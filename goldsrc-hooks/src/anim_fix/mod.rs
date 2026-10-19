@@ -76,9 +76,9 @@ mod trace;
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use classify::{
-    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, classify_body_sequence,
-    deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, model_stem,
-    third_person_stem,
+    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, MELEE_SEQUENCES,
+    classify_body_sequence, deploy_state_from_body_sequence, find_deployable_weapon,
+    is_grenade_viewmodel, model_stem, third_person_stem,
 };
 pub(crate) use crosshair_rule::Hidden as CrosshairHidden;
 pub(crate) use sequences::sequence_label;
@@ -761,7 +761,7 @@ pub fn apply() {
                     // have fired, and its draw plays below.
                     unsafe {
                         crate::debug::report(
-                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                            "anim_fix: spectated player fired just as they switched -- the previous gun's round, the draw plays instead",
                         )
                     };
                 }
@@ -797,6 +797,14 @@ pub fn apply() {
                     play_viewmodel_animation(
                         animation_lookup_sequence("reload", state, viewmodel_model),
                         "spectated player reloaded",
+                        state,
+                        viewmodel_model,
+                    );
+                }
+                Some(BodyAction::Melee) => {
+                    play_viewmodel_animation(
+                        animation_lookup_any(MELEE_SEQUENCES, state, viewmodel_model),
+                        "spectated player stabbed or swung his rifle",
                         state,
                         viewmodel_model,
                     );

@@ -46,9 +46,18 @@ fn start_line(queue: &std::path::Path) -> String {
     )
 }
 
-/// Sends `line` to game `pid`. `Ok(None)` when it doesn't take commands.
-fn try_send(pid: u32, line: &str) -> Result<Option<u32>, String> {
-    match game_remote::send_console_commands(pid, &[line.to_string()])
+/// What a review sends: Configuration > Players' "Use in the game" box as
+/// `dodstudio_player_overrides` (#428), then the line that starts `queue`.
+fn review_lines(queue: &std::path::Path, player_overrides: bool) -> Vec<String> {
+    vec![
+        native::player_overrides::cvar_line(player_overrides),
+        start_line(queue),
+    ]
+}
+
+/// Sends `lines` to game `pid`. `Ok(None)` when it doesn't take commands.
+fn try_send(pid: u32, lines: &[String]) -> Result<Option<u32>, String> {
+    match game_remote::send_console_commands(pid, lines)
         .map_err(crate::messages::failed_to_send_review)?
     {
         Sent::Delivered => Ok(Some(pid)),
@@ -56,19 +65,19 @@ fn try_send(pid: u32, line: &str) -> Result<Option<u32>, String> {
     }
 }
 
-/// Sends `line` to the running game `pid`, which must take commands: one
+/// Sends `lines` to the running game `pid`, which must take commands: one
 /// that doesn't wasn't started by DoD Studio.
-fn send_to_game(pid: u32, line: &str) -> Result<Option<u32>, String> {
-    try_send(pid, line)?
+fn send_to_game(pid: u32, lines: &[String]) -> Result<Option<u32>, String> {
+    try_send(pid, lines)?
         .map(Some)
         .ok_or_else(|| crate::messages::REVIEW_GAME_NOT_FROM_STUDIO.to_string())
 }
 
-/// Sends `line` to the first running game that takes commands, and says
+/// Sends `lines` to the first running game that takes commands, and says
 /// which. `Ok(None)` when none does. For the game DoD Studio just started.
-fn send_to_any_game(line: &str) -> Result<Option<u32>, String> {
+fn send_to_any_game(lines: &[String]) -> Result<Option<u32>, String> {
     for pid in native::sys::process::game_pids() {
-        if let Some(pid) = try_send(pid, line)? {
+        if let Some(pid) = try_send(pid, lines)? {
             return Ok(Some(pid));
         }
     }
@@ -136,10 +145,11 @@ pub async fn start_highlight_review(
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
     std::fs::write(&queue, format_queue(&highlights, fast_forward_gap))
         .map_err(crate::messages::could_not_write_review_queue)?;
-    let line = start_line(&queue);
+    let settings = crate::capture_manager::saved_settings(&app);
+    let line = review_lines(&queue, settings.players.use_in_game);
 
     let launch = crate::capture_manager::launch_config(
-        &crate::capture_manager::saved_settings(&app),
+        &settings,
         &crate::capture_manager::LaunchRequest::default(),
     );
     let sent = {
@@ -216,5 +226,26 @@ mod tests {
             "dodstudio_review start \"C:/Users/me/AppData/Roaming/dod-studio/review_queue.tsv\""
         );
         assert!(game_remote::check_command(&line).is_ok());
+    }
+
+    /// The Players tab's box goes first, so the review's first highlight
+    /// already plays with it (#428).
+    #[test]
+    fn a_review_sends_the_players_box_before_it_starts() {
+        let queue = std::path::Path::new("C:/q.tsv");
+        assert_eq!(
+            review_lines(queue, true),
+            [
+                "dodstudio_player_overrides 1",
+                "dodstudio_review start \"C:/q.tsv\""
+            ]
+        );
+        assert_eq!(
+            review_lines(queue, false)[0],
+            "dodstudio_player_overrides 0"
+        );
+        for line in review_lines(queue, true) {
+            assert!(game_remote::check_command(&line).is_ok(), "{line}");
+        }
     }
 }

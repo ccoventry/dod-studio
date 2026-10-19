@@ -98,6 +98,8 @@
                 <span id="scan-spinner" class="spinner" style="display: none;"></span>
                 <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Status: Ready</p>
               </div>
+              <!-- queue_scan.js: demos done of the scan's total -->
+              <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               <!-- demo_links.js (#376) -->
               <details id="demo-links-section" class="demo-links">
                 <summary data-str="DEMO_LINKS.TITLE">Demo folders the game can play</summary>
@@ -128,12 +130,44 @@
                   <input type="checkbox" id="master-owner-only-cb" />
                   <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
                 </label>
-                <!-- #685: the queue in match order, a header line per match. -->
-                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_MATCH_TITLE">
-                  <input type="checkbox" id="master-group-by-match-cb" />
-                  <span data-str="WORKSPACE.GROUP_BY_MATCH_LABEL">Group by match</span>
+                <!-- #685, #823: the queue in groups, a header line per group; queue_group_by.js. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_TITLE">
+                  <span data-str="WORKSPACE.GROUP_BY_LABEL">Group by:</span>
+                  <select id="master-group-by-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                    <option value="none" data-str="WORKSPACE.GROUP_BY_NONE">None</option>
+                    <option value="match" data-str="WORKSPACE.GROUP_BY_MATCH">Match</option>
+                    <option value="player" data-str="WORKSPACE.GROUP_BY_PLAYER">Player</option>
+                    <option value="map" data-str="WORKSPACE.GROUP_BY_MAP">Map</option>
+                    <option value="folder" data-str="WORKSPACE.GROUP_BY_FOLDER">Folder</option>
+                    <option value="date" data-str="WORKSPACE.GROUP_BY_DATE">Date</option>
+                    <option value="type" data-str="WORKSPACE.GROUP_BY_TYPE">Demo type</option>
+                  </select>
                 </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
+                <!-- #661: which Review marks a review plays. -->
+                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="all" data-str="REVIEW.COVERS_ALL">All</option>
+                  <option value="unmarked" data-str="REVIEW.COVERS_UNMARKED">Unmarked</option>
+                  <option value="keep" data-str="REVIEW.COVERS_KEEP">Keep</option>
+                  <option value="maybe" data-str="REVIEW.COVERS_MAYBE">Maybe</option>
+                  <option value="skip" data-str="REVIEW.COVERS_SKIP">Skip</option>
+                </select>
+                <!-- #822: whose highlights an HLTV demo's review plays; review_mode.js fills it. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.HLTV_TITLE">
+                  <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
+                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
+                </label>
+                <!-- #828: the players "Players I pick" reviews; review_hltv_picker.js fills it. -->
+                <span id="review-hltv-pick" class="review-hltv-pick" hidden>
+                  <span id="review-hltv-chips" class="review-hltv-chips"></span>
+                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;"></select>
+                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 180px;"></select>
+                </span>
+                <!-- The order an HLTV demo's players' highlights play in. -->
+                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>
+                  <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
+                </select>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
@@ -165,15 +199,15 @@
                     <th data-str="WORKSPACE.TABLE_HEADER_DEMO_FILE">Demo File</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_HIGHLIGHTS">Highlights</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_SELECTED">Selected</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_PENDING">Pending</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_CAPTURED">Captured</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_RENDERED">Rendered</th>
+                    <!-- Counts in one cell each, a legend of coloured letters under the name (queue_counts.js). -->
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_STATUS_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_STATUS">Status</span><div class="count-legend" id="status-count-legend"></div></th>
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_REVIEW_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_REVIEW">Review</span><div class="count-legend" id="review-count-legend"></div></th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="master-demo-table-body">
                   <tr>
-                    <td colspan="8" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
+                    <td colspan="7" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
                   </tr>
                 </tbody>
               </table>
@@ -223,6 +257,7 @@
               <button class="config-tab-btn" data-tab="tab-custom-commands" data-str="CAPTURE_CONFIG.TAB_CUSTOM_COMMANDS">Commands</button>
               <button class="config-tab-btn" data-tab="tab-drive-overrides" data-str="CAPTURE_CONFIG.TAB_CAPTURE_OUTPUT">Destinations</button>
               <button class="config-tab-btn" data-tab="tab-render-output" data-str="CAPTURE_CONFIG.TAB_RENDER_OUTPUT">Render Output</button>
+              <button class="config-tab-btn" data-tab="tab-players" data-str="CAPTURE_CONFIG.TAB_PLAYERS">Players</button>
               <button class="config-tab-btn" data-tab="tab-notifications" data-str="CAPTURE_CONFIG.TAB_NOTIFICATIONS">Notifications</button>
             </div>
 
@@ -692,6 +727,60 @@
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
                  by default, each stage independently switchable. -->
+            <!-- Tab Content: Players (#428) -- each player's spray and
+                 crosshair in a demo. players_ui.js fills it; the hook DLL
+                 applies it while dodstudio_player_overrides is 1. -->
+            <div id="tab-players" class="config-tab-content" style="display: none;">
+              <div class="setting-toggle">
+                <span class="setting-label"><span data-str="PLAYERS.USE_IN_GAME_LABEL">Use in the game</span><span class="info-icon" data-str-title="PLAYERS.USE_IN_GAME_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
+                <label class="setting-switch">
+                  <input type="checkbox" id="players-use-in-game" checked />
+                  <span class="setting-switch-slider"></span>
+                </label>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0;" data-str="PLAYERS.HELP">Pick the spray and the crosshair each player shows in your demos.</p>
+              <div class="input-row">
+                <input type="text" id="players-player-input" list="players-player-options" style="flex: 1;" data-str-placeholder="PLAYERS.PLAYER_PLACEHOLDER" placeholder="A player from the queue, a SteamID or a name" />
+                <datalist id="players-player-options"></datalist>
+                <button id="players-add-btn" disabled data-str="PLAYERS.ADD_BUTTON">Add Player</button>
+                <button id="players-refresh-btn" data-str="PLAYERS.REFRESH_BUTTON" data-str-title="PLAYERS.REFRESH_TITLE">Refresh</button>
+              </div>
+              <div id="players-players-status" class="players-status"></div>
+              <div id="players-list" class="players-list"></div>
+              <div id="players-warning" class="path-warning" style="display: none;"></div>
+              <div class="input-row" style="margin-top: 12px;">
+                <label for="players-pov-fallback" data-str="PLAYERS.POV_FALLBACK_LABEL" data-str-title="PLAYERS.POV_FALLBACK_TITLE">Spray, players not listed, POV demos:</label>
+                <select id="players-pov-fallback">
+                  <option value="own" data-str="PLAYERS.FALLBACK_OWN">Their own spray</option>
+                  <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
+                </select>
+                <span id="players-pov-fallback-png"></span>
+              </div>
+              <div class="input-row">
+                <label for="players-hltv-fallback" data-str="PLAYERS.HLTV_FALLBACK_LABEL" data-str-title="PLAYERS.HLTV_FALLBACK_TITLE">Spray, players not listed, HLTV demos:</label>
+                <select id="players-hltv-fallback">
+                  <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
+                </select>
+                <span id="players-hltv-fallback-png"></span>
+              </div>
+              <div class="input-row">
+                <label for="players-crosshair-fallback" data-str="PLAYERS.CROSSHAIR_FALLBACK_LABEL" data-str-title="PLAYERS.CROSSHAIR_FALLBACK_TITLE">Crosshair, players not listed:</label>
+                <select id="players-crosshair-fallback">
+                  <option value="game" data-str="PLAYERS.CROSSHAIR_GAME">Game's own</option>
+                  <option value="sprite" data-str="PLAYERS.CROSSHAIR_ONE">One fallback crosshair</option>
+                </select>
+                <span id="players-crosshair-fallback-pick"></span>
+              </div>
+              <div id="players-crosshair-fallback-picker"></div>
+              <div class="input-row">
+                <label for="players-spray-size" data-str="PLAYERS.SPRAY_SIZE_LABEL" data-str-title="PLAYERS.SPRAY_SIZE_TITLE">Spray size:</label>
+                <select id="players-spray-size" data-str-title="PLAYERS.SPRAY_SIZE_TITLE"></select>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0 0;" data-str="PLAYERS.HD_NOTE">Every spray from a PNG is drawn at the spray size in every demo.</p>
+            </div>
+
             <div id="tab-notifications" class="config-tab-content" style="display: none;">
               <div class="notification-settings-grid">
                 <div class="setting-toggle">

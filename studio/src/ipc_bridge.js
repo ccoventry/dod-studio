@@ -164,12 +164,52 @@ export async function diagnoseExecutablePaths(paths) {
     });
 }
 
-/** The folders beside `gamePath`'s hl.exe holding a liblist.gam (#402). */
+/** The folders beside `gamePath`'s hl.exe holding a liblist.gam and a cl_dlls/client.dll (#402, #768). */
 export async function listGameFolders(gamePath) {
   return await invoke('list_game_folders', { gamePath })
     .catch((err) => {
       console.error("IPC Execution Error (list_game_folders):", err);
       throw err;
+    });
+}
+
+/** The PNGs in the game install's logos folder, for Configuration >
+ *  Players' spray column (#428). Empty when they can't be listed. */
+export async function listLogoPngs(gamePath, gameFolder) {
+  return invoke('list_logo_pngs', { gamePath, gameFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_logo_pngs):", err);
+      return [];
+    });
+}
+
+/** The sprites in the game install's sprites folder, for Configuration >
+ *  Players' crosshair column (#428). Empty when they can't be listed. */
+export async function listCrosshairSprites(gamePath, gameFolder) {
+  return invoke('list_crosshair_sprites', { gamePath, gameFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_crosshair_sprites):", err);
+      return [];
+    });
+}
+
+/** One sprite's first frame, `{ width, height, rgba }` (base64 RGBA), for
+ *  the crosshair tile picker. Null when it can't be read. */
+export async function crosshairSpriteImage(gamePath, gameFolder, sprite) {
+  return invoke('crosshair_sprite_image', { gamePath, gameFolder, sprite })
+    .catch((err) => {
+      console.error("IPC Execution Error (crosshair_sprite_image):", err);
+      return null;
+    });
+}
+
+/** Sends Configuration > Players' "Use in the game" box to every running
+ *  game that takes commands (dodstudio_player_overrides); how many did. */
+export async function setPlayerOverrides(on) {
+  return invoke('set_player_overrides', { on })
+    .catch((err) => {
+      console.error("IPC Execution Error (set_player_overrides):", err);
+      return 0;
     });
 }
 

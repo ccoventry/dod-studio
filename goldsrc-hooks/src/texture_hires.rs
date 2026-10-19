@@ -41,6 +41,24 @@
 //! An earlier version of this module hooked `Draw_MiptexTexture` instead. That
 //! turned out to be the *decal* loader (`GLT_DECAL`, `decals.wad`) -- the live
 //! test's `"{shot5" 16x16` was a bullet hole -- not the map-texture path.
+//! Decals come through this same branch anyway (#729): `Draw_MiptexTexture`
+//! calls `GL_LoadTexture2` with `textureType` 1 (the pre-Anniversary build
+//! through the 8-argument `GL_LoadTexture` wrapper at `hw+0x3efa0`, the 25th
+//! Anniversary build directly, from `hw+0x23b6c0`), so the one swap stub sees
+//! them too. Before the call it overwrites the lump name's first character
+//! from the palette: `{` when entry 255 is pure blue (0,0,255), uploaded as
+//! `TEX_TYPE_ALPHA` (index 255 cut out, colours kept); `}` otherwise,
+//! uploaded as `TEX_TYPE_ALPHA_GRADIENT` (the index is the alpha, every pixel
+//! in entry 255's colour) -- DoD's `decals.wad` is 15 cut-outs and 223
+//! gradients, all but one lump named `{...` on disk. The width and height it
+//! passes are `texture_t`'s, filled from the miptex header, and that
+//! `texture_t` is what `R_DecalShoot` sizes the quad from; neither build
+//! imports a `glGetTex*`, so nothing can read the uploaded size back. A
+//! bigger upload therefore draws at the decal's own size, as for walls.
+//! Player sprays (`tempdecal.wad`, built with `gfCustomBuild` set) go through
+//! the same loader, named after the player's slot (`spray.rs`); they get
+//! their own arm, [`spray_upload`], which swaps in what Studio's Players table
+//! gives the slot's player.
 //!
 //! ## What `GL_Upload8` would have done that the replacement must copy
 //!
@@ -114,7 +132,7 @@
 //!
 //! ```text
 //! dodstudio_hd\
-//!     world\   models\   sprites\   detail\   sky\      <- one per asset type
+//!     world\   models\   sprites\   decals\   detail\   sky\   <- one per asset type
 //!         ultrasharp\  remacri\  siax\  generalv3\  x4plus\  plain\  blend\
 //!         overrides\                           <- single-file picks, win over any style
 //! ```
@@ -153,7 +171,45 @@
 //! like: normal and additive sprites are opaque RGB, alpha-test sprites cut
 //! out like masked world textures, and index-alpha sprites (smoke) use only
 //! the file's alpha -- the colour is always palette entry 255's, as in the
-//! engine. HUD sprites are not replaced (see `GLT_SPRITE`).
+//! engine.
+//!
+//! HUD sprites (`GLT_HUDSPRITE`, 2: the `hud.txt` atlases, the crosshairs,
+//! the scopes, the HLTV icons; #728) come from the same `Mod_LoadSpriteFrame`
+//! under the same `"%s_%i"` name, so they share the `sprites\` folder and
+//! its naming; `pfnSPR_Load` only clears a flag around the load that makes
+//! the frame type 2 with `mipmap = 0` instead of type 5 with `mipmap = 1`.
+//! The HUD draws them as a quad of exactly the `hud.txt` rect's pixels with
+//! texture coordinates `(rect ± 0.5) / frame width|height` -- the frame's
+//! logical size, never the GL texture's (`Draw_SpriteFrameGeneric`,
+//! pre-Anniversary `hw+0x3d280`, Anniversary `hw+0x23b1c0`) -- so a bigger
+//! upload with the logical size kept draws in the same place at the same
+//! size, as for walls. What made them worth skipping before was filtering:
+//! `GL_Upload32` with `mipmap = 0` uploads one level and sets MIN and MAG to
+//! its `filter` argument (`GL_LINEAR`), so a 4x atlas drawn at 1:1 would
+//! sample 2x2 of its 4x4 texels per pixel and shimmer. The swap stub
+//! therefore passes `mipmap = 1` for a replaced type-2 upload (the engine's
+//! own value for every other type, and the original path is untouched):
+//! `GL_Upload32` then builds the mip chain itself, halving down to 1x1
+//! (pre-Anniversary through `GL_MipMap`, `hw+0x3e0f0`; Anniversary inlined),
+//! and sets MIN to `gl_filter_min` (trilinear by default) and MAG to
+//! `gl_filter_max`. At 1:1 the HUD then samples level 2 of a 4x file, a
+//! clean box reduction, and a scaled draw (the scopes, a bigger kill feed)
+//! gets the finer levels. Read on both builds: the `mipmap` test is at
+//! `hw+0x3e492` / `hw+0x23d473`, the single-level filter at `hw+0x3e4bf` /
+//! `hw+0x23d4a4`, the mip loop at `hw+0x3e580` / `hw+0x23d573`. The atlases
+//! are 256x256 (the `weapons*` ones 512x512), so at 4x they need
+//! `gl_max_size 1024`, which the HD `movie.cfg` lines already set.
+//! Crosshair sheets are the exception and stay stock ([`is_crosshair_sheet`]):
+//! 1:1 pixel art gains nothing from an HD copy, and the mipmapped one drew
+//! fainter on PRE and ignored `gl_spriteblend 0`.
+//!
+//! Decals (`GLT_DECAL`: bullet holes, blood, scorch marks, the map logos,
+//! from `decals.wad`; #729) go in `decals\<style>\<name>_<hash>.tga`, where
+//! `<name>` is the name as the engine passes it -- `{` or `}` and the rest of
+//! the lump name, see above -- and the hash is over the lump's mip 0 and
+//! palette, as for a wall. A `{` decal is a cut-out like a masked wall
+//! texture; a `}` decal is index-alpha like a smoke sprite, so only the
+//! file's alpha matters and the colour is always palette entry 255's.
 //!
 //! HD **detail** textures go in `detail\<style>\`, named
 //! exactly as under `gfx\detail\` (e.g. `detail\ultrasharp\1.tga` replaces
@@ -179,7 +235,9 @@
 //! across several wsod25 maps in one session (lennon2, railroad2_test,
 //! armory_b6, harrington, anzio) at `gl_max_size 1024`: no crash, about 97% of
 //! world texture loads replaced (the rest are sky/tool textures the replacement
-//! set skips). The detail-texture limit raise came after that test.
+//! set skips). The detail-texture limit raise came after that test. The decal
+//! kind rests on the offline reading of both builds above, not yet on a live
+//! test.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -444,20 +502,22 @@ const MIN_GL_MAX_SIZE: u32 = 128;
 /// wider than this. A texture uploaded at its own size is never resampled.
 const MAX_OUTPUT_WIDTH: u32 = 1024;
 
-/// `GLT_STUDIO` / `GLT_WORLD` / `GLT_SPRITE` in GoldSrc's `GL_TEXTURETYPE`:
-/// model skins, map textures and world sprite frames, the three this module
-/// replaces. HUD sprites (`GLT_HUDSPRITE`, 2) are left alone: the HUD draws
-/// them pixel for pixel, without mipmaps, so a bigger copy would only be
-/// shrunk back down, badly.
+/// `GLT_DECAL` / `GLT_HUDSPRITE` / `GLT_STUDIO` / `GLT_WORLD` / `GLT_SPRITE`
+/// in GoldSrc's `GL_TEXTURETYPE`: decals, HUD sprites, model skins, map
+/// textures and world sprite frames, the five this module replaces. A HUD
+/// sprite is uploaded without mipmaps and drawn pixel for pixel, so its
+/// replacement goes up with `mipmap = 1` ([`replacement_mipmap`], #728).
+const GLT_DECAL: u32 = 1;
+const GLT_HUDSPRITE: u32 = 2;
 const GLT_STUDIO: u32 = 3;
 const GLT_WORLD: u32 = 4;
 const GLT_SPRITE: u32 = 5;
 /// `TEX_TYPE_NONE` / `TEX_TYPE_ALPHA`: the two `iType`s world textures use.
 const TEX_TYPE_NONE: u32 = 0;
 const TEX_TYPE_ALPHA: u32 = 1;
-/// `TEX_TYPE_ALPHA_GRADIENT`: index-alpha sprites (`SPR_INDEXALPHA`).
-/// `GL_Upload8` draws every pixel in palette entry 255's colour, with the
-/// pixel's palette index as its alpha.
+/// `TEX_TYPE_ALPHA_GRADIENT`: index-alpha sprites (`SPR_INDEXALPHA`) and
+/// `}` decals. `GL_Upload8` draws every pixel in palette entry 255's colour,
+/// with the pixel's palette index as its alpha.
 const TEX_TYPE_ALPHA_GRADIENT: u32 = 3;
 /// `TEX_TYPE_RGBA`: already truecolour. As `GLT_SPRITE` this is the overview
 /// map's tiles and every detail texture, not sprite frames, and it takes
@@ -471,6 +531,7 @@ const TEX_TYPE_RGBA: u32 = 4;
 const WORLD_DIR: &str = "dodstudio_hd/world";
 const MODELS_DIR: &str = "dodstudio_hd/models";
 const SPRITES_DIR: &str = "dodstudio_hd/sprites";
+const DECALS_DIR: &str = "dodstudio_hd/decals";
 /// Per-texture picks, in each type's folder, that win over the active style --
 /// e.g. one texture a particular model got wrong, taken from another style.
 const OVERRIDES: &str = "overrides";
@@ -662,7 +723,7 @@ pub fn poll_hd() {
                 !was.is_empty() && was != chosen
             });
             if changed {
-                for index in [&INDEX, &MODEL_INDEX, &SPRITE_INDEX] {
+                for index in [&INDEX, &MODEL_INDEX, &SPRITE_INDEX, &DECAL_INDEX] {
                     index.clear();
                 }
                 DETAIL_INDEX.clear();
@@ -688,7 +749,7 @@ fn settings_changed(what: &str) {
         crate::debug::report(&format!(
             "texture_hires: {what}{}",
             if mid {
-                " -- walls, detail and skies follow from the next map; models and sprites already loaded after a restart"
+                " -- walls, detail and skies follow from the next map; models, sprites and decals already loaded after a restart"
             } else {
                 ""
             }
@@ -704,6 +765,18 @@ static MODEL_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Sprite frames seen, and how many were replaced.
 static SPRITE_SEEN: AtomicU32 = AtomicU32::new(0);
 static SPRITE_REPLACED: AtomicU32 = AtomicU32::new(0);
+/// HUD sprite frames seen, and how many were replaced (#728). Counted apart
+/// from world sprites, though they share the folder: a HUD load is one
+/// atlas for a whole screen of icons, so the two counts say different things.
+static HUD_SEEN: AtomicU32 = AtomicU32::new(0);
+static HUD_REPLACED: AtomicU32 = AtomicU32::new(0);
+/// Decals seen, and how many were replaced (#729).
+static DECAL_SEEN: AtomicU32 = AtomicU32::new(0);
+static DECAL_REPLACED: AtomicU32 = AtomicU32::new(0);
+/// Of the decals, player sprays (`spray.rs`, #428): seen, and replaced as
+/// the Players table says. Counted among the decals too.
+static SPRAY_SEEN: AtomicU32 = AtomicU32::new(0);
+static SPRAY_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Textures of any type seen -- what `has_observed` keys on.
 static ANY_SEEN: AtomicU32 = AtomicU32::new(0);
 
@@ -900,7 +973,8 @@ const TOOL_TEXTURES: &[&str] = &[
 ];
 
 /// How a load is shown in the miss list: a model skin as `<model> <skin>`,
-/// a sprite frame as its sprite (its frames are counted, not listed).
+/// a sprite frame (world or HUD) as its sprite (its frames are counted, not
+/// listed).
 fn miss_display_name(texture_type: u32, identifier: &str) -> String {
     let lower = identifier.to_ascii_lowercase();
     match texture_type {
@@ -910,7 +984,7 @@ fn miss_display_name(texture_type: u32, identifier: &str) -> String {
             }
             _ => identifier.to_string(),
         },
-        GLT_SPRITE => match lower.rfind(".spr_") {
+        GLT_SPRITE | GLT_HUDSPRITE => match lower.rfind(".spr_") {
             Some(at) => identifier[..at + 4].to_string(),
             None => identifier.to_string(),
         },
@@ -982,7 +1056,7 @@ fn misses_report(only_map: Option<&str>) -> Vec<String> {
             }
             let loads = match (*kind, entry.loads) {
                 (_, 1) => String::new(),
-                ("sprite", n) => format!(" ({n} frame loads)"),
+                ("sprite" | "hud", n) => format!(" ({n} frame loads)"),
                 (_, n) => format!(" ({n} loads)"),
             };
             let others = others_of(entry);
@@ -1367,10 +1441,12 @@ static SKY_CURRENT_DIMS: Mutex<(u32, u32)> = Mutex::new((SKY_STOCK_SIDE, SKY_STO
 static SKY_REPLACED: AtomicU32 = AtomicU32::new(0);
 static SKY_INDEX: Cached<HashMap<String, String>> = Cached::new();
 
-/// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
-/// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
-/// target.
-static PENDING: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+/// `{ data, width, height, mipmap }`, read by the swap stub as `[eax]`,
+/// `[eax+4]`, `[eax+8]`, `[eax+0xc]` -- four `usize`s are four contiguous
+/// dwords on this 32-bit target. `mipmap` is what the replacement upload
+/// passes to `GL_Upload32`: the engine's own value, except `1` for a HUD
+/// sprite ([`replacement_mipmap`]).
+static PENDING: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
 /// Owns the pixels `PENDING` points at. Replaced on the next swap, by which
 /// time `GL_Upload32` has long since copied them into its own buffer.
 static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
@@ -1379,10 +1455,11 @@ static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static INSTALLED: Mutex<Option<Vec<detour::Detour>>> = Mutex::new(None);
 
 /// The replacement folders' indexes, built on first use: map textures, model
-/// skins and sprite frames.
+/// skins, sprite frames and decals.
 static INDEX: Cached<Index> = Cached::new();
 static MODEL_INDEX: Cached<Index> = Cached::new();
 static SPRITE_INDEX: Cached<Index> = Cached::new();
+static DECAL_INDEX: Cached<Index> = Cached::new();
 
 struct Index {
     dir: PathBuf,
@@ -1898,6 +1975,10 @@ fn build_sprite_index() -> Index {
     build_index_in(SPRITES_DIR)
 }
 
+fn build_decal_index() -> Index {
+    build_index_in(DECALS_DIR)
+}
+
 /// Every `<name>_<hash>.tga` in `<type_dir>/<style>` and then
 /// `<type_dir>/overrides`, so an override replaces the style's file.
 fn build_index_in(type_dir: &str) -> Index {
@@ -2182,6 +2263,146 @@ unsafe fn upload_hash(data: *const u8, palette: *const u8, width: u32, height: u
     Some(fnv1a32(&[indices, pal]))
 }
 
+/// Whether `GL_Upload8` would expand an upload of this `textureType` and
+/// `iType` in a way [`match_engine_expansion`] copies. Walls and skins come
+/// as `TEX_TYPE_NONE` or `TEX_TYPE_ALPHA`; sprites, world and HUD alike
+/// (one loader), also as `TEX_TYPE_ALPHA_GRADIENT` (index-alpha), while ones
+/// already in RGBA (`TEX_TYPE_RGBA`) take `GL_Upload32` directly and are
+/// never replaced; decals only ever as `TEX_TYPE_ALPHA` (`{`) or
+/// `TEX_TYPE_ALPHA_GRADIENT` (`}`), the two `Draw_MiptexTexture` sends (see
+/// the module doc).
+fn replaceable_i_type(texture_type: u32, i_type: u32) -> bool {
+    match texture_type {
+        GLT_DECAL => matches!(i_type, TEX_TYPE_ALPHA | TEX_TYPE_ALPHA_GRADIENT),
+        GLT_SPRITE | GLT_HUDSPRITE => matches!(
+            i_type,
+            TEX_TYPE_NONE | TEX_TYPE_ALPHA | TEX_TYPE_ALPHA_GRADIENT
+        ),
+        _ => matches!(i_type, TEX_TYPE_NONE | TEX_TYPE_ALPHA),
+    }
+}
+
+/// The `mipmap` a replacement upload passes to `GL_Upload32`: the engine's
+/// own for every type but a HUD sprite, which the engine uploads with `0`
+/// (one level, `GL_LINEAR` both ways) and whose 4x replacement would then
+/// shimmer at the HUD's 1:1 draw. With `1`, `GL_Upload32` builds the mip
+/// chain and uses `gl_filter_min`, so the HUD samples the level that matches
+/// its draw size (#728; see the module doc for where this was read).
+fn replacement_mipmap(texture_type: u32, engine_mipmap: u32) -> u32 {
+    if texture_type == GLT_HUDSPRITE {
+        1
+    } else {
+        engine_mipmap
+    }
+}
+
+/// Crosshair sheets (`crosshairs.spr`, `customXHair.spr` and the Players
+/// table's `customxhair-*`, `dodcross*`) are 1-3 px bars drawn at 1:1, so an
+/// HD copy has nothing to add, and a mipmapped one changes how they draw:
+/// on PRE the 1:1 draw comes out fainter than stock, and `gl_spriteblend 0`
+/// (alpha test, no blend) no longer brightens it, because the sampled alpha
+/// of a thin bar falls below stock's. Left to the engine, they draw exactly
+/// as stock on both builds (#733). `name` is [`sprite_frame_name`]'s.
+fn is_crosshair_sheet(name: &str) -> bool {
+    ["crosshair", "customogxhair", "customxhair", "dodcross"]
+        .iter()
+        .any(|p| name.starts_with(p))
+}
+
+/// Texture gamma on the colour of every pixel, alpha kept as the file has
+/// it: what a spray gets instead of [`match_engine_expansion`], whose cut-out
+/// threshold would throw the PNG's soft edges away.
+fn match_engine_gamma_keep_alpha(pixels: &mut [u8], gamma: &[u8; 256]) {
+    for px in pixels.as_chunks_mut::<4>().0 {
+        for c in &mut px[..3] {
+            *c = gamma[*c as usize];
+        }
+    }
+}
+
+/// The spray arm of [`decide`]: a `GLT_DECAL` upload made while the engine
+/// builds a player's custom logo, or one `spray_hltv` builds. A spray of
+/// ours built from a PNG gets that PNG in HD; the blank one has nothing to
+/// swap. A spray the demo saved is drawn as it is: Studio's Players table
+/// replaces one by shooting a spray of ours instead (`spray_hltv.rs`), never
+/// by changing the saved one's upload, so it is the same in every demo and
+/// whether or not HD textures are on.
+fn spray_upload(
+    identifier: &str,
+    key: Option<crate::spray::Key>,
+    width: u32,
+    height: u32,
+    i_type: u32,
+    log: bool,
+) -> *const AtomicUsize {
+    SPRAY_SEEN.fetch_add(1, Ordering::Relaxed);
+    let shown = match &key {
+        Some(key) => format!("spray {}", crate::spray::hex(key)),
+        None => format!("spray {identifier}"),
+    };
+    if !crate::spray_hltv::building() {
+        if log {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: \
+                     saved in the demo, drawn as it is"
+                ))
+            };
+        }
+        record_miss(Miss::OnPurpose, "decal", &shown, || {
+            format!("{width}x{height}, a spray the demo saved, drawn as it is")
+        });
+        return std::ptr::null();
+    }
+    // A spray of ours: the PNG it was built from, or nothing to swap (the
+    // blank one).
+    let Some(path) = key.and_then(|k| crate::spray_hltv::png_for_built_key(&k)) else {
+        return std::ptr::null();
+    };
+    let mut img = match crate::spray::load_png_fit(&path, replacement_cap()) {
+        Ok(img) => img,
+        Err(why) => {
+            crate::spray::warn_once(&path, &why);
+            record_miss(Miss::Failed, "decal", &shown, || {
+                format!("{width}x{height}, {}: {why}", path.display())
+            });
+            return std::ptr::null();
+        }
+    };
+    // Safety: read out of GL_Upload8's own instructions and checked at install.
+    let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
+    match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
+    let from = path.display().to_string();
+
+    let Ok(mut owned) = PENDING_PIXELS.lock() else {
+        return std::ptr::null();
+    };
+    *owned = img.pixels;
+    PENDING[0].store(owned.as_mut_ptr() as usize, Ordering::Release);
+    PENDING[1].store(img.width as usize, Ordering::Release);
+    PENDING[2].store(img.height as usize, Ordering::Release);
+    drop(owned);
+
+    DECAL_REPLACED.fetch_add(1, Ordering::Relaxed);
+    SPRAY_REPLACED.fetch_add(1, Ordering::Relaxed);
+    if let Ok(mut last) = LAST_REPLACED.lock() {
+        *last = Some(LastReplaced {
+            name: shown,
+            from: (width, height),
+            to: (img.width, img.height),
+        });
+    }
+    if log {
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: spray {identifier:?} {width}x{height} iType {i_type} -> {}x{} from {from}",
+                img.width, img.height,
+            ))
+        };
+    }
+    PENDING.as_ptr()
+}
+
 /// Called by the swap stub with `GL_LoadTexture2`'s frame pointer and the
 /// cache record it's filling. Returns `PENDING`'s address to upload a
 /// replacement, or null to carry on unchanged.
@@ -2197,6 +2418,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let texture_type = arg(0x0c);
     let (width, height) = (arg(0x10), arg(0x14));
     let data = arg(0x18) as *const u8;
+    let mipmap = arg(0x1c);
     let i_type = arg(0x20);
     let palette = arg(0x24) as *const u8;
 
@@ -2231,6 +2453,21 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
             &SPRITE_INDEX,
             build_sprite_index,
         ),
+        // Same loader, same names, same folder as world sprites (#728).
+        GLT_HUDSPRITE if i_type != TEX_TYPE_RGBA => (
+            &HUD_SEEN,
+            &HUD_REPLACED,
+            "hud",
+            &SPRITE_INDEX,
+            build_sprite_index,
+        ),
+        GLT_DECAL => (
+            &DECAL_SEEN,
+            &DECAL_REPLACED,
+            "decal",
+            &DECAL_INDEX,
+            build_decal_index,
+        ),
         _ => return std::ptr::null(),
     };
     if name_ptr.is_null() {
@@ -2242,7 +2479,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
     let name = match texture_type {
         GLT_STUDIO => studio_texture_name(&identifier).to_string(),
-        GLT_SPRITE => sprite_frame_name(&identifier),
+        GLT_SPRITE | GLT_HUDSPRITE => sprite_frame_name(&identifier),
         _ => identifier.to_string(),
     };
     let log = LOG_TEXTURE_LOADS.load(Ordering::Relaxed);
@@ -2263,14 +2500,16 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         std::ptr::null()
     };
 
-    // Sprites already in RGBA (iType 4) take GL_Upload32 directly and are
-    // never replaced; only sprites use the alpha gradient.
-    let known_type = matches!(i_type, TEX_TYPE_NONE | TEX_TYPE_ALPHA)
-        || (texture_type == GLT_SPRITE && i_type == TEX_TYPE_ALPHA_GRADIENT);
-    if !known_type {
+    if !replaceable_i_type(texture_type, i_type) {
         return skip(
             Miss::OnPurpose,
             &format!("iType {i_type}, a format this hook doesn't replace"),
+        );
+    }
+    if texture_type == GLT_HUDSPRITE && is_crosshair_sheet(&name) {
+        return skip(
+            Miss::OnPurpose,
+            "a crosshair sheet, drawn as stock (1:1 pixel art gains nothing)",
         );
     }
     if data.is_null()
@@ -2306,6 +2545,13 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
             Miss::OnPurpose,
             "a skin recoloured per player, which this hook doesn't replace",
         );
+    }
+    // A player's spray: a decal by upload, but named after the slot, so it is
+    // keyed by its content and mapped to a PNG (#428, `spray.rs`).
+    if texture_type == GLT_DECAL && crate::spray::is_custom_upload(&identifier) {
+        // Safety: the same arguments `indices` and `pal` were just made from.
+        let key = unsafe { crate::spray::upload_key(data, palette, width, height) };
+        return spray_upload(&identifier, key, width, height, i_type, log);
     }
 
     let index = index.get(build);
@@ -2378,6 +2624,10 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     PENDING[0].store(owned.as_mut_ptr() as usize, Ordering::Release);
     PENDING[1].store(img.width as usize, Ordering::Release);
     PENDING[2].store(img.height as usize, Ordering::Release);
+    PENDING[3].store(
+        replacement_mipmap(texture_type, mipmap) as usize,
+        Ordering::Release,
+    );
     drop(owned);
 
     replaced.fetch_add(1, Ordering::Relaxed);
@@ -2400,6 +2650,11 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     }
     PENDING.as_ptr()
 }
+
+/// `push dword ptr [eax+0xc]`: the replacement's `mipmap` from [`PENDING`],
+/// where both builds' swap stubs used to push the engine's `[ebp+0x1c]`.
+/// Same length, so neither stub's branch offsets move.
+const PUSH_MIPMAP: [u8; 3] = [0xFF, 0x70, 0x0C];
 
 /// Appends `FF 15`/`FF 25 <abs32>`: an indirect call/jump through `slot`.
 fn indirect(code: &mut Vec<u8>, modrm: u8, slot: &AtomicUsize) {
@@ -2425,7 +2680,7 @@ const JMP: u8 = 0x25;
 /// swap:
 ///     push [ebp+0x28]               ; filter
 ///     push [ebp+0x20]               ; iType
-///     push [ebp+0x1c]               ; mipmap
+///     push [eax+0xc]                ; mipmap (the engine's, or 1 for a HUD sprite)
 ///     push [eax+8]                  ; replacement height
 ///     push [eax+4]                  ; replacement width
 ///     push [eax]                    ; replacement pixels
@@ -2450,7 +2705,7 @@ fn swap_stub() -> Vec<u8> {
     // swap:
     code.extend_from_slice(&[0xFF, 0x75, 0x28]); // push [ebp+0x28]
     code.extend_from_slice(&[0xFF, 0x75, 0x20]); // push [ebp+0x20]
-    code.extend_from_slice(&[0xFF, 0x75, 0x1C]); // push [ebp+0x1c]
+    code.extend_from_slice(&PUSH_MIPMAP); // push [eax+0xc]
     code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
     code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
     code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
@@ -2966,9 +3221,9 @@ fn install_stale_fix(base: usize, tail: usize) -> Result<detour::Detour, String>
     Ok(detour)
 }
 
-/// The 25th Anniversary `hw.dll`'s map-texture, model-skin and sprite swap
-/// and leftover-texture fix (#370). Same idea as the pre-Anniversary hooks,
-/// compiled differently:
+/// The 25th Anniversary `hw.dll`'s map-texture, model-skin, sprite and decal
+/// swap and leftover-texture fix (#370). Same idea as the pre-Anniversary
+/// hooks, compiled differently:
 ///
 /// - `GL_LoadTexture2` (+0x23c0d0) keeps the same nine arguments at the same
 ///   `[ebp+...]` offsets and the same final branch, but its tail loads
@@ -3164,7 +3419,7 @@ mod anniversary {
     /// swap:
     ///     push [ebp+0x28]               ; filter
     ///     push [ebp+0x20]               ; iType
-    ///     push [ebp+0x1c]               ; mipmap
+    ///     push [eax+0xc]                ; mipmap (the engine's, or 1 for a HUD sprite)
     ///     push [eax+8]                  ; replacement height
     ///     push [eax+4]                  ; replacement width
     ///     push [eax]                    ; replacement pixels
@@ -3189,7 +3444,7 @@ mod anniversary {
         // swap:
         code.extend_from_slice(&[0xFF, 0x75, 0x28]); // push [ebp+0x28]
         code.extend_from_slice(&[0xFF, 0x75, 0x20]); // push [ebp+0x20]
-        code.extend_from_slice(&[0xFF, 0x75, 0x1C]); // push [ebp+0x1c]
+        code.extend_from_slice(&PUSH_MIPMAP); // push [eax+0xc]
         code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
         code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
         code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
@@ -3471,6 +3726,23 @@ pub fn status() -> String {
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| not_read(&SPRITE_SEEN, "restart the game"))
     );
+    // Same folder as the world sprites, so no file count of its own.
+    let hud = format!(
+        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps)",
+        HUD_REPLACED.load(Ordering::Relaxed),
+        HUD_SEEN.load(Ordering::Relaxed),
+    );
+    let decals = format!(
+        "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Players table says",
+        DECAL_REPLACED.load(Ordering::Relaxed),
+        DECAL_SEEN.load(Ordering::Relaxed),
+        DECAL_INDEX
+            .peek()
+            .map(|i| format!("{} file(s)", i.files.len()))
+            .unwrap_or_else(|| not_read(&DECAL_SEEN, "restart the game")),
+        SPRAY_REPLACED.load(Ordering::Relaxed),
+        SPRAY_SEEN.load(Ordering::Relaxed),
+    );
     let renamed = match RENAMED.load(Ordering::Relaxed) {
         0 => String::new(),
         n => format!(" ({n} of them renamed by the engine, matched anyway)"),
@@ -3504,7 +3776,7 @@ pub fn status() -> String {
         })
         .unwrap_or_default();
     format!(
-        "{NAME}: {HD_NAME} {}{}; style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
+        "{NAME}: {HD_NAME} {}{}; style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {hud}; {decals}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
         if enabled() { "1 (on)" } else { "0 (off)" },
         if CHANGED_MID_SESSION.load(Ordering::Relaxed) {
             ", changed this session: some of what's loaded is still the old way until a restart"
@@ -3722,10 +3994,78 @@ mod tests {
         assert_eq!(&code[22..24], &[0xFF, 0x25], "jmp [RESUME]");
         assert_eq!(swap, 28);
         assert_eq!(&code[swap..swap + 3], &[0xFF, 0x75, 0x28]);
+        // filter, iType, then the mipmap from PENDING, not the engine's frame (#728).
+        assert_eq!(&code[swap + 6..swap + 9], &PUSH_MIPMAP);
         assert_eq!(
             &code[code.len() - 6..code.len() - 4],
             &[0xFF, 0x25],
             "jmp [AFTER]"
+        );
+    }
+
+    /// #728: a replaced HUD sprite goes up with mipmaps, everything else with
+    /// whatever the engine asked for; the stubs read it from `PENDING`'s
+    /// fourth dword, which is why that slot exists.
+    #[test]
+    fn hud_sprite_replacements_are_mipmapped() {
+        assert_eq!(replacement_mipmap(GLT_HUDSPRITE, 0), 1);
+        assert_eq!(replacement_mipmap(GLT_HUDSPRITE, 1), 1);
+        for kind in [GLT_WORLD, GLT_STUDIO, GLT_SPRITE, GLT_DECAL] {
+            assert_eq!(replacement_mipmap(kind, 0), 0);
+            assert_eq!(replacement_mipmap(kind, 1), 1);
+        }
+        assert_eq!(PENDING.len(), 4);
+        assert_eq!(PUSH_MIPMAP, [0xFF, 0x70, 0x0C], "push dword ptr [eax+0xc]");
+        assert_eq!(
+            PUSH_MIPMAP.len(),
+            3,
+            "same length as the old push [ebp+0x1c]"
+        );
+    }
+
+    /// #733: crosshair sheets stay stock, by their frame name (lower-cased
+    /// by `sprite_frame_name`); the other HUD atlases don't.
+    #[test]
+    fn crosshair_sheets_are_left_stock() {
+        for id in [
+            "sprites/crosshairs.spr_0",
+            "sprites/customXHair.spr_0",
+            "sprites/customxhair-diceWSOD.spr_0",
+            "sprites/customogxhair.spr_0",
+            "sprites/dodcross1.spr_0",
+        ] {
+            assert!(is_crosshair_sheet(&sprite_frame_name(id)), "{id}");
+        }
+        for id in [
+            "sprites/weapons1.spr_0",
+            "sprites/scope_k43.spr_0",
+            "sprites/hud_icons.spr_0",
+        ] {
+            assert!(!is_crosshair_sheet(&sprite_frame_name(id)), "{id}");
+        }
+    }
+
+    /// #728: HUD atlases are sprites to everything but the counters -- same
+    /// iTypes, same file names, same miss display -- so `sprites_hd.py`'s
+    /// output for them needs no HUD-specific naming.
+    #[test]
+    fn hud_sprites_are_keyed_like_world_sprites() {
+        for i_type in [TEX_TYPE_NONE, TEX_TYPE_ALPHA, TEX_TYPE_ALPHA_GRADIENT] {
+            assert_eq!(
+                replaceable_i_type(GLT_HUDSPRITE, i_type),
+                replaceable_i_type(GLT_SPRITE, i_type)
+            );
+        }
+        assert!(!replaceable_i_type(GLT_HUDSPRITE, TEX_TYPE_RGBA));
+        assert_eq!(sprite_frame_name("sprites/weapons1.spr_0"), "weapons1_0");
+        assert_eq!(sprite_frame_name("sprites/scope_k43.spr_3"), "scope_k43_3");
+        assert_eq!(
+            miss_display_name(GLT_HUDSPRITE, "sprites/hud_icons.spr_0"),
+            "sprites/hud_icons.spr"
+        );
+        assert_eq!(
+            owner_of("hud", "sprites/Weapons1.spr_0"),
+            "hud:sprites/weapons1.spr_0"
         );
     }
 
@@ -3825,6 +4165,8 @@ mod tests {
         // jnz at [13]: target = 15 + 0x12 = the first push.
         assert_eq!(&code[13..15], &[0x75, 0x12]);
         assert_eq!(&code[15 + 0x12..15 + 0x12 + 3], &[0xFF, 0x75, 0x28]);
+        // filter, iType, then the mipmap from PENDING, not the engine's frame (#728).
+        assert_eq!(&code[15 + 0x12 + 6..15 + 0x12 + 9], &PUSH_MIPMAP);
         // The stolen compare, then a jne +6 that skips exactly the RESUME jump.
         assert_eq!(&code[15..19], &BRANCH_STOLEN[..4]);
         assert_eq!(&code[19..21], &[0x75, 0x06]);
@@ -4359,6 +4701,36 @@ mod tests {
         assert_eq!(map_short_name("maps/dod_Anzio.bsp"), "dod_anzio");
         assert_eq!(map_short_name("dod_caen"), "dod_caen");
         assert_eq!(map_short_name(""), NO_MAP);
+    }
+
+    /// #729: a decal's file is named as the engine uploads it (`{` or `}`
+    /// and the rest of the lump name), and only the two iTypes the decal
+    /// loader sends are taken; the other kinds keep theirs.
+    #[test]
+    fn decals_are_keyed_as_the_engine_names_them() {
+        assert_eq!(file_stem_name("}Scorch1"), "}scorch1");
+        assert_eq!(
+            parse_file_name("}scorch1_1a2b3c4d.tga"),
+            Some(("}scorch1".to_string(), 0x1a2b_3c4d))
+        );
+        assert_eq!(
+            parse_file_name("{shot5_deadbeef.tga"),
+            Some(("{shot5".to_string(), 0xdead_beef))
+        );
+        assert_eq!(miss_display_name(GLT_DECAL, "}scorch1"), "}scorch1");
+        assert_eq!(owner_of("decal", "{Shot5"), "decal:{shot5");
+
+        assert!(replaceable_i_type(GLT_DECAL, TEX_TYPE_ALPHA));
+        assert!(replaceable_i_type(GLT_DECAL, TEX_TYPE_ALPHA_GRADIENT));
+        assert!(!replaceable_i_type(GLT_DECAL, TEX_TYPE_NONE));
+        assert!(!replaceable_i_type(GLT_DECAL, TEX_TYPE_RGBA));
+        for kind in [GLT_WORLD, GLT_STUDIO] {
+            assert!(replaceable_i_type(kind, TEX_TYPE_NONE));
+            assert!(replaceable_i_type(kind, TEX_TYPE_ALPHA));
+            assert!(!replaceable_i_type(kind, TEX_TYPE_ALPHA_GRADIENT));
+        }
+        assert!(replaceable_i_type(GLT_SPRITE, TEX_TYPE_ALPHA_GRADIENT));
+        assert!(!replaceable_i_type(GLT_SPRITE, TEX_TYPE_RGBA));
     }
 
     #[test]
