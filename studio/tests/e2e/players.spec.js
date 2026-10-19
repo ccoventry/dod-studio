@@ -127,6 +127,30 @@ test('a sprite that cannot be read is picked by number', async ({ page }) => {
   await expect(page.locator('.players-picker-note')).toContainText('pick by number');
 });
 
+test('no preview is asked for before the hl.exe path is known, and previews load once it is (#852)', async ({ page }) => {
+  await loadHarness(page, { pngs: ['a.png'], sprites: ['customXHair.spr'] });
+  // As at start-up, when settings render the tab before the path is wired.
+  await page.locator('#hl-path-input').fill('');
+  await page.evaluate(() => window.__refresh());
+  await page.evaluate(() => window.__setPlayers({
+    players: [{ steam_id: '', name: 'Bot', png: '', crosshair_sprite: 'customXHair.spr', crosshair_tile: 2 }],
+  }));
+  await expect(page.locator('#players-list .players-tile')).toContainText('Tile 2');
+  const before = (await calls(page, 'crosshair_sprite_image')).length;
+  expect((await calls(page, 'crosshair_sprite_image')).filter((c) => !c.args.gamePath)).toEqual([]);
+
+  await page.locator('#hl-path-input').fill('C:/Games/Half-Life/hl.exe');
+  await page.evaluate(() => window.__refresh());
+  const sent = await calls(page, 'crosshair_sprite_image');
+  expect(sent.length).toBeGreaterThan(before);
+  for (const c of sent) expect(c.args.gamePath).toBe('C:/Games/Half-Life/hl.exe');
+  // Tile 2 is grey 16 in the mock sprite.
+  await expect.poll(() => page.evaluate(() => {
+    const preview = document.querySelector('#players-list .players-tile-preview');
+    return Array.from(preview.getContext('2d').getImageData(16, 16, 1, 1).data);
+  })).toEqual([16, 16, 16, 255]);
+});
+
 test('says when logos has no PNG, and marks files that are gone', async ({ page }) => {
   await loadHarness(page, { sprites: ['customXHair.spr'] });
   await page.evaluate((id) => window.__setPlayers({
