@@ -239,6 +239,8 @@ Your game's own `.cfg` files are read, never written.
 
 **Scan for Takes** walks the Destinations and stages every renderable take as a Queued row. A take is renderable when it has at least one stream folder and audio, either a `.wav` beside it or an audio track inside its video. A muted OBS recording is therefore not renderable.
 
+Scan works at any time, renders included (#772): it merges into the list. Queued and Rendering rows stay exactly as they are, finished, failed and cancelled rows are re-read from their take, new takes are added, and rows whose take folder is gone are dropped unless rendering. A new Queued row joins a batch that is already rendering. The toast says what changed ("3 new takes, 2 refreshed, 1 gone").
+
 Frame-sequence and video takes with HUD streams become two rows: the full picture, and a HUD-only row rendered as ProRes 4444 with alpha.
 
 | Codec | FFmpeg video | Container | Audio |

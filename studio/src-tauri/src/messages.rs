@@ -279,9 +279,8 @@ pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8])
 
 // ── render_manager.rs ────────────────────────────────────────────────────
 
-pub const RENDER_BATCH_ALREADY_RUNNING_LONG: &str = "A render batch is already running.";
-pub const BATCH_ALREADY_QUEUED: &str =
-    "A batch is already queued — start it or cancel it before scanning again.";
+pub const RENDER_SCAN_ALREADY_RUNNING: &str =
+    "A scan for takes is already running — wait for it to finish.";
 pub const RENDER_BATCH_ALREADY_IN_PROGRESS: &str = "Render batch already in progress";
 pub const NOTHING_QUEUED_TO_RENDER: &str = "Nothing queued to render — scan for takes first.";
 pub const SKIP_ONLY_FOR_OBS_TAKE: &str = "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip).";
@@ -581,14 +580,6 @@ mod tests {
 
     #[test]
     fn render_manager_messages_match_their_original_inline_text() {
-        assert_eq!(
-            RENDER_BATCH_ALREADY_RUNNING_LONG,
-            "A render batch is already running."
-        );
-        assert_eq!(
-            BATCH_ALREADY_QUEUED,
-            "A batch is already queued — start it or cancel it before scanning again."
-        );
         assert_eq!(
             RENDER_BATCH_ALREADY_IN_PROGRESS,
             "Render batch already in progress"

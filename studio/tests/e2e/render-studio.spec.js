@@ -161,7 +161,7 @@ test.describe('scan stages a batch, Start is a separate step', () => {
             codec_id: 'prores', skip_available: true,
           },
         ]);
-        return 1;
+        return { total: 1, added: 1, refreshed: 0, kept: 0, gone: 0, gone_queued: 0 };
       };
     });
 
@@ -171,7 +171,9 @@ test.describe('scan stages a batch, Start is a separate step', () => {
     expect(await invocationsFor(page, 'queue_render_batch')).toHaveLength(1);
     expect(await invocationsFor(page, 'start_queued_render')).toHaveLength(0);
     await expect(page.locator('#start-render-btn')).toBeEnabled();
-    await expect(page.locator('#scan-render-btn')).toBeDisabled();
+    // A scan merges (#772): another one is fine with rows queued.
+    await expect(page.locator('#scan-render-btn')).toBeEnabled();
+    await expect(page.locator('#toast-container')).toContainText('Scan complete: 1 new take.');
   });
 
   test('clicking Start Render Batch calls start_queued_render for every Queued row, ticked or not (#70)', async ({ page }) => {
@@ -186,14 +188,85 @@ test.describe('scan stages a batch, Start is a separate step', () => {
     expect(await invocationsFor(page, 'start_queued_render')).toHaveLength(1);
   });
 
-  test('once rendering starts, Scan and Start are both disabled again', async ({ page }) => {
+  test('once rendering starts, Start is disabled and Scan stays enabled (#772)', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
     await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 5 })]);
 
-    await expect(page.locator('#scan-render-btn')).toBeDisabled();
+    await expect(page.locator('#scan-render-btn')).toBeEnabled();
     await expect(page.locator('#start-render-btn')).toBeDisabled();
     await expect(page.locator('#cancel-render-btn')).toBeEnabled();
+  });
+});
+
+test.describe('issue #772 — Scan for Takes merges into the queue', () => {
+  test('Scan works while a take renders, is off only while the scan runs, and says what changed', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 40 })]);
+    await expect(page.locator('#scan-render-btn')).toBeEnabled();
+
+    await page.evaluate(() => {
+      window.__testCaptureLocations = ['C:\\captures'];
+      window.__mockInvokeHandlers['queue_render_batch'] = () =>
+        new Promise((resolve) => { window.__finishScan = resolve; });
+    });
+    await page.locator('#scan-render-btn').click();
+    await expect(page.locator('#scan-render-btn')).toBeDisabled();
+    // A render's snapshot mid-scan keeps it off and leaves the scan's status.
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 45 })]);
+    await expect(page.locator('#scan-render-btn')).toBeDisabled();
+    await expect(page.locator('#render-status')).toContainText('Scanning');
+
+    await page.evaluate(() => {
+      window.__mockEmit('render_jobs_snapshot', [
+        { id: '0', name: 'a', stream: 'all', frames: 1, date: '-', status: 'Rendering', speed: '', progress: 50,
+          error_log: null, settings_summary: 'ProRes @ 300fps', output_path: '', take_folder: 'C:\\a',
+          codec_id: 'prores', custom_codec_args: '', skip_available: false },
+        { id: '1', name: 'b', stream: 'all', frames: 1, date: '-', status: 'Queued', speed: '', progress: 0,
+          error_log: null, settings_summary: 'ProRes @ 300fps', output_path: '', take_folder: 'C:\\b',
+          codec_id: 'prores', custom_codec_args: '', skip_available: false },
+      ]);
+      window.__finishScan({ total: 4, added: 1, refreshed: 2, kept: 1, gone: 1, gone_queued: 1 });
+    });
+    await expect(page.locator('#scan-render-btn')).toBeEnabled();
+    await expect(page.locator('#toast-container')).toContainText('Scan complete: 1 new take, 2 refreshed, 1 gone (1 was queued).');
+    await expect(page.locator('tr[data-job-id="0"] .rj-status')).toHaveText('Rendering');
+    await expect(page.locator('tr[data-job-id="1"] .rj-status')).toHaveText('Queued');
+    expect(await invocationsFor(page, 'queue_render_batch')).toHaveLength(1);
+  });
+
+  test('a merge keeps each row ticked or unticked, and a new take comes in ticked', async ({ page }) => {
+    await gotoHarness(page);
+    const before = [
+      job({ id: '0', status: 'Rendering', take_folder: 'C:\\a' }),
+      job({ id: '1', status: 'Queued', take_folder: 'C:\\b' }),
+      job({ id: '2', status: 'Finished', take_folder: 'C:\\c' }),
+    ];
+    await emitSnapshot(page, before);
+    await page.locator('tr[data-job-id="1"] .render-job-select-cb').uncheck();
+    await page.locator('tr[data-job-id="2"] .render-job-select-cb').uncheck();
+    await expect(page.locator('#render-selection-count')).toHaveText('1 of 3 selected');
+
+    await page.evaluate((rows) => {
+      window.__testCaptureLocations = ['C:\\captures'];
+      window.__mockInvokeHandlers['queue_render_batch'] = () => {
+        window.__mockEmit('render_jobs_snapshot', rows);
+        return { total: 4, added: 1, refreshed: 1, kept: 2, gone: 0, gone_queued: 0 };
+      };
+    }, [
+      before[0],
+      before[1],
+      { ...before[2], frames: 450 },
+      job({ id: '3', status: 'Queued', take_folder: 'C:\\d' }),
+    ]);
+    await page.locator('#scan-render-btn').click();
+
+    await expect(page.locator('tr[data-job-id="3"]')).toHaveCount(1);
+    await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('tr[data-job-id="3"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('#render-selection-count')).toHaveText('2 of 4 selected');
   });
 });
 
@@ -223,7 +296,7 @@ test.describe('Custom codec', () => {
     await gotoHarness(page);
     await page.evaluate(() => {
       window.__testCaptureLocations = ['C:\\captures'];
-      window.__mockInvokeHandlers['queue_render_batch'] = () => 0;
+      window.__mockInvokeHandlers['queue_render_batch'] = () => ({ total: 0, added: 0, refreshed: 0, kept: 0, gone: 0, gone_queued: 0 });
     });
     await page.selectOption('#render-codec-select', 'custom');
     await page.locator('#render-custom-codec-input').fill('-c:v mpeg4 -q:v 3');

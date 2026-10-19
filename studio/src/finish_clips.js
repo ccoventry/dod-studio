@@ -125,7 +125,7 @@ export function finishSkipReason({ enabled, outcome, folders, exportDirs }) {
  *
  * Requests wait in order while the Render tab is busy — a running batch, or
  * one staged but not started (starting that would start somebody else's
- * batch, and queueing over it would throw it away). The next request goes the
+ * batch). The next request goes the
  * moment a jobs snapshot shows the queue idle.
  *
  * deps:
@@ -361,7 +361,9 @@ export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange 
   getClipNamesFn = getClipNames || null;
 
   controller = createFinishController({
-    queue: (payload) => queueRenderBatch(payload),
+    // The scan merges into the queue (#772); the controller wants how many
+    // takes it found.
+    queue: (payload) => queueRenderBatch(payload).then((summary) => summary?.total ?? 0),
     start: () => startQueuedRender(),
     onWaiting: () => setFooter(STRINGS.FINISH.WAITING_STATUS, null),
     onStarted: (total) => {
