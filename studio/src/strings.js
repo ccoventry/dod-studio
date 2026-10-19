@@ -1563,6 +1563,10 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    scanCancelledToast: (count) =>
+      count > 0
+        ? `Scan cancelled (${count} demo(s) added before cancel)`
+        : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 

@@ -84,7 +84,7 @@ fn from_analyzer_cache(root: &Path, demo: &Path) -> Option<Vec<String>> {
 }
 
 fn demos_in(folder: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
-    let walker = crate::sys::folder_walk::Walker::new();
+    let walker = crate::sys::folder_walk::Walker::new().skip_system_folders();
     let walker = if recursive {
         walker
     } else {

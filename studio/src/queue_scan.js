@@ -72,8 +72,10 @@ export function createQueueScan({
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else {
       if (scanStatusEl) {
+        // While folders are being listed (#843) no parse has started, so the
+        // parse clock must not start either.
         scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status)
-          + timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
+          + (p.listing ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached)));
       }
       if (cancelScanBtn) cancelScanBtn.disabled = false;
     }
@@ -107,6 +109,10 @@ export function createQueueScan({
     });
   }
 
+  // Cancel stopped the last scan before it added anything (e.g. while it
+  // was still listing a whole drive's folders, #843).
+  let lastScanAddedNothingCancelled = false;
+
   // Scans only the given paths and merges the results into the existing
   // master list (replacing entries with matching `path`, appending new ones).
   // `scanPaths` is the app-wide pinned-folder list (settings' pinned_folders,
@@ -121,6 +127,7 @@ export function createQueueScan({
   // than only skipped (#21).
   async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
+    lastScanAddedNothingCancelled = false;
 
     const scanStatusEl = document.querySelector('#scan-status');
     const scanSpinnerEl = document.querySelector('#scan-spinner');
@@ -147,7 +154,10 @@ export function createQueueScan({
       const known = getDemos()
         .filter(scanIsCurrent)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      const {
+        demos: scanned, unchanged, copies: unparsedCopies = [], cancelled = false,
+      } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      lastScanAddedNothingCancelled = cancelled && scanned.length === 0;
       // An identical copy under another name would be a second row for the
       // same demo, capturing every highlight twice (#21). The scan skips them
       // by key before parsing (`unparsedCopies`, each naming the queued or
@@ -193,7 +203,8 @@ export function createQueueScan({
       // it here in case the event arrives before renderMasterList finishes.
       updateDemoFooter(getDemos());
       if (newlyScanned.length > 0) markProjectDirty();
-      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
+      if (cancelled) showToast(STRINGS.MAIN.scanCancelledToast(newlyScanned.length), 'info');
+      else showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
       if (carryReport.toast) showToast(carryReport.toast.text, carryReport.toast.type, 10000);
       const selectedDemoIdx = newlyScanned.length > 0
         ? getDemos().indexOf(newlyScanned[0])
@@ -262,9 +273,11 @@ export function createQueueScan({
     // scanPaths only decides whether to remember it, and a folder that
     // turned out not to exist is not remembered. The merge in
     // triggerAutoScan replaces demos by path, so a re-scan adds no
-    // duplicate rows.
+    // duplicate rows. A scan cancelled before it added anything does not
+    // remember the folder: a drive root the user gave up on would be
+    // walked again by every list that reads the pinned folders.
     const scanned = await triggerAutoScan([folder]);
-    if (scanned && !getScanPaths().includes(folder)) {
+    if (scanned && !lastScanAddedNothingCancelled && !getScanPaths().includes(folder)) {
       getScanPaths().push(folder);
       markProjectDirty();
       await persistAppSettings();
