@@ -764,6 +764,8 @@ export const STRINGS = {
     countCancelled: (n) => `${n} cancelled`,
     batchSummary: (parts) => `Render batch finished — ${parts}.`,
     STATUS_FINISHED: 'Status: Finished',
+    STATUS_CANCELLED: 'Status: Cancelled',
+    statusFinishedWith: (parts) => `Status: Finished — ${parts}`,
     scanFoundSoFar: (n) => `Status: Scanning… found ${n} take(s) so far`,
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
     SCANNING_TOAST: 'Scanning render directories...',

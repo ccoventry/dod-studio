@@ -28,6 +28,7 @@ import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
 import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
+import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
@@ -108,10 +109,15 @@ function updateFooterQueueSummary() {
   updateBatchProgress();
   const el = document.querySelector('#render-footer-queue-summary');
   if (!el) return;
-  const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
-  const rendering = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
-  const done = jobs.filter((j) => j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR || j.status === JOB_STATUS.CANCELLED).length;
-  el.textContent = STRINGS.RENDER.queueSummary(queued, rendering, done);
+  el.textContent = queueSummaryText(jobs);
+}
+
+/** The status line, in the colour of the row status it reports (#818);
+ *  `status` null puts back the default colour. */
+function setRenderStatus(el, text, status = null) {
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = status ? statusColor(status) : '';
 }
 
 /** The footer's whole-batch bar (#40): hidden until there's a batch. */
@@ -724,10 +730,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
     const activeOrQueued = queuedCount + renderingCount;
-    if (renderStatusEl) {
-      renderStatusEl.textContent = renderingCount > 0
-        ? STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length)
-        : (queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
+    if (renderingCount > 0) {
+      setRenderStatus(renderStatusEl, STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length), JOB_STATUS.RENDERING);
+    } else {
+      setRenderStatus(renderStatusEl, queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
     }
     // Scan is blocked while anything is Queued or Rendering so a re-scan
     // can't clobber jobs the user may have already toggled Skip on — see
@@ -778,7 +784,8 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         notify(kind, title, summary);
       }
     }
-    if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.STATUS_FINISHED;
+    const end = batchEndStatus(finished, failed, cancelled);
+    setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
   if (scanRenderBtn) {
@@ -788,7 +795,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       // the status line needs, not the name, so this stays a cheap counter
       // rather than parsing/echoing every take's name into the DOM.
       scanFoundCount += 1;
-      if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.scanFoundSoFar(scanFoundCount);
+      setRenderStatus(renderStatusEl, STRINGS.RENDER.scanFoundSoFar(scanFoundCount));
     });
 
     scanRenderBtn.addEventListener('click', () => {
@@ -827,7 +834,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       scanFoundCount = 0;
       showToast(STRINGS.RENDER.SCANNING_TOAST, 'info');
       scanRenderBtn.disabled = true;
-      if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.STATUS_SCANNING;
+      setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCANNING);
 
       const renderPayload = {
         render_directories: captureLocations,
@@ -848,16 +855,14 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       queueRenderBatch(renderPayload)
         .then((count) => {
           showToast(STRINGS.RENDER.scannedTakesToast(count), count > 0 ? 'success' : 'info');
-          if (renderStatusEl) {
-            renderStatusEl.textContent = count > 0
-              ? STRINGS.RENDER.scanCompleteStatus(count)
-              : STRINGS.MAIN.statusGeneric(STRINGS.RENDER.NO_RENDER_TAKES_DETECTED);
-          }
+          setRenderStatus(renderStatusEl, count > 0
+            ? STRINGS.RENDER.scanCompleteStatus(count)
+            : STRINGS.MAIN.statusGeneric(STRINGS.RENDER.NO_RENDER_TAKES_DETECTED));
           if (count === 0) scanRenderBtn.disabled = false;
         })
         .catch((err) => {
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
-          if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.STATUS_SCAN_FAILED;
+          setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
           scanRenderBtn.disabled = false;
         });
     });
