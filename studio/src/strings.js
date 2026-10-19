@@ -1557,7 +1557,7 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
+    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',

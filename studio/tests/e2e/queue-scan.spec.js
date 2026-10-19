@@ -33,6 +33,16 @@ test('listing a drive shows its progress, and Cancel while listing adds nothing'
   await cancel.click();
   const cancels = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'cancel_scan'));
   expect(cancels).toHaveLength(1);
+  // The status line says it is stopping, rather than a toast that the
+  // cancelled one would follow a moment later.
+  await expect(status).toHaveText('Status: Cancelling…');
+  await expect(cancel).toBeDisabled();
+  // A listing line that was already on its way doesn't take that back.
+  await page.evaluate(() => window.__mockEmit('scan_progress', {
+    scanned: 0, found: 0, cancelled: false, listing: true, folders: 130, demos: 3,
+    status: 'Looking for demos: 130 folders read, 3 demos found',
+  }));
+  await expect(status).toHaveText('Status: Cancelling…');
 
   await page.evaluate(() => window.__mockEmit('scan_progress', {
     scanned: 0, found: 0, status: 'Cancelled', cancelled: true, unchanged: 0, skipped: [],
@@ -43,6 +53,7 @@ test('listing a drive shows its progress, and Cancel while listing adds nothing'
   await page.evaluate(() => window.__added);
   await expect(page.locator('.toast', { hasText: 'Scan cancelled, nothing added' })).toBeVisible();
   await expect(page.locator('.toast', { hasText: 'Scan complete' })).toHaveCount(0);
+  await expect(page.locator('.toast', { hasText: 'cancellation requested' })).toHaveCount(0);
   // A drive the user gave up on is not remembered.
   expect(await page.evaluate(() => window.__scanPaths)).toEqual([]);
   await expect(page.locator('#add-folder-btn')).toBeEnabled();

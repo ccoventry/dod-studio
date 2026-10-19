@@ -51,6 +51,10 @@ export function createQueueScan({
 }) {
   // ── scan_progress event listener (registered once on load) ────────────────
   let unlistenScanProgress = null;
+  // Cancel was clicked and the scan hasn't said it stopped yet: the status
+  // line says so instead of a toast, so it isn't followed a moment later by
+  // the cancelled one (#843).
+  let cancelling = false;
   listen('scan_progress', (event) => {
     const p = event.payload || {};
     const scanStatusEl = document.querySelector('#scan-status');
@@ -65,11 +69,15 @@ export function createQueueScan({
     }
 
     if (p.cancelled) {
+      cancelling = false;
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else if (p.status === 'Complete') {
+      cancelling = false;
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
+    } else if (cancelling) {
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCAN_CANCELLING_STATUS;
     } else {
       if (scanStatusEl) {
         // While folders are being listed (#843) no parse has started, so the
@@ -102,10 +110,15 @@ export function createQueueScan({
     cancelScanBtn.disabled = true;
     cancelScanBtn.addEventListener('click', async () => {
       cancelScanBtn.disabled = true;
+      cancelling = true;
+      const scanStatusEl = document.querySelector('#scan-status');
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCAN_CANCELLING_STATUS;
       try {
         await cancelScan();
-        showToast(STRINGS.MAIN.SCAN_CANCEL_REQUESTED_TOAST, 'info');
-      } catch (_) { /* already toasted in ipc_bridge */ }
+      } catch (_) {
+        /* already toasted in ipc_bridge */
+        cancelling = false;
+      }
     });
   }
 
@@ -128,6 +141,7 @@ export function createQueueScan({
   async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
     lastScanAddedNothingCancelled = false;
+    cancelling = false;
 
     const scanStatusEl = document.querySelector('#scan-status');
     const scanSpinnerEl = document.querySelector('#scan-spinner');
