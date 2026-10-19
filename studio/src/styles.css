@@ -3550,9 +3550,34 @@ button.setup-skip:hover:not(:disabled) {
   color: #fff;
 }
 
-/* The HLTV box's "Players I pick" (#828): the picked players as chips with
-   an x, then the lists that add a player or a team. */
+/* The HLTV box's "Players I pick" (#828): the lists that add a player or a
+   team stay together; the picked players, as chips with an x, take a line
+   of their own at the end of the toolbar, so more chips never move the
+   lists (#845). */
 .review-hltv-pick {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+/* Fixed widths: a list sized to its longest name narrows as players are
+   picked out of it, and the lists after it shift. */
+#review-hltv-add-player {
+  width: 200px;
+}
+
+#review-hltv-add-team {
+  width: 160px;
+}
+
+.review-hltv-pick[hidden],
+.review-hltv-chips[hidden] {
+  display: none;
+}
+
+.review-hltv-chips {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3560,14 +3585,8 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 12px;
 }
 
-.review-hltv-pick[hidden] {
-  display: none;
-}
-
-.review-hltv-chips {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.review-hltv-chips-row {
+  flex-basis: 100%;
 }
 
 .review-hltv-chip {
