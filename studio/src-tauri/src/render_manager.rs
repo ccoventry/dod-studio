@@ -1444,10 +1444,19 @@ pub fn get_render_required_estimate_gb(state: tauri::State<'_, RenderManager>) -
     total as f64 / 1_073_741_824.0
 }
 
-#[tauri::command(async)]
-pub fn get_export_pool_free_gb(directories: Vec<String>) -> f64 {
+/// On the blocking pool (#853): a disk-space cache miss re-lists every
+/// volume, which can wait on a sleeping or network drive.
+#[tauri::command]
+pub async fn get_export_pool_free_gb(directories: Vec<String>) -> Result<f64, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        export_pool_free_gb(&directories)
+    }))
+    .await
+}
+
+fn export_pool_free_gb(directories: &[String]) -> f64 {
     let mut total: u64 = 0;
-    for dir in &directories {
+    for dir in directories {
         let free = native::sys::disk::get_available_bytes(&PathBuf::from(dir));
         if free != u64::MAX {
             total += free;
@@ -1480,11 +1489,22 @@ pub fn check_render_autosave(
     }
     let json = std::fs::read_to_string(autosave_path()).ok()?;
     let session: RenderSessionData = serde_json::from_str(&json).ok()?;
+    recovery_summary(session)
+}
+
+/// What the recovery prompt offers, or `None` when every job had finished:
+/// a scan writes the autosave too, so a scan after a batch ended (or one
+/// whose takes were all rendered before) leaves a file with nothing left to
+/// render, and the prompt said "didn't finish cleanly" over "Pending: 0".
+fn recovery_summary(session: RenderSessionData) -> Option<RenderAutosaveSummary> {
     let pending_count = session
         .jobs
         .iter()
         .filter(|j| j.status == AutosaveJobStatus::Pending)
         .count();
+    if pending_count == 0 {
+        return None;
+    }
     let completed_count = session
         .jobs
         .iter()
@@ -1762,6 +1782,21 @@ mod tests {
             export_directories: vec!["E:/exports".to_string(), "  ".to_string()],
             max_concurrent_renders: 3,
         }
+    }
+
+    #[test]
+    fn the_recovery_prompt_needs_a_job_left_to_render() {
+        let done = session(vec![
+            autosave_job("a", AutosaveJobStatus::Completed, true),
+            autosave_job("b", AutosaveJobStatus::Completed, true),
+        ]);
+        assert!(recovery_summary(done).is_none());
+        let summary = recovery_summary(session(vec![
+            autosave_job("a", AutosaveJobStatus::Completed, true),
+            autosave_job("b", AutosaveJobStatus::Pending, true),
+        ]))
+        .expect("a pending job is worth recovering");
+        assert_eq!((summary.pending_count, summary.completed_count), (1, 1));
     }
 
     #[test]
