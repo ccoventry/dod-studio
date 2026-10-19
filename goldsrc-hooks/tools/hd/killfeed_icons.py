@@ -25,7 +25,8 @@ Per icon (ICONS):
   4. the side-on view: the model's principal axes, each muzzle / up sign
      and a roll, scored by silhouette overlap with Valve's icon, so the
      muzzle points right and the gun fills its box as Valve's does
-     (choose_view);
+     (choose_view); then, for guns, snapped to the model's own axes when
+     the match lands near one, so the barrel is level (level_view);
   5. the skin in the HD style: the model skin models_hd.py built for this
      style when there is one, else upscaled here, else the stock skin;
   6. rendered orthographically, supersampled, two-sided Lambert with a
@@ -68,7 +69,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 1
+VERSION = 2  # 2: barrels levelled (level_view)
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -372,6 +373,51 @@ def choose_view(tris, target_alpha, box, rolls=ROLLS, muzzle=MUZZLE):
     return view_basis(a1, a2, sx, sy, roll), s, (sx, sy, roll)
 
 
+# Icons drawn at the roll that matches Valve's silhouette rather than with
+# a level barrel: blades and grenades have no barrel to level.
+NOT_LEVELLED = re.compile(r"knife|spade|grenade|stick", re.I)
+
+
+def snap_axis(v):
+    """The model axis (+-X, +-Y, +-Z) nearest to `v`."""
+    i = int(np.argmax(np.abs(v)))
+    out = np.zeros(3)
+    out[i] = np.sign(v[i]) or 1.0
+    return out
+
+
+def level_view(tris, pick, force=False):
+    """The chosen view with its axes snapped to the model's own: weapon
+    models are built along a model axis, level, so this draws the barrel
+    straight; the silhouette match alone tilts a gun towards Valve's
+    drawing (most of all an SMG, whose magazine Valve drew shorter), which
+    reads as crooked. Keeps the side and the muzzle direction the match
+    picked. Returns (basis, pick)."""
+    sx, sy, roll = pick
+    a1, a2, _ = principal_axes(tris)
+    chosen = view_basis(a1, a2, sx, sy, roll)
+    right = snap_axis(chosen[0])
+    up = chosen[1] - np.dot(chosen[1], right) * right
+    up = snap_axis(up)
+    if abs(np.dot(right, up)) > 0.5:  # both snapped to one axis: keep the match
+        return chosen, pick
+    # Some models aren't built along an axis (the rifles' `p_` models lie at
+    # an angle, as held): there the snapped view is far off and the match's
+    # own view is the level one. `force` snaps anyway (the Sten, whose
+    # silhouette match lands far from its level axis).
+    off = np.degrees(np.arccos(np.clip(np.dot(chosen[0], right), -1, 1)))
+    if off > SNAP_MAX_DEG and not force:
+        return chosen, pick
+    return np.array([right, up, np.cross(right, up)]), (sx, sy, 0.0)
+
+
+# How far the silhouette match's view may be from a model axis and still be
+# snapped to it (level_view): the rifles' angled models are ~25 degrees off.
+SNAP_MAX_DEG = 15.0
+# Icons snapped to the model's axes whatever the match picked.
+FORCE_SNAP = {"d_sten"}
+
+
 # ── rasterizer ───────────────────────────────────────────────────────────────
 
 
@@ -603,6 +649,8 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
     if best is None:
         return None, "no model in this install"
     tris, score, pick, basis, path, cut = best
+    if not NOT_LEVELLED.search(name):
+        basis, pick = level_view(tris, pick, force=name in FORCE_SNAP)
     textures = sorted({id(t[3]): t[3] for t in tris}.values(), key=lambda t: t.name)
     skins = hd_skins(textures, style, models_dir)
     fit = fit_transform(tris, basis, box)

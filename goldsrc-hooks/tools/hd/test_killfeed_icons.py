@@ -122,6 +122,28 @@ class GeometryTest(unittest.TestCase):
         # the barrel along +x on the right, the grip below
         self.assertEqual((sx, sy), (1, 1))
 
+    def test_a_view_near_a_model_axis_is_snapped_level(self):
+        # An SMG-like body along X with a tall magazine: a match tilted 8
+        # degrees snaps back to the model's own X / Y axes.
+        tris = [box_tris(0, 10, 0, 1), box_tris(4, 5, -4, 0)]
+        basis, pick = K.level_view(tris, (1, 1, 8.0))
+        self.assertEqual(pick[2], 0.0)
+        np.testing.assert_allclose(np.abs(basis[0]), [1, 0, 0])
+        np.testing.assert_allclose(np.abs(basis[1]), [0, 1, 0])
+
+    def test_a_model_built_at_an_angle_keeps_the_match(self):
+        # A rifle lying 25 degrees off its axes, as the `p_` rifles do: the
+        # snapped view would tilt it, so the match's view stays.
+        a = np.radians(25)
+        rot = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+        v, n, uv, tex = box_tris(0, 12, 0, 1)
+        tris = [(v @ rot.T, n, uv, tex)]
+        pick = (1, 1, 0.0)
+        basis, kept = K.level_view(tris, pick)
+        self.assertEqual(kept, pick)
+        basis, forced = K.level_view(tris, pick, force=True)
+        self.assertEqual(forced[2], 0.0)
+
 
 class PassesTest(unittest.TestCase):
     def square(self):
