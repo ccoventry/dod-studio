@@ -68,8 +68,8 @@ export function hltvPlayerChosen(streak, players) {
 }
 
 /** The HLTV players box's fixed choices; any other value is one recorder's
- *  id (#822). */
-export const HLTV_PLAYERS = { MISSING: 'missing', RECORDERS: 'recorders', ALL: 'all' };
+ *  id (#822). PICKED: the players picked beside the box (#828). */
+export const HLTV_PLAYERS = { MISSING: 'missing', RECORDERS: 'recorders', ALL: 'all', PICKED: 'picked' };
 
 /**
  * The queue's recorders who have no POV demo of `hltvDemo`'s half in the
@@ -93,8 +93,9 @@ export function playersMissingThisHalf(hltvDemo, demos, recorders, recorderOf) {
 /**
  * The players an HLTV review covers for the box's `choice`: the recorders
  * missing their POV for that half (the default; a function of the demo),
- * every recorder in the queue, everyone (null), or the one picked.
- * `queue`: `{ demos, recorderOf }`, for the default.
+ * every recorder in the queue, everyone (null), the players picked beside
+ * the box (`queue.picked`, any player in the HLTV demos, #828), or the one
+ * recorder picked. `queue`: `{ demos, recorderOf, picked }`.
  */
 export function hltvPlayersFor(choice, recorders, queue = {}) {
   if (choice === HLTV_PLAYERS.ALL) return null;
@@ -103,6 +104,7 @@ export function hltvPlayersFor(choice, recorders, queue = {}) {
     return (demo) => playersMissingThisHalf(demo, queue.demos, all, queue.recorderOf || (() => null));
   }
   if (choice === HLTV_PLAYERS.RECORDERS) return all;
+  if (choice === HLTV_PLAYERS.PICKED) return queue.picked || [];
   return all.filter((p) => p.id === choice);
 }
 

@@ -56,6 +56,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { createHltvPicker } from './review_hltv_picker.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
 import { createPlayersUi } from './players_ui.js';
@@ -110,6 +111,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   // on the detected tag (project_teams.js). Project state rather than demo
   // state, so a re-scan never touches it. Persisted in the project file.
   let projectTeams = emptyProjectTeams();
+  // The Review box's HLTV pick (#828), kept in the project file.
+  const hltvPick = createHltvPicker({
+    getDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
+    onChange: () => markProjectDirty(),
+  });
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
@@ -139,6 +146,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     setProjectTeams: (teams) => { projectTeams = teams; },
     checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
     offerRescan: () => offerRescan(),
+    getReviewSettings: () => hltvPick.getState(),
+    setReviewSettings: (raw) => hltvPick.setState(raw),
   });
 
   // Initialize modular UI panes
@@ -378,6 +387,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     const clearAllBtnEl = document.querySelector('#clear-all-btn');
     if (clearAllBtnEl) clearAllBtnEl.disabled = isEmpty;
     setup?.refresh();
+    // The HLTV pick's lists follow the queue: filled while it was empty they
+    // are disabled, and a disabled list never opens to refill itself.
+    hltvPick.refresh();
   }
 
   // Which match and half each queued demo is (#685): queue_match_groups.js.
@@ -537,6 +549,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getRecorders: getQueueRecorders,
     recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
+    hltvPick,
   });
 
   initCaptureUI(() => ({

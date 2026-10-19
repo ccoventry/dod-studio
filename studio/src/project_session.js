@@ -23,8 +23,10 @@ import { STRINGS } from './strings.js';
  *   getDemos() the queue, replaceDemos(demos) main.js's replaceScannedDemos,
  *   loadDemos(demos) make a loaded project's demos the queue and show them,
  *   getTakeIndex()/setTakeIndex(index), getProjectTeams()/setProjectTeams(teams),
- *   checkMissingDemos(projectPath, scanPaths) from project_demos.js, and
- *   offerRescan() from project_rescan.js.
+ *   checkMissingDemos(projectPath, scanPaths) from project_demos.js,
+ *   offerRescan() from project_rescan.js, and getReviewSettings()/
+ *   setReviewSettings(raw), the Review box's HLTV pick (#828,
+ *   review_hltv_picker.js).
  */
 export function createProjectSession({
   getDemos,
@@ -36,6 +38,8 @@ export function createProjectSession({
   setProjectTeams,
   checkMissingDemos,
   offerRescan = async () => false,
+  getReviewSettings = () => undefined,
+  setReviewSettings = () => {},
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -139,6 +143,8 @@ export function createProjectSession({
         // doesn't accumulate uids for demos removed from the project.
         takeIndex: pruneTakeIndex(getTakeIndex(), collectAllUids()),
         teams: getProjectTeams(),
+        // Whose highlights an HLTV demo's review plays (#828).
+        review: getReviewSettings(),
         // Kept for older-file/older-version compatibility — nothing on the
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
@@ -205,6 +211,9 @@ export function createProjectSession({
           // Tolerant the same way: a project saved before the Teams list
           // (#445) has no `teams`, and loads with none named or merged.
           setProjectTeams(normalizeProjectTeams(data.teams));
+          // A project saved before #828 has no `review`: the HLTV box goes
+          // back to its default, nobody picked.
+          setReviewSettings(data.review);
           if (data.demos) {
             // timeline_string is a derived field, saved as a convenience
             // snapshot rather than the source of truth — recompute it from
@@ -246,6 +255,7 @@ export function createProjectSession({
     currentSessionPath = null;
     setTakeIndex({});
     setProjectTeams(emptyProjectTeams());
+    setReviewSettings(null);
     refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();

@@ -157,6 +157,12 @@
                   <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
                   <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
                 </label>
+                <!-- #828: the players "Players I pick" reviews; review_hltv_picker.js fills it. -->
+                <span id="review-hltv-pick" class="review-hltv-pick" hidden>
+                  <span id="review-hltv-chips" class="review-hltv-chips"></span>
+                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;"></select>
+                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 180px;"></select>
+                </span>
                 <!-- The order an HLTV demo's players' highlights play in. -->
                 <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
                   <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>

@@ -2209,16 +2209,31 @@ export const STRINGS = {
     COVERS_SKIP: 'Skip',
     // #822: whose highlights an HLTV demo's review plays.
     HLTV_LABEL: 'HLTV:',
-    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; any players you pick from the HLTV demos (a whole team at once from the Teams list), kept in the project; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
     HLTV_MISSING: 'Players missing their POV for this half',
     HLTV_RECORDERS: 'Players with a POV demo in the queue',
     HLTV_ALL: 'Everyone',
+    // #828: any players from the HLTV demos, picked beside the box.
+    HLTV_PICKED: 'Players I pick',
+    PICK_ADD_PLAYER: 'Add a player…',
+    PICK_ADD_PLAYER_TITLE: 'Everyone with a highlight in the queue\'s HLTV demos, one line per player with every name they used.',
+    PICK_NO_PLAYERS: 'No HLTV highlights in the queue',
+    PICK_ADD_TEAM: 'Add a team…',
+    PICK_ADD_TEAM_TITLE: 'Adds every player of a team from the Teams list: whoever played on its side in an HLTV demo, or has its tag in their name.',
+    PICK_NO_TEAMS: 'No teams in the HLTV demos',
+    pickTeamOption: (name, count) => `${name} (${count} player${count === 1 ? '' : 's'})`,
+    PICK_NONE: 'Nobody picked yet',
+    PICK_REMOVE: 'Take this player out',
+    PICK_NOT_IN_QUEUE_TITLE: 'No highlights in the queue\'s HLTV demos. Kept in the pick for when their demo is back.',
     ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
     ORDER_TIME: 'Chronological',
     ORDER_PLAYER: 'By player (A–Z)',
     // The HLTV box left out every highlight there was (#822).
-    hltvNoneChosen: (choice, count) => {
+    hltvNoneChosen: (choice, count, pickedCount = 0) => {
       const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;
+      if (choice === 'picked' && pickedCount === 0) {
+        return `Nothing to review: HLTV is set to Players I pick and nobody is picked, so the ${n} were left out. Add players or a team beside the HLTV box, or set HLTV to Everyone.`;
+      }
       if (choice === 'missing' || !choice) {
         return `Nothing to review: every player with a POV demo in the queue recorded this half themselves, so the ${n} were left out. To review a player from the HLTV demo, add one of their POV demos from another half, or set HLTV to Everyone.`;
       }
