@@ -20,7 +20,7 @@ async function loadHarness(page, { pngs = [], sprites = [], spriteReadable = tru
     };
     window.__mockInvokeHandlers = {
       list_logo_pngs: () => pngs,
-      list_crosshair_sprites: () => sprites,
+      list_crosshair_sprites: () => window.__sprites ?? sprites,
       crosshair_sprite_image: () => (spriteReadable ? sprite() : Promise.reject('bad sprite')),
       set_player_overrides: () => 1,
       // Answers the way the backend does: one event per demo, then resolves.
@@ -158,4 +158,87 @@ test('the spray size defaults to 64 and a row can keep the spray from the demo',
   expect(await page.evaluate(() => window.__players().players[0].png)).toBe('own');
   // Not a file: no "not in logos" warning for it.
   await expect(page.locator('#players-warning')).not.toContainText('own');
+});
+
+// "Make your own crosshair…" and "Add a crosshair file…" (#842).
+test('Make your own crosshair opens the creator in the browser', async ({ page }) => {
+  await loadHarness(page, { sprites: ['customXHair.spr'] });
+  await page.locator('#players-make-crosshair-btn').click();
+  await expect.poll(async () => (await calls(page, 'plugin:opener|open_url')).map((c) => c.args.url))
+    .toEqual(['https://vertexs-custom-crosshair-creator.replit.app/']);
+});
+
+test('Add a crosshair file: picks the ZIP, names it, copies it and lists it', async ({ page }) => {
+  await loadHarness(page, { sprites: ['customXHair.spr', 'customxhair-taken.spr'] });
+  await page.evaluate(() => {
+    // The picker stays open until the test answers it.
+    window.__mockInvokeHandlers['plugin:dialog|open'] = () => new Promise((resolve) => { window.__answerPick = resolve; });
+    window.__mockInvokeHandlers.add_crosshair_file = ({ name }) => {
+      window.__sprites = ['customXHair.spr', 'customxhair-taken.spr', 'customxhair-red-dot.spr'];
+      return name === 'Red Dot' ? 'customxhair-red-dot.spr' : Promise.reject('unexpected name');
+    };
+  });
+  const add = page.locator('#players-add-crosshair-btn');
+  await add.click();
+  // Disabled while the picker is open.
+  await expect(add).toBeDisabled();
+  const [pick] = await calls(page, 'plugin:dialog|open');
+  expect(pick.args.options.filters[0].extensions).toEqual(['spr', 'zip']);
+  await page.evaluate(() => window.__answerPick('C:\\Downloads\\customxhair (2).zip'));
+  await expect(add).toBeEnabled();
+
+  const form = page.locator('#players-add-crosshair-form');
+  const name = page.locator('#players-add-crosshair-name');
+  const save = page.locator('#players-add-crosshair-save');
+  await expect(form).toBeVisible();
+  await expect(name).toHaveValue('2');
+  await expect(page.locator('#players-add-crosshair-file')).toHaveText('Saved as customxhair-2.spr');
+
+  await name.fill('TAKEN');
+  await expect(page.locator('#players-add-crosshair-file')).toContainText("There's already a crosshair called customxhair-taken.spr");
+  await expect(save).toBeDisabled();
+  await name.fill('  ');
+  await expect(save).toBeDisabled();
+  await name.fill('Red Dot');
+  await expect(page.locator('#players-add-crosshair-file')).toHaveText('Saved as customxhair-red-dot.spr');
+  await save.click();
+
+  await expect(page.locator('#players-add-crosshair-status')).toHaveText('Added customxhair-red-dot.spr. Pick it in a crosshair list above.');
+  await expect(form).toBeHidden();
+  const [copy] = await calls(page, 'add_crosshair_file');
+  expect(copy.args).toEqual({
+    gamePath: 'C:/Games/Half-Life/hl.exe',
+    gameFolder: 'dod',
+    source: 'C:\\Downloads\\customxhair (2).zip',
+    name: 'Red Dot',
+  });
+  // The crosshair lists offer it now.
+  await page.locator('#players-crosshair-fallback').selectOption('sprite');
+  await expect(page.locator('#players-crosshair-fallback-pick select option[value="customxhair-red-dot.spr"]')).toHaveCount(1);
+});
+
+test('Add a crosshair file: a file that is not a crosshair says why and keeps the name row', async ({ page }) => {
+  await loadHarness(page, { sprites: ['customXHair.spr'] });
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers['plugin:dialog|open'] = () => 'C:\\Downloads\\notes.zip';
+    window.__mockInvokeHandlers.add_crosshair_file = () => Promise.reject('C:\\Downloads\\notes.zip: the ZIP holds no crosshair (.spr) file');
+  });
+  await page.locator('#players-add-crosshair-btn').click();
+  await expect(page.locator('#players-add-crosshair-name')).toHaveValue('notes');
+  await page.locator('#players-add-crosshair-save').click();
+  await expect(page.locator('#players-add-crosshair-status')).toContainText("Couldn't add the crosshair:");
+  await expect(page.locator('#players-add-crosshair-status')).toContainText('no crosshair (.spr) file');
+  await expect(page.locator('#players-add-crosshair-form')).toBeVisible();
+  await expect(page.locator('#players-add-crosshair-save')).toBeEnabled();
+  // Cancel closes the row.
+  await page.locator('#players-add-crosshair-cancel').click();
+  await expect(page.locator('#players-add-crosshair-form')).toBeHidden();
+});
+
+test('Add a crosshair file needs the Half-Life executable first', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('#hl-path-input').fill('');
+  await page.locator('#players-add-crosshair-btn').click();
+  await expect(page.locator('#players-add-crosshair-status')).toContainText('Set the Half-Life executable first');
+  expect(await calls(page, 'plugin:dialog|open')).toEqual([]);
 });

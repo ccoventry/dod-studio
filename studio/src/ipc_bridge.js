@@ -183,7 +183,7 @@ export async function listLogoPngs(gamePath, gameFolder) {
     });
 }
 
-/** The sprites in the game install's sprites folder, for Configuration >
+/** The sprites in the game install's sprites folders (addon and game), for Configuration >
  *  Players' crosshair column (#428). Empty when they can't be listed. */
 export async function listCrosshairSprites(gamePath, gameFolder) {
   return invoke('list_crosshair_sprites', { gamePath, gameFolder })
@@ -200,6 +200,18 @@ export async function crosshairSpriteImage(gamePath, gameFolder, sprite) {
     .catch((err) => {
       console.error("IPC Execution Error (crosshair_sprite_image):", err);
       return null;
+    });
+}
+
+/** "Add a crosshair file…" (#842): copies the sprite in `source` (a .spr, or
+ *  the crosshair creator's .zip) into the install's addon sprites folder as
+ *  customxhair-<name>.spr. `{ file }` on success, `{ error }` otherwise. */
+export async function addCrosshairFile(gamePath, gameFolder, source, name) {
+  return invoke('add_crosshair_file', { gamePath, gameFolder, source, name })
+    .then((file) => ({ file }))
+    .catch((err) => {
+      console.error("IPC Execution Error (add_crosshair_file):", err);
+      return { error: String(err) };
     });
 }
 

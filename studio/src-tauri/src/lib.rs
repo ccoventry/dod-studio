@@ -755,6 +755,7 @@ pub fn run() {
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
+            players_tab::add_crosshair_file,
             players_tab::set_player_overrides,
             link_hlae_ffmpeg,
             analyze_demo_full,
