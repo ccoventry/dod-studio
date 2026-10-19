@@ -185,11 +185,15 @@ is a different code path this element's vtable slot cannot see.
 
 `all 0` shows everything again, which is what a way out looks like. `all 1` is
 refused on purpose: it would hide `CHudMenu` too, and a session that cannot see
-the class menu is a support question rather than a feature.
+a server's text menus (a vote) is a support question rather than a feature.
+`CHudMenu` draws only `ShowMenu` text menus: DoD's voice-command menus and
+server plugin menus. The team and class menus are VGUI2 and not on this list.
+`dodstudio_hide_voice_menus` hides only the voice menus
+(`goldsrc-hooks/src/voice_menus.rs`).
 
 ### What it reaches that nothing else did
 
-Chat, the kill feed, the status bar under the crosshair, the team and class
+Chat, the kill feed, the status bar under the crosshair, the voice-command
 menus, the tram controls, the objective icons, and `CHudDodIcons` -- which
 owns **both** the MG-deploy icon (#288) and the capture-area icon (#289),
 along with blood and bandage. Those two were filed

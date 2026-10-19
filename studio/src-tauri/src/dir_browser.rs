@@ -306,6 +306,7 @@ fn demo_folders_under(root_dir: &Path) -> Vec<DemoFolderHit> {
     let mut counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
     Walker::new()
         .max_depth(max_depth)
+        .skip_system_folders()
         .walk(root_dir, &mut |found| match found.kind {
             Kind::Dir => {
                 let name = found.file_name();

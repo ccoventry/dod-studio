@@ -17,6 +17,7 @@ mod match_group_cmd;
 mod messages;
 mod overview_manager;
 mod packet_limit_manager;
+mod players_tab;
 mod preview_in_place;
 mod render_manager;
 mod review_manager;
@@ -39,7 +40,7 @@ use capture_manager::{
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
     check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
-    get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
+    get_render_jobs, get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
     remove_non_rendering_render_jobs, remove_render_job, remove_render_jobs, reset_all_render_jobs,
     reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
 };
@@ -95,6 +96,7 @@ async fn save_settings(
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
+        players_tab::mirror_table(&settings);
         *guard = settings;
         Ok(())
     }))
@@ -290,8 +292,10 @@ fn volume_key(path: &std::path::Path) -> Option<String> {
 }
 
 /// Free space across the capture folders, each drive counted once: two
-/// folders on one drive share its space.
-#[tauri::command]
+/// folders on one drive share its space. Off the main thread (#853): a
+/// cache miss re-lists every volume, which waits on a sleeping or network
+/// drive, and start-up asks for this while the window is up.
+#[tauri::command(async)]
 fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
     let mut seen = std::collections::HashSet::new();
@@ -324,7 +328,8 @@ struct CaptureOutputDiagnostic {
     usable: bool,
 }
 
-#[tauri::command]
+/// Off the main thread for the same reason as `calculate_export_pool_space`.
+#[tauri::command(async)]
 fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
     paths
         .into_iter()
@@ -524,9 +529,11 @@ pub struct AnalyzerReportPayload {
 
 /// Which request `index_demo_players` is serving, per lane; a newer one stops
 /// an older one between demos (the Demo Analyzer moved to another folder).
-/// Two lanes, so the Master Queue's lookups never cancel the Analyzer's.
+/// One lane each, so the Master Queue's and Configuration > Players' lookups
+/// never cancel the Analyzer's or each other's.
 static PLAYER_INDEX_ANALYZER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static PLAYER_INDEX_QUEUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PLAYER_INDEX_PLAYERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Who is in each demo (#437, #174), one `demo_players` event per demo as it
 /// is read: from the small player index when it is current (milliseconds), or
@@ -539,10 +546,10 @@ async fn index_demo_players(
     request_id: u64,
     lane: String,
 ) -> Result<usize, String> {
-    let current: &'static std::sync::atomic::AtomicU64 = if lane == "queue" {
-        &PLAYER_INDEX_QUEUE
-    } else {
-        &PLAYER_INDEX_ANALYZER
+    let current: &'static std::sync::atomic::AtomicU64 = match lane.as_str() {
+        "queue" => &PLAYER_INDEX_QUEUE,
+        "players" => &PLAYER_INDEX_PLAYERS,
+        _ => &PLAYER_INDEX_ANALYZER,
     };
     current.store(request_id, Ordering::SeqCst);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -748,6 +755,10 @@ pub fn run() {
             check_hlae_ffmpeg,
             diagnose_executable_paths,
             settings_manager::list_game_folders,
+            players_tab::list_logo_pngs,
+            players_tab::list_crosshair_sprites,
+            players_tab::crosshair_sprite_image,
+            players_tab::set_player_overrides,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
@@ -797,6 +808,7 @@ pub fn run() {
             check_render_autosave,
             discard_render_autosave,
             recover_render_batch,
+            get_render_jobs,
             get_settings,
             save_settings,
             save_project_session,

@@ -26,11 +26,15 @@ pub struct ReviewHighlight {
     /// The kill range, from 1.
     pub from: usize,
     pub to: usize,
-    /// `yes` or `no` when answered before.
+    /// `yes`, `maybe` or `no` when answered before.
     #[serde(default)]
     pub answered: Option<String>,
     #[serde(default)]
     pub note: String,
+    /// HLTV: the player number the game's camera goes on (#822); `None` for
+    /// a POV demo.
+    #[serde(default)]
+    pub spectate: Option<u32>,
 }
 
 /// A field as one tab-free line.
@@ -59,11 +63,12 @@ pub fn format_queue(highlights: &[ReviewHighlight], fast_forward_gap: Option<f64
         let times: Vec<String> = h.kill_times.iter().map(|t| format!("{t:.3}")).collect();
         let answered = match h.answered.as_deref() {
             Some("yes") => "yes",
+            Some("maybe") => "maybe",
             Some("no") => "no",
             _ => "-",
         };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             field(&h.demo),
             field(&h.key),
             field(&h.player),
@@ -73,6 +78,11 @@ pub fn format_queue(highlights: &[ReviewHighlight], fast_forward_gap: Option<f64
             answered,
             field(&h.note)
         ));
+        // A ninth field only for an HLTV highlight; an older game ignores it.
+        if let Some(n) = h.spectate {
+            out.push_str(&format!("\t{n}"));
+        }
+        out.push('\n');
     }
     out
 }
@@ -111,7 +121,7 @@ pub fn parse_event(line: &str) -> Option<ReviewEvent> {
             let demo = fields.next()?.to_string();
             let key = fields.next()?.to_string();
             let verdict = fields.next()?.to_string();
-            if verdict != "yes" && verdict != "no" {
+            if !matches!(verdict.as_str(), "yes" | "maybe" | "no") {
                 return None;
             }
             let from = fields.next()?.trim().parse().ok()?;
@@ -148,7 +158,19 @@ mod tests {
             to: 2,
             answered: None,
             note: "nice\tflick\n".to_string(),
+            spectate: None,
         }
+    }
+
+    #[test]
+    fn an_hltv_highlight_adds_the_camera_player_as_a_ninth_field() {
+        let mut h = highlight();
+        h.spectate = Some(7);
+        h.note = String::new();
+        assert_eq!(
+            format_queue(&[h], None).lines().nth(1),
+            Some("C:\\demos\\a b.dem\t3\tm00cat\t100.500,104.000\t1\t2\t-\t\t7")
+        );
     }
 
     #[test]
@@ -207,6 +229,19 @@ mod tests {
     }
 
     #[test]
+    fn maybe_goes_both_ways() {
+        let mut h = highlight();
+        h.answered = Some("maybe".to_string());
+        assert!(format_queue(&[h], None).contains("\tmaybe\t"));
+        let Some(ReviewEvent::Answer { verdict, .. }) =
+            parse_event("[dod-studio] REVIEW\tC:/d/a.dem\t4\tmaybe\t1\t1")
+        else {
+            panic!("not parsed");
+        };
+        assert_eq!(verdict, "maybe");
+    }
+
+    #[test]
     fn start_and_end_are_parsed_and_other_markers_ignored() {
         assert_eq!(
             parse_event("[dod-studio] REVIEW_START\t12"),
@@ -220,6 +255,9 @@ mod tests {
         );
         assert_eq!(parse_event("[dod-studio] DEMO_START 1 2 3"), None);
         assert_eq!(parse_event("dodstudio-hooks events 1"), None);
-        assert_eq!(parse_event("[dod-studio] REVIEW\ta\tb\tmaybe\t1\t1"), None);
+        assert_eq!(
+            parse_event("[dod-studio] REVIEW\ta\tb\tperhaps\t1\t1"),
+            None
+        );
     }
 }

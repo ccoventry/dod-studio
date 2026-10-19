@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+  Harness for queue_scan.js (#843): the Master Queue's scan buttons, status
+  line and bar from index.html, with Tauri's IPC mocked (vite.config.e2e.js).
+  `scan_directory` stays pending until a test calls
+  `window.__finishScan(outcome)`; `window.__addDemoFolder(folder)` is + Add
+  Folder after its picker, and `window.__scanPaths` the remembered folders.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>queue_scan.js test harness</title>
+</head>
+<body>
+  <button id="add-files-btn">+ Add Demo Files</button>
+  <button id="add-folder-btn">+ Add Folder</button>
+  <button id="cancel-scan-btn" disabled>Cancel Scan</button>
+  <span id="scan-spinner" style="display: none;"></span>
+  <p id="scan-status">Status: Ready</p>
+  <div id="scan-progress" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+  <table><tbody id="master-demo-table-body"></tbody></table>
+
+  <script type="module">
+    import { createQueueScan } from '/src/queue_scan.js';
+
+    window.__mockInvokeHandlers.scan_directory = () =>
+      new Promise((resolve) => { window.__finishScan = resolve; });
+
+    const demos = [];
+    window.__scanPaths = [];
+    const { addDemoFolder } = createQueueScan({
+      getDemos: () => demos,
+      setSelectedDemoIdx: () => {},
+      selectDemoAndRenderDetail: () => {},
+      updateDemoFooter: () => {},
+      markProjectDirty: () => {},
+      readScanWorkers: () => 2,
+      offerIdenticalCopies: async () => {},
+      getScanPaths: () => window.__scanPaths,
+      persistAppSettings: async () => {},
+    });
+    window.__addDemoFolder = addDemoFolder;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

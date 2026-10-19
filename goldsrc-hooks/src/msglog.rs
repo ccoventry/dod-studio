@@ -280,6 +280,13 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     {
         return result;
     }
+    // And for dodstudio_hide_voice_menus' ShowMenu.
+    if let Some(result) = name_str
+        .as_deref()
+        .and_then(|n| crate::voice_menus::filter(n, size, buf))
+    {
+        return result;
+    }
     match name_str.as_deref().and_then(original_thunk) {
         Some(original) => unsafe { original(name, size, buf) },
         // No thunk on record for this name (should not happen -- we only

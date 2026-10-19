@@ -133,6 +133,23 @@ memory: the world keeps every frame (`SetBufferSize(-1)`), inside a 32-bit
 process. The console prints `Demo file completely loaded.` when the loader
 disconnects, which is what `IsLoading()` reports.
 
+Measured on #797 (both builds, the DoD Studio window open or closed): the
+loader runs about 163 engine frames a second, 59.6 s of demo per wall second.
+
+**With the hook DLL** the cap is a time budget instead (#798,
+`dodstudio_demo_fast_load`, on by default, `goldsrc-hooks/src/fast_load.rs`).
+A detour over the counter's `inc eax` through its `cmp eax, 0x20`
+(pre-Anniversary `Core.dll+0x10db2`, 8 bytes; 25th Anniversary `+0x12db9`,
+7 bytes) redoes the increment and the store, calls into the hook, and
+compares the count against what it returns, so the engine's own `jg` still
+decides: no cap while this frame's loading has taken under the budget (8 ms
+by default), the engine's `0x20` once it has. A frame therefore still reads
+at least 33 packets. `0` returns `0x20` every time, the engine's own decision.
+`Core.dll` loads with the first `viewdemo`, so the patch goes in then, found
+by signature; `tools/verify_fast_load_offsets.py` checks both builds' loops
+(the count's init, the span, what follows the `jg`). The hook log has one
+`fast_load:` line per load with its time, packets and frame times.
+
 `Core.dll` also holds 256 entities per frame on the pre-Anniversary build
 (1024 on the Anniversary one); see the entity-limit entry in
 `docs/goldsrc_dod_quirks.md`. That limit is the same `viewdemo` or not.
