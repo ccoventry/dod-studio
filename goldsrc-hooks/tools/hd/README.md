@@ -256,6 +256,8 @@ Lists saved in this folder by an older version still work while the install has 
 | `my_styles.example.txt` | template for your own styles (copy it to `dodstudio_hd\my_styles.txt`) |
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, decal, model and sprite readers |
+| `studiomodel.py` | studio model (`.mdl` v10) reader: bones, rest pose, meshes, skins (`test_studiomodel.py` tests it) |
+| `killfeed_icons.py` | R&D (#841): renders a weapon model as a kill-feed icon and a comparison sheet; not part of `build_all.py` |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
 | `requirements.txt` | Python packages the scripts need (`pip install -r`) |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
