@@ -33,8 +33,9 @@ pub struct DemoMaps {
     pub split_files: Vec<Option<String>>,
 }
 
-/// For each of `maps`, the piece a split already wrote next to `demo`:
-/// `<demo>_<map>.dem` (or `_<n>` for a map that repeats), as written.
+/// For each of `maps`, the piece a split already wrote next to `demo`, by
+/// the name Split Maps gives it (`<demo>_split<N>_<map>.dem`) or the one it
+/// used before.
 pub fn split_files(demo: &Path, maps: &[String]) -> Vec<Option<String>> {
     let (Some(dir), Some(stem)) = (demo.parent(), demo.file_stem()) else {
         return vec![None; maps.len()];
@@ -45,10 +46,16 @@ pub fn split_files(demo: &Path, maps: &[String]) -> Vec<Option<String>> {
         .map(|m| crate::demo_split::map_stem(m))
         .collect();
     let stems: Vec<&str> = stems.iter().map(String::as_str).collect();
+    // Today's name first, then the one splits used before `_split<N>`.
     (0..maps.len())
         .map(|i| {
-            let name = format!("{}.dem", crate::demo_split::split_name_at(&stem, &stems, i));
-            dir.join(&name).is_file().then_some(name)
+            [
+                crate::demo_split::split_name_at(&stem, &stems, i),
+                crate::demo_split::old_split_name_at(&stem, &stems, i),
+            ]
+            .into_iter()
+            .map(|n| format!("{n}.dem"))
+            .find(|name| dir.join(name).is_file())
         })
         .collect()
 }

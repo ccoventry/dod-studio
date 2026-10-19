@@ -365,8 +365,9 @@ pub fn extract(
     Some(out)
 }
 
-/// The file name for map `segment` of `demo_stem`: `<demo>_<map>`, with the
-/// map's place added when the same map appears twice.
+/// The file name for map `segment` of `demo_stem`:
+/// `<demo>_split<N>_<map>`, `N` the map's place in the original (from 1)
+/// so the pieces sort in playing order, and the map without its `dod_`.
 pub fn split_name(demo_stem: &str, segments: &[MapSegment], segment: &MapSegment) -> String {
     let maps: Vec<&str> = segments.iter().map(|s| s.map.as_str()).collect();
     split_name_at(demo_stem, &maps, segment.index)
@@ -375,6 +376,15 @@ pub fn split_name(demo_stem: &str, segments: &[MapSegment], segment: &MapSegment
 /// [`split_name`] from the demo's map names alone (`maps[index]` is the
 /// piece's map), for knowing a piece's file before the demo is parsed.
 pub fn split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String {
+    let map = maps.get(index).copied().unwrap_or_default();
+    let short = map.strip_prefix("dod_").unwrap_or(map);
+    format!("{demo_stem}_split{}_{short}", index + 1)
+}
+
+/// The name splits used before `_split<N>` (#844): `<demo>_<map>`, with the
+/// map's place added when the same map appears twice. Only for finding
+/// pieces a split already wrote.
+pub fn old_split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String {
     let map = maps.get(index).copied().unwrap_or_default();
     let repeats = maps.iter().filter(|m| **m == map).count() > 1;
     if repeats {
@@ -601,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn a_repeated_map_gets_its_place_in_the_name() {
+    fn every_piece_gets_its_place_in_the_name() {
         let seg = |i: usize, map: &str| MapSegment {
             index: i,
             map: map.into(),
@@ -611,9 +621,21 @@ mod tests {
             frames: 0,
         };
         let two = [seg(0, "dod_anzio"), seg(1, "dod_flash")];
-        assert_eq!(split_name("m", &two, &two[1]), "m_dod_flash");
+        assert_eq!(split_name("m", &two, &two[0]), "m_split1_anzio");
+        assert_eq!(split_name("m", &two, &two[1]), "m_split2_flash");
+        // A map without the dod_ prefix keeps its name.
+        let other = [seg(0, "ktp_lobby")];
+        assert_eq!(split_name("m", &other, &other[0]), "m_split1_ktp_lobby");
+        assert_eq!(
+            old_split_name_at("m", &["dod_anzio", "dod_flash"], 1),
+            "m_dod_flash"
+        );
         let same = [seg(0, "dod_anzio"), seg(1, "dod_anzio")];
-        assert_eq!(split_name("m", &same, &same[1]), "m_dod_anzio_2");
+        assert_eq!(split_name("m", &same, &same[1]), "m_split2_anzio");
+        assert_eq!(
+            old_split_name_at("m", &["dod_anzio", "dod_anzio"], 1),
+            "m_dod_anzio_2"
+        );
     }
 
     #[test]
