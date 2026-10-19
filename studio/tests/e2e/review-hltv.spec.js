@@ -25,13 +25,34 @@ test.describe('Review: HLTV players', () => {
       'Players I pick',
       'm00cat (STEAM_0:0:1)',
     ]);
+    const chipRow = page.locator('#review-hltv-chips');
     await expect(box(page)).toHaveJSProperty('hidden', true);
+    await expect(chipRow).toHaveJSProperty('hidden', true);
     await pickPlayers(page);
     await expect(box(page)).toHaveJSProperty('hidden', false);
-    await expect(page.locator('#review-hltv-chips')).toHaveText('Nobody picked yet');
+    await expect(chipRow).toHaveJSProperty('hidden', false);
+    await expect(chipRow).toHaveText('Nobody picked yet');
     await expect.poll(() => page.evaluate(() => window.__changes)).toBe(1);
     await hltv(page).selectOption('all');
     await expect(box(page)).toHaveJSProperty('hidden', true);
+    await expect(chipRow).toHaveJSProperty('hidden', true);
+  });
+
+  test('the chips have a line of their own, so picking players never moves the lists (#845)', async ({ page }) => {
+    await gotoHarness(page);
+    await pickPlayers(page);
+    const team = page.locator('#review-hltv-add-team');
+    const before = await team.boundingBox();
+    const add = page.locator('#review-hltv-add-player');
+    for (let i = 0; i < 3; i++) {
+      const value = await add.locator('option').nth(1).getAttribute('value');
+      await add.selectOption(value);
+    }
+    await expect(chips(page)).toHaveCount(3);
+    expect(await team.boundingBox()).toEqual(before);
+    // The lists stay side by side.
+    const player = await add.boundingBox();
+    expect(Math.abs(player.y - before.y)).toBeLessThan(2);
   });
 
   test('lists picked on an empty queue fill once demos arrive', async ({ page }) => {
