@@ -2324,6 +2324,14 @@ export const STRINGS = {
     UPDATE_AVAILABLE_TITLE: 'A new version is ready — click to install it.',
   },
 
+  // ── The menu bar's update button (#868) ──────────────────────────────────
+  UPDATE_CHIP: {
+    available: (v) => `Update ${v} available`,
+    AVAILABLE_TITLE: 'A new version of DoD Studio is out. Click to download and install it.',
+    READY: 'Restart to update',
+    READY_TITLE: 'The update has downloaded. Click, then Restart to Apply.',
+  },
+
   // ── About modal (issue #122) ─────────────────────────────────────────────
   ABOUT_MODAL: {
     BLURB: 'A capture, patching, and analytics pipeline for Day of Defeat 1.3 demos — batch-records highlight clips through HLAE and parses matches for scoreboards, kills, chat, and rounds.',
