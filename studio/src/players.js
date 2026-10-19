@@ -197,6 +197,13 @@ export function tileRect(tile) {
   return { x: (i % GRID) * TILE_SIZE, y: Math.floor(i / GRID) * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE };
 }
 
+/** Whether a sprite preview can be asked for: the backend refuses without
+ *  both the hl.exe path and the game folder, which are still empty while
+ *  settings load (#852). */
+export function canPreviewSprites(paths) {
+  return !!(paths?.hlPath?.trim() && paths?.gameFolder?.trim());
+}
+
 /** The PNGs the table names that `listed` (the files in `logos\`) lacks,
  *  each once. */
 export function missingPngs(table, listed) {
