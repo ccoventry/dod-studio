@@ -98,6 +98,23 @@ pub fn locks(holder: Holder, name: &str) -> bool {
     }
 }
 
+/// The Review tab's controls that only act on a running review
+/// (`ui/Review.res`): the answers, the moves, Stop and the boxes the answer
+/// is read from. The other way round from the lock: they are greyed out
+/// while no review runs, so the tab looks idle when it is.
+pub const REVIEW_ONLY: &[&str] = &[
+    "YesButton",
+    "MaybeButton",
+    "NoButton",
+    "ReplayButton",
+    "BackButton",
+    "NextButton",
+    "StopButton",
+    "ReviewFrom",
+    "ReviewTo",
+    "ReviewNote",
+];
+
 /// Whether a console line a Playback tab button runs (`engine <line>`) moves
 /// the demo: a seek, a speed change, a reload or another demo.
 pub fn moves_the_demo(line: &str) -> bool {
@@ -221,6 +238,21 @@ mod tests {
             ] {
                 assert!(!locks(holder, name), "{name}");
             }
+        }
+    }
+
+    #[test]
+    fn the_review_only_controls_are_all_on_the_review_tab() {
+        let res = include_str!("../ui/Review.res");
+        for name in REVIEW_ONLY {
+            assert!(
+                res.contains(&format!("\"{name}\"")),
+                "{name} is not in Review.res"
+            );
+        }
+        // The labels stay: they say there is no review.
+        for name in ["ReviewHeading", "ReviewDetail", "ReviewHint"] {
+            assert!(!REVIEW_ONLY.contains(&name), "{name}");
         }
     }
 
