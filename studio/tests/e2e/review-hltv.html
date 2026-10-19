@@ -71,8 +71,12 @@
       .filter((c) => c.cmd === 'start_highlight_review')
       .map((c) => c.args.highlights.map((h) => `${h.demo}:${h.player}`));
 
+    // Empties the queue the picker sees, as before a scan (#828's lists
+    // must refill once demos arrive).
+    let queueEmpty = false;
+    window.__emptyQueue = (empty) => { queueEmpty = empty; };
     const hltvPick = createHltvPicker({
-      getDemos: () => demos,
+      getDemos: () => (queueEmpty ? [] : demos),
       getProjectTeams: () => projectTeams,
       onChange: () => { window.__changes += 1; },
     });

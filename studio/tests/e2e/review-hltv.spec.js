@@ -34,6 +34,20 @@ test.describe('Review: HLTV players', () => {
     await expect(box(page)).toHaveJSProperty('hidden', true);
   });
 
+  test('lists picked on an empty queue fill once demos arrive', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => { window.__emptyQueue(true); window.__pick.refresh(); });
+    await pickPlayers(page);
+    const add = page.locator('#review-hltv-add-player');
+    await expect(add).toBeDisabled();
+    await expect(add.locator('option')).toHaveText(['No HLTV highlights in the queue']);
+    // What main.js's updateDemoFooter does after a scan.
+    await page.evaluate(() => { window.__emptyQueue(false); window.__pick.refresh(); });
+    await expect(add).toBeEnabled();
+    await expect(add.locator('option')).toHaveCount(5);
+    await expect(page.locator('#review-hltv-add-team')).toBeEnabled();
+  });
+
   test('lists everyone with an HLTV highlight, one line per SteamID with every name; picked ones show as chips with ×', async ({ page }) => {
     await gotoHarness(page);
     await pickPlayers(page);

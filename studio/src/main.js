@@ -130,7 +130,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     replaceDemos: (demos) => replaceScannedDemos(demos),
     loadDemos: (demos) => {
       currentScannedDemos = demos;
-      hltvPick.refresh();
       selectedDemoIdx = currentScannedDemos.length > 0 ? 0 : null;
       renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
       if (currentScannedDemos.length > 0) {
@@ -388,6 +387,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     const clearAllBtnEl = document.querySelector('#clear-all-btn');
     if (clearAllBtnEl) clearAllBtnEl.disabled = isEmpty;
     setup?.refresh();
+    // The HLTV pick's lists follow the queue: filled while it was empty they
+    // are disabled, and a disabled list never opens to refill itself.
+    hltvPick.refresh();
   }
 
   // Which match and half each queued demo is (#685): queue_match_groups.js.
