@@ -1076,6 +1076,10 @@ export const STRINGS = {
       + 'the Demo Auditor\'s Split Maps tab lets you pick.',
     multiMapSplitDone: (names) => `Split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
     multiMapSplitFailed: (err) => `Could not split it: ${err}`,
+    // #811: a demo damaged partway, read up to the break.
+    damagedDemoNotice: (clock, rest, reason) => `Damaged demo: read up to ${clock}. `
+      + `The rest of the file (${rest}) doesn't parse (${reason}), so everything here stops at ${clock}.`,
+    DAMAGED_DEMO_REASON_UNKNOWN: 'no reason given',
 
     NO_PLAYERS_FOUND: 'No players found in this demo.',
     NO_WEAPON_DATA: 'No weapon data.',
