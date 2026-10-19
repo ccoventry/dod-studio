@@ -42,9 +42,9 @@
           { index: 1, map: 'dod_avalanche', map_checksum: 2, start_seconds: 300, end_seconds: 1500, frames: 1 },
           { index: 2, map: 'dod_armory_b6', map_checksum: 3, start_seconds: 1500, end_seconds: 1520, frames: 1 },
         ],
-      split_demo_maps: ({ path, keep }) => keep.map((k) => ({
+      split_demo_maps: ({ path, keep }) => (window.__holdSplit ? new Promise((r) => { window.__releaseSplit = r; }) : Promise.resolve()).then(() => keep.map((k) => ({
         path: path.replace('.dem', `_part${k + 1}.dem`), map: 'm', seconds: 1200, size_bytes: 5e6,
-      })),
+      }))),
     };
     const { initAuditorTabs } = await import('/src/auditor_tabs.js');
     const { initSplitPane } = await import('/src/split_pane.js');

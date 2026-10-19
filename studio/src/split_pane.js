@@ -29,8 +29,11 @@ export function initSplitPane() {
   const list = document.querySelector('#split-list');
   if (!findBtn || !list) return;
 
-  const refresh = () => { findBtn.disabled = !folderInput?.value?.trim() || scanning; };
+  // Find redraws the list, so it waits while a split runs: a new list
+  // would drop that split's progress bar and the files it wrote.
+  const refresh = () => { findBtn.disabled = !folderInput?.value?.trim() || scanning || splitting > 0; };
   let scanning = false;
+  let splitting = 0;
   folderInput?.addEventListener('input', refresh);
   refresh();
 
@@ -135,6 +138,8 @@ export function initSplitPane() {
       return;
     }
     go.disabled = true;
+    splitting += 1;
+    refresh();
     const bar = splitProgressBar();
     result.replaceChildren(bar.el);
     const unlisten = await listen('split_progress', (event) => {
@@ -154,6 +159,8 @@ export function initSplitPane() {
     } finally {
       unlisten();
       go.disabled = false;
+      splitting -= 1;
+      refresh();
     }
   }
 }

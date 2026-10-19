@@ -80,4 +80,16 @@ test.describe('Split Maps', () => {
     await expect(two.locator('.split-result')).toHaveText('Tick at least one map.');
     expect(await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'split_demo_maps'))).toBe(false);
   });
+
+  test('Find waits while a split runs, so the list keeps its progress and result', async ({ page }) => {
+    await gotoHarness(page);
+    await findDemos(page);
+    await page.evaluate(() => { window.__holdSplit = true; });
+    const three = demo(page, 'three.dem');
+    await three.locator('.split-go').click();
+    await expect(page.locator('#split-find-btn')).toBeDisabled();
+    await page.evaluate(() => window.__releaseSplit());
+    await expect(three.locator('.split-result')).toContainText('Wrote');
+    await expect(page.locator('#split-find-btn')).toBeEnabled();
+  });
 });

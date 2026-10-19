@@ -78,6 +78,11 @@ test('the list follows the Target Folder until it is edited here', async ({ page
   // Edited: the other tabs' folder no longer changes this list.
   await page.fill('#audit-target-folder-input', 'E:\\Elsewhere');
   await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['D:\\Other', 'F:\\Downloads']);
+  // Emptied: it follows the Target Folder again.
+  await page.locator('#audit-folder-list li button').first().click();
+  await page.locator('#audit-folder-list li button').first().click();
+  await page.fill('#audit-target-folder-input', 'G:\\Again');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['G:\\Again']);
 });
 
 test('All drives alone can start an audit and dims the list', async ({ page }) => {
