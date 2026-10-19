@@ -23,10 +23,7 @@ type SetProgressFn = unsafe extern "thiscall" fn(*mut c_void, f32);
 pub(super) fn update() {
     let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
     let percent = if SETTING.on() && !viewdemo_in_panel() {
-        crate::demo_seek::buffered_while_loading().and_then(|buffered| {
-            let total = super::load_progress::length_of_current_demo()?;
-            Some(crate::demo_file::load_percent(buffered, total))
-        })
+        super::load_progress::demo_percent()
     } else {
         None
     };

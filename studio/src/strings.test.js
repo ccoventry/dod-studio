@@ -17,6 +17,16 @@ describe('scanCompleteToast', () => {
   });
 });
 
+describe('scanCancelledToast', () => {
+  it('says nothing was added when Cancel came while listing folders (#843)', () => {
+    expect(STRINGS.MAIN.scanCancelledToast(0)).toBe('Scan cancelled, nothing added');
+  });
+
+  it('counts the demos parsed before the cancel', () => {
+    expect(STRINGS.MAIN.scanCancelledToast(4)).toBe('Scan cancelled (4 demo(s) added before cancel)');
+  });
+});
+
 describe('skippedDemosToast', () => {
   const skipped = (n) =>
     Array.from({ length: n }, (_, i) => ({ name: `d${i + 1}.dem`, reason: 'too short' }));

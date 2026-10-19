@@ -10,6 +10,7 @@ Progress goes to dodstudio_hd/build_all.log and the console.
            to (valve_models.txt), and the models folders of --also installs
            and --extra-models folders
   sprites  every world sprite of the game and of --also installs
+  decals   every decal in dod/decals.wad and valve/decals.wad
   detail   every gfx/detail/*.tga
   sky      every sky in dod/gfx/env, plus the Half-Life ones maps name
 
@@ -40,7 +41,7 @@ import hdcommon as C
 import styles as S
 
 STYLE_ORDER = ["ultrasharp", "plain", "x4plus", "blend", "generalv3", "remacri", "siax"]
-TYPES = ["sky", "sprites", "models", "detail", "world"]  # quickest first
+TYPES = ["sky", "decals", "sprites", "models", "detail", "world"]  # quickest first
 
 
 def main():
@@ -119,6 +120,8 @@ def main():
             cmd += [os.path.join(a, C.game_folder(), "models") for a in args.also] + args.extra_models
         elif kind == "sprites":
             cmd = ["sprites_hd.py", out]
+        elif kind == "decals":
+            cmd = ["decals_hd.py", out]
         elif kind == "detail":
             cmd = ["detail_hd.py", out]
         else:

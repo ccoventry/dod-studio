@@ -142,7 +142,8 @@ export function timeWord(seconds) {
   return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`;
 }
 
-function localDate(unixSecs) {
+/** `{date}`'s day, YYYY-MM-DD in local time; also the queue's Group by Date. */
+export function localDate(unixSecs) {
   if (!unixSecs) return null;
   const d = new Date(unixSecs * 1000);
   const pad = (n) => String(n).padStart(2, '0');

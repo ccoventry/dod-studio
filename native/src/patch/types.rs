@@ -471,6 +471,11 @@ pub struct PatcherConfig {
     /// (`dodstudio_run_in_background`).
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
+    /// Configuration > Players' "Use in the game" box (#428), sent to the
+    /// game as `dodstudio_player_overrides` when its pipe first answers.
+    /// `None` sends nothing: a config not built from the saved settings.
+    #[serde(default)]
+    pub player_overrides: Option<bool>,
     pub session_id: String,
     pub hlae_path: String,
     pub game_path: String,
@@ -811,6 +816,7 @@ impl Default for PatcherConfig {
             save_local_patched_copy: false,
             hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
+            player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),
             game_path: String::new(),

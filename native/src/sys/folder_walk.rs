@@ -80,12 +80,26 @@ pub struct Outcome {
     pub entries: usize,
 }
 
+/// Folders Windows keeps at a drive's root that hold no demos of the user's:
+/// the Recycle Bin keeps a deleted file's extension (`$R1A2B3C.dem`), so a
+/// walk into it brings deleted demos back, and System Volume Information is
+/// usually unreadable (#843). `hl_demo_auditor` keeps its own copy, since
+/// `native` depends on it; a test below checks the two agree.
+pub const SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+
+/// True for a folder name in [`SYSTEM_FOLDERS`], in any case.
+pub fn is_system_folder(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    SYSTEM_FOLDERS.iter().any(|s| name.eq_ignore_ascii_case(s))
+}
+
 /// A bounded walk. Depth-first unless [`Walker::breadth_first`] is set.
 #[derive(Debug, Clone)]
 pub struct Walker {
     max_depth: usize,
     max_entries: usize,
     breadth_first: bool,
+    skip_system_folders: bool,
 }
 
 impl Default for Walker {
@@ -104,7 +118,16 @@ impl Walker {
             max_depth: Self::DEFAULT_MAX_DEPTH,
             max_entries: usize::MAX,
             breadth_first: false,
+            skip_system_folders: false,
         }
+    }
+
+    /// Neither report nor enter a [`SYSTEM_FOLDERS`] folder at any depth.
+    /// A root that is one is still read: it is the folder the caller asked
+    /// for. Opt-in, so a walk that measures a folder still counts everything.
+    pub fn skip_system_folders(mut self) -> Self {
+        self.skip_system_folders = true;
+        self
     }
 
     /// Entries at most this deep are reported (1 = the root's own entries),
@@ -181,6 +204,12 @@ impl Walker {
                 } else {
                     continue;
                 };
+                if kind == Kind::Dir
+                    && self.skip_system_folders
+                    && is_system_folder(&entry.file_name())
+                {
+                    continue;
+                }
                 let found = Found {
                     path: entry.path(),
                     depth: depth + 1,
@@ -372,6 +401,58 @@ mod tests {
         assert_eq!(order[0], "a.dem");
         assert_eq!(order.last().unwrap(), "sub/deeper/c.dem");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn system_folders_are_skipped_at_any_depth_only_when_asked() {
+        let root = scratch("walk_system");
+        for dir in [
+            "$RECYCLE.BIN/S-1-5-21",
+            "sub/$Recycle.Bin",
+            "system volume information",
+            "sub/not $RECYCLE.BIN",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for f in [
+            "$RECYCLE.BIN/S-1-5-21/$R1A2B3C.dem",
+            "sub/$Recycle.Bin/$R9.dem",
+            "system volume information/x.dem",
+            "sub/not $RECYCLE.BIN/kept.dem",
+        ] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        let demos = Walker::new().skip_system_folders().demos(&root);
+        assert_eq!(
+            relative(&root, &demos),
+            [
+                "a.dem",
+                "sub/b.DEM",
+                "sub/deeper/c.dem",
+                "sub/not $RECYCLE.BIN/kept.dem"
+            ]
+        );
+        assert_eq!(Walker::new().demos(&root).len(), 7, "opt-in only");
+        // A picked root that is one is read: the user asked for it.
+        let bin = root.join("sub/$Recycle.Bin");
+        let demos = Walker::new().skip_system_folders().demos(&bin);
+        assert_eq!(relative(&bin, &demos), ["$R9.dem"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_system_folder_names_match_in_any_case() {
+        use std::ffi::OsStr;
+        assert!(is_system_folder(OsStr::new("$RECYCLE.BIN")));
+        assert!(is_system_folder(OsStr::new("$recycle.bin")));
+        assert!(is_system_folder(OsStr::new("SYSTEM VOLUME INFORMATION")));
+        assert!(!is_system_folder(OsStr::new("$RECYCLE.BIN2")));
+        assert!(!is_system_folder(OsStr::new("demos")));
+    }
+
+    #[test]
+    fn the_auditor_skips_the_same_system_folders() {
+        assert_eq!(hl_demo_auditor::SYSTEM_FOLDERS, SYSTEM_FOLDERS);
     }
 
     #[test]
