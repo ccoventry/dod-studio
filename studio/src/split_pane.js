@@ -108,7 +108,7 @@ export function initSplitPane() {
           </tbody>
         </table>
         <div class="split-actions">
-          <button type="button" class="split-go primary-btn">${escapeHtml(STRINGS.SPLIT.SPLIT_BUTTON)}</button>
+          <button type="button" class="split-go primary-btn" disabled title="${escapeHtml(STRINGS.SPLIT.WAIT_FOR_LENGTHS_TITLE)}">${escapeHtml(STRINGS.SPLIT.SPLIT_BUTTON)}</button>
           <span class="split-result"></span>
         </div>
       </div>`).join('');
@@ -144,6 +144,12 @@ export function initSplitPane() {
         box.querySelectorAll('.split-map-when').forEach((c) => { c.textContent = ''; });
         box.querySelector('.split-result').textContent = STRINGS.SPLIT.detailsFailed(err);
       }
+      // Split waits for the lengths: they untick a map under a minute, and a
+      // split started before them would write it anyway. After a failed read
+      // the button works, so the split itself can say what's wrong.
+      const go = box.querySelector('.split-go');
+      go.disabled = false;
+      go.removeAttribute('title');
     }
   }
 

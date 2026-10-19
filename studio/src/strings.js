@@ -853,6 +853,7 @@ export const STRINGS = {
     COL_MAP: 'Map',
     COL_WHEN: 'Length',
     COL_DONE: 'Already split',
+    WAIT_FOR_LENGTHS_TITLE: "Reading each map's length first.",
     ALREADY_SPLIT_CHIP: 'Already split',
     ALREADY_SPLIT_TITLE: 'A split already wrote this map next to the demo, so it starts unticked. Tick it to write it again (as a new file beside the old one).',
     footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,

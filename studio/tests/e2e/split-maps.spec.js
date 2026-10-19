@@ -111,4 +111,14 @@ test.describe('Split Maps', () => {
     await expect(three.locator('.split-result')).toContainText('Wrote');
     await expect(page.locator('#split-find-btn')).toBeEnabled();
   });
+
+  test('Split waits until the maps\' lengths are read', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => { window.__holdSegments = true; });
+    await findDemos(page);
+    const two = demo(page, 'two.dem');
+    await expect(two.locator('.split-go')).toBeDisabled();
+    await page.evaluate(() => window.__releaseSegments());
+    await expect(two.locator('.split-go')).toBeEnabled();
+  });
 });
