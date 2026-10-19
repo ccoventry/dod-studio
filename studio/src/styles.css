@@ -3638,3 +3638,41 @@ button.setup-skip:hover:not(:disabled) {
 .review-hltv-none {
   color: var(--text-muted);
 }
+
+/* Demo Auditor › Duplicates: Folders to check (audit_folders.js, #844). */
+.audit-folder-list {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.audit-folder-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.audit-folder-path {
+  word-break: break-all;
+}
+
+/* All drives walks every fixed drive, so the list doesn't apply: dimmed, not hidden. */
+.audit-folder-list.dimmed {
+  opacity: 0.45;
+}
+
+.audit-all-drives {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.audit-status-current {
+  font-size: 0.9em;
+  word-break: break-all;
+}

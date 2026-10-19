@@ -49,6 +49,10 @@ pub struct DuplicateGroup {
 #[derive(Debug, Clone)]
 pub enum AuditProgress {
     Scanning(String),
+    /// How many files [`find_duplicates`] will key, once paths named twice
+    /// are merged; sent before the first `Hashing`, so a bar can show
+    /// how far the key pass has got.
+    Keying(usize),
     Hashing(String),
     Found(usize),
     Failed(String),
@@ -197,6 +201,9 @@ pub fn find_duplicates(
         }
     }
     let files: Vec<PathBuf> = unique_paths.into_iter().collect();
+    if let Some(tx) = progress {
+        let _ = tx.send(AuditProgress::Keying(files.len()));
+    }
 
     let mut groups: HashMap<FileKey, Vec<PathBuf>> = HashMap::new();
     for path in files {
@@ -407,6 +414,35 @@ mod tests {
         let mut files = vec![];
         scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
         assert_eq!(files, [root.join("a.dem")]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Several roots walked into one list and keyed in one pass pair a copy
+    /// in one with its original in the other (#844), and the key pass says
+    /// how many files it will read first.
+    #[test]
+    fn one_key_pass_over_several_roots_groups_across_them() {
+        let root = std::env::temp_dir().join(format!("auditor_roots_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("c/dod")).unwrap();
+        fs::create_dir_all(root.join("f/downloads")).unwrap();
+        fs::write(root.join("c/dod/match.dem"), b"same bytes").unwrap();
+        fs::write(root.join("f/downloads/match (1).dem"), b"same bytes").unwrap();
+        fs::write(root.join("f/downloads/other.dem"), b"other").unwrap();
+
+        let cancel = AtomicBool::new(false);
+        let mut files = vec![];
+        for dir in [root.join("c"), root.join("f"), root.join("c/dod")] {
+            scan_dir(&dir, &mut files, &cancel, &None);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (_, groups, copies, wasted) = find_duplicates(files, &cancel, &Some(tx));
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].files.len(), 2);
+        assert_eq!((copies, wasted), (1, 10));
+        // c/dod was named twice; its demo is keyed once.
+        let first = rx.try_iter().next();
+        assert!(matches!(first, Some(AuditProgress::Keying(3))), "{first:?}");
         let _ = fs::remove_dir_all(&root);
     }
 }

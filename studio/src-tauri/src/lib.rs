@@ -30,7 +30,7 @@ mod updater_manager;
 #[cfg(test)]
 mod test_support;
 
-use audit_manager::{AuditManager, SerializedDuplicateGroup};
+use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
 use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
     generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
@@ -45,6 +45,7 @@ use render_manager::{
     reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
 };
 use settings_manager::{AppSettings, SettingsManager};
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -168,24 +169,59 @@ async fn load_project_session(path: String) -> Result<String, String> {
 
 // ── Auditor IPC Commands ───────────────────────────────────────────────────────
 
+/// `paths` plus every fixed drive when `all_drives`, in one key pass (#844).
+/// `queued` is the project's queue: copies there, or in the install's game
+/// folder, are kept first.
 #[tauri::command]
 async fn run_demo_audit(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AuditManager>,
+    settings: tauri::State<'_, SettingsManager>,
     paths: Vec<String>,
-) -> Result<Vec<SerializedDuplicateGroup>, String> {
+    all_drives: bool,
+    queued: Vec<String>,
+) -> Result<AuditOutcome, String> {
+    let hl_path = settings
+        .inner
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .hl_path
+        .clone();
+    let game_folders: Vec<PathBuf> = native::shared::paths::mod_dir_for_exe(Path::new(&hl_path))
+        .filter(|_| !hl_path.trim().is_empty())
+        .into_iter()
+        .collect();
     audit_manager::run_demo_audit_impl(
         app_handle,
         Arc::clone(&state.is_running),
         Arc::clone(&state.cancel_token),
         paths,
+        all_drives,
+        (game_folders, queued),
     )
     .await
 }
 
+/// The roots "All drives" walks, for its label.
 #[tauri::command]
-fn delete_audit_files(paths: Vec<String>) -> Result<(), String> {
-    audit_manager::delete_audit_files_impl(paths)
+async fn list_fixed_drives() -> Result<Vec<String>, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(
+        audit_manager::fixed_drive_roots,
+    ))
+    .await
+}
+
+/// To the Recycle Bin, or for good when `permanent` (#844).
+#[tauri::command]
+async fn delete_audit_files(
+    app_handle: tauri::AppHandle,
+    paths: Vec<String>,
+    permanent: bool,
+) -> Result<DeleteOutcome, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        audit_manager::delete_audit_files_impl(&app_handle, paths, permanent)
+    }))
+    .await
 }
 
 #[tauri::command]
@@ -861,6 +897,7 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::split_demo_auto,
             delete_audit_files,
+            list_fixed_drives,
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
