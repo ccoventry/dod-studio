@@ -2398,6 +2398,23 @@ tr.keyboard-selected {
   font-variant-numeric: tabular-nums;
 }
 
+.split-done td {
+  opacity: 0.75;
+}
+
+.split-map-done {
+  color: var(--text-muted, #aaa);
+  font-size: 0.9em;
+}
+
+.split-done-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  color: #5fb85f;
+}
+
 .split-short td {
   opacity: 0.6;
 }

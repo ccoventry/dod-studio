@@ -5,6 +5,7 @@ import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer } from '.
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
+import { setAuditorFooter } from './auditor_footer.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
@@ -32,14 +33,13 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   const statusTextEl = document.querySelector('#audit-status-text');
   const currentEl = document.querySelector('#audit-status-current');
   const footerEl = document.querySelector('#audit-list-footer');
-  const pinnedFooterEl = document.querySelector('#footer-audit-summary');
   const tbody = document.querySelector('#audit-results-body');
 
   const folders = createAuditFolders({ onChange: () => refreshStartButtonState() });
 
   function setAuditFooterSummary(text) {
     if (footerEl) footerEl.textContent = text;
-    if (pinnedFooterEl) pinnedFooterEl.textContent = text;
+    setAuditorFooter('duplicates', text);
   }
 
   function refreshStartButtonState() {

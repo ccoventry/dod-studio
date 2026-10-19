@@ -368,11 +368,19 @@ pub fn extract(
 /// The file name for map `segment` of `demo_stem`: `<demo>_<map>`, with the
 /// map's place added when the same map appears twice.
 pub fn split_name(demo_stem: &str, segments: &[MapSegment], segment: &MapSegment) -> String {
-    let repeats = segments.iter().filter(|s| s.map == segment.map).count() > 1;
+    let maps: Vec<&str> = segments.iter().map(|s| s.map.as_str()).collect();
+    split_name_at(demo_stem, &maps, segment.index)
+}
+
+/// [`split_name`] from the demo's map names alone (`maps[index]` is the
+/// piece's map), for knowing a piece's file before the demo is parsed.
+pub fn split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String {
+    let map = maps.get(index).copied().unwrap_or_default();
+    let repeats = maps.iter().filter(|m| **m == map).count() > 1;
     if repeats {
-        format!("{demo_stem}_{}_{}", segment.map, segment.index + 1)
+        format!("{demo_stem}_{map}_{}", index + 1)
     } else {
-        format!("{demo_stem}_{}", segment.map)
+        format!("{demo_stem}_{map}")
     }
 }
 

@@ -37,13 +37,14 @@ test.describe('Split Maps', () => {
     await expect(page.locator('#split-find-btn')).toBeEnabled();
   });
 
-  test('lists each multi-map demo with its maps, starts and lengths', async ({ page }) => {
+  test('lists each multi-map demo with its maps and how long each is', async ({ page }) => {
     await gotoHarness(page);
     await findDemos(page);
     const three = demo(page, 'three.dem');
     await expect(three.locator('tbody tr')).toHaveCount(3);
     await expect(three.locator('tbody tr').nth(1)).toContainText('dod_avalanche');
-    await expect(three.locator('tbody tr').nth(1)).toContainText('5:00 · 20:00 long');
+    // Only the length: the start is no clock viewdemo ever shows.
+    await expect(three.locator('tbody tr').nth(1).locator('.split-map-when')).toHaveText('20:00');
     const args = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'find_multi_map_demos_cmd').args);
     expect(args).toEqual({ folder: 'C:\\demos', recursive: true });
   });
@@ -51,10 +52,28 @@ test.describe('Split Maps', () => {
   test('a map under a minute starts unticked; the rest stay ticked', async ({ page }) => {
     await gotoHarness(page);
     await findDemos(page);
+    const three = demo(page, 'three.dem');
+    await expect(three.locator('tbody tr').nth(2).locator('.split-map-when')).toHaveText('0:20');
+    await expect(three.locator('.split-keep').nth(0)).toBeChecked();
+    await expect(three.locator('.split-keep').nth(1)).toBeChecked();
+    await expect(three.locator('.split-keep').nth(2)).not.toBeChecked();
+  });
+
+  test('a map a split already wrote says so and starts unticked; the footer counts it', async ({ page }) => {
+    await gotoHarness(page);
+    await findDemos(page);
     const two = demo(page, 'two.dem');
-    await expect(two.locator('tbody tr').nth(1).locator('.split-map-when')).toContainText('0:12 long');
-    await expect(two.locator('.split-keep').nth(0)).toBeChecked();
-    await expect(two.locator('.split-keep').nth(1)).not.toBeChecked();
+    await expect(two.locator('.split-done-chip')).toHaveText('Already split');
+    await expect(two.locator('tbody tr').nth(0).locator('.split-map-done')).toHaveText('two_dod_lennon2_1.dem');
+    await expect(two.locator('.split-keep').nth(0)).not.toBeChecked();
+    await expect(demo(page, 'three.dem').locator('.split-done-chip')).toHaveCount(0);
+    await expect(page.locator('#footer-audit-summary')).toHaveText('Multi-map demos: 2 | Already split: 1');
+    // Splitting three.dem marks it split too.
+    const three = demo(page, 'three.dem');
+    await three.locator('.split-go').click();
+    await expect(three.locator('.split-result')).toContainText('Wrote 2 demos');
+    await expect(three.locator('tbody tr').nth(0).locator('.split-map-done')).toHaveText('three_part1.dem');
+    await expect(page.locator('#footer-audit-summary')).toHaveText('Multi-map demos: 2 | Already split: 2');
   });
 
   test('Split sends the ticked maps and lists what was written', async ({ page }) => {

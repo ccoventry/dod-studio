@@ -11,6 +11,7 @@ import { escapeHtml } from './html.js';
 import { splitProgressBar } from './split_progress.js';
 import { STRINGS } from './strings.js';
 import { clockLong } from './time_format.js';
+import { setAuditorFooter } from './auditor_footer.js';
 
 /** A map shorter than this is ticked off by default: almost always the next
  *  map loading as the recording stopped. */
@@ -34,6 +35,10 @@ export function initSplitPane() {
   const refresh = () => { findBtn.disabled = !folderInput?.value?.trim() || scanning || splitting > 0; };
   let scanning = false;
   let splitting = 0;
+  // The listed demos, for the status bar's line (#844).
+  let shownDemos = [];
+  const updateFooter = () => setAuditorFooter('split', STRINGS.SPLIT.footer(
+    shownDemos.length, shownDemos.filter((d) => (d.split_files || []).some(Boolean)).length));
   folderInput?.addEventListener('input', refresh);
   refresh();
 
@@ -79,6 +84,7 @@ export function initSplitPane() {
         <div class="split-demo-head">
           <strong class="split-demo-name" title="${escapeHtml(d.path)}">${escapeHtml(fileName(d.path))}</strong>
           <span class="split-demo-meta" title="${escapeHtml(STRINGS.SPLIT.SOURCE_TITLE[d.source] || '')}">${mb(d.size_bytes)} MB · ${escapeHtml(STRINGS.SPLIT.mapsCount(d.maps.length))} · ${escapeHtml(folderOf(d.path))}</span>
+          ${(d.split_files || []).some(Boolean) ? `<span class="split-done-chip" title="${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_TITLE)}">${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_CHIP)}</span>` : ''}
         </div>
         <table class="split-maps analyzer-table">
           <thead>
@@ -87,15 +93,17 @@ export function initSplitPane() {
               <th>${escapeHtml(STRINGS.SPLIT.COL_NUM)}</th>
               <th>${escapeHtml(STRINGS.SPLIT.COL_MAP)}</th>
               <th>${escapeHtml(STRINGS.SPLIT.COL_WHEN)}</th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_DONE)}</th>
             </tr>
           </thead>
           <tbody>
             ${d.maps.map((m, k) => `
-              <tr data-map="${k}">
-                <td><input type="checkbox" class="split-keep" data-map="${k}" checked /></td>
+              <tr data-map="${k}"${d.split_files?.[k] ? ` class="split-done" title="${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_TITLE)}"` : ''}>
+                <td><input type="checkbox" class="split-keep" data-map="${k}"${d.split_files?.[k] ? '' : ' checked'} /></td>
                 <td class="split-map-num">${k + 1}</td>
                 <td class="split-map-name">${escapeHtml(m)}</td>
                 <td class="split-map-when">${escapeHtml(STRINGS.SPLIT.LOADING_DETAILS)}</td>
+                <td class="split-map-done">${escapeHtml(d.split_files?.[k] || '')}</td>
               </tr>`).join('')}
           </tbody>
         </table>
@@ -108,6 +116,8 @@ export function initSplitPane() {
       const box = list.querySelector(`.split-demo[data-demo="${i}"]`);
       box.querySelector('.split-go').addEventListener('click', () => split(d, box));
     });
+    shownDemos = demos;
+    updateFooter();
     loadDetails(demos);
   }
 
@@ -123,7 +133,7 @@ export function initSplitPane() {
           if (!row) continue;
           const length = seg.end_seconds - seg.start_seconds;
           row.querySelector('.split-map-when').textContent =
-            STRINGS.SPLIT.startsAt(clockLong(seg.start_seconds), clockLong(length));
+            clockLong(length);
           if (length < SHORT_MAP_SECONDS) {
             row.querySelector('.split-keep').checked = false;
             row.title = STRINGS.SPLIT.SHORT_MAP_TITLE;
@@ -162,6 +172,13 @@ export function initSplitPane() {
       result.querySelectorAll('.split-reveal').forEach((b) => {
         b.addEventListener('click', () => revealInExplorer(written[Number(b.dataset.k)].path).catch(() => {}));
       });
+      demo.split_files = demo.split_files || demo.maps.map(() => null);
+      for (const w of written.filter((x) => Number.isInteger(x.index))) {
+        demo.split_files[w.index] = fileName(w.path);
+        const cell = box.querySelector(`tr[data-map="${w.index}"] .split-map-done`);
+        if (cell) cell.textContent = fileName(w.path);
+      }
+      updateFooter();
     } catch (err) {
       result.textContent = STRINGS.SPLIT.splitFailed(err);
     } finally {

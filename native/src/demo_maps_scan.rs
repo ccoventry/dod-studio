@@ -27,6 +27,30 @@ pub struct DemoMaps {
     pub maps: Vec<String>,
     /// Where the answer came from: "cache", "analyzer" or "scan".
     pub source: String,
+    /// For each map, the file a split already wrote for it next to the
+    /// demo, if there is one (the name Split Maps gives it).
+    #[serde(default)]
+    pub split_files: Vec<Option<String>>,
+}
+
+/// For each of `maps`, the piece a split already wrote next to `demo`:
+/// `<demo>_<map>.dem` (or `_<n>` for a map that repeats), as written.
+pub fn split_files(demo: &Path, maps: &[String]) -> Vec<Option<String>> {
+    let (Some(dir), Some(stem)) = (demo.parent(), demo.file_stem()) else {
+        return vec![None; maps.len()];
+    };
+    let stem = stem.to_string_lossy();
+    let stems: Vec<String> = maps
+        .iter()
+        .map(|m| crate::demo_split::map_stem(m))
+        .collect();
+    let stems: Vec<&str> = stems.iter().map(String::as_str).collect();
+    (0..maps.len())
+        .map(|i| {
+            let name = format!("{}.dem", crate::demo_split::split_name_at(&stem, &stems, i));
+            dir.join(&name).is_file().then_some(name)
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -147,6 +171,7 @@ pub fn find_multi_map_demos(
         };
         if maps.len() > 1 {
             found.push(DemoMaps {
+                split_files: split_files(demo, &maps),
                 path: key,
                 size_bytes: size,
                 maps,
@@ -164,6 +189,28 @@ pub fn find_multi_map_demos(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_piece_already_written_next_to_the_demo_is_found() {
+        let dir = std::env::temp_dir().join(format!("demo_maps_split_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("m.dem");
+        std::fs::write(&demo, b"x").unwrap();
+        std::fs::write(dir.join("m_dod_anzio_1.dem"), b"x").unwrap();
+        let maps = vec!["dod_anzio".to_string(), "maps/dod_anzio.bsp".to_string()];
+        assert_eq!(
+            split_files(&demo, &maps),
+            vec![Some("m_dod_anzio_1.dem".to_string()), None]
+        );
+        // A map that doesn't repeat has no number.
+        std::fs::write(dir.join("m_dod_flash.dem"), b"x").unwrap();
+        let two = vec!["dod_anzio".to_string(), "dod_flash".to_string()];
+        assert_eq!(
+            split_files(&demo, &two),
+            vec![None, Some("m_dod_flash.dem".to_string())]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn reads_only_the_signon_maps_key() {

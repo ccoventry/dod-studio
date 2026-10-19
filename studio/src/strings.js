@@ -851,7 +851,11 @@ export const STRINGS = {
   SPLIT: {
     COL_NUM: '#',
     COL_MAP: 'Map',
-    COL_WHEN: 'Where in the demo',
+    COL_WHEN: 'Length',
+    COL_DONE: 'Already split',
+    ALREADY_SPLIT_CHIP: 'Already split',
+    ALREADY_SPLIT_TITLE: 'A split already wrote this map next to the demo, so it starts unticked. Tick it to write it again (as a new file beside the old one).',
+    footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
     progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
@@ -871,7 +875,6 @@ export const STRINGS = {
     mapsCount: (n) => `${n} maps`,
     LOADING_DETAILS: 'Reading lengths...',
     detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
-    startsAt: (start, length) => `${start} · ${length} long`,
     SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
     SPLIT_BUTTON: 'Split Checked Maps',
     SHOW_IN_FOLDER: 'Show in folder',
@@ -2478,6 +2481,7 @@ export const STRINGS = {
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
+    footer: (count, renames) => `Demos listed: ${count} | To rename: ${renames}`,
     CANCELLED: 'Stopped. The demos read so far are listed.',
     STATUS_SAME: 'already named this way',
     STATUS_SKIPPED: 'not ticked',

@@ -3,6 +3,8 @@
 // work on the folder picked at the top of the page; Duplicates has its own
 // list of folders (#844), so the top row is hidden on that tab.
 
+import { showAuditorFooterFor } from './auditor_footer.js';
+
 /** Tabs that pick their folders themselves, without the Target Folder row. */
 const OWN_FOLDERS = new Set(['duplicates']);
 
@@ -23,6 +25,7 @@ export function initAuditorTabs(onShow = () => {}) {
     }
     for (const p of panels) p.hidden = p.dataset.auditorPanel !== tab;
     showTargetRow(tab);
+    showAuditorFooterFor(tab);
     onShow(tab);
   };
   for (const b of buttons) b.addEventListener('click', () => show(b.dataset.auditorTab));
