@@ -15,6 +15,7 @@ import {
   missingSprites,
   isPngName,
   isSpriteName,
+  canPreviewSprites,
   OWN_SPRAY,
 } from './players.js';
 
@@ -153,6 +154,17 @@ describe('the crosshair grid', () => {
     expect(tileRect(17)).toBeNull();
     expect(cleanTile('7')).toBe(7);
     expect(cleanTile(2.5)).toBe(0);
+  });
+});
+
+describe('canPreviewSprites (#852)', () => {
+  it('asks for previews only once both the hl.exe path and the game folder are known', () => {
+    expect(canPreviewSprites({ hlPath: 'C:/Games/Half-Life/hl.exe', gameFolder: 'dod' })).toBe(true);
+    expect(canPreviewSprites({ hlPath: '', gameFolder: 'dod' })).toBe(false);
+    expect(canPreviewSprites({ hlPath: '   ', gameFolder: 'dod' })).toBe(false);
+    expect(canPreviewSprites({ hlPath: 'C:/Games/Half-Life/hl.exe', gameFolder: '' })).toBe(false);
+    expect(canPreviewSprites({})).toBe(false);
+    expect(canPreviewSprites(null)).toBe(false);
   });
 });
 
