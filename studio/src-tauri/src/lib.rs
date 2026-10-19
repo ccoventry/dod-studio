@@ -328,11 +328,18 @@ fn volume_key(path: &std::path::Path) -> Option<String> {
 }
 
 /// Free space across the capture folders, each drive counted once: two
-/// folders on one drive share its space. Off the main thread (#853): a
-/// cache miss re-lists every volume, which waits on a sleeping or network
-/// drive, and start-up asks for this while the window is up.
-#[tauri::command(async)]
-fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
+/// folders on one drive share its space. On the blocking pool (#853): a
+/// cache miss re-lists every volume, which can wait on a sleeping or network
+/// drive, and start-up asks for this alongside the other disk queries.
+#[tauri::command]
+async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        export_pool_space(paths)
+    }))
+    .await
+}
+
+fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
     let mut seen = std::collections::HashSet::new();
     for path_str in paths {
@@ -364,9 +371,18 @@ struct CaptureOutputDiagnostic {
     usable: bool,
 }
 
-/// Off the main thread for the same reason as `calculate_export_pool_space`.
-#[tauri::command(async)]
-fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
+/// On the blocking pool for the same reason as `calculate_export_pool_space`.
+#[tauri::command]
+async fn diagnose_capture_output_paths(
+    paths: Vec<String>,
+) -> Result<Vec<CaptureOutputDiagnostic>, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        capture_output_diagnostics(paths)
+    }))
+    .await
+}
+
+fn capture_output_diagnostics(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
     paths
         .into_iter()
         .map(|path_str| {
@@ -409,8 +425,21 @@ async fn validate_paths(hlae_path: String, hl_path: String) -> Result<bool, Stri
 /// the app's resolution chain, so this has to be reported before a batch rather
 /// than discovered after one — the failure is a capture that runs to completion
 /// and produces no video. See `native::shared::hlae_ffmpeg`.
+///
+/// On the blocking pool (#853): it searches PATH and runs `ffmpeg -version`,
+/// polling for up to 5 s, and start-up calls it twice.
 #[tauri::command]
 async fn check_hlae_ffmpeg(
+    hlae_path: String,
+    ffmpeg_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        hlae_ffmpeg_report(hlae_path, ffmpeg_path)
+    }))
+    .await
+}
+
+fn hlae_ffmpeg_report(
     hlae_path: String,
     ffmpeg_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -689,9 +718,15 @@ async fn analyze_demo_full(
 /// `native::patch::scanner` bakes into a kill streak's timeline text, so the
 /// frontend's weapon tables (analyzer_pane.js) can show identical text
 /// instead of independently re-deriving a name from the raw enum tag.
+///
+/// On the blocking pool (#853): the first call at every boot loads the
+/// localization files from disk.
 #[tauri::command]
-fn get_weapon_display_names() -> std::collections::HashMap<String, String> {
-    analysis::all_weapon_display_names()
+async fn get_weapon_display_names() -> Result<std::collections::HashMap<String, String>, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(
+        analysis::all_weapon_display_names,
+    ))
+    .await
 }
 
 /// The overview image for `map_name` and how it lies over the world, for the

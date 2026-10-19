@@ -152,8 +152,12 @@ pub async fn demo_rename_undo() -> Result<RenameOutcome, String> {
     .await
 }
 
-/// The batch Undo would put back, if any.
+/// The batch Undo would put back, if any. Off the main thread (#853): it
+/// reads and parses every rename log.
 #[tauri::command]
-pub fn demo_rename_undoable() -> Option<UndoableBatch> {
-    demo_rename::undoable(&log_dir())
+pub async fn demo_rename_undoable() -> Result<Option<UndoableBatch>, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        demo_rename::undoable(&log_dir())
+    }))
+    .await
 }
