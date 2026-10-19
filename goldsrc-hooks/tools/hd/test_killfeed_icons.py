@@ -122,27 +122,30 @@ class GeometryTest(unittest.TestCase):
         # the barrel along +x on the right, the grip below
         self.assertEqual((sx, sy), (1, 1))
 
-    def test_a_view_near_a_model_axis_is_snapped_level(self):
-        # An SMG-like body along X with a tall magazine: a match tilted 8
-        # degrees snaps back to the model's own X / Y axes.
-        tris = [box_tris(0, 10, 0, 1), box_tris(4, 5, -4, 0)]
-        basis, pick = K.level_view(tris, (1, 1, 8.0))
-        self.assertEqual(pick[2], 0.0)
-        np.testing.assert_allclose(np.abs(basis[0]), [1, 0, 0])
-        np.testing.assert_allclose(np.abs(basis[1]), [0, 1, 0])
-
-    def test_a_model_built_at_an_angle_keeps_the_match(self):
-        # A rifle lying 25 degrees off its axes, as the `p_` rifles do: the
-        # snapped view would tilt it, so the match's view stays.
-        a = np.radians(25)
+    def gun(self, tilt_deg):
+        """A gun in the DoD model layout: a thick body at the rear and a thin
+        barrel towards -Y (the muzzle), the top towards +X, the side along
+        Z, tilted in the X-Y plane by `tilt_deg` as a held `p_` model is."""
+        def slab(y0, y1, x0, x1):
+            v, n, uv, tex = box_tris(y0, y1, x0, x1)
+            return (v[..., [1, 0, 2]], n, uv, tex)  # length along Y, height X
+        tris = [slab(-20, -8, -2, 2), slab(-40, -20, 0.5, 1.0)]  # body, barrel
+        a = np.radians(tilt_deg)
         rot = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
-        v, n, uv, tex = box_tris(0, 12, 0, 1)
-        tris = [(v @ rot.T, n, uv, tex)]
-        pick = (1, 1, 0.0)
-        basis, kept = K.level_view(tris, pick)
-        self.assertEqual(kept, pick)
-        basis, forced = K.level_view(tris, pick, force=True)
-        self.assertEqual(forced[2], 0.0)
+        return [(v @ rot.T, n, uv, tex) for v, n, uv, tex in tris]
+
+    def test_the_barrel_ends_up_level_with_the_muzzle_right_and_top_up(self):
+        for tilt in (0, 8, 22, -15):
+            tris = self.gun(tilt)
+            basis, _ = K.level_view(tris, (1, 1, 0.0))
+            pts = K.surface_points(tris)
+            xy = np.stack([pts @ basis[0], pts @ basis[1]], 1)
+            self.assertLess(abs(np.degrees(np.arctan(K.barrel_slope(xy, front=0.45)))), 1.5, tilt)
+            # the muzzle (the barrel's far end, most negative model Y) on the right
+            muzzle = np.array([0.0, -40.0, 0.75]) @ np.array([[np.cos(np.radians(tilt)), np.sin(np.radians(tilt)), 0], [-np.sin(np.radians(tilt)), np.cos(np.radians(tilt)), 0], [0, 0, 1]])
+            self.assertGreater(muzzle @ basis[0], xy[:, 0].mean(), tilt)
+            # the model's +X (the top of the gun) still points up
+            self.assertGreater(basis[1][0] * np.cos(np.radians(tilt)) + basis[1][1] * np.sin(np.radians(tilt)), 0, tilt)
 
 
 class PassesTest(unittest.TestCase):

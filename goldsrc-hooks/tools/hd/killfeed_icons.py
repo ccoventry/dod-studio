@@ -69,7 +69,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 2  # 2: barrels levelled (level_view)
+VERSION = 3  # 3: barrel found and levelled, right side up (level_view)
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -88,6 +88,13 @@ UPRIGHT_ROLLS = ROLLS + tuple(r + 90 for r in ROLLS) + tuple(r - 90 for r in ROL
 # apart (the MG34's butt and bipod), so the view keeps the muzzle right
 # whenever the model's long axis runs along this one. None leaves it free.
 MUZZLE = (0.0, -1.0, 0.0)
+# Which way is up in a weapon model: the top of the gun (sights, scope)
+# towards +X, the grip and magazine towards -X (level_view).
+MODEL_UP = (1.0, 0.0, 0.0)
+# The share of a gun's length, from the muzzle, that level_view reads the
+# barrel from, and the largest tilt it trusts from it in one step.
+BARREL_FRONT = 0.3
+BARREL_MAX_STEP = 10.0
 
 
 @dataclass(frozen=True)
@@ -378,44 +385,72 @@ def choose_view(tris, target_alpha, box, rolls=ROLLS, muzzle=MUZZLE):
 NOT_LEVELLED = re.compile(r"knife|spade|grenade|stick", re.I)
 
 
-def snap_axis(v):
-    """The model axis (+-X, +-Y, +-Z) nearest to `v`."""
-    i = int(np.argmax(np.abs(v)))
-    out = np.zeros(3)
-    out[i] = np.sign(v[i]) or 1.0
-    return out
+def surface_points(tris, n=20000, seed=0):
+    """`n` points spread over the model's surface by area, so a long barrel
+    with vertices only at its ends still counts along its whole length."""
+    v = np.concatenate([t[0] for t in tris])  # (T, 3, 3)
+    area = 0.5 * np.linalg.norm(np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1)
+    if area.sum() <= 0:
+        return v.reshape(-1, 3)
+    rng = np.random.default_rng(seed)
+    pick = rng.choice(len(v), size=n, p=area / area.sum())
+    r1, r2 = rng.random(n), rng.random(n)
+    flip = r1 + r2 > 1
+    r1[flip], r2[flip] = 1 - r1[flip], 1 - r2[flip]
+    a, b, c = v[pick, 0], v[pick, 1], v[pick, 2]
+    return a + r1[:, None] * (b - a) + r2[:, None] * (c - a)
 
 
-def level_view(tris, pick, force=False):
-    """The chosen view with its axes snapped to the model's own: weapon
-    models are built along a model axis, level, so this draws the barrel
-    straight; the silhouette match alone tilts a gun towards Valve's
-    drawing (most of all an SMG, whose magazine Valve drew shorter), which
-    reads as crooked. Keeps the side and the muzzle direction the match
-    picked. Returns (basis, pick)."""
+def barrel_slope(xy, front=0.55, bins=40, keep=0.35):
+    """The slope of the barrel in a side view (`xy`: surface points, muzzle
+    towards +x, y up): the thinnest slices of the gun's front part are the
+    barrel (a bipod, sight, magazine or grip makes its slices thick), and a
+    line through their middles gives its slope."""
+    x, y = xy[:, 0], xy[:, 1]
+    x0 = x.max() - front * (x.max() - x.min())
+    edges = np.linspace(x0, x.max(), bins + 1)
+    rows = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        s = y[(x >= lo) & (x <= hi)]
+        if len(s) < 8:
+            continue
+        lo_y, hi_y = np.percentile(s, [5, 95])
+        rows.append((hi_y - lo_y, (lo + hi) / 2, (lo_y + hi_y) / 2))
+    if len(rows) < 3:
+        return 0.0
+    rows = np.array(rows)
+    thin = rows[rows[:, 0] <= np.quantile(rows[:, 0], keep) + 1e-9]
+    if len(thin) < 2 or np.ptp(thin[:, 1]) <= 0:
+        return 0.0
+    return float(np.polyfit(thin[:, 1], thin[:, 2], 1)[0])
+
+
+def level_view(tris, pick):
+    """A side view with the barrel parallel to the icon's baseline, as in
+    Valve's icons. The silhouette match alone tilts a gun towards Valve's
+    drawing, which reads as crooked. Returns (basis, pick)."""
     sx, sy, roll = pick
-    a1, a2, _ = principal_axes(tris)
-    chosen = view_basis(a1, a2, sx, sy, roll)
-    right = snap_axis(chosen[0])
-    up = chosen[1] - np.dot(chosen[1], right) * right
-    up = snap_axis(up)
-    if abs(np.dot(right, up)) > 0.5:  # both snapped to one axis: keep the match
-        return chosen, pick
-    # Some models aren't built along an axis (the rifles' `p_` models lie at
-    # an angle, as held): there the snapped view is far off and the match's
-    # own view is the level one. `force` snaps anyway (the Sten, whose
-    # silhouette match lands far from its level axis).
-    off = np.degrees(np.arccos(np.clip(np.dot(chosen[0], right), -1, 1)))
-    if off > SNAP_MAX_DEG and not force:
-        return chosen, pick
-    return np.array([right, up, np.cross(right, up)]), (sx, sy, 0.0)
-
-
-# How far the silhouette match's view may be from a model axis and still be
-# snapped to it (level_view): the rifles' angled models are ~25 degrees off.
-SNAP_MAX_DEG = 15.0
-# Icons snapped to the model's axes whatever the match picked.
-FORCE_SNAP = {"d_sten"}
+    # Every DoD weapon model shares one layout (built for the hand bone):
+    # the muzzle along -Y, the top of the gun towards +X, the side along Z,
+    # tilted in the X-Y plane as it's held (rifles ~20 degrees). So the view
+    # is fixed, and only the tilt is measured.
+    right = np.array(MUZZLE, float)
+    up = np.array(MODEL_UP, float)
+    pts = surface_points(tris)
+    angle = 0.0
+    for _ in range(4):
+        r = np.radians(angle)
+        rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
+        xy = np.stack([pts @ rr, pts @ uu], 1)
+        # The barrel proper: the front third. A compensator or front grip
+        # can make that misread (the Thompson): then the longer front half.
+        step = np.degrees(np.arctan(barrel_slope(xy, front=BARREL_FRONT)))
+        if abs(step) > BARREL_MAX_STEP:
+            step = np.degrees(np.arctan(barrel_slope(xy, front=0.55)))
+        angle += float(step)
+    r = np.radians(angle)
+    rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
+    return np.array([rr, uu, np.cross(rr, uu)]), (sx, sy, angle)
 
 
 # ── rasterizer ───────────────────────────────────────────────────────────────
@@ -650,7 +685,7 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
         return None, "no model in this install"
     tris, score, pick, basis, path, cut = best
     if not NOT_LEVELLED.search(name):
-        basis, pick = level_view(tris, pick, force=name in FORCE_SNAP)
+        basis, pick = level_view(tris, pick)
     textures = sorted({id(t[3]): t[3] for t in tris}.values(), key=lambda t: t.name)
     skins = hd_skins(textures, style, models_dir)
     fit = fit_transform(tris, basis, box)
