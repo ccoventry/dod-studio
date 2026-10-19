@@ -288,10 +288,17 @@ pub fn scan_folder_background(
         }
 
         // walkdir does not follow links by default; the depth cap is #376's.
+        // An output folder can be a drive root, whose Recycle Bin keeps
+        // deleted takes under their own names (#843).
         for entry in WalkDir::new(&source_folder)
             .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
             .into_iter()
-            .filter_entry(|e| !is_bmp_stream_folder(e))
+            .filter_entry(|e| {
+                !is_bmp_stream_folder(e)
+                    && !(e.depth() > 0
+                        && e.file_type().is_dir()
+                        && crate::sys::folder_walk::is_system_folder(e.file_name()))
+            })
             .filter_map(|e| e.ok())
         {
             if !entry.file_type().is_dir() {
