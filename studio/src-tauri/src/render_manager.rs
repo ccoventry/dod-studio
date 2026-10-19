@@ -1444,10 +1444,19 @@ pub fn get_render_required_estimate_gb(state: tauri::State<'_, RenderManager>) -
     total as f64 / 1_073_741_824.0
 }
 
-#[tauri::command(async)]
-pub fn get_export_pool_free_gb(directories: Vec<String>) -> f64 {
+/// On the blocking pool (#853): a disk-space cache miss re-lists every
+/// volume, which can wait on a sleeping or network drive.
+#[tauri::command]
+pub async fn get_export_pool_free_gb(directories: Vec<String>) -> Result<f64, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        export_pool_free_gb(&directories)
+    }))
+    .await
+}
+
+fn export_pool_free_gb(directories: &[String]) -> f64 {
     let mut total: u64 = 0;
-    for dir in &directories {
+    for dir in directories {
         let free = native::sys::disk::get_available_bytes(&PathBuf::from(dir));
         if free != u64::MAX {
             total += free;
