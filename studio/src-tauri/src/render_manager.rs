@@ -218,6 +218,9 @@ pub struct RenderJobView {
     /// Every recorded render of this job's stream of the take, oldest first
     /// (#438).
     pub history: Vec<HistoryEntry>,
+    /// When the attempt rendering now started: the history's `started` entry
+    /// with this time is in progress, any other `started` one was cut off.
+    pub current_attempt: Option<u64>,
 }
 
 impl RenderJobRuntime {
@@ -270,6 +273,7 @@ impl RenderJobRuntime {
                     .cloned()
                     .collect()
             },
+            current_attempt: self.current_attempt,
         }
     }
 }
@@ -736,7 +740,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                         }
                         if job.status == "Queued" {
                             job.status = "Rendering".to_string();
-                            // #438: recorded as started (Interrupted) before
+                            // #438: recorded as Started before
                             // FFmpeg runs, written once the lock is released.
                             let attempt = RenderAttempt {
                                 started_unix_ms: std::time::SystemTime::now()
@@ -751,7 +755,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                                     String::new()
                                 },
                                 fps: job.fps,
-                                outcome: RenderOutcome::Interrupted,
+                                outcome: RenderOutcome::Started,
                                 output_path: String::new(),
                                 output_size_bytes: None,
                                 error: None,

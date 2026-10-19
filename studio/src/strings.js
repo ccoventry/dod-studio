@@ -622,7 +622,7 @@ export const STRINGS = {
     TABLE_HEADER_HISTORY_TITLE: 'Every time this take was rendered, kept beside the take so it survives restarts. ▸ lists each attempt.',
     HISTORY_NEW: 'New',
     historyRendered: (count) => `Rendered ×${count}`,
-    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' },
+    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted', rendering: 'Rendering…' },
     HISTORY_SKIPPED_SETTINGS: 'Skip (kept original)',
     HISTORY_TOGGLE_TITLE: 'Show or hide every render of this take',
     historyFileNotFound: (name) => `${name} was moved or deleted`,

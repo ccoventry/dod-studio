@@ -862,8 +862,10 @@
             </div>
 
             <!-- Per-job render queue table — replaces the old single global
-                 status line + progress bar with real per-clip rows. -->
-            <div class="table-wrapper" style="margin-top: 8px; max-height: 280px;">
+                 status line + progress bar with real per-clip rows. It grows
+                 with the window down to just above the footer buttons and the
+                 status bar (#818), never shorter than the old 280px. -->
+            <div class="table-wrapper" style="margin-top: 8px; max-height: max(280px, calc(100vh - 360px));">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>

@@ -356,9 +356,9 @@ function updateJobRow(row, j, rowState = {}) {
 
   // #438: rebuilt only when the history changes; the open/closed state is
   // kept on the row, so a rebuild doesn't fold it shut.
-  const historyKey = JSON.stringify(j.history || []);
+  const historyKey = `${JSON.stringify(j.history || [])}|${j.current_attempt ?? ''}`;
   if (historyKey !== row.dataset.historyKey) {
-    renderHistoryCell(row, j.history || []);
+    renderHistoryCell(row, j.history || [], j.current_attempt);
     row.dataset.historyKey = historyKey;
   }
 
@@ -372,9 +372,9 @@ function updateJobRow(row, j, rowState = {}) {
 }
 
 /** The History cell (#438): the summary, and a ▸ that lists every attempt. */
-function renderHistoryCell(row, history) {
+function renderHistoryCell(row, history, currentAttempt) {
   const cell = row.querySelector('.rj-history');
-  const { label, bytes } = historySummary(history);
+  const { label, bytes } = historySummary(history, currentAttempt);
   const summary = document.createElement('span');
   summary.textContent = bytes > 0 ? `${label}, ${formatFileSize(bytes)}` : label;
   if (!history.length) {
@@ -389,7 +389,7 @@ function renderHistoryCell(row, history) {
   const list = document.createElement('div');
   list.className = 'rj-history-list';
   list.style.cssText = 'font-size: 0.85em; opacity: 0.85; margin-top: 2px; white-space: nowrap;';
-  historyLines(history, formatFileSize).forEach((line) => {
+  historyLines(history, formatFileSize, currentAttempt).forEach((line) => {
     const div = document.createElement('div');
     div.textContent = line;
     list.appendChild(div);
