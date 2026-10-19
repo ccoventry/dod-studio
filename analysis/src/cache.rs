@@ -450,6 +450,74 @@ pub fn load_players(root: &Path, demo_path: &Path) -> Option<DemoPlayers> {
         .then_some(entry.demo)
 }
 
+/// The demo files with an entry in the current schema's folder (each entry's
+/// `file_info.path`, sorted), for a list of everything Studio has analysed.
+/// Read from each entry's first bytes: an entry can be megabytes, and the
+/// file info sits right after the stamp.
+pub fn cached_demo_paths(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(version_dir(root, SCHEMA_VERSION)) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<String> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".json") && n.matches('.').count() == 1)
+        })
+        .filter_map(|path| head_file_info(&path).map(|info| info.path))
+        .filter(|path| !path.is_empty())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// How much of an entry [`head_file_info`] reads: the stamp and the file
+/// info are within it.
+const HEAD_BYTES: u64 = 4096;
+
+fn head_file_info(entry: &Path) -> Option<FileInfo> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(HEAD_BYTES as usize);
+    std::fs::File::open(entry)
+        .ok()?
+        .take(HEAD_BYTES)
+        .read_to_end(&mut head)
+        .ok()?;
+    file_info_in(&head)
+}
+
+/// The `file_info` object in an entry's first bytes; `None` when it is cut
+/// off or not there.
+fn file_info_in(head: &[u8]) -> Option<FileInfo> {
+    let key = b"\"file_info\":";
+    let at = head.windows(key.len()).position(|w| w == key)? + key.len();
+    let mut de = serde_json::Deserializer::from_slice(&head[at..]);
+    let info: FileInfo = serde::Deserialize::deserialize(&mut de).ok()?;
+    Some(info)
+}
+
+#[cfg(test)]
+mod cached_paths_tests {
+    use super::*;
+
+    #[test]
+    fn the_file_info_comes_out_of_an_entrys_first_bytes() {
+        let head = br#"{"size_bytes":12,"modified_unix_secs":34,"file_info":{"created_at":{"secs_since_epoch":5,"nanos_since_epoch":0},"name":"x.dem","path":"D:\\demos\\x.dem","size_bytes":12},"analysis":{"cut off"#;
+        assert_eq!(
+            file_info_in(head).map(|info| info.path).as_deref(),
+            Some("D:\\demos\\x.dem")
+        );
+        assert!(
+            file_info_in(&head[..80]).is_none(),
+            "cut off inside the file info"
+        );
+        assert!(file_info_in(b"{}").is_none());
+    }
+}
+
 /// Writes the players file of every entry under `root` that has none yet
 /// (entries saved before players files existed), and returns how many it
 /// wrote. Reads each such entry whole, once.

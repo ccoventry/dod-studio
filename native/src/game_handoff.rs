@@ -109,9 +109,46 @@ pub fn first_demo_start(first_demo: &str, hook_dll: bool) -> (String, Vec<String
     }
 }
 
+/// `early` with Configuration > Players' box added (#428), so the batch's
+/// first demo already plays with it. Only with the hook DLL, the one thing
+/// that reads it; `None` adds nothing.
+pub fn with_player_overrides(
+    mut early: Vec<String>,
+    overrides: Option<bool>,
+    hook_dll: bool,
+) -> Vec<String> {
+    if let Some(on) = overrides
+        && hook_dll
+    {
+        early.push(crate::player_overrides::cvar_line(on));
+    }
+    early
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_players_box_goes_with_the_early_lines() {
+        let early = vec!["dodstudio_run_in_background 1".to_string()];
+        assert_eq!(
+            with_player_overrides(early.clone(), Some(true), true),
+            [
+                "dodstudio_run_in_background 1",
+                "dodstudio_player_overrides 1"
+            ]
+        );
+        assert_eq!(
+            with_player_overrides(Vec::new(), Some(false), true),
+            ["dodstudio_player_overrides 0"]
+        );
+        assert_eq!(with_player_overrides(early.clone(), None, true), early);
+        assert_eq!(
+            with_player_overrides(early.clone(), Some(true), false),
+            early
+        );
+    }
 
     #[test]
     fn with_the_hook_the_first_demo_waits_for_the_configs() {

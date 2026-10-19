@@ -1,10 +1,10 @@
 // game_folder_ui.js
 // Configuration > Paths > Game Folder (#402): which folder beside hl.exe
 // DoD Studio launches with `-game` and reads and writes in (`dod` unless
-// set). Always a dropdown of the folders holding a liblist.gam, so a typo
-// can't happen; with nothing to list (no hl.exe set yet, a path with no
-// file, an unreadable folder) it is disabled on the saved value and says
-// why. settings_sync.js saves getGameFolder().
+// set). Always a dropdown of the folders holding a liblist.gam and a
+// cl_dlls/client.dll (#768), so a typo can't happen; with nothing to list
+// (no hl.exe set yet, a path with no file, an unreadable folder) it is
+// disabled on the saved value and says why. settings_sync.js saves getGameFolder().
 
 import { listGameFolders } from './ipc_bridge.js';
 import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions } from './game_folder.js';

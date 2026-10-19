@@ -1008,7 +1008,10 @@ pub async fn start_capture_batch_impl(
         .store(false, std::sync::atomic::Ordering::Relaxed);
 
     // ── Build PatcherConfig from the IPC payload ───────────────────────────────
-    let patcher_config = config_from_payload(&payload);
+    let mut patcher_config = config_from_payload(&payload);
+    // Configuration > Players' box (#428) is a saved setting, not part of
+    // the batch's payload.
+    patcher_config.player_overrides = Some(saved_settings(&app_handle).players.use_in_game);
     {
         let mut slot = manager
             .last_config
@@ -1625,6 +1628,11 @@ pub struct SerializedDemo {
     /// existed; the frontend scans those again.
     #[serde(default)]
     pub signon_maps: Vec<String>,
+    /// The `analysis::highlights::HIGHLIGHTS_VERSION` that listed this demo's
+    /// highlights; 0 for a demo from a project saved before it was recorded.
+    /// Opening a project offers to rescan demos below the current one.
+    #[serde(default)]
+    pub highlights_version: u32,
 }
 
 /// A demo already in the queue, as the frontend passes it to a scan.
@@ -1643,6 +1651,10 @@ pub struct ScanOutcome {
     pub unchanged: u32,
     #[serde(default)]
     pub copies: Vec<ScanCopy>,
+    /// Cancel stopped the scan; `demos` holds what was parsed before it,
+    /// none when it stopped while listing folders (#843).
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 /// A scanned file with the same key as a queued demo at another path, or as
@@ -1654,6 +1666,84 @@ pub struct ScanCopy {
     /// `same_as` was already in the queue; otherwise it's the copy this scan
     /// kept.
     pub queued: bool,
+}
+
+/// What `scan_demo_for_highlights_with_analysis` lists for one demo, before
+/// its analysis.
+type ScannedHighlights = (
+    f32,
+    Vec<CaptureStreak>,
+    bool,
+    Option<usize>,
+    i32,
+    Option<i32>,
+    std::sync::Arc<Vec<f32>>,
+);
+
+/// One scanned demo as the queue holds it, stamped with the version of
+/// highlight detection that listed its highlights.
+fn serialized_demo(
+    file: &std::path::Path,
+    file_name: String,
+    file_key: Option<String>,
+    highlights: ScannedHighlights,
+    analysis: &::analysis::Analysis,
+) -> SerializedDemo {
+    let (
+        tickrate,
+        streaks,
+        is_pov,
+        local_player_index,
+        playback_frames,
+        match_start_tick,
+        frame_times_arc,
+    ) = highlights;
+    let recorder = native::player_index::players_in(analysis)
+        .players
+        .into_iter()
+        .find(|p| p.recorder);
+
+    let serialized_streaks: Vec<SerializedStreak> = streaks
+        .into_iter()
+        .map(|mut s| {
+            s.match_start_tick = match_start_tick;
+            s.frame_times = frame_times_arc.clone();
+            let facts = native::clip_facts::streak_facts(
+                analysis,
+                s.player_index,
+                s.kills.first().map_or(s.start_tick, |k| k.0),
+            )
+            .unwrap_or_default();
+            let mut serialized = SerializedStreak::from(s);
+            serialized.faction = Some(facts.faction).filter(|f| !f.is_empty());
+            serialized.victims = facts.victims;
+            serialized.victim_factions = facts.victim_factions;
+            serialized
+        })
+        .collect();
+
+    SerializedDemo {
+        path: file.to_string_lossy().to_string(),
+        name: file_name,
+        tickrate,
+        is_pov,
+        local_player_index,
+        playback_frames,
+        streaks: serialized_streaks,
+        file_key,
+        map_name: Some(analysis.demo_info.map_name.clone()).filter(|m| !m.is_empty()),
+        modified_unix_secs: std::fs::metadata(file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()),
+        peak_packet_entities: analysis.demo_info.peak_packet_entities,
+        recorder_id: recorder.as_ref().map(|p| p.id.clone()),
+        recorder_name: recorder.map(|p| p.name),
+        teams: ::analysis::team_tags(&analysis.state),
+        signon_maps: analysis.state.signon_maps.clone(),
+        highlights_version: ::analysis::highlights::HIGHLIGHTS_VERSION,
+    }
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -1707,6 +1797,51 @@ fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -
         line += &format!(" — {name}");
     }
     line
+}
+
+/// The scan's step line while it lists folders, before any demo is parsed.
+fn listing_status_line(folders: u32, demos: u32) -> String {
+    format!("Looking for demos: {folders} folders read, {demos} demos found")
+}
+
+/// Phase 1 of a queue scan: every `.dem` under `dirs` goes into `list`, kept
+/// in file-name order. A picked folder is read through even when it is a
+/// link; links inside it are not, so a junction back up the tree cannot
+/// loop. The Recycle Bin and System Volume Information are skipped (#843).
+/// `progress(folders, demos)` is called as the counts grow (the caller
+/// throttles); `cancel` is checked at every entry. False when cancelled.
+fn list_scan_demos(
+    dirs: &[PathBuf],
+    list: &mut Vec<PathBuf>,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &mut dyn FnMut(u32, u32),
+) -> bool {
+    let mut folders = dirs.len() as u32;
+    progress(folders, list.len() as u32);
+    let outcome = Walker::new()
+        .skip_system_folders()
+        .walk_roots(dirs, &mut |found| {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Step::Stop;
+            }
+            match found.kind {
+                Kind::Dir => folders += 1,
+                Kind::File if found.is_demo() => {
+                    let insert_idx = list
+                        .binary_search_by(|p: &PathBuf| {
+                            p.file_name()
+                                .unwrap_or_default()
+                                .cmp(found.path.file_name().unwrap_or_default())
+                        })
+                        .unwrap_or_else(|pos| pos);
+                    list.insert(insert_idx, found.path.clone());
+                }
+                _ => return Step::Enter,
+            }
+            progress(folders, list.len() as u32);
+            Step::Enter
+        });
+    outcome.complete || !cancel.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// True when a progress line may go out at `now_ms`: at most one per ~33 ms
@@ -1810,6 +1945,8 @@ fn locate_missing_demos_within(
         .collect();
     Walker::new()
         .breadth_first()
+        // A deleted copy in the Recycle Bin has the same key (#843).
+        .skip_system_folders()
         // Folders LOCATE_MAX_DEPTH below a search folder are still read.
         .max_depth(LOCATE_MAX_DEPTH + 1)
         .max_entries(max_entries)
@@ -2052,27 +2189,56 @@ pub async fn scan_directory_impl(
             }
         }
 
-        // A picked folder is read through even when it is a link; links
-        // inside it are not, so a junction back up the tree cannot loop.
-        Walker::new().walk_roots(&dir_stack, &mut |found| {
-            if found.kind == Kind::File
-                && found
-                    .path
-                    .extension()
-                    .map(|ext| ext == "dem")
-                    .unwrap_or(false)
-            {
-                let insert_idx = list
-                    .binary_search_by(|p: &PathBuf| {
-                        p.file_name()
-                            .unwrap_or_default()
-                            .cmp(found.path.file_name().unwrap_or_default())
-                    })
-                    .unwrap_or_else(|pos| pos);
-                list.insert(insert_idx, found.path.clone());
-            }
-            Step::Enter
-        });
+        // A whole drive takes a minute or more to list (#843): say how far
+        // it got, at most one line per ~33 ms, the first at once.
+        let listing_started = std::time::Instant::now();
+        let last_listing_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let listed = list_scan_demos(
+            &dir_stack,
+            &mut list,
+            &cancel_token,
+            &mut |folders, demos| {
+                let now_ms = listing_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u32::MAX as u128 - 1) as u32;
+                if !progress_emit_due(&last_listing_emit, now_ms) {
+                    return;
+                }
+                let _ = app_handle.emit(
+                    "scan_progress",
+                    serde_json::json!({
+                        "scanned": 0,
+                        "found": 0,
+                        "status": listing_status_line(folders, demos),
+                        "cancelled": false,
+                        "listing": true,
+                        "folders": folders,
+                        "demos": demos,
+                    }),
+                );
+            },
+        );
+        if !listed {
+            // Cancelled while listing: nothing is parsed, nothing added.
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": 0,
+                    "found": 0,
+                    "status": "Cancelled",
+                    "cancelled": true,
+                    "unchanged": 0,
+                    "skipped": [],
+                }),
+            );
+            return Ok(ScanOutcome {
+                demos: Vec::new(),
+                unchanged: 0,
+                copies: Vec::new(),
+                cancelled: true,
+            });
+        }
 
         // Demos already in the queue and unchanged on disk are not parsed
         // again: re-adding a folder to pick up one new demo used to re-parse
@@ -2207,75 +2373,22 @@ pub async fn scan_directory_impl(
                                 plain_scan_failure(file, reason),
                             ));
                         }
-                        let serialized = scanned.ok().map(
-                            |(
-                                (
-                                    tickrate,
-                                    streaks,
-                                    is_pov,
-                                    local_player_index,
-                                    playback_frames,
-                                    match_start_tick,
-                                    frame_times_arc,
-                                ),
-                                analysis,
-                            )| {
-                                // Pre-warm the analyzer cache with the Analysis
-                                // this scan already computed, so opening this
-                                // demo in the Demo Analyzer afterward hits the
-                                // cache path instead of re-parsing.
-                                // Best-effort/silent, and safe under concurrency:
-                                // keyed per demo path, not one shared cache.
-                                native::warm_analyzer_cache(file, &analysis);
-                                let recorder = native::player_index::players_in(&analysis)
-                                    .players
-                                    .into_iter()
-                                    .find(|p| p.recorder);
-
-                                let serialized_streaks: Vec<SerializedStreak> = streaks
-                                    .into_iter()
-                                    .map(|mut s| {
-                                        s.match_start_tick = match_start_tick;
-                                        s.frame_times = frame_times_arc.clone();
-                                        let facts = native::clip_facts::streak_facts(
-                                            &analysis,
-                                            s.player_index,
-                                            s.kills.first().map_or(s.start_tick, |k| k.0),
-                                        )
-                                        .unwrap_or_default();
-                                        let mut serialized = SerializedStreak::from(s);
-                                        serialized.faction =
-                                            Some(facts.faction).filter(|f| !f.is_empty());
-                                        serialized.victims = facts.victims;
-                                        serialized.victim_factions = facts.victim_factions;
-                                        serialized
-                                    })
-                                    .collect();
-
-                                SerializedDemo {
-                                    path: file.to_string_lossy().to_string(),
-                                    name: file_name.clone(),
-                                    tickrate,
-                                    is_pov,
-                                    local_player_index,
-                                    playback_frames,
-                                    streaks: serialized_streaks,
-                                    file_key: file_keys[idx].clone(),
-                                    map_name: Some(analysis.demo_info.map_name.clone())
-                                        .filter(|m| !m.is_empty()),
-                                    modified_unix_secs: std::fs::metadata(file)
-                                        .and_then(|m| m.modified())
-                                        .ok()
-                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                        .map(|d| d.as_secs()),
-                                    peak_packet_entities: analysis.demo_info.peak_packet_entities,
-                                    recorder_id: recorder.as_ref().map(|p| p.id.clone()),
-                                    recorder_name: recorder.map(|p| p.name),
-                                    teams: ::analysis::team_tags(&analysis.state),
-                                    signon_maps: analysis.state.signon_maps.clone(),
-                                }
-                            },
-                        );
+                        let serialized = scanned.ok().map(|(highlights, analysis)| {
+                            // Pre-warm the analyzer cache with the Analysis
+                            // this scan already computed, so opening this
+                            // demo in the Demo Analyzer afterward hits the
+                            // cache path instead of re-parsing.
+                            // Best-effort/silent, and safe under concurrency:
+                            // keyed per demo path, not one shared cache.
+                            native::warm_analyzer_cache(file, &analysis);
+                            serialized_demo(
+                                file,
+                                file_name.clone(),
+                                file_keys[idx].clone(),
+                                highlights,
+                                &analysis,
+                            )
+                        });
 
                         if serialized.is_some() {
                             found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2330,6 +2443,7 @@ pub async fn scan_directory_impl(
             demos: results,
             unchanged,
             copies,
+            cancelled: was_cancelled,
         })
     }))
     .await;
@@ -2762,6 +2876,8 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             .spawn()
             .map_err(crate::messages::failed_to_launch_hlae)?;
         watch_for_error_dialogs(app, launcher);
+        // Configuration > Players' box (#428), once the game takes commands.
+        crate::players_tab::send_when_listening(settings.players.use_in_game);
 
         Ok(())
     }))
@@ -3292,6 +3408,87 @@ mod tests {
         assert!(!progress_emit_due(&last, 20));
         assert!(progress_emit_due(&last, 33));
         assert!(!progress_emit_due(&last, 40));
+    }
+
+    #[test]
+    fn the_listing_line_counts_folders_and_demos() {
+        assert_eq!(
+            listing_status_line(12, 3),
+            "Looking for demos: 12 folders read, 3 demos found"
+        );
+    }
+
+    /// A drive-like tree: two demos to find, and deleted ones in the
+    /// Recycle Bin and System Volume Information.
+    fn drive_like(scratch: &Scratch) -> PathBuf {
+        let root = scratch.path().to_path_buf();
+        for dir in [
+            "games/dod",
+            "$RECYCLE.BIN/S-1-5-21",
+            "System Volume Information",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for f in [
+            "b.dem",
+            "games/dod/a.dem",
+            "$RECYCLE.BIN/S-1-5-21/$R1A2B3C.dem",
+            "System Volume Information/c.dem",
+        ] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn listing_finds_demos_in_name_order_and_skips_system_folders() {
+        let scratch = Scratch::new("list_scan_demos");
+        let root = drive_like(&scratch);
+        let mut list = Vec::new();
+        let mut last = (0, 0);
+        let listed = list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &std::sync::atomic::AtomicBool::new(false),
+            &mut |folders, demos| last = (folders, demos),
+        );
+        assert!(listed);
+        assert_eq!(list, [root.join("games/dod/a.dem"), root.join("b.dem")]);
+        // The root, games and games/dod; the two system folders not counted.
+        assert_eq!(last, (3, 2));
+    }
+
+    #[test]
+    fn cancel_stops_the_listing_and_says_so() {
+        let scratch = Scratch::new("list_scan_cancel");
+        let root = drive_like(&scratch);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut list = Vec::new();
+        let mut calls = 0;
+        let listed = list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &cancel,
+            &mut |_, _| {
+                calls += 1;
+                // The first call is the start line; cancel on the next.
+                if calls == 2 {
+                    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            },
+        );
+        assert!(!listed);
+        assert_eq!(calls, 2, "nothing more is read once cancelled");
+
+        // Cancelled before it starts: nothing is listed.
+        let mut list = Vec::new();
+        assert!(!list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &cancel,
+            &mut |_, _| {}
+        ));
+        assert!(list.is_empty());
     }
 
     #[test]
@@ -3852,5 +4049,63 @@ mod tests {
 
         clips.session_finished();
         assert_eq!(clips.done, 5);
+    }
+
+    fn fixture_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn a_scanned_demo_carries_the_current_highlights_version() {
+        let path = fixture_path();
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let analysis = ::analysis::Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = (
+            100.0,
+            Vec::new(),
+            true,
+            None,
+            0,
+            None,
+            std::sync::Arc::new(Vec::new()),
+        );
+        let demo = serialized_demo(&path, "ci_fixture.dem".into(), None, highlights, &analysis);
+        assert_eq!(
+            demo.highlights_version,
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+        assert!(
+            demo.highlights_version > 0,
+            "0 means 'scanned before it was recorded'"
+        );
+        let json = serde_json::to_value(&demo).unwrap();
+        assert_eq!(
+            json["highlights_version"],
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+    }
+
+    #[test]
+    fn a_demo_from_an_older_project_has_highlights_version_0() {
+        let old = r#"{"path":"D:/demos/a.dem","name":"a.dem","tickrate":100.0,"is_pov":true,
+            "local_player_index":null,"playback_frames":10,"streaks":[]}"#;
+        let demo: SerializedDemo = serde_json::from_str(old).unwrap();
+        assert_eq!(demo.highlights_version, 0);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_highlights_version() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/scan_version.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const HIGHLIGHTS_VERSION = {};",
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/scan_version.js must say `{line}`"
+        );
     }
 }

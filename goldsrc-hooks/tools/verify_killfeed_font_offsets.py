@@ -5,8 +5,9 @@ slots against both movie installs' `hw.dll` (issue #562).
 `font.rs` rewrites six `call [gEngfuncs+N]` instructions in
 `CHudDeathNotice::Draw` into `call rel32; nop`, and detours the 16-byte line
 step after them. The signature it scans for covers only the first site; the
-other five, the two sprite calls it reads as anchors and the step span are
-offsets from the match. Nothing at runtime can prove those offsets land on
+other five, the `SPR_Set` call it reads as an anchor and the step span are
+offsets from the match (the `SPR_DrawHoles` call beside it is `scale.rs`'s,
+checked by `verify_killfeed_scale_offsets.py`). Nothing at runtime can prove those offsets land on
 whole instructions of the kind the Rust assumes, so this does:
 
   client.dll
