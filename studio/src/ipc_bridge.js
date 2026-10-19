@@ -478,7 +478,8 @@ export async function diagnoseCaptureOutputPaths(paths) {
 export async function queueRenderBatch(payload) {
   // payload must match RenderBatchPayload:
   //   { render_directories, codec, custom_codec_args?, fps, ffmpeg_path?, export_directories, max_concurrent_renders }
-  // Resolves to the number of takes found and staged as Queued jobs.
+  // Merges the scan into the queue (#772) and resolves to what changed:
+  //   { total, added, refreshed, kept, gone, gone_queued } (ScanMergeSummary).
   return invoke("queue_render_batch", { payload: payload })
     .catch((err) => {
       console.error("IPC Execution Error (queue_render_batch):", err);
