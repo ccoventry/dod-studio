@@ -159,7 +159,6 @@
                 </label>
                 <!-- #828: the players "Players I pick" reviews; review_hltv_picker.js fills it. -->
                 <span id="review-hltv-pick" class="review-hltv-pick" hidden>
-                  <span id="review-hltv-chips" class="review-hltv-chips"></span>
                   <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;"></select>
                   <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 180px;"></select>
                 </span>
@@ -182,6 +181,9 @@
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
+                <!-- #845: the picked players get a line of their own under the
+                     toolbar, so adding one never moves the lists. -->
+                <span id="review-hltv-chips" class="review-hltv-chips review-hltv-chips-row" hidden></span>
               </div>
             </div>
             <!-- Populated by map_warnings.js when a scanned demo needs a map
