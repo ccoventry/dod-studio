@@ -1,6 +1,6 @@
 // auditor_pane.js + audit_folders.js — Demo Auditor › Duplicates (#844).
 //
-// Pins the Folders to check list (Target Folder, picked folders, All
+// Pins the Folders to check list (the Target Folder to start, picked folders, All
 // drives), what Start Audit sends, the progress bar and step line while it
 // runs, the kept copy and the in-use copies left unticked, and the two
 // deletes: the Recycle Bin by default, permanent as its own choice.
@@ -58,7 +58,8 @@ test('the folder list holds the Target Folder and picked folders, once each', as
   await page.fill('#audit-target-folder-input', 'C:\\Demos');
   await page.click('#audit-add-folder-btn');
   await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['C:\\Demos', 'F:\\Downloads', 'G:\\']);
-  await expect(page.locator('#audit-folder-list li').first()).toContainText('(Target Folder)');
+  // Every folder can be removed, the Target Folder's too.
+  await expect(page.locator('#audit-folder-list li button')).toHaveCount(3);
   await expect(page.locator('#run-audit-btn')).toBeEnabled();
 
   await page.locator('#audit-folder-list li', { hasText: 'G:\\' }).locator('button').click();
@@ -66,6 +67,17 @@ test('the folder list holds the Target Folder and picked folders, once each', as
   const picker = await calls(page, 'plugin:dialog|open');
   expect(picker[0].options.directory).toBe(true);
   expect(picker[0].options.multiple).toBe(true);
+});
+
+test('the list follows the Target Folder until it is edited here', async ({ page }) => {
+  await loadHarness(page, { picked: ['F:\\Downloads'] });
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.fill('#audit-target-folder-input', 'D:\\Other');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['D:\\Other']);
+  await page.click('#audit-add-folder-btn');
+  // Edited: the other tabs' folder no longer changes this list.
+  await page.fill('#audit-target-folder-input', 'E:\\Elsewhere');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['D:\\Other', 'F:\\Downloads']);
 });
 
 test('All drives alone can start an audit and dims the list', async ({ page }) => {

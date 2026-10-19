@@ -936,12 +936,14 @@
               <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
-              <div class="input-row">
+              <!-- Split Maps and Rename Demos use this folder; Duplicates has its
+                   own list, so auditor_tabs.js hides this row there (#844). -->
+              <div class="input-row" id="audit-target-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
                 <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <!-- One tab per tool; all of them work on the folder above (#624). -->
+              <!-- One tab per tool (#624). -->
               <div class="auditor-tabs" role="tablist">
                 <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
                 <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
@@ -953,9 +955,9 @@
           <div class="auditor-tab-panel" data-auditor-panel="duplicates">
             <div class="egui-panel" style="margin-top: 10px;">
               <div class="panel-body">
-                <!-- Folders to check (#844): audit_folders.js. The Target
-                     Folder above, folders added with the picker, or every
-                     fixed drive, in one pass. -->
+                <!-- Folders to check (#844): audit_folders.js. Folders added
+                     with the picker (starting from the Target Folder the other
+                     tabs use), or every fixed drive, in one pass. -->
                 <label data-str="AUDITOR.FOLDERS_TO_CHECK_LABEL">Folders to check:</label>
                 <ul id="audit-folder-list" class="audit-folder-list"></ul>
                 <div class="row-inputs">
