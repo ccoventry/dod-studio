@@ -5,10 +5,12 @@
 //! Player, Kills, Time, Dur. and Details, its Load button is Go, and its `OnCommand` is
 //! ours: Go, or a double-click, seeks to just before the streak.
 //!
-//! Every life with a kill is listed; a Min kills box narrows the list. A POV
-//! demo lists only the recording player's (the footage follows no one else).
-//! An HLTV demo lists everyone's, a Player box narrows them, and Go also puts
-//! the camera on the streak's player (`dodstudio_spec_target`).
+//! Every life with a kill is listed. A POV demo lists only the recording
+//! player's (the footage follows no one else), named in a greyed-out Player
+//! box. An HLTV demo lists everyone's, the Player box narrows them, and Go
+//! also puts the camera on the streak's player (`dodstudio_spec_target`).
+//! The hint line under the list says when there is nothing to list, and why;
+//! how far the analysis has got is the loading strip's and the progress bar's.
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,13 +25,13 @@ pub(super) fn dialog() -> usize {
     DIALOG.load(Ordering::Acquire)
 }
 static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
-/// What the status line and the list show now, so each is redrawn only when
+/// What the hint line and the list show now, so each is redrawn only when
 /// it changes.
 static SHOWN_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 static SHOWN_ROWS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-/// The Player and Min kills boxes' text the list was last narrowed by;
-/// `None` after a refill.
-static FILTERED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The list the Player box was last set for, so it is set once per demo and
+/// then left to what is typed.
+static BOXED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// The row keys Go reads: the bar time to seek to, and in an HLTV demo the
 /// player's number to put the camera on.
@@ -47,14 +49,12 @@ const COLUMNS: [(&CStr, &CStr, i32); 5] = [
 ];
 const PLAYER_COLUMN: i32 = 1;
 const ROW_COLUMN_WIDE: i32 = 44;
-const STATUS_LABEL: &str = "StreakStatus";
+/// The line under the list, beside Go (`Highlights.res`).
+const HINT_LABEL: &str = "Hint";
 const PROGRESS: &str = "StreakProgress";
-/// The Player box, and its label: shown for an HLTV demo only.
+/// The Player box, and its label: shown once the streaks are found.
 const PLAYER_BOX: &str = "StreakPlayer";
 const PLAYER_LABEL: &str = "StreakPlayerLabel";
-/// The Min kills box, and its label: shown once the streaks are found.
-const MIN_KILLS_BOX: &str = "StreakMinKills";
-const MIN_KILLS_LABEL: &str = "StreakMinKillsLabel";
 
 type KeyValuesCtor = unsafe extern "thiscall" fn(
     *mut c_void,
@@ -89,6 +89,7 @@ pub(super) unsafe fn build(
             .unwrap_or_else(|e| e.into_inner())
             .clear();
         SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        BOXED_FOR.lock().unwrap_or_else(|e| e.into_inner()).clear();
 
         let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
         if list.is_null() {
@@ -124,8 +125,9 @@ pub(super) unsafe fn build(
     }
 }
 
-/// Keeps the tab showing the playing demo's streaks. Runs every frame; asks
-/// for an analysis only while the tab is showing.
+/// Keeps the tab showing the playing demo's streaks. Runs every frame while
+/// the tab shows; the analysis itself starts as soon as the demo plays
+/// (`load_strip::request_highlights`, #797), so asking here again is a no-op.
 pub(super) unsafe fn update(vgui: &Vgui) {
     unsafe {
         let page = vpanel_of(PAGE_OBJECTS[STREAKS_PAGE].load(Ordering::Acquire) as *mut c_void);
@@ -152,7 +154,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 ),
                 None,
             );
-            fill(list, base, build, "none", &[], false);
+            fill(list, base, build, "none", &[], false, "");
             show_filters(vgui, page, None);
             return;
         };
@@ -162,13 +164,15 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         let Some((generation, status, percent)) = streaks::status() else {
             return;
         };
-        let file = path
-            .file_name()
-            .map_or(name.clone(), |f| f.to_string_lossy().into_owned());
         match status {
             Status::Loading => {
-                let text = format!("Finding the highlights in {file}... {percent}%");
-                show(vgui, page, build, (&text, &text), Some(percent));
+                show(
+                    vgui,
+                    page,
+                    build,
+                    (&format!("loading {percent}"), GO_HINT),
+                    Some(percent),
+                );
                 fill(
                     list,
                     base,
@@ -176,25 +180,40 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     &format!("{generation}:loading"),
                     &[],
                     false,
+                    "",
                 );
                 show_filters(vgui, page, None);
             }
             Status::Ready(found) => {
-                let text = ready_text(&found, &file);
+                let text = ready_hint(&found);
                 show(vgui, page, build, (&text, &text), None);
+                let demo_key = format!("{generation}:ready");
+                {
+                    let mut boxed = BOXED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+                    if *boxed != demo_key {
+                        fill_player_box(vgui, page, &found);
+                        *boxed = demo_key.clone();
+                    }
+                }
+                // A POV demo's box names its one player: every row shows.
+                let player = if found.hltv {
+                    box_text(vgui, page, PLAYER_BOX).trim().to_string()
+                } else {
+                    String::new()
+                };
                 fill(
                     list,
                     base,
                     build,
-                    &format!("{generation}:ready"),
+                    &format!("{demo_key}|{player}"),
                     &found.streaks,
                     found.hltv,
+                    &player,
                 );
                 show_filters(vgui, page, Some(found.hltv));
-                narrow(vgui, page, list, found.hltv);
             }
             Status::Failed(why) => {
-                let text = format!("Could not find the highlights in {file}: {why}");
+                let text = format!("Could not find the highlights: {why}");
                 show(vgui, page, build, (&text, &text), None);
                 fill(
                     list,
@@ -203,6 +222,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     &format!("{generation}:failed"),
                     &[],
                     false,
+                    "",
                 );
                 show_filters(vgui, page, None);
             }
@@ -210,96 +230,64 @@ pub(super) unsafe fn update(vgui: &Vgui) {
     }
 }
 
-/// The status line once the streaks are found.
-fn ready_text(found: &Found, file: &str) -> String {
-    let n = found.streaks.len();
-    let lead = streaks::LEAD_IN_SECS;
-    match (&found.recorder, n) {
-        (Some(recorder), 0) => format!("No kills by {recorder} in {file}."),
-        (Some(recorder), _) => format!(
-            "{n} highlights by {recorder} in {file}. Go jumps to {lead} s before the first kill."
-        ),
-        (None, 0) => format!("No kills in {file}."),
-        (None, _) if found.hltv => {
-            format!("{n} highlights in {file}. Go jumps to {lead} s before and watches the player.")
+/// The hint under the list while the streaks are found or loading: what Go
+/// does.
+const GO_HINT: &str = "Double-click a streak, or pick one and Go.";
+
+/// The hint under the list once the streaks are found: what Go does, or that
+/// there is nothing to go to.
+fn ready_hint(found: &Found) -> String {
+    match (&found.recorder, found.streaks.is_empty()) {
+        (Some(recorder), true) => format!("No kills by {recorder} in this demo."),
+        (None, true) => "No kills in this demo.".to_string(),
+        (_, false) if found.hltv => {
+            "Double-click a streak, or pick one and Go: the camera follows its player.".to_string()
         }
-        (None, _) => {
-            format!("{n} highlights in {file}. Go jumps to {lead} s before the first kill.")
-        }
+        (_, false) => GO_HINT.to_string(),
     }
 }
 
-/// The filter boxes: none while nothing is listed (`None`), Min kills once
-/// the streaks are found, and Player too for an HLTV demo (`Some(true)`).
+/// The Player box for a newly listed demo: empty and editable in an HLTV
+/// demo, the recording player's name and greyed out in a POV demo, which
+/// lists no one else.
+unsafe fn fill_player_box(vgui: &Vgui, page: Vpanel, found: &Found) {
+    unsafe {
+        let Some(entry) = vgui
+            .child_named(page, PLAYER_BOX)
+            .map(|vp| vgui.object(vp))
+            .filter(|o| !o.is_null())
+        else {
+            return;
+        };
+        let name = match (&found.recorder, found.hltv) {
+            (Some(recorder), false) => recorder.replace('\0', ""),
+            _ => String::new(),
+        };
+        if let Ok(name) = CString::new(name) {
+            let set_text: SetTextFn = slot(entry, TEXT_ENTRY_SLOT_SET_TEXT);
+            set_text(entry, name.as_ptr());
+        }
+        let set_enabled: ListIntVoidFn = slot(entry, PANEL_SLOT_SET_ENABLED);
+        set_enabled(entry, i32::from(found.hltv));
+    }
+}
+
+/// The Player box and its label: hidden while nothing is listed (`None`),
+/// shown once the streaks are found.
 unsafe fn show_filters(vgui: &Vgui, page: Vpanel, hltv: Option<bool>) {
     unsafe {
-        let shown = [
-            (PLAYER_BOX, hltv == Some(true)),
-            (PLAYER_LABEL, hltv == Some(true)),
-            (MIN_KILLS_BOX, hltv.is_some()),
-            (MIN_KILLS_LABEL, hltv.is_some()),
-        ];
-        for (name, on) in shown {
+        for name in [PLAYER_BOX, PLAYER_LABEL] {
             if let Some(vp) = vgui.child_named(page, name)
-                && vgui.visible(vp) != on
+                && vgui.visible(vp) != hltv.is_some()
             {
-                vgui.set_visible(vp, on);
+                vgui.set_visible(vp, hltv.is_some());
             }
         }
     }
 }
 
-/// Shows only the rows whose player matches the Player box (every word, case
-/// ignored) with at least the Min kills box's kills, when either box changed
-/// or the list was refilled.
-unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
-    unsafe {
-        let player = if hltv {
-            box_text(vgui, page, PLAYER_BOX).trim().to_string()
-        } else {
-            String::new()
-        };
-        let min_kills: usize = box_text(vgui, page, MIN_KILLS_BOX)
-            .trim()
-            .parse()
-            .unwrap_or(0);
-        let wanted = format!("{player}|{min_kills}");
-        let mut filtered = FILTERED.lock().unwrap_or_else(|e| e.into_inner());
-        if filtered.as_deref() == Some(wanted.as_str()) {
-            return;
-        }
-        let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
-        let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
-        let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
-        let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
-        let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
-        let mut id = first(list);
-        let mut guard = 0;
-        while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
-            guard += 1;
-            let row = get_item(list, id);
-            if !row.is_null() {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let get = |key: &CStr| {
-                    let raw = get_string(row, key.as_ptr(), c"".as_ptr());
-                    if raw.is_null() {
-                        String::new()
-                    } else {
-                        text(raw)
-                    }
-                };
-                let kills: usize = get(COLUMNS[1].0).trim().parse().unwrap_or(0);
-                let shown = matches_filter(&get(COLUMNS[0].0), &player) && kills >= min_kills;
-                set_visible(list, id, shown as u32);
-            }
-            id = next(list, id);
-        }
-        *filtered = Some(wanted);
-    }
-}
-
-/// Sets the status line (when `key` changed) and the progress bar: shown
-/// with `percent`, hidden without.
+/// Sets the hint line (when `key` changed) and the progress bar: shown with
+/// `percent`, hidden without.
 unsafe fn show(
     vgui: &Vgui,
     page: Vpanel,
@@ -312,7 +300,7 @@ unsafe fn show(
         if *shown == key {
             return;
         }
-        if let Some(label) = vgui.child_named(page, STATUS_LABEL) {
+        if let Some(label) = vgui.child_named(page, HINT_LABEL) {
             set_label(vgui.object(label), text);
         }
         if let Some(bar) = vgui.child_named(page, PROGRESS) {
@@ -331,7 +319,11 @@ unsafe fn show(
     }
 }
 
-/// Lists `streaks`, when `key` (which list it is) changed.
+/// Lists the `streaks` whose player matches `player` (every word, case
+/// ignored; "" matches all), when `key` (which list, and which filter)
+/// changed. Each keeps its Row # from the whole list. Typing in the Player
+/// box lists the rows again rather than hiding the others: a row
+/// `SetItemVisible` shows again goes to the end of the list, out of order.
 unsafe fn fill(
     list: *mut c_void,
     base: usize,
@@ -339,6 +331,7 @@ unsafe fn fill(
     key: &str,
     streaks: &[Streak],
     hltv: bool,
+    player: &str,
 ) {
     unsafe {
         let mut shown = SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner());
@@ -346,8 +339,6 @@ unsafe fn fill(
             return;
         }
         *shown = key.to_string();
-        // Every row shows again: narrow it afresh.
-        *FILTERED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
         delete_all(list);
         // One player in a POV demo: no Player column.
@@ -357,6 +348,9 @@ unsafe fn fill(
         let ctor: KeyValuesCtor = std::mem::transmute(base + build.keyvalues_ctor);
         let add_item: AddItemFn = slot(list, LIST_SLOT_ADD_ITEM);
         for (index, streak) in streaks.iter().enumerate() {
+            if !matches_filter(&streak.player, player) {
+                continue;
+            }
             let target = match (hltv, streak.player_number) {
                 (true, Some(number)) => number.to_string(),
                 _ => String::new(),
@@ -384,11 +378,17 @@ unsafe fn fill(
                     set_string(row, cell.as_ptr(), value.as_ptr());
                 }
             }
-            // The list keeps its own copy; `row` stays ours, and is left
-            // (a few dozen bytes a row, once per demo) rather than freed
-            // through a slot nothing here has verified.
+            // AddItem keeps its own `MakeCopy` of the row, so ours is freed
+            // straight after: the list is filled again on every change to
+            // the Player box (#812).
             add_item(list, row, 0, 0, 0);
+            let delete_this: ListVoidFn = slot(row, KEYVALUES_SLOT_DELETE_THIS);
+            delete_this(row);
         }
+        // A list scrolled down for the last demo showed nothing for one with
+        // fewer highlights until the next scroll (#796). Nothing is sorted
+        // unless a heading was clicked: the rows are in highlight order.
+        crate::list_panel::after_refill(list, build.list_sort_column, None);
         if !streaks.is_empty() {
             // What the list holds now, counted back through it.
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
@@ -424,17 +424,23 @@ unsafe fn set_label(object: *mut c_void, text: &str) {
 /// player.
 unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
     if text(raw).eq_ignore_ascii_case("load") {
-        match unsafe { selected_value(this, SEEK_KEY) } {
-            Some(secs) => {
-                let target = unsafe { selected_value(this, TARGET_KEY) };
-                let line = go_line(&secs, target.as_deref());
-                if !CString::new(line).is_ok_and(|l| crate::engine::client_cmd(&l)) {
-                    crate::commands::console_print(&format!("{NAME}: could not run the seek\n"));
-                }
+        // A double-click seeks even with Go greyed out (#826).
+        if crate::review_lock::locked() {
+            crate::commands::console_print(&format!(
+                "{NAME}: {}\n",
+                crate::review_lock::LOCKED_NOTE
+            ));
+            return;
+        }
+        // Nothing picked: Enter anywhere on the tab lands here too (the
+        // window's default button), so no console line then (#777); the
+        // hint under the list already says what to do.
+        if let Some(secs) = unsafe { selected_value(this, SEEK_KEY) } {
+            let target = unsafe { selected_value(this, TARGET_KEY) };
+            let line = go_line(&secs, target.as_deref());
+            if !CString::new(line).is_ok_and(|l| crate::engine::client_cmd(&l)) {
+                crate::commands::console_print(&format!("{NAME}: could not run the seek\n"));
             }
-            None => crate::commands::console_print(&format!(
-                "{NAME}: pick a streak in the list first\n"
-            )),
         }
         return;
     }

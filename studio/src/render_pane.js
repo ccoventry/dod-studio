@@ -15,6 +15,7 @@ import {
   checkRenderAutosave,
   discardRenderAutosave,
   recoverRenderBatch,
+  getRenderJobs,
   revealInExplorer,
   writeTextFile,
   measureTakeFolders,
@@ -27,6 +28,7 @@ import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
 import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
+import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
@@ -36,6 +38,7 @@ import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
 import { themedConfirm } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
+import { createRenderJobsRestore } from './render_jobs_restore.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -106,10 +109,15 @@ function updateFooterQueueSummary() {
   updateBatchProgress();
   const el = document.querySelector('#render-footer-queue-summary');
   if (!el) return;
-  const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
-  const rendering = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
-  const done = jobs.filter((j) => j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR || j.status === JOB_STATUS.CANCELLED).length;
-  el.textContent = STRINGS.RENDER.queueSummary(queued, rendering, done);
+  el.textContent = queueSummaryText(jobs);
+}
+
+/** The status line, in the colour of the row status it reports (#818);
+ *  `status` null puts back the default colour. */
+function setRenderStatus(el, text, status = null) {
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = status ? statusColor(status) : '';
 }
 
 /** The footer's whole-batch bar (#40): hidden until there's a batch. */
@@ -354,9 +362,9 @@ function updateJobRow(row, j, rowState = {}) {
 
   // #438: rebuilt only when the history changes; the open/closed state is
   // kept on the row, so a rebuild doesn't fold it shut.
-  const historyKey = JSON.stringify(j.history || []);
+  const historyKey = `${JSON.stringify(j.history || [])}|${j.current_attempt ?? ''}`;
   if (historyKey !== row.dataset.historyKey) {
-    renderHistoryCell(row, j.history || []);
+    renderHistoryCell(row, j.history || [], j.current_attempt);
     row.dataset.historyKey = historyKey;
   }
 
@@ -370,9 +378,9 @@ function updateJobRow(row, j, rowState = {}) {
 }
 
 /** The History cell (#438): the summary, and a ▸ that lists every attempt. */
-function renderHistoryCell(row, history) {
+function renderHistoryCell(row, history, currentAttempt) {
   const cell = row.querySelector('.rj-history');
-  const { label, bytes } = historySummary(history);
+  const { label, bytes } = historySummary(history, currentAttempt);
   const summary = document.createElement('span');
   summary.textContent = bytes > 0 ? `${label}, ${formatFileSize(bytes)}` : label;
   if (!history.length) {
@@ -387,7 +395,7 @@ function renderHistoryCell(row, history) {
   const list = document.createElement('div');
   list.className = 'rj-history-list';
   list.style.cssText = 'font-size: 0.85em; opacity: 0.85; margin-top: 2px; white-space: nowrap;';
-  historyLines(history, formatFileSize).forEach((line) => {
+  historyLines(history, formatFileSize, currentAttempt).forEach((line) => {
     const div = document.createElement('div');
     div.textContent = line;
     list.appendChild(div);
@@ -546,7 +554,9 @@ async function refreshExportPoolFree(getExportDirs) {
 
 // ── Startup crash-recovery prompt ────────────────────────────────────────────
 
-export async function checkRenderRecoveryOnStartup(onRecovered) {
+/** `showRenderTab` runs on the Recover click, so the status line it sets is
+ *  on screen while the batch comes back. */
+export async function checkRenderRecoveryOnStartup(showRenderTab) {
   const summary = await checkRenderAutosave();
   if (!summary) return;
 
@@ -557,28 +567,35 @@ export async function checkRenderRecoveryOnStartup(onRecovered) {
   document.querySelector('#render-recovery-pending').textContent = String(summary.pending_count);
   modal.style.display = 'flex';
 
+  // Both buttons close the dialog on the click: the reply can take seconds
+  // at start-up (#853), and the status line shows the recovery meanwhile.
   document.querySelector('#render-recovery-recover-btn').addEventListener('click', async () => {
+    modal.style.display = 'none';
+    const statusEl = document.querySelector('#render-status');
+    setRenderStatus(statusEl, STRINGS.RENDER.STATUS_RECOVERING);
+    if (showRenderTab) showRenderTab();
+    // A scan started meanwhile owns the status line; leave its text alone.
+    const stillRecovering = () => statusEl?.textContent === STRINGS.RENDER.STATUS_RECOVERING;
     try {
       jobs = await recoverRenderBatch();
       renderJobsTable();
+      if (stillRecovering()) {
+        const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+        setRenderStatus(statusEl, STRINGS.RENDER.recoveredStatus(queued));
+      }
       showToast(STRINGS.RENDER.recoveredJobsToast(summary.completed_count, summary.pending_count), 'info');
-      if (onRecovered) onRecovered();
     } catch (err) {
       console.error('Error recovering render batch:', err);
+      if (stillRecovering()) setRenderStatus(statusEl, STRINGS.RENDER.STATUS_WAITING);
       showToast(STRINGS.RENDER.recoverFailed(err), 'error');
-    } finally {
-      modal.style.display = 'none';
     }
   }, { once: true });
 
-  document.querySelector('#render-recovery-discard-btn').addEventListener('click', async () => {
-    try {
-      await discardRenderAutosave();
-    } catch (err) {
+  document.querySelector('#render-recovery-discard-btn').addEventListener('click', () => {
+    modal.style.display = 'none';
+    discardRenderAutosave().catch((err) => {
       console.error('Error discarding render autosave:', err);
-    } finally {
-      modal.style.display = 'none';
-    }
+    });
   }, { once: true });
 }
 
@@ -702,8 +719,17 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // single source of truth for whether a batch is actually running — Start
   // and Cancel follow it rather than only the Start click and
   // render_batch_finished.
+  // A page reload keeps the backend's queue (#771): the list it holds is
+  // asked for once, and painted unless a snapshot got here first.
+  const jobsRestore = createRenderJobsRestore({ fetchJobs: getRenderJobs, applyJobs: applyJobsSnapshot });
   listen('render_jobs_snapshot', (event) => {
-    jobs = event.payload || [];
+    jobsRestore.noteSnapshot();
+    applyJobsSnapshot(event.payload || []);
+  }).catch((err) => console.error('Failed to register render_jobs_snapshot listener:', err));
+  jobsRestore.restore();
+
+  function applyJobsSnapshot(list) {
+    jobs = list;
     if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
       for (const j of jobs) {
         if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
@@ -713,10 +739,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
     const activeOrQueued = queuedCount + renderingCount;
-    if (renderStatusEl) {
-      renderStatusEl.textContent = renderingCount > 0
-        ? STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length)
-        : (queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
+    if (renderingCount > 0) {
+      setRenderStatus(renderStatusEl, STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length), JOB_STATUS.RENDERING);
+    } else {
+      setRenderStatus(renderStatusEl, queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
     }
     // Scan is blocked while anything is Queued or Rendering so a re-scan
     // can't clobber jobs the user may have already toggled Skip on — see
@@ -734,7 +760,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       lastJobsFingerprint = fingerprint;
       refreshExportPoolFree(getExportDirs);
     }
-  });
+  }
 
   listen('render_batch_finished', () => {
     // A row that was Retried during the batch is still Queued, so Scan stays
@@ -767,7 +793,8 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         notify(kind, title, summary);
       }
     }
-    if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.STATUS_FINISHED;
+    const end = batchEndStatus(finished, failed, cancelled);
+    setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
   if (scanRenderBtn) {
@@ -777,7 +804,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       // the status line needs, not the name, so this stays a cheap counter
       // rather than parsing/echoing every take's name into the DOM.
       scanFoundCount += 1;
-      if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.scanFoundSoFar(scanFoundCount);
+      setRenderStatus(renderStatusEl, STRINGS.RENDER.scanFoundSoFar(scanFoundCount));
     });
 
     scanRenderBtn.addEventListener('click', () => {
@@ -816,7 +843,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       scanFoundCount = 0;
       showToast(STRINGS.RENDER.SCANNING_TOAST, 'info');
       scanRenderBtn.disabled = true;
-      if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.STATUS_SCANNING;
+      setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCANNING);
 
       const renderPayload = {
         render_directories: captureLocations,
@@ -837,16 +864,14 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       queueRenderBatch(renderPayload)
         .then((count) => {
           showToast(STRINGS.RENDER.scannedTakesToast(count), count > 0 ? 'success' : 'info');
-          if (renderStatusEl) {
-            renderStatusEl.textContent = count > 0
-              ? STRINGS.RENDER.scanCompleteStatus(count)
-              : STRINGS.MAIN.statusGeneric(STRINGS.RENDER.NO_RENDER_TAKES_DETECTED);
-          }
+          setRenderStatus(renderStatusEl, count > 0
+            ? STRINGS.RENDER.scanCompleteStatus(count)
+            : STRINGS.MAIN.statusGeneric(STRINGS.RENDER.NO_RENDER_TAKES_DETECTED));
           if (count === 0) scanRenderBtn.disabled = false;
         })
         .catch((err) => {
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
-          if (renderStatusEl) renderStatusEl.textContent = STRINGS.RENDER.STATUS_SCAN_FAILED;
+          setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
           scanRenderBtn.disabled = false;
         });
     });

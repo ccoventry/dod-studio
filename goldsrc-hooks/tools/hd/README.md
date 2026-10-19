@@ -1,6 +1,6 @@
 # HD asset build scripts
 
-These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
+These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, sprites (world sprites and, since #728, the HUD's own: kill-feed and weapon icons, scopes, hint icons, HLTV icons; crosshairs stay stock), decals (bullet holes, blood, scorch marks, map logos), detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
 
 The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
 
@@ -40,7 +40,7 @@ dodstudio_hd_enabled 0
 dodstudio_hd_enabled 1
 ```
 
-A change applies to what loads next: walls, detail textures and skies from the next demo, models and sprites already loaded after a game restart. Put it in `movie.cfg` to have it from the start.
+A change applies to what loads next: walls, detail textures and skies from the next demo, models, sprites and decals already loaded after a game restart. Put it in `movie.cfg` to have it from the start.
 
 ### More examples
 
@@ -148,7 +148,7 @@ Map textures and skies are the bulk of the build, and a public-server map you ne
 1. Copy `hd_maps.example.txt` to `hd_maps.txt` in the game's `dod_addon\dodstudio_hd` folder (e.g. `...\Half-Life\dod_addon\dodstudio_hd\hd_maps.txt`), next to the files it decides about.
 2. List the maps, one per line. `*` matches anything and `?` one character, like a Windows folder search: `dod_railroad2*` covers every railroad2 build. A name without them matches only that map.
 
-`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
+`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites, decals and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
 
 A map left out simply shows its original textures in game, and `dodstudio_debug_hd_misses` lists it.
 
@@ -173,6 +173,7 @@ python world_hd.py   %OUT%\world\ultrasharp   dod_mymap dod_othermap
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\v_mycustomgun.mdl
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\a\folder\of\models
 python sprites_hd.py %OUT%\sprites\ultrasharp C:\path\to\mysprite.spr
+python decals_hd.py  %OUT%\decals\ultrasharp  C:\path\to\decals.wad
 python detail_hd.py  %OUT%\detail\ultrasharp  C:\path\to\folder\of\detail\tgas
 python sky_hd.py     %OUT%\sky\ultrasharp     dod_mymap
 ```
@@ -185,7 +186,8 @@ Every script upscales 250 files at a time and writes each batch before starting 
 
 - **Map textures:** `<name>_<hash>.tga`
 - **Model skins:** `<skin name>_<hash>.tga`
-- **Sprites:** `<sprite>_<frame>_<hash>.tga`
+- **Sprites:** `<sprite>_<frame>_<hash>.tga`, HUD atlases included (`weapons1_0_<hash>.tga`, `hud_icons_0_<hash>.tga`); the game draws a HUD sprite at the size `hud.txt` says whatever the file's size, so the file just needs the same layout at a multiple of the original
+- **Decals:** `<name>_<hash>.tga`, where the name's first character is the one the game uses, not the wad's: `{` for a cut-out decal (its palette ends in pure blue), `}` for every other (`}scorch1`, `{shot5`)
 - **Detail textures and skies:** the same names as in `gfx\detail` and `gfx\env`
 
 The easiest way to get the right name is to build the texture once with any style and copy the file name. In game, `dodstudio_debug_hd_misses` also names the file a texture would need.
@@ -244,7 +246,8 @@ Lists saved in this folder by an older version still work while the install has 
 | `build_all.py` | runs everything below, for each style |
 | `world_hd.py` | map textures (embedded in the BSP or from its wads) |
 | `models_hd.py` | model skins |
-| `sprites_hd.py` | world sprite frames (HUD sprites are never replaced, so they're skipped) |
+| `sprites_hd.py` | sprite frames, world and HUD (`--no-hud` leaves the HUD atlases out) |
+| `decals_hd.py` | decals from `decals.wad` (players' sprays can't be built: they arrive with the demo) |
 | `detail_hd.py` | detail textures |
 | `sky_hd.py` | skybox faces |
 | `compare.py` | the style comparison sheet |
@@ -252,7 +255,7 @@ Lists saved in this folder by an older version still work while the install has 
 | `styles.py` | the style list and the upscaler call |
 | `my_styles.example.txt` | template for your own styles (copy it to `dodstudio_hd\my_styles.txt`) |
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
-| `goldsrc.py` | BSP, WAD, model and sprite readers |
+| `goldsrc.py` | BSP, WAD, decal, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
 | `requirements.txt` | Python packages the scripts need (`pip install -r`) |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |

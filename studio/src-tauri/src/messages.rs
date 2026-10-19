@@ -286,6 +286,15 @@ pub const RENDER_BATCH_ALREADY_IN_PROGRESS: &str = "Render batch already in prog
 pub const NOTHING_QUEUED_TO_RENDER: &str = "Nothing queued to render — scan for takes first.";
 pub const SKIP_ONLY_FOR_OBS_TAKE: &str = "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip).";
 
+/// Start on a recovered batch whose autosave lacks something a render needs
+/// (#770): the rows show, but only a fresh scan can fill `what` in.
+pub fn recovered_batch_needs_scan(what: &str) -> String {
+    format!(
+        "recovered batch: scan again to set {} (Clear Queue, then Scan for Takes).",
+        what
+    )
+}
+
 pub fn no_such_job(job_id: &str) -> String {
     format!("No such job: {}", job_id)
 }

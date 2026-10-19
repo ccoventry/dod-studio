@@ -39,6 +39,8 @@ pub struct AppSettings {
     /// reads.
     #[serde(default)]
     pub goldsrc_hooks_dll_path: Option<String>,
+    /// The hook DLL's in-game Demos tab reads this and `demo_folder_history`
+    /// out of settings.json for its Go to list (#779): keep the key names.
     pub pinned_folders: Vec<String>,
     /// Analyzer sidebar's "Recent" quick-links tier — most-recent-first,
     /// capped at 10, pushed whenever a folder selection yields a non-empty
@@ -255,6 +257,12 @@ pub struct AppSettings {
     /// goes missing later opens the window again.
     #[serde(default)]
     pub setup_dismissed: bool,
+    /// Configuration > Players (#428): the spray and crosshair each player
+    /// gets in a demo, what everyone else gets, and whether the game uses it.
+    /// Mirrored for the hook DLL by `players_tab::mirror_table` on load and
+    /// on every save.
+    #[serde(default)]
+    pub players: native::player_overrides::PlayerTable,
 }
 
 fn default_game_folder() -> String {
@@ -445,6 +453,7 @@ impl Default for AppSettings {
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
             setup_dismissed: false,
+            players: native::player_overrides::PlayerTable::default(),
         }
     }
 }
@@ -506,6 +515,9 @@ impl SettingsManager {
     pub fn new() -> Self {
         let settings = AppSettings::load_or_default();
         apply_game_folder(&settings);
+        // At start too, so the hook's copy follows a settings.json edited or
+        // restored while Studio was closed.
+        crate::players_tab::mirror_table(&settings);
         Self {
             inner: Arc::new(Mutex::new(settings)),
         }

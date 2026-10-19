@@ -90,11 +90,30 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
-    // #685: the queue grouped by match, with a header line per match.
-    GROUP_BY_MATCH_LABEL: 'Group by match',
-    GROUP_BY_MATCH_TITLE: 'Put the demos of one match together: the HLTV demo and every POV of each half, under a line naming the match. '
+    // #685, #823: the queue grouped by match, player, map, ..., with a header line per group.
+    GROUP_BY_LABEL: 'Group by:',
+    GROUP_BY_TITLE: 'Show the queue in groups, each under a line with its counts. Only the order changes: '
+      + 'the same demos stay shown, and Review highlights and the bulk actions use them as before.\n'
+      + 'Match puts the demos of one match together: the HLTV demo and every POV of each half. '
       + 'Which match and half a demo is comes from what it recorded (the players, their sides, the kills and the chat), never from its file name. '
-      + 'The same numbers feed {match} and {half} in clip names.',
+      + 'The same numbers feed {match} and {half} in clip names.\n'
+      + 'Player groups POV demos by who recorded them. Date is the day the demo file was last changed.',
+    GROUP_BY_NONE: 'None',
+    GROUP_BY_MATCH: 'Match',
+    GROUP_BY_PLAYER: 'Player',
+    GROUP_BY_MAP: 'Map',
+    GROUP_BY_FOLDER: 'Folder',
+    GROUP_BY_DATE: 'Date',
+    GROUP_BY_TYPE: 'Demo type',
+    groupHeader: (label, demos, highlights) =>
+      `${label} · ${demos} demo${demos === 1 ? '' : 's'}, ${highlights} highlight${highlights === 1 ? '' : 's'}`,
+    GROUP_HLTV: 'HLTV demos',
+    GROUP_POV: 'POV demos',
+    GROUP_NO_RECORDER: 'No recording player found',
+    GROUP_NO_MAP: 'Map not known',
+    GROUP_NO_DATE: 'Date not known',
+    GROUP_NO_TYPE: 'Demo type not known',
+    groupDateTitle: (day) => `Demo files last changed on ${day}`,
     groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
     matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
     matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
@@ -112,9 +131,13 @@ export const STRINGS = {
     TABLE_HEADER_DEMO_FILE: 'Demo File',
     TABLE_HEADER_HIGHLIGHTS: 'Highlights',
     TABLE_HEADER_SELECTED: 'Selected',
-    TABLE_HEADER_PENDING: 'Pending',
-    TABLE_HEADER_CAPTURED: 'Captured',
-    TABLE_HEADER_RENDERED: 'Rendered',
+    // One cell each of coloured counts, legend letters under the name.
+    TABLE_HEADER_STATUS: 'Status',
+    TABLE_HEADER_STATUS_TITLE: 'How many of the demo\'s highlights are Pending / Captured / Rendered (P / C / R), each in its status colour. Hover a row for the numbers in words.',
+    TABLE_HEADER_REVIEW: 'Review',
+    TABLE_HEADER_REVIEW_TITLE: 'How many of the demo\'s highlights have no Review mark yet / Keep / Maybe / Skip (– / K / M / S), each in its colour. Hover a row for the numbers in words.',
+    COUNT_LABELS: { Pending: 'Pending', Captured: 'Captured', Rendered: 'Rendered', Unmarked: 'not reviewed', Keep: 'Keep', Maybe: 'Maybe', Skip: 'Skip' },
+    COUNT_LETTERS: { Pending: 'P', Captured: 'C', Rendered: 'R', Unmarked: '–', Keep: 'K', Maybe: 'M', Skip: 'S' },
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
@@ -141,7 +164,7 @@ export const STRINGS = {
     REASON_STATUS: 'a Pending/Captured/Rendered status',
     REASON_NOTE: 'a note',
     REASON_CLIP_NAME: 'a typed clip name',
-    REASON_REVIEW: 'a Keep/Skip review mark',
+    REASON_REVIEW: 'a Keep/Maybe/Skip review mark',
     REASON_RANGE: 'an edited kill range',
     EMPTY_DASH: '—',
   },
@@ -186,9 +209,10 @@ export const STRINGS = {
     COL_DUR: 'Dur.',
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
-    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, or Skip. Skip unticks the row and locks it out of every capture batch.',
+    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',
     CURATION_UNREVIEWED: '–',
     CURATION_KEEP: 'Keep',
+    CURATION_MAYBE: 'Maybe',
     CURATION_SKIP: 'Skip',
     SKIPPED_CB_TITLE: 'Marked Skip in the Review column, so it can\'t be captured. Set Review back to use it.',
     COL_STATUS: 'Status',
@@ -251,6 +275,7 @@ export const STRINGS = {
     TAB_CAPTURE_OUTPUT: 'Destinations',
     TAB_CUSTOM_COMMANDS: 'Commands',
     TAB_RENDER_OUTPUT: 'Render Settings',
+    TAB_PLAYERS: 'Players',
     TAB_NOTIFICATIONS: 'Notifications',
     HLAE_EXEC_LABEL: 'HLAE Executable:',
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
@@ -268,7 +293,7 @@ export const STRINGS = {
       : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
     gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
     gameFolderMissing: (name) =>
-        `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+        `There's no "${name}" folder beside hl.exe with a liblist.gam and a cl_dlls/client.dll, so the game can't start it. Pick one from the list.`,
     GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
@@ -597,7 +622,7 @@ export const STRINGS = {
     TABLE_HEADER_HISTORY_TITLE: 'Every time this take was rendered, kept beside the take so it survives restarts. ▸ lists each attempt.',
     HISTORY_NEW: 'New',
     historyRendered: (count) => `Rendered ×${count}`,
-    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' },
+    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted', rendering: 'Rendering…' },
     HISTORY_SKIPPED_SETTINGS: 'Skip (kept original)',
     HISTORY_TOGGLE_TITLE: 'Show or hide every render of this take',
     historyFileNotFound: (name) => `${name} was moved or deleted`,
@@ -728,6 +753,8 @@ export const STRINGS = {
     REQUIRED_ESTIMATED_DEFAULT: 'Required (Over-estimated): 0.00 GB',
     recoveredJobsToast: (completed, pending) => `Recovered ${completed} completed, ${pending} pending render job(s).`,
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
+    STATUS_RECOVERING: 'Status: Recovering the render batch…',
+    recoveredStatus: (queued) => `Status: Render batch recovered — ${queued} take(s) queued`,
     renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
@@ -739,6 +766,8 @@ export const STRINGS = {
     countCancelled: (n) => `${n} cancelled`,
     batchSummary: (parts) => `Render batch finished — ${parts}.`,
     STATUS_FINISHED: 'Status: Finished',
+    STATUS_CANCELLED: 'Status: Cancelled',
+    statusFinishedWith: (parts) => `Status: Finished — ${parts}`,
     scanFoundSoFar: (n) => `Status: Scanning… found ${n} take(s) so far`,
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
     SCANNING_TOAST: 'Scanning render directories...',
@@ -1508,18 +1537,56 @@ export const STRINGS = {
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
-    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_QUESTION: "Rescan them now? Their highlights are replaced by the new scan; marks, notes, status and kill ranges go with any highlight found again.",
     CHANGED_DEMOS_RESCAN: 'Rescan',
+    // Opening a project with demos an older DoD Studio scanned (scan_version.js).
+    OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
+    outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
+    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    OUTDATED_DEMOS_RESCAN: 'Rescan',
+    OUTDATED_DEMOS_NOT_NOW: 'Not now',
+    // What a rescan did with the highlights' work (rescan_carry.js).
+    rescanCarryToast: (kept, total) => kept === total
+      ? `Rescan kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `Rescan kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the new scan; their marks and notes are listed in the activity log (View Logs).`,
+    rescanCarryLog: (kept, total, demos) => `[rescan] kept the work on ${kept} of ${total} highlight(s) across ${demos} demo(s)`,
+    rescanDemoLog: (name) => `[rescan] ${name}:`,
+    rescanNarrowedLog: (time, player) => `[rescan]   ${time} ${player}: the new scan splits its Kill Range over two highlights; kept on the one holding most of its kills`,
+    rescanUncarriedLog: (time, player, timeline, reason, work) => `[rescan]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    RESCAN_UNCARRIED_REASON: {
+      'no-piece': 'the demo did not scan',
+      'not-found': 'no highlight in the new scan has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
     // #217: splitting a queued demo that recorded more than one map.
-    SPLIT_TRACKED_DEMO_TITLE: 'Split Tracked Demo',
-    VERB_SPLITS: 'splits and replaces',
-    SPLIT_ANYWAY: 'Split Anyway',
     queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    // What happened to the original's highlight work (split_carry.js).
+    splitCarryToast: (name, kept, total) => kept === total
+      ? `${name}: kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `${name}: kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the split demos; their marks and notes are listed in the activity log (View Logs).`,
+    splitCarryLog: (name, kept, total, pieces) => `[split] ${name} -> ${pieces.join(', ')}: kept the work on ${kept} of ${total} highlight(s)`,
+    splitNarrowedLog: (time, player, piece) => `[split]   ${time} ${player}: its Kill Range spans two highlights in ${piece}; kept on the one holding most of its kills`,
+    splitUncarriedLog: (time, player, timeline, reason, work) => `[split]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    SPLIT_UNCARRIED_REASON: {
+      'no-piece': 'its map was not written as a demo of its own (shorter than a minute), or the piece did not scan',
+      'not-found': 'no highlight in the split demo has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
+    splitWorkText: ({ curation, status, picked, notes, clipName, range }) => [
+      curation && `Review: ${curation}`,
+      status && `Status: ${status}`,
+      picked && 'Picked',
+      range && `Kill Range: ${range}`,
+      clipName && `Clip name: "${clipName}"`,
+      notes && `Note: "${notes}"`,
+    ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
     queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue; their picks don\'t carry over, so pick the highlights again in each one.',
+    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
     MULTI_MAP_PICKED_SPLIT: 'Split Them',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
@@ -1535,7 +1602,7 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
+    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
@@ -1543,6 +1610,10 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    scanCancelledToast: (count) =>
+      count > 0
+        ? `Scan cancelled (${count} demo(s) added before cancel)`
+        : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 
@@ -1717,7 +1788,7 @@ export const STRINGS = {
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
-    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
+    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
     // #426: how much of the game a style covers.
@@ -1725,7 +1796,7 @@ export const STRINGS = {
     CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
     largestSize: (width, height) => `up to ${width}×${height}`,
     LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
-    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', decals: 'decals', detail: 'detail textures', sky: 'skies' },
     someOf: (files, most, type) => `${files} of ${most} ${type}`,
     styleGaps: (style, none, some) => {
       const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
@@ -1897,12 +1968,12 @@ export const STRINGS = {
     // What to do about each reason, after the hook's own heading.
     MISSES_ADVICE: {
       wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
-      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      no_file: "Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps. A decal that isn't in decals.wad is a player's spray, which has no HD version.",
       failed: "A file was found but couldn't be used; each line says why.",
       on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
     },
     // The hook's asset kinds in the miss list (singular, unlike the folders).
-    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', decal: 'Decal', detail: 'Detail texture', sky: 'Sky' },
   },
 
   // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
@@ -2179,13 +2250,56 @@ export const STRINGS = {
   // ── Review highlights (#623) ─────────────────────────────────────────────
   REVIEW: {
     BUTTON: 'Review highlights',
-    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, No marks it Skip.',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
+    // #661: which Review marks a review plays.
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
+    COVERS_ALL: 'All',
+    COVERS_UNMARKED: 'Unmarked',
+    COVERS_KEEP: 'Keep',
+    COVERS_MAYBE: 'Maybe',
+    COVERS_SKIP: 'Skip',
+    // #822: whose highlights an HLTV demo's review plays.
+    HLTV_LABEL: 'HLTV:',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; any players you pick from the HLTV demos (a whole team at once from the Teams list), kept in the project; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
+    HLTV_MISSING: 'Players missing their POV for this half',
+    HLTV_RECORDERS: 'Players with a POV demo in the queue',
+    HLTV_ALL: 'Everyone',
+    // #828: any players from the HLTV demos, picked beside the box.
+    HLTV_PICKED: 'Players I pick',
+    PICK_ADD_PLAYER: 'Add a player…',
+    PICK_ADD_PLAYER_TITLE: 'Everyone with a highlight in the queue\'s HLTV demos, one line per player with every name they used.',
+    PICK_NO_PLAYERS: 'No HLTV highlights in the queue',
+    PICK_ADD_TEAM: 'Add a team…',
+    PICK_ADD_TEAM_TITLE: 'Adds every player of a team from the Teams list: whoever played on its side in an HLTV demo, or has its tag in their name.',
+    PICK_NO_TEAMS: 'No teams in the HLTV demos',
+    pickTeamOption: (name, count) => `${name} (${count} player${count === 1 ? '' : 's'})`,
+    PICK_NONE: 'Nobody picked yet',
+    PICK_REMOVE: 'Take this player out',
+    PICK_NOT_IN_QUEUE_TITLE: 'No highlights in the queue\'s HLTV demos. Kept in the pick for when their demo is back.',
+    ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
+    ORDER_TIME: 'Chronological',
+    ORDER_PLAYER: 'By player (A–Z)',
+    // The HLTV box left out every highlight there was (#822).
+    hltvNoneChosen: (choice, count, pickedCount = 0) => {
+      const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;
+      if (choice === 'picked' && pickedCount === 0) {
+        return `Nothing to review: HLTV is set to Players I pick and nobody is picked, so the ${n} were left out. Add players or a team beside the HLTV box, or set HLTV to Everyone.`;
+      }
+      if (choice === 'missing' || !choice) {
+        return `Nothing to review: every player with a POV demo in the queue recorded this half themselves, so the ${n} were left out. To review a player from the HLTV demo, add one of their POV demos from another half, or set HLTV to Everyone.`;
+      }
+      return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
+    },
+    nothingCovered: (covers, ticked) => {
+      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
+      return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
+    },
     TICK_YES_LABEL: 'Tick Yes for capture',
-    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep.',
+    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
     FAST_FORWARD_UNIT: 's',
     FAST_FORWARD_TITLE: 'When two kills in a highlight are further apart than this, the stretch between them plays at 4x: from 2 s after one kill to 4 s before the next. You still see everything, just quicker. Takes effect when a review starts.',
-    NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
+    NOTHING_TO_REVIEW: 'The Master Demo Queue shows no demos to review: add some, or clear its search and filters.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
     startedToast: (count, launched, skipped) =>
@@ -2459,6 +2573,62 @@ export const STRINGS = {
   },
 
   // ── First-run Setup window and the Capture page's checklist (#599) ──────
+  // Configuration > Players (#428): players_ui.js.
+  PLAYERS: {
+    USE_IN_GAME_LABEL: 'Use in the game',
+    USE_IN_GAME_TITLE: 'On: sprays and crosshairs in your demos follow this table (dodstudio_player_overrides 1, sent when Studio starts the game, a review or a batch, and right away to a game already running). Off: the game\'s own.',
+    HELP: "Pick the spray and the crosshair each player shows in your demos: sprays are PNGs from the game's logos folder, crosshairs a 64x64 tile of a sprite in its sprites folder. Players are matched by SteamID, or by name when there is none.",
+    PLAYER_PLACEHOLDER: 'A player from the queue, a SteamID or a name',
+    ADD_BUTTON: 'Add Player',
+    REFRESH_BUTTON: 'Refresh',
+    REFRESH_TITLE: "Read the logos and sprites folders and the queue's players again",
+    COLUMN_PLAYER: 'Player',
+    COLUMN_SPRAY: 'Spray',
+    COLUMN_CROSSHAIR: 'Crosshair',
+    PICK_PNG: 'Pick a PNG…',
+    FALLBACK_SPRAY_OPTION: 'Fallback spray',
+    FALLBACK_CROSSHAIR_OPTION: 'Fallback crosshair',
+    pngMissingOption: (name) => `${name} (not in logos)`,
+    spriteMissingOption: (name) => `${name} (not in sprites)`,
+    SPRITE_TITLE: "The crosshair's sprite, in the game's sprites folder",
+    TILE_TITLE: 'Pick the tile: the sprite is a 4x4 grid of 64x64 crosshairs, numbered as cl_xhair_style numbers them',
+    PICK_TILE: 'Pick a tile',
+    tileLabel: (tile) => `Tile ${tile}`,
+    NO_PREVIEW: "This sprite couldn't be read for a preview: pick by number (1 top left, 16 bottom right).",
+    notGridSize: (w, h) => `This sprite is ${w}x${h}, not 256x256: its tiles are still cut 64x64 from the top left.`,
+    NO_PLAYERS: 'No players listed yet: everyone gets the fallbacks below.',
+    MATCHED_BY_STEAMID: 'Matched by SteamID, whatever name they play under',
+    MATCHED_BY_NAME: 'Matched by name, ignoring case',
+    REMOVE_TITLE: 'Remove this player',
+    removeAria: (who) => `Remove ${who}`,
+    readingPlayers: (done, total) => `Reading the queue's players… ${done} of ${total} demos`,
+    playersFound: (players, demos) => (demos
+      ? `${players} player${players === 1 ? '' : 's'} in the queue's ${demos} demo${demos === 1 ? '' : 's'}`
+      : 'No demos in the queue: type a SteamID or a name.'),
+    NO_PNGS: "No PNG in the game's logos folder (in the game folder beside hl.exe). Put your spray pictures there, then Refresh.",
+    pngsMissing: (names) => `Not in the logos folder: ${names.join(', ')}. Those sprays stay as the game draws them.`,
+    spritesMissing: (names) => `Not in the sprites folder: ${names.join(', ')}. Those crosshairs stay the game's own.`,
+    HLTV_FALLBACK_UNSET: 'HLTV demos: pick the fallback spray. Without one, players not listed show no spray (with nobody listed at all, the game\'s bullet hole).',
+    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray, or players not listed keep their own (no spray where the demo saved none).',
+    NOT_IN_GAME: "Use in the game is off: the game draws its own sprays and crosshairs.",
+    POV_FALLBACK_LABEL: 'Spray, players not listed, POV demos:',
+    POV_FALLBACK_TITLE: 'Their own spray is the one the demo saved, drawn as it is. A player who joined before the recording started has none saved and shows no spray, never a bullet hole.',
+    HLTV_FALLBACK_LABEL: 'Spray, players not listed, HLTV demos:',
+    HLTV_FALLBACK_TITLE: 'An HLTV demo records that a player sprayed, never the picture, so "their own" is not offered.',
+    FALLBACK_OWN: 'Their own spray',
+    FALLBACK_PNG: 'One fallback spray',
+    FALLBACK_NONE: 'No spray',
+    CROSSHAIR_FALLBACK_LABEL: 'Crosshair, players not listed:',
+    CROSSHAIR_FALLBACK_TITLE: "The game's own is your cl_xhair_style tile of customXHair.spr, as without this table. The crosshair shown is the recorder's in a POV demo, and the watched player's in an HLTV demo's in-eye view.",
+    CROSSHAIR_GAME: "Game's own",
+    CROSSHAIR_ONE: 'One fallback crosshair',
+    HD_NOTE: "Every spray from a PNG is drawn at the spray size in every demo, whether or not the demo saved one, with or without HD textures (with them on, it's sharper). A spray change shows from the next demo you play. A crosshair changes on the next frame, and in a POV demo needs your cl_xhair_style at 1-16 (0 is DoD's classic crosshair, which has no tile to swap).",
+    SPRAY_SIZE_LABEL: 'Spray size:',
+    SPRAY_SIZE_TITLE: "How big a spray built from a PNG is on the wall (its longer side; the picture's shape is kept): every listed player's spray, and every fallback spray. A spray from the demo keeps its real size. A change shows from the next demo you play.",
+    spraySizeOption: (n) => `${n}${n === 64 ? ' (like a saved spray)' : ''}`,
+    FROM_DEMO_OPTION: 'From the demo',
+    FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
   SETUP: {
     MENU_ITEM: 'Setup…',
     MENU_ITEM_TITLE: 'Walk through what DoD Studio needs: the game, HLAE, FFmpeg, output folders and demos',
