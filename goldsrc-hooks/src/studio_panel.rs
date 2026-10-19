@@ -680,6 +680,10 @@ const MENU_SLOT_SET_FIXED_WIDTH: usize = 166;
 /// Demos tab's Back, Forward and Up are greyed out where they have nowhere
 /// to go.
 const PANEL_SLOT_SET_ENABLED: usize = 47;
+/// `Panel::IsEnabled()`, the slot after: what `Button` and `Slider` check
+/// before taking a click, and what the review's lock (#826) reads to put
+/// each control back as it was.
+const PANEL_SLOT_IS_ENABLED: usize = 48;
 /// The Demos tab's Back, Forward and Up buttons (`ui/Demos.res`).
 const DEMO_NAV_BUTTONS: [&str; 3] = ["DemoBack", "DemoForward", "DemoUp"];
 /// What a `ComboBox`'s own arrow button sends it: `OnCommand` opens the list,
@@ -1387,6 +1391,17 @@ fn action(command: &str) -> Action<'_> {
     }
 }
 
+/// Whether a Playback tab button's action moves the demo, so a review's
+/// lock refuses it (#826): the VCR bar's commands, Go, and console lines that
+/// seek, change speed or load.
+fn action_moves_the_demo(action: &Action) -> bool {
+    match action {
+        Action::Vcr(_) | Action::Goto => true,
+        Action::Engine(line) => crate::review_lock::moves_the_demo(line),
+        _ => false,
+    }
+}
+
 /// Where the tab strip goes in a window whose client area is `client`
 /// (x, y, wide, tall): all of it, inset by [`SHEET_MARGIN`], less the help
 /// line along the bottom.
@@ -1704,6 +1719,8 @@ mod hook {
     mod load_progress;
     /// The loading strip along the top of every tab (#797).
     mod load_strip;
+    /// The demo controls greyed out while a review runs (#826).
+    pub(super) mod lock_controls;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
     /// The Review tab (#623).
@@ -1881,6 +1898,17 @@ mod hook {
         let command = text(raw);
         if command.eq_ignore_ascii_case("load") {
             match unsafe { selected_demo(this) } {
+                // A double-click loads even with Load greyed out (#826).
+                Some(row)
+                    if !row.trim_end_matches('"').ends_with('/')
+                        && crate::review_lock::locked() =>
+                {
+                    crate::commands::console_print(&format!(
+                        "{NAME}: {}\n",
+                        crate::review_lock::LOCKED_NOTE
+                    ));
+                    return;
+                }
                 Some(row) if !row.trim_end_matches('"').ends_with('/') => {
                     let line = viewdemo_line(&row);
                     let ran = std::ffi::CString::new(line.clone())
@@ -4034,7 +4062,15 @@ mod hook {
 
     unsafe fn handle(this: *mut c_void, raw: *const c_char, own: &AtomicUsize) {
         let command = text(raw);
+        let playback = PAGE_OBJECTS[PLAYBACK_PAGE].load(Ordering::Acquire) as *mut c_void;
         let result = match action(&command) {
+            // Greyed out during a review (#826); refused here too, in case a
+            // click lands before the lock greys the button.
+            ref a
+                if this == playback && crate::review_lock::locked() && action_moves_the_demo(a) =>
+            {
+                Err(crate::review_lock::LOCKED_NOTE.to_string())
+            }
             // The Demos and Highlights tabs' borrowed Load / Go buttons say
             // "load" too, and their parent is the page now. Their own window
             // has already acted on it; switching tabs here sent Go to Demos.
@@ -4170,6 +4206,10 @@ mod hook {
 
     /// Reads the Playback tab's time box and jumps there.
     unsafe fn goto_typed_time() -> Result<(), String> {
+        // Enter in the box lands here without a button (#826).
+        if crate::review_lock::locked() {
+            return Err(crate::review_lock::LOCKED_NOTE.to_string());
+        }
         let vgui = Vgui::get()?;
         unsafe {
             let page =
@@ -4409,6 +4449,8 @@ pub fn poll() {
     #[cfg(target_arch = "x86")]
     {
         hook::poll();
+        // After the loans have moved for this frame (#826).
+        hook::lock_controls::poll();
         if CLOSE_FOR_PLAYBACK.swap(false, Ordering::AcqRel) {
             hook::close_for_playback();
         }
@@ -5081,6 +5123,24 @@ mod tests {
         assert_eq!(action("Demo_Forward"), Action::DemoForward);
         assert_eq!(action("demo_up"), Action::DemoUp);
         assert_eq!(action("reset_settings"), Action::ResetSettings);
+    }
+
+    /// Every Playback tab button that moves the demo is refused during a
+    /// review (#826); the decals and "use this tab" buttons are not.
+    #[test]
+    fn a_review_refuses_the_playback_buttons_that_move_the_demo() {
+        let res = include_str!("../ui/Playback.res");
+        let mut commands = res
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("\"Command\""))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .collect::<Vec<_>>();
+        commands.push("goto".to_string());
+        assert!(commands.len() > 10, "{commands:?}");
+        for command in &commands {
+            let keeps = command.contains("clear_decals") || command.contains("viewdemo_in_panel");
+            assert_eq!(action_moves_the_demo(&action(command)), !keeps, "{command}");
+        }
     }
 
     #[test]

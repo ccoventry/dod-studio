@@ -246,6 +246,7 @@ mod position;
 mod pov_live_bob;
 mod remote;
 mod review;
+mod review_lock;
 mod run_in_background;
 mod scan;
 mod schedule;
