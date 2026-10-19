@@ -44,7 +44,8 @@
 //! treated as alive by this routine alone, the timer stays cleared and the
 //! keypress is never issued. Nothing is corrected after the fact, so there
 //! is no frame in which the camera has already moved. A viewer's own
-//! `+attack` still changes player.
+//! `+attack` still changes player, except during Review highlights
+//! (`spectator_buttons`, #826).
 //!
 //! While the watched player is dead the view is the game's own for a dead
 //! target (`V_GetInEyePos` rolls the camera and lowers it by 8), and it is
@@ -98,6 +99,21 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 static LOCKED: AtomicBool = AtomicBool::new(false);
 /// Whether a failure to apply has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
+/// Review highlights holds the lock for the whole review (#822), so a death
+/// before an HLTV highlight ends can't move the camera off its player; the
+/// cvar itself is left as the user set it.
+static REVIEW_HOLD: AtomicBool = AtomicBool::new(false);
+
+/// Holds the lock on (or lets the cvar decide again) for Review highlights.
+pub fn hold_for_review(on: bool) {
+    REVIEW_HOLD.store(on, Ordering::Relaxed);
+}
+
+/// Whether a review holds the lock: `spectator_buttons` ignores the viewer's
+/// spectator buttons for as long (#826).
+pub fn review_holds() -> bool {
+    REVIEW_HOLD.load(Ordering::Relaxed)
+}
 
 /// Called once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
@@ -147,13 +163,14 @@ pub fn set_locked(locked: bool) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Follows the cvar. Called every frame from `commands::poll`.
+/// Follows the cvar, or a review's hold. Called every frame from
+/// `commands::poll`.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
         return;
     }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = unsafe { (*cvar).value } != 0.0 || REVIEW_HOLD.load(Ordering::Relaxed);
     match set_locked(wanted) {
         Ok(false) => COMPLAINED.store(false, Ordering::Relaxed),
         Ok(true) => {
@@ -181,9 +198,9 @@ pub fn poll() {
 
 fn describe(locked: bool) -> &'static str {
     if locked {
-        "1: the camera stays on the player being watched when he dies"
+        "1: the camera stays on the player being watched when they die"
     } else {
-        "0: the game moves the camera on four seconds after he dies"
+        "0: the game moves the camera on four seconds after they die"
     }
 }
 

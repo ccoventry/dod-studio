@@ -542,6 +542,9 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // dodstudio_hide_clan_text changes.
     crate::clan_text::poll();
+    // Keeps the ShowMenu handler prepended and the voice and command menus
+    // hidden while dodstudio_hide_voice_menus is on.
+    crate::voice_menus::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -564,6 +567,9 @@ pub fn poll() {
     crate::remote::poll();
     // One step of a long forward seek, or a landed seek's follow-up command.
     crate::demo_seek::poll();
+    // Patches Core.dll's packet loop once viewdemo loads it, and logs each
+    // load's time (#798).
+    crate::fast_load::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
@@ -572,6 +578,12 @@ pub fn poll() {
     crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
+    // Once a second: rereads Studio's Players table when it changed and
+    // installs the demo spray detours once it asks for anything (#428).
+    crate::spray_hltv::poll();
+    // After the table is read: this frame's crosshair for the player on
+    // screen, which the HUD's sprite draws then pick up (#428).
+    crate::player_crosshair::poll();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
     crate::missing_shots::poll();
@@ -579,6 +591,8 @@ pub fn poll() {
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    // While a review runs, the viewer's clicks don't move its camera (#826).
+    crate::spectator_buttons::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
@@ -733,6 +747,16 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(fast_load) = crate::fast_load::status_line() {
+        lines.push(fast_load);
+    }
+    lines.push(crate::player_overrides::status());
+    if let Some(sprays) = crate::spray_hltv::status_line() {
+        lines.push(sprays);
+    }
+    if let Some(crosshair) = crate::player_crosshair::status_line() {
+        lines.push(crosshair);
+    }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
     }
@@ -786,6 +810,9 @@ fn status_text() -> String {
     }
     if let Some(clan_text) = crate::clan_text::status_line() {
         lines.push(clan_text);
+    }
+    if let Some(voice_menus) = crate::voice_menus::status_line() {
+        lines.push(voice_menus);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1117,10 +1144,12 @@ unsafe extern "C" fn cmd_hudelement() {
     if is_all {
         if on {
             // Deliberately refused. Hiding every element at once includes the
-            // menus, and a capture session that cannot see the class menu is a
-            // support question, not a feature.
+            // text menus (`menu`: voice commands and server votes; the team
+            // and class menus are VGUI and not on this list), and a capture
+            // session that cannot see a vote is a support question, not a
+            // feature.
             console_print(&format!(
-                "{HUDELEMENT_NAME}: `all 1` would hide the team and class menus too -- name the elements you want gone\n"
+                "{HUDELEMENT_NAME}: `all 1` would hide every text menu too -- name the elements you want gone\n"
             ));
             return;
         }
@@ -1237,6 +1266,16 @@ unsafe extern "C" fn cmd_demo_list_show_counts() {
         demo_list_folders::SHOW_COUNTS.name,
         &demo_list_folders::SHOW_COUNTS.fallback,
         demo_list_folders::show_counts_status,
+    );
+}
+
+/// Only registered when `dodstudio_demo_fast_load` could not be a cvar: on
+/// is the default budget.
+unsafe extern "C" fn cmd_demo_fast_load() {
+    handle_toggle(
+        crate::fast_load::NAME,
+        &crate::fast_load::FALLBACK_ON,
+        crate::fast_load::status,
     );
 }
 
@@ -1483,6 +1522,7 @@ pub fn install() {
     add_command(crate::review::NAME, crate::review::command);
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
+    add_command(crate::spray::NAME, crate::spray::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1520,6 +1560,11 @@ pub fn install() {
             demo_list_folders::COUNT_SUBFOLDERS.name,
             cmd_demo_list_count_subfolders,
         ),
+    }
+    // On by default (#798); read by fast_load::poll each frame.
+    match register(crate::fast_load::NAME, "1") {
+        Some(cvar) => crate::fast_load::set_cvar(cvar),
+        None => add_command(crate::fast_load::NAME, cmd_demo_fast_load),
     }
     match register(demo_list_folders::SHOW_COUNTS.name, "1") {
         Some(cvar) => demo_list_folders::SHOW_COUNTS.set_cvar(cvar),
@@ -1603,6 +1648,9 @@ pub fn install() {
     if let Some(clan_text) = register(crate::clan_text::NAME, "0") {
         crate::clan_text::set_cvar(clan_text);
     }
+    if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
+        crate::voice_menus::set_cvar(voice_menus);
+    }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
@@ -1635,6 +1683,11 @@ pub fn install() {
     }
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
         crate::pov_live_bob::set_cvar(bob);
+    }
+    // Off unless Studio turns it on: a game not started from Studio keeps
+    // its own sprays and crosshair (#428).
+    if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
+        crate::player_overrides::set_cvar(overrides);
     }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<!--
+  Harness for players_ui.js (#428): Configuration > Players. The backend's
+  list_logo_pngs, list_crosshair_sprites, crosshair_sprite_image,
+  set_player_overrides and index_demo_players are window.__mockInvokeHandlers;
+  window.__persisted counts saves, window.__players() reads the setting.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>players_ui.js test harness</title>
+</head>
+<body>
+  <input type="text" id="hl-path-input" value="C:/Games/Half-Life/hl.exe" />
+  <button class="config-tab-btn" data-tab="tab-players">Players</button>
+  <div id="tab-players">
+    <input type="checkbox" id="players-use-in-game" checked />
+    <input type="text" id="players-player-input" list="players-player-options" />
+    <datalist id="players-player-options"></datalist>
+    <button id="players-add-btn" disabled>Add Player</button>
+    <button id="players-refresh-btn">Refresh</button>
+    <div id="players-players-status"></div>
+    <div id="players-list"></div>
+    <div id="players-warning" style="display: none;"></div>
+    <select id="players-pov-fallback">
+      <option value="own">Their own spray</option>
+      <option value="png">One fallback spray</option>
+      <option value="none">No spray</option>
+    </select>
+    <span id="players-pov-fallback-png"></span>
+    <select id="players-hltv-fallback">
+      <option value="png">One fallback spray</option>
+      <option value="none">No spray</option>
+    </select>
+    <span id="players-hltv-fallback-png"></span>
+    <select id="players-crosshair-fallback">
+      <option value="game">Game's own</option>
+      <option value="sprite">One fallback crosshair</option>
+    </select>
+    <span id="players-crosshair-fallback-pick"></span>
+    <div id="players-crosshair-fallback-picker"></div>
+    <select id="players-spray-size"></select>
+  </div>
+  <script type="module">
+    import { createPlayersUi, getPlayers, setPlayers } from '/src/players_ui.js';
+    window.__persisted = 0;
+    window.__demos = [{ path: 'C:/demos/a.dem' }, { path: 'C:/demos/b.dem' }];
+    const ui = createPlayersUi({
+      getDemos: () => window.__demos,
+      getHlPath: () => document.querySelector('#hl-path-input').value.trim(),
+      getGameFolder: () => 'dod',
+      persist: () => { window.__persisted += 1; },
+    });
+    window.__players = () => getPlayers();
+    window.__setPlayers = (t) => setPlayers(t);
+    window.__refresh = () => ui.refresh();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

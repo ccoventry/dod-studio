@@ -194,9 +194,12 @@ fn modified_unix_secs(path: &Path) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Every `.dem` under `folder`, subfolders too, sorted by path.
+/// Every `.dem` under `folder`, subfolders too, sorted by path. Never the
+/// Recycle Bin's: renaming a deleted demo there would be wrong (#843).
 pub fn demos_in(folder: &Path) -> Vec<PathBuf> {
-    crate::sys::folder_walk::Walker::new().demos(folder)
+    crate::sys::folder_walk::Walker::new()
+        .skip_system_folders()
+        .demos(folder)
 }
 
 /// One rename: full paths.

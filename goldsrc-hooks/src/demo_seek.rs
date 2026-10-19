@@ -86,7 +86,8 @@
 //! ## Still loading
 //!
 //! The world fills in the background -- `Core.dll`'s `Server::RunFrame` reads at
-//! most 33 packets per engine frame -- while playback has already started. A
+//! most 33 packets per engine frame, or for a time budget per frame with
+//! `dodstudio_demo_fast_load` (#798) -- while playback has already started. A
 //! seek past what is loaded lands on the last loaded frame. `IsLoading()`
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.
@@ -464,11 +465,17 @@ pub fn set_time_scale(scale: f32) -> Result<(), String> {
 
 /// [`SEEK_TO_NAME`]'s seek, for code: lands on `seconds` of the world clock.
 pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
+    seek_to_seconds_then(seconds, None)
+}
+
+/// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
+/// landed, as `dodstudio_seek_to <seconds> <command>` does.
+pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
     #[cfg(target_arch = "x86")]
-    return player::seek(seconds, false, skip_between(), None);
+    return player::seek(seconds, false, skip_between(), then);
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = seconds;
+        let _ = (seconds, then);
         Err("only the 32-bit build has a demo player".to_string())
     }
 }

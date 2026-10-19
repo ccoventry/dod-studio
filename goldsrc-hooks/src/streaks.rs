@@ -27,8 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-/// Every life with a kill is listed; the tab's Min kills box narrows the
-/// list, so nothing is hidden by a number fixed here.
+/// Every life with a kill is listed: one kill is a highlight too.
 pub const MIN_KILLS: usize = 1;
 /// Go jumps this long before a streak's first kill.
 pub const LEAD_IN_SECS: f32 = 5.0;
@@ -282,6 +281,19 @@ pub fn status() -> Option<(u64, Status, u32)> {
     ))
 }
 
+/// The current analysis' progress (0 to 100) while it runs, `Some(None)`
+/// when none runs, or `None` while the worker is saving its result. Cheaper
+/// than [`status`] for the loading strip (#797), which asks every frame: it
+/// never copies the streaks found.
+pub fn loading_percent() -> Option<Option<u32>> {
+    let job = JOB.try_lock().ok()?;
+    Some(
+        job.as_ref()
+            .filter(|j| matches!(j.status, Status::Loading))
+            .map(|_| PERCENT.load(Ordering::Acquire)),
+    )
+}
+
 /// The streaks, and where they came from (for the log).
 fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     let root = cache_root();
@@ -314,7 +326,14 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
                     "DoD Studio read it, but its result is not in the cache".to_string()
                 });
         }
-        Some(Err(why)) => return Err(format!("DoD Studio could not read it: {why}")),
+        // An older Studio sends the parse error with its byte dump; the
+        // Highlights tab has one line for it.
+        Some(Err(why)) => {
+            return Err(format!(
+                "DoD Studio could not read it: {}",
+                analysis::integrity::parse_error_reason(&why)
+            ));
+        }
         None => {}
     }
     let size = std::fs::metadata(path)
