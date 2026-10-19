@@ -137,10 +137,11 @@ class GeometryTest(unittest.TestCase):
     def test_the_barrel_ends_up_level_with_the_muzzle_right_and_top_up(self):
         for tilt in (0, 8, 22, -15):
             tris = self.gun(tilt)
-            basis, _ = K.level_view(tris, (1, 1, 0.0))
-            pts = K.surface_points(tris)
+            basis, (_, _, angle) = K.level_view(tris, (1, 1, 0.0))
+            # the view tilts with the barrel's line, which is the model's tilt
+            self.assertAlmostEqual(angle, tilt, delta=0.3)
+            pts = np.concatenate([t[0].reshape(-1, 3) for t in tris])
             xy = np.stack([pts @ basis[0], pts @ basis[1]], 1)
-            self.assertLess(abs(np.degrees(np.arctan(K.top_edge_slope(xy)))), 1.5, tilt)
             # the muzzle (the barrel's far end, most negative model Y) on the right
             muzzle = np.array([0.0, -40.0, 0.75]) @ np.array([[np.cos(np.radians(tilt)), np.sin(np.radians(tilt)), 0], [-np.sin(np.radians(tilt)), np.cos(np.radians(tilt)), 0], [0, 0, 1]])
             self.assertGreater(muzzle @ basis[0], xy[:, 0].mean(), tilt)

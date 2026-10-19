@@ -25,8 +25,8 @@ Per icon (ICONS):
   4. the side-on view: the model's principal axes, each muzzle / up sign
      and a roll, scored by silhouette overlap with Valve's icon, so the
      muzzle points right and the gun fills its box as Valve's does
-     (choose_view); then, for guns, snapped to the model's own axes when
-     the match lands near one, so the barrel is level (level_view);
+     (choose_view); then, for guns, the model's own side view, tilted so
+     the end of the barrel is level (level_view);
   5. the skin in the HD style: the model skin models_hd.py built for this
      style when there is one, else upscaled here, else the stock skin;
   6. rendered orthographically, supersampled, two-sided Lambert with a
@@ -69,7 +69,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 4  # 4: barrel levelled by its top edge (level_view)
+VERSION = 5  # 5: the end of the barrel levelled (level_view)
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -381,43 +381,9 @@ def choose_view(tris, target_alpha, box, rolls=ROLLS, muzzle=MUZZLE):
 NOT_LEVELLED = re.compile(r"knife|spade|grenade|stick", re.I)
 
 
-def surface_points(tris, n=20000, seed=0):
-    """`n` points spread over the model's surface by area, so a long barrel
-    with vertices only at its ends still counts along its whole length."""
-    v = np.concatenate([t[0] for t in tris])  # (T, 3, 3)
-    area = 0.5 * np.linalg.norm(np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1)
-    if area.sum() <= 0:
-        return v.reshape(-1, 3)
-    rng = np.random.default_rng(seed)
-    pick = rng.choice(len(v), size=n, p=area / area.sum())
-    r1, r2 = rng.random(n), rng.random(n)
-    flip = r1 + r2 > 1
-    r1[flip], r2[flip] = 1 - r1[flip], 1 - r2[flip]
-    a, b, c = v[pick, 0], v[pick, 1], v[pick, 2]
-    return a + r1[:, None] * (b - a) + r2[:, None] * (c - a)
-
-
-def top_edge_slope(xy, front=0.45, bins=60, tol=0.012):
-    """The slope of the barrel's top edge in a side view (`xy`: surface
-    points, muzzle towards +x, y up): the highest point in each slice of
-    the gun's front part, and the straight line most of those lie on
-    (within `tol` of the gun's length). A sight post or the muzzle's lip is
-    a short spike off that line and doesn't count; a bipod or a magazine
-    hangs below the barrel, so it never reaches the top edge."""
-    x, y = xy[:, 0], xy[:, 1]
-    span = x.max() - x.min()
-    x0 = x.max() - front * span
-    edges = np.linspace(x0, x.max(), bins + 1)
-    cx, cy = [], []
-    for lo, hi in zip(edges[:-1], edges[1:]):
-        s = y[(x >= lo) & (x <= hi)]
-        if len(s) >= 4:
-            cx.append((lo + hi) / 2)
-            cy.append(np.percentile(s, 98))
-    if len(cx) < 4:
-        return 0.0
-    cx, cy = np.array(cx), np.array(cy)
-    eps = tol * span
+def line_slope(cx, cy, eps):
+    """The slope of the straight line most of the points (`cx`, `cy`) lie
+    on, within `eps`: a step or a spike off that line doesn't count."""
     best = (-1, np.inf, 0.0, 0.0)
     for i in range(len(cx)):
         for j in range(i + 1, len(cx)):
@@ -435,27 +401,105 @@ def top_edge_slope(xy, front=0.45, bins=60, tol=0.012):
     return float(k)
 
 
-def level_view(tris, pick):
-    """A side view with the barrel parallel to the icon's baseline, as in
-    Valve's icons. The silhouette match alone tilts a gun towards Valve's
-    drawing, which reads as crooked. Returns (basis, pick)."""
-    sx, sy, roll = pick
-    # Every DoD weapon model shares one layout (built for the hand bone):
-    # the muzzle along -Y, the top of the gun towards +X, the side along Z,
-    # tilted in the X-Y plane as it's held (rifles ~20 degrees). So the view
-    # is fixed, and only the tilt is measured.
-    right = np.array(MUZZLE, float)
-    up = np.array(MODEL_UP, float)
-    pts = surface_points(tris)
-    angle = 0.0
-    for _ in range(4):
-        r = np.radians(angle)
-        rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
-        xy = np.stack([pts @ rr, pts @ uu], 1)
-        angle += float(np.degrees(np.arctan(top_edge_slope(xy))))
+def runs(col):
+    """(top, bottom) of each opaque run in a silhouette column, top first."""
+    d = np.diff(np.concatenate([[0], col.astype(np.int8), [0]]))
+    return list(zip(np.nonzero(d == 1)[0], np.nonzero(d == -1)[0] - 1))
+
+
+def barrel_axis_slope(cov, reach=0.35, grow=1.6, samples=60):
+    """The slope of the bore's line at the end of the barrel, from a side
+    view's silhouette (`cov`: coverage 0..1, muzzle towards the right, y
+    down; the slope returned is y-up). Walking back from the muzzle, the
+    barrel is the run each column shares with the one before; while it
+    stays about as thick as the barrel its middle (to a fraction of a pixel,
+    from the edge pixels' coverage) is on the bore's line. Where a sight
+    post or gas tube sits on top (or a lug, rod or bipod hangs under) only
+    one edge moves, and the other edge, half a barrel away, still is; where
+    both move the forend or receiver has started and the walk stops."""
+    sil = cov > 0.5
+    xs = np.nonzero(sil.any(0))[0]
+    if len(xs) < 8:
+        return 0.0
+    x0, x1 = xs.min(), xs.max()
+    span = x1 - x0
+    start = x1 - max(1, span // 200)  # off the muzzle's anti-aliased edge
+    first = runs(sil[:, start])
+    if not first:
+        return 0.0
+    top, bot = max(first, key=lambda r: r[1] - r[0])
+    thick = max(bot - top, 1)
+    step = max(1, int(reach * span) // (samples * 3))
+    clean, guessed = [], []
+    misses = 0
+    for x in range(start, int(x1 - reach * span), -step):
+        over = [r for r in runs(sil[:, x]) if r[0] <= bot + 1 and r[1] >= top - 1]
+        if not over:
+            misses += 1
+            if misses > 3:
+                break
+            continue
+        t, b = max(over, key=lambda r: min(r[1], bot) - max(r[0], top))
+        if b - t <= grow * thick:
+            rows = np.arange(max(t - 1, 0), min(b + 2, len(cov)))
+            c = cov[rows, x]
+            clean.append((x, float((rows * c).sum() / c.sum())))
+            top, bot, thick = t, b, max(b - t, 1)
+            misses = 0
+        elif abs(b - bot) <= max(2, thick * 0.25):  # something on top
+            guessed.append((x, b - thick / 2))
+            top, bot = b - thick, b
+            misses = 0
+        elif abs(t - top) <= max(2, thick * 0.25):  # something underneath
+            guessed.append((x, t + thick / 2))
+            top, bot = t, t + thick
+            misses = 0
+        else:
+            misses += 1
+            if misses > 3:
+                break
+    # The clean run alone when it's long enough: an edge drifts with a
+    # tapered barrel, the middle doesn't. A blast shield or a muzzle cup
+    # off the bore's line is a step in the middles, left out by line_slope.
+    if len(clean) >= 8 and clean[0][0] - clean[-1][0] >= 0.06 * span:
+        cx, cy = np.array(clean, float).T
+        return -line_slope(cx, cy, 0.75)
+    pts = clean + guessed
+    if len(pts) < 3:
+        return 0.0
+    cx, cy = np.array(pts, float).T
+    return -line_slope(cx, cy, max(1.0, 0.0015 * span))
+
+
+# The silhouette level_view measures in: big enough that a pixel is a
+# small fraction of a degree along the barrel's end.
+LEVEL_SIZE = (2048, 1024)
+
+
+def side_view(angle):
+    """The basis of the side view tilted by `angle` degrees: every DoD
+    weapon model shares one layout (built for the hand bone), the muzzle
+    along -Y, the top of the gun towards +X, the side along Z, tilted in
+    the X-Y plane as it's held (rifles ~20 degrees)."""
+    right, up = np.array(MUZZLE, float), np.array(MODEL_UP, float)
     r = np.radians(angle)
     rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
-    return np.array([rr, uu, np.cross(rr, uu)]), (sx, sy, angle)
+    return np.array([rr, uu, np.cross(rr, uu)])
+
+
+def level_view(tris, pick):
+    """A side view with the end of the barrel level, as in Valve's icons:
+    the silhouette match alone tilts a gun towards Valve's drawing, and a
+    gun's overall outline (stock drop, tapered barrel, a gas tube) isn't
+    its bore, so the tilt is measured at the muzzle. Returns (basis, pick)."""
+    sx, sy, _ = pick
+    w, h = LEVEL_SIZE
+    angle = 0.0
+    for _ in range(3):
+        basis = side_view(angle)
+        cov = silhouette(tris, basis, *fit_transform(tris, basis, (4, 4, w - 4, h - 4)), w, h)
+        angle += float(np.degrees(np.arctan(barrel_axis_slope(cov))))
+    return side_view(angle), (sx, sy, angle)
 
 
 # ── rasterizer ───────────────────────────────────────────────────────────────
