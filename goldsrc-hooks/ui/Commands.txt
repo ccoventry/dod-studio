@@ -2,9 +2,9 @@ SPECTATING (HLTV demos)
   dodstudio_spec_match_pov 0/1
       Make a spectated first-person view match the player's own recording: gun animations, lost gunshots, the crosshair, prone eye height, the gun lowering.
   dodstudio_spec_lock 0/1
-      Keep the camera on the player you are watching when he dies.
+      Keep the camera on the player you are watching when they die.
   dodstudio_spec_deathcam 0/1
-      When the player you are watching dies, show the death cam his own recording shows (2.4 s behind his body, turning to the killer), then his eyes again.
+      When the player you are watching dies, show the death cam their own recording shows (2.4 s behind their body, turning to the killer), then their eyes again.
   dodstudio_spec_target <player>
       Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
   dodstudio_hide_spectator_bars 0/1
@@ -25,16 +25,18 @@ HUD
       Replace players' hand-signal animations.
   dodstudio_mute_voice_commands 0/1
       Silence voice commands ('fire in the hole!' and the rest).
+  dodstudio_hide_voice_menus 0/1
+      Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   dodstudio_hide_hudelement <name> 0/1
       Hide one HUD element; the bare command lists them.
   dodstudio_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
   dodstudio_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
-  dodstudio_hide_asset list|add|del|clear <model>...
+  dodstudio_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg
-      Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow] (live). The bare command shows the options.
+      Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
   dodstudio_objectives
       Move the objective icons and the objective timer.
   dodstudio_overviewmap
@@ -42,7 +44,7 @@ HUD
   dodstudio_hud_map_players 0-4
       Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
   dodstudio_hud_map_team_marker 0/1
-      HLTV: mark the watched player on the overview map with his team's camera icon.
+      HLTV: mark the watched player on the overview map with their team's camera icon.
   dodstudio_show_demo_scope 0/1
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
@@ -51,6 +53,8 @@ DEMO PLAYBACK
       Run at full speed while another window is in front, so a capture batch doesn't need the screen.
   dodstudio_pov_live_bob 0/1
       POV demos: the view and gun bob by the cl_bob set now (otherwise they don't bob at all).
+  dodstudio_player_overrides 0/1
+      Sprays and crosshairs in demos follow DoD Studio's Players table (Configuration > Players); 0 is the game's own. Studio sets it.
   dodstudio_stay_behind_while_capturing 0/1
       Keep the game behind your other windows while it records, instead of coming to the front.
   dodstudio_seek_to <time>
@@ -63,7 +67,7 @@ DEMO PLAYBACK
       viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
   dodstudio_reload_demo
       Play the last demo again.
-  dodstudio_review yes|no|replay|next|back|stop
+  dodstudio_review yes|maybe|no|replay|next|back|stop
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   dodstudio_schedule load "<file>"|clear
       Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
@@ -101,6 +105,8 @@ HD TEXTURES
       Load the HD textures built by DoD Studio's HD page.
   dodstudio_hd_style <name>
       Which HD style to use (ultrasharp by default).
+  dodstudio_spray [<name>|players]
+      Make logos\<name>.png your spray for live play (writes tempdecal.wad, shows from the next connect); bare lists the PNGs; players shows what Studio's Players table gives each player in the demo.
   dodstudio_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
 
