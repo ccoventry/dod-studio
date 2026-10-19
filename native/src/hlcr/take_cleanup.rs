@@ -407,14 +407,14 @@ mod tests {
     }
 
     #[test]
-    fn never_rendered_failed_cancelled_and_interrupted_takes_are_not_finished() {
+    fn never_rendered_failed_cancelled_and_unfinished_takes_are_not_finished() {
         let s = streams(&["all"]);
         assert_eq!(finished_at(&[], &s, EVERY_FILE_EXISTS), None);
         assert_eq!(finished_at(&[], &[], EVERY_FILE_EXISTS), None);
         for outcome in [
             RenderOutcome::Failed,
             RenderOutcome::Cancelled,
-            RenderOutcome::Interrupted,
+            RenderOutcome::Started,
         ] {
             let history = vec![attempt("all", 10, outcome, "E:/out/a.mov")];
             assert_eq!(
