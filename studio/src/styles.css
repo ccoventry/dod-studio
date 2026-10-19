@@ -3688,6 +3688,13 @@ button.setup-skip:hover:not(:disabled) {
   word-break: break-all;
 }
 
+.audit-table .audit-keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
 .audit-table td:nth-child(2),
 .audit-table td:nth-child(3),
 .audit-table td:last-child {

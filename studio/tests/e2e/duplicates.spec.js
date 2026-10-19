@@ -131,6 +131,39 @@ test('the kept copy comes first and copies in use start unticked', async ({ page
   await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 3 | Wasted Space: 5.0 MB');
 });
 
+test('another copy can be kept: it moves to the top, the old pick becomes a ticked copy', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  // Keep E:\old\a.dem instead of D:\a.dem.
+  // A click, not check(): the list redraws at once, so check() can't see it stay ticked.
+  await rows.nth(4).locator('input[type=radio]').click();
+  await expect(rows.locator('.audit-file-path')).toHaveText([
+    'C:\\Half-Life\\dod\\match.dem', 'F:\\downloads\\match.dem', 'G:\\project\\match.dem',
+    'E:\\old\\a.dem', 'D:\\a.dem',
+  ]);
+  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(3).locator('input.audit-row-cb')).toBeDisabled();
+  await expect(rows.nth(4).locator('input.audit-row-cb')).toBeChecked();
+
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  const [args] = await calls(page, 'delete_audit_files');
+  // The kept copy is never sent.
+  expect(args.paths).toEqual(['\\\\?\\F:\\downloads\\match.dem', '\\\\?\\D:\\a.dem']);
+});
+
+test('Keep the copies in a folder picks the copy in that folder in every group', async ({ page }) => {
+  await loadHarness(page, { picked: 'E:\\old' });
+  await expect(page.locator('#audit-prefer-folder-btn')).toBeDisabled();
+  await runAudit(page);
+  await page.click('#audit-prefer-folder-btn');
+  await expect(page.locator('.toast').last()).toContainText('in 1 group (1 changed)');
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.nth(3).locator('.audit-file-path')).toHaveText('E:\\old\\a.dem');
+  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('Kept');
+});
+
 test('Move to Recycle Bin is the default delete, and the list follows it', async ({ page }) => {
   await loadHarness(page);
   await runAudit(page);

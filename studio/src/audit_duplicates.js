@@ -78,6 +78,35 @@ export function startsTicked(file, index) {
   return index > 0 && !file.in_use;
 }
 
+/// The groups with `path` as the kept copy of group `groupIdx`: it moves to
+/// the front, where the kept copy always is, and the rest keep their order.
+/// Also says which ticks change: the new kept copy can't be deleted, and the
+/// old one is a copy now, ticked by the usual rule (#844).
+export function keepFile(groups, groupIdx, path) {
+  const group = groups[groupIdx];
+  const at = group?.files.findIndex((f) => f.path === path) ?? -1;
+  if (at <= 0) return { groups, untick: null, tick: null };
+  const files = [group.files[at], ...group.files.filter((_, i) => i !== at)];
+  const was = group.files[0];
+  const out = groups.map((g, i) => (i === groupIdx ? { ...g, files } : g));
+  return { groups: out, untick: path, tick: startsTicked(was, 1) ? was.path : null };
+}
+
+/// For each group with a copy inside `folder` (or a folder under it), that
+/// copy: `{ groupIdx, path, already }`, `already` when it's the kept one now.
+/// The first such copy in the group's order, which is the audit's ranking.
+export function keepPicksIn(groups, folder) {
+  const base = comparable(shownPath(folder ?? ''));
+  if (!base) return [];
+  const inside = (p) => comparable(shownPath(p)).startsWith(`${base}\\`);
+  const picks = [];
+  groups.forEach((g, groupIdx) => {
+    const at = g.files.findIndex((f) => inside(f.path));
+    if (at >= 0) picks.push({ groupIdx, path: g.files[at].path, already: at === 0 });
+  });
+  return picks;
+}
+
 /// The groups after a delete: `deleted` paths gone, and a group left with
 /// one file dropped, since it has no copies any more.
 export function withoutDeleted(groups, deleted) {

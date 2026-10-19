@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
-  deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus,
+  deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -74,5 +74,36 @@ describe('audit_duplicates (#844)', () => {
     expect(wastedSizeText(21_870_000)).toBe('20.9 MB');
     expect(wastedSizeText(3 * 1024 ** 3)).toBe('3.00 GB');
     expect(wastedSizeText(0)).toBe('0.0 MB');
+  });
+
+  it('keeps another copy: it moves to the front, the old pick becomes a ticked copy', () => {
+    const [d, e, f] = [String.raw`D:\a.dem`, String.raw`E:\a.dem`, String.raw`F:\a.dem`];
+    const groups = [{ size: 1, header_hash: 1, files: [{ path: d, in_use: null }, { path: e, in_use: null }, { path: f, in_use: null }] }];
+    const r = keepFile(groups, 0, f);
+    expect(r.groups[0].files.map((x) => x.path)).toEqual([f, d, e]);
+    expect(r.untick).toBe(f);
+    expect(r.tick).toBe(d);
+    // The input is left alone, and keeping the kept one changes nothing.
+    expect(groups[0].files[0].path).toBe(d);
+    expect(keepFile(groups, 0, d).untick).toBeNull();
+  });
+
+  it('an old pick the game uses is not ticked when another copy is kept', () => {
+    const e = String.raw`E:\a.dem`;
+    const groups = [{ size: 1, header_hash: 1, files: [{ path: String.raw`C:\hl\dod\a.dem`, in_use: 'game_folder' }, { path: e, in_use: null }] }];
+    expect(keepFile(groups, 0, e).tick).toBeNull();
+  });
+
+  it("finds each group's copy inside a folder, verbatim paths and case aside", () => {
+    const groups = [
+      { size: 1, header_hash: 1, files: [{ path: String.raw`\\?\D:\a.dem` }, { path: String.raw`\\?\F:\Keep\sub\a.dem` }] },
+      { size: 1, header_hash: 2, files: [{ path: String.raw`\\?\F:\keep\b.dem` }, { path: String.raw`\\?\G:\b.dem` }] },
+      { size: 1, header_hash: 3, files: [{ path: String.raw`\\?\F:\Keeper\c.dem` }, { path: String.raw`\\?\G:\c.dem` }] },
+    ];
+    expect(keepPicksIn(groups, String.raw`f:\keep\ `.trim())).toEqual([
+      { groupIdx: 0, path: String.raw`\\?\F:\Keep\sub\a.dem`, already: false },
+      { groupIdx: 1, path: String.raw`\\?\F:\keep\b.dem`, already: true },
+    ]);
+    expect(keepPicksIn(groups, '')).toEqual([]);
   });
 });

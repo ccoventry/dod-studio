@@ -7,7 +7,7 @@ import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
-  auditTotals, wastedSizeText, fileStatus,
+  auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
 } from './audit_duplicates.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
@@ -26,6 +26,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   const cancelAuditBtn = document.querySelector('#cancel-audit-btn');
   const deleteBtn = document.querySelector('#delete-selected-audits-btn');
   const deletePermanentBtn = document.querySelector('#delete-permanent-audits-btn');
+  const preferFolderBtn = document.querySelector('#audit-prefer-folder-btn');
   const selectAllCb = document.querySelector('#audit-select-all');
   const progressEl = document.querySelector('#audit-progress');
   const statusTextEl = document.querySelector('#audit-status-text');
@@ -228,9 +229,19 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         });
         tdCb.appendChild(cb);
 
+        // Which copy to keep: the audit's pick, or any other one (#844).
         const tdStatus = document.createElement('td');
         tdStatus.className = 'audit-file-status';
-        tdStatus.textContent = fileStatus(file, fileIdx);
+        const keepLabel = document.createElement('label');
+        keepLabel.className = 'audit-keep';
+        keepLabel.title = fileIdx === 0 ? STRINGS.AUDITOR.ORIGINAL_FILE_TITLE : STRINGS.AUDITOR.KEEP_THIS_TITLE;
+        const keepRadio = document.createElement('input');
+        keepRadio.type = 'radio';
+        keepRadio.name = `audit-keep-${groupIdx}`;
+        keepRadio.checked = fileIdx === 0;
+        keepRadio.addEventListener('change', () => keepInstead(groupIdx, file.path));
+        keepLabel.append(keepRadio, document.createTextNode(` ${fileStatus(file, fileIdx).trim()}`));
+        tdStatus.appendChild(keepLabel);
 
         const tdSize = document.createElement('td');
         tdSize.textContent = STRINGS.AUDITOR.megabytesLabel(sizeMb);
@@ -279,6 +290,42 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
     updateDeleteButtonState();
   }
 
+  /// Keeps `path` instead of group `groupIdx`'s current pick.
+  function applyKeep(groupIdx, path) {
+    const { groups, untick, tick } = keepFile(currentAuditResults, groupIdx, path);
+    currentAuditResults = groups;
+    if (untick) ticked.delete(untick);
+    if (tick) ticked.add(tick);
+    return !!untick;
+  }
+
+  function keepInstead(groupIdx, path) {
+    applyKeep(groupIdx, path);
+    renderAuditResults();
+  }
+
+  // Keep the copies in one folder, over every group at once: a long list
+  // needs no row-by-row picking (#844).
+  preferFolderBtn?.addEventListener('click', async () => {
+    let folder;
+    try {
+      folder = await open({ directory: true, multiple: false, title: STRINGS.AUDITOR.PREFER_FOLDER_DIALOG_TITLE });
+    } catch (err) {
+      console.error('Error picking the folder to keep:', err);
+      return;
+    }
+    if (!folder) return;
+    folder = Array.isArray(folder) ? folder[0] : folder;
+    let changed = 0;
+    let found = 0;
+    keepPicksIn(currentAuditResults, folder).forEach(({ groupIdx, path, already }) => {
+      found += 1;
+      if (!already && applyKeep(groupIdx, path)) changed += 1;
+    });
+    renderAuditResults();
+    showToast(STRINGS.AUDITOR.preferFolderToast(found, changed, folder), found ? 'success' : 'info');
+  });
+
   /// The ticked copies still in the results (a collapsed group's count too).
   function tickedFiles() {
     const listed = new Set(currentAuditResults.flatMap((g) => g.files.slice(1).map((f) => f.path)));
@@ -287,6 +334,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
 
   function setDeleteButtons(n) {
     const busy = running || !!deleting;
+    if (preferFolderBtn) preferFolderBtn.disabled = busy || currentAuditResults.length === 0;
     if (deleteBtn) {
       deleteBtn.disabled = busy || n === 0;
       deleteBtn.textContent = STRINGS.AUDITOR.recycleNSelectedFiles(n);
