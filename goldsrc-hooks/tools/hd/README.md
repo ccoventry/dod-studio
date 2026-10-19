@@ -1,6 +1,6 @@
 # HD asset build scripts
 
-These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, sprites (world sprites and, since #728, the HUD's own: kill-feed and weapon icons, scopes, hint icons, HLTV icons; crosshairs stay stock), decals (bullet holes, blood, scorch marks, map logos), detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
+These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, sprites (world sprites and, since #728, the HUD's own: kill-feed and weapon icons, scopes, hint icons, HLTV icons; crosshairs stay stock; since #841 the kill-feed weapon icons are drawn from the weapon models instead of upscaled), decals (bullet holes, blood, scorch marks, map logos), detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
 
 The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
 
@@ -257,7 +257,7 @@ Lists saved in this folder by an older version still work while the install has 
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, decal, model and sprite readers |
 | `studiomodel.py` | studio model (`.mdl` v10) reader: bones, rest pose, meshes, skins (`test_studiomodel.py` tests it) |
-| `killfeed_icons.py` | R&D (#841): renders a weapon model as a kill-feed icon and a comparison sheet; not part of `build_all.py` |
+| `killfeed_icons.py` | kill-feed weapon icons rendered from the weapon models into the HD `weapons*` sheets (#841); `sprites_hd.py` runs it after the sheets (`--no-icons` skips it). The upscaled sheet is kept beside each one it changes as `<file>.tga.bak`, and `dodstudio_hd\killfeed_icons.json` records which sheets are done. `--review <folder>` writes comparison sheets (`test_killfeed_icons.py` tests it) |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
 | `requirements.txt` | Python packages the scripts need (`pip install -r`) |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
