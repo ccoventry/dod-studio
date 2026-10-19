@@ -555,7 +555,9 @@ async function refreshExportPoolFree(getExportDirs) {
 
 // ── Startup crash-recovery prompt ────────────────────────────────────────────
 
-export async function checkRenderRecoveryOnStartup(onRecovered) {
+/** `showRenderTab` runs on the Recover click, so the status line it sets is
+ *  on screen while the batch comes back. */
+export async function checkRenderRecoveryOnStartup(showRenderTab) {
   const summary = await checkRenderAutosave();
   if (!summary) return;
 
@@ -566,28 +568,35 @@ export async function checkRenderRecoveryOnStartup(onRecovered) {
   document.querySelector('#render-recovery-pending').textContent = String(summary.pending_count);
   modal.style.display = 'flex';
 
+  // Both buttons close the dialog on the click: the reply can take seconds
+  // at start-up (#853), and the status line shows the recovery meanwhile.
   document.querySelector('#render-recovery-recover-btn').addEventListener('click', async () => {
+    modal.style.display = 'none';
+    const statusEl = document.querySelector('#render-status');
+    setRenderStatus(statusEl, STRINGS.RENDER.STATUS_RECOVERING);
+    if (showRenderTab) showRenderTab();
+    // A scan started meanwhile owns the status line; leave its text alone.
+    const stillRecovering = () => statusEl?.textContent === STRINGS.RENDER.STATUS_RECOVERING;
     try {
       jobs = await recoverRenderBatch();
       renderJobsTable();
+      if (stillRecovering()) {
+        const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+        setRenderStatus(statusEl, STRINGS.RENDER.recoveredStatus(queued));
+      }
       showToast(STRINGS.RENDER.recoveredJobsToast(summary.completed_count, summary.pending_count), 'info');
-      if (onRecovered) onRecovered();
     } catch (err) {
       console.error('Error recovering render batch:', err);
+      if (stillRecovering()) setRenderStatus(statusEl, STRINGS.RENDER.STATUS_WAITING);
       showToast(STRINGS.RENDER.recoverFailed(err), 'error');
-    } finally {
-      modal.style.display = 'none';
     }
   }, { once: true });
 
-  document.querySelector('#render-recovery-discard-btn').addEventListener('click', async () => {
-    try {
-      await discardRenderAutosave();
-    } catch (err) {
+  document.querySelector('#render-recovery-discard-btn').addEventListener('click', () => {
+    modal.style.display = 'none';
+    discardRenderAutosave().catch((err) => {
       console.error('Error discarding render autosave:', err);
-    } finally {
-      modal.style.display = 'none';
-    }
+    });
   }, { once: true });
 }
 

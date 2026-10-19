@@ -292,8 +292,10 @@ fn volume_key(path: &std::path::Path) -> Option<String> {
 }
 
 /// Free space across the capture folders, each drive counted once: two
-/// folders on one drive share its space.
-#[tauri::command]
+/// folders on one drive share its space. Off the main thread (#853): a
+/// cache miss re-lists every volume, which waits on a sleeping or network
+/// drive, and start-up asks for this while the window is up.
+#[tauri::command(async)]
 fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
     let mut seen = std::collections::HashSet::new();
@@ -326,7 +328,8 @@ struct CaptureOutputDiagnostic {
     usable: bool,
 }
 
-#[tauri::command]
+/// Off the main thread for the same reason as `calculate_export_pool_space`.
+#[tauri::command(async)]
 fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
     paths
         .into_iter()

@@ -753,6 +753,8 @@ export const STRINGS = {
     REQUIRED_ESTIMATED_DEFAULT: 'Required (Over-estimated): 0.00 GB',
     recoveredJobsToast: (completed, pending) => `Recovered ${completed} completed, ${pending} pending render job(s).`,
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
+    STATUS_RECOVERING: 'Status: Recovering the render batch…',
+    recoveredStatus: (queued) => `Status: Render batch recovered — ${queued} take(s) queued`,
     renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
