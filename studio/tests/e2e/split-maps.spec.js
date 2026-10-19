@@ -118,7 +118,9 @@ test.describe('Split Maps', () => {
     await findDemos(page);
     const two = demo(page, 'two.dem');
     await expect(two.locator('.split-go')).toBeDisabled();
+    await expect(two.locator('.split-keep').first()).toBeDisabled();
     await page.evaluate(() => window.__releaseSegments());
     await expect(two.locator('.split-go')).toBeEnabled();
+    await expect(two.locator('.split-keep').first()).toBeEnabled();
   });
 });

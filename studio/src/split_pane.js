@@ -99,7 +99,7 @@ export function initSplitPane() {
           <tbody>
             ${d.maps.map((m, k) => `
               <tr data-map="${k}"${d.split_files?.[k] ? ` class="split-done" title="${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_TITLE)}"` : ''}>
-                <td><input type="checkbox" class="split-keep" data-map="${k}"${d.split_files?.[k] ? '' : ' checked'} /></td>
+                <td><input type="checkbox" class="split-keep" data-map="${k}"${d.split_files?.[k] ? '' : ' checked'} disabled /></td>
                 <td class="split-map-num">${k + 1}</td>
                 <td class="split-map-name">${escapeHtml(m)}</td>
                 <td class="split-map-when">${escapeHtml(STRINGS.SPLIT.LOADING_DETAILS)}</td>
@@ -150,6 +150,8 @@ export function initSplitPane() {
       const go = box.querySelector('.split-go');
       go.disabled = false;
       go.removeAttribute('title');
+      // The tick boxes too: their final state waits for the lengths.
+      box.querySelectorAll('.split-keep').forEach((c) => { c.disabled = false; });
     }
   }
 
