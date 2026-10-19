@@ -30,8 +30,9 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     use std::time::Instant;
     use sysinfo::Disks;
 
-    // Shared sysinfo disk list — only refreshed when cache is stale.
-    static DISKS: OnceLock<Mutex<Disks>> = OnceLock::new();
+    // Shared sysinfo disk list and when it was last re-listed — only
+    // refreshed when older than TTL_MS.
+    static DISKS: OnceLock<Mutex<(Disks, Instant)>> = OnceLock::new();
 
     // Per-path TTL cache: path_key → (last_refresh, available_bytes)
     static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64)>>> = OnceLock::new();
@@ -71,11 +72,18 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     let result = match diagnose_path(path) {
         PathStatus::Malformed | PathStatus::NotAbsolute | PathStatus::NotADirectory => u64::MAX,
         PathStatus::Ok | PathStatus::NotFound => {
-            let disks_mutex = DISKS.get_or_init(|| Mutex::new(Disks::new_with_refreshed_list()));
+            let disks_mutex = DISKS
+                .get_or_init(|| Mutex::new((Disks::new_with_refreshed_list(), Instant::now())));
 
-            if let Ok(mut disks) = disks_mutex.lock() {
-                // Re-lists too, so a drive plugged in since the last call counts.
-                disks.refresh(true);
+            if let Ok(mut guard) = disks_mutex.lock() {
+                let (disks, refreshed_at) = &mut *guard;
+                // Callers that queued on the lock behind a refresh use its list
+                // instead of each re-listing every volume again (#853).
+                if !list_is_fresh(*refreshed_at, Instant::now()) {
+                    // Re-lists too, so a drive plugged in since the last call counts.
+                    disks.refresh(true);
+                    *refreshed_at = Instant::now();
+                }
 
                 let mut best_bytes = u64::MAX;
                 let mut best_len = 0usize;
@@ -112,6 +120,13 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     }
 
     result
+}
+
+/// Whether a disk list re-listed at `refreshed_at` is still young enough at
+/// `now` to answer from without re-listing every volume.
+#[cfg(not(target_arch = "wasm32"))]
+fn list_is_fresh(refreshed_at: std::time::Instant, now: std::time::Instant) -> bool {
+    now.saturating_duration_since(refreshed_at).as_millis() < TTL_MS
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -183,5 +198,19 @@ mod tests {
             get_available_bytes(std::path::Path::new("relative/folder")),
             u64::MAX
         );
+    }
+
+    /// A list re-listed within TTL_MS serves the next caller; an older one
+    /// is re-listed.
+    #[test]
+    fn disk_list_freshness_follows_the_ttl() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        assert!(list_is_fresh(t0, t0));
+        assert!(list_is_fresh(t0, t0 + Duration::from_millis(1_999)));
+        assert!(!list_is_fresh(t0, t0 + Duration::from_millis(2_000)));
+        // A refresh stamped after `now` (another thread raced ahead) counts
+        // as fresh rather than underflowing.
+        assert!(list_is_fresh(t0 + Duration::from_millis(5), t0));
     }
 }
