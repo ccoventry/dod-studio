@@ -986,6 +986,27 @@
                 <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
                 <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
                 <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+                <button id="audit-consolidate-btn" type="button" data-str="AUDITOR.CONSOLIDATE_BUTTON" data-str-title="AUDITOR.CONSOLIDATE_TITLE">Consolidate…</button>
+              </div>
+            </div>
+            <!-- Consolidate (#872): audit_consolidate_ui.js. Every demo the
+                 audit found into one folder; copies recycled on the way. -->
+            <div id="audit-consolidate-panel" class="panel-body" hidden>
+              <div class="input-row">
+                <label for="audit-consolidate-dest" data-str="AUDITOR.CONSOLIDATE_DEST_LABEL">Move every demo into:</label>
+                <input type="text" id="audit-consolidate-dest" readonly style="flex: 1;" data-str-placeholder="AUDITOR.CONSOLIDATE_DEST_PLACEHOLDER" placeholder="Choose a folder…" />
+                <button id="audit-consolidate-browse" type="button" data-str="AUDITOR.CONSOLIDATE_BROWSE_BUTTON">Choose…</button>
+              </div>
+              <div class="row-inputs">
+                <label><input type="radio" name="audit-consolidate-layout" value="flat" checked /> <span data-str="AUDITOR.CONSOLIDATE_LAYOUT_FLAT">All in one folder</span></label>
+                <label data-str-title="AUDITOR.CONSOLIDATE_LAYOUT_SUBFOLDERS_TITLE" title=""><input type="radio" name="audit-consolidate-layout" value="subfolders" /> <span data-str="AUDITOR.CONSOLIDATE_LAYOUT_SUBFOLDERS">Keep their subfolders</span></label>
+                <label data-str-title="AUDITOR.CONSOLIDATE_GAME_FOLDERS_TITLE" title=""><input type="checkbox" id="audit-consolidate-game" /> <span data-str="AUDITOR.CONSOLIDATE_GAME_FOLDERS">Also move demos in game folders</span></label>
+              </div>
+              <p id="audit-consolidate-preview" class="text-muted"></p>
+              <div class="row-inputs">
+                <button id="audit-consolidate-start" type="button" class="primary-btn" disabled data-str="AUDITOR.CONSOLIDATE_START_BUTTON">Move Demos</button>
+                <button id="audit-consolidate-cancel" type="button" disabled data-str="AUDITOR.CONSOLIDATE_CANCEL_BUTTON">Cancel</button>
+                <button id="audit-consolidate-undo" type="button" disabled data-str="AUDITOR.CONSOLIDATE_UNDO_BUTTON">Undo Last Consolidate</button>
               </div>
             </div>
             <!-- The app's table style; the list grows with the window, like the

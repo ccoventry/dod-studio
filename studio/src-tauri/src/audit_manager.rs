@@ -51,9 +51,22 @@ pub struct SerializedDuplicateGroup {
     pub files: Vec<AuditFile>,
 }
 
+/// A demo with no copies: Consolidate moves these too (#872).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct SingleDemo {
+    pub path: String,
+    pub size: u64,
+    pub in_use: Option<InUse>,
+}
+
 #[derive(Serialize)]
 pub struct AuditOutcome {
     pub groups: Vec<SerializedDuplicateGroup>,
+    /// Every demo without copies, by path.
+    pub singles: Vec<SingleDemo>,
+    /// The folders walked, drives included, for Consolidate's
+    /// keep-subfolders layout.
+    pub roots: Vec<String>,
     /// Demos keyed.
     pub demos: usize,
     /// Cancelled before the key pass ended: `groups` is empty, since a
@@ -182,6 +195,23 @@ pub fn order_for_keeping(files: Vec<PathBuf>, rules: &KeepRules) -> Vec<AuditFil
     ranked.into_iter().map(|(_, _, _, file)| file).collect()
 }
 
+/// The demos `find_duplicates` listed once that are in no group, with their
+/// sizes. A demo it couldn't read is left out: there is nothing to move.
+pub fn singles_of(
+    unique: Vec<PathBuf>,
+    groups: &[hl_demo_auditor::DuplicateGroup],
+) -> Vec<(PathBuf, u64)> {
+    let grouped: HashSet<&PathBuf> = groups.iter().flat_map(|g| g.files.iter()).collect();
+    unique
+        .into_iter()
+        .filter(|p| !grouped.contains(p))
+        .filter_map(|p| {
+            let size = std::fs::metadata(&p).ok()?.len();
+            Some((p, size))
+        })
+        .collect()
+}
+
 /// The folders to walk: the ones picked, plus every fixed drive when asked,
 /// without blanks or repeats (case-insensitive).
 pub fn audit_roots(folders: &[String], drives: &[String]) -> Vec<PathBuf> {
@@ -266,32 +296,54 @@ pub async fn run_demo_audit_impl(
         for root in roots.iter().filter(|r| r.is_dir()) {
             scan_dir(root, &mut files, &cancel_token, &Some(tx.clone()));
         }
-        let (_, duplicate_groups, _, _) = find_duplicates(files, &cancel_token, &Some(tx));
+        let (unique, duplicate_groups, _, _) = find_duplicates(files, &cancel_token, &Some(tx));
         let last = progress_handle.join().unwrap_or_default();
         let cancelled = cancel_token.load(Ordering::Relaxed);
 
-        let groups = if cancelled {
-            Vec::new()
+        let (groups, singles) = if cancelled {
+            (Vec::new(), Vec::new())
         } else {
-            // Every install the copies sit in counts, not only the one the
+            let singles = singles_of(unique, &duplicate_groups);
+            // Every install the demos sit in counts, not only the one the
             // hl.exe setting names: a PC with a stock, a PRE and a POST
             // install keeps each one's demos.
             let mut game_folders = rules.0.clone();
             game_folders.extend(install_game_folders(
-                duplicate_groups.iter().flat_map(|g| g.files.iter()),
+                duplicate_groups
+                    .iter()
+                    .flat_map(|g| g.files.iter())
+                    .chain(singles.iter().map(|(p, _)| p)),
             ));
             let keep_rules = KeepRules::new(&game_folders, &rules.1);
-            duplicate_groups
+            let singles = singles
+                .into_iter()
+                .map(|(path, size)| {
+                    let in_use = keep_rules.in_use(&comparable(&path));
+                    SingleDemo {
+                        path: path.to_string_lossy().into_owned(),
+                        size,
+                        in_use,
+                    }
+                })
+                .collect();
+            let groups = duplicate_groups
                 .into_iter()
                 .map(|g| SerializedDuplicateGroup {
                     size: g.key.size,
                     header_hash: g.key.header_hash,
                     files: order_for_keeping(g.files, &keep_rules),
                 })
-                .collect()
+                .collect();
+            (groups, singles)
         };
         Ok(AuditOutcome {
             groups,
+            singles,
+            roots: roots
+                .iter()
+                .filter(|r| r.is_dir())
+                .map(|r| r.to_string_lossy().into_owned())
+                .collect(),
             demos: last.done,
             cancelled,
         })
@@ -562,6 +614,26 @@ mod tests {
             err.contains(&dir.path().join("gone.dem").display().to_string()),
             "{err}"
         );
+    }
+
+    #[test]
+    fn singles_are_the_demos_in_no_group_with_their_sizes() {
+        let dir = crate::test_support::Scratch::new("audit_singles");
+        let one = dir.path().join("one.dem");
+        let a = dir.path().join("a.dem");
+        let b = dir.path().join("b.dem");
+        std::fs::write(&one, b"12345").unwrap();
+        std::fs::write(&a, b"x").unwrap();
+        std::fs::write(&b, b"x").unwrap();
+        let groups = [hl_demo_auditor::DuplicateGroup {
+            key: hl_demo_auditor::FileKey {
+                size: 1,
+                header_hash: 0,
+            },
+            files: vec![a.clone(), b],
+        }];
+        let gone = dir.path().join("gone.dem");
+        assert_eq!(singles_of(vec![a, one.clone(), gone], &groups), [(one, 5)]);
     }
 
     #[test]

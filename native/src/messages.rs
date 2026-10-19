@@ -319,6 +319,36 @@ pub fn rename_bad_name(name: &str) -> String {
     format!("`{name}` isn't a usable demo name")
 }
 
+// ── demo_consolidate.rs (#872) ────────────────────────────────────────────
+
+pub const CONSOLIDATE_NO_DESTINATION: &str = "choose the folder to move the demos into first";
+pub const CONSOLIDATE_SOURCE_GONE: &str = "the demo is no longer there";
+pub const CONSOLIDATE_TARGET_EXISTS: &str = "a file with that name is already there";
+
+pub fn consolidate_destination_bad(dest: &std::path::Path) -> String {
+    format!(
+        "{} can't hold the demos: it isn't a folder, or a folder can't be made there",
+        dest.display()
+    )
+}
+
+pub fn consolidate_not_enough_space(needed: u64, free: u64, dest: &std::path::Path) -> String {
+    let gb = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
+    format!(
+        "not enough free space on the drive of {}: the demos copied from other drives need {:.1} GB and {:.1} GB is free",
+        dest.display(),
+        gb(needed),
+        gb(free)
+    )
+}
+
+pub fn consolidate_copy_mismatch(to: &std::path::Path) -> String {
+    format!(
+        "the copy at {} doesn't match the original's size, so the original was kept",
+        to.display()
+    )
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any

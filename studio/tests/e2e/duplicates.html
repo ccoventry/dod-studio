@@ -5,7 +5,9 @@
   the progress bar and results table copied from index.html, and the themed
   confirm modal. The backend's run_demo_audit / delete_audit_files /
   list_fixed_drives and the folder picker are window.__mockInvokeHandlers,
-  set by each test; `window.__queue` stands in for main.js's queue.
+  set by each test; `window.__queue` stands in for main.js's queue, and
+  `window.__relocated` collects what Consolidate asked the queue to follow
+  (#872).
 -->
 <html lang="en">
 <head>
@@ -27,6 +29,18 @@
   <button id="audit-prefer-folder-btn" disabled>Keep copies already in a folder…</button>
   <button id="delete-selected-audits-btn" disabled>Move to Recycle Bin</button>
   <button id="delete-permanent-audits-btn" disabled>Delete Permanently…</button>
+  <button id="audit-consolidate-btn" type="button">Consolidate…</button>
+  <div id="audit-consolidate-panel" hidden>
+    <input type="text" id="audit-consolidate-dest" readonly />
+    <button id="audit-consolidate-browse" type="button">Choose…</button>
+    <label><input type="radio" name="audit-consolidate-layout" value="flat" checked /> All in one folder</label>
+    <label><input type="radio" name="audit-consolidate-layout" value="subfolders" /> Keep their subfolders</label>
+    <label><input type="checkbox" id="audit-consolidate-game" /> Also move demos in game folders</label>
+    <p id="audit-consolidate-preview"></p>
+    <button id="audit-consolidate-start" type="button" disabled>Move Demos</button>
+    <button id="audit-consolidate-cancel" type="button" disabled>Cancel</button>
+    <button id="audit-consolidate-undo" type="button" disabled>Undo Last Consolidate</button>
+  </div>
   <table id="audit-results-table" class="analyzer-table audit-table">
     <thead><tr><th><input type="checkbox" id="audit-select-all" /></th><th>Status</th><th>Size</th><th>File Path</th><th>Action</th></tr></thead>
     <tbody id="audit-results-body"></tbody>
@@ -46,7 +60,11 @@
 
     window.__queue = [];
     initThemedConfirm();
-    initAuditorPane({ getDemos: () => window.__queue });
+    window.__relocated = [];
+    initAuditorPane({
+      getDemos: () => window.__queue,
+      relocateMoved: (pairs) => { window.__relocated.push(...pairs); return pairs.length; },
+    });
     window.__harnessReady = true;
   </script>
 </body>

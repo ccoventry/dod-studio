@@ -347,6 +347,8 @@ pub fn audit_folder_not_found(path: &Path) -> String {
 }
 
 pub const NO_AUDIT_FOLDERS: &str = "Add a folder to check, or choose All drives.";
+pub const CONSOLIDATE_ALREADY_RUNNING: &str =
+    "Demos are already being moved. Wait for that to finish, or cancel it.";
 
 pub fn path_no_longer_exists(path: &str) -> String {
     format!("Path no longer exists: {}", path)

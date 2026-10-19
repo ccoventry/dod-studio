@@ -5,15 +5,23 @@ import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer } from '.
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
+import { createAuditConsolidate } from './audit_consolidate_ui.js';
+import { singlesAfterDelete } from './audit_consolidate.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
 } from './audit_duplicates.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
-/// copies in it are kept first and never start ticked.
-export function initAuditorPane({ getDemos = () => [] } = {}) {
+/// copies in it are kept first and never start ticked. `relocateMoved(pairs)`
+/// points queued demos at the files Consolidate moved (#872).
+export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 } = {}) {
   let currentAuditResults = [];
+  // Demos without copies and the folders walked, for Consolidate (#872).
+  let currentSingles = [];
+  let currentRoots = [];
+  let consolidating = false;
+  let consolidate = null;
   // Groups default to expanded; this tracks the exceptions. Reset on every
   // new audit run so a fresh result set always starts fully expanded.
   let collapsedGroups = new Set();
@@ -44,7 +52,8 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
 
   function refreshStartButtonState() {
     if (!runAuditBtn) return;
-    runAuditBtn.disabled = running || !!deleting || !folders.canStart();
+    runAuditBtn.disabled = running || !!deleting || consolidating || !folders.canStart();
+    consolidate?.refreshButtons();
   }
   refreshStartButtonState();
 
@@ -107,6 +116,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
       running = true;
       collapsedGroups = new Set();
       currentAuditResults = [];
+      currentSingles = [];
       refreshStartButtonState();
       folders.setLocked(true);
       if (cancelAuditBtn) cancelAuditBtn.disabled = false;
@@ -117,6 +127,8 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
       try {
         const outcome = await runDemoAudit(paths, allDrives, queued);
         currentAuditResults = outcome?.groups ?? [];
+        currentSingles = outcome?.singles ?? [];
+        currentRoots = outcome?.roots ?? [];
         renderAuditResults({ resetTicks: true });
         setStatus(outcome?.cancelled
           ? STRINGS.AUDITOR.CANCELLED_STATUS
@@ -143,6 +155,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         if (cancelAuditBtn) cancelAuditBtn.disabled = true;
         refreshStartButtonState();
         updateDeleteButtonState();
+        consolidate?.resultsChanged();
       }
     });
   }
@@ -302,6 +315,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   function keepInstead(groupIdx, path) {
     applyKeep(groupIdx, path);
     renderAuditResults();
+    consolidate?.resultsChanged();
   }
 
   // Keep the copies in one folder, over every group at once: a long list
@@ -323,6 +337,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
       if (!already && applyKeep(groupIdx, path)) changed += 1;
     });
     renderAuditResults();
+    consolidate?.resultsChanged();
     showToast(STRINGS.AUDITOR.preferFolderToast(found, changed, folder), found ? 'success' : 'info');
   });
 
@@ -333,7 +348,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   }
 
   function setDeleteButtons(n) {
-    const busy = running || !!deleting;
+    const busy = running || !!deleting || consolidating;
     if (preferFolderBtn) preferFolderBtn.disabled = busy || currentAuditResults.length === 0;
     if (deleteBtn) {
       deleteBtn.disabled = busy || n === 0;
@@ -382,6 +397,8 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         showToast(STRINGS.AUDITOR.someNotDeletedToast(failed.length, failed[0].error), 'error');
       }
       deleted.forEach((p) => ticked.delete(p));
+      // A group left with one file has no copies now: Consolidate moves it.
+      currentSingles = [...currentSingles, ...singlesAfterDelete(currentAuditResults, deleted)];
       currentAuditResults = withoutDeleted(currentAuditResults, deleted);
       setStatus(STRINGS.AUDITOR.deletedStatus(deleted.length, failed.length, permanent));
       if (selectAllCb) selectAllCb.checked = false;
@@ -393,9 +410,34 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
       if (progressEl) progressEl.hidden = true;
       renderAuditResults();
       refreshStartButtonState();
+      consolidate?.resultsChanged();
     }
   }
 
   deleteBtn?.addEventListener('click', () => deleteTicked(false));
   deletePermanentBtn?.addEventListener('click', () => deleteTicked(true));
+
+  // Consolidate… (#872): audit_consolidate_ui.js.
+  consolidate = createAuditConsolidate({
+    getAudit: () => ({ groups: currentAuditResults, singles: currentSingles, roots: currentRoots }),
+    isBusy: () => running || !!deleting,
+    setBusy: (on) => {
+      consolidating = on;
+      folders.setLocked(on);
+      refreshStartButtonState();
+      updateDeleteButtonState();
+    },
+    showProgress,
+    hideProgress,
+    setStatus: (text) => setStatus(text),
+    relocateMoved,
+    // The list names files that have moved: it's stale until the next audit.
+    onMoved: () => {
+      currentAuditResults = [];
+      currentSingles = [];
+      ticked = new Set();
+      renderAuditResults();
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.CONSOLIDATED_ROW}</td></tr>`;
+    },
+  });
 }

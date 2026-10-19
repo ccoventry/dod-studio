@@ -152,7 +152,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane({ getDemos: () => currentScannedDemos });
+  // relocateMovedDemos is declared further down (project_demos.js).
+  initAuditorPane({ getDemos: () => currentScannedDemos, relocateMoved: (pairs) => relocateMovedDemos(pairs) });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({
@@ -330,6 +331,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     useFoundCopies,
     offerIdenticalCopies,
     locateDemoByHand,
+    relocateMovedDemos,
   } = createProjectDemos({
     getDemos: () => currentScannedDemos,
     getTakeIndex: () => takeIndex,

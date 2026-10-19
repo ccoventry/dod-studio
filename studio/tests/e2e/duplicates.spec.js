@@ -211,6 +211,144 @@ test('Delete Permanently asks on its own and sends permanent', async ({ page }) 
   await expect(page.locator('#audit-status-text')).toHaveText('Deleted: 2.');
 });
 
+// Consolidate… (#872): audit_consolidate_ui.js.
+const PLAN = {
+  destination: 'H:\\All',
+  moves: [
+    { from: '\\\\?\\D:\\a.dem', to: 'H:\\All\\a.dem', size: 1048576, cross_drive: true, renamed: false },
+    { from: '\\\\?\\G:\\solo.dem', to: 'H:\\All\\solo.dem', size: 1048576, cross_drive: true, renamed: false },
+  ],
+  recycle: ['\\\\?\\E:\\old\\a.dem', '\\\\?\\F:\\downloads\\match.dem', '\\\\?\\G:\\project\\match.dem'],
+  stay_in_game_folders: 1,
+  copies_in_game_folders: 0,
+  already_there: 0,
+  renamed: 0,
+  move_bytes: 2097152,
+  copy_bytes: 2097152,
+  free_bytes: 1e12,
+  enough_space: true,
+};
+
+async function openConsolidate(page, { plan = PLAN } = {}) {
+  await page.evaluate((plan) => {
+    window.__mockInvokeHandlers.consolidate_plan = () => plan;
+    window.__mockInvokeHandlers.consolidate_undoable = () => window.__undoable ?? null;
+  }, plan);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate((groups) => window.__finishAudit({
+    groups,
+    singles: [{ path: '\\\\?\\G:\\solo.dem', size: 1048576, in_use: null }],
+    roots: ['C:\\Demos'],
+    demos: 6,
+    cancelled: false,
+  }), GROUPS);
+  await page.click('#audit-consolidate-btn');
+}
+
+test('Consolidate previews the plan, then moves, updates the queue and offers Undo', async ({ page }) => {
+  await loadHarness(page, { picked: 'H:\\All' });
+  await openConsolidate(page);
+  await expect(page.locator('#audit-consolidate-preview')).toHaveText('Choose the folder to move the demos into.');
+  await expect(page.locator('#audit-consolidate-start')).toBeDisabled();
+
+  await page.check('input[name="audit-consolidate-layout"][value="subfolders"]');
+  await page.click('#audit-consolidate-browse');
+  await expect(page.locator('#audit-consolidate-dest')).toHaveValue('H:\\All');
+  await expect(page.locator('#audit-consolidate-preview')).toHaveText(
+    'Move 2 demos (2.0 MB) into H:\\All, recycle 3 copies. 1 in game folders left where they are.',
+  );
+  const plans = await calls(page, 'consolidate_plan');
+  const req = plans.at(-1).request;
+  expect(req).toMatchObject({ destination: 'H:\\All', layout: 'subfolders', include_game_folders: false, roots: ['C:\\Demos'] });
+  // Each group's kept copy and the demo without copies move; the rest recycle.
+  expect(req.keep.map((d) => d.path)).toEqual(['\\\\?\\C:\\Half-Life\\dod\\match.dem', '\\\\?\\D:\\a.dem', '\\\\?\\G:\\solo.dem']);
+  expect(req.keep[0].game_folder).toBe(true);
+  expect(req.recycle.map((d) => d.path)).toEqual([
+    '\\\\?\\F:\\downloads\\match.dem', '\\\\?\\G:\\project\\match.dem', '\\\\?\\E:\\old\\a.dem',
+  ]);
+
+  // Nothing moves until it's confirmed.
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.consolidate_run = () => new Promise((resolve) => { window.__finishRun = resolve; });
+  });
+  await page.click('#audit-consolidate-start');
+  await page.click('#themed-confirm-cancel-btn');
+  expect(await calls(page, 'consolidate_run')).toHaveLength(0);
+
+  await page.click('#audit-consolidate-start');
+  await confirm(page);
+  await expect(page.locator('#audit-consolidate-start')).toBeDisabled();
+  await expect(page.locator('#audit-consolidate-cancel')).toBeEnabled();
+  await expect(page.locator('#run-audit-btn')).toBeDisabled();
+  await page.evaluate(() => window.__mockEmit('consolidate_progress', {
+    step: 'moving', files_done: 1, files_total: 2, bytes_done: 1048576, bytes_total: 2097152, current: 'D:\\a.dem',
+  }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Moving demos: 1 / 2 (1.0 MB of 2.0 MB)');
+  await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 50%/);
+
+  await page.evaluate(() => {
+    window.__undoable = { log: 'x.json', count: 2, destination: 'H:\\All', created_unix_secs: 1 };
+    window.__finishRun({
+      moved: [{ from: 'D:\\a.dem', to: 'H:\\All\\a.dem' }, { from: 'G:\\solo.dem', to: 'H:\\All\\solo.dem' }],
+      failed: [],
+      recycled: ['\\\\?\\E:\\old\\a.dem'],
+      recycle_failed: [],
+      cancelled: false,
+      log: 'x.json',
+    });
+  });
+  await expect(page.locator('#audit-status-text')).toHaveText("Moved 2 demos, recycled 1 copy. 2 in this project's queue updated.");
+  expect(await page.evaluate(() => window.__relocated)).toEqual([
+    { from: 'D:\\a.dem', to: 'H:\\All\\a.dem' }, { from: 'G:\\solo.dem', to: 'H:\\All\\solo.dem' },
+  ]);
+  await expect(page.locator('#audit-results-body')).toContainText('Run the audit again');
+  await expect(page.locator('#audit-progress')).toHaveAttribute('hidden');
+  await expect(page.locator('#audit-consolidate-undo')).toBeEnabled();
+  await expect(page.locator('#run-audit-btn')).toBeEnabled();
+
+  // Undo puts them back, and the queue follows again.
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.consolidate_undo = () => {
+      window.__undoable = null;
+      return { moved: [{ from: 'H:\\All\\a.dem', to: 'D:\\a.dem' }], failed: [], recycled: [], recycle_failed: [], cancelled: false, log: 'x.json' };
+    };
+  });
+  await page.click('#audit-consolidate-undo');
+  await confirm(page);
+  await expect(page.locator('#audit-status-text')).toHaveText("Put back 1 demo. 1 in this project's queue updated.");
+  await expect(page.locator('#audit-consolidate-undo')).toBeDisabled();
+});
+
+test('Consolidate can be cancelled while it moves', async ({ page }) => {
+  await loadHarness(page, { picked: 'H:\\All' });
+  await openConsolidate(page);
+  await page.click('#audit-consolidate-browse');
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.consolidate_run = () => new Promise((resolve) => { window.__finishRun = resolve; });
+  });
+  await page.click('#audit-consolidate-start');
+  await confirm(page);
+  await page.click('#audit-consolidate-cancel');
+  expect(await calls(page, 'consolidate_cancel')).toHaveLength(1);
+  await page.evaluate(() => window.__finishRun({
+    moved: [{ from: 'D:\\a.dem', to: 'H:\\All\\a.dem' }], failed: [], recycled: [], recycle_failed: [], cancelled: true, log: 'x.json',
+  }));
+  await expect(page.locator('#audit-status-text')).toHaveText(
+    "Moved 1 demo. Cancelled: the rest stayed where they were, and no copies were recycled. 1 in this project's queue updated.",
+  );
+});
+
+test('Consolidate does not start when the copies do not fit', async ({ page }) => {
+  await loadHarness(page, { picked: 'H:\\All' });
+  await openConsolidate(page, { plan: { ...PLAN, enough_space: false, free_bytes: 1048576 } });
+  await page.click('#audit-consolidate-browse');
+  await expect(page.locator('#audit-consolidate-preview')).toHaveText(
+    'Not enough space: the demos copied from other drives need 2.0 MB and 1.0 MB is free.',
+  );
+  await expect(page.locator('#audit-consolidate-start')).toBeDisabled();
+});
+
 test('a file that fails to delete stays listed and is reported', async ({ page }) => {
   await loadHarness(page);
   await runAudit(page);
