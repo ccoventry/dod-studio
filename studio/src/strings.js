@@ -849,6 +849,9 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    COL_NUM: '#',
+    COL_MAP: 'Map',
+    COL_WHEN: 'Where in the demo',
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
     progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
@@ -897,7 +900,7 @@ export const STRINGS = {
     TABLE_HEADER_FILE_PATH: 'File Path',
     TABLE_HEADER_ACTION: 'Action',
     TABLE_EMPTY: 'Choose a folder and run audit to find duplicate demo files.',
-    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.00 GB',
+    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.0 MB',
     footerSummary: (count, size) => `Duplicates Found: ${count} | Wasted Space: ${size}`,
 
     SELECT_FOLDER_DIALOG_TITLE: 'Select Folder to Audit',

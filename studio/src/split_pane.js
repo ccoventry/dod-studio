@@ -80,7 +80,15 @@ export function initSplitPane() {
           <strong class="split-demo-name" title="${escapeHtml(d.path)}">${escapeHtml(fileName(d.path))}</strong>
           <span class="split-demo-meta" title="${escapeHtml(STRINGS.SPLIT.SOURCE_TITLE[d.source] || '')}">${mb(d.size_bytes)} MB · ${escapeHtml(STRINGS.SPLIT.mapsCount(d.maps.length))} · ${escapeHtml(folderOf(d.path))}</span>
         </div>
-        <table class="split-maps">
+        <table class="split-maps analyzer-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_NUM)}</th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_MAP)}</th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_WHEN)}</th>
+            </tr>
+          </thead>
           <tbody>
             ${d.maps.map((m, k) => `
               <tr data-map="${k}">

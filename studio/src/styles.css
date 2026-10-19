@@ -2381,13 +2381,15 @@ tr.keyboard-selected {
   overflow-wrap: anywhere;
 }
 
-.split-maps {
-  margin: 6px 0;
-  border-collapse: collapse;
+/* The app's table style (analyzer-table), sized to its content. */
+.split-maps.analyzer-table {
+  width: auto;
+  min-width: 420px;
+  margin: 8px 0;
 }
 
-.split-maps td {
-  padding: 2px 10px 2px 0;
+.split-maps th {
+  position: static;
 }
 
 .split-map-num,
@@ -2400,9 +2402,10 @@ tr.keyboard-selected {
   opacity: 0.6;
 }
 
+/* The result goes under the button, not beside it. */
 .split-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   align-items: flex-start;
 }
@@ -3687,6 +3690,11 @@ button.setup-skip:hover:not(:disabled) {
 .audit-table .audit-file-path {
   word-break: break-all;
 }
+
+.audit-table th:nth-child(1) { width: 32px; }
+.audit-table th:nth-child(2) { width: 210px; }
+.audit-table th:nth-child(3) { width: 90px; }
+.audit-table th:nth-child(5) { width: 200px; }
 
 .audit-table .audit-keep {
   display: inline-flex;

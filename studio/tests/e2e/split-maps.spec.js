@@ -41,9 +41,9 @@ test.describe('Split Maps', () => {
     await gotoHarness(page);
     await findDemos(page);
     const three = demo(page, 'three.dem');
-    await expect(three.locator('tr')).toHaveCount(3);
-    await expect(three.locator('tr').nth(1)).toContainText('dod_avalanche');
-    await expect(three.locator('tr').nth(1)).toContainText('5:00 · 20:00 long');
+    await expect(three.locator('tbody tr')).toHaveCount(3);
+    await expect(three.locator('tbody tr').nth(1)).toContainText('dod_avalanche');
+    await expect(three.locator('tbody tr').nth(1)).toContainText('5:00 · 20:00 long');
     const args = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'find_multi_map_demos_cmd').args);
     expect(args).toEqual({ folder: 'C:\\demos', recursive: true });
   });
@@ -52,7 +52,7 @@ test.describe('Split Maps', () => {
     await gotoHarness(page);
     await findDemos(page);
     const two = demo(page, 'two.dem');
-    await expect(two.locator('tr').nth(1).locator('.split-map-when')).toContainText('0:12 long');
+    await expect(two.locator('tbody tr').nth(1).locator('.split-map-when')).toContainText('0:12 long');
     await expect(two.locator('.split-keep').nth(0)).toBeChecked();
     await expect(two.locator('.split-keep').nth(1)).not.toBeChecked();
   });
@@ -61,7 +61,7 @@ test.describe('Split Maps', () => {
     await gotoHarness(page);
     await findDemos(page);
     const three = demo(page, 'three.dem');
-    await expect(three.locator('tr').nth(2).locator('.split-keep')).not.toBeChecked();
+    await expect(three.locator('tbody tr').nth(2).locator('.split-keep')).not.toBeChecked();
     await three.locator('.split-keep').nth(0).uncheck();
     await three.locator('.split-go').click();
     await expect(three.locator('.split-result')).toContainText('Wrote 1 demo:');
