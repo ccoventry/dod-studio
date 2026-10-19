@@ -985,8 +985,10 @@
                 <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
               </div>
             </div>
-            <div class="table-wrapper" style="max-height: 400px;">
-              <table id="audit-results-table">
+            <!-- The app's table style; the list grows with the window, like the
+                 render list (#818), never shorter than 280px. -->
+            <div class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
+              <table id="audit-results-table" class="analyzer-table audit-table">
                 <thead>
                   <tr>
                     <th><input type="checkbox" id="audit-select-all" /></th>

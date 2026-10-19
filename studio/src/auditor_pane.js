@@ -7,7 +7,7 @@ import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
-  auditTotals, fileStatus,
+  auditTotals, wastedSizeText, fileStatus,
 } from './audit_duplicates.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
@@ -274,8 +274,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
     });
 
     const { copies, wastedBytes } = auditTotals(currentAuditResults);
-    const wastedGb = (wastedBytes / (1024 * 1024 * 1024)).toFixed(2);
-    setAuditFooterSummary(STRINGS.AUDITOR.footerSummary(copies, wastedGb));
+    setAuditFooterSummary(STRINGS.AUDITOR.footerSummary(copies, wastedSizeText(wastedBytes)));
 
     updateDeleteButtonState();
   }

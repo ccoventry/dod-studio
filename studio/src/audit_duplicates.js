@@ -98,6 +98,12 @@ export function auditTotals(groups) {
   return { copies, wastedBytes };
 }
 
+/** Wasted space for the footer: GB from 1 GB up, MB below it. */
+export function wastedSizeText(bytes) {
+  const gb = bytes / (1024 * 1024 * 1024);
+  return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /// The Status cell of a file row: kept, in use, or a copy.
 export function fileStatus(file, index) {
   const why = file.in_use ? STRINGS.AUDITOR.IN_USE[file.in_use] : '';

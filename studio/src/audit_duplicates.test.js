@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
-  deleteProgressView, startsTicked, withoutDeleted, auditTotals, fileStatus,
+  deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -68,5 +68,11 @@ describe('audit_duplicates (#844)', () => {
     expect(fileStatus({ in_use: 'game_folder' }, 0)).toBe('Kept (in the game folder)');
     expect(fileStatus({ in_use: null }, 1)).toBe('   ↳ Copy');
     expect(fileStatus({ in_use: 'queue' }, 1)).toBe("   ↳ Copy, in this project's queue");
+  });
+
+  it('says wasted space in MB under a gigabyte, GB from there', () => {
+    expect(wastedSizeText(21_870_000)).toBe('20.9 MB');
+    expect(wastedSizeText(3 * 1024 ** 3)).toBe('3.00 GB');
+    expect(wastedSizeText(0)).toBe('0.0 MB');
   });
 });

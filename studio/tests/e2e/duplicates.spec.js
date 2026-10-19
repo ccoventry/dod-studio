@@ -128,7 +128,7 @@ test('the kept copy comes first and copies in use start unticked', async ({ page
   await expect(boxes.nth(4)).toBeChecked();
   await expect(page.locator('#delete-selected-audits-btn')).toHaveText('Move 2 to Recycle Bin');
   await expect(page.locator('#delete-permanent-audits-btn')).toHaveText('Delete 2 Permanently…');
-  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 3 | Wasted Space: 0.00 GB');
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 3 | Wasted Space: 5.0 MB');
 });
 
 test('Move to Recycle Bin is the default delete, and the list follows it', async ({ page }) => {

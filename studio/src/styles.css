@@ -3672,6 +3672,34 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 12px;
 }
 
+/* Duplicates (#844): a group's header row stands out from its files, and the
+   row buttons are the compact kind the render list uses. */
+.audit-table .audit-group-row td {
+  background: #1c1c1c;
+  border-top: 1px solid var(--border-color);
+}
+
+.audit-table .group-toggle-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.audit-table .audit-file-path {
+  word-break: break-all;
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(3),
+.audit-table td:last-child {
+  white-space: nowrap;
+}
+
+.audit-table td:last-child button {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
 .audit-status-current {
   font-size: 0.9em;
   word-break: break-all;

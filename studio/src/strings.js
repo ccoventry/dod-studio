@@ -898,7 +898,7 @@ export const STRINGS = {
     TABLE_HEADER_ACTION: 'Action',
     TABLE_EMPTY: 'Choose a folder and run audit to find duplicate demo files.',
     FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.00 GB',
-    footerSummary: (count, gb) => `Duplicates Found: ${count} | Wasted Space: ${gb} GB`,
+    footerSummary: (count, size) => `Duplicates Found: ${count} | Wasted Space: ${size}`,
 
     SELECT_FOLDER_DIALOG_TITLE: 'Select Folder to Audit',
     // Duplicates' "Folders to check" (audit_folders.js, #844).
