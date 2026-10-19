@@ -110,13 +110,15 @@ impl SessionMeta {
     }
 }
 
-/// How a render attempt ended. `Interrupted` is what an attempt says from the
+/// How a render attempt ended. `Started` is what an attempt says from the
 /// moment it starts until it ends, so a crash mid-render leaves that behind
-/// rather than nothing.
+/// rather than nothing: a `Started` attempt no running job owns was cut off.
+/// Files written before #818's fix say `interrupted` for the same thing.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RenderOutcome {
-    Interrupted,
+    #[serde(alias = "interrupted")]
+    Started,
     Finished,
     Failed,
     Cancelled,
@@ -236,7 +238,7 @@ fn update_history(
     std::fs::write(path, json)
 }
 
-/// Records an attempt as it starts (outcome `Interrupted`).
+/// Records an attempt as it starts (outcome `Started`).
 pub fn record_render_start(take_folder: &Path, attempt: &RenderAttempt) -> std::io::Result<()> {
     update_history(take_folder, |renders| renders.push(attempt.clone()))
 }
@@ -421,14 +423,14 @@ mod tests {
             codec: "prores".to_string(),
             custom_codec_args: String::new(),
             fps: 300,
-            outcome: RenderOutcome::Interrupted,
+            outcome: RenderOutcome::Started,
             output_path: String::new(),
             output_size_bytes: None,
             error: None,
         }
     }
 
-    /// #438: an attempt reads as interrupted until it ends, both streams of
+    /// #438: an attempt reads as started until it ends, both streams of
     /// a take keep their own entries, and capture settings survive.
     #[test]
     fn render_history_records_each_attempt_and_its_outcome() {
@@ -437,7 +439,7 @@ mod tests {
 
         record_render_start(&take, &attempt_at(10, "all")).expect("start all");
         record_render_start(&take, &attempt_at(10, "hudcolor")).expect("start hud");
-        assert_eq!(read_history(&take)[0].outcome, RenderOutcome::Interrupted);
+        assert_eq!(read_history(&take)[0].outcome, RenderOutcome::Started);
 
         record_render_end(
             &take,
@@ -468,6 +470,18 @@ mod tests {
         assert_eq!(history[1].error.as_deref(), Some("ffmpeg exited 1"));
         let meta = read_for_take(&take).expect("meta");
         assert_eq!((meta.capture_fps, meta.format), (120, FORMAT));
+    }
+
+    /// A started attempt is written as `started`, and one an older build
+    /// wrote as `interrupted` reads as the same thing.
+    #[test]
+    fn started_outcome_reads_the_old_interrupted_name() {
+        assert_eq!(
+            serde_json::to_string(&RenderOutcome::Started).unwrap(),
+            "\"started\""
+        );
+        let old: RenderOutcome = serde_json::from_str("\"interrupted\"").unwrap();
+        assert_eq!(old, RenderOutcome::Started);
     }
 
     /// A take captured before the file existed gets one, in its block folder,

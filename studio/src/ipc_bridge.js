@@ -644,6 +644,16 @@ export async function discardRenderAutosave() {
     });
 }
 
+/** The render job list the backend holds (#771), for the Render tab on page
+ *  load; null when the call fails. */
+export async function getRenderJobs() {
+  return invoke("get_render_jobs")
+    .catch((err) => {
+      console.error("IPC Execution Error (get_render_jobs):", err);
+      return null;
+    });
+}
+
 export async function recoverRenderBatch() {
   return invoke("recover_render_batch")
     .catch((err) => {
