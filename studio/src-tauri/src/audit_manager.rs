@@ -5,7 +5,7 @@
 
 use hl_demo_auditor::{AuditProgress, find_duplicates, scan_dir};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
@@ -30,7 +30,8 @@ impl Default for AuditManager {
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InUse {
-    /// Inside the configured install's game folder (`dod`).
+    /// Inside an install's game folder (`dod`): the configured one, or any
+    /// other `dod` beside an `hl.exe`.
     GameFolder,
     /// In the current project's queue.
     Queue,
@@ -131,6 +132,37 @@ impl KeepRules {
     }
 }
 
+/// The game folders (`<install>\dod`, beside an `hl.exe`) that any of
+/// `files` sits in, each checked on disk once.
+pub fn install_game_folders<'a>(files: impl Iterator<Item = &'a PathBuf>) -> Vec<PathBuf> {
+    let mut checked: HashMap<PathBuf, bool> = HashMap::new();
+    let mut found = Vec::new();
+    for file in files {
+        for dir in file.ancestors().skip(1) {
+            let is_dod = dir
+                .file_name()
+                .is_some_and(|n| n.eq_ignore_ascii_case(GAME_FOLDER_NAME));
+            if !is_dod {
+                continue;
+            }
+            let hit = *checked.entry(dir.to_path_buf()).or_insert_with(|| {
+                let yes = dir.parent().is_some_and(|p| p.join("hl.exe").is_file());
+                if yes {
+                    found.push(dir.to_path_buf());
+                }
+                yes
+            });
+            if hit {
+                break;
+            }
+        }
+    }
+    found
+}
+
+/// The game's own folder name in every install DoD Studio supports.
+const GAME_FOLDER_NAME: &str = "dod";
+
 /// One group's files, the copy to keep first: one the game folder or the
 /// queue uses, then the shortest path, then by name so the pick is stable.
 pub fn order_for_keeping(files: Vec<PathBuf>, rules: &KeepRules) -> Vec<AuditFile> {
@@ -202,8 +234,6 @@ pub async fn run_demo_audit_impl(
                 None => crate::messages::NO_AUDIT_FOLDERS.to_string(),
             });
         }
-        let keep_rules = KeepRules::new(&rules.0, &rules.1);
-
         let (tx, rx) = mpsc::channel();
         let ah = app_handle.clone();
         // At most one event per ~33 ms, the first at once (CLAUDE.md).
@@ -243,6 +273,14 @@ pub async fn run_demo_audit_impl(
         let groups = if cancelled {
             Vec::new()
         } else {
+            // Every install the copies sit in counts, not only the one the
+            // hl.exe setting names: a PC with a stock, a PRE and a POST
+            // install keeps each one's demos.
+            let mut game_folders = rules.0.clone();
+            game_folders.extend(install_game_folders(
+                duplicate_groups.iter().flat_map(|g| g.files.iter()),
+            ));
+            let keep_rules = KeepRules::new(&game_folders, &rules.1);
             duplicate_groups
                 .into_iter()
                 .map(|g| SerializedDuplicateGroup {
@@ -437,6 +475,26 @@ mod tests {
             }
         );
         assert_eq!(files[1].in_use, None);
+    }
+
+    #[test]
+    fn every_install_the_copies_sit_in_is_a_game_folder() {
+        let root =
+            std::env::temp_dir().join(format!("dodstudio-audit-installs-{}", std::process::id()));
+        let post = root.join("POST");
+        let loose = root.join("loose");
+        std::fs::create_dir_all(post.join("dod").join("sub")).unwrap();
+        std::fs::create_dir_all(loose.join("dod")).unwrap();
+        std::fs::write(post.join("hl.exe"), b"").unwrap();
+        let files = [
+            post.join("dod").join("sub").join("a.dem"),
+            post.join("dod").join("b.dem"),
+            // A folder named dod with no hl.exe beside it is not an install.
+            loose.join("dod").join("c.dem"),
+        ];
+        let found = install_game_folders(files.iter());
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(found, vec![post.join("dod")]);
     }
 
     #[test]
