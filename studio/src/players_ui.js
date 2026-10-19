@@ -29,6 +29,7 @@ import {
   tileRect,
   missingPngs,
   missingSprites,
+  canPreviewSprites,
   OWN_SPRAY,
   SPRAY_SIZES,
   GRID,
@@ -71,9 +72,14 @@ function edit(next) {
   onEdit();
 }
 
-/** A sprite decoded once, as a canvas the previews draw from. */
+/** A sprite decoded once, as a canvas the previews draw from. Null, asked
+ *  for and kept nowhere, until both paths are known: settings_sync.js renders
+ *  the tab before createPlayersUi wires them, and its refresh draws again
+ *  once they are (#852). */
 function spriteCanvas(file) {
-  const { hlPath, gameFolder } = getPaths();
+  const paths = getPaths();
+  if (!canPreviewSprites(paths)) return Promise.resolve(null);
+  const { hlPath, gameFolder } = paths;
   const key = `${hlPath}|${gameFolder}`;
   if (key !== imagesFor) {
     spriteImages.clear();

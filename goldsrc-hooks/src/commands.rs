@@ -567,6 +567,9 @@ pub fn poll() {
     crate::remote::poll();
     // One step of a long forward seek, or a landed seek's follow-up command.
     crate::demo_seek::poll();
+    // Patches Core.dll's packet loop once viewdemo loads it, and logs each
+    // load's time (#798).
+    crate::fast_load::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
@@ -743,6 +746,9 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(fast_load) = crate::fast_load::status_line() {
+        lines.push(fast_load);
     }
     lines.push(crate::player_overrides::status());
     if let Some(sprays) = crate::spray_hltv::status_line() {
@@ -1263,6 +1269,16 @@ unsafe extern "C" fn cmd_demo_list_show_counts() {
     );
 }
 
+/// Only registered when `dodstudio_demo_fast_load` could not be a cvar: on
+/// is the default budget.
+unsafe extern "C" fn cmd_demo_fast_load() {
+    handle_toggle(
+        crate::fast_load::NAME,
+        &crate::fast_load::FALLBACK_ON,
+        crate::fast_load::status,
+    );
+}
+
 /// Only registered when the window-layout cvars could not be registered.
 /// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_viewdemo_in_panel() {
@@ -1544,6 +1560,11 @@ pub fn install() {
             demo_list_folders::COUNT_SUBFOLDERS.name,
             cmd_demo_list_count_subfolders,
         ),
+    }
+    // On by default (#798); read by fast_load::poll each frame.
+    match register(crate::fast_load::NAME, "1") {
+        Some(cvar) => crate::fast_load::set_cvar(cvar),
+        None => add_command(crate::fast_load::NAME, cmd_demo_fast_load),
     }
     match register(demo_list_folders::SHOW_COUNTS.name, "1") {
         Some(cvar) => demo_list_folders::SHOW_COUNTS.set_cvar(cvar),

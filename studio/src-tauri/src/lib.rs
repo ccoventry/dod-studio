@@ -40,7 +40,7 @@ use capture_manager::{
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
     check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
-    get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
+    get_render_jobs, get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
     remove_non_rendering_render_jobs, remove_render_job, remove_render_jobs, reset_all_render_jobs,
     reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
 };
@@ -292,8 +292,10 @@ fn volume_key(path: &std::path::Path) -> Option<String> {
 }
 
 /// Free space across the capture folders, each drive counted once: two
-/// folders on one drive share its space.
-#[tauri::command]
+/// folders on one drive share its space. Off the main thread (#853): a
+/// cache miss re-lists every volume, which waits on a sleeping or network
+/// drive, and start-up asks for this while the window is up.
+#[tauri::command(async)]
 fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
     let mut seen = std::collections::HashSet::new();
@@ -326,7 +328,8 @@ struct CaptureOutputDiagnostic {
     usable: bool,
 }
 
-#[tauri::command]
+/// Off the main thread for the same reason as `calculate_export_pool_space`.
+#[tauri::command(async)]
 fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
     paths
         .into_iter()
@@ -806,6 +809,7 @@ pub fn run() {
             check_render_autosave,
             discard_render_autosave,
             recover_render_batch,
+            get_render_jobs,
             get_settings,
             save_settings,
             save_project_session,

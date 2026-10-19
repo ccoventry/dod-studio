@@ -86,7 +86,8 @@
 //! ## Still loading
 //!
 //! The world fills in the background -- `Core.dll`'s `Server::RunFrame` reads at
-//! most 33 packets per engine frame -- while playback has already started. A
+//! most 33 packets per engine frame, or for a time budget per frame with
+//! `dodstudio_demo_fast_load` (#798) -- while playback has already started. A
 //! seek past what is loaded lands on the last loaded frame. `IsLoading()`
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.

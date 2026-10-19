@@ -622,7 +622,7 @@ export const STRINGS = {
     TABLE_HEADER_HISTORY_TITLE: 'Every time this take was rendered, kept beside the take so it survives restarts. ▸ lists each attempt.',
     HISTORY_NEW: 'New',
     historyRendered: (count) => `Rendered ×${count}`,
-    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' },
+    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted', rendering: 'Rendering…' },
     HISTORY_SKIPPED_SETTINGS: 'Skip (kept original)',
     HISTORY_TOGGLE_TITLE: 'Show or hide every render of this take',
     historyFileNotFound: (name) => `${name} was moved or deleted`,
@@ -753,6 +753,8 @@ export const STRINGS = {
     REQUIRED_ESTIMATED_DEFAULT: 'Required (Over-estimated): 0.00 GB',
     recoveredJobsToast: (completed, pending) => `Recovered ${completed} completed, ${pending} pending render job(s).`,
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
+    STATUS_RECOVERING: 'Status: Recovering the render batch…',
+    recoveredStatus: (queued) => `Status: Render batch recovered — ${queued} take(s) queued`,
     renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
@@ -764,6 +766,8 @@ export const STRINGS = {
     countCancelled: (n) => `${n} cancelled`,
     batchSummary: (parts) => `Render batch finished — ${parts}.`,
     STATUS_FINISHED: 'Status: Finished',
+    STATUS_CANCELLED: 'Status: Cancelled',
+    statusFinishedWith: (parts) => `Status: Finished — ${parts}`,
     scanFoundSoFar: (n) => `Status: Scanning… found ${n} take(s) so far`,
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
     SCANNING_TOAST: 'Scanning render directories...',
@@ -1555,7 +1559,7 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
+    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
@@ -1563,6 +1567,10 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    scanCancelledToast: (count) =>
+      count > 0
+        ? `Scan cancelled (${count} demo(s) added before cancel)`
+        : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 

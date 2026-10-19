@@ -424,6 +424,14 @@ unsafe fn set_label(object: *mut c_void, text: &str) {
 /// player.
 unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
     if text(raw).eq_ignore_ascii_case("load") {
+        // A double-click seeks even with Go greyed out (#826).
+        if crate::review_lock::locked() {
+            crate::commands::console_print(&format!(
+                "{NAME}: {}\n",
+                crate::review_lock::LOCKED_NOTE
+            ));
+            return;
+        }
         // Nothing picked: Enter anywhere on the tab lands here too (the
         // window's default button), so no console line then (#777); the
         // hint under the list already says what to do.

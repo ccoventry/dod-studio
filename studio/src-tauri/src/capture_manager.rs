@@ -1651,6 +1651,10 @@ pub struct ScanOutcome {
     pub unchanged: u32,
     #[serde(default)]
     pub copies: Vec<ScanCopy>,
+    /// Cancel stopped the scan; `demos` holds what was parsed before it,
+    /// none when it stopped while listing folders (#843).
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 /// A scanned file with the same key as a queued demo at another path, or as
@@ -1795,6 +1799,51 @@ fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -
     line
 }
 
+/// The scan's step line while it lists folders, before any demo is parsed.
+fn listing_status_line(folders: u32, demos: u32) -> String {
+    format!("Looking for demos: {folders} folders read, {demos} demos found")
+}
+
+/// Phase 1 of a queue scan: every `.dem` under `dirs` goes into `list`, kept
+/// in file-name order. A picked folder is read through even when it is a
+/// link; links inside it are not, so a junction back up the tree cannot
+/// loop. The Recycle Bin and System Volume Information are skipped (#843).
+/// `progress(folders, demos)` is called as the counts grow (the caller
+/// throttles); `cancel` is checked at every entry. False when cancelled.
+fn list_scan_demos(
+    dirs: &[PathBuf],
+    list: &mut Vec<PathBuf>,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &mut dyn FnMut(u32, u32),
+) -> bool {
+    let mut folders = dirs.len() as u32;
+    progress(folders, list.len() as u32);
+    let outcome = Walker::new()
+        .skip_system_folders()
+        .walk_roots(dirs, &mut |found| {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Step::Stop;
+            }
+            match found.kind {
+                Kind::Dir => folders += 1,
+                Kind::File if found.is_demo() => {
+                    let insert_idx = list
+                        .binary_search_by(|p: &PathBuf| {
+                            p.file_name()
+                                .unwrap_or_default()
+                                .cmp(found.path.file_name().unwrap_or_default())
+                        })
+                        .unwrap_or_else(|pos| pos);
+                    list.insert(insert_idx, found.path.clone());
+                }
+                _ => return Step::Enter,
+            }
+            progress(folders, list.len() as u32);
+            Step::Enter
+        });
+    outcome.complete || !cancel.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// True when a progress line may go out at `now_ms`: at most one per ~33 ms
 /// (CLAUDE.md's telemetry throttle). `last_ms` holds the last emit time, or
 /// `u32::MAX` before the first one.
@@ -1896,6 +1945,8 @@ fn locate_missing_demos_within(
         .collect();
     Walker::new()
         .breadth_first()
+        // A deleted copy in the Recycle Bin has the same key (#843).
+        .skip_system_folders()
         // Folders LOCATE_MAX_DEPTH below a search folder are still read.
         .max_depth(LOCATE_MAX_DEPTH + 1)
         .max_entries(max_entries)
@@ -2138,27 +2189,56 @@ pub async fn scan_directory_impl(
             }
         }
 
-        // A picked folder is read through even when it is a link; links
-        // inside it are not, so a junction back up the tree cannot loop.
-        Walker::new().walk_roots(&dir_stack, &mut |found| {
-            if found.kind == Kind::File
-                && found
-                    .path
-                    .extension()
-                    .map(|ext| ext == "dem")
-                    .unwrap_or(false)
-            {
-                let insert_idx = list
-                    .binary_search_by(|p: &PathBuf| {
-                        p.file_name()
-                            .unwrap_or_default()
-                            .cmp(found.path.file_name().unwrap_or_default())
-                    })
-                    .unwrap_or_else(|pos| pos);
-                list.insert(insert_idx, found.path.clone());
-            }
-            Step::Enter
-        });
+        // A whole drive takes a minute or more to list (#843): say how far
+        // it got, at most one line per ~33 ms, the first at once.
+        let listing_started = std::time::Instant::now();
+        let last_listing_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let listed = list_scan_demos(
+            &dir_stack,
+            &mut list,
+            &cancel_token,
+            &mut |folders, demos| {
+                let now_ms = listing_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u32::MAX as u128 - 1) as u32;
+                if !progress_emit_due(&last_listing_emit, now_ms) {
+                    return;
+                }
+                let _ = app_handle.emit(
+                    "scan_progress",
+                    serde_json::json!({
+                        "scanned": 0,
+                        "found": 0,
+                        "status": listing_status_line(folders, demos),
+                        "cancelled": false,
+                        "listing": true,
+                        "folders": folders,
+                        "demos": demos,
+                    }),
+                );
+            },
+        );
+        if !listed {
+            // Cancelled while listing: nothing is parsed, nothing added.
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": 0,
+                    "found": 0,
+                    "status": "Cancelled",
+                    "cancelled": true,
+                    "unchanged": 0,
+                    "skipped": [],
+                }),
+            );
+            return Ok(ScanOutcome {
+                demos: Vec::new(),
+                unchanged: 0,
+                copies: Vec::new(),
+                cancelled: true,
+            });
+        }
 
         // Demos already in the queue and unchanged on disk are not parsed
         // again: re-adding a folder to pick up one new demo used to re-parse
@@ -2363,6 +2443,7 @@ pub async fn scan_directory_impl(
             demos: results,
             unchanged,
             copies,
+            cancelled: was_cancelled,
         })
     }))
     .await;
@@ -3327,6 +3408,87 @@ mod tests {
         assert!(!progress_emit_due(&last, 20));
         assert!(progress_emit_due(&last, 33));
         assert!(!progress_emit_due(&last, 40));
+    }
+
+    #[test]
+    fn the_listing_line_counts_folders_and_demos() {
+        assert_eq!(
+            listing_status_line(12, 3),
+            "Looking for demos: 12 folders read, 3 demos found"
+        );
+    }
+
+    /// A drive-like tree: two demos to find, and deleted ones in the
+    /// Recycle Bin and System Volume Information.
+    fn drive_like(scratch: &Scratch) -> PathBuf {
+        let root = scratch.path().to_path_buf();
+        for dir in [
+            "games/dod",
+            "$RECYCLE.BIN/S-1-5-21",
+            "System Volume Information",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for f in [
+            "b.dem",
+            "games/dod/a.dem",
+            "$RECYCLE.BIN/S-1-5-21/$R1A2B3C.dem",
+            "System Volume Information/c.dem",
+        ] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn listing_finds_demos_in_name_order_and_skips_system_folders() {
+        let scratch = Scratch::new("list_scan_demos");
+        let root = drive_like(&scratch);
+        let mut list = Vec::new();
+        let mut last = (0, 0);
+        let listed = list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &std::sync::atomic::AtomicBool::new(false),
+            &mut |folders, demos| last = (folders, demos),
+        );
+        assert!(listed);
+        assert_eq!(list, [root.join("games/dod/a.dem"), root.join("b.dem")]);
+        // The root, games and games/dod; the two system folders not counted.
+        assert_eq!(last, (3, 2));
+    }
+
+    #[test]
+    fn cancel_stops_the_listing_and_says_so() {
+        let scratch = Scratch::new("list_scan_cancel");
+        let root = drive_like(&scratch);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut list = Vec::new();
+        let mut calls = 0;
+        let listed = list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &cancel,
+            &mut |_, _| {
+                calls += 1;
+                // The first call is the start line; cancel on the next.
+                if calls == 2 {
+                    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            },
+        );
+        assert!(!listed);
+        assert_eq!(calls, 2, "nothing more is read once cancelled");
+
+        // Cancelled before it starts: nothing is listed.
+        let mut list = Vec::new();
+        assert!(!list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &cancel,
+            &mut |_, _| {}
+        ));
+        assert!(list.is_empty());
     }
 
     #[test]
