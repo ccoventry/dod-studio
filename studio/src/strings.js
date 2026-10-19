@@ -928,12 +928,12 @@ export const STRINGS = {
     identicalHash: (hash) => `Identical Hash: ${hash}`,
     ORIGINAL_FILE_TITLE: 'The copy this group keeps. Pick another copy to keep that one instead.',
     KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
-    PREFER_FOLDER_BUTTON: 'Keep the copies in a folder…',
-    PREFER_FOLDER_TITLE: 'Pick a folder: every group with a copy in it (or in a folder inside it) keeps that copy, so a long list needs no picking row by row.',
-    PREFER_FOLDER_DIALOG_TITLE: 'Keep the copies in this folder',
+    PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',
+    PREFER_FOLDER_TITLE: 'Moves nothing. Pick a folder: every group that already has a copy in it (or in a folder inside it) keeps that copy, so a long list needs no picking row by row.',
+    PREFER_FOLDER_DIALOG_TITLE: 'Keep the copies that are already in this folder',
     preferFolderToast: (found, changed, folder) => (found
       ? `Keeping the copy in ${folder} in ${found} group${found === 1 ? '' : 's'} (${changed} changed).`
-      : `No group has a copy in ${folder}.`),
+      : `No group has a copy in ${folder}. This only picks which copy to keep; it doesn't move demos.`),
     IN_USE_TITLE: "The game or this project reads this copy, so it isn't ticked. Tick it only if you're sure.",
     // Why a copy is kept or left unticked (audit_manager.rs's InUse).
     IN_USE: { game_folder: 'in the game folder', queue: "in this project's queue" },

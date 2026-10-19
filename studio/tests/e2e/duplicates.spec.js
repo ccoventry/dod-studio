@@ -165,7 +165,7 @@ test('another copy can be kept: it moves to the top, the old pick becomes a tick
   expect(args.paths).toEqual(['\\\\?\\F:\\downloads\\match.dem', '\\\\?\\D:\\a.dem']);
 });
 
-test('Keep the copies in a folder picks the copy in that folder in every group', async ({ page }) => {
+test('Keep copies already in a folder picks the copy in that folder in every group', async ({ page }) => {
   await loadHarness(page, { picked: 'E:\\old' });
   await expect(page.locator('#audit-prefer-folder-btn')).toBeDisabled();
   await runAudit(page);
