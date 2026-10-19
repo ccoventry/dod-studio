@@ -69,7 +69,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 3  # 3: barrel found and levelled, right side up (level_view)
+VERSION = 4  # 4: barrel levelled by its top edge (level_view)
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -91,10 +91,6 @@ MUZZLE = (0.0, -1.0, 0.0)
 # Which way is up in a weapon model: the top of the gun (sights, scope)
 # towards +X, the grip and magazine towards -X (level_view).
 MODEL_UP = (1.0, 0.0, 0.0)
-# The share of a gun's length, from the muzzle, that level_view reads the
-# barrel from, and the largest tilt it trusts from it in one step.
-BARREL_FRONT = 0.3
-BARREL_MAX_STEP = 10.0
 
 
 @dataclass(frozen=True)
@@ -401,28 +397,42 @@ def surface_points(tris, n=20000, seed=0):
     return a + r1[:, None] * (b - a) + r2[:, None] * (c - a)
 
 
-def barrel_slope(xy, front=0.55, bins=40, keep=0.35):
-    """The slope of the barrel in a side view (`xy`: surface points, muzzle
-    towards +x, y up): the thinnest slices of the gun's front part are the
-    barrel (a bipod, sight, magazine or grip makes its slices thick), and a
-    line through their middles gives its slope."""
+def top_edge_slope(xy, front=0.45, bins=60, tol=0.012):
+    """The slope of the barrel's top edge in a side view (`xy`: surface
+    points, muzzle towards +x, y up): the highest point in each slice of
+    the gun's front part, and the straight line most of those lie on
+    (within `tol` of the gun's length). A sight post or the muzzle's lip is
+    a short spike off that line and doesn't count; a bipod or a magazine
+    hangs below the barrel, so it never reaches the top edge."""
     x, y = xy[:, 0], xy[:, 1]
-    x0 = x.max() - front * (x.max() - x.min())
+    span = x.max() - x.min()
+    x0 = x.max() - front * span
     edges = np.linspace(x0, x.max(), bins + 1)
-    rows = []
+    cx, cy = [], []
     for lo, hi in zip(edges[:-1], edges[1:]):
         s = y[(x >= lo) & (x <= hi)]
-        if len(s) < 8:
-            continue
-        lo_y, hi_y = np.percentile(s, [5, 95])
-        rows.append((hi_y - lo_y, (lo + hi) / 2, (lo_y + hi_y) / 2))
-    if len(rows) < 3:
+        if len(s) >= 4:
+            cx.append((lo + hi) / 2)
+            cy.append(np.percentile(s, 98))
+    if len(cx) < 4:
         return 0.0
-    rows = np.array(rows)
-    thin = rows[rows[:, 0] <= np.quantile(rows[:, 0], keep) + 1e-9]
-    if len(thin) < 2 or np.ptp(thin[:, 1]) <= 0:
-        return 0.0
-    return float(np.polyfit(thin[:, 1], thin[:, 2], 1)[0])
+    cx, cy = np.array(cx), np.array(cy)
+    eps = tol * span
+    best = (-1, np.inf, 0.0, 0.0)
+    for i in range(len(cx)):
+        for j in range(i + 1, len(cx)):
+            k = (cy[j] - cy[i]) / (cx[j] - cx[i])
+            c = cy[i] - k * cx[i]
+            resid = np.abs(cy - (k * cx + c))
+            n = int((resid <= eps).sum())
+            err = float(resid[resid <= eps].sum())
+            if n > best[0] or (n == best[0] and err < best[1]):
+                best = (n, err, k, c)
+    _, _, k, c = best
+    inl = np.abs(cy - (k * cx + c)) <= eps
+    if inl.sum() >= 2:
+        k = np.polyfit(cx[inl], cy[inl], 1)[0]
+    return float(k)
 
 
 def level_view(tris, pick):
@@ -442,12 +452,7 @@ def level_view(tris, pick):
         r = np.radians(angle)
         rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
         xy = np.stack([pts @ rr, pts @ uu], 1)
-        # The barrel proper: the front third. A compensator or front grip
-        # can make that misread (the Thompson): then the longer front half.
-        step = np.degrees(np.arctan(barrel_slope(xy, front=BARREL_FRONT)))
-        if abs(step) > BARREL_MAX_STEP:
-            step = np.degrees(np.arctan(barrel_slope(xy, front=0.55)))
-        angle += float(step)
+        angle += float(np.degrees(np.arctan(top_edge_slope(xy))))
     r = np.radians(angle)
     rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
     return np.array([rr, uu, np.cross(rr, uu)]), (sx, sy, angle)
