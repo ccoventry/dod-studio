@@ -65,8 +65,16 @@ jobs:
       # goldsrc-hooks is left out: Hooks 32-bit runs every one of its tests as
       # 32-bit, the build that ships, so compiling them again as 64-bit here
       # only lengthened the slowest job.
+      #
+      # --lib --bins --tests: a plain `cargo test` also builds and links every
+      # example (114 R&D probes in native/ and analysis/), which run no tests;
+      # Clippy's --all-targets still checks that they compile. The doc tests
+      # (only dem-patch has any) run in a step of their own.
       - name: cargo test --workspace
-        run: cargo test --workspace --exclude goldsrc-hooks --locked
+        run: cargo test --workspace --exclude goldsrc-hooks --lib --bins --tests --locked
+
+      - name: cargo test --doc (dem-patch)
+        run: cargo test -p dem --doc --locked
 
   clippy:
     name: Clippy
