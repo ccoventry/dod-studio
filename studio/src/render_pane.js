@@ -29,6 +29,7 @@ import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
 import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
+import { scanMergeMessage } from './render_scan_summary.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
@@ -728,14 +729,12 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   }).catch((err) => console.error('Failed to register render_jobs_snapshot listener:', err));
   jobsRestore.restore();
 
-  function applyJobsSnapshot(list) {
-    jobs = list;
-    if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
-      for (const j of jobs) {
-        if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
-      }
-    }
-    renderJobsTable();
+  // A scan merges into the queue (#772), so Scan stays enabled whatever the
+  // rows are doing and is off only while a scan runs; the status line shows
+  // the scan's progress until it ends.
+  let scanRunning = false;
+
+  function paintQueueStatus() {
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
     const activeOrQueued = queuedCount + renderingCount;
@@ -744,11 +743,20 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     } else {
       setRenderStatus(renderStatusEl, queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
     }
-    // Scan is blocked while anything is Queued or Rendering so a re-scan
-    // can't clobber jobs the user may have already toggled Skip on — see
-    // queue_render_batch's own guard against this. Start and the other
-    // footer buttons follow the ticked rows (renderJobsTable above).
-    if (scanRenderBtn) scanRenderBtn.disabled = activeOrQueued > 0;
+  }
+
+  function applyJobsSnapshot(list) {
+    jobs = list;
+    if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
+      for (const j of jobs) {
+        if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
+      }
+    }
+    renderJobsTable();
+    if (!scanRunning) paintQueueStatus();
+    // Start and the other footer buttons follow the ticked rows
+    // (renderJobsTable above).
+    if (scanRenderBtn) scanRenderBtn.disabled = scanRunning;
 
     // Export Pool Free / Required (Estimated) only change when a job is
     // added, removed, or crosses a status boundary (started, finished,
@@ -763,9 +771,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   }
 
   listen('render_batch_finished', () => {
-    // A row that was Retried during the batch is still Queued, so Scan stays
-    // blocked and Start comes back for it; the buttons follow the ticks.
-    if (scanRenderBtn) scanRenderBtn.disabled = jobs.some((j) => j.status === JOB_STATUS.QUEUED);
+    // A row that was Retried during the batch is still Queued, so Start
+    // comes back for it; the buttons follow the ticks.
+    if (scanRenderBtn) scanRenderBtn.disabled = scanRunning;
     syncSelectionControls();
     // Counted, not `some()`. The old check asked "was anything cancelled?"
     // before "did anything finish?", so one cancelled job in a batch of any
@@ -794,7 +802,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       }
     }
     const end = batchEndStatus(finished, failed, cancelled);
-    setRenderStatus(renderStatusEl, end.text, end.status);
+    if (!scanRunning) setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
   if (scanRenderBtn) {
@@ -842,6 +850,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
 
       scanFoundCount = 0;
       showToast(STRINGS.RENDER.SCANNING_TOAST, 'info');
+      scanRunning = true;
       scanRenderBtn.disabled = true;
       setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCANNING);
 
@@ -856,23 +865,26 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         clip_names: clipNames,
       };
 
-      // Populates the real job table (below) as Queued rows via the
-      // render_jobs_snapshot event this emits — not a preview. Start Render
-      // Batch is what actually kicks off the scheduler; this only stages it,
-      // so there's a real window to review the batch or toggle Skip on an
-      // OBS-shaped job before anything runs.
+      // Merges into the real job table (below) via the render_jobs_snapshot
+      // event this emits (#772): new takes join as Queued rows, rows already
+      // there keep their state and tick. Start Render Batch is what kicks
+      // off the scheduler when none runs, so there's a window to review the
+      // batch or toggle Skip on an OBS-shaped job before anything renders.
       queueRenderBatch(renderPayload)
-        .then((count) => {
-          showToast(STRINGS.RENDER.scannedTakesToast(count), count > 0 ? 'success' : 'info');
-          setRenderStatus(renderStatusEl, count > 0
-            ? STRINGS.RENDER.scanCompleteStatus(count)
-            : STRINGS.MAIN.statusGeneric(STRINGS.RENDER.NO_RENDER_TAKES_DETECTED));
-          if (count === 0) scanRenderBtn.disabled = false;
+        .then((summary) => {
+          scanRunning = false;
+          scanRenderBtn.disabled = false;
+          const message = scanMergeMessage(summary);
+          showToast(message.toast, message.level);
+          // While a batch renders, its own progress line takes over again.
+          if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) paintQueueStatus();
+          else setRenderStatus(renderStatusEl, message.status);
         })
         .catch((err) => {
+          scanRunning = false;
+          scanRenderBtn.disabled = false;
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
           setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
-          scanRenderBtn.disabled = false;
         });
     });
   }
