@@ -935,13 +935,26 @@
           <div class="auditor-tab-panel" data-auditor-panel="duplicates">
             <div class="egui-panel" style="margin-top: 10px;">
               <div class="panel-body">
+                <!-- Folders to check (#844): audit_folders.js. The Target
+                     Folder above, folders added with the picker, or every
+                     fixed drive, in one pass. -->
+                <label data-str="AUDITOR.FOLDERS_TO_CHECK_LABEL">Folders to check:</label>
+                <ul id="audit-folder-list" class="audit-folder-list"></ul>
+                <div class="row-inputs">
+                  <button id="audit-add-folder-btn" type="button" data-str="AUDITOR.ADD_FOLDER_BUTTON">Add Folder…</button>
+                  <label class="audit-all-drives" data-str-title="AUDITOR.ALL_DRIVES_TITLE" title="Check every fixed drive in one pass">
+                    <input type="checkbox" id="audit-all-drives" />
+                    <span id="audit-all-drives-label" data-str="AUDITOR.ALL_DRIVES_LABEL">All drives</span>
+                  </label>
+                </div>
                 <div class="row-inputs">
                   <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
                   <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
                 </div>
+                <div id="audit-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="audit-status" class="status-indicator">
-                  <span id="audit-spinner" class="spinner" style="display: none;"></span>
                   <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
+                  <br><span id="audit-status-current" class="text-muted audit-status-current"></span>
                 </p>
               </div>
             </div>
@@ -949,7 +962,10 @@
           <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
-              <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Delete Selected Files</button>
+              <div class="row-inputs">
+                <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
+                <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+              </div>
             </div>
             <div class="table-wrapper" style="max-height: 400px;">
               <table id="audit-results-table">

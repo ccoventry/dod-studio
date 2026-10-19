@@ -689,8 +689,11 @@ export async function saveSettings(settings) {
     });
 }
 
-export async function runDemoAudit(paths) {
-  return invoke("run_demo_audit", { paths })
+// Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
+// `allDrives`, in one key pass; copies in `queued` (the project's queue) or
+// the install's game folder are listed first, as the ones to keep.
+export async function runDemoAudit(paths, allDrives = false, queued = []) {
+  return invoke("run_demo_audit", { paths, allDrives, queued })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');
@@ -698,8 +701,17 @@ export async function runDemoAudit(paths) {
     });
 }
 
-export async function deleteAuditFiles(paths) {
-  return invoke("delete_audit_files", { paths })
+export async function listFixedDrives() {
+  return invoke("list_fixed_drives")
+    .catch((err) => {
+      console.error("IPC Execution Error (list_fixed_drives):", err);
+      throw err;
+    });
+}
+
+// To the Recycle Bin unless `permanent`; resolves to `{ deleted, failed }`.
+export async function deleteAuditFiles(paths, permanent = false) {
+  return invoke("delete_audit_files", { paths, permanent })
     .catch((err) => {
       console.error("IPC Execution Error (delete_audit_files):", err);
       showToast(STRINGS.IPC.deletionFailed(err), 'error');
