@@ -1489,11 +1489,22 @@ pub fn check_render_autosave(
     }
     let json = std::fs::read_to_string(autosave_path()).ok()?;
     let session: RenderSessionData = serde_json::from_str(&json).ok()?;
+    recovery_summary(session)
+}
+
+/// What the recovery prompt offers, or `None` when every job had finished:
+/// a scan writes the autosave too, so a scan after a batch ended (or one
+/// whose takes were all rendered before) leaves a file with nothing left to
+/// render, and the prompt said "didn't finish cleanly" over "Pending: 0".
+fn recovery_summary(session: RenderSessionData) -> Option<RenderAutosaveSummary> {
     let pending_count = session
         .jobs
         .iter()
         .filter(|j| j.status == AutosaveJobStatus::Pending)
         .count();
+    if pending_count == 0 {
+        return None;
+    }
     let completed_count = session
         .jobs
         .iter()
@@ -1771,6 +1782,21 @@ mod tests {
             export_directories: vec!["E:/exports".to_string(), "  ".to_string()],
             max_concurrent_renders: 3,
         }
+    }
+
+    #[test]
+    fn the_recovery_prompt_needs_a_job_left_to_render() {
+        let done = session(vec![
+            autosave_job("a", AutosaveJobStatus::Completed, true),
+            autosave_job("b", AutosaveJobStatus::Completed, true),
+        ]);
+        assert!(recovery_summary(done).is_none());
+        let summary = recovery_summary(session(vec![
+            autosave_job("a", AutosaveJobStatus::Completed, true),
+            autosave_job("b", AutosaveJobStatus::Pending, true),
+        ]))
+        .expect("a pending job is worth recovering");
+        assert_eq!((summary.pending_count, summary.completed_count), (1, 1));
     }
 
     #[test]
