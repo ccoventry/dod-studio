@@ -8,7 +8,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import {
-  findMultiMapDemos, cancelMultiMapScan, demoMapSegments, splitDemoMaps, revealInExplorer,
+  findMultiMapDemos, cancelMultiMapScan, demoMapSegments, splitDemoMaps, cancelDemoSplit, revealInExplorer,
 } from './ipc_bridge.js';
 import { escapeHtml } from './html.js';
 import { splitProgressBar } from './split_progress.js';
@@ -173,10 +173,19 @@ export function initSplitPane() {
           </tbody>
         </table>
         <div class="split-actions">
-          <button type="button" class="split-go primary-btn">${escapeHtml(STRINGS.SPLIT.SPLIT_BUTTON)}</button>
+          <div class="row-inputs">
+            <button type="button" class="split-go primary-btn">${escapeHtml(STRINGS.SPLIT.SPLIT_BUTTON)}</button>
+            <button type="button" class="split-cancel" hidden>${escapeHtml(STRINGS.SPLIT.CANCEL_SPLIT_BUTTON)}</button>
+          </div>
           <span class="split-result">${failed ? escapeHtml(STRINGS.SPLIT.detailsFailed(failed)) : ''}</span>
         </div>`;
     box.querySelector('.split-go').addEventListener('click', () => split(d, box));
+    box.querySelector('.split-cancel').addEventListener('click', (e) => {
+      e.currentTarget.disabled = true;
+      const note = box.querySelector('.split-cancel-note');
+      if (note) note.textContent = STRINGS.SPLIT.CANCELLING_SPLIT;
+      cancelDemoSplit(d.path).catch(() => {});
+    });
     box.querySelectorAll('.split-keep').forEach((c) => c.addEventListener('change', () => updateGo(box)));
     updateGo(box);
     list.appendChild(box);
@@ -200,16 +209,25 @@ export function initSplitPane() {
     if (!keep.length) return; // the button is greyed out then
     box.dataset.splitting = '1';
     go.disabled = true;
+    // The ticks were read above; they stay as they are while it runs.
+    box.querySelectorAll('.split-keep').forEach((c) => { c.disabled = true; });
+    const cancel = box.querySelector('.split-cancel');
+    cancel.hidden = false;
+    cancel.disabled = false;
     splitting += 1;
     refresh();
     const bar = splitProgressBar();
-    result.replaceChildren(bar.el);
+    const note = document.createElement('div');
+    note.className = 'split-cancel-note';
+    result.replaceChildren(bar.el, note);
     const unlisten = await listen('split_progress', (event) => {
       if (event.payload?.path === demo.path) bar.update(event.payload.progress);
     }).catch(() => () => {});
     try {
-      const written = await splitDemoMaps(demo.path, keep);
-      result.innerHTML = `${escapeHtml(STRINGS.SPLIT.wrote(written.length))}<ul class="split-written">${
+      const outcome = await splitDemoMaps(demo.path, keep);
+      const written = outcome?.written ?? [];
+      const heading = outcome?.cancelled ? STRINGS.SPLIT.cancelledSplit(written.length) : STRINGS.SPLIT.wrote(written.length);
+      result.innerHTML = `${escapeHtml(heading)}<ul class="split-written">${
         written.map((w, k) => `<li>${escapeHtml(STRINGS.SPLIT.writtenLine(fileName(w.path), clockLong(w.seconds), mb(w.size_bytes)))}
           <button type="button" class="split-reveal" data-k="${k}">${escapeHtml(STRINGS.SPLIT.SHOW_IN_FOLDER)}</button></li>`).join('')
       }</ul>`;
@@ -228,6 +246,8 @@ export function initSplitPane() {
     } finally {
       unlisten();
       box.dataset.splitting = '';
+      cancel.hidden = true;
+      box.querySelectorAll('.split-keep').forEach((c) => { c.disabled = false; });
       updateGo(box);
       splitting -= 1;
       refresh();

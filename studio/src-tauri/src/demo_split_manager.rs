@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use native::demo_maps_scan::{DemoMaps, find_multi_map_demos};
 use native::demo_split::{
-    Keep, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_with_progress,
+    Keep, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_cancellable,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -18,6 +18,15 @@ use crate::settings_manager::SettingsManager;
 #[derive(Default)]
 pub struct DemoSplitManager {
     pub cancel: Arc<AtomicBool>,
+    /// Each running Split Checked Maps' cancel flag, by the demo's path.
+    pub splits: std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
+}
+
+/// What Split Checked Maps wrote, and whether Cancel stopped it first.
+#[derive(serde::Serialize)]
+pub struct SplitOutcome {
+    pub written: Vec<Written>,
+    pub cancelled: bool,
 }
 
 /// Progress events at most this often (~30 fps), per the event-loop rule.
@@ -81,19 +90,53 @@ pub async fn demo_map_segments(path: String) -> Result<Vec<MapSegment>, String> 
     .await
 }
 
-/// Writes the ticked maps (`keep`) of the demo at `path` as demos of their own.
+/// Writes the ticked maps (`keep`) of the demo at `path` as demos of their
+/// own; [`cancel_demo_split`] stops it (the maps already saved stay).
 #[tauri::command]
 pub async fn split_demo_maps(
     app_handle: AppHandle,
     settings: tauri::State<'_, SettingsManager>,
+    state: tauri::State<'_, DemoSplitManager>,
     path: String,
     keep: Vec<usize>,
-) -> Result<Vec<Written>, String> {
+) -> Result<SplitOutcome, String> {
     let map_dirs = game_map_dirs(&settings);
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        split_with_events(&app_handle, &path, Keep::These(&keep), &map_dirs)
+    let cancel = Arc::new(AtomicBool::new(false));
+    state
+        .splits
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(path.clone(), Arc::clone(&cancel));
+    let key = path.clone();
+    let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let stop = || cancel.load(Ordering::Relaxed);
+        split_events_cancellable(&app_handle, &path, Keep::These(&keep), &map_dirs, &stop)
+            .map(|(written, cancelled)| SplitOutcome { written, cancelled })
     }))
-    .await
+    .await;
+    state
+        .splits
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&key);
+    result
+}
+
+/// Stops the running split of the demo at `path`, at its next step.
+#[tauri::command]
+pub fn cancel_demo_split(
+    state: tauri::State<'_, DemoSplitManager>,
+    path: String,
+) -> Result<(), String> {
+    if let Some(flag) = state
+        .splits
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&path)
+    {
+        flag.store(true, Ordering::SeqCst);
+    }
+    Ok(())
 }
 
 /// Split now (#217): every map at least `min_seconds` long, with one parse of
@@ -141,21 +184,39 @@ fn split_with_events(
     keep: Keep,
     map_dirs: &[PathBuf],
 ) -> Result<Vec<Written>, String> {
+    split_events_cancellable(app_handle, path, keep, map_dirs, &|| false).map(|(w, _)| w)
+}
+
+/// [`split_with_events`] that `cancel` can stop.
+fn split_events_cancellable(
+    app_handle: &AppHandle,
+    path: &str,
+    keep: Keep,
+    map_dirs: &[PathBuf],
+    cancel: &dyn Fn() -> bool,
+) -> Result<(Vec<Written>, bool), String> {
     let started = std::time::Instant::now();
     let last = AtomicU32::new(0);
     let mut last_step = (String::new(), 0usize);
-    split_file_with_progress(Path::new(path), keep, map_dirs, &mut |p: SplitProgress| {
-        let now = started.elapsed().as_millis() as u32;
-        let step = (p.stage.to_string(), p.part);
-        if step == last_step && now.saturating_sub(last.load(Ordering::Relaxed)) < PROGRESS_EVERY_MS
-        {
-            return;
-        }
-        last_step = step;
-        last.store(now, Ordering::Relaxed);
-        let _ = app_handle.emit(
-            "split_progress",
-            serde_json::json!({ "path": path, "progress": p }),
-        );
-    })
+    split_file_cancellable(
+        Path::new(path),
+        keep,
+        map_dirs,
+        &mut |p: SplitProgress| {
+            let now = started.elapsed().as_millis() as u32;
+            let step = (p.stage.to_string(), p.part);
+            if step == last_step
+                && now.saturating_sub(last.load(Ordering::Relaxed)) < PROGRESS_EVERY_MS
+            {
+                return;
+            }
+            last_step = step;
+            last.store(now, Ordering::Relaxed);
+            let _ = app_handle.emit(
+                "split_progress",
+                serde_json::json!({ "path": path, "progress": p }),
+            );
+        },
+        cancel,
+    )
 }

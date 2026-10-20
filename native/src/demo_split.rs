@@ -665,6 +665,20 @@ pub fn split_file_with_progress(
     map_dirs: &[std::path::PathBuf],
     progress: &mut dyn FnMut(SplitProgress),
 ) -> Result<Vec<Written>, String> {
+    split_file_cancellable(path, keep, map_dirs, progress, &|| false).map(|(written, _)| written)
+}
+
+/// [`split_file_with_progress`] that stops when `cancel` answers true: after
+/// the demo is read, between maps, while a map is written, and before it is
+/// saved. A map already saved stays. Returns what was written and whether
+/// it stopped early.
+pub fn split_file_cancellable(
+    path: &std::path::Path,
+    keep: Keep,
+    map_dirs: &[std::path::PathBuf],
+    progress: &mut dyn FnMut(SplitProgress),
+    cancel: &dyn Fn() -> bool,
+) -> Result<(Vec<Written>, bool), String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
     let demo = dem::open_demo_from_bytes_with_progress(&bytes, &mut |read, total| {
@@ -699,6 +713,9 @@ pub fn split_file_with_progress(
     };
     let mut written = Vec::new();
     for (k, &i) in keep.iter().enumerate() {
+        if cancel() {
+            return Ok((written, true));
+        }
         let seg = segs
             .get(i)
             .ok_or_else(|| format!("the demo has no map {}", i + 1))?;
@@ -712,9 +729,9 @@ pub fn split_file_with_progress(
         });
         let part = extract(&demo, i, &find_bsp)
             .ok_or_else(|| format!("map {} ({}) could not be cut out", i + 1, seg.map))?;
-        let out = part
-            .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
-            .ok_or("writing was cancelled")?;
+        let Some(out) = part.write_to_bytes_reusing_source_cancellable(&bytes, cancel) else {
+            return Ok((written, true));
+        };
         let back = dem::open_demo_from_bytes_with_progress(&out, &mut |read, total| {
             progress(SplitProgress {
                 fraction: start + share * (0.5 + 0.5 * read as f32 / total.max(1) as f32),
@@ -734,6 +751,9 @@ pub fn split_file_with_progress(
                 back_segs.len()
             ));
         }
+        if cancel() {
+            return Ok((written, true));
+        }
         let target = free_path(dir, &split_name(&stem, &segs, seg));
         std::fs::write(&target, &out)
             .map_err(|e| format!("could not write {}: {e}", target.display()))?;
@@ -745,7 +765,7 @@ pub fn split_file_with_progress(
             size_bytes: out.len() as u64,
         });
     }
-    Ok(written)
+    Ok((written, false))
 }
 
 #[cfg(test)]
@@ -903,5 +923,20 @@ mod tests {
         h.extend(48i32.to_le_bytes());
         assert_eq!(header_protocol(&h), Some(48));
         assert_eq!(header_protocol(b"nope"), None);
+    }
+
+    #[test]
+    fn a_cancelled_split_writes_nothing_and_says_so() {
+        let dir = std::env::temp_dir().join(format!("demo_split_cancel_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("m.dem");
+        std::fs::write(&demo, ci_fixture()).unwrap();
+        let (written, cancelled) =
+            split_file_cancellable(&demo, Keep::These(&[0]), &[], &mut |_| {}, &|| true).unwrap();
+        assert!(cancelled);
+        assert!(written.is_empty());
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+        assert_eq!(left.len(), 1, "only the original");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

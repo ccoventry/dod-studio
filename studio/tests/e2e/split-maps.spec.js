@@ -116,6 +116,26 @@ test.describe('Split Maps', () => {
     await expect(page.locator('#split-find-btn')).toBeEnabled();
   });
 
+  test('a running split locks its ticks and has its own Cancel', async ({ page }) => {
+    await gotoHarness(page);
+    await findDemos(page);
+    await page.evaluate(() => { window.__holdSplit = true; });
+    const three = demo(page, 'three.dem');
+    await expect(three.locator('.split-cancel')).toBeHidden();
+    await three.locator('.split-go').click();
+    await expect(three.locator('.split-keep').nth(0)).toBeDisabled();
+    await expect(three.locator('.split-cancel')).toBeVisible();
+    await three.locator('.split-cancel').click();
+    await expect(three.locator('.split-cancel')).toBeDisabled();
+    await expect(three.locator('.split-cancel-note')).toHaveText('Cancelling after this step…');
+    const args = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'cancel_demo_split').args);
+    expect(args).toEqual({ path: 'C:\\demos\\sub\\three.dem' });
+    await page.evaluate(() => window.__releaseSplit('cancelled'));
+    await expect(three.locator('.split-result')).toContainText('Cancelled after 1 demo:');
+    await expect(three.locator('.split-cancel')).toBeHidden();
+    await expect(three.locator('.split-keep').nth(0)).toBeEnabled();
+  });
+
   async function findHeld(page) {
     await gotoHarness(page);
     await page.evaluate(() => { window.__holdSegments = true; });
