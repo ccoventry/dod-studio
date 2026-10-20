@@ -40,7 +40,9 @@ export function applyProgress(rows, p) {
   const pct = p.stage === 'checking'
     ? pctOf(((p.map_fraction ?? 0.5) - 0.5) * 2)
     : FINAL_STAGES.has(p.stage) ? 100 : 0;
-  const bar = FINAL_STAGES.has(p.stage) ? 100 : pctOf(p.map_fraction);
+  // A cancelled map's bar stays where it stopped: a full one reads as written.
+  const bar = p.stage === 'cancelled' ? row.bar
+    : FINAL_STAGES.has(p.stage) ? 100 : pctOf(p.map_fraction);
   next[p.index] = { stage: p.stage, pct, bar, file: p.file ?? row.file, error: p.error ?? row.error };
   return next;
 }

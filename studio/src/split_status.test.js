@@ -61,6 +61,17 @@ describe('split status rows', () => {
     expect(summaryText(rows)).toBe('Wrote 1 demo, 2 cancelled.');
   });
 
+  it('a cancelled map\'s bar stays where it stopped, not full', () => {
+    let rows = startRows([0, 1]);
+    rows = applyProgress(rows, { stage: 'reading', index: null, map_fraction: 0.4 });
+    rows = applyProgress(rows, ev('checking', 1, 0.6));
+    rows = applyProgress(rows, ev('cancelled', 0, 1));
+    rows = applyProgress(rows, ev('cancelled', 1, 1));
+    expect(statusText(rows[0])).toBe('Cancelled');
+    expect(rows[0].bar).toBe(0);
+    expect(rows[1].bar).toBe(60);
+  });
+
   it('the outcome fills in what the events missed', () => {
     let rows = startRows([0, 1]);
     rows = applyOutcome(rows, {
