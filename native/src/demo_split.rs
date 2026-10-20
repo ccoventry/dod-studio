@@ -673,18 +673,32 @@ pub struct SplitReport {
 impl SplitReport {
     /// The written maps and whether Cancel stopped it, or an error naming
     /// every map that failed, for callers that treat any failure as the
-    /// split's.
+    /// split's. The other maps still run, so the error also names the files
+    /// they wrote: the caller drops them (the queue keeps the demo), and they
+    /// would otherwise sit next to it unmentioned.
     pub fn into_written(self) -> Result<(Vec<Written>, bool), String> {
         if self.failed.is_empty() {
-            Ok((self.written, self.cancelled))
-        } else {
-            Err(self
-                .failed
-                .iter()
-                .map(|f| f.error.as_str())
-                .collect::<Vec<_>>()
-                .join("; "))
+            return Ok((self.written, self.cancelled));
         }
+        let mut error = self
+            .failed
+            .iter()
+            .map(|f| f.error.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !self.written.is_empty() {
+            let names: Vec<String> = self
+                .written
+                .iter()
+                .map(|w| {
+                    let path = std::path::Path::new(&w.path);
+                    path.file_name()
+                        .map_or_else(|| w.path.clone(), |n| n.to_string_lossy().to_string())
+                })
+                .collect();
+            error.push_str(&format!(" (still written: {})", names.join(", ")));
+        }
+        Err(error)
     }
 }
 
@@ -1224,7 +1238,11 @@ mod tests {
         assert_eq!(report.failed.len(), 1);
         assert_eq!(report.failed[0].index, 5);
         assert!(report.failed[0].error.contains("no map 6"));
-        assert!(report.clone().into_written().is_err());
+        // Callers that treat a failed map as the split failing are told the
+        // file map 1 still wrote.
+        let error = report.clone().into_written().unwrap_err();
+        assert!(error.contains("no map 6"), "{error}");
+        assert!(error.contains("(still written: m_split1_"), "{error}");
 
         let stages = |index: usize| -> Vec<&str> {
             let mut s: Vec<&str> = events
