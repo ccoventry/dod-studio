@@ -286,6 +286,13 @@ signal to load again. The file is checked first (in the `-addons` folder, then
 the game folder; `IDSP`, version 2), so a missing or broken sprite is said in
 the log and the game's crosshair stays, rather than the engine meeting it.
 
+Studio's crosshair lists read the same two folders (`player_overrides::list_sprites`,
+the addon's copy first). The Players tab's **Add a crosshair file…** (#842)
+takes the `customxhair.spr` Vertex's crosshair creator downloads, alone or
+from its ZIP, and copies it to `<game>_addon\sprites\customxhair-<name>.spr`
+(`native/src/crosshair_import.rs`): never into the game folder, and never
+over a file already there.
+
 ### What it leaves alone
 
 When the crosshair shows. `ShouldDrawCrossHair`, §1's stub and §2's gate all

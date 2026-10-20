@@ -86,6 +86,10 @@ pub mod map_overview;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod overview;
 
+/// Players tab, "Add a crosshair file…": a made crosshair into the addon
+/// folder's sprites (#842).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crosshair_import;
 /// Who is in a demo, from a small index beside the analyzer cache (#437).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod player_index;

@@ -49,6 +49,11 @@ pub const MIGRATIONS: &[Migration] = &[
         to: 10,
         upgrade: v9_to_v10,
     },
+    Migration {
+        from: 10,
+        to: 11,
+        upgrade: v10_to_v11,
+    },
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
@@ -200,6 +205,16 @@ fn v9_to_v10(analysis: &mut Value) -> Upgrade {
     Upgrade::Done
 }
 
+/// #811: `demo_info.damage`, where a damaged demo stopped being read. A v10
+/// entry is for a demo that read to the end (a damaged one had no analysis),
+/// so it has none, which is what the field's default says.
+fn v10_to_v11(analysis: &mut Value) -> Upgrade {
+    match analysis.get("demo_info") {
+        Some(Value::Object(_)) => Upgrade::Done,
+        _ => Upgrade::NeedsReparse(MALFORMED),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,14 +279,14 @@ mod tests {
     }
 
     #[test]
-    fn the_real_chain_goes_7_9_10_and_8_has_none() {
-        let hops: Vec<_> = chain(MIGRATIONS, 7, 10)
+    fn the_real_chain_goes_7_9_10_11_and_8_has_none() {
+        let hops: Vec<_> = chain(MIGRATIONS, 7, 11)
             .unwrap()
             .iter()
             .map(|m| (m.from, m.to))
             .collect();
-        assert_eq!(hops, [(7, 9), (9, 10)]);
-        assert!(upgrades_from(7) && upgrades_from(9));
+        assert_eq!(hops, [(7, 9), (9, 10), (10, 11)]);
+        assert!(upgrades_from(7) && upgrades_from(9) && upgrades_from(10));
         assert!(!upgrades_from(8) && !upgrades_from(6));
         assert!(!upgrades_from(super::super::SCHEMA_VERSION));
     }
@@ -446,6 +461,29 @@ mod tests {
         assert_eq!(state["objectives"]["attempts_abandoned"], json!(1));
         assert_eq!(state["players"][0]["cap_breaks"], json!(0));
         assert_eq!(state["players"][1]["cap_breaks"], json!(1));
+    }
+
+    #[test]
+    fn a_v10_entry_loads_as_a_demo_that_read_to_the_end() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let fresh = Analysis::try_from_bytes(&bytes).unwrap();
+        let mut old = serde_json::to_value(&fresh).unwrap();
+        old["demo_info"].as_object_mut().unwrap().remove("damage");
+        assert_eq!(upgrade(10, &mut old), Upgrade::Done);
+        let upgraded: Analysis = serde_json::from_value(old).unwrap();
+        assert_eq!(upgraded.demo_info.damage, None);
+        assert_eq!(
+            serde_json::to_value(&upgraded).unwrap(),
+            serde_json::to_value(&fresh).unwrap()
+        );
+        assert_eq!(
+            upgrade(10, &mut json!({"state": {}})),
+            Upgrade::NeedsReparse(MALFORMED)
+        );
     }
 
     #[test]
