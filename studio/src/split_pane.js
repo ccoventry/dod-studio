@@ -4,7 +4,9 @@
 // the ticked maps out as demos of their own (native::demo_split). Find shows
 // a bar through both its steps (finding the demos, then reading each one's
 // map lengths), and a demo's card appears once its lengths are in, ready to
-// use: nothing on it changes after it shows (#844).
+// use: nothing on it changes after it shows (#844). While a split runs, each
+// ticked map's row shows its Status, bar, size and Show in folder, like a
+// Render tab job (#876, split_status.js).
 
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -12,6 +14,9 @@ import {
 } from './ipc_bridge.js';
 import { escapeHtml } from './html.js';
 import { splitProgressBar } from './split_progress.js';
+import {
+  startRows, applyProgress, applyOutcome, applyError, statusText, summaryText,
+} from './split_status.js';
 import { STRINGS } from './strings.js';
 import { clockLong } from './time_format.js';
 import { setAuditorFooter } from './auditor_footer.js';
@@ -22,6 +27,8 @@ export const SHORT_MAP_SECONDS = 60;
 
 export const fileName = (path) => path.split(/[\\/]/).pop();
 const folderOf = (path) => path.slice(0, path.length - fileName(path).length).replace(/[\\/]$/, '');
+/** `name` in the folder of `path`, with `path`'s own separator. */
+const besidePath = (path, name) => path.slice(0, path.length - fileName(path).length) + name;
 const mb = (bytes) => (bytes / 1e6).toFixed(1);
 
 export function initSplitPane() {
@@ -152,6 +159,10 @@ export function initSplitPane() {
               <th>${escapeHtml(STRINGS.SPLIT.COL_MAP)}</th>
               <th>${escapeHtml(STRINGS.SPLIT.COL_WHEN)}</th>
               <th>${escapeHtml(STRINGS.SPLIT.COL_DONE)}</th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_STATUS)}</th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_PROGRESS)}</th>
+              <th>${escapeHtml(STRINGS.SPLIT.COL_SIZE)}</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -168,6 +179,10 @@ export function initSplitPane() {
                 <td class="split-map-name">${escapeHtml(m)}</td>
                 <td class="split-map-when">${len === null ? '' : escapeHtml(clockLong(len))}</td>
                 <td class="split-map-done">${escapeHtml(done || '')}</td>
+                <td class="split-map-status"></td>
+                <td class="split-map-bar"><div class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div></td>
+                <td class="split-map-size"></td>
+                <td class="split-map-actions"></td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -187,6 +202,9 @@ export function initSplitPane() {
       cancelDemoSplit(d.path).catch(() => {});
     });
     box.querySelectorAll('.split-keep').forEach((c) => c.addEventListener('change', () => updateGo(box)));
+    (d.split_files || []).forEach((name, k) => {
+      if (name) setReveal(box, k, besidePath(d.path, name));
+    });
     updateGo(box);
     list.appendChild(box);
     shownDemos = [...shownDemos, d];
@@ -200,6 +218,39 @@ export function initSplitPane() {
     const none = !box.querySelector('.split-keep:checked');
     go.disabled = none || box.dataset.splitting === '1';
     go.title = none ? STRINGS.SPLIT.NOTHING_TICKED : '';
+  }
+
+  /// Map `k`'s Show in folder, for the file at `path`.
+  function setReveal(box, k, path) {
+    const cell = box.querySelector(`tr[data-map="${k}"] .split-map-actions`);
+    if (!cell) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'split-reveal';
+    btn.textContent = STRINGS.SPLIT.SHOW_IN_FOLDER;
+    btn.title = path;
+    btn.addEventListener('click', () => revealInExplorer(path).catch(() => {}));
+    cell.replaceChildren(btn);
+  }
+
+  /// Each ticked map's Status, bar, size and Show in folder (#876).
+  function drawRows(box, rows) {
+    for (const [k, row] of Object.entries(rows)) {
+      const tr = box.querySelector(`tr[data-map="${k}"]`);
+      if (!tr) continue;
+      tr.dataset.stage = row.stage;
+      const status = tr.querySelector('.split-map-status');
+      status.textContent = statusText(row);
+      status.title = row.error || '';
+      const bar = tr.querySelector('.split-map-bar .progress-bar-container');
+      bar.hidden = false;
+      bar.querySelector('.progress-bar-fill').style.width = `${row.bar}%`;
+      if (row.file) {
+        tr.querySelector('.split-map-size').textContent = STRINGS.SPLIT.sizeMb(mb(row.file.size_bytes));
+        tr.querySelector('.split-map-done').textContent = fileName(row.file.path);
+        if (tr.querySelector('.split-reveal')?.title !== row.file.path) setReveal(box, k, row.file.path);
+      }
+    }
   }
 
   async function split(demo, box) {
@@ -216,34 +267,34 @@ export function initSplitPane() {
     cancel.disabled = false;
     splitting += 1;
     refresh();
+    // Each ticked map's row says what it's doing; the bar under the button
+    // is the whole split's (#876).
+    let rows = startRows(keep);
+    drawRows(box, rows);
     const bar = splitProgressBar();
     const note = document.createElement('div');
     note.className = 'split-cancel-note';
     result.replaceChildren(bar.el, note);
     const unlisten = await listen('split_progress', (event) => {
-      if (event.payload?.path === demo.path) bar.update(event.payload.progress);
+      if (event.payload?.path !== demo.path) return;
+      bar.update(event.payload.progress);
+      rows = applyProgress(rows, event.payload.progress);
+      drawRows(box, rows);
     }).catch(() => () => {});
     try {
       const outcome = await splitDemoMaps(demo.path, keep);
-      const written = outcome?.written ?? [];
-      const heading = outcome?.cancelled ? STRINGS.SPLIT.cancelledSplit(written.length) : STRINGS.SPLIT.wrote(written.length);
-      result.innerHTML = `${escapeHtml(heading)}<ul class="split-written">${
-        written.map((w, k) => `<li>${escapeHtml(STRINGS.SPLIT.writtenLine(fileName(w.path), clockLong(w.seconds), mb(w.size_bytes)))}
-          <button type="button" class="split-reveal" data-k="${k}">${escapeHtml(STRINGS.SPLIT.SHOW_IN_FOLDER)}</button></li>`).join('')
-      }</ul>`;
-      result.querySelectorAll('.split-reveal').forEach((b) => {
-        b.addEventListener('click', () => revealInExplorer(written[Number(b.dataset.k)].path).catch(() => {}));
-      });
+      rows = applyOutcome(rows, outcome);
+      result.textContent = summaryText(rows);
       demo.split_files = demo.split_files || demo.maps.map(() => null);
-      for (const w of written.filter((x) => Number.isInteger(x.index))) {
+      for (const w of (outcome?.written ?? []).filter((x) => Number.isInteger(x.index))) {
         demo.split_files[w.index] = fileName(w.path);
-        const cell = box.querySelector(`tr[data-map="${w.index}"] .split-map-done`);
-        if (cell) cell.textContent = fileName(w.path);
       }
       updateFooter();
     } catch (err) {
+      rows = applyError(rows, err);
       result.textContent = STRINGS.SPLIT.splitFailed(err);
     } finally {
+      drawRows(box, rows);
       unlisten();
       box.dataset.splitting = '';
       cancel.hidden = true;
