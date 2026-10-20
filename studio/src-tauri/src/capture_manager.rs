@@ -405,6 +405,9 @@ pub struct CaptureManager {
     /// Recording blocks the most recent batch planned, used to verify takes
     /// against disk once the batch ends.
     pub last_manifest: Arc<Mutex<Option<CaptureManifest>>>,
+    /// Whether the running batch's start has reached the game, for the
+    /// close prompt (#545). Reset to `Preparing` when a batch starts.
+    pub batch_start: Arc<native::game_handoff::BatchStart>,
 }
 
 impl CaptureManager {
@@ -414,6 +417,7 @@ impl CaptureManager {
             cancel_token: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             last_config: Arc::new(Mutex::new(None)),
             last_manifest: Arc::new(Mutex::new(None)),
+            batch_start: Arc::new(native::game_handoff::BatchStart::default()),
         }
     }
 
@@ -1036,6 +1040,9 @@ pub async fn start_capture_batch_impl(
     manager
         .cancel_token
         .store(false, std::sync::atomic::Ordering::Relaxed);
+    manager
+        .batch_start
+        .set(native::game_handoff::StartState::Preparing);
 
     // ── Build PatcherConfig from the IPC payload ───────────────────────────────
     let mut patcher_config = config_from_payload(&payload);
@@ -1083,6 +1090,7 @@ pub async fn start_capture_batch_impl(
     // ── Clone Arcs into the worker closure ────────────────────────────────────
     let is_running_arc = Arc::clone(&manager.is_running);
     let cancel_token_arc = Arc::clone(&manager.cancel_token);
+    let batch_start_arc = Arc::clone(&manager.batch_start);
     let manifest_arc = Arc::clone(&manager.last_manifest);
     let hlae_path = PathBuf::from(&patcher_config.hlae_path);
     let hl_path = PathBuf::from(&patcher_config.game_path);
@@ -1618,6 +1626,7 @@ pub async fn start_capture_batch_impl(
             drive_headroom,
             obs_take_folders,
             runtime_batch,
+            batch_start_arc,
         );
     });
 

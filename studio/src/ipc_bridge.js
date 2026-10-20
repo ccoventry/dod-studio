@@ -1003,6 +1003,17 @@ export async function catchUpUnwatchedBatches() {
     });
 }
 
+/** Where the running batch's start stands once it is no longer on its way
+ *  to the game, or `timeoutMs` has passed (#545): 'preparing', 'pending',
+ *  'sent', 'not_needed', 'failed' or 'not_running'. */
+export async function waitForBatchStart(timeoutMs) {
+  return invoke("wait_for_batch_start", { timeoutMs })
+    .catch((err) => {
+      console.error("IPC Execution Error (wait_for_batch_start):", err);
+      throw err;
+    });
+}
+
 /** A project file's text, for a change made without opening it (#545). */
 export async function readProjectFile(path) {
   return invoke("load_project_session", { path })

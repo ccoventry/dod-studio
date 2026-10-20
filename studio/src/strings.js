@@ -1313,6 +1313,14 @@ export const STRINGS = {
     LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
     CLOSE_BUTTON: 'Close DoD Studio',
     KEEP_OPEN_BUTTON: 'Keep Studio open',
+    // The batch's start has not reached the game yet (#545): Studio waits for
+    // it before asking, so the game does not sit at its main menu.
+    WAIT_TITLE: 'Closing DoD Studio',
+    starting: (secondsLeft) => `The game is still starting. Studio is starting the batch in it first, so it can keep capturing after Studio closes… (up to ${secondsLeft} s)`,
+    NOT_STARTED_TITLE: 'Capture batch not started',
+    NOT_STARTED_MESSAGE: 'The batch has not started in the game yet, so the game cannot capture it on its own. Closing DoD Studio cancels the batch and closes the game.',
+    CANCEL_AND_CLOSE_BUTTON: 'Cancel batch and close',
+    CANCELLING: 'Cancelling the batch and closing the game…',
   },
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
