@@ -309,6 +309,9 @@ pub struct RenderManager {
     /// on. Renders then start one at a time, and each take whose clip
     /// finished goes at once rather than when the render batch ends.
     while_capturing: Arc<AtomicBool>,
+    /// The capture is held between clips for space (#861): nothing records,
+    /// so renders started now get the machine as they would without a capture.
+    capture_held: Arc<AtomicBool>,
 }
 
 /// How many renders run at once while a capture batch runs (#861): one, so
@@ -343,6 +346,7 @@ struct SchedulerHandles {
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
     clear_on_finish: Arc<AtomicBool>,
     while_capturing: Arc<AtomicBool>,
+    capture_held: Arc<AtomicBool>,
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -371,6 +375,7 @@ impl RenderManager {
             scanning: AtomicBool::new(false),
             next_job_id: AtomicUsize::new(0),
             while_capturing: Arc::new(AtomicBool::new(false)),
+            capture_held: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -378,6 +383,12 @@ impl RenderManager {
     /// (true) or ended (false).
     pub(crate) fn set_while_capturing(&self, on: bool) {
         self.while_capturing.store(on, Ordering::SeqCst);
+        self.capture_held.store(false, Ordering::SeqCst);
+    }
+
+    /// The capture holds between clips (true) or records again (false).
+    pub(crate) fn set_capture_held(&self, held: bool) {
+        self.capture_held.store(held, Ordering::SeqCst);
     }
 
     /// The render jobs of the take(s) under `folder`, a capture block's
@@ -581,6 +592,7 @@ impl RenderManager {
             export_reservations: self.export_reservations.clone(),
             clear_on_finish: self.clear_on_finish.clone(),
             while_capturing: self.while_capturing.clone(),
+            capture_held: self.capture_held.clone(),
         }
     }
 }
@@ -868,7 +880,11 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
 
             // Read every pass: a capture starting or ending changes it (#861).
             let while_capturing = handles.while_capturing.load(Ordering::SeqCst);
-            let max_concurrent = concurrency_cap(config.max_concurrent_renders, while_capturing);
+            // Held between clips, nothing records: renders starting now run
+            // as they would with no capture (measured on #861: a lone ProRes
+            // render is 3x faster on every core than on a quarter of them).
+            let game_busy = while_capturing && !handles.capture_held.load(Ordering::SeqCst);
+            let max_concurrent = concurrency_cap(config.max_concurrent_renders, game_busy);
             let mut dirty = false;
             let mut rendered_now: Vec<String> = Vec::new();
             while let Ok(update) = rx.try_recv() {
@@ -911,7 +927,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // While a capture runs (#861) the one render takes the
                     // threads one of the batch's usual renders would, not
                     // every core: the game needs the rest.
-                    let thread_share = if while_capturing {
+                    let thread_share = if game_busy {
                         config.max_concurrent_renders.max(1)
                     } else {
                         effective_concurrent

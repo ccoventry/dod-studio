@@ -356,6 +356,7 @@ impl CaptureRoom {
     /// The game held (`BATCH_HELD`) or went on (`BATCH_GOING`).
     pub(crate) fn game_held(&self, held: bool) {
         self.lock().held = held;
+        self.app.state::<RenderManager>().set_capture_held(held);
         if held {
             log_markdown("[render-while-capturing] The batch is holding between clips");
         }
