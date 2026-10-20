@@ -520,8 +520,9 @@ fn a_block_bigger_than_the_drive_is_refused_unless_renders_free_space_while_capt
     config.render_while_capturing = true;
     let (jobs, headroom) =
         build_batch_queue(streaks(), &config, &std::collections::HashMap::new()).unwrap();
-    assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].blocks.len(), 1);
+    // The primer (no hook DLL here) records nothing.
+    let blocks: usize = jobs.iter().map(|j| j.blocks.len()).sum();
+    assert_eq!(blocks, 1);
     assert_eq!(headroom.len(), 1);
     assert_eq!(headroom[0].path, temp_drive);
 }
