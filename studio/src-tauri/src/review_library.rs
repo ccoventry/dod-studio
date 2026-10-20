@@ -204,6 +204,19 @@ mod tests {
         let back = read(&path).unwrap();
         assert_eq!(back.demos["k1"], lib.demos["k1"]);
         assert!(!path.with_extension("json.tmp").exists());
+
+        // Every save after the first renames over a file that exists.
+        apply_update(
+            &mut lib,
+            "k1",
+            "",
+            changes(&[("h", Some(json!({"notes": "y"})))]),
+        );
+        write(&path, &lib).unwrap();
+        assert_eq!(
+            read(&path).unwrap().demos["k1"].highlights["h"],
+            json!({"notes": "y"})
+        );
     }
 
     /// A damaged file is reported, not read as empty: the next save would

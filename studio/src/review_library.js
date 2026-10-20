@@ -104,9 +104,14 @@ export function createReviewLibrary({
 }) {
   const seenDemos = new WeakSet();
   const signatures = new WeakMap();
-  // source_key -> { name, changes: Map(id -> entry | null) }, not yet written.
+  // source_key -> { name, changes: Map(id -> streak) }, not yet written. The
+  // streak, not its entry: the entry is taken as it is written, so a write
+  // tried again after a failure never puts back an older mark.
   const pending = new Map();
   let timer = null;
+  // The writes under way, one after another: a batch that started later must
+  // not land before, and then under, an older one.
+  let writing = Promise.resolve();
 
   function note(demo) {
     seenDemos.add(demo);
@@ -118,22 +123,32 @@ export function createReviewLibrary({
     getDemos().forEach(note);
   }
 
-  function queueChange(demo, key, streak) {
-    if (!pending.has(key)) pending.set(key, { name: fileNameOf(demo.path), changes: new Map() });
-    pending.get(key).changes.set(highlightId(streak), libraryEntry(streak));
+  function queueChange(key, name, id, streak) {
+    if (!pending.has(key)) pending.set(key, { name, changes: new Map() });
+    pending.get(key).changes.set(id, streak);
   }
 
-  /** Writes what changed now. Resolves once it is on disk (or failed). */
-  async function flush() {
+  /** Writes what changed now, after any write already under way. Resolves
+   *  once it is on disk (or failed). */
+  function flush() {
     if (timer) clearTimeout(timer);
     timer = null;
     const batch = [...pending];
     pending.clear();
+    writing = writing.then(() => write(batch));
+    return writing;
+  }
+
+  async function write(batch) {
     for (const [key, { name, changes }] of batch) {
+      const entries = {};
+      changes.forEach((streak, id) => { entries[id] = libraryEntry(streak); });
       try {
-        await bridge.update(key, name, Object.fromEntries(changes));
+        await bridge.update(key, name, entries);
       } catch {
-        // ipc_bridge has shown the error.
+        // ipc_bridge has shown the error. Queued again, so the next change
+        // or the close tries once more instead of dropping the marks.
+        changes.forEach((streak, id) => queueChange(key, name, id, streak));
       }
     }
   }
@@ -158,7 +173,7 @@ export function createReviewLibrary({
         }
         if (signatures.get(streak) === signature) continue;
         signatures.set(streak, signature);
-        queueChange(demo, key, streak);
+        queueChange(key, fileNameOf(demo.path), highlightId(streak), streak);
       }
     }
     if (pending.size > 0) {

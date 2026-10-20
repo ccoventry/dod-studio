@@ -160,6 +160,56 @@ describe('createReviewLibrary', () => {
     expect(ask).not.toHaveBeenCalled();
   });
 
+  it('a write that starts later waits for the one under way, so the newer mark is the one kept', async () => {
+    const a = hl(KILLS_A);
+    const other = { ...hl(KILLS_B), source_key: 'other:key' };
+    const d1 = demo('C:/demos/a.dem', [a]);
+    const d2 = demo('C:/demos/b.dem', [other]);
+    const bridge = memoryBridge();
+    const inner = bridge.update.getMockImplementation();
+    let releaseFirst;
+    const firstHeld = new Promise((resolve) => { releaseFirst = resolve; });
+    let calls = 0;
+    bridge.update.mockImplementation(async (...args) => {
+      calls += 1;
+      if (calls === 1) await firstHeld; // the other demo's write is slow
+      return inner(...args);
+    });
+    const { library } = setup({ demos: [d2, d1], bridge });
+    await library.sync();
+    other.curation = 'Keep';
+    a.curation = 'Keep';
+    library.sync();
+    const older = library.flush(); // the other demo, then a = Keep
+    a.curation = 'Skip';
+    library.sync();
+    const newer = library.flush(); // a = Skip
+    releaseFirst();
+    await Promise.all([older, newer]);
+    expect(bridge.demos[KEY].highlights['3#100#300'].curation).toBe('Skip');
+  });
+
+  it('a write that fails is tried again with the next change', async () => {
+    const a = hl(KILLS_A);
+    const b = hl(KILLS_B);
+    const d = demo('C:/demos/a.dem', [a, b]);
+    const bridge = memoryBridge();
+    const inner = bridge.update.getMockImplementation();
+    bridge.update.mockImplementationOnce(async () => { throw new Error('locked'); });
+    const { library } = setup({ demos: [d], bridge });
+    await library.sync();
+    a.curation = 'Keep';
+    library.sync();
+    await library.flush();
+    expect(bridge.demos).toEqual({});
+    bridge.update.mockImplementation(inner);
+    b.notes = 'later';
+    library.sync();
+    await library.flush();
+    expect(bridge.demos[KEY].highlights['3#100#300'].curation).toBe('Keep');
+    expect(bridge.demos[KEY].highlights['3#900#1000'].notes).toBe('later');
+  });
+
   it('a demo with no contents key (an older scan) is neither saved nor looked up', async () => {
     const s = { player_index: 0, kills: KILLS_A };
     const d = demo('C:/old.dem', [s]);
