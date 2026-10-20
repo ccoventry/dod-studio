@@ -1,7 +1,8 @@
 // review_hltv_picker.js
-// The HLTV box's "Players I pick" (#828): beside the box, the picked players
-// as chips with an ×, a list to add anyone with a highlight in the queue's
-// HLTV demos, and one to add a whole team from the Teams list (#445). It
+// The HLTV box's "Players I pick" (#828): beside the box, a list to add
+// anyone with a highlight in the queue's HLTV demos and one to add a whole
+// team from the Teams list (#445); on a line under the toolbar, the picked
+// players as chips with an × (#845). It
 // owns the box's choice too, so the project file can keep both
 // (review_hltv_pick.js has the logic).
 
@@ -100,7 +101,9 @@ export function createHltvPicker({ getDemos, getProjectTeams, onChange = () => {
   }
 
   function render() {
-    if (box) box.hidden = pick.choice !== HLTV_PLAYERS.PICKED;
+    const picking = pick.choice === HLTV_PLAYERS.PICKED;
+    if (box) box.hidden = !picking;
+    if (chips) chips.hidden = !picking;
     renderChips();
     fillLists();
   }

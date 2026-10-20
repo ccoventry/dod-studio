@@ -95,6 +95,19 @@ pub fn open_demo_from_bytes_with_progress(
     progress::with_progress(progress, || open_demo_from_bytes(demo_bytes))
 }
 
+/// [`open_demo_from_bytes_with_progress`] for a demo that may be damaged
+/// (#811): what parses up to the first frame that does not, and where that is
+/// ([`demo_parser::parse_demo_tolerant`]). For reading a demo only; anything
+/// that writes one keeps to the strict parse.
+pub fn open_demo_from_bytes_tolerant_with_progress(
+    demo_bytes: &[u8],
+    progress: &mut dyn FnMut(usize, usize),
+) -> eyre::Result<(Demo, Option<demo_parser::ParseDamage>)> {
+    progress::with_progress(progress, || {
+        Demo::parse_from_bytes_tolerant(demo_bytes, types::MessageDataParseMode::Parse)
+    })
+}
+
 /// Writes a [`u32`] into [`types::BitVec`]
 #[macro_export]
 macro_rules! nbit_num {
@@ -280,6 +293,159 @@ mod test {
         );
     }
 
+    /// The tolerant parse on damaged copies of `ci_fixture.dem` (#811), built
+    /// here so CI runs them.
+    mod tolerant_parse {
+        use super::*;
+        use crate::demo_parser::ParseDamage;
+
+        fn fixture() -> Vec<u8> {
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../test-fixtures/ci_fixture.dem"
+            );
+            std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"))
+        }
+
+        fn tolerant(bytes: &[u8]) -> (Demo, Option<ParseDamage>) {
+            Demo::parse_from_bytes_tolerant(bytes, types::MessageDataParseMode::Parse).unwrap()
+        }
+
+        fn frame_counts(demo: &Demo) -> Vec<usize> {
+            demo.directory
+                .entries
+                .iter()
+                .map(|e| e.frames.len())
+                .collect()
+        }
+
+        #[test]
+        fn an_intact_demo_reads_as_the_strict_parse_reads_it() {
+            let bytes = fixture();
+            let strict = open_demo_from_bytes(&bytes).unwrap();
+            let (demo, damage) = tolerant(&bytes);
+            assert_eq!(damage, None);
+            assert_eq!(frame_counts(&demo), frame_counts(&strict));
+            assert_eq!(demo.write_to_bytes(), strict.write_to_bytes());
+        }
+
+        #[test]
+        fn a_file_cut_mid_frame_reads_up_to_the_cut() {
+            let bytes = fixture();
+            let cut = bytes.len() * 3 / 5;
+            let cut_file = &bytes[..cut];
+            assert!(open_demo_from_bytes(cut_file).is_err(), "strict refuses it");
+
+            let (demo, damage) = tolerant(cut_file);
+            let damage = damage.expect("the cut is reported");
+            // The directory went with the end of the file, so the frames are
+            // read as an unfinalised demo's.
+            assert_eq!(demo.directory.entries.len(), 2);
+            assert_eq!(damage.entry_index, 1);
+            assert_eq!(damage.entry_description, "Playback");
+            // In words, whichever read hit the cut first.
+            assert!(
+                damage.reason == "the file ends partway through a frame"
+                    || damage.reason.contains("runs past the end of the file"),
+                "{}",
+                damage.reason
+            );
+            assert_eq!(
+                damage.frame_index,
+                frame_counts(&demo).iter().sum::<usize>()
+            );
+            assert!(damage.byte_offset < cut && damage.bytes_unread == cut - damage.byte_offset);
+            // Less than one frame is lost: a network frame is a few hundred bytes.
+            assert!(damage.bytes_unread < 70_000, "{damage:?}");
+            let last = demo.directory.entries[1].frames.last().unwrap();
+            assert_eq!(damage.last_frame_time, Some(last.time));
+
+            // Every frame before the cut is the strict parse's.
+            let strict = open_demo_from_bytes(&bytes).unwrap();
+            let strict_frames: Vec<_> = strict
+                .directory
+                .entries
+                .iter()
+                .flat_map(|e| &e.frames)
+                .collect();
+            let frames: Vec<_> = demo
+                .directory
+                .entries
+                .iter()
+                .flat_map(|e| &e.frames)
+                .collect();
+            assert!(
+                frames.len() > strict_frames.len() / 2,
+                "{} frames",
+                frames.len()
+            );
+            for (a, b) in frames.iter().zip(&strict_frames) {
+                assert_eq!((a.time, a.frame), (b.time, b.frame));
+            }
+        }
+
+        #[test]
+        fn a_bad_message_length_ends_the_entry_at_that_frame() {
+            let bytes = fixture();
+            let strict = open_demo_from_bytes(&bytes).unwrap();
+            // A network frame halfway through the longest entry, by its
+            // payload's place in the file.
+            let longest = (0..strict.directory.entries.len())
+                .max_by_key(|&k| strict.directory.entries[k].frames.len())
+                .unwrap();
+            let before: usize = strict.directory.entries[..longest]
+                .iter()
+                .map(|e| e.frames.len())
+                .sum();
+            let entry = &strict.directory.entries[longest];
+            let (in_entry, span) = entry.frames[entry.frames.len() / 2..]
+                .iter()
+                .enumerate()
+                .find_map(|(k, f)| match &f.frame_data {
+                    types::FrameData::NetworkMessage(n) => n.1.source_span.clone().map(|s| (k, s)),
+                    _ => None,
+                })
+                .map(|(k, s)| (entry.frames.len() / 2 + k, s))
+                .expect("a network frame in the second half");
+
+            let mut mangled = bytes.clone();
+            mangled[span.start - 4..span.start].copy_from_slice(&0x0010_0000u32.to_le_bytes());
+            assert!(open_demo_from_bytes(&mangled).is_err(), "strict refuses it");
+
+            let (demo, damage) = tolerant(&mangled);
+            let damage = damage.expect("the bad frame is reported");
+            assert_eq!(damage.reason, "message length too long: 1048576");
+            assert_eq!(damage.entry_index, longest);
+            assert_eq!(damage.frame_index, before + in_entry);
+            assert_eq!(
+                demo.directory.entries.len(),
+                longest + 1,
+                "later entries are dropped"
+            );
+            assert_eq!(demo.directory.entries[longest].frames.len(), in_entry);
+            assert_eq!(
+                damage.last_frame_time,
+                Some(entry.frames[in_entry - 1].time)
+            );
+            assert!(damage.byte_offset < span.start - 4);
+            let directory = i32::from_le_bytes(bytes[540..544].try_into().unwrap()) as usize;
+            assert_eq!(damage.bytes_unread, directory - damage.byte_offset);
+        }
+
+        #[test]
+        fn nothing_readable_is_an_error() {
+            let bytes = fixture();
+            assert!(
+                Demo::parse_from_bytes_tolerant(&bytes[..300], types::MessageDataParseMode::Parse)
+                    .is_err()
+            );
+            assert!(
+                Demo::parse_from_bytes_tolerant(&bytes[..550], types::MessageDataParseMode::Parse)
+                    .is_err()
+            );
+        }
+    }
+
     /// A malformed demo must come back as `Err`, never as a panic.
     ///
     /// The distinction is not cosmetic. The release profile sets
@@ -321,6 +487,10 @@ mod test {
             let bytes = fixture();
             for at in 544..bytes.len() {
                 let _ = open_demo_from_bytes(&bytes[..at]);
+                let _ = Demo::parse_from_bytes_tolerant(
+                    &bytes[..at],
+                    types::MessageDataParseMode::Parse,
+                );
             }
         }
 
@@ -334,6 +504,10 @@ mod test {
                     let mut mutant = bytes.clone();
                     mutant[at] = v;
                     let _ = open_demo_from_bytes(&mutant);
+                    let _ = Demo::parse_from_bytes_tolerant(
+                        &mutant,
+                        types::MessageDataParseMode::Parse,
+                    );
                 }
             }
         }

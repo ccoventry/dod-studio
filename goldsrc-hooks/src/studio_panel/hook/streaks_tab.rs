@@ -185,7 +185,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 show_filters(vgui, page, None);
             }
             Status::Ready(found) => {
-                let text = ready_hint(&found);
+                let text = streaks::with_damage(ready_hint(&found), &found);
                 show(vgui, page, build, (&text, &text), None);
                 let demo_key = format!("{generation}:ready");
                 {
