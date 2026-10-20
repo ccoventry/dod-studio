@@ -25,7 +25,9 @@ always ends the game it started, and only that one.
                                 hook log since launch (default 60 s)
     cmd <console command>       send it over the remote pipe
     shot <name>                 a frame recorded by HLAE, saved as <run>/<name>.png
-    window                      note the game window's size, minimised and foreground state
+    window                      note the game window's size, minimised and foreground state,
+                                which window holds the mouse capture, and the cursor clip
+                                when it's narrower than the screen
     clip <name> [secs] [fps]    record HLAE frames for a few seconds into <run>/<name>/
                                 and a contact sheet <run>/<name>.png (default 2 s, 30 fps);
                                 demo seconds while a demo plays
