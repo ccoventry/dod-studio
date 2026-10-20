@@ -381,6 +381,9 @@ pub fn poll() {
             if let Some(then) = &seek.then
                 && let Ok(line) = std::ffi::CString::new(format!("{then}\n"))
             {
+                // Typed during a review, `dodstudio_seek_to` itself is
+                // refused, so a follow-up now is the review's camera line.
+                crate::review_lock::let_through(then);
                 engine::client_cmd(&line);
             }
             format!(

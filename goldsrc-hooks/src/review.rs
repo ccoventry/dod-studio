@@ -40,7 +40,9 @@
 //! While the hold is on, the viewer's own spectator buttons (a click, jump
 //! or duck) do nothing either (`spectator_buttons`, #826), and the demo
 //! controls (VCR bar, Load Demo, the Playback / Demos / Highlights tabs) are
-//! greyed out (`review_lock`, #826).
+//! greyed out (`review_lock`, #826). The console refuses the commands that
+//! move the demo or the camera too (#855), all but the review's own lines,
+//! which `run` and the seek's follow-up name to the lock first.
 //!
 //! Commands and [`poll`] both run on the game's main thread.
 
@@ -399,6 +401,8 @@ fn trace(line: &str) {
 }
 
 fn run(line: &str) -> bool {
+    // The review's own `viewdemo`: not the user's, so the lock lets it run.
+    crate::review_lock::let_through(line);
     std::ffi::CString::new(line).is_ok_and(|l| crate::engine::client_cmd(&l))
 }
 
