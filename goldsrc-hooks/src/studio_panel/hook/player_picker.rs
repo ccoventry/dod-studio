@@ -21,9 +21,14 @@
 //! filters by the SteamID, which [`crate::demo_rosters::has_player`] matches
 //! whatever name was used. A player with no SteamID (a demo without `*sid`,
 //! LAN) stays one entry per name.
+//!
+//! An entry shows at most [`MAX_ALSO`] other names, so the open list is
+//! widened to fit its longest entry (as far as the tab has room), and the
+//! window's help line spells out every name of the entry under the mouse
+//! (#781).
 
 use std::collections::HashMap;
-use std::ffi::{CString, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
 
 use analysis::cache::DemoPlayers;
@@ -47,6 +52,8 @@ struct Choice {
     label: String,
     /// What the picked line shows: the main name.
     name: String,
+    /// Every other name, most used first: what the help line spells out.
+    others: Vec<String>,
     /// What picking it adds to the filter: the SteamID64, or the name for a
     /// player with none.
     term: String,
@@ -64,6 +71,8 @@ static BUILT_FOR: Mutex<Option<String>> = Mutex::new(None);
 static WAS_OPEN: AtomicBool = AtomicBool::new(false);
 /// What the picked-players line says now.
 static CHOSEN_SHOWN: Mutex<Option<String>> = Mutex::new(None);
+/// The text of the list row under the mouse while the list is open.
+static HOVERED: Mutex<Option<String>> = Mutex::new(None);
 
 /// Roughly how wide a character of the window's font is, in pixels: what
 /// the picked-players line is cut to fit by.
@@ -103,6 +112,106 @@ fn fit_names(picked: &[String], room: usize) -> String {
         line = next;
     }
     line
+}
+
+/// Every name of one entry as one line of at most `room` characters: as
+/// many of the other names as fit, then how many more there are.
+fn names_help(choice: &Choice, room: usize) -> String {
+    if choice.others.is_empty() {
+        return format!("{}: no other names in these demos", choice.name);
+    }
+    let head = format!("{}, also: ", choice.name);
+    let mut line = head.clone();
+    for (i, other) in choice.others.iter().enumerate() {
+        let next = if i == 0 {
+            format!("{line}{other}")
+        } else {
+            format!("{line}, {other}")
+        };
+        let rest = choice.others.len() - i - 1;
+        let tail = if rest > 0 {
+            format!(" +{rest} more").chars().count()
+        } else {
+            0
+        };
+        if next.chars().count() + tail > room {
+            let left = choice.others.len() - i;
+            return if i == 0 {
+                format!("{head}{left} other names")
+            } else {
+                format!("{line} +{left} more")
+            };
+        }
+        line = next;
+    }
+    line
+}
+
+/// The entry a list row's text belongs to: its label, or a picked player's
+/// `[x] ` row by their main name.
+fn entry_for<'a>(choices: &'a [Choice], row: &str) -> Option<&'a Choice> {
+    let row = row.trim();
+    match row.strip_prefix(REMOVE.trim_end()) {
+        Some(name) => choices
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name.trim())),
+        None => choices.iter().find(|c| c.label.eq_ignore_ascii_case(row)),
+    }
+}
+
+/// While the list is open with the mouse over an entry: every name of that
+/// player, cut to fit a line `wide` pixels wide. For the window's help line.
+pub(super) fn hovered_help(wide: i32) -> Option<String> {
+    let row = HOVERED.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+    let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    let (_, all) = names.as_ref()?;
+    let choice = entry_for(all, &row)?;
+    let room = ((wide - 8) / CHAR_WIDE).max(20) as usize;
+    Some(names_help(choice, room))
+}
+
+/// The text of the list row under the mouse, if it is one of the menu's
+/// items (a `MenuItem`, not its scroll bar).
+unsafe fn row_under_mouse(vgui: &Vgui, menu: *mut c_void, item_vftable: usize) -> Option<String> {
+    unsafe {
+        let (mx, my) = cursor()?;
+        let row = vgui
+            .child_list(vpanel_of(menu))
+            .into_iter()
+            .filter(|&c| vgui.visible(c))
+            .find(|&c| {
+                let (ax, ay) = vgui.abs_pos(c);
+                let (_, _, w, h) = vgui.rect(c);
+                mx >= ax && mx < ax + w && my >= ay && my < ay + h
+            })?;
+        let item = vgui.object(row);
+        if item.is_null() || *(item as *const usize) != item_vftable {
+            return None;
+        }
+        let get_text: GetTextFn = slot(item, LABEL_SLOT_GET_TEXT);
+        let mut buf = [0u8; 512];
+        get_text(item, buf.as_mut_ptr() as *mut c_char, buf.len() as i32);
+        CStr::from_bytes_until_nul(&buf)
+            .ok()
+            .map(|s| s.to_string_lossy().into_owned())
+    }
+}
+
+/// Widens the open list past the 170 px box to fit its longest entry, as far
+/// as the tab has room right of the box. Every frame while open, since the
+/// box narrows its menu to itself each time it opens (as the Go to list).
+unsafe fn widen(vgui: &Vgui, page: Vpanel, combo: *mut c_void, menu: *mut c_void, all: &[Choice]) {
+    unsafe {
+        let longest = all
+            .iter()
+            .map(|c| c.label.chars().count())
+            .max()
+            .unwrap_or(0);
+        let (x, _, w, _) = vgui.rect(vpanel_of(combo));
+        let (_, _, page_w, _) = vgui.rect(page);
+        let set_width: ListIntVoidFn = slot(menu, MENU_SLOT_SET_FIXED_WIDTH);
+        set_width(menu, place_menu_width(longest, w, page_w - x - 8));
+    }
 }
 
 /// What the picked line calls a picked term: its player's main name.
@@ -188,11 +297,12 @@ fn choices(demos: &[DemoPlayers]) -> Vec<Choice> {
                 0 => name.clone(),
                 n if n <= MAX_ALSO => format!("{name} (also: {})", others.join(", ")),
                 n => format!(
-                    "{name} (also: {} +{})",
+                    "{name} (also: {} +{} more)",
                     others[..MAX_ALSO].join(", "),
                     n - MAX_ALSO
                 ),
             };
+            let others: Vec<String> = others.iter().map(|n| n.to_string()).collect();
             let search = names
                 .iter()
                 .map(|(n, _)| n.as_str())
@@ -203,6 +313,7 @@ fn choices(demos: &[DemoPlayers]) -> Vec<Choice> {
             Choice {
                 label,
                 name,
+                others,
                 term: id,
                 search,
             }
@@ -222,6 +333,7 @@ fn choices(demos: &[DemoPlayers]) -> Vec<Choice> {
             },
             search: name.to_ascii_lowercase(),
             term: name.clone(),
+            others: Vec::new(),
             name,
         });
     }
@@ -274,6 +386,7 @@ fn matching<'a>(choices: &'a [Choice], typed: &str, picked: &[String]) -> Vec<&'
 /// Runs every frame while the window shows.
 pub(super) unsafe fn update(vgui: &Vgui) {
     unsafe {
+        *HOVERED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
         if page == 0 || !vgui.visible(page) {
             return;
@@ -318,6 +431,11 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         }
         let open = vgui.visible(vpanel_of(menu));
         let was_open = WAS_OPEN.swap(open, Ordering::AcqRel);
+        if open {
+            widen(vgui, page, combo, menu, all);
+            *HOVERED.lock().unwrap_or_else(|e| e.into_inner()) =
+                row_under_mouse(vgui, menu, base + build.menu_item_vftable);
+        }
         // A name clicked in the list: the list closed itself and the box holds
         // that name. It joins the picked players and the box empties for the
         // next. (A name typed out in full is still just a search.)
@@ -513,7 +631,7 @@ mod tests {
             demo(&[("a", id)]),
             demo(&[("b", id), ("c", id), ("d", id), ("e", id)]),
         ]);
-        assert_eq!(labels(&all), vec!["a (also: b, c, d +1)"]);
+        assert_eq!(labels(&all), vec!["a (also: b, c, d +1 more)"]);
     }
 
     #[test]
@@ -521,5 +639,40 @@ mod tests {
         let all = choices(&[demo(&[("dyelife", Some("1"))]), demo(&[("dyelife", None)])]);
         assert_eq!(labels(&all), vec!["dyelife", "dyelife (no SteamID)"]);
         assert_eq!(all[1].term, "dyelife");
+    }
+
+    /// #781: the help line names every other name, as many as fit.
+    #[test]
+    fn the_help_line_spells_out_every_name_that_fits() {
+        let id = Some("1");
+        let all = choices(&[
+            demo(&[("a", id)]),
+            demo(&[("a", id)]),
+            demo(&[("bb", id), ("cc", id), ("dd", id), ("ee", id)]),
+            demo(&[("solo", Some("2"))]),
+        ]);
+        let a = entry_for(&all, "a (also: bb, cc, dd +1 more)").unwrap();
+        assert_eq!(names_help(a, 100), "a, also: bb, cc, dd, ee");
+        let cut = names_help(a, 23);
+        assert_eq!(cut, "a, also: bb, cc +2 more");
+        assert!(cut.chars().count() <= 23, "{cut}");
+        assert_eq!(names_help(a, 22), "a, also: bb +3 more");
+        assert_eq!(names_help(a, 5), "a, also: 4 other names");
+        let solo = entry_for(&all, "solo").unwrap();
+        assert_eq!(names_help(solo, 100), "solo: no other names in these demos");
+    }
+
+    #[test]
+    fn a_picked_row_finds_its_entry_by_name() {
+        let all = choices(&[demo(&[("dyelife", Some("1")), ("dyeL!fe[dd]", Some("1"))])]);
+        assert_eq!(
+            entry_for(&all, "[x] dyeL!fe[dd]").map(|c| c.term.as_str()),
+            Some("1")
+        );
+        assert_eq!(
+            entry_for(&all, "dyeL!fe[dd] (also: dyelife)").map(|c| c.term.as_str()),
+            Some("1")
+        );
+        assert!(entry_for(&all, "nobody").is_none());
     }
 }

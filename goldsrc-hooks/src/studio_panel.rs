@@ -233,6 +233,10 @@ pub struct Build {
     /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
     /// hand on to, `mov ecx, [ecx + combo_menu]`).
     pub combo_menu: usize,
+    /// `MenuItem`'s vftable: only a child of the Player list's menu with
+    /// exactly this one has its text read, for the hovered entry's names on
+    /// the help line (#781).
+    pub menu_item_vftable: usize,
     /// Where a `ListPanel` keeps its sort column (`int`, -1 for none) and its
     /// ascending flag (a byte), as its `OnSetSortColumn` reads them; the
     /// secondary column and its flag follow each (#611).
@@ -273,6 +277,7 @@ pub const BUILDS: [Build; 2] = [
         progress_bar_vftable: 0xa_1dcc,
         combo_box_vftable: 0x9_fbbc,
         combo_menu: 0x13c,
+        menu_item_vftable: 0xa_2604,
         list_sort_column: 0xfc,
         list_sort_ascending: 0x104,
         list_columns: 0x78,
@@ -300,6 +305,7 @@ pub const BUILDS: [Build; 2] = [
         progress_bar_vftable: 0xa_bbd4,
         combo_box_vftable: 0xa_8f10,
         combo_menu: 0x140,
+        menu_item_vftable: 0xa_ca20,
         list_sort_column: 0x100,
         list_sort_ascending: 0x108,
         list_columns: 0x7c,
@@ -549,6 +555,10 @@ const TEXT_ENTRY_SLOT_GET_TEXT: usize = 137;
 /// `Label::SetText(const char *)`, as GameUI calls it with its `#GameUI_`
 /// strings (`call [vftable+0x21c]`).
 const LABEL_SLOT_SET_TEXT: usize = 135;
+/// `Label::GetText(char *buf, int bufLen)`: hands on to its `TextImage`,
+/// which converts the text through the localizer. `MenuItem` inherits it;
+/// the Player list reads its hovered row through it (#781).
+const LABEL_SLOT_GET_TEXT: usize = 137;
 const BUTTON_SLOT_IS_SELECTED: usize = 174;
 
 /// The Commands tab's text: every console setting and command, grouped.
@@ -3555,6 +3565,11 @@ mod hook {
                             .unwrap_or_default();
                     }
                 }
+            }
+            // Over an entry in the open Player list: all of that player's
+            // names, which the entry itself cuts short (#781).
+            if let Some(names) = player_picker::hovered_help(vgui.rect(line).2) {
+                text = names;
             }
             if lent.help_shown.as_deref() != Some(text.as_str()) {
                 let object = vgui.object(line);
