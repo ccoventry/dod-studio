@@ -78,11 +78,28 @@ async function untilStopped(isRunning, ms) {
  * `waitForStart(ms)` resolves to where the batch's start stands once it is
  * no longer on its way to the game, or `ms` has passed (ipc_bridge's
  * waitForBatchStart). `cancelBatch()` asks the running batch to stop.
+ *
+ * A second close while the first still asks or waits (the title bar's X
+ * clicked again) answers no at once and opens nothing: the dialog is one
+ * element, and a second one over it took the first's answer, so the end of
+ * one wait dismissed the other's question and Studio stayed open.
  */
-export async function confirmCloseDuringBatch({
+export async function confirmCloseDuringBatch(args) {
+  if (!args.isRunning()) return true;
+  if (asking) return false;
+  asking = true;
+  try {
+    return await askBeforeClose(args);
+  } finally {
+    asking = false;
+  }
+}
+
+let asking = false;
+
+async function askBeforeClose({
   isRunning, isLocalBuild, waitForStart = waitForBatchStart, cancelBatch = cancelCaptureBatch,
 }) {
-  if (!isRunning()) return true;
   const s = STRINGS.BATCH_CLOSE_MODAL;
 
   // Where the start stands now; only a start still on its way is waited for.

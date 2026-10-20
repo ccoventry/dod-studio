@@ -133,6 +133,26 @@ describe('closing Studio during a batch (#545)', () => {
     expect(b.cancelBatch).not.toHaveBeenCalled();
   });
 
+  it('a second close during the wait opens nothing, and the first still asks', async () => {
+    dialog.answers = [true];
+    let sendStart;
+    const b = batch(['pending']);
+    b.waitForStart.mockImplementationOnce(async () => 'pending');
+    b.waitForStart.mockImplementationOnce(() => new Promise((resolve) => { sendStart = resolve; }));
+    const first = confirmCloseDuringBatch(b.args);
+    await vi.waitFor(() => expect(titles()).toEqual([s.WAIT_TITLE]));
+    expect(await confirmCloseDuringBatch(b.args)).toBe(false);
+    expect(titles()).toEqual([s.WAIT_TITLE]);
+    sendStart('sent');
+    expect(await first).toBe(true);
+    expect(titles()).toEqual([s.WAIT_TITLE, s.TITLE]);
+    // Once answered, a later close asks again.
+    dialog.answers = [false];
+    b.waitForStart.mockImplementationOnce(async () => 'sent');
+    expect(await confirmCloseDuringBatch(b.args)).toBe(false);
+    expect(titles()).toEqual([s.WAIT_TITLE, s.TITLE, s.TITLE]);
+  });
+
   it('warns a local build that closing takes the game with it', () => {
     expect(batchCloseMessage(true)).toContain(s.LOCAL_BUILD_NOTE);
     expect(batchCloseMessage(false)).not.toContain(s.LOCAL_BUILD_NOTE);
