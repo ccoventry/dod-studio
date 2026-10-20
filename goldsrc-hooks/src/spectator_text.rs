@@ -1,7 +1,7 @@
 //! `dodstudio_hide_spectator_text`: hide the two lines DoD prints when the
-//! view becomes a spectator camera (#677) -- the camera mode's name in the
-//! middle of the screen ("Locked Chase Cam", "Free Look", ...) and the green
-//! "Press DUCK for Spectator Menu" written out below it.
+//! view becomes a spectator camera (#677) -- the camera mode's name, centred
+//! just above the bottom bar ("Locked Chase Cam", "Free Look", ...), and the
+//! green "Press DUCK for Spectator Menu" written out above it.
 //!
 //! Neither has a narrow switch of its own. `dodstudio_hide_hudelement
 //! vgui2print 1` takes the mode name with every other centre-print, and
@@ -29,6 +29,15 @@
 //! the stack exactly as the callee's `ret 0xc` would have taken them, and
 //! nothing after it reads `eax`. Only this one call site changes, so every
 //! other centre-print (server text, the clan countdown) is untouched.
+//!
+//! ## The server's copy of the mode name
+//!
+//! A demo also carries the mode name as an ordinary `TextMsg` from the
+//! server: destination 4 with the key `#Spec_Mode1`..`4`, at every POV death
+//! and HLTV mode change. That one goes through the engine's message
+//! dispatcher, not `SetMode`, so the patch above never sees it, and in game it
+//! showed with the patch in place. `clan_text`'s `TextMsg` filter asks
+//! [`hide_text_msg`] for it, the same way it asks `center_text`.
 //!
 //! ## "Press DUCK for Spectator Menu"
 //!
@@ -128,10 +137,30 @@ static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static TOUCHED: AtomicBool = AtomicBool::new(false);
 /// Whether both lines are hidden right now.
 static HIDDEN_NOW: AtomicBool = AtomicBool::new(false);
+/// The cvar's value as last seen: what [`hide_text_msg`] reads.
+static WANTED: AtomicBool = AtomicBool::new(false);
+
+/// `TextMsg`'s destination byte for the middle of the screen.
+const HUD_PRINTCENTER: u8 = 4;
+/// The start of the mode names' `titles.txt` keys.
+const MODE_KEY: &[u8] = b"#Spec_Mode";
 
 /// Called by `commands.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
+}
+
+/// Whether a `TextMsg` payload (destination byte, then the key) is the
+/// server's copy of the camera mode name.
+fn is_mode_name(payload: &[u8]) -> bool {
+    payload.first() == Some(&HUD_PRINTCENTER) && payload[1..].starts_with(MODE_KEY)
+}
+
+/// Whether `clan_text`'s `TextMsg` filter should drop this payload: the
+/// cvar is on and it is the server's copy of the mode name (see the module
+/// doc). An atomic load and a byte compare.
+pub(crate) fn hide_text_msg(payload: &[u8]) -> bool {
+    WANTED.load(Ordering::Relaxed) && is_mode_name(payload)
 }
 
 fn pack(bytes: &[u8]) -> u64 {
@@ -210,6 +239,7 @@ pub fn poll() {
         return;
     }
     let wanted = unsafe { (*cvar).value } != 0.0;
+    WANTED.store(wanted, Ordering::Relaxed);
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);
     } else if !TOUCHED.load(Ordering::Relaxed) {
@@ -310,6 +340,17 @@ mod tests {
         assert_eq!(SPEC_DUCK.at, 0);
         assert_eq!(&t[..4], &["8B", "44", "24", "04"]);
         assert_eq!(SPEC_DUCK.hidden, &[0xc3]);
+    }
+
+    #[test]
+    fn only_a_centre_spec_mode_key_is_the_servers_mode_name() {
+        assert!(is_mode_name(b"\x04#Spec_Mode4\0"));
+        assert!(is_mode_name(b"\x04#Spec_Mode1\0"));
+        assert!(!is_mode_name(b"\x03#Spec_Mode4\0"), "chat, not centre");
+        assert!(!is_mode_name(b"\x04#Spec_Duck\0"));
+        assert!(!is_mode_name(b"\x04#clan_ready_rules\0"));
+        assert!(!is_mode_name(b"\x04"));
+        assert!(!is_mode_name(b""));
     }
 
     #[test]

@@ -184,6 +184,11 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
         if crate::center_text::hide(payload) {
             return Some(1);
         }
+        // And dodstudio_hide_spectator_text, for the server's own copy of
+        // the camera mode name.
+        if crate::spectator_text::hide_text_msg(payload) {
+            return Some(1);
+        }
         return None;
     }
     if name.eq_ignore_ascii_case(CLAN_TIMER) {

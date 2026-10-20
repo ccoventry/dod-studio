@@ -17,7 +17,9 @@
 //!
 //! - The spectator camera mode's name: `CHudSpectator::SetMode` calls
 //!   `MsgFunc_TextMsg` directly, not through the message dispatcher, so this
-//!   never sees it. `dodstudio_hide_spectator_text` hides that one.
+//!   never sees the client's own copy. (The server's copy, a `#Spec_Mode`
+//!   `TextMsg` a demo carries, is centre text like any other and goes.)
+//!   `dodstudio_hide_spectator_text` hides both.
 //! - The viewport's own way in: entry 13 of the function table at
 //!   `+0xc1aa0` (`+0x20480`) also calls `MsgFunc_TextMsg` directly. What, if
 //!   anything, uses it has not been looked into.
