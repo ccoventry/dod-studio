@@ -61,13 +61,16 @@ export function auditProgressView(p) {
   };
 }
 
-/// `audit_delete_progress` → the same bar, while copies are deleted.
+/// `audit_delete_progress` → the same bar, while copies are compared with
+/// the kept ones (`step` "checking"), then deleted.
 export function deleteProgressView(p, permanent) {
   const total = p?.total ?? 0;
   const done = Math.min(p?.done ?? 0, total);
   return {
     pct: total ? Math.round((done / total) * 100) : 0,
-    text: STRINGS.AUDITOR.deletingLine(done, total, permanent),
+    text: p?.step === 'checking'
+      ? STRINGS.AUDITOR.checkingCopiesLine(done, total)
+      : STRINGS.AUDITOR.deletingLine(done, total, permanent),
     current: '',
   };
 }

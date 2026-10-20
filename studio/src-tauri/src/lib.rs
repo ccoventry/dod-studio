@@ -211,15 +211,16 @@ async fn list_fixed_drives() -> Result<Vec<String>, String> {
     .await
 }
 
-/// To the Recycle Bin, or for good when `permanent` (#844).
+/// To the Recycle Bin, or for good when `permanent` (#844), each copy only
+/// once it matches its group's kept copy byte for byte.
 #[tauri::command]
 async fn delete_audit_files(
     app_handle: tauri::AppHandle,
-    paths: Vec<String>,
+    copies: Vec<audit_manager::DeleteCopy>,
     permanent: bool,
 ) -> Result<DeleteOutcome, String> {
     crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
-        audit_manager::delete_audit_files_impl(&app_handle, paths, permanent)
+        audit_manager::delete_audit_files_impl(&app_handle, copies, permanent)
     }))
     .await
 }

@@ -929,6 +929,7 @@ export const STRINGS = {
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
@@ -958,7 +959,7 @@ export const STRINGS = {
     DELETE_PERMANENT_BUTTON: 'Delete Permanently…',
     recycleNSelectedFiles: (n) => `Move ${n} to Recycle Bin`,
     deleteNPermanently: (n) => `Delete ${n} Permanently…`,
-    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? You can put them back from there.`,
+    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? Each is first compared byte for byte with the copy kept, and any that differ stay where they are. You can put them back from the Recycle Bin.`,
     deletePermanentlyConfirm: (n) => `Delete ${n} duplicate file${n === 1 ? '' : 's'} permanently? They skip the Recycle Bin and can't be put back.`,
     recycledFilesToast: (n) => `Moved ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin.`,
     deletedFilesToast: (n) => `Deleted ${n} duplicate file${n === 1 ? '' : 's'} permanently.`,

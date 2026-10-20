@@ -985,7 +985,9 @@
               <div class="row-inputs">
                 <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
                 <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
-                <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+                <!-- Hidden for 0.2.0, so every delete can be put back from the
+                     Recycle Bin; remove `hidden` to offer it again. -->
+                <button id="delete-permanent-audits-btn" hidden style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
               </div>
             </div>
             <!-- The app's table style; the list grows with the window, like the

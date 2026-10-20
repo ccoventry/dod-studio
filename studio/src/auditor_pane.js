@@ -326,10 +326,16 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
     showToast(STRINGS.AUDITOR.preferFolderToast(found, changed, folder), found ? 'success' : 'info');
   });
 
-  /// The ticked copies still in the results (a collapsed group's count too).
+  /// The ticked copies still in the results (a collapsed group's count too),
+  /// each with the copy its group keeps, which the delete compares it to.
+  function tickedCopies() {
+    return currentAuditResults.flatMap((g) => g.files.slice(1)
+      .filter((f) => ticked.has(f.path))
+      .map((f) => ({ path: f.path, keep: g.files[0].path })));
+  }
+
   function tickedFiles() {
-    const listed = new Set(currentAuditResults.flatMap((g) => g.files.slice(1).map((f) => f.path)));
-    return [...ticked].filter((p) => listed.has(p));
+    return tickedCopies().map((c) => c.path);
   }
 
   function setDeleteButtons(n) {
@@ -360,7 +366,8 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   }
 
   async function deleteTicked(permanent) {
-    const filesToDelete = tickedFiles();
+    const copies = tickedCopies();
+    const filesToDelete = copies.map((c) => c.path);
     if (filesToDelete.length === 0) return;
     const question = permanent
       ? STRINGS.AUDITOR.deletePermanentlyConfirm(filesToDelete.length)
@@ -370,9 +377,9 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
     deleting = { permanent };
     setDeleteButtons(filesToDelete.length);
     refreshStartButtonState();
-    showProgress(deleteProgressView({ done: 0, total: filesToDelete.length }, permanent));
+    showProgress(deleteProgressView({ step: 'checking', done: 0, total: filesToDelete.length }, permanent));
     try {
-      const { deleted = [], failed = [] } = (await deleteAuditFiles(filesToDelete, permanent)) ?? {};
+      const { deleted = [], failed = [] } = (await deleteAuditFiles(copies, permanent)) ?? {};
       if (deleted.length) {
         showToast(permanent
           ? STRINGS.AUDITOR.deletedFilesToast(deleted.length)

@@ -334,6 +334,38 @@ pub fn failed_to_delete_audit_file(path: &Path, err: impl Display) -> String {
     format!("Failed to delete {}: {}", path.display(), err)
 }
 
+/// A copy kept because it isn't byte for byte the copy its group keeps:
+/// the audit's key reads only the first 64 KiB.
+pub fn copy_differs_from_kept(copy: &Path, keep: &Path, offset: u64) -> String {
+    format!(
+        "Not deleted: {} is not an exact copy of {} (they differ from byte {}), so it may be a different demo",
+        copy.display(),
+        keep.display(),
+        offset
+    )
+}
+
+pub fn kept_copy_missing(copy: &Path, keep: &Path) -> String {
+    format!(
+        "Not deleted: {} could not be checked against the copy being kept, {}, which is no longer there",
+        copy.display(),
+        keep.display()
+    )
+}
+
+pub fn copy_is_the_kept_copy(copy: &Path) -> String {
+    format!("Not deleted: {} is the copy being kept", copy.display())
+}
+
+pub fn copy_compare_failed(copy: &Path, keep: &Path, err: impl Display) -> String {
+    format!(
+        "Not deleted: {} could not be compared with {}: {}",
+        copy.display(),
+        keep.display(),
+        err
+    )
+}
+
 /// The Duplicates delete only removes `.dem` files (#844).
 pub fn not_a_demo_file(path: &Path) -> String {
     format!(

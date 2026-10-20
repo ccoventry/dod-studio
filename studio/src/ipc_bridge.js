@@ -722,9 +722,11 @@ export async function listFixedDrives() {
     });
 }
 
-// To the Recycle Bin unless `permanent`; resolves to `{ deleted, failed }`.
-export async function deleteAuditFiles(paths, permanent = false) {
-  return invoke("delete_audit_files", { paths, permanent })
+// `copies` is `[{ path, keep }]`: each is deleted only once it matches its
+// group's kept copy byte for byte. To the Recycle Bin unless `permanent`;
+// resolves to `{ deleted, failed }`.
+export async function deleteAuditFiles(copies, permanent = false) {
+  return invoke("delete_audit_files", { copies, permanent })
     .catch((err) => {
       console.error("IPC Execution Error (delete_audit_files):", err);
       showToast(STRINGS.IPC.deletionFailed(err), 'error');

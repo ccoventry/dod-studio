@@ -34,7 +34,7 @@ async function loadHarness(page, { picked = null, drives = ['C:\\', 'F:\\'] } = 
     window.__mockInvokeHandlers.run_demo_audit = () => new Promise((resolve) => {
       window.__finishAudit = (outcome) => resolve(outcome ?? { groups, demos: 5, cancelled: false });
     });
-    window.__mockInvokeHandlers.delete_audit_files = ({ paths }) => ({ deleted: paths, failed: [] });
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({ deleted: copies.map((c) => c.path), failed: [] });
   }, { picked, drives, groups: GROUPS });
   await page.goto('/tests/e2e/duplicates.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -166,8 +166,11 @@ test('another copy can be kept: it moves to the top, the old pick becomes a tick
   await page.click('#delete-selected-audits-btn');
   await confirm(page);
   const [args] = await calls(page, 'delete_audit_files');
-  // The kept copy is never sent.
-  expect(args.paths).toEqual(['\\\\?\\F:\\downloads\\match.dem', '\\\\?\\D:\\a.dem']);
+  // The kept copy is never sent to be deleted, only as what each copy must match.
+  expect(args.copies).toEqual([
+    { path: '\\\\?\\F:\\downloads\\match.dem', keep: '\\\\?\\C:\\Half-Life\\dod\\match.dem' },
+    { path: '\\\\?\\D:\\a.dem', keep: '\\\\?\\E:\\old\\a.dem' },
+  ]);
 });
 
 test('Keep copies already in a folder picks the copy in that folder in every group', async ({ page }) => {
@@ -190,7 +193,10 @@ test('Move to Recycle Bin is the default delete, and the list follows it', async
 
   const [args] = await calls(page, 'delete_audit_files');
   expect(args).toEqual({
-    paths: ['\\\\?\\F:\\downloads\\match.dem', '\\\\?\\E:\\old\\a.dem'],
+    copies: [
+      { path: '\\\\?\\F:\\downloads\\match.dem', keep: '\\\\?\\C:\\Half-Life\\dod\\match.dem' },
+      { path: '\\\\?\\E:\\old\\a.dem', keep: '\\\\?\\D:\\a.dem' },
+    ],
     permanent: false,
   });
   await expect(page.locator('#audit-status-text')).toHaveText('Moved to the Recycle Bin: 2.');
@@ -201,9 +207,32 @@ test('Move to Recycle Bin is the default delete, and the list follows it', async
   await expect(page.locator('#delete-selected-audits-btn')).toBeDisabled();
 });
 
-test('Delete Permanently asks on its own and sends permanent', async ({ page }) => {
+test('the delete line says copies are being checked before any is deleted', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.delete_audit_files = () => new Promise((resolve) => { window.__finishDelete = resolve; });
+  });
+  await runAudit(page);
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  await expect(page.locator('#audit-status-text')).toHaveText('Checking each copy matches the kept one byte for byte: 0 / 2');
+  await page.evaluate(() => window.__mockEmit('audit_delete_progress', { step: 'checking', done: 1, total: 2 }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Checking each copy matches the kept one byte for byte: 1 / 2');
+  await page.evaluate(() => window.__mockEmit('audit_delete_progress', { step: 'deleting', done: 1, total: 2 }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Moving to the Recycle Bin: 1 / 2');
+  await page.evaluate(() => window.__finishDelete({ deleted: [], failed: [] }));
+});
+
+test('Delete Permanently is hidden for 0.2.0', async ({ page }) => {
   await loadHarness(page);
   await runAudit(page);
+  await expect(page.locator('#delete-permanent-audits-btn')).toBeHidden();
+});
+
+test('Delete Permanently, when offered, asks on its own and sends permanent', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await page.evaluate(() => document.querySelector('#delete-permanent-audits-btn').removeAttribute('hidden'));
   await page.click('#delete-permanent-audits-btn');
   await expect(page.locator('#themed-confirm-message')).toContainText("can't be put back");
   await page.click('#themed-confirm-cancel-btn');
@@ -220,9 +249,9 @@ test('a file that fails to delete stays listed and is reported', async ({ page }
   await loadHarness(page);
   await runAudit(page);
   await page.evaluate(() => {
-    window.__mockInvokeHandlers.delete_audit_files = ({ paths }) => ({
-      deleted: [paths[0]],
-      failed: [{ path: paths[1], error: 'Failed to delete E:\\old\\a.dem: in use' }],
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({
+      deleted: [copies[0].path],
+      failed: [{ path: copies[1].path, error: 'Failed to delete E:\\old\\a.dem: in use' }],
     });
   });
   await page.click('#delete-selected-audits-btn');
