@@ -298,5 +298,10 @@ export function createProjectSession({
     });
   }
 
-  return { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation };
+  /** Whether a project file is open (loaded or saved in this window). */
+  function hasProjectFile() {
+    return !!currentSessionPath;
+  }
+
+  return { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, hasProjectFile };
 }

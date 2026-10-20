@@ -2291,6 +2291,16 @@ export const STRINGS = {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
     },
+    // #848: marks saved outside the project, brought onto demos a scan adds.
+    LIBRARY_TITLE: 'Marks you saved before',
+    libraryAskMessage: (demos, highlights) =>
+      `${demos} of these demos ${demos === 1 ? 'has' : 'have'} Review marks you saved before (${highlights} highlight${highlights === 1 ? '' : 's'}). Bring them in?`,
+    LIBRARY_ASK_FOOTER: 'Only highlights with no mark, note or Kill Range in this project get them; the project\'s own stay as they are.',
+    LIBRARY_BRING_IN: 'Bring them in',
+    LIBRARY_NOT_NOW: 'Not now',
+    libraryDemoLine: (highlights) => `${highlights} highlight${highlights === 1 ? '' : 's'}`,
+    libraryBroughtInToast: (demos, highlights) =>
+      `Brought in your saved Review marks: ${highlights} highlight${highlights === 1 ? '' : 's'} in ${demos} demo${demos === 1 ? '' : 's'}.`,
     TICK_YES_LABEL: 'Tick Yes for capture',
     TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
@@ -2327,6 +2337,7 @@ export const STRINGS = {
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
     reviewFailed: (err) => `Could not start the review: ${err}`,
+    reviewLibraryFailed: (err) => `Review marks: ${err}`,
     cfgImportFailed: (err) => `Could not read that config: ${err}`,
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,
