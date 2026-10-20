@@ -4,24 +4,37 @@ import { listen } from '@tauri-apps/api/event';
 import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { createAuditFolders } from './audit_folders.js';
+import {
+  shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
+  auditTotals, fileStatus,
+} from './audit_duplicates.js';
 
-export function initAuditorPane() {
+/// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
+/// copies in it are kept first and never start ticked.
+export function initAuditorPane({ getDemos = () => [] } = {}) {
   let currentAuditResults = [];
   // Groups default to expanded; this tracks the exceptions. Reset on every
   // new audit run so a fresh result set always starts fully expanded.
   let collapsedGroups = new Set();
+  let running = false;
+  let deleting = null; // { permanent } while a delete runs
 
   const targetFolderInput = document.querySelector('#audit-target-folder-input');
   const browseFolderBtn = document.querySelector('#audit-browse-folder-btn');
   const runAuditBtn = document.querySelector('#run-audit-btn');
   const cancelAuditBtn = document.querySelector('#cancel-audit-btn');
   const deleteBtn = document.querySelector('#delete-selected-audits-btn');
+  const deletePermanentBtn = document.querySelector('#delete-permanent-audits-btn');
   const selectAllCb = document.querySelector('#audit-select-all');
-  const spinnerEl = document.querySelector('#audit-spinner');
+  const progressEl = document.querySelector('#audit-progress');
   const statusTextEl = document.querySelector('#audit-status-text');
+  const currentEl = document.querySelector('#audit-status-current');
   const footerEl = document.querySelector('#audit-list-footer');
   const pinnedFooterEl = document.querySelector('#footer-audit-summary');
   const tbody = document.querySelector('#audit-results-body');
+
+  const folders = createAuditFolders({ onChange: () => refreshStartButtonState() });
 
   function setAuditFooterSummary(text) {
     if (footerEl) footerEl.textContent = text;
@@ -30,12 +43,25 @@ export function initAuditorPane() {
 
   function refreshStartButtonState() {
     if (!runAuditBtn) return;
-    runAuditBtn.disabled = !targetFolderInput?.value?.trim();
+    runAuditBtn.disabled = running || !!deleting || !folders.canStart();
   }
   refreshStartButtonState();
 
-  if (targetFolderInput) {
-    targetFolderInput.addEventListener('input', refreshStartButtonState);
+  function setStatus(text, current = '') {
+    if (statusTextEl) statusTextEl.textContent = text;
+    if (currentEl) currentEl.textContent = current;
+  }
+
+  function showProgress(view) {
+    if (!progressEl) return;
+    progressEl.hidden = false;
+    const fill = progressEl.querySelector('.progress-bar-fill');
+    if (fill) fill.style.width = `${view.pct}%`;
+    setStatus(view.text, view.current);
+  }
+
+  function hideProgress() {
+    if (progressEl) progressEl.hidden = true;
   }
 
   if (browseFolderBtn) {
@@ -61,44 +87,61 @@ export function initAuditorPane() {
     });
   }
 
-  let filesCheckedSoFar = 0;
-
   listen('audit_progress', (event) => {
-    const p = event.payload;
-    filesCheckedSoFar = p.files_checked || 0;
-    if (statusTextEl) {
-      statusTextEl.innerHTML =
-        STRINGS.AUDITOR.foundSoFarHtml(filesCheckedSoFar) +
-        STRINGS.AUDITOR.statusLineHtml(p.status);
-    }
+    if (running) showProgress(auditProgressView(event.payload));
+  });
+  listen('audit_delete_progress', (event) => {
+    if (deleting) showProgress(deleteProgressView(event.payload, deleting.permanent));
   });
 
   if (runAuditBtn) {
     runAuditBtn.addEventListener('click', async () => {
-      const targetFolder = targetFolderInput?.value?.trim();
-      if (!targetFolder) {
+      if (!folders.canStart()) {
         showToast(STRINGS.AUDITOR.CHOOSE_FOLDER_FIRST, 'error');
         return;
       }
+      const { paths, allDrives } = folders.getRequest();
+      const queued = (getDemos() || []).map((d) => d?.path).filter(Boolean);
 
-      filesCheckedSoFar = 0;
+      running = true;
       collapsedGroups = new Set();
-      runAuditBtn.disabled = true;
+      currentAuditResults = [];
+      refreshStartButtonState();
+      folders.setLocked(true);
       if (cancelAuditBtn) cancelAuditBtn.disabled = false;
-      if (deleteBtn) deleteBtn.disabled = true;
-      if (spinnerEl) spinnerEl.style.display = 'inline-block';
-      if (statusTextEl) statusTextEl.innerHTML = STRINGS.AUDITOR.INITIALIZING_HTML;
+      setDeleteButtons(0);
+      showProgress(auditProgressView(null));
       if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.AUDITING_IN_PROGRESS_ROW}</td></tr>`;
 
       try {
-        currentAuditResults = await runDemoAudit([targetFolder]);
-        renderAuditResults();
+        const outcome = await runDemoAudit(paths, allDrives, queued);
+        currentAuditResults = outcome?.groups ?? [];
+        renderAuditResults({ resetTicks: true });
+        setStatus(outcome?.cancelled
+          ? STRINGS.AUDITOR.CANCELLED_STATUS
+          : STRINGS.AUDITOR.doneStatus(outcome?.demos ?? 0, currentAuditResults.length));
+        if (outcome?.cancelled && tbody) {
+          tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.CANCELLED_ROW}</td></tr>`;
+        }
       } catch (e) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.auditFailedRow(e)}</td></tr>`;
+        setStatus(STRINGS.AUDITOR.auditFailedRow(e));
+        if (tbody) {
+          tbody.innerHTML = '';
+          const tr = document.createElement('tr');
+          const td = document.createElement('td');
+          td.colSpan = 5;
+          td.className = 'table-empty';
+          td.textContent = STRINGS.AUDITOR.auditFailedRow(e);
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+        }
       } finally {
-        if (spinnerEl) spinnerEl.style.display = 'none';
+        running = false;
+        hideProgress();
+        folders.setLocked(false);
         if (cancelAuditBtn) cancelAuditBtn.disabled = true;
         refreshStartButtonState();
+        updateDeleteButtonState();
       }
     });
   }
@@ -106,7 +149,7 @@ export function initAuditorPane() {
   if (cancelAuditBtn) {
     cancelAuditBtn.addEventListener('click', async () => {
       cancelAuditBtn.disabled = true;
-      if (statusTextEl) statusTextEl.innerHTML = STRINGS.AUDITOR.CANCELLING_HTML;
+      setStatus(STRINGS.AUDITOR.CANCELLING_STATUS);
       try {
         await cancelAudit();
       } catch (e) {
@@ -126,31 +169,31 @@ export function initAuditorPane() {
     renderAuditResults();
   }
 
-  function renderAuditResults() {
+  // Ticks survive collapsing a group and re-rendering.
+  let ticked = new Set();
+
+  function renderAuditResults({ resetTicks = false } = {}) {
     if (!tbody) return;
 
     if (currentAuditResults.length === 0) {
       tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.NO_DUPLICATES_ROW}</td></tr>`;
-      if (deleteBtn) deleteBtn.disabled = true;
+      setDeleteButtons(0);
       setAuditFooterSummary(STRINGS.AUDITOR.FOOTER_DEFAULT);
       return;
     }
+    if (resetTicks) {
+      ticked = new Set();
+      currentAuditResults.forEach((g) => g.files.forEach((f, i) => { if (startsTicked(f, i)) ticked.add(f.path); }));
+    }
 
     tbody.innerHTML = '';
-    let totalWastedBytes = 0;
-    let duplicateCount = 0;
-
     currentAuditResults.forEach((group, groupIdx) => {
       const sizeMb = (group.size / (1024 * 1024)).toFixed(2);
       const hashStr = group.header_hash.toString(16);
-
-      const wastedBytes = group.size * (group.files.length - 1);
-      totalWastedBytes += wastedBytes;
-      duplicateCount += (group.files.length - 1);
-
       const isExpanded = !collapsedGroups.has(groupIdx);
 
       const groupRow = document.createElement('tr');
+      groupRow.className = 'audit-group-row';
       groupRow.innerHTML = `
         <td></td>
         <td><button class="group-toggle-btn" type="button">${STRINGS.AUDITOR.groupToggleLabel(isExpanded, group.files.length)}</button></td>
@@ -165,39 +208,39 @@ export function initAuditorPane() {
 
       group.files.forEach((file, fileIdx) => {
         const tr = document.createElement('tr');
+        tr.className = fileIdx === 0 ? 'audit-file-row audit-kept' : 'audit-file-row';
 
         const tdCb = document.createElement('td');
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'audit-row-cb';
-        cb.dataset.file = file;
-
-        // Auto-select duplicates (all but the first file in the group)
-        if (fileIdx > 0) {
-          cb.checked = true;
-        } else {
-          cb.disabled = true; // Prevent deleting the original
+        cb.dataset.file = file.path;
+        if (fileIdx === 0) {
+          cb.disabled = true; // The kept copy is never deleted.
           cb.title = STRINGS.AUDITOR.ORIGINAL_FILE_TITLE;
+        } else {
+          cb.checked = ticked.has(file.path);
+          if (file.in_use) cb.title = STRINGS.AUDITOR.IN_USE_TITLE;
         }
-
-        cb.addEventListener('change', updateDeleteButtonState);
+        cb.addEventListener('change', () => {
+          if (cb.checked) ticked.add(file.path); else ticked.delete(file.path);
+          updateDeleteButtonState();
+        });
         tdCb.appendChild(cb);
 
         const tdStatus = document.createElement('td');
-        tdStatus.textContent = STRINGS.AUDITOR.FILE_ROW_LABEL;
+        tdStatus.className = 'audit-file-status';
+        tdStatus.textContent = fileStatus(file, fileIdx);
 
         const tdSize = document.createElement('td');
         tdSize.textContent = STRINGS.AUDITOR.megabytesLabel(sizeMb);
 
-        let displayPath = file;
-        if (displayPath.startsWith('\\\\?\\')) {
-          displayPath = displayPath.slice(4);
-        }
-
+        const displayPath = shownPath(file.path);
         const tdPath = document.createElement('td');
+        tdPath.className = 'audit-file-path';
         tdPath.textContent = displayPath;
-        tdPath.style.color = fileIdx > 0 ? '#ff9999' : undefined;
-        if (fileIdx === 0) tdPath.style.fontWeight = 'bold';
+        if (fileIdx > 0) tdPath.style.color = '#ff9999';
+        else tdPath.style.fontWeight = 'bold';
 
         const tdAction = document.createElement('td');
         const copyBtn = document.createElement('button');
@@ -230,56 +273,82 @@ export function initAuditorPane() {
       });
     });
 
-    const wastedGb = (totalWastedBytes / (1024 * 1024 * 1024)).toFixed(2);
-    setAuditFooterSummary(STRINGS.AUDITOR.footerSummary(duplicateCount, wastedGb));
+    const { copies, wastedBytes } = auditTotals(currentAuditResults);
+    const wastedGb = (wastedBytes / (1024 * 1024 * 1024)).toFixed(2);
+    setAuditFooterSummary(STRINGS.AUDITOR.footerSummary(copies, wastedGb));
 
     updateDeleteButtonState();
   }
 
+  /// The ticked copies still in the results (a collapsed group's count too).
+  function tickedFiles() {
+    const listed = new Set(currentAuditResults.flatMap((g) => g.files.slice(1).map((f) => f.path)));
+    return [...ticked].filter((p) => listed.has(p));
+  }
+
+  function setDeleteButtons(n) {
+    const busy = running || !!deleting;
+    if (deleteBtn) {
+      deleteBtn.disabled = busy || n === 0;
+      deleteBtn.textContent = STRINGS.AUDITOR.recycleNSelectedFiles(n);
+    }
+    if (deletePermanentBtn) {
+      deletePermanentBtn.disabled = busy || n === 0;
+      deletePermanentBtn.textContent = STRINGS.AUDITOR.deleteNPermanently(n);
+    }
+  }
+
   function updateDeleteButtonState() {
-    if (!deleteBtn) return;
-    const checked = document.querySelectorAll('.audit-row-cb:checked');
-    deleteBtn.disabled = checked.length === 0;
-    deleteBtn.textContent = STRINGS.AUDITOR.deleteNSelectedFiles(checked.length);
+    setDeleteButtons(tickedFiles().length);
   }
 
   if (selectAllCb) {
     selectAllCb.addEventListener('change', (e) => {
       const isChecked = e.target.checked;
-      document.querySelectorAll('.audit-row-cb:not([disabled])').forEach(cb => {
-        cb.checked = isChecked;
-      });
-      updateDeleteButtonState();
+      currentAuditResults.forEach((g) => g.files.slice(1).forEach((f) => {
+        if (isChecked) ticked.add(f.path); else ticked.delete(f.path);
+      }));
+      renderAuditResults();
     });
   }
 
-  if (deleteBtn) {
-    deleteBtn.addEventListener('click', async () => {
-      const checked = document.querySelectorAll('.audit-row-cb:checked');
-      const filesToDelete = Array.from(checked).map(cb => cb.dataset.file);
+  async function deleteTicked(permanent) {
+    const filesToDelete = tickedFiles();
+    if (filesToDelete.length === 0) return;
+    const question = permanent
+      ? STRINGS.AUDITOR.deletePermanentlyConfirm(filesToDelete.length)
+      : STRINGS.AUDITOR.recycleConfirm(filesToDelete.length);
+    if (!(await themedConfirm(question))) return;
 
-      if (filesToDelete.length === 0) return;
-      if (!(await themedConfirm(STRINGS.AUDITOR.deleteConfirm(filesToDelete.length)))) return;
-
-      deleteBtn.disabled = true;
-      try {
-        await deleteAuditFiles(filesToDelete);
-        showToast(STRINGS.AUDITOR.deletedFilesToast(filesToDelete.length), 'success');
-
-        // Remove deleted files from current state to avoid re-auditing immediately
-        currentAuditResults = currentAuditResults.map(g => {
-          return {
-            ...g,
-            files: g.files.filter(f => !filesToDelete.includes(f))
-          };
-        }).filter(g => g.files.length > 1); // Remove group if no duplicates remain
-
-        renderAuditResults();
-        if (selectAllCb) selectAllCb.checked = false;
-      } catch (e) {
-        showToast(STRINGS.AUDITOR.deletionFailedToast(e), 'error');
-        updateDeleteButtonState();
+    deleting = { permanent };
+    setDeleteButtons(filesToDelete.length);
+    refreshStartButtonState();
+    showProgress(deleteProgressView({ done: 0, total: filesToDelete.length }, permanent));
+    try {
+      const { deleted = [], failed = [] } = (await deleteAuditFiles(filesToDelete, permanent)) ?? {};
+      if (deleted.length) {
+        showToast(permanent
+          ? STRINGS.AUDITOR.deletedFilesToast(deleted.length)
+          : STRINGS.AUDITOR.recycledFilesToast(deleted.length), 'success');
       }
-    });
+      if (failed.length) {
+        showToast(STRINGS.AUDITOR.someNotDeletedToast(failed.length, failed[0].error), 'error');
+      }
+      deleted.forEach((p) => ticked.delete(p));
+      currentAuditResults = withoutDeleted(currentAuditResults, deleted);
+      setStatus(STRINGS.AUDITOR.deletedStatus(deleted.length, failed.length, permanent));
+      if (selectAllCb) selectAllCb.checked = false;
+    } catch (e) {
+      // ipc_bridge toasts the error.
+      setStatus(STRINGS.AUDITOR.deletionFailedToast(e));
+    } finally {
+      deleting = null;
+      if (progressEl) progressEl.hidden = true;
+      renderAuditResults();
+      refreshStartButtonState();
+    }
   }
+
+  deleteBtn?.addEventListener('click', () => deleteTicked(false));
+  deletePermanentBtn?.addEventListener('click', () => deleteTicked(true));
 }
