@@ -153,7 +153,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane();
+  initAuditorPane({ getDemos: () => currentScannedDemos });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({

@@ -1890,7 +1890,7 @@ fn list_scan_demos(
 /// True when a progress line may go out at `now_ms`: at most one per ~33 ms
 /// (CLAUDE.md's telemetry throttle). `last_ms` holds the last emit time, or
 /// `u32::MAX` before the first one.
-fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> bool {
+pub(crate) fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> bool {
     use std::sync::atomic::Ordering;
     let last = last_ms.load(Ordering::Relaxed);
     if last != u32::MAX && now_ms.saturating_sub(last) < 33 {

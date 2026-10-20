@@ -2,7 +2,8 @@
 <!--
   Harness for players_ui.js (#428): Configuration > Players. The backend's
   list_logo_pngs, list_crosshair_sprites, crosshair_sprite_image,
-  set_player_overrides and index_demo_players are window.__mockInvokeHandlers;
+  set_player_overrides, index_demo_players and add_crosshair_file (#842) are
+  window.__mockInvokeHandlers;
   window.__persisted counts saves, window.__players() reads the setting.
 -->
 <html lang="en">
@@ -39,6 +40,15 @@
     </select>
     <span id="players-crosshair-fallback-pick"></span>
     <div id="players-crosshair-fallback-picker"></div>
+    <button id="players-make-crosshair-btn">Make your own crosshair…</button>
+    <button id="players-add-crosshair-btn">Add a crosshair file…</button>
+    <div id="players-add-crosshair-form" style="display: none;">
+      <input type="text" id="players-add-crosshair-name" />
+      <span id="players-add-crosshair-file"></span>
+      <button id="players-add-crosshair-save">Add</button>
+      <button id="players-add-crosshair-cancel">Cancel</button>
+    </div>
+    <div id="players-add-crosshair-status" style="display: none;"></div>
     <select id="players-spray-size"></select>
   </div>
   <script type="module">

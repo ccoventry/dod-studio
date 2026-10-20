@@ -93,7 +93,7 @@ impl IntegrityReport {
 
 /// `m:ss`. A negative or non-finite time (a damaged `SvcTime`) shows as 0:00;
 /// the cast saturates rather than panicking.
-fn clock(seconds: f32) -> String {
+pub(crate) fn clock(seconds: f32) -> String {
     let total = if seconds.is_finite() && seconds > 0.0 {
         seconds as u32
     } else {

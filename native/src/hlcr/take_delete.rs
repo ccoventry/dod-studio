@@ -150,21 +150,19 @@ pub fn size_on_disk(path: &Path) -> u64 {
 }
 
 /// Sends a checked take to the Recycle Bin.
-///
-/// On a fresh thread: `trash` initialises COM apartment-threaded on whatever
-/// thread calls it and panics if that thread already chose the other model,
-/// which a reused worker thread may have. A panic aborts a release build.
 pub fn recycle_take(deletion: &TakeDeletion) -> Result<(), String> {
-    let paths = deletion.recycle.clone();
-    let outcome = std::thread::spawn(move || trash::delete_all(&paths).map_err(|e| e.to_string()))
-        .join()
-        .unwrap_or_else(|_| Err("the Recycle Bin call stopped unexpectedly".to_string()));
-    outcome.map_err(|e| {
-        format!(
-            "Couldn't move {} to the Recycle Bin: {e}",
-            deletion.take_folder.display()
-        )
-    })
+    let errors: Vec<String> = crate::sys::recycle_bin::recycle(deletion.recycle.clone(), |_| {})
+        .into_iter()
+        .flatten()
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "Couldn't move {} to the Recycle Bin: {}",
+        deletion.take_folder.display(),
+        errors.join("; ")
+    ))
 }
 
 /// Deletes a take for good: the automatic mode's permanent choice (#644). The

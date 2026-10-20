@@ -2533,6 +2533,7 @@ dependencies = [
  "dirs 5.0.1",
  "dod",
  "filetime",
+ "flate2",
  "hl-demo-auditor",
  "humantime",
  "js-sys",
@@ -2552,6 +2553,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zip",
 ]
 
 [[package]]
@@ -6411,6 +6413,7 @@ checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
  "crc32fast",
+ "flate2",
  "indexmap 2.14.0",
  "memchr",
 ]

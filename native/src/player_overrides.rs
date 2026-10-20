@@ -7,9 +7,11 @@
 //! rather than settings.json so its parser stays a few lines of tab-separated
 //! text, and so a settings file it can't read never touches the table. Both
 //! sides test against `test-fixtures/players_table.txt`, so the format can't
-//! drift between the writer and the reader. Studio never writes into the game
-//! install for this: the PNGs and sprites are the user's own, in
-//! `<game>\logos\` and `<game>\sprites\`.
+//! drift between the writer and the reader. The PNGs and sprites are the
+//! user's own, in `<game>\logos\` and `<game>\sprites\` or
+//! `<game>_addon\sprites\`. Studio writes into the install for this only when
+//! the user adds a crosshair file, and then only into `<game>_addon\sprites\`
+//! (`crosshair_import`, #842).
 //!
 //! The hook applies the table only while `dodstudio_player_overrides` is 1;
 //! Studio sets it from the tab's "Use in the game" box ([`cvar_line`]) when it
@@ -54,7 +56,7 @@ pub struct PlayerRow {
     /// A PNG in `<game>\logos\`, or [`OWN_SPRAY`] for "From the demo".
     #[serde(default)]
     pub png: String,
-    /// A sprite in `<game>\sprites\`.
+    /// A sprite in `<game>_addon\sprites\` or `<game>\sprites\`.
     #[serde(default)]
     pub crosshair_sprite: String,
     /// 1..=16, the tile of the sprite's 4x4 grid; 0 for none.
@@ -344,9 +346,40 @@ pub fn list_logo_pngs(game_dir: &Path) -> Vec<String> {
     list_files(&game_dir.join("logos"), is_png_name)
 }
 
-/// The sprites in `<game>\sprites\`, for the crosshair dropdowns.
+/// `<game>_addon` beside `game_dir` (`<hl.exe's folder>\<game>`): the folder
+/// `-addons` puts ahead of `<game>` in the engine's search path, where
+/// "Add a crosshair file…" puts sheets (`crosshair_import`, #842).
+pub fn addon_of(game_dir: &Path) -> PathBuf {
+    let name = game_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    game_dir.with_file_name(format!("{name}_addon"))
+}
+
+/// The sprites in `<game>_addon\sprites\` and `<game>\sprites\`, for the
+/// crosshair dropdowns: the hook loads either (the addon's copy first, as the
+/// engine does). A name in both is listed once.
 pub fn list_sprites(game_dir: &Path) -> Vec<String> {
-    list_files(&game_dir.join("sprites"), is_sprite_name)
+    let mut out = list_files(&addon_of(game_dir).join("sprites"), is_sprite_name);
+    for name in list_files(&game_dir.join("sprites"), is_sprite_name) {
+        if !out.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+            out.push(name);
+        }
+    }
+    out.sort_by_key(|n| n.to_ascii_lowercase());
+    out
+}
+
+/// The file the game loads for sprite `name`: the addon folder's when it
+/// has one, else the game folder's (which may not exist).
+pub fn sprite_path(game_dir: &Path, name: &str) -> PathBuf {
+    let addon = addon_of(game_dir).join("sprites").join(name);
+    if addon.is_file() {
+        addon
+    } else {
+        game_dir.join("sprites").join(name)
+    }
 }
 
 // ── Sprite preview ──────────────────────────────────────────────────────────
@@ -594,6 +627,32 @@ mod tests {
         assert_eq!(list_logo_pngs(&dir), vec!["a.png", "b.PNG"]);
         assert_eq!(list_sprites(&dir), vec!["Bar.SPR", "customXHair.spr"]);
         assert!(list_logo_pngs(&dir.join("missing")).is_empty());
+    }
+
+    #[test]
+    fn sprites_in_the_addon_folder_are_listed_and_found_first() {
+        let root = crate::test_support::Scratch::new("players_addon_sprites");
+        let game = root.join("dod");
+        let addon = root.join("dod_addon").join("sprites");
+        std::fs::create_dir_all(game.join("sprites")).unwrap();
+        std::fs::create_dir_all(&addon).unwrap();
+        std::fs::write(game.join("sprites").join("customXHair.spr"), b"game").unwrap();
+        std::fs::write(game.join("sprites").join("Both.spr"), b"game").unwrap();
+        std::fs::write(addon.join("customxhair-red.spr"), b"addon").unwrap();
+        std::fs::write(addon.join("both.SPR"), b"addon").unwrap();
+        assert_eq!(addon_of(&game), root.join("dod_addon"));
+        assert_eq!(
+            list_sprites(&game),
+            vec!["both.SPR", "customxhair-red.spr", "customXHair.spr"]
+        );
+        assert_eq!(
+            sprite_path(&game, "customxhair-red.spr"),
+            addon.join("customxhair-red.spr")
+        );
+        assert_eq!(
+            sprite_path(&game, "customXHair.spr"),
+            game.join("sprites").join("customXHair.spr")
+        );
     }
 
     /// A sprite as the engine's loader lays it out: one `w`x`h` frame, alone
