@@ -183,7 +183,7 @@ export async function listLogoPngs(gamePath, gameFolder) {
     });
 }
 
-/** The sprites in the game install's sprites folder, for Configuration >
+/** The sprites in the game install's sprites folders (addon and game), for Configuration >
  *  Players' crosshair column (#428). Empty when they can't be listed. */
 export async function listCrosshairSprites(gamePath, gameFolder) {
   return invoke('list_crosshair_sprites', { gamePath, gameFolder })
@@ -200,6 +200,18 @@ export async function crosshairSpriteImage(gamePath, gameFolder, sprite) {
     .catch((err) => {
       console.error("IPC Execution Error (crosshair_sprite_image):", err);
       return null;
+    });
+}
+
+/** "Add a crosshair file…" (#842): copies the sprite in `source` (a .spr, or
+ *  the crosshair creator's .zip) into the install's addon sprites folder as
+ *  customxhair-<name>.spr. `{ file }` on success, `{ error }` otherwise. */
+export async function addCrosshairFile(gamePath, gameFolder, source, name) {
+  return invoke('add_crosshair_file', { gamePath, gameFolder, source, name })
+    .then((file) => ({ file }))
+    .catch((err) => {
+      console.error("IPC Execution Error (add_crosshair_file):", err);
+      return { error: String(err) };
     });
 }
 
@@ -466,7 +478,8 @@ export async function diagnoseCaptureOutputPaths(paths) {
 export async function queueRenderBatch(payload) {
   // payload must match RenderBatchPayload:
   //   { render_directories, codec, custom_codec_args?, fps, ffmpeg_path?, export_directories, max_concurrent_renders }
-  // Resolves to the number of takes found and staged as Queued jobs.
+  // Merges the scan into the queue (#772) and resolves to what changed:
+  //   { total, added, refreshed, kept, gone, gone_queued } (ScanMergeSummary).
   return invoke("queue_render_batch", { payload: payload })
     .catch((err) => {
       console.error("IPC Execution Error (queue_render_batch):", err);
@@ -689,8 +702,11 @@ export async function saveSettings(settings) {
     });
 }
 
-export async function runDemoAudit(paths) {
-  return invoke("run_demo_audit", { paths })
+// Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
+// `allDrives`, in one key pass; copies in `queued` (the project's queue) or
+// the install's game folder are listed first, as the ones to keep.
+export async function runDemoAudit(paths, allDrives = false, queued = []) {
+  return invoke("run_demo_audit", { paths, allDrives, queued })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');
@@ -698,8 +714,17 @@ export async function runDemoAudit(paths) {
     });
 }
 
-export async function deleteAuditFiles(paths) {
-  return invoke("delete_audit_files", { paths })
+export async function listFixedDrives() {
+  return invoke("list_fixed_drives")
+    .catch((err) => {
+      console.error("IPC Execution Error (list_fixed_drives):", err);
+      throw err;
+    });
+}
+
+// To the Recycle Bin unless `permanent`; resolves to `{ deleted, failed }`.
+export async function deleteAuditFiles(paths, permanent = false) {
+  return invoke("delete_audit_files", { paths, permanent })
     .catch((err) => {
       console.error("IPC Execution Error (delete_audit_files):", err);
       showToast(STRINGS.IPC.deletionFailed(err), 'error');

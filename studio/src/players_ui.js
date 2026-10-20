@@ -17,6 +17,7 @@ import {
   indexDemoPlayers,
 } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { createCrosshairImport } from './crosshair_import_ui.js';
 import {
   normalizePlayers,
   playerOptions as groupOptions,
@@ -395,7 +396,16 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
     sprites = Array.isArray(listed[1]) ? listed[1] : [];
     spriteImages.clear();
     render();
+    crosshairImport.refresh();
   }
+
+  // "Make your own crosshair…" and "Add a crosshair file…" (#842); a file
+  // added re-lists the sprites so the crosshair lists offer it.
+  const crosshairImport = createCrosshairImport({
+    getPaths,
+    getSprites: () => sprites,
+    onAdded: () => refreshFiles(),
+  });
 
   async function refreshPlayers() {
     const paths = (getDemos() || []).map((d) => d.path).filter(Boolean);
