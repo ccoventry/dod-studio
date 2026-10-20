@@ -690,15 +690,42 @@ pub fn build_batch_queue(
             .map(|streak| block_byte_estimate(config, streak, demo_fps))
             .collect();
 
-        let assignments = allocate_blocks_first_fit_decreasing(
+        let assignments = match allocate_blocks_first_fit_decreasing(
             &block_estimates,
             &mut drive_free,
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
-        )
-        .map_err(|_| {
-            std::io::Error::other("Insufficient space across all mapped drives to allocate a block")
-        })?;
+        ) {
+            Ok(assignments) => assignments,
+            // Render While Capturing (#861) frees space as the batch runs and
+            // holds it between clips until there is room, so the blocks that
+            // don't fit now still get a drive: counted as if this demo's
+            // blocks will have been freed by the time they record.
+            Err(_) if config.render_while_capturing => {
+                let overcommit = block_estimates
+                    .iter()
+                    .fold(FAILOVER_THRESHOLD, |sum, &b| sum.saturating_add(b));
+                for free in drive_free.iter_mut() {
+                    *free = free.saturating_add(overcommit);
+                }
+                allocate_blocks_first_fit_decreasing(
+                    &block_estimates,
+                    &mut drive_free,
+                    &mut active_drive_idx,
+                    FAILOVER_THRESHOLD,
+                )
+                .map_err(|_| {
+                    std::io::Error::other(
+                        "Insufficient space across all mapped drives to allocate a block",
+                    )
+                })?
+            }
+            Err(_) => {
+                return Err(std::io::Error::other(
+                    "Insufficient space across all mapped drives to allocate a block",
+                ));
+            }
+        };
 
         // Route aliases key off each block's original index in merged_streaks,
         // not allocation order, so the scheduled-command lookup below (which

@@ -202,6 +202,11 @@ line runs once on the first frame at or past its time, and where the patched
 demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs
 while a seek is on its way. A demo that doesn't load in three minutes, stops,
 or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
+`hold` makes the batch stop at the next clip boundary (a seek to the next
+clip, or the move to the next demo, both after the clip's recording stopped)
+with the demo paused and a `BATCH_HELD` line on the events pipe; `go` lets it
+go on (`BATCH_GOING`). Studio's Render While Capturing sends them while
+renders free space for the next clip (#861).
 `stop` ends the batch; bare says where it is. With
 `dodstudio_stay_behind_while_capturing` on when it starts, the game steps aside behind
 the other windows (minimised if it had the foreground, which then parks it

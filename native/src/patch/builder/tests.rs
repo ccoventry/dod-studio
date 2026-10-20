@@ -501,6 +501,32 @@ fn test_drive_headroom_includes_drive_0_when_a_block_actually_lands_there() {
 }
 
 #[test]
+fn a_block_bigger_than_the_drive_is_refused_unless_renders_free_space_while_capturing() {
+    // #861: Render While Capturing holds the batch between clips until
+    // renders have freed the room, so the planner routes what doesn't fit now.
+    let mut config = mock_config();
+    let temp_drive = std::env::temp_dir().join("dod_test_render_while_capturing_drive");
+    std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
+    config.capture_directories = vec![temp_drive.clone()];
+    // Petabytes per second of footage: more than any drive has free.
+    config.resolution_width = 20_000;
+    config.resolution_height = 20_000;
+    config.capture_fps = 100_000;
+    let streaks = || vec![streak_with_kills(1000, 3000, &[1000, 3000])];
+
+    let refused = build_batch_queue(streaks(), &config, &std::collections::HashMap::new());
+    assert!(refused.is_err(), "the block can't fit the drive");
+
+    config.render_while_capturing = true;
+    let (jobs, headroom) =
+        build_batch_queue(streaks(), &config, &std::collections::HashMap::new()).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].blocks.len(), 1);
+    assert_eq!(headroom.len(), 1);
+    assert_eq!(headroom[0].path, temp_drive);
+}
+
+#[test]
 fn test_patched_demos_land_directly_in_dod_not_on_a_capture_directory() {
     // See issue #8: capture_directories is only about where recorded
     // video blocks land now, never these small demo files -- both the

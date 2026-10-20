@@ -37,6 +37,7 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
@@ -46,7 +47,7 @@ pub const NAME: &str = console_name!("batch");
 /// The batch file's first line.
 pub(crate) const HEADER: &str = "dodstudio-batch 1";
 
-const USAGE: &str = "start \"<batch file>\" | away | stop (bare: where it is)";
+const USAGE: &str = "start \"<batch file>\" | away | hold | go | stop (bare: where it is)";
 
 /// How long a demo may take to load before the batch skips it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
@@ -265,6 +266,20 @@ enum Phase {
     },
     /// Running the demo's schedule.
     Playing { cursor: Cursor, beat: Instant },
+    /// Held between two clips (`hold`, #861), the demo paused, until `go`;
+    /// `then` is what the schedule asked for when it stopped.
+    Held { cursor: Cursor, then: Then },
+}
+
+/// Studio asked the batch to stop at the next clip boundary (#861): a seek to
+/// the next clip, or the move to the next demo. Both come after the clip's
+/// recording has stopped, so nothing records while held. Studio sends `hold`
+/// when a render has to free space for the next clip, and `go` once it has.
+static HOLD: AtomicBool = AtomicBool::new(false);
+
+/// Whether the batch stops before doing `then`: only at a clip boundary.
+pub(crate) fn holds_at(then: &Then, hold: bool) -> bool {
+    hold && matches!(then, Then::Seek(_) | Then::Next)
 }
 
 struct Batch {
@@ -443,42 +458,91 @@ pub fn poll() {
             } else {
                 beat
             };
-            match then {
-                Then::Next => {
-                    let next = batch.at + 1;
-                    go_to(&mut guard, next);
-                }
-                Then::Seek(to) => {
-                    match crate::demo_seek::seek_to_seconds(to) {
-                        Ok(how) => trace(&format!(
-                            "demo {}: seeking from {:.1} to {to:.1} ({how})",
-                            batch.at + 1,
-                            c.now
-                        )),
-                        Err(why) => trace(&format!(
-                            "demo {}: the seek to {to:.1} failed ({why}); playing on",
-                            batch.at + 1
-                        )),
-                    }
-                    batch.phase = Phase::Playing { cursor, beat };
-                }
-                Then::Play => {
-                    // The last entry passed with no `next`: the demo is done.
-                    if left == 0 && entries.last().is_some_and(|e| e.action != Action::Next) {
-                        let next = batch.at + 1;
-                        go_to(&mut guard, next);
-                    } else if c.now >= c.end - 0.05 && left > 0 {
-                        skip(
-                            &mut guard,
-                            format!(
-                                "the demo ended at {:.1} s with {left} timed line(s) not run",
-                                c.end
-                            ),
-                        );
+            // The last entry passed with no `next`: the demo is done, which is
+            // a boundary like `next`.
+            let then = if then == Then::Play
+                && left == 0
+                && entries.last().is_some_and(|e| e.action != Action::Next)
+            {
+                Then::Next
+            } else {
+                then
+            };
+            if holds_at(&then, HOLD.load(Ordering::Relaxed)) {
+                let _ = crate::demo_seek::set_paused(true);
+                say(&format!(
+                    "held before {} (demo {}, clock {:.1})",
+                    if then == Then::Next {
+                        "the next demo"
                     } else {
-                        batch.phase = Phase::Playing { cursor, beat };
-                    }
-                }
+                        "the next clip"
+                    },
+                    batch.at + 1,
+                    c.now
+                ));
+                crate::events::send("BATCH_HELD");
+                batch.phase = Phase::Held { cursor, then };
+                return;
+            }
+            act(&mut guard, cursor, beat, then, &c, left);
+        }
+        Phase::Held { cursor, then } => {
+            if HOLD.load(Ordering::Relaxed) {
+                return;
+            }
+            let _ = crate::demo_seek::set_paused(false);
+            say("going on");
+            crate::events::send("BATCH_GOING");
+            let Some(c) = crate::demo_seek::clock().filter(|c| c.active && !c.loading) else {
+                skip(&mut guard, "the demo stopped playing while held".into());
+                return;
+            };
+            let left = batch.plan.demos[batch.at].entries.len() - cursor.next;
+            act(&mut guard, cursor, Instant::now(), then, &c, left);
+        }
+    }
+}
+
+/// Does what one frame of the schedule asked for after its commands ran.
+fn act(
+    guard: &mut Option<Batch>,
+    cursor: Cursor,
+    beat: Instant,
+    then: Then,
+    c: &crate::demo_seek::Clock,
+    left: usize,
+) {
+    let Some(batch) = guard.as_mut() else { return };
+    match then {
+        Then::Next => {
+            let next = batch.at + 1;
+            go_to(guard, next);
+        }
+        Then::Seek(to) => {
+            match crate::demo_seek::seek_to_seconds(to) {
+                Ok(how) => trace(&format!(
+                    "demo {}: seeking from {:.1} to {to:.1} ({how})",
+                    batch.at + 1,
+                    c.now
+                )),
+                Err(why) => trace(&format!(
+                    "demo {}: the seek to {to:.1} failed ({why}); playing on",
+                    batch.at + 1
+                )),
+            }
+            batch.phase = Phase::Playing { cursor, beat };
+        }
+        Then::Play => {
+            if c.now >= c.end - 0.05 && left > 0 {
+                skip(
+                    guard,
+                    format!(
+                        "the demo ended at {:.1} s with {left} timed line(s) not run",
+                        c.end
+                    ),
+                );
+            } else {
+                batch.phase = Phase::Playing { cursor, beat };
             }
         }
     }
@@ -509,6 +573,7 @@ fn start(path: &str) {
     if crate::hlae_window::wanted() {
         crate::hlae_window::step_aside();
     }
+    HOLD.store(false, Ordering::Relaxed);
     let mut guard = lock();
     *guard = Some(Batch {
         plan,
@@ -531,6 +596,7 @@ pub unsafe extern "C" fn command() {
             Some(b) => {
                 let what = match &b.phase {
                     Phase::Loading { .. } => "loading".to_string(),
+                    Phase::Held { .. } => "held between clips".to_string(),
                     Phase::Playing { cursor, .. } => format!(
                         "{} of {} timed line(s) run",
                         cursor.next,
@@ -556,7 +622,18 @@ pub unsafe extern "C" fn command() {
                 say(&format!("away needs {} 1 first", crate::hlae_window::NAME));
             }
         }
+        // Studio holds the batch at the next clip boundary while renders
+        // free space for the next clip (#861), and lets it go on after.
+        Some("hold") => {
+            HOLD.store(true, Ordering::Relaxed);
+            say("will hold at the next clip boundary");
+        }
+        Some("go") => {
+            HOLD.store(false, Ordering::Relaxed);
+            say("not holding");
+        }
         Some("stop") => {
+            HOLD.store(false, Ordering::Relaxed);
             if lock().take().is_some() {
                 run("mirv_recordmovie_stop");
                 say("stopped");
@@ -672,6 +749,15 @@ mod tests {
         assert_eq!(cursor.due(&e, 2.0).0, ["a", "b"]);
         assert_eq!(cursor.due(&e, 0.5), (vec![], Then::Play));
         assert_eq!(cursor.due(&e, 2.0), (vec![], Then::Play));
+    }
+
+    #[test]
+    fn a_hold_stops_only_at_a_clip_boundary() {
+        assert!(holds_at(&Then::Seek(20.0), true));
+        assert!(holds_at(&Then::Next, true));
+        assert!(!holds_at(&Then::Play, true), "mid-clip: plays on");
+        assert!(!holds_at(&Then::Seek(20.0), false));
+        assert!(!holds_at(&Then::Next, false));
     }
 
     #[test]

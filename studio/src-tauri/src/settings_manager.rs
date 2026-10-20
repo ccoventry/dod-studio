@@ -238,6 +238,12 @@ pub struct AppSettings {
     /// stay until a capture or finish job is short of room.
     #[serde(default)]
     pub take_delete_only_when_space_needed: bool,
+    /// "Render while capturing" (#861): each take renders as soon as the
+    /// batch has recorded it, one render at a time, and a batch short of room
+    /// holds between clips until renders free enough. Off by default: how
+    /// much a render slows the capture depends on the machine.
+    #[serde(default)]
+    pub render_while_capturing: bool,
     /// How a highlight's clip name is built (#441), in the placeholder syntax
     /// of `studio/src/clip_name.js`. Configuration > Render Output.
     #[serde(default = "default_clip_name_template")]
@@ -448,6 +454,7 @@ impl Default for AppSettings {
             finish_codec_frames: default_finish_codec_render_tab(),
             take_after_finish: default_take_after_finish(),
             take_delete_only_when_space_needed: false,
+            render_while_capturing: false,
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
@@ -593,6 +600,8 @@ mod tests {
         // Settings saved before #644 keep every take.
         assert_eq!(settings.take_after_finish, "keep");
         assert!(!settings.take_delete_only_when_space_needed);
+        // Settings saved before #861 don't render while capturing.
+        assert!(!settings.render_while_capturing);
         // Settings saved before #246 get today's worker count.
         assert_eq!(
             settings.scan_workers,

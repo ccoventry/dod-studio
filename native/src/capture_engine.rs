@@ -41,6 +41,21 @@ pub enum EngineEvent {
     /// clip_count), all 1-based. Same console-log source as DemoLoading.
     /// See issue #98.
     FastForwardToClip(u32, u32, u32, u32),
+    /// A clip's recording started (`START_RECORD`): the 0-based position of
+    /// its block in the batch, the capture manifest's order (#861).
+    ClipStarted(usize),
+    /// A clip's recording stopped (`STOP_RECORD`), same numbering. The take
+    /// may still be flushing to disk.
+    ClipRecorded(usize),
+    /// The hook's batch stopped at a clip boundary after `hold` (#861).
+    Held,
+    /// The hook's batch went on after `go`.
+    Going,
+}
+
+/// The hook batch command that asks for `hold` (true) or `go` (false), #861.
+pub fn hold_command(hold: bool) -> String {
+    format!("dodstudio_batch {}", if hold { "hold" } else { "go" })
 }
 
 /// Longest a batch may go without a console marker before OBS mode calls it
@@ -282,6 +297,10 @@ pub fn spawn_capture_engine(
     // `jobs` is then empty: nothing is patched into `dod/`, the game starts on
     // no demo, and the file is handed to it once it takes commands.
     runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
+    // Render While Capturing (#861): true asks the hook's batch to stop at the
+    // next clip boundary, false lets it go on. Sent over the game's pipe when
+    // it changes; a patched batch can't hold, so it is ignored there.
+    hold: Arc<AtomicBool>,
 ) {
     std::thread::Builder::new()
         .name("capture_engine".into())
@@ -803,6 +822,11 @@ pub fn spawn_capture_engine(
             let mut last_process_check: Option<std::time::Instant> = None;
             let mut last_dialog_check: Option<std::time::Instant> = None;
             let mut hl_alive_cached = false;
+            // What the game was last told (#861), and when a send last failed.
+            let mut hold_sent = false;
+            let mut hold_retry_at: Option<std::time::Instant> = None;
+            let mut clips_started = 0usize;
+            let mut clips_recorded = 0usize;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -833,6 +857,50 @@ pub fn spawn_capture_engine(
                         && let Some((job_idx, total, clip_idx, clip_count)) = marker.next_clip_progress {
                             let _ = tx.send(EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count));
                         }
+                    match marker.kind {
+                        crate::obs::MarkerKind::StartRecord => {
+                            let _ = tx.send(EngineEvent::ClipStarted(clips_started));
+                            clips_started += 1;
+                        }
+                        crate::obs::MarkerKind::StopRecord => {
+                            let _ = tx.send(EngineEvent::ClipRecorded(clips_recorded));
+                            clips_recorded += 1;
+                        }
+                        crate::obs::MarkerKind::Other if marker.label == "BATCH_HELD" => {
+                            let _ = tx.send(EngineEvent::Held);
+                        }
+                        crate::obs::MarkerKind::Other if marker.label == "BATCH_GOING" => {
+                            let _ = tx.send(EngineEvent::Going);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Render While Capturing (#861): tell the hook's batch when the
+                // hold changes. A failed send tries again a second later.
+                let want_hold = hold.load(Ordering::Relaxed);
+                if runtime_batch.is_some()
+                    && want_hold != hold_sent
+                    && hold_retry_at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1))
+                {
+                    let sent = crate::sys::process::game_pids_in(&sys)
+                        .into_iter()
+                        .next()
+                        .map(|pid| crate::sys::game_remote::send_console_commands(pid, &[hold_command(want_hold)]));
+                    match sent {
+                        Some(Ok(crate::sys::game_remote::Sent::Delivered)) => {
+                            hold_sent = want_hold;
+                            hold_retry_at = None;
+                            log_markdown(&format!("[HLAE] Sent `{}`", hold_command(want_hold)));
+                        }
+                        other => {
+                            hold_retry_at = Some(std::time::Instant::now());
+                            log_markdown(&format!(
+                                "[HLAE] Could not send `{}` yet ({other:?}); trying again",
+                                hold_command(want_hold)
+                            ));
+                        }
+                    }
                 }
 
                 if !launcher_exit_logged {
@@ -997,7 +1065,9 @@ pub fn spawn_capture_engine(
                 // never started playing, which produces no markers to count
                 // from at all. Both mean the same thing: the game is alive and
                 // the batch is not advancing.
+                // A batch held for renders (#861) sends no markers on purpose.
                 if obs_mode
+                    && !hold_sent
                     && let Some(since) = last_marker_at.or(hl_first_seen)
                         && hl_alive && since.elapsed() > marker_stall_deadline(longest_marker_gap) {
                             let never_started = last_marker_at.is_none();

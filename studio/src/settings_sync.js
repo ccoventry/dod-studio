@@ -13,6 +13,7 @@ import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
+import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 
@@ -159,7 +160,9 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       setup_dismissed: !!state.setupDismissed,
       players: getPlayers(),
       // "After a clip is finished" (#644).
-      ...getTakeCleanupSetting()
+      ...getTakeCleanupSetting(),
+      // "Render while capturing" (#861).
+      ...getRenderWhileCapturing()
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -365,4 +368,5 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
   });
   setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
+  setRenderWhileCapturing(settings.render_while_capturing);
 }

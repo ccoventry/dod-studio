@@ -1012,6 +1012,14 @@ pub async fn start_capture_batch_impl(
     // Configuration > Players' box (#428) is a saved setting, not part of
     // the batch's payload.
     patcher_config.player_overrides = Some(saved_settings(&app_handle).players.use_in_game);
+    // Render While Capturing (#861) renders each take as it lands. Only a
+    // batch the hook runs can hold for space, and only deleted takes free
+    // any, so only then may the planner route more than the drives hold now.
+    let render_while_capturing = crate::capture_room_manager::enabled(&app_handle)
+        && patcher_config.capture_mode != native::patch::CaptureMode::Agr;
+    patcher_config.render_while_capturing = render_while_capturing
+        && patcher_config.hook_runs_batch
+        && saved_settings(&app_handle).take_after_finish == "delete";
     {
         let mut slot = manager
             .last_config
@@ -1123,6 +1131,11 @@ pub async fn start_capture_batch_impl(
         } else {
             Vec::new()
         };
+        let planned_capture_bytes = if render_while_capturing {
+            native::patch::estimate_batch_capture_bytes(&raw_streaks, &patcher_config)
+        } else {
+            0
+        };
         let (patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
@@ -1218,6 +1231,29 @@ pub async fn start_capture_batch_impl(
             .flat_map(|j| j.blocks.iter())
             .map(|b| i64::from(b.record_stop_tick) - i64::from(b.record_start_tick))
             .collect();
+        // Render While Capturing (#861): follows the batch clip by clip.
+        let capture_room = render_while_capturing.then(|| {
+            let blocks: Vec<native::patch::types::CaptureBlock> = patch_jobs
+                .iter()
+                .flat_map(|j| j.blocks.iter().cloned())
+                .collect();
+            crate::capture_room_manager::CaptureRoom::new(
+                app_handle_clone.clone(),
+                &blocks,
+                planned_capture_bytes,
+                patcher_config.session_id.clone(),
+                patcher_config.capture_fps,
+                patcher_config.capture_mode.to_str_id().to_string(),
+                Arc::clone(&cancel_token_arc),
+                runtime_batch.is_some(),
+            )
+        });
+        let hold = capture_room
+            .as_ref()
+            .map(|room| Arc::clone(&room.hold))
+            .unwrap_or_default();
+        // Every way out before the engine starts ends it too.
+        let mut room_guard = RoomGuard(capture_room.clone());
         // The hook plays the original demos: nothing to patch or copy.
         let patch_jobs = if runtime_batch.is_some() {
             Vec::new()
@@ -1402,7 +1438,12 @@ pub async fn start_capture_batch_impl(
         let app_emitter = app_handle_clone.clone();
         let is_running_for_panic = Arc::clone(&is_running_arc);
         let app_emitter_for_panic = app_handle_clone.clone();
+        let room = capture_room;
+        // The listener ends the room from here on.
+        room_guard.0 = None;
         std::thread::spawn(move || {
+            // Ends Render While Capturing however the listener ends.
+            let _room_guard = RoomGuard(room.clone());
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut total_jobs: u32 = 0;
                 let mut current_idx: u32 = 0;
@@ -1525,6 +1566,26 @@ pub async fn start_capture_batch_impl(
                                 }),
                             );
                         }
+                        EngineEvent::ClipStarted(index) => {
+                            if let Some(room) = &room {
+                                room.clip_started(index);
+                            }
+                        }
+                        EngineEvent::ClipRecorded(index) => {
+                            if let Some(room) = &room {
+                                room.clip_recorded(index);
+                            }
+                        }
+                        EngineEvent::Held => {
+                            if let Some(room) = &room {
+                                room.game_held(true);
+                            }
+                        }
+                        EngineEvent::Going => {
+                            if let Some(room) = &room {
+                                room.game_held(false);
+                            }
+                        }
                         EngineEvent::Error(msg) => {
                             let mut running =
                                 is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
@@ -1619,10 +1680,22 @@ pub async fn start_capture_batch_impl(
             drive_headroom,
             obs_take_folders,
             runtime_batch,
+            hold,
         );
     });
 
     Ok(())
+}
+
+/// Ends a batch's Render While Capturing (#861) when dropped.
+struct RoomGuard(Option<Arc<crate::capture_room_manager::CaptureRoom>>);
+
+impl Drop for RoomGuard {
+    fn drop(&mut self) {
+        if let Some(room) = &self.0 {
+            room.finish();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

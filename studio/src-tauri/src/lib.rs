@@ -2,6 +2,7 @@ mod audit_manager;
 mod batch_eta;
 mod blender_manager;
 mod capture_manager;
+mod capture_room_manager;
 mod combine_manager;
 mod crash_maps_manager;
 mod demo_cache_cmd;

@@ -305,6 +305,33 @@ pub struct RenderManager {
     /// The next unused job id: a scan merges into the list (#772), so new
     /// rows take ids no earlier row had. Read and written under `jobs`.
     next_job_id: AtomicUsize,
+    /// Render While Capturing (#861): set while a capture batch runs with it
+    /// on. Renders then start one at a time, and each take whose clip
+    /// finished goes at once rather than when the render batch ends.
+    while_capturing: Arc<AtomicBool>,
+}
+
+/// How many renders run at once while a capture batch runs (#861): one, so
+/// the game keeps most of the machine.
+pub(crate) const RENDERS_WHILE_CAPTURING: usize = 1;
+
+/// What the scheduler may run at once: the batch's own number, or
+/// [`RENDERS_WHILE_CAPTURING`] while a capture runs.
+fn concurrency_cap(configured: usize, while_capturing: bool) -> usize {
+    let configured = configured.max(1);
+    if while_capturing {
+        configured.min(RENDERS_WHILE_CAPTURING)
+    } else {
+        configured
+    }
+}
+
+/// One render job of a take, for Render While Capturing's space check (#861).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TakeRender {
+    pub status: String,
+    pub output_path: String,
+    pub output_size_bytes: Option<u64>,
 }
 
 struct SchedulerHandles {
@@ -315,6 +342,7 @@ struct SchedulerHandles {
     render_session: Arc<Mutex<Option<RenderSessionData>>>,
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
     clear_on_finish: Arc<AtomicBool>,
+    while_capturing: Arc<AtomicBool>,
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -342,7 +370,43 @@ impl RenderManager {
             clear_on_finish: Arc::new(AtomicBool::new(false)),
             scanning: AtomicBool::new(false),
             next_job_id: AtomicUsize::new(0),
+            while_capturing: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Render While Capturing (#861): a capture batch with it on started
+    /// (true) or ended (false).
+    pub(crate) fn set_while_capturing(&self, on: bool) {
+        self.while_capturing.store(on, Ordering::SeqCst);
+    }
+
+    /// The render jobs of the take(s) under `folder`, a capture block's
+    /// folder: HLAE writes the take into a `take0000` folder inside it.
+    pub(crate) fn renders_under(&self, folder: &str) -> Vec<TakeRender> {
+        let key = native::hlcr::take_cleanup::folder_key(folder);
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| {
+                let job = native::hlcr::take_cleanup::folder_key(&j.clip.take_folder);
+                job == key || job.starts_with(&format!("{key}\\"))
+            })
+            .map(|j| TakeRender {
+                status: j.status.clone(),
+                output_path: j.output_path.clone(),
+                output_size_bytes: j.output_size_bytes,
+            })
+            .collect()
+    }
+
+    /// Whether any render is queued or running.
+    pub(crate) fn has_pending_renders(&self) -> bool {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|j| j.status == "Queued" || j.status == "Rendering")
     }
 
     /// The statuses of the jobs rendering from `take_folder`: two for a take
@@ -516,6 +580,7 @@ impl RenderManager {
             render_session: self.render_session.clone(),
             export_reservations: self.export_reservations.clone(),
             clear_on_finish: self.clear_on_finish.clone(),
+            while_capturing: self.while_capturing.clone(),
         }
     }
 }
@@ -784,7 +849,6 @@ fn apply_render_update(
 fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConfig) {
     tokio::spawn(async move {
         let (tx, rx) = std::sync::mpsc::channel::<RenderUpdate>();
-        let max_concurrent = config.max_concurrent_renders.max(1);
         // Takes with a job that finished in this run, for the automatic take
         // cleanup (#644) once the run ends.
         let mut finished_takes: Vec<String> = Vec::new();
@@ -802,15 +866,33 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 }
             }
 
+            // Read every pass: a capture starting or ending changes it (#861).
+            let while_capturing = handles.while_capturing.load(Ordering::SeqCst);
+            let max_concurrent = concurrency_cap(config.max_concurrent_renders, while_capturing);
             let mut dirty = false;
+            let mut rendered_now: Vec<String> = Vec::new();
             while let Ok(update) = rx.try_recv() {
                 if let Some(take_folder) =
                     apply_render_update(&app, &handles.jobs, &handles.render_session, update)
-                    && !finished_takes.contains(&take_folder)
                 {
-                    finished_takes.push(take_folder);
+                    if while_capturing {
+                        rendered_now.push(take_folder.clone());
+                    }
+                    if !finished_takes.contains(&take_folder) {
+                        finished_takes.push(take_folder);
+                    }
                 }
                 dirty = true;
+            }
+            // While a capture runs, a take goes as soon as its clip is
+            // finished (#861), so the batch gets the space back; the rest
+            // still wait for the batch's end below.
+            if !rendered_now.is_empty() {
+                if dirty {
+                    emit_jobs_snapshot(&app, &handles.jobs);
+                }
+                finished_takes.retain(|t| !rendered_now.contains(t));
+                crate::take_cleanup_manager::after_takes_rendered(&app, rendered_now);
             }
 
             let mut attempts_started: Vec<(String, RenderAttempt)> = Vec::new();
@@ -826,6 +908,14 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // gives a lone job all available threads instead of only 1/max of them.
                     let effective_concurrent =
                         (active_count + jobs_starting).min(max_concurrent).max(1);
+                    // While a capture runs (#861) the one render takes the
+                    // threads one of the batch's usual renders would, not
+                    // every core: the game needs the rest.
+                    let thread_share = if while_capturing {
+                        config.max_concurrent_renders.max(1)
+                    } else {
+                        effective_concurrent
+                    };
 
                     for job in guard.iter_mut() {
                         if started >= limit {
@@ -871,7 +961,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             job_config.target_codec = job.codec;
                             job_config.custom_codec_args = job.custom_codec_args.clone();
                             job_config.fps = job.fps;
-                            job_config.max_concurrent_renders = effective_concurrent;
+                            job_config.max_concurrent_renders = thread_share;
                             let tx2 = tx.clone();
                             let reservations = handles.export_reservations.clone();
                             tokio::spawn(async move {
@@ -1842,6 +1932,14 @@ fn recovered_jobs(session: &RenderSessionData) -> Vec<RenderJobRuntime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renders_run_one_at_a_time_while_a_capture_runs() {
+        assert_eq!(concurrency_cap(4, false), 4);
+        assert_eq!(concurrency_cap(4, true), 1);
+        assert_eq!(concurrency_cap(0, false), 1);
+        assert_eq!(concurrency_cap(0, true), 1);
+    }
 
     fn attempt(stream: &str, outcome: RenderOutcome, path: &str) -> RenderAttempt {
         RenderAttempt {
