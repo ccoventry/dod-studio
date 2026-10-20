@@ -148,13 +148,20 @@ fn names_help(choice: &Choice, room: usize) -> String {
 }
 
 /// The entry a list row's text belongs to: its label, or a picked player's
-/// `[x] ` row by their main name.
-fn entry_for<'a>(choices: &'a [Choice], row: &str) -> Option<&'a Choice> {
+/// `[x] ` row by their main name. A player with no SteamID shares a main
+/// name with the SteamID player whose name they used, so a `[x] ` row looks
+/// among the `picked` terms first.
+fn entry_for<'a>(choices: &'a [Choice], picked: &[String], row: &str) -> Option<&'a Choice> {
     let row = row.trim();
     match row.strip_prefix(REMOVE.trim_end()) {
-        Some(name) => choices
-            .iter()
-            .find(|c| c.name.eq_ignore_ascii_case(name.trim())),
+        Some(name) => {
+            let named = |c: &&Choice| c.name.eq_ignore_ascii_case(name.trim());
+            choices
+                .iter()
+                .filter(named)
+                .find(|c| picked.iter().any(|p| p.eq_ignore_ascii_case(&c.term)))
+                .or_else(|| choices.iter().find(named))
+        }
         None => choices.iter().find(|c| c.label.eq_ignore_ascii_case(row)),
     }
 }
@@ -163,9 +170,13 @@ fn entry_for<'a>(choices: &'a [Choice], row: &str) -> Option<&'a Choice> {
 /// player, cut to fit a line `wide` pixels wide. For the window's help line.
 pub(super) fn hovered_help(wide: i32) -> Option<String> {
     let row = HOVERED.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+    let picked = PICKED_PLAYERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
     let (_, all) = names.as_ref()?;
-    let choice = entry_for(all, &row)?;
+    let choice = entry_for(all, &picked, &row)?;
     let room = ((wide - 8) / CHAR_WIDE).max(20) as usize;
     Some(names_help(choice, room))
 }
@@ -651,14 +662,14 @@ mod tests {
             demo(&[("bb", id), ("cc", id), ("dd", id), ("ee", id)]),
             demo(&[("solo", Some("2"))]),
         ]);
-        let a = entry_for(&all, "a (also: bb, cc, dd +1 more)").unwrap();
+        let a = entry_for(&all, &[], "a (also: bb, cc, dd +1 more)").unwrap();
         assert_eq!(names_help(a, 100), "a, also: bb, cc, dd, ee");
         let cut = names_help(a, 23);
         assert_eq!(cut, "a, also: bb, cc +2 more");
         assert!(cut.chars().count() <= 23, "{cut}");
         assert_eq!(names_help(a, 22), "a, also: bb +3 more");
         assert_eq!(names_help(a, 5), "a, also: 4 other names");
-        let solo = entry_for(&all, "solo").unwrap();
+        let solo = entry_for(&all, &[], "solo").unwrap();
         assert_eq!(names_help(solo, 100), "solo: no other names in these demos");
     }
 
@@ -666,13 +677,32 @@ mod tests {
     fn a_picked_row_finds_its_entry_by_name() {
         let all = choices(&[demo(&[("dyelife", Some("1")), ("dyeL!fe[dd]", Some("1"))])]);
         assert_eq!(
-            entry_for(&all, "[x] dyeL!fe[dd]").map(|c| c.term.as_str()),
+            entry_for(&all, &[], "[x] dyeL!fe[dd]").map(|c| c.term.as_str()),
             Some("1")
         );
         assert_eq!(
-            entry_for(&all, "dyeL!fe[dd] (also: dyelife)").map(|c| c.term.as_str()),
+            entry_for(&all, &[], "dyeL!fe[dd] (also: dyelife)").map(|c| c.term.as_str()),
             Some("1")
         );
-        assert!(entry_for(&all, "nobody").is_none());
+        assert!(entry_for(&all, &[], "nobody").is_none());
+    }
+
+    /// A picked player with no SteamID whose name a SteamID player also used:
+    /// their `[x]` row names them, not the SteamID player.
+    #[test]
+    fn a_picked_row_without_a_steamid_is_its_own_entry() {
+        let id = Some("1");
+        let all = choices(&[
+            demo(&[("dyelife", id)]),
+            demo(&[("dyelife", id), ("dl", id)]),
+            demo(&[("dyelife", None)]),
+        ]);
+        let lan = entry_for(&all, &["dyelife".to_string()], "[x] dyelife").unwrap();
+        assert_eq!(
+            names_help(lan, 100),
+            "dyelife: no other names in these demos"
+        );
+        let steam = entry_for(&all, &["1".to_string()], "[x] dyelife").unwrap();
+        assert_eq!(names_help(steam, 100), "dyelife, also: dl");
     }
 }
