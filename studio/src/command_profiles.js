@@ -5,7 +5,9 @@
 //
 // The lists use the settings file's shape (`getCommandsState()`):
 // `init_commands` is a list of strings, `custom_commands` a list of
-// `{ command, relation, offset_seconds }`.
+// `{ command, relation, offset_seconds, players }`.
+
+import { normalisePlayers } from './command_players.js';
 
 /** Both lists in a normalised shape: trimmed, blank rows dropped. Order is
  *  kept, since the commands run in it. */
@@ -15,13 +17,19 @@ export function profileLists(lists) {
       .map((c) => String(c ?? '').trim())
       .filter((c) => c.length > 0),
     custom_commands: (Array.isArray(lists?.custom_commands) ? lists.custom_commands : [])
-      .map((c) => ({
-        command: String(c?.command ?? '').trim(),
-        relation: c?.relation === 'After' ? 'After' : 'Before',
-        // Same fallback as hydrateCommandsState, and never NaN: the settings
-        // file cannot hold one.
-        offset_seconds: Number.isFinite(c?.offset_seconds) ? c.offset_seconds : 2.0,
-      }))
+      .map((c) => {
+        // Empty, or absent from a profile saved before it, is everyone, and
+        // is left out so such a profile reads exactly as it did.
+        const players = normalisePlayers(c?.players);
+        return {
+          command: String(c?.command ?? '').trim(),
+          relation: c?.relation === 'After' ? 'After' : 'Before',
+          // Same fallback as hydrateCommandsState, and never NaN: the settings
+          // file cannot hold one.
+          offset_seconds: Number.isFinite(c?.offset_seconds) ? c.offset_seconds : 2.0,
+          ...(players.length ? { players } : {}),
+        };
+      })
       .filter((c) => c.command.length > 0),
   };
 }

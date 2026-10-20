@@ -958,6 +958,7 @@ fn the_pre_roll_floor_names_whichever_requirement_is_binding() {
         command: "mirv_movie_fps 500".to_string(),
         offset: 8.0,
         relation: CommandRelation::Before,
+        players: Vec::new(),
     }];
     let f = roll_floors(&config);
     assert_eq!(f.pre_roll, 8.0);
@@ -990,6 +991,7 @@ fn the_pre_roll_floor_names_whichever_requirement_is_binding() {
         command: "echo done".to_string(),
         offset: 3.0,
         relation: CommandRelation::After,
+        players: Vec::new(),
     }];
     let f = roll_floors(&config);
     assert_eq!(f.post_roll, 3.0);
@@ -1831,4 +1833,103 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
             .iter()
             .any(|c| c.starts_with("dodstudio_spec"))
     );
+}
+
+// ── Scheduled Commands for some players ─────────────────────────────────────
+
+fn player_command(command: &str, id: Option<&str>, name: &str) -> crate::patch::CustomCommand {
+    crate::patch::CustomCommand {
+        command: command.to_string(),
+        offset: 0.5,
+        relation: CommandRelation::Before,
+        players: vec![crate::patch::CommandPlayer {
+            id: id.map(str::to_string),
+            name: name.to_string(),
+        }],
+    }
+}
+
+fn scheduled_ticks(job: &PatchJob, command: &str) -> Vec<i32> {
+    job.scheduled_commands
+        .iter()
+        .filter(|(_, c)| c == command)
+        .map(|(t, _)| *t)
+        .collect()
+}
+
+const STEAM_A: &str = "76561197961831029";
+const STEAM_B: &str = "76561197972575011";
+
+#[test]
+fn a_players_command_runs_only_on_that_players_demo() {
+    // Two POV demos, one clip each: a crosshair per recorder.
+    let mut config = mock_config();
+    let mut a = streak_with_kills(5000, 5200, &[5000, 5200]);
+    a.source_demo = "a.dem".into();
+    a.target_player = Some("m00cat".into());
+    a.steam_id = Some(STEAM_A.into());
+    a.recorded_this_demo = true;
+    let mut b = streak_with_kills(7000, 7200, &[7000, 7200]);
+    b.source_demo = "b.dem".into();
+    b.target_player = Some("Brain".into());
+    b.recorded_this_demo = true;
+    config.custom_commands = vec![
+        player_command("cl_xhair_style 1", Some(STEAM_A), "m00cat"),
+        // No SteamID on either side: matched by name, ignoring case.
+        player_command("cl_xhair_style 2", None, "brain"),
+        crate::patch::CustomCommand {
+            players: Vec::new(),
+            ..player_command("echo everyone", None, "")
+        },
+    ];
+    a.viewdemo_times = vec![60.0, 62.0];
+    b.viewdemo_times = vec![80.0, 82.0];
+    let streaks = vec![a, b];
+    let (jobs, _) = build_batch_queue(streaks.clone(), &config, &Default::default()).unwrap();
+    // The hook-run batch is built from the same schedule.
+    let file = crate::patch::runtime_batch::batch_file(&jobs, &streaks, false).unwrap();
+    assert_eq!(file.matches("\tcl_xhair_style 1\n").count(), 1, "{file}");
+    assert_eq!(file.matches("\tcl_xhair_style 2\n").count(), 1, "{file}");
+    let job_a = jobs
+        .iter()
+        .find(|j| j.source_demo == "a.dem" && !j.blocks.is_empty())
+        .unwrap();
+    let job_b = jobs
+        .iter()
+        .find(|j| j.source_demo == "b.dem" && !j.blocks.is_empty())
+        .unwrap();
+    assert_eq!(scheduled_ticks(job_a, "cl_xhair_style 1"), [4950]);
+    assert!(scheduled_ticks(job_a, "cl_xhair_style 2").is_empty());
+    assert_eq!(scheduled_ticks(job_b, "cl_xhair_style 2"), [6950]);
+    assert!(scheduled_ticks(job_b, "cl_xhair_style 1").is_empty());
+    assert_eq!(scheduled_ticks(job_a, "echo everyone"), [4950]);
+    assert_eq!(scheduled_ticks(job_b, "echo everyone"), [6950]);
+}
+
+#[test]
+fn in_a_merged_block_of_two_players_each_command_follows_its_own_clip() {
+    // One HLTV demo whose two clips share a player name but not a SteamID,
+    // so they land in one job and their overlapping recordings merge.
+    let mut config = mock_config();
+    let mut a = streak_with_kills(5000, 5200, &[5000, 5200]);
+    a.steam_id = Some(STEAM_A.into());
+    a.spectated = true;
+    let mut b = streak_with_kills(5220, 5400, &[5220, 5400]);
+    b.steam_id = Some(STEAM_B.into());
+    b.spectated = true;
+    config.custom_commands = vec![
+        player_command("cl_xhair_style 1", Some(STEAM_A), "a"),
+        player_command("cl_xhair_style 2", Some(STEAM_B), "b"),
+        crate::patch::CustomCommand {
+            relation: CommandRelation::After,
+            ..player_command("echo after b", Some(STEAM_B), "b")
+        },
+    ];
+    let (jobs, _) = build_batch_queue(vec![a, b], &config, &Default::default()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert_eq!(job.blocks.len(), 1, "the two clips are one take");
+    assert_eq!(job.blocks[0].source_streak_indices, [0, 1]);
+    assert_eq!(scheduled_ticks(job, "cl_xhair_style 1"), [4950]);
+    assert_eq!(scheduled_ticks(job, "cl_xhair_style 2"), [5170]);
+    assert_eq!(scheduled_ticks(job, "echo after b"), [5450]);
 }

@@ -130,6 +130,7 @@ pub mod bsp_entities;
 pub mod builder;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
+pub mod command_players;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod decal_atlas;
 #[cfg(not(target_arch = "wasm32"))]
@@ -165,9 +166,9 @@ pub mod viewdemo_refresh;
 // Every existing `native::patch::*` call site resolves here unchanged.
 
 pub use types::{
-    CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
-    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig, PatchJob,
-    PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
+    CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandPlayer, CommandRelation,
+    CustomCommand, DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
+    PatchJob, PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

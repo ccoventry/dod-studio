@@ -555,7 +555,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCaptureUI(() => ({
     scanPaths,
     targetDrives,
-    currentScannedDemos
+    currentScannedDemos,
+    // The Scheduled Commands' Players picker lists the queue's recorders.
+    recorderOf: queueRecorderOf,
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
   // Saving, renaming or deleting a profile changes its name in the capture
   // summary strip without touching a field the strip listens to.
