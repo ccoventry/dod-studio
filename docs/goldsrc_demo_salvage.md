@@ -45,6 +45,10 @@ Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1
 
 A copy that silently lost frames (a bad thumb-drive transfer) still parses, because frames are length-prefixed with no checksum, and then crashes the engine. `hl-demo-auditor --integrity <demo-or-folder>...` catches it: it reports every packet-entity or client-data delta whose from-frame is not in the file, so the engine would decode it against stale ring state (`analysis::integrity::check_delta_continuity`; `native/examples/demo_integrity.rs` lists each one and can drop frames in memory to simulate a loss). It finds nothing on healthy demos and fires on a single dropped network frame; a demo that does not parse at all is reported as such. The recovered `_v10` builds above are flagged too, by client-data deltas only: the ramp's cloned `svc_clientdata` keeps one from-frame for its whole length. `m3_h2` played anyway, so a client-data-only hit on a salvaged build means stale client data, not necessarily a crash.
 
+## Analysing a damaged demo without repairing it (#811)
+
+The analyzer reads a damaged demo up to its first frame that does not parse and keeps everything before it (`dem::demo_parser::parse_demo_tolerant`; the patcher and writer keep to the strict parse). The result says where it stopped (`DemoInfo::damage`: the viewdemo clock there, the frame, the byte offset and why), and the Demo Analyzer and the in-game Highlights tab show it. A directory lost with the end of the file is rebuilt by walking the frames, as for an unfinalised demo. On the four originals above it stops at the first hole: `m1_h1` at 8:27, `m1_h2` 12:09, `m3_h1-1` 18:23, `m3_h2` 10:59.
+
 ## What each live crash taught
 
 Every one of these passed every offline check that existed at the time. Each was found by playing the build in the engine.

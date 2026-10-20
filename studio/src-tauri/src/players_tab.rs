@@ -48,8 +48,8 @@ pub fn list_logo_pngs(game_path: String, game_folder: String) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The sprites in the game install's `sprites` folder, for the crosshair
-/// column.
+/// The sprites in the game install's `sprites` folders (the addon folder's
+/// and the game folder's), for the crosshair column.
 #[tauri::command(async)]
 pub fn list_crosshair_sprites(game_path: String, game_folder: String) -> Vec<String> {
     game_dir(&game_path, &game_folder)
@@ -69,7 +69,23 @@ pub fn crosshair_sprite_image(
     }
     let dir = game_dir(&game_path, &game_folder)
         .ok_or_else(|| "set the Half-Life executable and game folder first".to_string())?;
-    player_overrides::sprite_image(&dir.join("sprites").join(sprite.trim()))
+    player_overrides::sprite_image(&player_overrides::sprite_path(&dir, sprite.trim()))
+}
+
+/// "Add a crosshair file…" (#842): copies the sprite in `source` (a `.spr`, or
+/// the `.zip` the crosshair creator downloads) into the install's
+/// `<game>_addon\sprites\` as `customxhair-<name>.spr`, and returns that file
+/// name for the picker.
+#[tauri::command(async)]
+pub fn add_crosshair_file(
+    game_path: String,
+    game_folder: String,
+    source: String,
+    name: String,
+) -> Result<String, String> {
+    let dir = game_dir(&game_path, &game_folder)
+        .ok_or_else(|| "set the Half-Life executable and game folder first".to_string())?;
+    native::crosshair_import::import_crosshair(&dir, Path::new(&source), &name)
 }
 
 /// Sends the box's value to every running game that takes commands, and

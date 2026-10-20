@@ -18,6 +18,7 @@
 // through Tauri commands unwrapped (a separate crate — see issue #650).
 
 use std::fmt::Display;
+use std::path::Path;
 
 // ── spawn_blocking join-error flattening ────────────────────────────────────
 //
@@ -279,9 +280,8 @@ pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8])
 
 // ── render_manager.rs ────────────────────────────────────────────────────
 
-pub const RENDER_BATCH_ALREADY_RUNNING_LONG: &str = "A render batch is already running.";
-pub const BATCH_ALREADY_QUEUED: &str =
-    "A batch is already queued — start it or cancel it before scanning again.";
+pub const RENDER_SCAN_ALREADY_RUNNING: &str =
+    "A scan for takes is already running — wait for it to finish.";
 pub const RENDER_BATCH_ALREADY_IN_PROGRESS: &str = "Render batch already in progress";
 pub const NOTHING_QUEUED_TO_RENDER: &str = "Nothing queued to render — scan for takes first.";
 pub const SKIP_ONLY_FOR_OBS_TAKE: &str = "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip).";
@@ -330,9 +330,23 @@ pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
-pub fn failed_to_delete_audit_file(path: &str, err: impl Display) -> String {
-    format!("Failed to delete {}: {}", path, err)
+pub fn failed_to_delete_audit_file(path: &Path, err: impl Display) -> String {
+    format!("Failed to delete {}: {}", path.display(), err)
 }
+
+/// The Duplicates delete only removes `.dem` files (#844).
+pub fn not_a_demo_file(path: &Path) -> String {
+    format!(
+        "Not deleted: {} is not a demo file, or is no longer there",
+        path.display()
+    )
+}
+
+pub fn audit_folder_not_found(path: &Path) -> String {
+    format!("Folder not found: {}", path.display())
+}
+
+pub const NO_AUDIT_FOLDERS: &str = "Add a folder to check, or choose All drives.";
 
 pub fn path_no_longer_exists(path: &str) -> String {
     format!("Path no longer exists: {}", path)
@@ -582,14 +596,6 @@ mod tests {
     #[test]
     fn render_manager_messages_match_their_original_inline_text() {
         assert_eq!(
-            RENDER_BATCH_ALREADY_RUNNING_LONG,
-            "A render batch is already running."
-        );
-        assert_eq!(
-            BATCH_ALREADY_QUEUED,
-            "A batch is already queued — start it or cancel it before scanning again."
-        );
-        assert_eq!(
             RENDER_BATCH_ALREADY_IN_PROGRESS,
             "Render batch already in progress"
         );
@@ -618,8 +624,16 @@ mod tests {
     #[test]
     fn audit_manager_messages_match_their_original_inline_text() {
         assert_eq!(
-            failed_to_delete_audit_file("demo.dem", "in use"),
+            failed_to_delete_audit_file(Path::new("demo.dem"), "in use"),
             format!("Failed to delete {}: {}", "demo.dem", "in use")
+        );
+        assert_eq!(
+            not_a_demo_file(Path::new("a.txt")),
+            "Not deleted: a.txt is not a demo file, or is no longer there"
+        );
+        assert_eq!(
+            audit_folder_not_found(Path::new("X:")),
+            "Folder not found: X:"
         );
         assert_eq!(
             path_no_longer_exists("demo.dem"),

@@ -3,7 +3,7 @@
 // them. Start Render Batch ignores the ticks: every Queued row renders, and a
 // row to leave out is cancelled or removed. The ticks scope Cancel, Retry,
 // Remove and Delete. The tick state lives here, keyed by the job rather than by its id:
-// a scan numbers its jobs from 0 again, so an id alone would hand a new
+// a recovered batch numbers its jobs from 0 again, so an id alone would hand a new
 // take the tick of whatever sat in that slot before. Pure apart from the
 // factory's own map, so it can be tested on its own.
 
