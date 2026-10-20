@@ -112,15 +112,38 @@ test.describe('Split Maps', () => {
     await expect(page.locator('#split-find-btn')).toBeEnabled();
   });
 
-  test('Split waits until the maps\' lengths are read', async ({ page }) => {
+  async function findHeld(page) {
     await gotoHarness(page);
     await page.evaluate(() => { window.__holdSegments = true; });
-    await findDemos(page);
-    const two = demo(page, 'two.dem');
-    await expect(two.locator('.split-go')).toBeDisabled();
-    await expect(two.locator('.split-keep').first()).toBeDisabled();
+    await page.locator('#audit-target-folder-input').fill('C:\\demos');
+    await page.locator('.auditor-tab-btn[data-auditor-tab="split"]').click();
+    await page.locator('#split-find-btn').click();
+  }
+
+  test('a demo is listed once its lengths are read, ready to use; the bar says which step', async ({ page }) => {
+    await findHeld(page);
+    await expect(page.locator('#split-status')).toHaveText('Reading map lengths: 1 of 2 demos (two.dem)');
+    await expect(page.locator('#split-progress')).not.toHaveAttribute('hidden');
+    await expect(page.locator('.split-demo')).toHaveCount(0);
+    await expect(page.locator('#split-find-btn')).toBeDisabled();
     await page.evaluate(() => window.__releaseSegments());
+    const two = demo(page, 'two.dem');
     await expect(two.locator('.split-go')).toBeEnabled();
-    await expect(two.locator('.split-keep').first()).toBeEnabled();
+    await expect(two.locator('.split-keep').nth(1)).not.toBeChecked();
+    await expect(page.locator('#split-status')).toHaveText('Reading map lengths: 2 of 2 demos (three.dem)');
+    await page.evaluate(() => window.__releaseSegments());
+    await expect(page.locator('#split-status')).toHaveText('2 demos with more than one map.');
+    await expect(page.locator('#split-progress')).toHaveAttribute('hidden');
+    await expect(page.locator('#split-find-btn')).toBeEnabled();
+  });
+
+  test('Cancel while lengths are read keeps the demos already listed', async ({ page }) => {
+    await findHeld(page);
+    await expect(page.locator('#split-status')).toHaveText('Reading map lengths: 1 of 2 demos (two.dem)');
+    await page.locator('#split-cancel-btn').click();
+    await page.evaluate(() => window.__releaseSegments());
+    await expect(page.locator('#split-status')).toHaveText('Cancelled: 1 of 2 demos with more than one map listed.');
+    await expect(page.locator('.split-demo')).toHaveCount(1);
+    expect(await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'cancel_multi_map_scan'))).toBe(false);
   });
 });

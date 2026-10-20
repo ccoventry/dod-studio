@@ -1,7 +1,10 @@
 // split_pane.js
 // The Demo Auditor's Split Maps tab (#624): every demo in the folder that
-// recorded more than one map, each map's start and length, and a button that
-// writes the ticked maps out as demos of their own (native::demo_split).
+// recorded more than one map, each map's length, and a button that writes
+// the ticked maps out as demos of their own (native::demo_split). Find shows
+// a bar through both its steps (finding the demos, then reading each one's
+// map lengths), and a demo's card appears once its lengths are in, ready to
+// use: nothing on it changes after it shows (#844).
 
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -28,7 +31,22 @@ export function initSplitPane() {
   const cancelBtn = document.querySelector('#split-cancel-btn');
   const status = document.querySelector('#split-status');
   const list = document.querySelector('#split-list');
+  const progress = document.querySelector('#split-progress');
   if (!findBtn || !list) return;
+
+  const showProgress = (pct, text) => {
+    if (progress) {
+      progress.hidden = false;
+      const fill = progress.querySelector('.progress-bar-fill');
+      if (fill) fill.style.width = `${Math.round(pct)}%`;
+    }
+    status.textContent = text;
+  };
+  const hideProgress = () => { if (progress) progress.hidden = true; };
+  // Set by Cancel while the lengths are read: the demo being read finishes,
+  // and no other starts.
+  let stopReading = false;
+  let reading = false;
 
   // Find redraws the list, so it waits while a split runs: a new list
   // would drop that split's progress bar and the files it wrote.
@@ -43,9 +61,9 @@ export function initSplitPane() {
   refresh();
 
   listen('split_scan_progress', (event) => {
-    if (!scanning) return;
+    if (!scanning || reading) return;
     const { done, total, demo } = event.payload || {};
-    status.textContent = STRINGS.SPLIT.scanning(done, total, demo);
+    showProgress(total ? (done / total) * 50 : 0, STRINGS.SPLIT.scanning(done, total, demo));
   }).catch(() => {});
 
   findBtn.addEventListener('click', async () => {
@@ -55,18 +73,27 @@ export function initSplitPane() {
       return;
     }
     scanning = true;
+    reading = false;
+    stopReading = false;
     refresh();
     cancelBtn.disabled = false;
     list.innerHTML = '';
-    status.textContent = STRINGS.SPLIT.scanning(0, 0, '');
+    shownDemos = [];
+    updateFooter();
+    showProgress(0, STRINGS.SPLIT.scanning(0, 0, ''));
     try {
       const demos = await findMultiMapDemos(folder, !!recursive?.checked);
-      status.textContent = STRINGS.SPLIT.found(demos.length);
-      renderDemos(demos);
+      reading = true;
+      const listed = await readAndList(demos);
+      status.textContent = listed < demos.length
+        ? STRINGS.SPLIT.cancelledListed(listed, demos.length)
+        : STRINGS.SPLIT.found(demos.length);
     } catch (err) {
       status.textContent = STRINGS.SPLIT.scanFailed(err);
     } finally {
       scanning = false;
+      reading = false;
+      hideProgress();
       cancelBtn.disabled = true;
       refresh();
     }
@@ -75,12 +102,43 @@ export function initSplitPane() {
   cancelBtn.addEventListener('click', async () => {
     status.textContent = STRINGS.SPLIT.CANCELLING;
     cancelBtn.disabled = true;
+    if (reading) {
+      stopReading = true;
+      return;
+    }
     try { await cancelMultiMapScan(); } catch { /* logged by ipc_bridge */ }
   });
 
-  function renderDemos(demos) {
-    list.innerHTML = demos.map((d, i) => `
-      <div class="split-demo" data-demo="${i}">
+  /// Reads each demo's map lengths, one at a time (each is a full parse), and
+  /// lists its card once they're in. Returns how many were listed.
+  async function readAndList(demos) {
+    for (let i = 0; i < demos.length; i++) {
+      if (stopReading) return i;
+      showProgress(50 + (i / demos.length) * 50,
+        STRINGS.SPLIT.readingLengths(i + 1, demos.length, fileName(demos[i].path)));
+      let segs = null;
+      let failed = null;
+      try {
+        segs = await demoMapSegments(demos[i].path);
+      } catch (err) {
+        failed = err;
+      }
+      addCard(demos[i], i, segs, failed);
+    }
+    return demos.length;
+  }
+
+  /// Adds `d`'s card with its maps' lengths from `segs` (ticks final: a map
+  /// under a minute or already split starts unticked), or `failed`'s reason.
+  function addCard(d, i, segs, failed) {
+    const length = (k) => {
+      const seg = segs?.find((s) => s.index === k);
+      return seg ? seg.end_seconds - seg.start_seconds : null;
+    };
+    const box = document.createElement('div');
+    box.className = 'split-demo';
+    box.dataset.demo = String(i);
+    box.innerHTML = `
         <div class="split-demo-head">
           <strong class="split-demo-name" title="${escapeHtml(d.path)}">${escapeHtml(fileName(d.path))}</strong>
           <span class="split-demo-meta" title="${escapeHtml(STRINGS.SPLIT.SOURCE_TITLE[d.source] || '')}">${mb(d.size_bytes)} MB · ${escapeHtml(STRINGS.SPLIT.mapsCount(d.maps.length))} · ${escapeHtml(folderOf(d.path))}</span>
@@ -97,62 +155,31 @@ export function initSplitPane() {
             </tr>
           </thead>
           <tbody>
-            ${d.maps.map((m, k) => `
-              <tr data-map="${k}"${d.split_files?.[k] ? ` class="split-done" title="${escapeHtml(STRINGS.SPLIT.ALREADY_SPLIT_TITLE)}"` : ''}>
-                <td><input type="checkbox" class="split-keep" data-map="${k}"${d.split_files?.[k] ? '' : ' checked'} disabled /></td>
+            ${d.maps.map((m, k) => {
+              const len = length(k);
+              const done = d.split_files?.[k];
+              const short = len !== null && len < SHORT_MAP_SECONDS;
+              const cls = [done ? 'split-done' : '', short ? 'split-short' : ''].filter(Boolean).join(' ');
+              const title = done ? STRINGS.SPLIT.ALREADY_SPLIT_TITLE : short ? STRINGS.SPLIT.SHORT_MAP_TITLE : '';
+              return `
+              <tr data-map="${k}"${cls ? ` class="${cls}"` : ''}${title ? ` title="${escapeHtml(title)}"` : ''}>
+                <td><input type="checkbox" class="split-keep" data-map="${k}"${done || short ? '' : ' checked'} /></td>
                 <td class="split-map-num">${k + 1}</td>
                 <td class="split-map-name">${escapeHtml(m)}</td>
-                <td class="split-map-when">${escapeHtml(STRINGS.SPLIT.LOADING_DETAILS)}</td>
-                <td class="split-map-done">${escapeHtml(d.split_files?.[k] || '')}</td>
-              </tr>`).join('')}
+                <td class="split-map-when">${len === null ? '' : escapeHtml(clockLong(len))}</td>
+                <td class="split-map-done">${escapeHtml(done || '')}</td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
         <div class="split-actions">
-          <button type="button" class="split-go primary-btn" disabled title="${escapeHtml(STRINGS.SPLIT.WAIT_FOR_LENGTHS_TITLE)}">${escapeHtml(STRINGS.SPLIT.SPLIT_BUTTON)}</button>
-          <span class="split-result"></span>
-        </div>
-      </div>`).join('');
-    demos.forEach((d, i) => {
-      const box = list.querySelector(`.split-demo[data-demo="${i}"]`);
-      box.querySelector('.split-go').addEventListener('click', () => split(d, box));
-    });
-    shownDemos = demos;
+          <button type="button" class="split-go primary-btn">${escapeHtml(STRINGS.SPLIT.SPLIT_BUTTON)}</button>
+          <span class="split-result">${failed ? escapeHtml(STRINGS.SPLIT.detailsFailed(failed)) : ''}</span>
+        </div>`;
+    box.querySelector('.split-go').addEventListener('click', () => split(d, box));
+    list.appendChild(box);
+    shownDemos = [...shownDemos, d];
     updateFooter();
-    loadDetails(demos);
-  }
-
-  // One demo at a time: each is a full parse.
-  async function loadDetails(demos) {
-    for (let i = 0; i < demos.length; i++) {
-      const box = list.querySelector(`.split-demo[data-demo="${i}"]`);
-      if (!box) return;
-      try {
-        const segs = await demoMapSegments(demos[i].path);
-        for (const seg of segs) {
-          const row = box.querySelector(`tr[data-map="${seg.index}"]`);
-          if (!row) continue;
-          const length = seg.end_seconds - seg.start_seconds;
-          row.querySelector('.split-map-when').textContent =
-            clockLong(length);
-          if (length < SHORT_MAP_SECONDS) {
-            row.querySelector('.split-keep').checked = false;
-            row.title = STRINGS.SPLIT.SHORT_MAP_TITLE;
-            row.classList.add('split-short');
-          }
-        }
-      } catch (err) {
-        box.querySelectorAll('.split-map-when').forEach((c) => { c.textContent = ''; });
-        box.querySelector('.split-result').textContent = STRINGS.SPLIT.detailsFailed(err);
-      }
-      // Split waits for the lengths: they untick a map under a minute, and a
-      // split started before them would write it anyway. After a failed read
-      // the button works, so the split itself can say what's wrong.
-      const go = box.querySelector('.split-go');
-      go.disabled = false;
-      go.removeAttribute('title');
-      // The tick boxes too: their final state waits for the lengths.
-      box.querySelectorAll('.split-keep').forEach((c) => { c.disabled = false; });
-    }
   }
 
   async function split(demo, box) {
