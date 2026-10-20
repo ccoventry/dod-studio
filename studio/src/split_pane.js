@@ -177,19 +177,28 @@ export function initSplitPane() {
           <span class="split-result">${failed ? escapeHtml(STRINGS.SPLIT.detailsFailed(failed)) : ''}</span>
         </div>`;
     box.querySelector('.split-go').addEventListener('click', () => split(d, box));
+    box.querySelectorAll('.split-keep').forEach((c) => c.addEventListener('change', () => updateGo(box)));
+    updateGo(box);
     list.appendChild(box);
     shownDemos = [...shownDemos, d];
     updateFooter();
+  }
+
+  /// Split Checked Maps works only with a map ticked, and not while this
+  /// demo's split runs.
+  function updateGo(box) {
+    const go = box.querySelector('.split-go');
+    const none = !box.querySelector('.split-keep:checked');
+    go.disabled = none || box.dataset.splitting === '1';
+    go.title = none ? STRINGS.SPLIT.NOTHING_TICKED : '';
   }
 
   async function split(demo, box) {
     const keep = [...box.querySelectorAll('.split-keep:checked')].map((c) => Number(c.dataset.map));
     const result = box.querySelector('.split-result');
     const go = box.querySelector('.split-go');
-    if (!keep.length) {
-      result.textContent = STRINGS.SPLIT.NOTHING_TICKED;
-      return;
-    }
+    if (!keep.length) return; // the button is greyed out then
+    box.dataset.splitting = '1';
     go.disabled = true;
     splitting += 1;
     refresh();
@@ -218,7 +227,8 @@ export function initSplitPane() {
       result.textContent = STRINGS.SPLIT.splitFailed(err);
     } finally {
       unlisten();
-      go.disabled = false;
+      box.dataset.splitting = '';
+      updateGo(box);
       splitting -= 1;
       refresh();
     }

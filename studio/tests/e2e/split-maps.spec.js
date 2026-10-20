@@ -89,15 +89,19 @@ test.describe('Split Maps', () => {
     expect(call).toEqual({ path: 'C:\\demos\\sub\\three.dem', keep: [1] });
   });
 
-  test('nothing ticked asks for a map instead of calling the backend', async ({ page }) => {
+  test('Split is greyed out while no map is ticked', async ({ page }) => {
     await gotoHarness(page);
     await findDemos(page);
-    const two = demo(page, 'two.dem');
-    await expect(two.locator('.split-keep').nth(1)).not.toBeChecked();
-    await two.locator('.split-keep').nth(0).uncheck();
-    await two.locator('.split-go').click();
-    await expect(two.locator('.split-result')).toHaveText('Tick at least one map.');
-    expect(await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'split_demo_maps'))).toBe(false);
+    const three = demo(page, 'three.dem');
+    await expect(three.locator('.split-go')).toBeEnabled();
+    await three.locator('.split-keep').nth(0).uncheck();
+    await three.locator('.split-keep').nth(1).uncheck();
+    await expect(three.locator('.split-go')).toBeDisabled();
+    await expect(three.locator('.split-go')).toHaveAttribute('title', 'Tick at least one map to split.');
+    await three.locator('.split-keep').nth(2).check();
+    await expect(three.locator('.split-go')).toBeEnabled();
+    // two.dem: map 1 already split and map 2 short, so nothing starts ticked.
+    await expect(demo(page, 'two.dem').locator('.split-go')).toBeDisabled();
   });
 
   test('Find waits while a split runs, so the list keeps its progress and result', async ({ page }) => {
@@ -128,8 +132,10 @@ test.describe('Split Maps', () => {
     await expect(page.locator('#split-find-btn')).toBeDisabled();
     await page.evaluate(() => window.__releaseSegments());
     const two = demo(page, 'two.dem');
-    await expect(two.locator('.split-go')).toBeEnabled();
+    // Ready as it shows: ticks final (nothing to split on this one yet).
+    await expect(two.locator('.split-keep').nth(0)).toBeEnabled();
     await expect(two.locator('.split-keep').nth(1)).not.toBeChecked();
+    await expect(two.locator('.split-map-when').nth(0)).toHaveText('21:28');
     await expect(page.locator('#split-status')).toHaveText('Reading map lengths: 2 of 2 demos (three.dem)');
     await page.evaluate(() => window.__releaseSegments());
     await expect(page.locator('#split-status')).toHaveText('2 demos with more than one map.');

@@ -879,7 +879,7 @@ export const STRINGS = {
     SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
     SPLIT_BUTTON: 'Split Checked Maps',
     SHOW_IN_FOLDER: 'Show in folder',
-    NOTHING_TICKED: 'Tick at least one map.',
+    NOTHING_TICKED: 'Tick at least one map to split.',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
