@@ -891,7 +891,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 if let Some(take_folder) =
                     apply_render_update(&app, &handles.jobs, &handles.render_session, update)
                 {
-                    if while_capturing {
+                    // A HUD pair's two jobs can finish in one pass: the take
+                    // is looked at once.
+                    if while_capturing && !rendered_now.contains(&take_folder) {
                         rendered_now.push(take_folder.clone());
                     }
                     if !finished_takes.contains(&take_folder) {

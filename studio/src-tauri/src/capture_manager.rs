@@ -752,6 +752,9 @@ pub struct VerifiedBlock {
     pub captured: bool,
     /// Tier 2: Render Studio's scanner would actually admit this take.
     pub renderable: bool,
+    /// Rendered while the batch ran and deleted after (Render While
+    /// Capturing, #861): captured, but nothing is left to render.
+    pub rendered: bool,
     /// What the take folder holds on disk, for the batch results panel (#172).
     pub bytes: u64,
 }
@@ -779,6 +782,15 @@ fn take_folder_has_content(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a block's take was rendered and then deleted while the batch ran
+/// (Render While Capturing, #861): its folder keeps only the render history,
+/// which shows a finished render. That take was captured.
+fn rendered_while_capturing(block_folder: &Path) -> bool {
+    native::hlcr::take_meta::read_history(block_folder)
+        .iter()
+        .any(|r| r.outcome == native::hlcr::take_meta::RenderOutcome::Finished)
+}
+
 /// Checks each planned block against disk after a batch ends.
 ///
 /// Two tiers on purpose: "captured" is the loose check that drives status, so
@@ -789,15 +801,20 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
     let mut verified: Vec<VerifiedBlock> = manifest
         .blocks
         .iter()
-        .map(|block| VerifiedBlock {
-            take_key: block.take_key.clone(),
-            take_folder: block.take_folder.to_string_lossy().into_owned(),
-            demo_name: block.demo_name.clone(),
-            block_index: block.block_index,
-            source_streak_indices: block.source_streak_indices.clone(),
-            captured: take_folder_has_content(&block.take_folder),
-            renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
-            bytes: 0,
+        .map(|block| {
+            let has_content = take_folder_has_content(&block.take_folder);
+            let rendered = !has_content && rendered_while_capturing(&block.take_folder);
+            VerifiedBlock {
+                take_key: block.take_key.clone(),
+                take_folder: block.take_folder.to_string_lossy().into_owned(),
+                demo_name: block.demo_name.clone(),
+                block_index: block.block_index,
+                source_streak_indices: block.source_streak_indices.clone(),
+                captured: has_content || rendered,
+                renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+                rendered,
+                bytes: 0,
+            }
         })
         .collect();
 
@@ -852,6 +869,12 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
 
     for block in blocks.iter().filter(|b| b.captured) {
         let folder = Path::new(&block.take_folder);
+        // A take rendered while the batch ran (#861) already has a history;
+        // writing the settings keeps it.
+        let meta = native::hlcr::take_meta::SessionMeta {
+            renders: native::hlcr::take_meta::read_history(folder),
+            ..meta.clone()
+        };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
             log_markdown(&format!(
                 "[take-verify] could not record capture settings at {} — {}. Render Studio will \
@@ -882,10 +905,12 @@ fn emit_take_verification(
 
     let blocks = verify_capture_takes(&manifest);
     let captured_count = blocks.iter().filter(|b| b.captured).count();
-    let renderable_count = blocks.iter().filter(|b| b.renderable).count();
+    // A take already rendered and deleted (#861) isn't one Render Studio
+    // missed.
+    let renderable_count = blocks.iter().filter(|b| b.renderable || b.rendered).count();
 
     log_markdown(&format!(
-        "[take-verify] session {}: {}/{} takes on disk, {} renderable",
+        "[take-verify] session {}: {}/{} takes on disk or rendered while capturing, {} renderable or rendered",
         manifest.session_id,
         captured_count,
         blocks.len(),
@@ -1566,14 +1591,14 @@ pub async fn start_capture_batch_impl(
                                 }),
                             );
                         }
-                        EngineEvent::ClipStarted(index) => {
+                        EngineEvent::ClipStarted(tick) => {
                             if let Some(room) = &room {
-                                room.clip_started(index);
+                                room.clip_started(tick);
                             }
                         }
-                        EngineEvent::ClipRecorded(index) => {
+                        EngineEvent::ClipRecorded(tick) => {
                             if let Some(room) = &room {
-                                room.clip_recorded(index);
+                                room.clip_recorded(tick);
                             }
                         }
                         EngineEvent::Held => {
@@ -3374,6 +3399,76 @@ mod tests {
     use super::*;
     use crate::test_support::Scratch;
     use native::patch::PatchStage;
+
+    /// Render While Capturing (#861) deletes a take once its clip renders,
+    /// before the batch ends: the block still counts as captured, isn't one
+    /// Render Studio missed, and writing the capture settings keeps its
+    /// render history.
+    #[test]
+    fn a_take_rendered_and_deleted_while_capturing_verifies_as_captured() {
+        use native::hlcr::take_meta::{self, RenderAttempt, RenderOutcome, SessionMeta};
+        let scratch = Scratch::new("rendered_while_capturing");
+        let block = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b0");
+        std::fs::create_dir_all(&block).unwrap();
+        let attempt = RenderAttempt {
+            started_unix_ms: 1,
+            stream: "all".into(),
+            codec: "prores".into(),
+            custom_codec_args: String::new(),
+            fps: 120,
+            outcome: RenderOutcome::Finished,
+            output_path: "D:/clips/a.mov".into(),
+            output_size_bytes: Some(10),
+            error: None,
+        };
+        let meta = SessionMeta {
+            renders: vec![attempt.clone()],
+            ..SessionMeta::new(String::new(), 0)
+        };
+        take_meta::write(&block, &meta).unwrap();
+        let empty = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_02_b0");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        let manifest = CaptureManifest {
+            session_id: "session_1".into(),
+            blocks: [&block, &empty]
+                .iter()
+                .map(|folder| native::patch::types::CaptureBlock {
+                    demo_name: "d".into(),
+                    block_index: 0,
+                    drive_index: 0,
+                    take_folder: folder.to_path_buf(),
+                    take_key: String::new(),
+                    source_streak_indices: vec![],
+                    start_tick: 0,
+                    end_tick: 1,
+                    record_start_tick: 0,
+                    record_stop_tick: 1,
+                })
+                .collect(),
+            capture_fps: 120,
+            capture_mode: String::new(),
+            agr_fps: 0,
+        };
+        let verified = verify_capture_takes(&manifest);
+        assert!(verified[0].captured && verified[0].rendered);
+        assert!(!verified[0].renderable);
+        assert!(
+            !verified[1].captured && !verified[1].rendered,
+            "nothing there"
+        );
+
+        record_capture_settings(&manifest, &verified);
+        let kept = take_meta::read_for_take(&block).unwrap();
+        assert_eq!(kept.capture_fps, 120);
+        assert_eq!(kept.renders, vec![attempt]);
+    }
 
     /// The running-game check compares against what a launch would use: the
     /// caller's unsaved values over the saved settings, blanks ignored (#666).

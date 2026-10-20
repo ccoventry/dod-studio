@@ -55,6 +55,34 @@ struct RoomBlock {
     ticks: u64,
     /// The planner's share of the batch estimate for this block.
     planned_bytes: u64,
+    /// The ticks its `START_RECORD` and `STOP_RECORD` markers name.
+    start_tick: i64,
+    stop_tick: i64,
+    /// What the frontend needs to mark the block's highlights Captured and
+    /// name its clip (`capture_clip_ready`).
+    take_key: String,
+    source_streak_indices: Vec<usize>,
+}
+
+/// Which block a record marker naming `tick` belongs to: the first from
+/// `cursor` on whose tick (`tick_of`) matches. A demo the hook's batch
+/// skipped sends no markers for its blocks, so the next marker can belong to
+/// a block further on; with no tick, or none matching, the one at `cursor`.
+fn resolve_block(
+    blocks: &[RoomBlock],
+    cursor: usize,
+    tick: Option<i64>,
+    tick_of: impl Fn(&RoomBlock) -> i64,
+) -> usize {
+    tick.and_then(|t| {
+        blocks
+            .iter()
+            .enumerate()
+            .skip(cursor)
+            .find(|(_, b)| tick_of(b) == t)
+            .map(|(i, _)| i)
+    })
+    .unwrap_or(cursor)
 }
 
 #[derive(Debug, Default)]
@@ -72,6 +100,9 @@ struct State {
     /// Takes recorded but not yet settled: their size isn't learned yet, so
     /// no hold gives up while one is.
     settling: usize,
+    /// The block the next `START_RECORD` / `STOP_RECORD` is looked for from.
+    next_start: usize,
+    next_stop: usize,
 }
 
 /// One look at the drive before a clip boundary.
@@ -114,6 +145,10 @@ fn room_blocks(blocks: &[CaptureBlock], planned_total: u64) -> Vec<RoomBlock> {
             folder: b.take_folder.clone(),
             ticks,
             planned_bytes: ((planned_total as f64) * (ticks as f64) / (all as f64)).ceil() as u64,
+            start_tick: i64::from(b.record_start_tick),
+            stop_tick: i64::from(b.record_stop_tick),
+            take_key: b.take_key.clone(),
+            source_streak_indices: b.source_streak_indices.clone(),
         })
         .collect()
 }
@@ -277,16 +312,33 @@ impl CaptureRoom {
         })
     }
 
-    /// `START_RECORD` of block `index`.
-    pub(crate) fn clip_started(self: &Arc<Self>, index: usize) {
-        {
+    /// Whether blocks `a` and `b` record to the same drive.
+    fn same_drive(&self, a: usize, b: usize) -> bool {
+        match (self.blocks.get(a), self.blocks.get(b)) {
+            (Some(a), Some(b)) => volume_of(&a.folder) == volume_of(&b.folder),
+            _ => false,
+        }
+    }
+
+    /// `START_RECORD` naming `tick`.
+    pub(crate) fn clip_started(self: &Arc<Self>, tick: Option<i64>) {
+        let index = {
             let mut state = self.lock();
+            let index = resolve_block(&self.blocks, state.next_start, tick, |b| b.start_tick);
+            state.next_start = index + 1;
             state.recording = Some(index);
             if state.watching || !self.can_hold {
                 return;
             }
-        }
-        let writing = self.clip_bytes(&self.lock(), index).unwrap_or(0);
+            index
+        };
+        // The clip recording now only takes room from the next one's drive
+        // when it records there too.
+        let writing = if self.same_drive(index, index + 1) {
+            self.clip_bytes(&self.lock(), index).unwrap_or(0)
+        } else {
+            0
+        };
         let Some(check) = self.check(index + 1, writing) else {
             return;
         };
@@ -307,34 +359,44 @@ impl CaptureRoom {
         std::thread::spawn(move || room.watch(index + 1));
     }
 
-    /// `STOP_RECORD` of block `index`: hand the take over once it settles.
-    pub(crate) fn clip_recorded(self: &Arc<Self>, index: usize) {
-        let Some(block) = self.blocks.get(index).cloned() else {
-            return;
+    /// `STOP_RECORD` naming `tick`: hand the take over once it settles.
+    pub(crate) fn clip_recorded(self: &Arc<Self>, tick: Option<i64>) {
+        let (index, block) = {
+            let mut state = self.lock();
+            let index = resolve_block(&self.blocks, state.next_stop, tick, |b| b.stop_tick);
+            state.next_stop = index + 1;
+            let Some(block) = self.blocks.get(index).cloned() else {
+                return;
+            };
+            state.settling += 1;
+            (index, block)
         };
-        self.lock().settling += 1;
         let room = Arc::clone(self);
         std::thread::spawn(move || {
-            let bytes = settle(&block.folder, &room.cancel);
+            let settled = settle(&block.folder, &room.cancel);
             {
                 let mut state = room.lock();
                 state.settling = state.settling.saturating_sub(1);
                 if state.recording == Some(index) {
                     state.recording = None;
                 }
-                if bytes > 0 {
+                if let Some(bytes) = settled {
                     state.sizes.learn(bytes, block.ticks);
                     state.recorded.push((index, bytes));
                 }
             }
-            if bytes == 0 {
+            let Some(bytes) = settled else {
+                // Nothing there, still changing, or the batch was cancelled:
+                // the finish step after the batch sees it, as without this
+                // setting. A take still being written is never rendered (and
+                // so never deleted) from here.
                 log_markdown(&format!(
-                    "[render-while-capturing] Clip {} left nothing at {}; nothing to render",
+                    "[render-while-capturing] Clip {} at {} didn't settle into a take to render; left for after the batch",
                     index + 1,
                     block.folder.display()
                 ));
                 return;
-            }
+            };
             log_markdown(&format!(
                 "[render-while-capturing] Clip {} recorded ({}); queueing its render",
                 index + 1,
@@ -346,6 +408,8 @@ impl CaptureRoom {
                     "session_id": room.session_id,
                     "block_index": index,
                     "take_folder": block.folder.to_string_lossy(),
+                    "take_key": block.take_key,
+                    "source_streak_indices": block.source_streak_indices,
                     "capture_fps": room.capture_fps,
                     "capture_mode": room.capture_mode,
                 }),
@@ -353,11 +417,13 @@ impl CaptureRoom {
         });
     }
 
-    /// The game held (`BATCH_HELD`) or went on (`BATCH_GOING`).
+    /// The game held (`BATCH_HELD`) or went on (`BATCH_GOING`). The hook
+    /// repeats `BATCH_HELD` while it holds, to notice a Studio that has gone,
+    /// so only a change is logged.
     pub(crate) fn game_held(&self, held: bool) {
-        self.lock().held = held;
+        let was = std::mem::replace(&mut self.lock().held, held);
         self.app.state::<RenderManager>().set_capture_held(held);
-        if held {
+        if held && !was {
             log_markdown("[render-while-capturing] The batch is holding between clips");
         }
     }
@@ -382,11 +448,11 @@ impl CaptureRoom {
             } else {
                 let state = self.lock();
                 match state.recording {
-                    Some(i) => {
+                    Some(i) if self.same_drive(i, next) => {
                         let est = self.clip_bytes(&state, i).unwrap_or(0);
                         est.saturating_sub(folder_bytes(&self.blocks[i].folder))
                     }
-                    None => 0,
+                    _ => 0,
                 }
             };
             let Some(check) = self.check(next, writing) else {
@@ -510,8 +576,10 @@ const STRINGS_HOLDING: RoomLine = RoomLine("holding");
 const STRINGS_HELD: RoomLine = RoomLine("held");
 
 /// Waits for a take to stop changing (HLAE's FFmpeg closes the video a
-/// moment after the stop) and returns what it holds; 0 when it holds nothing.
-fn settle(folder: &Path, cancel: &AtomicBool) -> u64 {
+/// moment after the stop) and returns what it holds. `None` when it holds
+/// nothing, was still changing at [`SETTLE_LIMIT`], or the batch was
+/// cancelled: a take that may still be written is never handed over.
+fn settle(folder: &Path, cancel: &AtomicBool) -> Option<u64> {
     let started = Instant::now();
     let mut last = None;
     let mut steady = 0;
@@ -522,7 +590,7 @@ fn settle(folder: &Path, cancel: &AtomicBool) -> u64 {
             // Two looks a second apart with nothing written, and a take the
             // Render tab would admit.
             if steady >= 2 && take_renderable(folder) {
-                return bytes;
+                return Some(bytes);
             }
         } else {
             steady = 0;
@@ -530,7 +598,7 @@ fn settle(folder: &Path, cancel: &AtomicBool) -> u64 {
         last = Some(bytes);
         std::thread::sleep(POLL * 2);
     }
-    last.unwrap_or(0)
+    None
 }
 
 /// The nearest folder of `path` that exists, for the free-space query: a
@@ -568,6 +636,34 @@ mod tests {
             record_start_tick: start,
             record_stop_tick: stop,
         }
+    }
+
+    #[test]
+    fn a_record_marker_finds_its_block_by_tick_past_a_skipped_demo() {
+        let blocks = room_blocks(&[block(100, 200), block(300, 400), block(500, 600)], 3000);
+        let start = |b: &RoomBlock| b.start_tick;
+        let stop = |b: &RoomBlock| b.stop_tick;
+        assert_eq!(resolve_block(&blocks, 0, Some(100), start), 0);
+        // Block 1's demo was skipped: block 2's marker comes next.
+        assert_eq!(resolve_block(&blocks, 1, Some(500), start), 2);
+        assert_eq!(resolve_block(&blocks, 1, Some(600), stop), 2);
+        // An earlier block's tick is never matched again.
+        assert_eq!(resolve_block(&blocks, 2, Some(100), start), 2);
+        // No tick, or one nothing names: the next in order.
+        assert_eq!(resolve_block(&blocks, 1, None, start), 1);
+        assert_eq!(resolve_block(&blocks, 1, Some(7), start), 1);
+        // Past the end stays past the end, for the callers' `get`.
+        assert_eq!(resolve_block(&blocks, 3, Some(100), start), 3);
+    }
+
+    #[test]
+    fn a_take_that_never_settles_is_not_handed_over() {
+        let cancel = AtomicBool::new(true);
+        let dir = std::env::temp_dir().join("dod_test_rwc_settle_cancelled");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("video.avi"), b"frames").unwrap();
+        assert_eq!(settle(&dir, &cancel), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

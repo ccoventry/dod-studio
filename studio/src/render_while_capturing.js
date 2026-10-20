@@ -18,6 +18,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { queueRenderBatch, startQueuedRender } from './ipc_bridge.js';
 import { renderPayloadFor } from './finish_clips.js';
+import { markClipCaptured } from './capture_pane.js';
 import { STRINGS } from './strings.js';
 import { showToast } from './toast.js';
 
@@ -157,6 +158,9 @@ export function initRenderWhileCapturing({ onSettingsChange } = {}) {
   // The backend only sends this with the setting on, for the batch it was
   // on for when it started.
   listen('capture_clip_ready', (event) => {
+    // Before its render is queued: the clip's name and its Rendered mark
+    // both look the take up in the take index.
+    markClipCaptured(event.payload);
     renders.clipReady(event.payload || {});
   }).catch((err) => console.error('Failed to register capture_clip_ready listener:', err));
 

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve()) }));
 vi.mock('./ipc_bridge.js', () => ({ queueRenderBatch: vi.fn(), startQueuedRender: vi.fn() }));
 vi.mock('./finish_clips.js', () => ({ renderPayloadFor: vi.fn() }));
+vi.mock('./capture_pane.js', () => ({ markClipCaptured: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {

@@ -182,6 +182,12 @@ pub fn studio_connected() -> bool {
     server::CONNECTED.load(Ordering::Relaxed)
 }
 
+/// Whether markers go to Studio over the events pipe at all (`echo` is
+/// wrapped), so [`studio_connected`] means something.
+pub fn pipe_in_use() -> bool {
+    WRAPPED.load(Ordering::Relaxed)
+}
+
 /// One `dodstudio_debug_status` line.
 pub fn status_line() -> Option<String> {
     WRAPPED.load(Ordering::Relaxed).then(|| {

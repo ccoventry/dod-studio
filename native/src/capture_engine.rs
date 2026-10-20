@@ -41,12 +41,14 @@ pub enum EngineEvent {
     /// clip_count), all 1-based. Same console-log source as DemoLoading.
     /// See issue #98.
     FastForwardToClip(u32, u32, u32, u32),
-    /// A clip's recording started (`START_RECORD`): the 0-based position of
-    /// its block in the batch, the capture manifest's order (#861).
-    ClipStarted(usize),
-    /// A clip's recording stopped (`STOP_RECORD`), same numbering. The take
-    /// may still be flushing to disk.
-    ClipRecorded(usize),
+    /// A clip's recording started (`START_RECORD`), with the demo tick the
+    /// marker names: its block's `record_start_tick` (#861). The listener
+    /// finds the block by it, since a skipped demo sends no markers for its
+    /// clips and a plain count would fall behind the batch's order.
+    ClipStarted(Option<i64>),
+    /// A clip's recording stopped (`STOP_RECORD`), with its block's
+    /// `record_stop_tick`. The take may still be flushing to disk.
+    ClipRecorded(Option<i64>),
     /// The hook's batch stopped at a clip boundary after `hold` (#861).
     Held,
     /// The hook's batch went on after `go`.
@@ -825,8 +827,6 @@ pub fn spawn_capture_engine(
             // What the game was last told (#861), and when a send last failed.
             let mut hold_sent = false;
             let mut hold_retry_at: Option<std::time::Instant> = None;
-            let mut clips_started = 0usize;
-            let mut clips_recorded = 0usize;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -836,7 +836,11 @@ pub fn spawn_capture_engine(
                 // for OBS mode at the end of this loop.
                 for marker in marker_rx.try_iter() {
                     let now = std::time::Instant::now();
-                    if let Some(previous) = last_marker_at {
+                    // A gap that spans a hold (#861) is waiting, not the pace
+                    // of the batch, so it doesn't widen the stall deadline.
+                    if let Some(previous) = last_marker_at
+                        && !hold_sent
+                    {
                         longest_marker_gap = longest_marker_gap.max(now - previous);
                     }
                     last_marker_at = Some(now);
@@ -859,12 +863,10 @@ pub fn spawn_capture_engine(
                         }
                     match marker.kind {
                         crate::obs::MarkerKind::StartRecord => {
-                            let _ = tx.send(EngineEvent::ClipStarted(clips_started));
-                            clips_started += 1;
+                            let _ = tx.send(EngineEvent::ClipStarted(marker.tick));
                         }
                         crate::obs::MarkerKind::StopRecord => {
-                            let _ = tx.send(EngineEvent::ClipRecorded(clips_recorded));
-                            clips_recorded += 1;
+                            let _ = tx.send(EngineEvent::ClipRecorded(marker.tick));
                         }
                         crate::obs::MarkerKind::Other if marker.label == "BATCH_HELD" => {
                             let _ = tx.send(EngineEvent::Held);
@@ -889,6 +891,12 @@ pub fn spawn_capture_engine(
                         .map(|pid| crate::sys::game_remote::send_console_commands(pid, &[hold_command(want_hold)]));
                     match sent {
                         Some(Ok(crate::sys::game_remote::Sent::Delivered)) => {
+                            // A hold sends no markers for as long as it lasts:
+                            // the stall check counts from the `go`, not from
+                            // the last marker before the hold.
+                            if hold_sent && !want_hold {
+                                last_marker_at = Some(std::time::Instant::now());
+                            }
                             hold_sent = want_hold;
                             hold_retry_at = None;
                             log_markdown(&format!("[HLAE] Sent `{}`", hold_command(want_hold)));
