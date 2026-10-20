@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use native::demo_maps_scan::{DemoMaps, find_multi_map_demos};
 use native::demo_split::{
-    Keep, MapSegment, SplitProgress, Written, demo_segments, split_file_with_progress,
+    Keep, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_with_progress,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -75,7 +75,8 @@ pub fn cancel_multi_map_scan(state: tauri::State<'_, DemoSplitManager>) -> Resul
 #[tauri::command]
 pub async fn demo_map_segments(path: String) -> Result<Vec<MapSegment>, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        demo_segments(Path::new(&path))
+        // Frame headers only; a full parse when the walk can't read a frame.
+        quick_demo_segments(Path::new(&path))
     }))
     .await
 }
