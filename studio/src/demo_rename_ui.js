@@ -16,6 +16,7 @@ import { parseClock } from './scan_progress.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { setAuditorFooter } from './auditor_footer.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -280,7 +281,9 @@ async function listDemos() {
 }
 
 function showListed() {
-  setStatus(STRINGS.DEMO_RENAME.listed(facts.length, rows.filter((r) => r.status === 'rename').length));
+  const renames = rows.filter((r) => r.status === 'rename').length;
+  setStatus(STRINGS.DEMO_RENAME.listed(facts.length, renames));
+  setAuditorFooter('rename', STRINGS.DEMO_RENAME.footer(facts.length, renames));
 }
 
 /** Points each listed demo at its new path, so the preview stays right

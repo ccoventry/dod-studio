@@ -1414,6 +1414,15 @@ export async function splitDemoMaps(path, keep) {
     });
 }
 
+// Stops a running Split Checked Maps at its next step (#844).
+export async function cancelDemoSplit(path) {
+  return invoke("cancel_demo_split", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_split):", err);
+      throw err;
+    });
+}
+
 // Split now (#217): every map at least `minSeconds` long, one parse.
 export async function splitDemoAuto(path, minSeconds) {
   return invoke("split_demo_auto", { path, minSeconds })

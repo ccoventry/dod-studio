@@ -7,6 +7,7 @@ import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
 import { createAuditConsolidate } from './audit_consolidate_ui.js';
 import { singlesAfterDelete } from './audit_consolidate.js';
+import { setAuditorFooter } from './auditor_footer.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
@@ -40,14 +41,13 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
   const statusTextEl = document.querySelector('#audit-status-text');
   const currentEl = document.querySelector('#audit-status-current');
   const footerEl = document.querySelector('#audit-list-footer');
-  const pinnedFooterEl = document.querySelector('#footer-audit-summary');
   const tbody = document.querySelector('#audit-results-body');
 
   const folders = createAuditFolders({ onChange: () => refreshStartButtonState() });
 
   function setAuditFooterSummary(text) {
     if (footerEl) footerEl.textContent = text;
-    if (pinnedFooterEl) pinnedFooterEl.textContent = text;
+    setAuditorFooter('duplicates', text);
   }
 
   function refreshStartButtonState() {

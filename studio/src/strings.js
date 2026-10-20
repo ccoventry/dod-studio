@@ -849,6 +849,13 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    COL_NUM: '#',
+    COL_MAP: 'Map',
+    COL_WHEN: 'Length',
+    COL_DONE: 'Already split',
+    ALREADY_SPLIT_CHIP: 'Already split',
+    ALREADY_SPLIT_TITLE: 'A split already wrote this map next to the demo, so it starts unticked. Tick it to write it again (as a new file beside the old one).',
+    footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
     progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
@@ -859,20 +866,23 @@ export const STRINGS = {
     FIND_BUTTON: 'Find Multi-Map Demos',
     CANCEL_BUTTON: 'Cancel',
     CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
-    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    scanning: (done, total, demo) => `Finding demos: ${done} of ${total} checked${demo ? ` (${demo})` : ''}`,
+    readingLengths: (n, total, demo) => `Reading map lengths: ${n} of ${total} demos (${demo})`,
+    cancelledListed: (listed, total) => `Cancelled: ${listed} of ${total} demos with more than one map listed.`,
     CANCELLING: 'Cancelling...',
     found: (n, total) => n === 0
       ? 'No demo here has more than one map.'
       : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
     scanFailed: (e) => `Couldn't check the folder: ${e}`,
     mapsCount: (n) => `${n} maps`,
-    LOADING_DETAILS: 'Reading lengths...',
     detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
-    startsAt: (start, length) => `${start} · ${length} long`,
     SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
     SPLIT_BUTTON: 'Split Checked Maps',
+    CANCEL_SPLIT_BUTTON: 'Cancel',
+    CANCELLING_SPLIT: 'Cancelling after this step…',
+    cancelledSplit: (n) => n === 0 ? 'Cancelled. Nothing was written.' : `Cancelled after ${n} demo${n === 1 ? '' : 's'}:`,
     SHOW_IN_FOLDER: 'Show in folder',
-    NOTHING_TICKED: 'Tick at least one map.',
+    NOTHING_TICKED: 'Tick at least one map to split.',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
@@ -897,7 +907,7 @@ export const STRINGS = {
     TABLE_HEADER_FILE_PATH: 'File Path',
     TABLE_HEADER_ACTION: 'Action',
     TABLE_EMPTY: 'Choose a folder and run audit to find duplicate demo files.',
-    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.00 GB',
+    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.0 MB',
     footerSummary: (count, size) => `Duplicates Found: ${count} | Wasted Space: ${size}`,
 
     SELECT_FOLDER_DIALOG_TITLE: 'Select Folder to Audit',
@@ -2533,6 +2543,7 @@ export const STRINGS = {
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
+    footer: (count, renames) => `Demos listed: ${count} | To rename: ${renames}`,
     CANCELLED: 'Stopped. The demos read so far are listed.',
     STATUS_SAME: 'already named this way',
     STATUS_SKIPPED: 'not ticked',

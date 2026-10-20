@@ -40,8 +40,9 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
     remove.textContent = STRINGS.AUDITOR.REMOVE_FOLDER_BUTTON;
     remove.disabled = locked || allDrives();
     remove.addEventListener('click', () => {
-      edited = true;
       folders = folders.filter((f) => f !== path);
+      // Emptied: follow the Target Folder again, as at the start.
+      edited = folders.length > 0;
       render();
       onChange();
     });

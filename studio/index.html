@@ -1029,7 +1029,7 @@
                 </tbody>
               </table>
             </div>
-            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
           </div>
           </div>
 
@@ -1047,6 +1047,8 @@
                   <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
                   <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
                 </div>
+                <!-- Find's two steps: finding the demos, then reading each one's map lengths. -->
+                <div id="split-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="split-status" class="status-indicator"></p>
                 <div id="split-list" class="split-list"></div>
               </div>
@@ -1753,7 +1755,7 @@
              Configuration-specific later if a need comes up. -->
         <div id="footer-configuration" class="pinned-footer-content" style="display: none;"></div>
         <div id="footer-demo-auditor" class="pinned-footer-content" style="display: none;">
-          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
         </div>
         <div id="footer-demo-analyzer" class="pinned-footer-content" style="display: none;">
           <div id="footer-analyzer-current-file" data-str="ANALYZER.NO_DEMO_LOADED">No demo loaded</div>
