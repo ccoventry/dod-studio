@@ -1,8 +1,19 @@
+import { logFrontendEvent } from './ipc_bridge.js';
+
+/** The activity-log line for a toast (#873): its kind and its text on one
+ *  line, so a log shows what the user was told. */
+export function toastLogLine(message, type = 'info') {
+  return `[toast ${type}] ${String(message).replace(/\s*\n\s*/g, ' ').trim()}`;
+}
+
 /**
  * `action` ({ label, onClick }) adds a button to the toast, e.g. Undo.
  * Clicking it runs onClick and dismisses the toast at once.
+ * Every toast is also written to the activity log (#873).
  */
 export function showToast(message, type = 'info', duration = 3000, { action } = {}) {
+  logFrontendEvent(toastLogLine(message, type));
+
   let container = document.querySelector('#toast-container');
   if (!container) {
     container = document.createElement('div');
