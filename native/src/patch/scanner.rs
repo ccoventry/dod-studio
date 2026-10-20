@@ -143,18 +143,21 @@ fn leading_frame_times(
 
 /// The Capture page's rows: one per highlight, as `analysis::highlights`
 /// defines them, each built on `demo` (the fields every row of the demo
-/// shares). Every player's (`all`): the frontend keeps the recording player's
-/// rows itself (`isVisibleStreak`), and saved projects index these rows in
-/// this order. The slot is the one the kills were scored from (#573), which
-/// capture spectates (#706), so a player who left before the demo ended keeps
-/// theirs; only a highlight whose slot is unknown is skipped, as capture
-/// needs one to anchor the patcher.
+/// shares). Whose rows exist is decided here and nowhere later (#573):
+/// `Highlights::shown`, the same rule the in-game Highlights tab applies
+/// (D18: a POV demo's recorder, an HLTV demo's everyone), so the two list
+/// the same highlights; the frontend only narrows them by Min Kills and its
+/// Player filter. Saved projects index these rows in this order. The slot is
+/// the one the kills were scored from, which capture spectates (#706), so a
+/// player who left before the demo ended keeps theirs; only a highlight
+/// whose slot is unknown is skipped, as capture needs one to anchor the
+/// patcher.
 fn capture_streaks(
     highlights: &analysis::highlights::Highlights,
     demo: &CaptureStreak,
 ) -> Vec<CaptureStreak> {
     let mut streaks = Vec::new();
-    for highlight in &highlights.all {
+    for highlight in highlights.shown() {
         let Some(slot) = highlight.slot else {
             continue;
         };
@@ -182,6 +185,8 @@ fn capture_streaks(
             viewdemo_times,
             start_index: 0,
             end_index,
+            steam_id: highlight.steam_id(),
+            recorded_this_demo: highlight.recorder,
             ..demo.clone()
         };
         streak.update_visuals();
@@ -299,13 +304,17 @@ pub fn scan_demo_for_highlights_with_analysis(
             match_start_tick: analysis.state.match_start_tick,
             source_key: Some(source_key),
             spectated: highlights.hltv,
+            steam_id: None,
+            recorded_this_demo: false,
         },
     );
 
-    // The player the Highlights table keeps (D18, `analysis::highlights::Rule`):
-    // a POV demo's recorder. None lists everyone's -- an HLTV demo, whose
-    // `svc_serverinfo` names the proxy's slot 0 (#247), or a POV demo whose
-    // recorder can't be told.
+    // The recorder's slot, when the rows are theirs alone (D18,
+    // `analysis::highlights::Rule`). None when every player's rows are
+    // listed: an HLTV demo, whose `svc_serverinfo` names the proxy's slot 0
+    // (#247), or a POV demo whose recorder can't be told. The rows above are
+    // already the ones to list, so the frontend reads this only to know
+    // whether to show whose row is whose, never to filter (#573).
     let local_player_index = match highlights.rule {
         analysis::highlights::Rule::Recorder => {
             analysis.state.pov_player_index.map(|idx| idx as usize)
@@ -388,6 +397,8 @@ mod source_check_tests {
             match_start_tick: None,
             source_key: key,
             spectated: false,
+            steam_id: None,
+            recorded_this_demo: false,
         }
     }
 
@@ -614,5 +625,127 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// How many rows the Capture page showed before #573: every highlight
+    /// with a known slot was scanned, and the frontend kept the recorder's
+    /// slot's (`local_player_index`) when the demo had one.
+    fn rows_before_573(analysis: &analysis::Analysis) -> usize {
+        let highlights = analysis::highlights::highlights(analysis);
+        let recorder_slot = match highlights.rule {
+            analysis::highlights::Rule::Recorder => analysis.state.pov_player_index,
+            analysis::highlights::Rule::Everyone => None,
+        };
+        highlights
+            .all
+            .iter()
+            .filter(|h| h.slot.is_some())
+            .filter(|h| recorder_slot.is_none() || h.slot == recorder_slot)
+            .count()
+    }
+
+    #[test]
+    fn a_pov_demo_lists_the_recorders_highlights_and_an_hltv_demo_everyones() {
+        let mut json = serde_json::to_value(analysis_of_one_player(
+            serde_json::json!({ "Connected": { "client_id": 3 } }),
+        ))
+        .unwrap();
+        let mut other = json["state"]["players"][0].clone();
+        other["name"] = "milo".into();
+        other["id"] = "76561197961831029".into();
+        other["connection"] = serde_json::json!({ "Connected": { "client_id": 5 } });
+        other["kill_streaks"][0]["slot"] = 5.into();
+        json["state"]["players"].as_array_mut().unwrap().push(other);
+        json["state"]["pov_player_index"] = 3.into();
+
+        json["demo_info"]["demo_type"] = "POV".into();
+        let pov: analysis::Analysis = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(rows(&pov), [(Some("leaver".to_string()), 3, 2)]);
+        let highlights = analysis::highlights::highlights(&pov);
+        let demo = source_check_tests::streak_for(std::path::Path::new("x.dem"), None);
+        let streaks = capture_streaks(&highlights, &demo);
+        assert!(streaks.iter().all(|s| s.recorded_this_demo));
+        assert_eq!(rows_before_573(&pov), streaks.len());
+
+        json["demo_info"]["demo_type"] = "HLTV".into();
+        let hltv: analysis::Analysis = serde_json::from_value(json).unwrap();
+        let listed = rows(&hltv);
+        assert_eq!(
+            listed,
+            [
+                (Some("leaver".to_string()), 3, 2),
+                (Some("milo".to_string()), 5, 2)
+            ]
+        );
+        let highlights = analysis::highlights::highlights(&hltv);
+        let streaks = capture_streaks(&highlights, &demo);
+        assert!(streaks.iter().all(|s| !s.recorded_this_demo));
+        assert_eq!(streaks[1].steam_id.as_deref(), Some("76561197961831029"));
+    }
+
+    /// The checked-in POV recording lists as many highlights as it did before
+    /// #573, all the recorder's.
+    #[test]
+    fn the_ci_fixture_lists_the_same_highlights_as_before() {
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        ));
+        let ((_, streaks, ..), analysis) =
+            scan_demo_for_highlights_with_analysis(path).expect("the fixture scans");
+        assert!(!streaks.is_empty());
+        assert_eq!(streaks.len(), rows_before_573(&analysis));
+        assert!(streaks.iter().all(|s| s.recorded_this_demo));
+    }
+
+    /// POV demos list as many highlights as before #573. Reads every demo in
+    /// `DOD_ANALYSIS_DEMOS` (a folder), else the pre-Anniversary install's
+    /// `dod` folder, up to 50 POV demos: `cargo test -p native --lib
+    /// pov_highlight_counts -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn pov_highlight_counts_are_unchanged() {
+        let dir = std::env::var_os("DOD_ANALYSIS_DEMOS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    "C:/Program Files (x86)/Steam/steamapps/common/Half-Life - PRE-Anniversary for Movies/dod",
+                )
+            });
+        let mut demos: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("no demos at {}: {e}", dir.display()))
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
+            .collect();
+        demos.sort();
+        let (mut checked, mut before_total, mut after_total) = (0, 0, 0);
+        for path in demos {
+            if checked == 50 {
+                break;
+            }
+            if is_hltv_demo(&path).unwrap_or(true) {
+                continue;
+            }
+            let Ok(((_, streaks, ..), analysis)) = scan_demo_for_highlights_with_analysis(&path)
+            else {
+                continue;
+            };
+            if analysis.demo_info.demo_type == "HLTV" {
+                continue;
+            }
+            let before = rows_before_573(&analysis);
+            println!(
+                "{:>4} {:>4}  {}",
+                before,
+                streaks.len(),
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+            assert_eq!(streaks.len(), before, "{}", path.display());
+            checked += 1;
+            before_total += before;
+            after_total += streaks.len();
+        }
+        println!("{checked} POV demos: {before_total} highlights before, {after_total} after");
+        assert!(checked > 0, "no POV demo read in {}", dir.display());
     }
 }

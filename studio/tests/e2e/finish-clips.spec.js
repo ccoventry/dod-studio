@@ -33,7 +33,7 @@ function job(id, block, status, extra = {}) {
 async function gotoHarness(page) {
   await page.addInitScript(() => {
     window.__mockInvokeHandlers = {
-      queue_render_batch: (args) => args.payload.render_directories.length,
+      queue_render_batch: (args) => ({ total: args.payload.render_directories.length, added: args.payload.render_directories.length }),
       get_export_pool_free_gb: () => 100,
       get_render_required_estimate_gb: () => 0,
     };

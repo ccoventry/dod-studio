@@ -114,7 +114,7 @@ pub fn set_prone(prone: bool) {
             crate::debug::report(&format!(
                 "spectator_eye: the spectated player is {}",
                 if prone {
-                    "prone -- eye 6 below his origin"
+                    "prone -- eye 6 below their origin"
                 } else {
                     "not prone -- the game's own eye height"
                 }
@@ -209,7 +209,7 @@ pub fn status() -> String {
         return "the in-eye camera uses the game's own heights (a prone player is seen from crouch height)".to_string();
     }
     format!(
-        "the in-eye camera drops to the ground for a prone player; right now he is {}",
+        "the in-eye camera drops to the ground for a prone player; right now they are {}",
         if PRONE.load(Ordering::Relaxed) {
             "prone"
         } else {

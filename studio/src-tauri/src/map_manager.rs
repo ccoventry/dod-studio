@@ -410,7 +410,7 @@ pub async fn scan_game_configs(
     decal_flush: Option<bool>,
 ) -> Result<CfgReport, String> {
     let exe = PathBuf::from(&game_path);
-    let Some(dir) = exe.parent().map(|p| p.join("dod")) else {
+    let Some(dir) = native::shared::paths::mod_dir_for_exe(&exe) else {
         return Ok(CfgReport::default());
     };
     if !dir.is_dir() {

@@ -28,6 +28,12 @@
 //!     are drawn by different code paths and do not otherwise share a look.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
+//!   - `spectator_gun`: the gun drops off the bottom of the screen when the
+//!     player's own would (sprint, jump, prone, ladder).
+//! - `spectator_deathcam`: `dodstudio_spec_deathcam`, the game's own death cam
+//!   when the watched player dies, as his recording shows it, instead of the
+//!   rolled view from his dead eyes. Its own switch: a movie wants it, a
+//!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
 //!   gunshots through. It changes no sound.
 //! - `deathmsg`: the `ds_deathmsg` command -- raise the four-line cap on
@@ -61,7 +67,10 @@
 //!   `docs/goldsrc_scoreboard.md`.
 //! - `voice`: the `ds_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
-//! - `crosshair`: the `ds_hide_crosshair` cvar -- hide the crosshair and have
+//! - `voice_menus`: the `dodstudio_hide_voice_menus` cvar -- hide the
+//!   numbered voice-command menus and the hand-signal command menu a POV
+//!   demo's player opened.
+//! - `crosshair`: the `dodstudio_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
 //! - `objicons`: the `ds_objectives` command -- place the objective
@@ -74,7 +83,10 @@
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
 //!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
-//! - `particle_hide`: `ds_hide_asset` for DoD's own particles (impact
+//! - `hud_sprites`: `dodstudio_hide_asset` for the HUD's own 2D sprites, by
+//!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
+//!   function pointers (#808). Installed when client.dll initialises.
+//! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
 //! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
@@ -87,6 +99,9 @@
 //! - `demo_list_folders`: the `ds_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `demo_other_drives`: the `dodstudio_demo_other_drives` cvar -- `viewdemo`
+//!   and `playdemo` open a demo on another drive by its full path, through a
+//!   swap of the file system's `Open` slot (issue #776).
 //! - `engine_buttons`: a button inside a GameUI window whose command is
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
@@ -120,6 +135,10 @@
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
 //!   turns it off.
+//! - `game_dir_check`: demos recorded in `dod` play in a copy of the game
+//!   folder (`-game dod_movies`), which the engine otherwise refuses with
+//!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
+//!   check, both builds; only when the game folder is not `dod`.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -179,6 +198,7 @@ mod debug;
 mod decals;
 mod demo_file;
 mod demo_list_folders;
+mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
@@ -189,17 +209,22 @@ mod engine;
 mod engine_buttons;
 mod events;
 mod ex_interp;
+mod fast_load;
 mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod game_dir_check;
+mod game_folder;
 mod hand_signals;
 mod hide_asset;
 mod hlae_window;
 mod hltv_messages;
+mod hud_sprites;
 mod hudelement;
 mod hull_trace_guard;
 mod lightmap_gamma;
+mod list_panel;
 mod map_text;
 mod missing_shots;
 mod msglog;
@@ -213,10 +238,15 @@ mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
+mod player_crosshair;
+mod player_overrides;
+mod player_table;
 mod pmove_guard;
 mod position;
+mod pov_live_bob;
 mod remote;
 mod review;
+mod review_lock;
 mod run_in_background;
 mod scan;
 mod schedule;
@@ -224,18 +254,23 @@ mod scoreboard;
 mod screen_effects;
 mod server_query;
 mod spectator_bars;
+mod spectator_buttons;
 mod spectator_crosshair;
+mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
 mod spectator_hud;
 mod spectator_target;
+mod spray;
+mod spray_hltv;
 mod sprite_blend;
 mod streaks;
 mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod voice_menus;
 mod window_layout;
 mod world_shaders;
 
@@ -435,6 +470,8 @@ fn install_fixes() {
     pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.
     sprite_blend::install();
+    // Before the first demo's svc_serverinfo; does nothing in `dod`.
+    game_dir_check::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

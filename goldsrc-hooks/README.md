@@ -7,7 +7,12 @@ reverse-engineering. For every `ds_*` cvar/command in one scannable
 table, see [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
 instead of the list below.
 
-**Match POV** (`ds_spec_match_pov 1`, off by default;
+Folder names below (`dod`, `dod_addon`, `dod_downloads`) are the defaults.
+The DLL reads the game folder from the game's own `-game <folder>` (Studio's
+Game Folder setting, #402; `src/game_folder.rs`), so under `-game dod_movies`
+they are `dod_movies`, `dod_movies_addon` and `dod_movies_downloads`.
+
+**Match POV** (`dodstudio_spec_match_pov 1`, off by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
 making a spectated first-person view look and sound like the player's own
 recording. Five things come on together, and anything else of that kind
@@ -35,7 +40,7 @@ joins this switch rather than adding a command:
   at crouch height. See `docs/goldsrc_spectator_camera.md`.
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
-  ladder, as his own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
+  ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
@@ -45,7 +50,13 @@ is the complete list):
 
 - **Death notices** (`ds_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
-  players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only
+  players (by slot, SteamID or `self`), injects one by hand, or draws the
+  names in a Windows font of your choice, live (`font "Verdana" 28 bold
+  shadow`: the names go through the engine's vgui2 surface with a font handle
+  the hook owns; `src/deathmsg/font.rs`, #562), or draws the weapon icons
+  bigger with the lines spaced to match (`scale 2`: the game's own sprite
+  draw under a scaled modelview, its rect table swapped for a scaled copy;
+  `src/deathmsg/scale.rs`, #728). HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
 - **Message log** (`ds_debug_msglog <name>... | all | clear`): dumps chosen
@@ -77,15 +88,21 @@ is the complete list):
 - **Crosshair** (`ds_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
-- **Spectator lock** (`ds_spec_lock 1`): in an HLTV demo the camera
-  stays on the player being watched when he dies; the game otherwise moves to
+- **Spectator lock** (`dodstudio_spec_lock 1`): in an HLTV demo the camera
+  stays on the player being watched when they die; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
   switch. See `docs/goldsrc_spectator_camera.md`.
 - **High-quality overviews:** when `overviews/<map>_hd.tga` sits beside the
   overview the game loads (in `dod_addon` with `-addons`, or `dod`), its tiles
   replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
   Overviews page writes it. See `src/overview_hd.rs`.
-- **Overview map icons** (`ds_hud_map_players 0-4`): which players the
+- **Death cam** (`dodstudio_spec_deathcam 1`): when the spectated player dies,
+  the camera pulls back from their body and turns to the killer for 2.4 s, as
+  their own recording shows, then returns to their eyes. DoD's own `V_GetDeathCam`,
+  which `V_CalcRefdef` never reaches for a spectator. A movie wants it, a
+  shoutcast does not, so it is not part of `spec_match_pov`. See
+  `docs/goldsrc_spectator_camera.md`.
+- **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
   map's one team test in `client.dll`; see `src/overview_players.rs`.
@@ -93,10 +110,12 @@ is the complete list):
   the scope off for demo playback; this turns it back on, so a POV demo shows
   it whenever the recorder zoomed, and in-eye it is the watched player's rifle
   rather than the Springfield DoD always picks there. Two one-byte patches in
-  `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307).
-- **Spectator target** (`ds_spec_target <player>`): puts the camera on
-  a player by number, the one `ds_deathmsg players` lists. Same doc.
-- **Spectator bars** (`ds_hide_spectator_bars 1`): hides the two dark
+  `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307). Outside the
+  scope's frame the screen is black at any FOV (`gl_widescreen_yfov 1`,
+  `mirv_fov`), in demos only; see `src/demo_scope/fill.rs` (#799).
+- **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
+  a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
+- **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
   bands across the top and bottom of the screen while spectating, and the
   text and menu row on them, on screen and with no capture running, which
   HLAE's `mirv_movie_hidepanels` cannot do. A filter on vgui2's
@@ -164,9 +183,27 @@ is the complete list):
   demos sit directly in it. Only what is really under `dod/` is listed, not
   the other folders the game's file system merges in (`valve/`, the install
   folder's). On by default; a Settings-tab box turns it off. See
-  `src/demo_list_folders.rs`.
-- **Window layout** (`ds_resizable_windows 1`,
-  `ds_remember_window_layout 1`): every GameUI window can be resized
+  `src/demo_list_folders.rs`. Since #779 `dod/`'s list in the game's Load
+  Demo window also has a row per drive, a drive's folders are listed
+  straight from the disk, and the Demos
+  tab has Back, Forward and Up (above a drive is This PC,
+  every drive as one list, where Up greys out) and a Go to dropdown: the
+  game folder, Studio's analysed demos (every demo in its analyzer cache as
+  one list, with the tab's filters on it), This PC, each drive, Studio's demo folders
+  (from its settings.json) and the folders visited lately; the folder shown
+  is remembered between sessions. Each row has an icon (up, folder, drive, POV or HLTV demo) in a
+  first image column, drawn from pictures in the DLL through the list's own
+  image list; see `src/studio_panel/hook/list_icons.rs`.
+- **Demos on another drive** (`dodstudio_demo_other_drives 1`): `viewdemo`
+  and `playdemo` open a demo by its full path, `viewdemo "D:/folder/demo"`,
+  which the game alone cannot (its file system only tries each search path
+  plus the name, and the Anniversary build asserts on the `:`). A swap of
+  the file system's `Open` slot: the drive's root becomes a search path the
+  first time it is named, under the hook's own path ID, and the rest of the
+  path is opened under it. On by default. See `src/demo_other_drives.rs`
+  and `docs/goldsrc_viewdemo.md` (#776).
+- **Window layout** (`dodstudio_resizable_windows 1`,
+  `dodstudio_remember_window_layout 1`): every GameUI window can be resized
   like the console, and each comes back where it was left after a restart
   (the console loads no `.res`, so build mode can't save its place). Walks
   the engine surface's popups through vgui2's own interfaces; only
@@ -301,7 +338,8 @@ before launch; no file, no test -- no `hl.exe` is
 already running, and the install is one of the two movie installs. See the
 script's docstring for the steps and flags; `--check` runs only the refusal
 checks. `--at-launch` starts the demo from the launch command line, as a
-capture batch starts its primer, which matters for first-demo bugs (#546).
+capture batch without the hook DLL starts its primer, which matters for
+first-demo bugs (#546).
 
 ## Status
 
@@ -310,14 +348,34 @@ analysis only, are in each module's `//!` doc and the linked `docs/` pages.
 `tools/` holds a verifier per patched site, which checks the Rust constants
 against a real `client.dll` or `hw.dll`.
 
-`src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
-detail textures and skies as the game loads them: on when there's a
-`dodstudio_hd` folder (`dod_addon`, or `dod` from before #415), `ds_hd_enabled 0/1` in game, and
+`src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites
+(world sprites and the HUD's atlases -- kill feed, weapon icons, scopes, but
+not the crosshairs, which stay stock -- the latter uploaded with mipmaps so they stay clean at the HUD's
+1:1 draw, #728), decals, detail textures and skies as the game loads them: on when there's a
+`dodstudio_hd` folder (`dod_addon`, or `dod` from before #415), `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
 those files; see its README. It works the same on the 25th Anniversary
 `hw.dll` (#370), from that build's own offsets
 (`tools/verify_texture_hires_offsets.py --anniversary`).
+
+`src/spray.rs` does the same for player sprays (#428): in a demo, while
+`dodstudio_player_overrides` is 1, a player's spray becomes what Studio's
+Players table (Configuration > Players, mirrored to
+`%APPDATA%\dod-studio\goldsrc_hooks_players.txt`, read by
+`src/player_table.rs`) gives that player. `src/spray_hltv.rs` shoots every
+spray from a PNG (and every "no spray") as a spray of its own, built at the
+tab's spray size, in place of the engine's -- whether or not the demo saved
+one, POV or HLTV (#368) -- through the engine's own custom-spray path, on
+both builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`); with HD
+textures on, its upload gets the PNG itself. A spray the demo saved is drawn
+untouched ("From the demo", "Their own spray").
+`dodstudio_spray <name>` makes a `logos\<name>.png` the user's own spray for
+live play by writing the game's `tempdecal.wad` (with a backup).
+`src/player_crosshair.rs` gives the crosshair on screen (the recorder's in
+POV, the in-eye target's in HLTV) the table's sprite and tile, through the
+`SPR_Set`/`SPR_Draw*` hooks `src/hud_sprites.rs` already has in client.dll's
+`gEngfuncs` copy: no code patch, one table for every install.
 
 ### Always-on crash guards
 

@@ -101,13 +101,17 @@ pub fn flag_icons(install: &Path, level: &Level) -> Vec<FlagIcon> {
     out
 }
 
-/// `name` (with `%s` the map) in the install's `dod`, else `dod_addon`.
+/// `name` (with `%s` the map) in the install's game folder (`dod` by
+/// default, #402), else its `_addon` sibling.
 fn icon_file(install: &Path, map: &str, name: &str) -> Option<PathBuf> {
     let relative = name.replace("%s", map);
-    ["dod", "dod_addon"]
-        .into_iter()
-        .map(|game| install.join(game).join(&relative))
-        .find(|p| p.is_file())
+    [
+        crate::shared::paths::mod_dir(install),
+        crate::shared::paths::addon_dir(install),
+    ]
+    .into_iter()
+    .map(|game| game.join(&relative))
+    .find(|p| p.is_file())
 }
 
 /// The first frame of a GoldSrc sprite (`IDSP`, version 2) as RGBA, drawn

@@ -31,7 +31,7 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, recordingPlayerStreaks } from './master_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks, getVisibleDemos, getQueueRecorders, queueRecorderOf } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -43,15 +43,24 @@ import { numberField } from './number_field.js';
 import { initClipNameSettings, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { initCommandProfiles, setCommandProfiles } from './command_profiles_ui.js';
+import { renderCaptureSummary } from './capture_summary_ui.js';
 import { initRenderPresets } from './render_presets_ui.js';
 import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
+import { createProjectRescan } from './project_rescan.js';
+import { createQueueMatchGroups } from './queue_match_groups.js';
+import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
-import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
+import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { createHltvPicker } from './review_hltv_picker.js';
+import { initDemoLinks } from './demo_links.js';
+import { createSetup } from './setup_wiring.js';
+import { createPlayersUi } from './players_ui.js';
+import { getGameFolder } from './game_folder_ui.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -88,6 +97,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   let targetDrives = [];
   let renderExportDirs = []; // JIT multi-drive export pool for Render Studio
   let currentScannedDemos = [];
+  // The Setup window and the Capture page's checklist (#599): setup_wiring.js,
+  // created once everything it reads is wired, near the end of startup.
+  let setup = null;
+  let savedSetupDismissed = false;
   let selectedDemoIdx = null;
   // take_key -> uid[]. Recorded by capture_pane.js when a batch verifies a
   // block on disk; resolved by render_pane.js when that take finishes
@@ -98,6 +111,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   // on the detected tag (project_teams.js). Project state rather than demo
   // state, so a re-scan never touches it. Persisted in the project file.
   let projectTeams = emptyProjectTeams();
+  // The Review box's HLTV pick (#828), kept in the project file.
+  const hltvPick = createHltvPicker({
+    getDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
+    onChange: () => markProjectDirty(),
+  });
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
@@ -117,17 +136,23 @@ window.addEventListener("DOMContentLoaded", async () => {
         selectDemoAndRenderDetail(currentScannedDemos[0], selectedDemoIdx);
       }
       updateDemoFooter(currentScannedDemos);
+      // Match and half per demo (#685), from the analyzer cache; declared
+      // further down (queue_match_groups.js), reached through the closure.
+      regroupMatches();
     },
     getTakeIndex: () => takeIndex,
     setTakeIndex: (index) => { takeIndex = index; },
     getProjectTeams: () => projectTeams,
     setProjectTeams: (teams) => { projectTeams = teams; },
     checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+    offerRescan: () => offerRescan(),
+    getReviewSettings: () => hltvPick.getState(),
+    setReviewSettings: (raw) => hltvPick.setState(raw),
   });
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane();
+  initAuditorPane({ getDemos: () => currentScannedDemos });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({
@@ -140,7 +165,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTeamsPane({
     getDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,
-    onChange: markProjectDirty,
+    onChange: () => {
+      markProjectDirty();
+      // A renamed or merged team changes the clip names shown (#445).
+      // renderDetailView and refreshClipNamePreview are imported above;
+      // selectedDemoIdx is declared further down this scope.
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+      refreshClipNamePreview();
+    },
     // triggerAutoScan is declared further down (queue_scan.js).
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
@@ -177,6 +211,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       updateExportPoolIndicator();
       persistAppSettings();
       refreshLaunchGuard({ targetDrives, currentScannedDemos });
+      setup?.refresh();
     },
   });
 
@@ -186,7 +221,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.RENDER.EXPORT_DIR_ROW_PLACEHOLDER }],
     unique: true,
     browse: pickRenderExportDir,
-    onChange: () => persistAppSettings(),
+    onChange: () => { persistAppSettings(); setup?.refresh(); refreshSameDriveWarning(renderExportDirs, 'clips'); },
   });
 
   // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
@@ -220,6 +255,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       targetDrives,
       renderExportDirs,
       scanWorkers: readScanWorkers(),
+      // Read from the file until setup_wiring.js exists, so a save made
+      // earlier in startup keeps it.
+      setupDismissed: setup ? setup.isDismissed() : savedSetupDismissed,
     }),
     currentCaptureMode,
   });
@@ -241,6 +279,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         demoFolderHistory = [...settings.demo_folder_history];
       }
       scanFoldersForDemos = !!settings.scan_folders_for_demos;
+      savedSetupDismissed = !!settings.setup_dismissed;
       if (settings.analyzer_explorer_width) {
         analyzerExplorerWidth = settings.analyzer_explorer_width;
       }
@@ -252,6 +291,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (Array.isArray(settings.render_export_dirs) && settings.render_export_dirs.length > 0) {
         renderExportDirs = [...settings.render_export_dirs];
         renderExportDirsEditor.render();
+        refreshSameDriveWarning(renderExportDirs, 'clips');
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
       setCommandProfiles(settings.command_profiles, settings.command_profile_active);
@@ -304,12 +344,20 @@ window.addEventListener("DOMContentLoaded", async () => {
     getDemos: () => currentScannedDemos,
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
     scan: (paths, opts) => triggerAutoScan(paths, opts),
-    confirmTracked: (demo) => requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.SPLIT_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_SPLITS, confirmLabel: STRINGS.MAIN.SPLIT_ANYWAY }),
+    getTakeIndex: () => takeIndex,
+    refreshQueue: () => refreshAfterRelocation(true),
     pickedDemosPresent,
   });
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
+  // Configuration > Players (#428): players_ui.js.
+  createPlayersUi({
+    getDemos: () => currentScannedDemos,
+    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    getGameFolder,
+    persist: () => persistAppSettings(),
+  }).refresh();
 
   // ── Shared "a demo row was selected" handler ────────────────────────────────
   // Extracted so every renderMasterList call site behaves identically —
@@ -326,11 +374,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   function updateDemoFooter(demos) {
     const footerEl = document.querySelector('#demo-list-footer');
     if (footerEl) {
-      // Same recording-player filter the Highlights column uses (M2) — this
-      // used to sum every player's streaks in the demo, not just the
-      // recording player's, and could read in the hundreds where the
-      // visible Highlights column summed to a fraction of that.
-      const totalHighlights = (demos || []).reduce((sum, d) => sum + recordingPlayerStreaks(d).length, 0);
+      // The same highlights the Highlights column counts (M2).
+      const totalHighlights = (demos || []).reduce((sum, d) => sum + listedStreaks(d).length, 0);
       footerEl.textContent = STRINGS.WORKSPACE.demoListFooter((demos || []).length, totalHighlights);
     }
     // Clear Untracked/Clear All only make sense with something in the
@@ -341,12 +386,30 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (clearUntrackedBtnEl) clearUntrackedBtnEl.disabled = isEmpty;
     const clearAllBtnEl = document.querySelector('#clear-all-btn');
     if (clearAllBtnEl) clearAllBtnEl.disabled = isEmpty;
+    setup?.refresh();
+    // The HLTV pick's lists follow the queue: filled while it was empty they
+    // are disabled, and a disabled list never opens to refill itself.
+    hltvPick.refresh();
   }
+
+  // Which match and half each queued demo is (#685): queue_match_groups.js.
+  // Runs after a scan and a project load. The Group by dropdown (#823):
+  // queue_group_by.js; grouped by match, a regroup also reads uncached demos.
+  const { regroup: regroupMatches } = createQueueMatchGroups({
+    getDemos: () => currentScannedDemos,
+    renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    parseMissingByDefault: isGroupedByMatch,
+  });
+  createQueueGroupBy({
+    getDemos: () => currentScannedDemos,
+    renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    regroupMatches: (opts) => regroupMatches(opts),
+  });
 
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
   // queue_scan.js. Declared before anything can start a scan; the earlier
   // callers above reach triggerAutoScan through closures.
-  const { triggerAutoScan } = createQueueScan({
+  const { triggerAutoScan, addDemoFolder } = createQueueScan({
     getDemos: () => currentScannedDemos,
     setSelectedDemoIdx: (idx) => { selectedDemoIdx = idx; },
     selectDemoAndRenderDetail: (demo, idx) => selectDemoAndRenderDetail(demo, idx),
@@ -356,10 +419,20 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
     getScanPaths: () => scanPaths,
     persistAppSettings: () => persistAppSettings(),
+    regroupMatches: () => regroupMatches(),
+    getTakeIndex: () => takeIndex,
+  });
+
+  // Demos an older DoD Studio scanned, offered for a rescan when a project
+  // opens: project_rescan.js.
+  const { offerRescan } = createProjectRescan({
+    getDemos: () => currentScannedDemos,
+    scan: (paths) => triggerAutoScan(paths),
   });
 
   async function updateExportPoolIndicator() {
     const indicator = document.querySelector('#export-pool-free-indicator');
+    refreshSameDriveWarning(targetDrives);
     if (!indicator) return;
     if (targetDrives.length === 0) {
       indicator.textContent = STRINGS.MAIN.EXPORT_POOL_FREE_DEFAULT;
@@ -472,7 +545,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   initReviewMode({
     getDemos: () => currentScannedDemos,
     getCheckedPaths: getCheckedDemoPaths,
+    getShownPaths: () => getVisibleDemos().map((d) => d.path),
+    getRecorders: getQueueRecorders,
+    recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
+    hltvPick,
   });
 
   initCaptureUI(() => ({
@@ -480,7 +557,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
-  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
+  // Saving, renaming or deleting a profile changes its name in the capture
+  // summary strip without touching a field the strip listens to.
+  initCommandProfiles({
+    getLists: getCommandsState,
+    applyLists: applyCommandsState,
+    onChange: () => { persistAppSettings(); renderCaptureSummary(); },
+  });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
@@ -492,6 +575,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
     onStatusChange: onHighlightStatusChange
   });
 
@@ -500,7 +584,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFinishClips({
     getExportDirs: () => renderExportDirs,
     getClipNames: (exportDirs) => clipNamesForTakes(
-      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+      takeIndex, currentScannedDemos, getClipNameTemplate(),
+      { maxLength: maxNameLength(exportDirs), projectTeams },
     ),
     onSettingsChange: persistAppSettings,
   });
@@ -608,7 +693,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Clear Untracked / Selected / All and the tracked-work modal:
   // queue_actions.js.
-  const { requestTrackedClearConfirmation, requestTrackedDeleteConfirm } = createQueueActions({
+  const { requestTrackedDeleteConfirm } = createQueueActions({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     saveProjectSession: () => saveProjectSession(),
@@ -618,6 +703,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
+  initDemoLinks(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
   // capture_pane.js owns the Scheduled Command list, so the floor check reads
   // it from there rather than keeping a second copy.
   initRollFloors(() => getCommandsState().custom_commands);
@@ -639,11 +725,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   initClipNameSettings({
     getHighlight: () => {
       const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
-      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const own = demo ? listedStreaks(demo) : [];
       const streak = own.find((s) => s.selected) || own[0];
       return streak ? { demo, streak } : null;
     },
     getExportDirList: () => renderExportDirs,
+    getProjectTeams: () => projectTeams,
     onChange: () => {
       persistAppSettings();
       if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
@@ -667,7 +754,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // kill range, status, notes) — all of it is part of the `demos` written
     // by saveProjectSession(), so all of it marks the project dirty.
     markProjectDirty();
-  });
+  }, { getProjectTeams: () => projectTeams });
 
   // Demo Analyzer's Explorer sidebar Pinned tier shares the same
   // pinned_folders/scanPaths state as Capture Studio (matches dev's real
@@ -720,6 +807,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     getAnalyzerExplorerWidth: () => analyzerExplorerWidth,
     setAnalyzerExplorerWidth,
   });
+
+  setup = createSetup({
+    getDemos: () => currentScannedDemos,
+    getScanPaths: () => scanPaths,
+    getTargetDrives: () => targetDrives,
+    getRenderExportDirs: () => renderExportDirs,
+    captureFolders: { add: (p) => driveOverridesEditor.addItem(p), remove: (p) => driveOverridesEditor.removeItem(p) },
+    renderFolders: { add: (p) => renderExportDirsEditor.addItem(p), remove: (p) => renderExportDirsEditor.removeItem(p) },
+    addDemoFolder: (folder) => addDemoFolder(folder),
+    persistAppSettings: () => persistAppSettings(),
+    dismissed: savedSetupDismissed,
+  });
+  setup.start();
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {

@@ -14,6 +14,7 @@ import { streakUid, pruneTakeIndex } from './take_index.js';
 import { emptyProjectTeams, normalizeProjectTeams } from './project_teams.js';
 import { refreshTeamsPane } from './teams_pane.js';
 import { projectFolders } from './project_paths.js';
+import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -22,7 +23,10 @@ import { STRINGS } from './strings.js';
  *   getDemos() the queue, replaceDemos(demos) main.js's replaceScannedDemos,
  *   loadDemos(demos) make a loaded project's demos the queue and show them,
  *   getTakeIndex()/setTakeIndex(index), getProjectTeams()/setProjectTeams(teams),
- *   and checkMissingDemos(projectPath, scanPaths) from project_demos.js.
+ *   checkMissingDemos(projectPath, scanPaths) from project_demos.js,
+ *   offerRescan() from project_rescan.js, and getReviewSettings()/
+ *   setReviewSettings(raw), the Review box's HLTV pick (#828,
+ *   review_hltv_picker.js).
  */
 export function createProjectSession({
   getDemos,
@@ -33,6 +37,9 @@ export function createProjectSession({
   getProjectTeams,
   setProjectTeams,
   checkMissingDemos,
+  offerRescan = async () => false,
+  getReviewSettings = () => undefined,
+  setReviewSettings = () => {},
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -123,8 +130,8 @@ export function createProjectSession({
       });
       if (!filePath) return false;
 
-      const hlaePath = document.querySelector('#hlae-path-input')?.value || "";
-      const hlPath = document.querySelector('#hl-path-input')?.value || "";
+      // No HLAE or hl.exe path: those are this PC's settings, not the
+      // project's, and a project carrying them switched them on every open.
       const projectData = JSON.stringify({
         version: "0.12.0",
         // The folders this project's demos are in, not the app-wide pinned
@@ -132,12 +139,12 @@ export function createProjectSession({
         // project). Read back only to look for demos that have moved (#21).
         scanPaths: projectFolders(getDemos()),
         demos: getDemos(),
-        hlaePath: hlaePath,
-        hlPath: hlPath,
         // Pruned against what's actually still scanned so the index
         // doesn't accumulate uids for demos removed from the project.
         takeIndex: pruneTakeIndex(getTakeIndex(), collectAllUids()),
         teams: getProjectTeams(),
+        // Whose highlights an HLTV demo's review plays (#828).
+        review: getReviewSettings(),
         // Kept for older-file/older-version compatibility — nothing on the
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
@@ -187,14 +194,9 @@ export function createProjectSession({
           // pattern as detail_pane.js's "View Match Telemetry" button.
           switchNavTab('workspace');
           clearCheckedPaths();
-          if (data.hlaePath) {
-            const hlaeInput = document.querySelector('#hlae-path-input');
-            if (hlaeInput) hlaeInput.value = data.hlaePath;
-          }
-          if (data.hlPath) {
-            const hlInput = document.querySelector('#hl-path-input');
-            if (hlInput) hlInput.value = data.hlPath;
-          }
+          // An older project's hlaePath / hlPath are ignored: Settings own
+          // those paths, and applying them here silently switched the game
+          // install (a PRE project opened on a POST setup).
           // Tolerant: a 0.10.0 project file has no takeIndex at all — load
           // as empty rather than reject the file. Auto-Rendered just won't
           // retroactively apply to takes captured before this existed.
@@ -209,6 +211,9 @@ export function createProjectSession({
           // Tolerant the same way: a project saved before the Teams list
           // (#445) has no `teams`, and loads with none named or merged.
           setProjectTeams(normalizeProjectTeams(data.teams));
+          // A project saved before #828 has no `review`: the HLTV box goes
+          // back to its default, nobody picked.
+          setReviewSettings(data.review);
           if (data.demos) {
             // timeline_string is a derived field, saved as a convenience
             // snapshot rather than the source of truth — recompute it from
@@ -217,9 +222,15 @@ export function createProjectSession({
             // sessions saved before the fix, instead of replaying whatever
             // text got baked in at save time.
             data.demos.forEach(demo => (demo.streaks || []).forEach(updateStreakVisuals));
+            // A project saved before #573 holds other players' highlights
+            // the table never showed; a new scan lists the recorder's alone.
+            data.demos.forEach(dropOtherPlayersSavedStreaks);
             loadDemos(data.demos);
             showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
             await checkMissingDemos(selected, data.scanPaths || []);
+            // After the missing check: a demo it relocates can be rescanned,
+            // one still missing can't.
+            await offerRescan();
           }
           refreshTeamsPane();
         }
@@ -244,6 +255,7 @@ export function createProjectSession({
     currentSessionPath = null;
     setTakeIndex({});
     setProjectTeams(emptyProjectTeams());
+    setReviewSettings(null);
     refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();

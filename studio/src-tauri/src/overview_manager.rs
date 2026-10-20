@@ -120,17 +120,17 @@ fn screen_height() -> Option<u32> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn overview_load_edits(map: String, install: Option<String>) -> Option<serde_json::Value> {
     files::load_edits_for(install.as_deref().map(Path::new), &map)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn overview_save_edits(map: String, edits: serde_json::Value) -> Result<(), String> {
     files::save_edits(&map, &edits)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn overview_reset_edits(map: String) -> Result<(), String> {
     files::remove_edits(&map)
 }

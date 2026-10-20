@@ -84,27 +84,13 @@ fn from_analyzer_cache(root: &Path, demo: &Path) -> Option<Vec<String>> {
 }
 
 fn demos_in(folder: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
-    let Ok(read) = std::fs::read_dir(folder) else {
-        return;
+    let walker = crate::sys::folder_walk::Walker::new().skip_system_folders();
+    let walker = if recursive {
+        walker
+    } else {
+        walker.max_depth(1)
     };
-    let mut dirs = Vec::new();
-    for e in read.flatten() {
-        let p = e.path();
-        match e.file_type() {
-            Ok(t) if t.is_dir() => dirs.push(p),
-            Ok(t)
-                if t.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dem")) =>
-            {
-                out.push(p);
-            }
-            _ => {}
-        }
-    }
-    if recursive {
-        for d in dirs {
-            demos_in(&d, true, out);
-        }
-    }
+    out.extend(walker.demos(folder));
 }
 
 /// Every demo under `folder` with more than one map. `progress(done, total,

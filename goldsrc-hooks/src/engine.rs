@@ -105,11 +105,69 @@ pub struct DemoApiPartial {
     pub is_playingback: unsafe extern "C" fn() -> i32,
 }
 
+/// Partial mirror of `triangleapi_s` (`common/triangleapi.h`) from `version`
+/// through `WorldToScreen`. Every offset is pinned by a call in DoD's
+/// `CHudScope::DrawTriApiScope` (`client+0x46690`): `RenderMode` `+0x4`,
+/// `Begin` `+0x8`, `End` `+0xc`, `Color4f` `+0x10`, `TexCoord2f` `+0x18`,
+/// `Vertex3fv` `+0x1c`, `Brightness` `+0x24`, `CullFace` `+0x28`,
+/// `SpriteTexture` `+0x2c`; `Vertex3f` `+0x20` and `WorldToScreen` `+0x30`
+/// by other client calls through the same pointer.
+#[repr(C)]
+pub struct TriangleApiPartial {
+    pub version: i32,
+    pub render_mode: unsafe extern "C" fn(mode: i32),
+    pub begin: unsafe extern "C" fn(primitive: i32),
+    pub end: unsafe extern "C" fn(),
+    pub color4f: unsafe extern "C" fn(r: f32, g: f32, b: f32, a: f32),
+    _color4ub: *mut c_void,
+    pub tex_coord2f: unsafe extern "C" fn(u: f32, v: f32),
+    pub vertex3fv: unsafe extern "C" fn(point: *const f32),
+    pub vertex3f: unsafe extern "C" fn(x: f32, y: f32, z: f32),
+    pub brightness: unsafe extern "C" fn(brightness: f32),
+    pub cull_face: unsafe extern "C" fn(style: i32),
+    pub sprite_texture: unsafe extern "C" fn(model: *mut ModelSPartial, frame: i32) -> i32,
+    /// Writes the point's normalised screen position (-1..1, y up) and
+    /// returns 1 when it is behind the eye.
+    pub world_to_screen: unsafe extern "C" fn(world: *const f32, screen: *mut f32) -> i32,
+}
+
+/// `SCREENINFO` (`cdll_int.h`): `iSize`, `iWidth`, `iHeight`, `iFlags`,
+/// `iCharHeight`, `charWidths[256]`. `CHud::VidInit` sets `iSize` to 0x214
+/// before `pfnGetScreenInfo` (`client+0x36b2c`), which pins the size.
+#[repr(C)]
+pub struct ScreenInfo {
+    pub size: i32,
+    pub width: i32,
+    pub height: i32,
+    pub flags: i32,
+    pub char_height: i32,
+    pub char_widths: [i16; 256],
+}
+
+const _: () = assert!(size_of::<ScreenInfo>() == 0x214);
+
+/// `gEngfuncs.pfnGetScreenInfo` (slot 12): fills `info`, whose `size` the
+/// caller sets first.
+pub type GetScreenInfoFn = unsafe extern "C" fn(info: *mut ScreenInfo) -> i32;
+
 /// `gEngfuncs.pfnGetCvarPointer` (slot 72). Looks up any registered cvar by
 /// name -- the engine's own included -- and returns its `cvar_s`, or null.
 /// DoD's `client.dll` calls this slot 11 times with a cvar name
 /// (`"r_decals"`, `"crosshair"`, `"developer"`, ...) and stores the result.
 pub type GetCvarPointerFn = unsafe extern "C" fn(name: *const c_char) -> *mut CvarSPartial;
+
+/// `gEngfuncs.pfnDrawConsoleString` (slot 27): draws `string` in the engine
+/// font (`EngineFont` of the default scheme) with its top-left at `(x, y)`,
+/// in the colour the last `pfnDrawSetTextColor` set, then puts the colour
+/// back to `con_color`. Returns `x` plus the text's width.
+pub type DrawConsoleStringFn = unsafe extern "C" fn(x: i32, y: i32, string: *const c_char) -> i32;
+/// `gEngfuncs.pfnDrawSetTextColor` (slot 28): the colour for the next
+/// `pfnDrawConsoleString`, each component 0.0..=1.0.
+pub type DrawSetTextColorFn = unsafe extern "C" fn(r: f32, g: f32, b: f32);
+/// `gEngfuncs.pfnDrawConsoleStringLen` (slot 29): the width and height
+/// `pfnDrawConsoleString` would give `string`.
+pub type DrawConsoleStringLenFn =
+    unsafe extern "C" fn(string: *const c_char, width: *mut i32, height: *mut i32);
 
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
 /// A client event handler, `void (*)(struct event_args_s *args)`.
@@ -545,7 +603,10 @@ pub struct EngineStudioApiPartial {
 /// leave no room for the count between them to be wrong.
 #[repr(C)]
 pub struct ClEngineFuncsPartial {
-    _slots_before_register_variable: [*mut c_void; 14], // pfnSPR_Load .. pfnSetCrosshair
+    _slots_before_get_screen_info: [*mut c_void; 12], // pfnSPR_Load .. pfnFillRGBA
+    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::VidInit` (`client+0x36b32`).
+    pub pfn_get_screen_info: GetScreenInfoFn,
+    _slot_set_crosshair: *mut c_void,
     pub pfn_register_variable: RegisterVariableFn,
     pub pfn_get_cvar_float: GetCvarFloatFn,
     _slots_before_add_command: [*mut c_void; 1], // pfnGetCvarString
@@ -554,7 +615,17 @@ pub struct ClEngineFuncsPartial {
     _slots_before_get_player_info: [*mut c_void; 2], // pfnServerCmd, pfnClientCmd
     /// Slot 21. See [`GetPlayerInfoFn`].
     pub pfn_get_player_info: GetPlayerInfoFn,
-    _slots_before_console_print: [*mut c_void; 8], // pfnPlaySoundByName .. pfnDrawConsoleStringLen
+    _slots_before_draw_console_string: [*mut c_void; 5], // pfnPlaySoundByName .. pfnDrawCharacter
+    /// Slot 27. See [`DrawConsoleStringFn`]; the kill feed's names go through
+    /// it (`CHudDeathNotice::Draw`, `call [gEngfuncs+0x6c]` at
+    /// `client.dll+0x2b089` and `+0x2b135`) (#562).
+    pub pfn_draw_console_string: DrawConsoleStringFn,
+    /// Slot 28. See [`DrawSetTextColorFn`] (`call [gEngfuncs+0x70]` at
+    /// `+0x2b079` and `+0x2b125`).
+    pub pfn_draw_set_text_color: DrawSetTextColorFn,
+    /// Slot 29. See [`DrawConsoleStringLenFn`] (`call [gEngfuncs+0x74]` at
+    /// `+0x2b00d` and `+0x2b04e`).
+    pub pfn_draw_console_string_len: DrawConsoleStringLenFn,
     pub pfn_console_print: ConsolePrintFn,
     _slots_before_cmd_argc: [*mut c_void; 7], // pfnCenterPrint .. Cvar_SetValue
     pub cmd_argc: CmdArgcFn,
@@ -579,7 +650,11 @@ pub struct ClEngineFuncsPartial {
     /// through `gEngfuncs+0x128`): the one at RVA 0x26c00 prefixes the result
     /// with `"dod/"` and cuts it at the last `'.'` -- a map path.
     pub pfn_get_level_name: GetLevelNameFn,
-    _slots_after_level_name: [*mut c_void; 9], // pfnGetScreenFade .. pEfxAPI
+    _slots_after_level_name: [*mut c_void; 7], // pfnGetScreenFade .. COM_FreeFile
+    /// Slot 82: the client's copy sits at `gEngfuncs+0x148`, which
+    /// `DrawTriApiScope` loads before every TriAPI call.
+    pub p_tri_api: *mut TriangleApiPartial,
+    _slot_efx_api: *mut c_void,
     pub p_event_api: *mut EventApiPartial,
     /// Slot 85. See [`DemoApiPartial`].
     pub p_demo_api: *mut DemoApiPartial,
@@ -628,6 +703,25 @@ pub fn engine_module_base() -> Option<usize> {
     let name = c"hw.dll";
     let handle = unsafe { GetModuleHandleA(name.as_ptr() as *const u8) };
     (!handle.is_null()).then_some(handle as usize)
+}
+
+/// One of the engine's or vgui2's interface singletons, by module and
+/// version string (`VGUI_Surface026` from `hw.dll`, `VGUI_Panel007` from
+/// `vgui2.dll`), through the module's exported `CreateInterface`. `None`
+/// while the module isn't loaded or doesn't serve that name.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub fn create_interface(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Option<*mut c_void> {
+    use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
+    type CreateInterfaceFn = unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void;
+    let handle = unsafe { GetModuleHandleA(module.as_ptr() as *const u8) };
+    if handle.is_null() {
+        return None;
+    }
+    let create = unsafe { GetProcAddress(handle, c"CreateInterface".as_ptr() as *const u8) }?;
+    // Safety: the interface factory's signature, the same on every Valve DLL.
+    let create: CreateInterfaceFn = unsafe { std::mem::transmute(create) };
+    let object = unsafe { create(name.as_ptr(), std::ptr::null_mut()) };
+    (!object.is_null()).then_some(object)
 }
 
 /// Returns the captured engine function table, once `client.dll` has loaded
@@ -930,6 +1024,10 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
     // gEngfuncs is only populated once the real Initialize has run, so this
     // has to come after it.
     unsafe { watch_client_commands() };
+    // The HUD loads its sheets (`SPR_Load`) at the first VidInit, right after
+    // this, so the hooks that map handles to paths go in now, not on the
+    // first `dodstudio_hide_asset add` (#808).
+    crate::hud_sprites::install();
 
     if !engfuncs.is_null()
         && let Some(callback) = ON_ENGINE_READY.get()
@@ -1118,6 +1216,52 @@ unsafe fn find_gengfuncs(real_initialize: *const u8) -> Option<*mut *mut c_void>
     None
 }
 
+/// `client.dll`'s own `cl_enginefunc_t` copy, once the real `Initialize` is
+/// known (see [`find_gengfuncs`]); `hud_sprites` patches its `SPR_*`
+/// pointers the way [`watch_client_commands`] patches `pfnClientCmd`.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn client_gengfuncs() -> Option<*mut *mut c_void> {
+    let real_initialize = REAL_INITIALIZE.load(Ordering::Acquire) as *const u8;
+    if real_initialize.is_null() {
+        return None;
+    }
+    unsafe { find_gengfuncs(real_initialize) }
+}
+
+/// Writes `hook` into slot `slot` of client.dll's `gEngfuncs` copy and
+/// returns what was there.
+///
+/// # Safety
+/// `gengfuncs` is the live copy from [`client_gengfuncs`], and `hook` has
+/// the slot's signature.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) unsafe fn patch_gengfuncs_slot(
+    gengfuncs: *mut *mut c_void,
+    slot: usize,
+    hook: *mut c_void,
+) -> Result<*mut c_void, String> {
+    unsafe {
+        let at = gengfuncs.add(slot);
+        let was = *at;
+        if was.is_null() {
+            return Err(format!("slot {slot} is null"));
+        }
+        let mut old: PAGE_PROTECTION_FLAGS = 0;
+        if VirtualProtect(
+            at as *mut c_void,
+            size_of::<*mut c_void>(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old,
+        ) == 0
+        {
+            return Err(format!("slot {slot} could not be made writable"));
+        }
+        *at = hook;
+        VirtualProtect(at as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
+        Ok(was)
+    }
+}
+
 /// Redirects `client.dll`'s own `pfnClientCmd` through `hook_client_cmd`.
 ///
 /// This patches one function pointer inside a struct client.dll owns, rather
@@ -1192,7 +1336,10 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 }
 
 /// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
-/// adjust the viewmodel it just placed (`spectator_gun`).
+/// replace the camera for a dead player (`spectator_deathcam`, before the
+/// position is recorded, so the recorded view is the drawn one), adjust the
+/// viewmodel it just placed (`spectator_gun`) and keep its live bob for a POV
+/// demo (`pov_live_bob`).
 unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
     if real.is_null() {
@@ -1200,15 +1347,18 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
     unsafe { real(pparams) };
+    unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {
         // Safety: the engine's ref_params_s for this view, valid for the call.
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    crate::pov_live_bob::after_calc_refdef(pparams);
 }
 
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
-/// scope is drawn), after `demo_scope` has read the frame's render view.
+/// scope is drawn), after `demo_scope` has read the frame's render view, and
+/// with its black fill around the scope (#799).
 unsafe extern "C" fn tramp_draw_transparent_triangles() {
     let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
     if real.is_null() {
@@ -1216,7 +1366,8 @@ unsafe extern "C" fn tramp_draw_transparent_triangles() {
     }
     crate::demo_scope::before_transparent_triangles();
     let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
-    unsafe { real() };
+    // Safety: the client's own export, called on the engine's thread.
+    crate::demo_scope::with_black_fill(|| unsafe { real() });
 }
 
 /// Called once per entity the engine is about to add to the render list.

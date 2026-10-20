@@ -11,9 +11,12 @@ import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { multiMapSplitButton } from './queue_multimap.js';
-import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { matchesInQueue } from './queue_match_groups.js';
+import { groupDemos, currentGroupBy } from './queue_group_by.js';
 import { makeClearable } from './clearable_input.js';
-import { statusCountColor, HIGHLIGHT_STATUS } from './status_colors.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { countsCell, statusCounts, reviewCounts, initCountLegends } from './queue_counts.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -112,6 +115,18 @@ listen('demo_players', (event) => {
   if (recorder) renderMasterList(currentDemos, null, currentOnSelectDemo);
 }).catch((err) => console.error('Failed to register demo_players listener:', err));
 
+/** Every player who recorded a demo in the queue, one entry per id with
+ *  every name it was seen with (player_filter.js's groupPlayers). */
+export function getQueueRecorders() {
+  return groupPlayers(currentDemos.map(recorderOf).filter(Boolean));
+}
+
+/** Who recorded `demo` (`{ id, name }`), from the scan or a lookup; null for
+ *  an HLTV demo or one not looked up yet. */
+export function queueRecorderOf(demo) {
+  return recorderOf(demo);
+}
+
 /** Refills the player filter from the queue's recorders, keeping the pick
  *  while that player still has a demo in the queue. */
 function renderPlayerFilterOptions() {
@@ -165,6 +180,7 @@ export function getVisibleDemos() {
 }
 
 export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy, onSplitDemo) {
+  initCountLegends();
   if (onDeleteDemo) {
     currentOnDeleteDemo = onDeleteDemo;
   }
@@ -227,7 +243,8 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
     const activeTab = document.querySelector('.nav-tab-btn.active')?.dataset.nav;
     if (activeTab !== 'workspace') return;
 
-    const rows = Array.from(document.querySelectorAll('#master-demo-table-body tr'));
+    // Group header lines (#685, #823) are not demos, so the arrows step over them.
+    const rows = Array.from(document.querySelectorAll('#master-demo-table-body tr:not(.queue-match-header)'));
     if (!rows.length || rows[0].querySelector('.table-empty')) return;
 
     // Instant select, no separate cursor: selecting a row here just wires up
@@ -246,17 +263,9 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-// recordingPlayerStreaks lives in queue_filters.js now, beside the quick
+// listedStreaks lives in queue_filters.js, beside the quick
 // filters that share it; re-exported for main.js and detail callers.
-export { recordingPlayerStreaks };
-
-/** Count streaks matching a given status string. An unset status (still
- *  `undefined` — see take_index.js's isHighlightTracked doc comment) counts
- *  as 'None', not 'Pending': Pending is now a deliberate flag the user sets
- *  to mark a highlight for later capture, not the implicit default. */
-function countByStatus(streaks, status) {
-  return (streaks || []).filter((s) => (s.status || STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT) === status).length;
-}
+export { listedStreaks };
 
 // ── Row selection (Clear Selected) ──────────────────────────────────────────
 
@@ -346,7 +355,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
   if (filteredDemos.length === 0) {
     tableBody.innerHTML =
-      `<tr><td colspan="8" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_MATCH_SEARCH}</td></tr>`;
+      `<tr><td colspan="7" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_MATCH_SEARCH}</td></tr>`;
     syncClearSelectedButtonState();
     return;
   }
@@ -358,17 +367,32 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   Array.from(checkedPaths).forEach(p => { if (!allPaths.has(p)) checkedPaths.delete(p); });
   syncClearSelectedButtonState();
 
-  filteredDemos.forEach((demo) => {
+  // Group by (#685, #823): the visible demos in groups, a header line before
+  // each group; otherwise the queue's own order. Either way the same demos.
+  const groups = groupDemos(filteredDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
+  const rows = groups
+    ? groups.flatMap((g) => [{ header: g }, ...g.demos.map((demo) => ({ demo }))])
+    : filteredDemos.map((demo) => ({ demo }));
+
+  rows.forEach(({ header, demo }) => {
+    if (header) {
+      const tr = document.createElement('tr');
+      tr.className = 'queue-match-header';
+      const td = document.createElement('td');
+      td.colSpan = 7;
+      td.textContent = header.text;
+      if (header.title) td.title = header.title;
+      tr.appendChild(td);
+      tableBody.appendChild(tr);
+      return;
+    }
     const originalIdx = currentDemos.indexOf(demo);
-    // Highlights/Pending/Captured/Rendered all count only the recording
-    // player's own streaks, matching the Highlight Details table's rows.
-    const ownStreaks = recordingPlayerStreaks(demo);
+    // Every count column counts only the recording player's own streaks,
+    // matching the Highlight Details table's rows.
+    const ownStreaks = listedStreaks(demo);
 
     // ── Derive live column values ─────────────────────────────────────────
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
-    const pending     = countByStatus(ownStreaks, HIGHLIGHT_STATUS.PENDING); // M4
-    const captured    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.CAPTURED); // M4
-    const rendered    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.RENDERED); // M4
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
@@ -467,28 +491,12 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     tdSelected.style.color = selected > 0 ? '#64b5f6' : '#555';
     tdSelected.textContent = selected;
 
-    // Col 5: Pending count   [M4]
-    const tdPending = document.createElement('td');
-    tdPending.style.padding = '6px 8px';
-    tdPending.style.textAlign = 'center';
-    tdPending.style.color = statusCountColor(HIGHLIGHT_STATUS.PENDING, pending);
-    tdPending.textContent = pending;
+    // Col 5: Status, Pending / Captured / Rendered in one cell; col 6: Review,
+    // unmarked / Keep / Maybe / Skip (queue_counts.js).
+    const tdStatus = countsCell(statusCounts(ownStreaks));
+    const tdReview = countsCell(reviewCounts(ownStreaks));
 
-    // Col 6: Captured count  [M4]
-    const tdCaptured = document.createElement('td');
-    tdCaptured.style.padding = '6px 8px';
-    tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = statusCountColor(HIGHLIGHT_STATUS.CAPTURED, captured);
-    tdCaptured.textContent = captured;
-
-    // Col 7: Rendered count  [M4]
-    const tdRendered = document.createElement('td');
-    tdRendered.style.padding = '6px 8px';
-    tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = statusCountColor(HIGHLIGHT_STATUS.RENDERED, rendered);
-    tdRendered.textContent = rendered;
-
-    // Col 8: Actions — remove-from-queue only, no status badge  [M3]
+    // Col 7: Actions — remove-from-queue only, no status badge  [M3]
     const tdActions = document.createElement('td');
     tdActions.style.padding = '6px 8px';
     tdActions.style.textAlign = 'center';
@@ -566,9 +574,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     tr.appendChild(tdName);
     tr.appendChild(tdYield);
     tr.appendChild(tdSelected);
-    tr.appendChild(tdPending);
-    tr.appendChild(tdCaptured);
-    tr.appendChild(tdRendered);
+    tr.appendChild(tdStatus);
+    tr.appendChild(tdReview);
     tr.appendChild(tdActions);
 
     // Row click selects the demo (but not when clicking the delete btn)

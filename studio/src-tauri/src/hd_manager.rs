@@ -9,7 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use native::hd::build::{BuildOutcome, BuildRequest};
 use native::hd::my_styles::{self, StyleDef};
-use native::hd::{self, HdStatus, map_list, misses, python, setup::SetupOutcome, upscaler};
+use native::hd::{
+    self, HdStatus, map_keys_cache, map_list, map_textures, misses, python, setup::SetupOutcome,
+    upscaler,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One download or build at a time, and a way to stop it. They share the
@@ -20,6 +23,15 @@ pub struct HdManager {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
     previewing: Arc<AtomicBool>,
+    /// The map coverage scan (#426): it only reads, so it has its own flag.
+    covering: Arc<AtomicBool>,
+}
+
+/// How far the map coverage scan is, for the page's progress bar.
+#[derive(Clone, serde::Serialize)]
+struct CoverageProgress {
+    done: usize,
+    total: usize,
 }
 
 /// The `hl.exe` path from the Configuration page, or the "set it first"
@@ -75,12 +87,66 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         // Read fresh, not scan_cached: the user may have just edited movie.cfg.
         if let Some(game) = exe.parent() {
-            let configs = native::patch::cfg_scan::scan(&game.join("dod"));
+            let configs = native::patch::cfg_scan::scan(&native::shared::paths::mod_dir(game));
             status.gl_max_size = Some(hd::gl_max_size::effective(&configs, &init_commands));
         }
         status
     }))
     .await
+}
+
+/// Which maps each style has map textures for (#426): every map in
+/// `<game>\dod\maps` against every style folder under `world`. Each map's
+/// keys come from the app's cache while its files are unchanged, so only
+/// the first scan, or one after a map or wad changed, reads the maps.
+/// Emits `hd_coverage_progress` at most ~30 times a second.
+#[tauri::command]
+pub async fn hd_world_coverage(
+    app: AppHandle,
+    state: State<'_, HdManager>,
+    game_path: String,
+) -> Result<map_textures::WorldCoverage, String> {
+    let exe = game_exe(&game_path)?;
+    let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let game = exe
+        .parent()
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?
+        .to_path_buf();
+    if state.covering.swap(true, Ordering::SeqCst) {
+        return Err(crate::messages::HD_COVERAGE_RUNNING.to_string());
+    }
+    let covering = Arc::clone(&state.covering);
+    let result = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let maps: Vec<String> = map_list::available_maps(&exe)
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        let cache_path = map_keys_cache::default_path();
+        let mut cache = map_keys_cache::KeysCache::load(&cache_path);
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let coverage = map_textures::world_coverage_with(
+            &game,
+            &root,
+            &maps,
+            &mut cache,
+            &mut |done, total| {
+                let now = std::time::Instant::now();
+                if done == total
+                    || now.duration_since(last_emit) >= std::time::Duration::from_millis(33)
+                {
+                    last_emit = now;
+                    let _ = app.emit("hd_coverage_progress", CoverageProgress { done, total });
+                }
+            },
+        );
+        // A cache that can't be written costs the next scan its speed, not
+        // this one its result.
+        let _ = cache.save(&cache_path);
+        coverage
+    }))
+    .await;
+    covering.store(false, Ordering::SeqCst);
+    result
 }
 
 /// Marks a download or build as running, or says one already is.

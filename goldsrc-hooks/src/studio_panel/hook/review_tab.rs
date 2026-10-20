@@ -71,6 +71,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             *shown = Some(labels);
         }
         drop(shown);
+        enable_review_only(vgui, page, view.is_some());
         if let Some(v) = view
             && FILLED.swap(v.generation, Ordering::AcqRel) != v.generation
         {
@@ -83,6 +84,31 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             );
             set(vgui, page, TO, TEXT_ENTRY_SLOT_SET_TEXT, &v.to.to_string());
             set(vgui, page, NOTE, TEXT_ENTRY_SLOT_SET_TEXT, &v.note);
+        }
+    }
+}
+
+type IsEnabledFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
+
+/// Greys out the answers, moves, Stop and boxes while no review runs, and
+/// enables them while one does (`review_lock::REVIEW_ONLY`). Only a control
+/// whose state differs is touched, so a frame with nothing to change costs
+/// ten `IsEnabled` calls.
+unsafe fn enable_review_only(vgui: &Vgui, page: Vpanel, on: bool) {
+    unsafe {
+        for name in crate::review_lock::REVIEW_ONLY {
+            let Some(object) = vgui
+                .child_named(page, name)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null())
+            else {
+                continue;
+            };
+            let is_enabled: IsEnabledFn = slot(object, PANEL_SLOT_IS_ENABLED);
+            if (is_enabled(object) & 0xff != 0) != on {
+                let set: ListIntVoidFn = slot(object, PANEL_SLOT_SET_ENABLED);
+                set(object, i32::from(on));
+            }
         }
     }
 }

@@ -18,6 +18,7 @@
 // through Tauri commands unwrapped (a separate crate — see issue #650).
 
 use std::fmt::Display;
+use std::path::Path;
 
 // ── spawn_blocking join-error flattening ────────────────────────────────────
 //
@@ -130,6 +131,7 @@ pub fn blender_not_blender(path: &str) -> String {
 pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";
 pub const HD_ALREADY_RUNNING: &str =
     "A download or build is already running. Wait for it, or Cancel it.";
+pub const HD_COVERAGE_RUNNING: &str = "Studio is already checking which maps each style covers.";
 pub const HD_NO_SCRIPTS: &str =
     "This copy of DoD Studio has no HD build scripts (goldsrc-hooks/tools/hd).";
 pub const HD_NO_PYTHON: &str =
@@ -175,7 +177,11 @@ pub fn obs_orphan_recovery_failed(err: impl Display) -> String {
 }
 
 pub fn failed_to_create_dod_directory(err: impl Display) -> String {
-    format!("Failed to create dod directory: {}", err)
+    format!(
+        "Failed to create the game folder `{}` beside hl.exe: {}",
+        native::shared::paths::game_folder(),
+        err
+    )
 }
 
 pub fn failed_to_patch_preview_demo(source_demo: &str, err: impl Display) -> String {
@@ -204,6 +210,12 @@ pub fn capturing_clip(clip: u32, total: u32) -> String {
     format!("Capturing clip {} of {}", clip, total)
 }
 
+/// The batch status line while a demo whose highlights have no demo-player
+/// times is read again before a Seek Between Clips batch (#434). 1-based.
+pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
+    format!("Reading {demo} again for its clip times ({index} of {total})")
+}
+
 pub fn game_directory_not_found(game_dir: &str) -> String {
     format!("Game directory not found: {}", game_dir)
 }
@@ -212,7 +224,7 @@ pub fn game_directory_not_found(game_dir: &str) -> String {
 /// `resolve_dod_dir_for_sweep`) — both derive `dod_dir` from `hl.exe`'s
 /// parent and fail identically when that parent can't be resolved.
 pub const COULD_NOT_RESOLVE_DOD_DIRECTORY: &str =
-    "Could not resolve the 'dod' directory next to hl.exe";
+    "Could not resolve the game folder next to hl.exe";
 pub const FAILED_TO_BUILD_PREVIEW_PATCH_JOB: &str = "Failed to build the preview patch job";
 
 pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
@@ -268,12 +280,20 @@ pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8])
 
 // ── render_manager.rs ────────────────────────────────────────────────────
 
-pub const RENDER_BATCH_ALREADY_RUNNING_LONG: &str = "A render batch is already running.";
-pub const BATCH_ALREADY_QUEUED: &str =
-    "A batch is already queued — start it or cancel it before scanning again.";
+pub const RENDER_SCAN_ALREADY_RUNNING: &str =
+    "A scan for takes is already running — wait for it to finish.";
 pub const RENDER_BATCH_ALREADY_IN_PROGRESS: &str = "Render batch already in progress";
 pub const NOTHING_QUEUED_TO_RENDER: &str = "Nothing queued to render — scan for takes first.";
 pub const SKIP_ONLY_FOR_OBS_TAKE: &str = "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip).";
+
+/// Start on a recovered batch whose autosave lacks something a render needs
+/// (#770): the rows show, but only a fresh scan can fill `what` in.
+pub fn recovered_batch_needs_scan(what: &str) -> String {
+    format!(
+        "recovered batch: scan again to set {} (Clear Queue, then Scan for Takes).",
+        what
+    )
+}
 
 pub fn no_such_job(job_id: &str) -> String {
     format!("No such job: {}", job_id)
@@ -290,11 +310,43 @@ pub fn job_still_rendering(job_id: &str) -> String {
     format!("Job {} is still rendering — cancel it first", job_id)
 }
 
+// ── take_delete_manager.rs (#644) ───────────────────────────────────────
+
+pub fn take_not_listed(take_folder: &str) -> String {
+    format!(
+        "{} isn't in the Render tab's list, so it was not deleted",
+        take_folder
+    )
+}
+
+pub fn take_is_rendering(take_folder: &str) -> String {
+    format!(
+        "{} is rendering. Cancel it first, then delete the take.",
+        take_folder
+    )
+}
+
+pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
-pub fn failed_to_delete_audit_file(path: &str, err: impl Display) -> String {
-    format!("Failed to delete {}: {}", path, err)
+pub fn failed_to_delete_audit_file(path: &Path, err: impl Display) -> String {
+    format!("Failed to delete {}: {}", path.display(), err)
 }
+
+/// The Duplicates delete only removes `.dem` files (#844).
+pub fn not_a_demo_file(path: &Path) -> String {
+    format!(
+        "Not deleted: {} is not a demo file, or is no longer there",
+        path.display()
+    )
+}
+
+pub fn audit_folder_not_found(path: &Path) -> String {
+    format!("Folder not found: {}", path.display())
+}
+
+pub const NO_AUDIT_FOLDERS: &str = "Add a folder to check, or choose All drives.";
 
 pub fn path_no_longer_exists(path: &str) -> String {
     format!("Path no longer exists: {}", path)
@@ -327,8 +379,9 @@ pub fn failed_to_open_folder(err: impl Display) -> String {
 
 pub fn no_map_folder_beside_exe(game_path: &str) -> String {
     format!(
-        "No map folder beside `{}` — maps are expected at `<hl.exe folder>/dod/maps`",
-        game_path
+        "No map folder beside `{}` — maps are expected at `<hl.exe folder>/{}/maps`",
+        game_path,
+        native::shared::paths::game_folder()
     )
 }
 
@@ -489,7 +542,7 @@ mod tests {
         );
         assert_eq!(
             failed_to_create_dod_directory("access denied"),
-            format!("Failed to create dod directory: {}", "access denied")
+            "Failed to create the game folder `dod` beside hl.exe: access denied"
         );
         assert_eq!(
             failed_to_patch_preview_demo("demo1.dem", "bad frame"),
@@ -520,7 +573,7 @@ mod tests {
         );
         assert_eq!(
             COULD_NOT_RESOLVE_DOD_DIRECTORY,
-            "Could not resolve the 'dod' directory next to hl.exe"
+            "Could not resolve the game folder next to hl.exe"
         );
         assert_eq!(
             FAILED_TO_BUILD_PREVIEW_PATCH_JOB,
@@ -542,14 +595,6 @@ mod tests {
 
     #[test]
     fn render_manager_messages_match_their_original_inline_text() {
-        assert_eq!(
-            RENDER_BATCH_ALREADY_RUNNING_LONG,
-            "A render batch is already running."
-        );
-        assert_eq!(
-            BATCH_ALREADY_QUEUED,
-            "A batch is already queued — start it or cancel it before scanning again."
-        );
         assert_eq!(
             RENDER_BATCH_ALREADY_IN_PROGRESS,
             "Render batch already in progress"
@@ -579,8 +624,16 @@ mod tests {
     #[test]
     fn audit_manager_messages_match_their_original_inline_text() {
         assert_eq!(
-            failed_to_delete_audit_file("demo.dem", "in use"),
+            failed_to_delete_audit_file(Path::new("demo.dem"), "in use"),
             format!("Failed to delete {}: {}", "demo.dem", "in use")
+        );
+        assert_eq!(
+            not_a_demo_file(Path::new("a.txt")),
+            "Not deleted: a.txt is not a demo file, or is no longer there"
+        );
+        assert_eq!(
+            audit_folder_not_found(Path::new("X:")),
+            "Folder not found: X:"
         );
         assert_eq!(
             path_no_longer_exists("demo.dem"),

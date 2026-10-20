@@ -134,6 +134,29 @@ fn flag_captures() {
 }
 
 #[test]
+fn cap_breaks() {
+    // Two timed captures, both completed: nothing to break (#192). This pins
+    // that a recording with no cancel credits nobody and counts nothing.
+    let state = &analysis().state;
+    let outcomes: Vec<_> = state
+        .objectives
+        .attempts
+        .iter()
+        .map(|a| (a.outcome.clone(), a.cancel_cause.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            (AttemptOutcome::Captured, None),
+            (AttemptOutcome::Captured, None)
+        ]
+    );
+    assert_eq!(state.objectives.blocks_unattributed, 0);
+    assert_eq!(state.objectives.attempts_abandoned, 0);
+    assert!(state.players.iter().all(|p| p.cap_breaks == 0));
+}
+
+#[test]
 fn highlights_keep_their_kill_time_slots() {
     // Everyone is still in the game at this demo's end, so each highlight's
     // slot is also the one they end in, and none is dropped.
@@ -176,4 +199,212 @@ fn pov_stats() {
         (garand.kills, garand.bullets_fired, garand.reloads),
         (4, 10, 1)
     );
+}
+
+/// #811: a damaged copy of the fixture is analysed up to the break, and says
+/// where that is. Built here, so CI runs it.
+mod damaged {
+    use super::*;
+
+    fn total_kills(analysis: &Analysis) -> usize {
+        analysis
+            .state
+            .players
+            .iter()
+            .map(|p| p.stats.1.max(0) as usize)
+            .sum()
+    }
+
+    fn assert_partial(damaged: &Analysis) {
+        let full = analysis();
+        let damage = damaged
+            .demo_info
+            .damage
+            .as_ref()
+            .expect("the break is noted");
+        let end = full.state.current_time.viewdemo_offset.as_secs_f32();
+        assert!(
+            damage.read_up_to_secs > 0.0 && damage.read_up_to_secs < end,
+            "{damage:?}, the whole demo runs to {end}"
+        );
+        // The analysis is the demo's up to there.
+        assert!(
+            damaged.state.current_time.viewdemo_offset.as_secs_f32() <= damage.read_up_to_secs,
+            "{damage:?}"
+        );
+        assert!(total_kills(damaged) <= total_kills(full));
+        assert!(damage.bytes_unread > 0 && !damage.reason.is_empty());
+        let summary = damage.summary();
+        assert!(
+            summary.starts_with(&format!(
+                "Damaged demo: {}, the rest (",
+                damage.read_up_to_text()
+            )),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn an_intact_demo_is_not_damaged() {
+        assert_eq!(analysis().demo_info.damage, None);
+    }
+
+    #[test]
+    fn a_file_cut_short_is_read_up_to_the_cut() {
+        let bytes = fixture();
+        let damaged =
+            Analysis::try_from_bytes(&bytes[..bytes.len() / 2]).expect("half a demo reads");
+        assert_partial(&damaged);
+    }
+
+    #[test]
+    fn a_bad_message_length_is_read_up_to_its_frame() {
+        let bytes = fixture();
+        let demo = dem::open_demo_from_bytes(&bytes).unwrap();
+        let spans: Vec<_> = demo
+            .directory
+            .entries
+            .iter()
+            .flat_map(|e| &e.frames)
+            .filter_map(|f| match &f.frame_data {
+                FrameData::NetworkMessage(n) => n.1.source_span.clone(),
+                _ => None,
+            })
+            .collect();
+        let span = &spans[spans.len() * 2 / 3];
+        let mut mangled = bytes.clone();
+        mangled[span.start - 4..span.start].copy_from_slice(&0x0010_0000u32.to_le_bytes());
+
+        let damaged = Analysis::try_from_bytes(&mangled).expect("the frames before it read");
+        assert_partial(&damaged);
+        let damage = damaged.demo_info.damage.unwrap();
+        assert_eq!(damage.reason, "message length too long: 1048576");
+        assert!(damage.byte_offset < span.start as u64);
+    }
+
+    #[test]
+    fn the_note_survives_the_cache() {
+        let bytes = fixture();
+        let damaged = Analysis::try_from_bytes(&bytes[..bytes.len() / 2]).unwrap();
+        let json = serde_json::to_string(&damaged).unwrap();
+        let back: Analysis = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.demo_info.damage, damaged.demo_info.damage);
+    }
+
+    #[test]
+    fn summary_reads_in_words() {
+        let damage = DemoDamage {
+            read_up_to_secs: 125.9,
+            frame_index: 7,
+            byte_offset: 1000,
+            bytes_unread: 15 << 20,
+            reason: "message length too long: 70000".into(),
+        };
+        assert_eq!(
+            damage.summary(),
+            "Damaged demo: read up to 2:05, the rest (15.0 MB) does not parse."
+        );
+        let small = DemoDamage {
+            bytes_unread: 1500,
+            ..damage
+        };
+        assert!(
+            small.summary().contains("the rest (2 KB)"),
+            "{}",
+            small.summary()
+        );
+    }
+
+    /// The demo #811 was seen on: an HLTV recording whose server crashed a
+    /// minute or two after the clan match went live. Not in the tree (19.6 MB);
+    /// set `DOD_DAMAGED_DEMO` to it, or keep it in the POST install's `dod\`.
+    #[test]
+    #[ignore = "needs hltv-2508021304-dod_solitude_b2.dem from #811"]
+    fn the_damaged_demo_from_811_reads_up_to_its_break() {
+        let path = std::env::var_os("DOD_DAMAGED_DEMO")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(concat!(
+                    r"C:\Program Files (x86)\Steam\steamapps\common",
+                    r"\Half-Life - POST-Anniversary for Movies\dod",
+                    r"\hltv-2508021304-dod_solitude_b2.dem"
+                ))
+            });
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+            panic!(
+                "{}: {e} (set DOD_DAMAGED_DEMO to the damaged demo from #811)",
+                path.display()
+            )
+        });
+        assert!(
+            dem::open_demo_from_bytes(&bytes).is_err(),
+            "the strict parse refuses it"
+        );
+        let analysis = Analysis::try_from_bytes(&bytes).expect("the frames before the break read");
+        let damage = analysis
+            .demo_info
+            .damage
+            .clone()
+            .expect("the break is noted");
+        assert!(damage.read_up_to_secs > 60.0, "{damage:?}");
+        assert!(!analysis.state.players.is_empty());
+        println!(
+            "{}: {} at frame {}, byte {} ({}); {} players, {} kills",
+            path.display(),
+            damage.summary(),
+            damage.frame_index,
+            damage.byte_offset,
+            damage.reason,
+            analysis.state.players.len(),
+            total_kills(&analysis)
+        );
+    }
+
+    /// #15's four damaged POV demos (`docs/goldsrc_demo_salvage.md`), each
+    /// with holes partway: read up to the first one. Not in the tree (80 to
+    /// 115 MB each); set `DOD_SALVAGE_DEMOS` to the folder holding them, or
+    /// keep them in the PRE install's `dod\`.
+    #[test]
+    #[ignore = "needs the four damaged monday-wsod25_r07 demos from #15"]
+    fn the_damaged_pov_demos_from_15_read_up_to_their_first_hole() {
+        const DEMOS: [&str; 4] = [
+            "monday-wsod25_r07_m1_h1.dem",
+            "monday-wsod25_r07_m1_h2.dem",
+            "monday-wsod25_r07_m3_h1-1.dem",
+            "monday-wsod25_r07_m3_h2.dem",
+        ];
+        let folder = std::env::var_os("DOD_SALVAGE_DEMOS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+                )
+            });
+        for name in DEMOS {
+            let path = folder.join(name);
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+                panic!(
+                    "{}: {e} (set DOD_SALVAGE_DEMOS to the folder holding #15's demos)",
+                    path.display()
+                )
+            });
+            let analysis = Analysis::try_from_bytes(&bytes)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let damage = analysis
+                .demo_info
+                .damage
+                .clone()
+                .unwrap_or_else(|| panic!("{}: no break noted", path.display()));
+            println!(
+                "{name}: {} at frame {}, byte {} of {} ({}); {} players, {} kills",
+                damage.summary(),
+                damage.frame_index,
+                damage.byte_offset,
+                bytes.len(),
+                damage.reason,
+                analysis.state.players.len(),
+                total_kills(&analysis)
+            );
+        }
+    }
 }

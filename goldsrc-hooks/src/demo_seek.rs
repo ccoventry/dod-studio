@@ -86,7 +86,8 @@
 //! ## Still loading
 //!
 //! The world fills in the background -- `Core.dll`'s `Server::RunFrame` reads at
-//! most 33 packets per engine frame -- while playback has already started. A
+//! most 33 packets per engine frame, or for a time budget per frame with
+//! `dodstudio_demo_fast_load` (#798) -- while playback has already started. A
 //! seek past what is loaded lands on the last loaded frame. `IsLoading()`
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.
@@ -424,6 +425,15 @@ pub struct Clock {
 
 /// The demo player's clock, or `None` with no demo player (or one of a
 /// build this was not checked against).
+/// The demo player's `IDemoPlayer` interface, for checking a GameUI dialog
+/// points at the same player (#663).
+pub fn player_object() -> Option<*mut std::ffi::c_void> {
+    #[cfg(target_arch = "x86")]
+    return player::find().ok().map(|(p, _)| p);
+    #[cfg(not(target_arch = "x86"))]
+    None
+}
+
 pub fn clock() -> Option<Clock> {
     #[cfg(target_arch = "x86")]
     return player::clock();
@@ -455,11 +465,17 @@ pub fn set_time_scale(scale: f32) -> Result<(), String> {
 
 /// [`SEEK_TO_NAME`]'s seek, for code: lands on `seconds` of the world clock.
 pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
+    seek_to_seconds_then(seconds, None)
+}
+
+/// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
+/// landed, as `dodstudio_seek_to <seconds> <command>` does.
+pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
     #[cfg(target_arch = "x86")]
-    return player::seek(seconds, false, skip_between(), None);
+    return player::seek(seconds, false, skip_between(), then);
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = seconds;
+        let _ = (seconds, then);
         Err("only the 32-bit build has a demo player".to_string())
     }
 }
@@ -498,7 +514,7 @@ mod player {
 
     /// The `IDemoPlayer` singleton, once `DemoPlayer.dll` is loaded and is a
     /// build in [`BUILDS`].
-    fn find() -> Result<(*mut c_void, &'static Build), String> {
+    pub(super) fn find() -> Result<(*mut c_void, &'static Build), String> {
         let module = unsafe { GetModuleHandleA(c"DemoPlayer.dll".as_ptr() as *const u8) };
         if module.is_null() {
             return Err("DemoPlayer.dll is not loaded; start the demo with viewdemo".into());

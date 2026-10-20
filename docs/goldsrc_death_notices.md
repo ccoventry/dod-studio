@@ -4,6 +4,7 @@
 > Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
 > `ds_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
 > plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
+> `font` (§6, #562) and `scale` (§7, #728) came later, in `deathmsg/`.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -545,3 +546,128 @@ patch state is reset too rather than inherited.
 The `[demo N]` column in the DLL's log is client time since process start, not
 demo playback position. It reads as though a demo is running when none is, which
 is exactly how the crash above was misdiagnosed once before being pinned down.
+
+## 6. The font (`font`, #562)
+
+`Draw` draws the names with the engine's console-string calls, all
+`call [gEngfuncs + slot*4]`:
+
+| RVA | call | slot |
+| --- | --- | --- |
+| `0x2b00d` | `pfnDrawConsoleStringLen(victim, &w, &h)` | 29 (`+0x74`) |
+| `0x2b04e` | `pfnDrawConsoleStringLen(killer, &w, &h)` | 29 |
+| `0x2b079` | `pfnDrawSetTextColor(KillerColor[0..3])`, if non-null | 28 (`+0x70`) |
+| `0x2b089` | `pfnDrawConsoleString(x, y, killer)` | 27 (`+0x6c`) |
+| `0x2b0de` | `SPR_Set(icon, 255, 255, 255)` | 4 |
+| `0x2b0f1` | `SPR_DrawHoles(0, x, y, &rect)` | 6 |
+| `0x2b125` | `pfnDrawSetTextColor(VictimColor[0..3])`, if non-null | 28 |
+| `0x2b135` | `pfnDrawConsoleString(x, y, victim)` | 27 |
+
+`x = ScreenWidth - len(victim) - icon width [- 5 - len(killer)]`, and the
+next line starts `rect.bottom - rect.top` (the icon's height) lower, at
+`0x2b13e..0x2b14e`, not a constant 20 as the SDK's `Draw` has.
+
+In `hw.dll` (both builds: `cl_enginefuncs` is at PRE `+0x136260`, POST
+`+0x319b08`), `pfnDrawConsoleString` draws through the engine's vgui2 surface
+-- `VGUI_Surface026`, class `BaseUISurface`, served by `hw.dll`'s own
+`CreateInterface`; there is no `vguimatsurface.dll` in GoldSrc -- with one
+font, `IScheme::GetFont("EngineFont", proportional)` of the default scheme
+(`dod/resource/TrackerScheme.res`), fetched once (PRE `+0x6a0f`, POST
+`+0x230d71`). It sets the font, position and colour, converts the string
+with `ILocalize::ConvertANSIToUnicode` (`MultiByteToWideChar(CP_UTF8)`),
+prints it, and then **resets the colour to `con_color`**. The width is the sum
+of `GetCharABCwide` over the characters, the height `GetFontTall`.
+
+`ISurface` slots (slot 0 is the destructor; MSVC lays adjacent overloads out
+in reverse order), checked by `ret` size on both builds in
+`tools/verify_killfeed_font_offsets.py`: 13 `DrawSetTextFont`, 15
+`DrawSetTextColor(r,g,b,a)`, 16 `DrawSetTextPos`, 18 `DrawPrintText`, 21
+`DrawFlushText`, 59 `CreateFont`, 60 `AddGlyphSetToFont`, 62 `GetFontTall`,
+65 `GetTextSize`.
+
+**A font cannot be changed in place.** `CFontManager::AddGlyphSetToFont` (PRE
+`+0xcfd70`, POST `+0x26cb10`) returns false for a handle that already has a
+glyph set, and the interface has no `DeleteFont`. So `font` creates a new
+handle each time and leaves the old one (one table entry; the Windows font
+behind it is cached by name, size and flags). The next frame draws with the
+new handle: live, no demo reload.
+
+The hook rewrites the six text calls to `call rel32; nop` (same six bytes)
+into `goldsrc-hooks/src/deathmsg/font.rs`, which forwards to the engine until
+a font is set, then draws and measures with its own handle and keeps each
+name's colour from the `pfnDrawSetTextColor` just before it (`con_color` when
+none was set, as the engine does). A 16-byte detour at the line step makes it
+`max(icon height, font height)`. The icon's size is §7's.
+
+Flags: vgui2's scheme loader maps `dropshadow` to 0x80 when
+`ISurface::SupportsFeature(2)` is true, which it is on both builds (and the
+PRE `EngineFont`'s own shadow shows it renders). Neither font manager tests an
+outline bit (0x200), so `outline` is accepted and reported as not drawn.
+
+## 7. The icon scale (`scale`, #728)
+
+Neither engine build nor either client has a HUD scale: `CHud::VidInit`
+picks the 640 set on any screen 640 or wider and `pfnSPR_Draw*` draws exactly
+`rect` pixels, texture coordinates `(rect ± 0.5) / the frame's logical size`
+(`Draw_SpriteFrameGeneric`, PRE `hw+0x3d280`, Anniversary `+0x23b1c0`). DoD's
+`d_*` icons are big and uneven -- `d_skull` 74×52, `d_garand` 201×34,
+`d_bren` 168×58, `d_britknife` 76×20 -- so the stock feed's line step already
+varies per line and the names sit at the top of each line.
+
+Everything in a line's layout comes from one `wrect_t` -- the icon's entry in
+`gHUD.m_rgrcRects` (`gHUD+0x18c`, `{left, right, top, bottom}`, 16 bytes per
+sprite id, `new wrect_t[m_iSpriteCount]` once in `VidInit`, `client+0x21c9c`;
+`m_iSpriteCount` is `gHUD+0x10`, `m_rghSprites` `gHUD+0x188`). `Draw` reads
+the array exactly twice, both `mov eax, [gHUD+0x18c]`:
+
+| RVA | use |
+| --- | --- |
+| `0x2b017` | anchor: `x = ScreenWidth - (right - left) - victim width [- 5 - killer width]` |
+| `0x2b097` | the stack copy handed to `SPR_DrawHoles(0, x, y, &rect)` at `0x2b0f1`, then the advance `right - left` (`0x2b0ff`) and the line step `bottom - top` (`0x2b13e`) |
+
+So the feed scales without a code patch beyond three operands, each the same
+length (`goldsrc-hooks/src/deathmsg/scale.rs`):
+
+1. Both reads become `mov eax, [RECTS]`, a pointer the hook owns. At S = 1 it
+   is the game's array, re-read every frame. At S ≠ 1 it is a copy with
+   `right = left + round(S·w)`, `bottom = top + round(S·h)`: the anchor, the
+   advance and the step come out S× by themselves, and §6's step detour makes
+   the step `max(S·icon height, font height)`.
+2. The `call [gEngfuncs+0x18]` becomes `call rel32; nop` into the hook. At
+   S = 1 it forwards to whatever the table held (HLAE's wrapper, if HLAE hooked
+   the slot), moving the icon down by `(font height - icon height) / 2` when a
+   font is set and taller. At S ≠ 1 it looks the unscaled rect up (same index
+   in the copy), moves the icon down by `(font height - S·icon height) / 2`
+   when the font is taller, and calls that same function with the
+   **unscaled** rect under
+   `glPushMatrix; glTranslatef(x+.5, y+.5); glScalef(S, S, 1);
+   glTranslatef(-(x+.5), -(y+.5)); …; glPopMatrix` on `GL_MODELVIEW`
+   (`opengl32.dll`'s exports; the matrix mode is restored if it was another).
+   The engine draws its own quad -- its texture coordinates, alpha test,
+   `gl_spriteblend`, scissor, `GL_Bind`'s cache -- S× bigger about the icon's
+   corner. `glTranslatef`/`glScalef` post-multiply, so this is the engine's
+   pixel space whatever matrix the HUD pass has current.
+3. The names are centred on the line when the icon is the taller. The
+   killer's name is drawn before the icon (`0x2b089`, the icon at `0x2b0f1`),
+   so the line's height has to be known at its start: a 6-byte detour at
+   `0x2b026` (`shl ebx, 4; add esp, 0xc`, just after the first rect read, with
+   `ebx` the line's sprite index and `eax` the array `Draw` reads) stores
+   `rect.bottom - rect.top` -- the scaled height at S ≠ 1. §6's name draws
+   then use `y + (max(icon height, font height) - text height) / 2`, the text
+   height being our font's, or the engine font's as its length call reports
+   it. At S = 1 with no font they leave `y` alone, so the stock layout is
+   untouched.
+
+Why not a vftable wrapper around `Draw` (slot 3 of `+0xac1c4`, which does hold
+`Draw`) with a per-call swap of the table slot: `hudelement` owns that slot --
+it refuses a value that is neither the stock `Draw` nor `CHudBase::Draw`, and
+writes both -- and a swap needs a restore on every exit. Why not TriAPI: it
+would mean re-deriving the texture coordinates and the alpha-test state the
+engine's own draw already has.
+
+The magnified icon is the 640-set sprite under bilinear filtering with the
+engine's alpha test (`GL_GREATER 0.632`), so it is soft at 2×; HD HUD sprites
+(#728 (a), `texture_hires` with `mipmap = 1`) are what make it sharp.
+`tools/verify_killfeed_scale_offsets.py` checks the three operands, the
+line-start detour's span and registers, the field offsets, the stride, the
+vftable slot and that both installs ship the same `client.dll`.

@@ -40,7 +40,7 @@
 //! | deploy | the viewmodel settling on a new weapon |
 //! | reload | the body sequence reading `*_reload` |
 //! | bolt-rifle shot | a shot (body animation or fire sound) while holding one |
-//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys |
+//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`) |
 //! | prone transition | 1.5s from the body entering `get_down` / `get_up` |
 //! | crawl | gait `prone_forward` (`dod_crawl` is the crouched walk) |
 //! | jump | body `jump`, from take-off until landing |
@@ -147,6 +147,7 @@ pub(super) fn forget() {
     BOLT_SHOT_AT.store(0, Ordering::Relaxed);
     PRONE_TRANSITION_AT.store(0, Ordering::Relaxed);
     IN_TRANSITION.store(0, Ordering::Relaxed);
+    super::sprint_turn::forget();
 }
 
 /// Starts the prone timer on the frame the body enters `get_down` or
@@ -322,7 +323,7 @@ fn lowered_because(view: &View, now: f64) -> Option<Hidden> {
         ..
     } = *view;
     if !is_deployed(body) {
-        if gait == "dod_sprint" {
+        if super::sprint_turn::lowered(gait == "dod_sprint", now) {
             return Some(Hidden::Sprinting);
         }
         if since(&PRONE_TRANSITION_AT, now).is_some_and(|s| s < PRONE_TRANSITION_SECONDS) {

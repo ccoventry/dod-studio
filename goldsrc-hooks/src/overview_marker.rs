@@ -96,7 +96,7 @@ pub fn set_on(on: bool) -> Result<bool, String> {
 
 fn describe(on: bool) -> &'static str {
     if on {
-        "1: in HLTV the watched player is marked with his team's camera icon"
+        "1: in HLTV the watched player is marked with their team's camera icon"
     } else {
         "0: in HLTV the watched player is marked with spec_camera.spr"
     }

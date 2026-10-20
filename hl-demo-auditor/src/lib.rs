@@ -49,6 +49,10 @@ pub struct DuplicateGroup {
 #[derive(Debug, Clone)]
 pub enum AuditProgress {
     Scanning(String),
+    /// How many files [`find_duplicates`] will key, once paths named twice
+    /// are merged; sent before the first `Hashing`, so a bar can show
+    /// how far the key pass has got.
+    Keying(usize),
     Hashing(String),
     Found(usize),
     Failed(String),
@@ -72,6 +76,34 @@ pub fn scan_dir(
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
 ) {
+    scan_dir_to_depth(dir, files, cancel, progress, 0);
+}
+
+/// Folder levels [`scan_dir`] reads below the folder it is given.
+const SCAN_MAX_DEPTH: usize = 32;
+
+/// Folders [`scan_dir`] never enters: a demo in the Recycle Bin is a deleted
+/// copy, not a duplicate to clean up (#843). The same list as
+/// `native::sys::folder_walk::SYSTEM_FOLDERS`, which can't be used here
+/// (`native` depends on this crate); a test there checks they agree.
+pub const SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+
+fn is_system_folder(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        let name = name.to_string_lossy();
+        SYSTEM_FOLDERS.iter().any(|s| name.eq_ignore_ascii_case(s))
+    })
+}
+
+/// `file_type` never follows a junction or symlink, so a link is never
+/// entered; with the depth cap, no folder layout can make this loop (#376).
+fn scan_dir_to_depth(
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+    cancel: &AtomicBool,
+    progress: &Option<Sender<AuditProgress>>,
+    depth: usize,
+) {
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
@@ -84,8 +116,10 @@ pub fn scan_dir(
                 break;
             }
             let path = entry.path();
-            if path.is_dir() {
-                scan_dir(&path, files, cancel, progress);
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if depth < SCAN_MAX_DEPTH && !is_system_folder(&path) {
+                    scan_dir_to_depth(&path, files, cancel, progress, depth + 1);
+                }
             } else if path
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
@@ -167,6 +201,9 @@ pub fn find_duplicates(
         }
     }
     let files: Vec<PathBuf> = unique_paths.into_iter().collect();
+    if let Some(tx) = progress {
+        let _ = tx.send(AuditProgress::Keying(files.len()));
+    }
 
     let mut groups: HashMap<FileKey, Vec<PathBuf>> = HashMap::new();
     for path in files {
@@ -336,5 +373,76 @@ mod tests {
             duplicates
         );
         assert_eq!(wasted, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_back_up_the_tree_is_not_followed() {
+        let root = std::env::temp_dir().join(format!("auditor_loop_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("a.dem"), b"").unwrap();
+        fs::write(root.join("sub/b.dem"), b"").unwrap();
+        let link = root.join("sub").join("loop");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink /J failed");
+
+        let mut files = vec![];
+        scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
+        assert_eq!(files.len(), 2, "{files:?}");
+
+        // A junction is a directory to `remove_dir`, which unlinks it only.
+        fs::remove_dir(&link).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_recycle_bin_and_system_volume_information_are_not_entered() {
+        let root = std::env::temp_dir().join(format!("auditor_system_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("d/$Recycle.Bin/S-1-5")).unwrap();
+        fs::create_dir_all(root.join("SYSTEM VOLUME INFORMATION")).unwrap();
+        fs::write(root.join("a.dem"), b"").unwrap();
+        fs::write(root.join("d/$Recycle.Bin/S-1-5/$R1A2B3C.dem"), b"").unwrap();
+        fs::write(root.join("SYSTEM VOLUME INFORMATION/x.dem"), b"").unwrap();
+
+        let mut files = vec![];
+        scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
+        assert_eq!(files, [root.join("a.dem")]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Several roots walked into one list and keyed in one pass pair a copy
+    /// in one with its original in the other (#844), and the key pass says
+    /// how many files it will read first.
+    #[test]
+    fn one_key_pass_over_several_roots_groups_across_them() {
+        let root = std::env::temp_dir().join(format!("auditor_roots_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("c/dod")).unwrap();
+        fs::create_dir_all(root.join("f/downloads")).unwrap();
+        fs::write(root.join("c/dod/match.dem"), b"same bytes").unwrap();
+        fs::write(root.join("f/downloads/match (1).dem"), b"same bytes").unwrap();
+        fs::write(root.join("f/downloads/other.dem"), b"other").unwrap();
+
+        let cancel = AtomicBool::new(false);
+        let mut files = vec![];
+        for dir in [root.join("c"), root.join("f"), root.join("c/dod")] {
+            scan_dir(&dir, &mut files, &cancel, &None);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (_, groups, copies, wasted) = find_duplicates(files, &cancel, &Some(tx));
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].files.len(), 2);
+        assert_eq!((copies, wasted), (1, 10));
+        // c/dod was named twice; its demo is keyed once.
+        let first = rx.try_iter().next();
+        assert!(matches!(first, Some(AuditProgress::Keying(3))), "{first:?}");
+        let _ = fs::remove_dir_all(&root);
     }
 }

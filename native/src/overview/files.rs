@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::transform::Transform;
+use crate::shared::paths::{addon_dir, downloads_dir, mod_dir};
 
 /// What the first line of every `.txt` this app writes contains, so its own
 /// files are told apart from a user's.
@@ -93,7 +94,7 @@ pub fn installs(hint: Option<&Path>) -> Vec<Install> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.join("hl.exe").is_file() && path.join("dod").join("maps").is_dir() {
+            if path.join("hl.exe").is_file() && mod_dir(&path).join("maps").is_dir() {
                 out.push(Install {
                     name: entry.file_name().to_string_lossy().into_owned(),
                     path: path.to_string_lossy().into_owned(),
@@ -133,31 +134,34 @@ fn safe(map: &str) -> String {
 
 /// The folders the game reads maps from, highest priority first:
 /// `dod_addon` (with `-addons`), `dod`, then `dod_downloads`, where the
-/// 25th Anniversary game saves maps downloaded from a server.
-const MAP_DIRS: [&str; 3] = ["dod_addon", "dod", "dod_downloads"];
+/// 25th Anniversary game saves maps downloaded from a server. Named from the
+/// Game folder setting, `dod` by default (#402).
+fn map_dirs(install: &Path) -> [PathBuf; 3] {
+    [addon_dir(install), mod_dir(install), downloads_dir(install)]
+}
 
 /// Where `map`'s `.bsp` is in `install`, looking where the game does
-/// ([`MAP_DIRS`]); `dod/maps` when it is nowhere, so the error names the
+/// ([`map_dirs`]); `dod/maps` when it is nowhere, so the error names the
 /// usual place.
 pub fn bsp_path(install: &Path, map: &str) -> PathBuf {
     let file = format!("{}.bsp", safe(map));
-    MAP_DIRS
+    map_dirs(install)
         .iter()
-        .map(|dir| install.join(dir).join("maps").join(&file))
+        .map(|dir| dir.join("maps").join(&file))
         .find(|p| p.is_file())
-        .unwrap_or_else(|| install.join("dod").join("maps").join(&file))
+        .unwrap_or_else(|| mod_dir(install).join("maps").join(&file))
 }
 
-/// Every map in an install's map folders ([`MAP_DIRS`]), and what overview
+/// Every map in an install's map folders ([`map_dirs`]), and what overview
 /// each has. A map in more than one folder is listed once, from the folder
 /// the game would load it from.
 pub fn maps(install: &Path) -> Vec<MapEntry> {
-    let dod = install.join("dod");
-    let addon = install.join("dod_addon");
+    let dod = mod_dir(install);
+    let addon = addon_dir(install);
     let mut out: Vec<MapEntry> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for dir in MAP_DIRS {
-        let Ok(entries) = std::fs::read_dir(install.join(dir).join("maps")) else {
+    for dir in map_dirs(install) {
+        let Ok(entries) = std::fs::read_dir(dir.join("maps")) else {
             continue;
         };
         for entry in entries.flatten() {
@@ -221,8 +225,8 @@ pub fn save(
 ) -> Result<Saved, String> {
     let map = safe(map);
     let folder = match target {
-        Target::Addon => install.join("dod_addon").join("overviews"),
-        Target::Game => install.join("dod").join("overviews"),
+        Target::Addon => addon_dir(install).join("overviews"),
+        Target::Game => mod_dir(install).join("overviews"),
     };
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let txt = folder.join(format!("{map}.txt"));
@@ -255,8 +259,8 @@ pub fn save(
     saved.written.push(txt.to_string_lossy().into_owned());
 
     let other = match target {
-        Target::Addon => install.join("dod").join("overviews"),
-        Target::Game => install.join("dod_addon").join("overviews"),
+        Target::Addon => mod_dir(install).join("overviews"),
+        Target::Game => addon_dir(install).join("overviews"),
     };
     if is_ours(&other.join(format!("{map}.txt"))) {
         for ext in ["txt", "bmp", "tga"] {
@@ -320,8 +324,7 @@ pub fn export(request: &Export) -> Result<Saved, String> {
 /// Copied with the overview to another PC, it lets the page pick the edits
 /// up there.
 pub fn sidecar_path(install: &Path, map: &str) -> PathBuf {
-    install
-        .join("dod_addon")
+    addon_dir(install)
         .join("overviews")
         .join(format!("{}.dodstudio.json", safe(map)))
 }
@@ -357,13 +360,12 @@ pub fn save_hd(
     rgba: &[u8],
 ) -> Result<String, String> {
     let map = safe(map);
-    let folder = install.join("dod_addon").join("overviews");
+    let folder = addon_dir(install).join("overviews");
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let bytes = super::image::tga_hd(width, height, rgba)?;
     let path = folder.join(format!("{map}_hd.tga"));
     std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-    let old = install
-        .join("dod")
+    let old = mod_dir(install)
         .join("overviews")
         .join(format!("{map}_hd.tga"));
     if old.is_file() {

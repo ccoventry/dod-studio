@@ -42,6 +42,14 @@ ureq = "3"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 sha2 = "0.11.0"
 base64 = "0.23.1"
+# Delete Take (#644) sends a take folder to the Recycle Bin, never a permanent
+# delete, so a wrong click can be undone from Explorer.
+trash = "5.2"
+# "Add a crosshair file…" (#842) takes the sprite out of the ZIP Vertex's
+# crosshair creator downloads. Only DEFLATE (with flate2's default pure-Rust
+# backend, which zip's own dependency leaves off) and STORE are needed.
+zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2"] }
+flate2 = "1.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }

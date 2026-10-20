@@ -70,14 +70,15 @@ mod classify;
 mod crosshair_rule;
 mod grenade;
 mod sequences;
+mod sprint_turn;
 mod trace;
 
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use classify::{
-    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, classify_body_sequence,
-    deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, model_stem,
-    third_person_stem,
+    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, MELEE_SEQUENCES,
+    classify_body_sequence, deploy_state_from_body_sequence, find_deployable_weapon,
+    is_grenade_viewmodel, model_stem, third_person_stem,
 };
 pub(crate) use crosshair_rule::Hidden as CrosshairHidden;
 pub(crate) use sequences::sequence_label;
@@ -128,7 +129,13 @@ pub fn enabled() -> bool {
 /// its recorder spends dead and watching someone in-eye: that is what they saw
 /// live, recorded. Live play and HLTV demos are unchanged.
 pub fn active() -> bool {
-    enabled() && !engine::engfuncs().is_some_and(playing_pov_demo)
+    enabled() && !pov_demo_playing()
+}
+
+/// Whether a POV demo is playing now (see [`active`]). Also what
+/// `spectator_deathcam` stands down for.
+pub fn pov_demo_playing() -> bool {
+    engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
 /// A demo is playing and the engine is not connected as a spectator.
@@ -754,7 +761,7 @@ pub fn apply() {
                     // have fired, and its draw plays below.
                     unsafe {
                         crate::debug::report(
-                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                            "anim_fix: spectated player fired just as they switched -- the previous gun's round, the draw plays instead",
                         )
                     };
                 }
@@ -790,6 +797,14 @@ pub fn apply() {
                     play_viewmodel_animation(
                         animation_lookup_sequence("reload", state, viewmodel_model),
                         "spectated player reloaded",
+                        state,
+                        viewmodel_model,
+                    );
+                }
+                Some(BodyAction::Melee) => {
+                    play_viewmodel_animation(
+                        animation_lookup_any(MELEE_SEQUENCES, state, viewmodel_model),
+                        "spectated player stabbed or swung his rifle",
                         state,
                         viewmodel_model,
                     );
@@ -846,6 +861,11 @@ pub fn apply() {
         body_label.as_deref().unwrap_or(""),
         gait_label.as_deref().unwrap_or(""),
     ));
+    sprint_turn::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        spectated.curstate.origin.x,
+        spectated.curstate.origin.y,
+    );
     let pov_view = crosshair_rule::View {
         body: body_label.as_deref().unwrap_or(""),
         gait: gait_label.as_deref().unwrap_or(""),
