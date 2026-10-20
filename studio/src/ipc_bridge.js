@@ -216,7 +216,7 @@ export async function addCrosshairFile(gamePath, gameFolder, source, name) {
 }
 
 /** Sends Configuration > Players' "Use in the game" box to every running
- *  game that takes commands (dodstudio_player_overrides); how many did. */
+ *  game that takes commands (ds_player_overrides); how many did. */
 export async function setPlayerOverrides(on) {
   return invoke('set_player_overrides', { on })
     .catch((err) => {

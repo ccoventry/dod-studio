@@ -288,7 +288,7 @@ ds_debug_hd_misses: 1 miss(es) this session, 1 different texture(s) (style \"ult
   world  black  32x32, tool texture, never built
 
 [17:24:35.718] [demo   552.884] [dodstudio_goldsrc_hooks] commands: ds_debug_status --
-ds_hide_scoreboard = 0 -- the scoreboard behaves normally
+ds_hud_hide_scoreboard = 0 -- the scoreboard behaves normally
 
 [22:05:57.463] [demo   828.700] [dodstudio_goldsrc_hooks] texture_hires: ds_debug_hd_misses --
 ds_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (style \"plain\"). A texture several maps use is listed under each of them.

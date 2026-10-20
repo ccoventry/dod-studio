@@ -1,4 +1,4 @@
-//! `ds_clear_decals`: empty the engine's decal pool at runtime.
+//! `ds_map_clear_decals`: empty the engine's decal pool at runtime.
 //!
 //! ## What this replaces
 //!
@@ -80,7 +80,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("clear_decals");
+pub const NAME: &str = console_name!("map_clear_decals");
 
 /// `hw+0x4a000`, the engine's remove-every-decal-with-this-flag loop. The
 /// wildcards are the pool base, the two relative calls and the pool end.

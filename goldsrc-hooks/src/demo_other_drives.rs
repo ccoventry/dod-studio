@@ -1,4 +1,4 @@
-//! `dodstudio_demo_other_drives 1`: `viewdemo` and `playdemo` open a demo on
+//! `ds_demo_other_drives 1`: `viewdemo` and `playdemo` open a demo on
 //! another drive by its full path, `viewdemo "D:/folder/demo"` (issue #776).
 //!
 //! ## Why the game can't by itself
@@ -60,7 +60,7 @@ const FS_SLOT_OPEN: usize = 10;
 /// (`GAME`, `GAMECONFIG`, ...) skips them; the demo opens name none.
 const PATH_ID: &std::ffi::CStr = c"DODSTUDIO";
 
-/// Called by `commands.rs` once `dodstudio_demo_other_drives` is registered.
+/// Called by `commands.rs` once `ds_demo_other_drives` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

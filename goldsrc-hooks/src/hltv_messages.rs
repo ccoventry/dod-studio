@@ -1,4 +1,4 @@
-//! `ds_hide_hltv_messages`: hide the text an HLTV proxy puts on screen
+//! `ds_spec_hide_hltv_messages`: hide the text an HLTV proxy puts on screen
 //! during playback -- "You're watching HLTV. Visit www.valvesoftware.com",
 //! and any line a proxy operator sends with `msg` -- without patching the
 //! demo (issue #30).
@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_hltv_messages");
+pub const NAME: &str = console_name!("spec_hide_hltv_messages");
 
 /// `hltv.h`'s `DRC_CMD_MESSAGE`.
 const DRC_CMD_MESSAGE: u8 = 6;

@@ -61,7 +61,7 @@ Examples:
 
     python goldsrc-hooks/tools/game_probe.py --install pre --demo ktps8w1-m00cat_soul_lenn_h2 ^
         --step "waitfor Playing demo from ktps8w1-m00cat" --step "wait 8" ^
-        --step "cmd ds_deathmsg players" --step "wait 1" ^
+        --step "cmd ds_hud_deathmsg players" --step "wait 1" ^
         --step "expect STEAM_0:" --step "shot kill-feed"
 
     # A first-demo crash: start the demo at launch, as a batch does (#546),

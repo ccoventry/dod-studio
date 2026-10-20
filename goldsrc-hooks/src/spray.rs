@@ -35,7 +35,7 @@
 //! everyone else per demo type (POV: their own, one PNG or none; HLTV: one
 //! PNG or none), mirrored to `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`
 //! (`player_table.rs`). It applies only while a demo plays and
-//! `dodstudio_player_overrides` is 1. Every spray from a PNG, and every "no
+//! `ds_player_overrides` is 1. Every spray from a PNG, and every "no
 //! spray", is a spray `spray_hltv.rs` builds and shoots in place of the
 //! engine's, whether or not the demo saved one: so it is the same size (the
 //! tab's spray size) in every demo, and needs no HD textures. With HD
@@ -46,7 +46,7 @@
 //!
 //! The content key below names a spray in the HD-miss list.
 //!
-//! ## `dodstudio_spray <name>`
+//! ## `ds_player_spray <name>`
 //!
 //! Makes `<name>.png` the user's own spray for live play: writes a
 //! `tempdecal.wad` the engine accepts (one `{LOGO` lump, sides in steps of 16
@@ -70,10 +70,10 @@ use crate::engine;
 use crate::names::console_name;
 use crate::texture_hires::{Rgba, game_dir};
 
-/// `dodstudio_spray`: list the PNGs in `logos\`, switch to one, or list
+/// `ds_player_spray`: list the PNGs in `logos\`, switch to one, or list
 /// each player and the spray the Players table gives them. Registered in
 /// `commands.rs`.
-pub const NAME: &str = console_name!("spray");
+pub const NAME: &str = console_name!("player_spray");
 const LOGOS: &str = "logos";
 const TEMPDECAL: &str = "tempdecal.wad";
 const BACKUP: &str = "tempdecal.wad.dodstudio-backup";
@@ -828,7 +828,7 @@ fn usage() -> String {
     )
 }
 
-/// The PNG the last `dodstudio_spray <name>` this session wrote.
+/// The PNG the last `ds_player_spray <name>` this session wrote.
 static SWITCHED_TO: Mutex<String> = Mutex::new(String::new());
 
 /// The PNGs in `logos\`, sorted, with their sizes.
@@ -929,7 +929,7 @@ fn switch(name: &str) -> Result<String, String> {
 
 /// `players`: every slot the engine has a player in, with the spray the
 /// Players table gives them in this demo. The SteamID comes from the slot's
-/// userinfo, as `dodstudio_deathmsg players` reads it.
+/// userinfo, as `ds_hud_deathmsg players` reads it.
 fn players() -> String {
     let Some(engfuncs) = engine::engfuncs() else {
         return format!("{NAME} players: the game's functions aren't captured yet\n");

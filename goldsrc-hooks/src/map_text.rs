@@ -1,4 +1,4 @@
-//! `ds_hide_map_text`: hide the text a map puts on screen itself --
+//! `ds_hud_hide_map_text`: hide the text a map puts on screen itself --
 //! the anzio mortar warning, the round result -- and nothing else (#287).
 //!
 //! ## What carries it
@@ -64,7 +64,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_map_text");
+pub const NAME: &str = console_name!("hud_hide_map_text");
 
 /// The user message DoD puts map text on.
 pub(crate) const MESSAGE: &str = "HudText";
@@ -97,7 +97,7 @@ struct MapText {
     strings: BTreeSet<Vec<u8>>,
 }
 
-/// Called by `commands.rs` once `ds_hide_map_text` is registered.
+/// Called by `commands.rs` once `ds_hud_hide_map_text` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

@@ -1,4 +1,4 @@
-//! `ds_run_in_background`: the game runs at full speed while another
+//! `ds_capture_run_in_background`: the game runs at full speed while another
 //! window has the foreground, so a capture batch doesn't need the screen.
 //!
 //! ## What the engine does
@@ -21,7 +21,7 @@
 //! 0.05`) went from 11.7x real time to 2.2x (PRE) or 1.5x (25th Anniversary)
 //! as soon as another window took the foreground. Recording looked unaffected
 //! only because HLAE brings the game window to the front while it records;
-//! `ds_stay_behind_while_capturing` (`hlae_window.rs`) stops that, so the wait has to
+//! `ds_capture_stay_behind` (`hlae_window.rs`) stops that, so the wait has to
 //! go for the recording too.
 //!
 //! With the `jne` made a `jmp`, the wait never happens: the game runs as if
@@ -38,7 +38,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("run_in_background");
+pub const NAME: &str = console_name!("capture_run_in_background");
 
 /// One build's view of the inactive-window wait.
 struct Site {

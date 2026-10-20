@@ -1,4 +1,4 @@
-//! `ds_hide_crosshair`: hide DoD's crosshair, and make it stay hidden.
+//! `ds_hud_hide_crosshair`: hide DoD's crosshair, and make it stay hidden.
 //!
 //! ## Why the stock cvar is not enough
 //!
@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_crosshair");
+pub const NAME: &str = console_name!("hud_hide_crosshair");
 
 /// `CHudDoDCrossHair::Draw`'s prologue. The wildcards cover the relative call
 /// and the one absolute address that follows it, both of which move with the

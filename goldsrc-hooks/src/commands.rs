@@ -393,7 +393,7 @@ fn poll_overviewmap() {
     }
 }
 
-/// `ds_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
+/// `ds_hud_hide_element` keeps its own state -- a bitmask, not a cvar --
 /// so it cannot go through `poll_code_patch`. Everything else about it is the
 /// same: applied every frame, reported only when it writes, and complaining
 /// once rather than sixty times a second while `client.dll` is not loaded.
@@ -522,7 +522,7 @@ pub fn poll() {
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
-    // ds_overviewmap keeps its own state -- held rects, not a cvar --
+    // ds_hud_overview_layout keeps its own state -- held rects, not a cvar --
     // so it belongs here alongside hudelement rather than in the gated block
     // above.
     poll_overviewmap();
@@ -536,17 +536,17 @@ pub fn poll() {
     // Same reason, for whichever messages ds_debug_msglog currently wants.
     crate::msglog::poll();
     // Reads the map's own on-screen strings once per level while
-    // ds_hide_map_text is on, and keeps its HudText handler prepended.
+    // ds_hud_hide_map_text is on, and keeps its HudText handler prepended.
     crate::map_text::poll();
     // Keeps the TextMsg, ClanTimer and GameRules handlers prepended, and puts
     // the game's countdown and warm-up flag right when
-    // ds_hide_clan_text changes.
+    // ds_hud_hide_clan_text changes.
     crate::clan_text::poll();
     // Keeps the ShowMenu handler prepended and the voice and command menus
-    // hidden while dodstudio_hide_voice_menus is on.
+    // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
-    // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
-    // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
+    // Follows ds_hd_enabled / ds_hd_style, then notes what each map
+    // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
     crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
@@ -638,7 +638,7 @@ fn log_level_changes() {
 /// Everything in one place, for debugging -- not the settings surface a
 /// player is expected to type. That is what `debug_` in the name signals:
 /// every value here is also visible piecemeal (a suppression cvar's own
-/// bare-name query, the console type-ahead, `ds_deathmsg`'s own
+/// bare-name query, the console type-ahead, `ds_hud_deathmsg`'s own
 /// status), but this is the one command that dumps all of it together, which
 /// is what a support question actually needs -- so it covers the *entire*
 /// `ds_*` surface, not a subset.
@@ -828,7 +828,7 @@ fn status_text() -> String {
 unsafe extern "C" fn cmd_status() {
     // A console line's semicolon-joined commands all run together, in one
     // pass, before `poll` gets another turn as the per-frame prologue -- so
-    // `ds_hide_scoreboard 1;ds_debug_status` on one line would
+    // `ds_hud_hide_scoreboard 1;ds_debug_status` on one line would
     // otherwise report the state from *before* that same line's own change.
     // `poll` is cheap and idempotent (it already runs every frame), so
     // forcing one here just makes this report always current.
@@ -1072,7 +1072,7 @@ unsafe extern "C" fn cmd_crosshair() {
     );
 }
 
-/// `ds_hide_hudelement [<name> <0|1>]`.
+/// `ds_hud_hide_element [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
 /// value cannot carry, and there is one per element -- a cvar for each would
@@ -1181,7 +1181,7 @@ unsafe extern "C" fn cmd_hudelement() {
     }
 }
 
-/// `ds_clear_decals` -- takes no arguments and holds no state, so a
+/// `ds_map_clear_decals` -- takes no arguments and holds no state, so a
 /// command is the whole of what it needs to be.
 unsafe extern "C" fn cmd_clear_decals() {
     match decals::clear() {
@@ -1222,7 +1222,7 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
-/// Only registered when `ds_demo_list_folders` could not be a cvar.
+/// Only registered when `ds_ui_demo_list_folders` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_folders() {
     handle_toggle(
         demo_list_folders::NAME,
@@ -1231,7 +1231,7 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
-/// Only registered when `dodstudio_demo_other_drives` could not be a cvar.
+/// Only registered when `ds_demo_other_drives` could not be a cvar.
 unsafe extern "C" fn cmd_demo_other_drives() {
     handle_toggle(
         demo_other_drives::NAME,
@@ -1240,7 +1240,7 @@ unsafe extern "C" fn cmd_demo_other_drives() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
+/// Only registered when `ds_ui_demo_list_hide_empty` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_hide_empty() {
     handle_toggle(
         demo_list_folders::HIDE_EMPTY.name,
@@ -1249,7 +1249,7 @@ unsafe extern "C" fn cmd_demo_list_hide_empty() {
     );
 }
 
-/// Only registered when `ds_demo_list_count_subfolders` could not be
+/// Only registered when `ds_ui_demo_list_count_subfolders` could not be
 /// a cvar.
 unsafe extern "C" fn cmd_demo_list_count_subfolders() {
     handle_toggle(
@@ -1259,7 +1259,7 @@ unsafe extern "C" fn cmd_demo_list_count_subfolders() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_show_counts` could not be a
+/// Only registered when `ds_ui_demo_list_show_counts` could not be a
 /// cvar.
 unsafe extern "C" fn cmd_demo_list_show_counts() {
     handle_toggle(
@@ -1269,7 +1269,7 @@ unsafe extern "C" fn cmd_demo_list_show_counts() {
     );
 }
 
-/// Only registered when `dodstudio_demo_fast_load` could not be a cvar: on
+/// Only registered when `ds_demo_fast_load` could not be a cvar: on
 /// is the default budget.
 unsafe extern "C" fn cmd_demo_fast_load() {
     handle_toggle(
@@ -1280,7 +1280,7 @@ unsafe extern "C" fn cmd_demo_fast_load() {
 }
 
 /// Only registered when the window-layout cvars could not be registered.
-/// Only registered when `ds_viewdemo_in_panel` could not be a cvar.
+/// Only registered when `ds_ui_viewdemo_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_viewdemo_in_panel() {
     handle_toggle(
         crate::studio_panel::VIEWDEMO_NAME,
@@ -1289,7 +1289,7 @@ unsafe extern "C" fn cmd_viewdemo_in_panel() {
     );
 }
 
-/// Only registered when `ds_console_in_panel` could not be a cvar.
+/// Only registered when `ds_ui_console_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
         crate::studio_panel::CONSOLE_NAME,
@@ -1314,7 +1314,7 @@ unsafe extern "C" fn cmd_remember_window_layout() {
     );
 }
 
-/// Only registered when `ds_seek_skip_between` could not be a cvar.
+/// Only registered when `ds_demo_seek_skip_between` could not be a cvar.
 unsafe extern "C" fn cmd_seek_skip_between() {
     handle_toggle(
         demo_seek::SKIP_BETWEEN_NAME,
@@ -1323,7 +1323,7 @@ unsafe extern "C" fn cmd_seek_skip_between() {
     );
 }
 
-/// `ds_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
+/// `ds_hud_overview_layout [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
 /// value, and two cvars per rectangle would be eight names in the type-ahead
@@ -1797,7 +1797,7 @@ mod tests {
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
-        assert!(idle.contains("ds_deathmsg"), "{idle}");
+        assert!(idle.contains("ds_hud_deathmsg"), "{idle}");
         for part in [
             "viewmodel animations:",
             "gunshot sounds:",
@@ -1923,7 +1923,9 @@ mod tests {
     #[test]
     fn suppression_cvars_are_named_after_the_action() {
         for name in [SCOREBOARD_NAME, CROSSHAIR_NAME, VOICE_NAME] {
-            let verb = name.trim_start_matches(console_name!(""));
+            // After the prefix comes the area (`hud_`, `sound_`, #555).
+            let rest = name.trim_start_matches(console_name!(""));
+            let verb = rest.split_once('_').map_or(rest, |(_, verb)| verb);
             assert!(
                 verb.starts_with("hide_") || verb.starts_with("mute_"),
                 "{name} is named after its subject, not the action it performs"

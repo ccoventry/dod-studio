@@ -1,4 +1,4 @@
-//! `ds_batch`: runs a whole capture batch from the hook, on the original
+//! `ds_capture_batch`: runs a whole capture batch from the hook, on the original
 //! demos, with seeks instead of patched demos and fast-forward (issue #434,
 //! step 3).
 //!
@@ -6,11 +6,11 @@
 //!
 //! Studio plans the batch as before (`native::patch::build_batch_queue`), then
 //! writes the plan to a file instead of patching a copy of each demo, and sends
-//! `ds_batch start "<file>"` over the game's pipe (#413). For each demo
+//! `ds_capture_batch start "<file>"` over the game's pipe (#413). For each demo
 //! the batch loads it with `viewdemo`, waits for the whole file to be read,
 //! runs the demo's init commands, then runs its timed commands on the demo
 //! player's clock. Where the patched demo would fast-forward to the next clip,
-//! the batch seeks there (`ds_seek_to`'s stepped seek, #601). At the
+//! the batch seeks there (`ds_demo_seek_to`'s stepped seek, #601). At the
 //! demo's `next` time it moves on to the next demo, and after the last one it
 //! runs the `end` commands.
 //!
@@ -28,7 +28,7 @@
 //! - `next <seconds>`: at that time, the demo is done;
 //! - `end <command>`: after the last demo (outside any section).
 //!
-//! Times are the demo player's clock, the one `ds_seek_to` takes. Lines
+//! Times are the demo player's clock, the one `ds_demo_seek_to` takes. Lines
 //! starting with `//` and blank lines are skipped.
 //!
 //! Commands and [`poll`] run on the game's main thread.
@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("batch");
+pub const NAME: &str = console_name!("capture_batch");
 
 /// The batch file's first line.
 pub(crate) const HEADER: &str = "dodstudio-batch 1";
@@ -523,7 +523,7 @@ fn start(path: &str) {
     go_to(&mut guard, 0);
 }
 
-/// `ds_batch <what>`.
+/// `ds_capture_batch <what>`.
 pub unsafe extern "C" fn command() {
     let args = crate::cmd_list::args();
     match args.first().map(|a| a.to_ascii_lowercase()).as_deref() {

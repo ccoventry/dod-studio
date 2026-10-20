@@ -1,8 +1,8 @@
-//! `ds_hide_hand_signals`: stop players miming their voice commands.
+//! `ds_player_hide_hand_signals`: stop players miming their voice commands.
 //!
 //! ## Why the voice mute does not cover this
 //!
-//! `ds_mute_voice_commands` NOPs a client-side `EV_PlaySound` call, which
+//! `ds_sound_mute_voice_commands` NOPs a client-side `EV_PlaySound` call, which
 //! is where the *sound* comes from. The gesture is a different mechanism
 //! entirely: `client.dll` contains **no `hs_` string at all**, because the
 //! client never picks these animations by name. The server picks a sequence
@@ -65,7 +65,7 @@ use crate::engine::{self, ClEntityS};
 use crate::names::console_name;
 
 /// The cvar name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_hand_signals");
+pub const NAME: &str = console_name!("player_hide_hand_signals");
 
 /// Set from the cvar by `commands::poll`.
 pub static ENABLED: AtomicBool = AtomicBool::new(false);

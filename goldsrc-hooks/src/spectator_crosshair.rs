@@ -132,7 +132,7 @@
 //! and drew all sixteen tiles of `customXHair.spr` below and right of the
 //! screen centre.
 //!
-//! ## It loses to `ds_hide_crosshair`
+//! ## It loses to `ds_hud_hide_crosshair`
 //!
 //! That setting stubs `CHudDoDCrossHair::Draw`'s prologue, so neither branch
 //! runs and nothing is drawn. Hiding wins by construction, with no interlock
@@ -445,7 +445,7 @@ fn matching() -> bool {
 /// One line for `ds_debug_status`.
 ///
 /// Reports what is patched into the code, which is not the same question as
-/// what is on screen: `ds_hide_crosshair` stubs `Draw`'s prologue, so
+/// what is on screen: `ds_hud_hide_crosshair` stubs `Draw`'s prologue, so
 /// none of this ever runs while it is on. Said here rather than left for the
 /// player to work out from two settings that otherwise look unrelated.
 pub fn status() -> String {
@@ -709,7 +709,7 @@ mod tests {
         ACTIVE_STYLE.store(saved, Ordering::Release);
     }
 
-    /// `ds_hide_crosshair` stubs `Draw`'s prologue, so nothing this
+    /// `ds_hud_hide_crosshair` stubs `Draw`'s prologue, so nothing this
     /// module patches ever runs while it is on. `status()` has to say so,
     /// rather than describe a tile that is not actually visible.
     #[test]

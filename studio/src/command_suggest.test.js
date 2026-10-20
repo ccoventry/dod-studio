@@ -32,9 +32,12 @@ describe('suggestions (#215)', () => {
     expect(one('gl_use_shaders')).toMatchObject({ builds: 'post' });
   });
 
-  it('lists the ds_ name for a name typed with the old dodstudio_ prefix (#555)', () => {
+  it('lists the new name for a name typed the pre-#555 way', () => {
     expect(suggestions('dodstudio_spec_lo')[0].name).toBe('ds_spec_lock');
-    expect(suggestions('DodStudio_hide_scoreboard')[0].name).toBe('ds_hide_scoreboard');
+    expect(suggestions('DodStudio_hide_scoreboard')[0].name).toBe('ds_hud_hide_scoreboard');
+    expect(suggestions('dodstudio_pov_live').map((s) => s.name)).toEqual(['ds_view_bob']);
+    expect(suggestions('dodstudio_seek_')[0].name).toBe('ds_demo_seek_by');
+    expect(suggestions('dodstudio_hd').map((s) => s.name)).toEqual(['ds_hd_enabled', 'ds_hd_style']);
     expect(acceptSuggestion('dodstudio_spec_lock 1', 'ds_spec_lock')).toBe('ds_spec_lock 1');
     expect(suggestions('dodstudio_').every((s) => s.name.startsWith('ds_'))).toBe(true);
   });

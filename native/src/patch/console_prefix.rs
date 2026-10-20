@@ -1,7 +1,10 @@
 //! The hook DLL's console prefix, and the names it had before #555.
 //!
-//! #555 renamed every `dodstudio_*` cvar and command the hook registers to
-//! `ds_*`, keeping the rest of each name. The game gets no aliases, so an old
+//! #555 renamed every `dodstudio_*` cvar and command the hook registers: the
+//! prefix became `ds_` and the area a name belongs to comes second
+//! (`dodstudio_hide_scoreboard` is `ds_hud_hide_scoreboard`). The old -> new
+//! table is the hook's own `old_names.rs`, compiled in here as a module so
+//! both sides read one list. The game gets no aliases, so an old
 //! name typed in the console, or left in a config, does nothing. What the app
 //! can do about that lives here:
 //!
@@ -18,80 +21,20 @@ pub const PREFIX: &str = "ds_";
 /// The prefix before #555.
 pub const OLD_PREFIX: &str = "dodstudio_";
 
-/// Every name the hook registered when the prefix changed, without the prefix.
-/// Frozen, plus the ones that shipped on `dev` with the old prefix while #555
-/// was open (`batch` #702, `debug_keep_detail_cache` #718, `show_demo_scope`
-/// #721, `hide_headshot_red_screen` and `hide_screen_shake` #606,
-/// `stay_behind_while_capturing` #434); a name added since never had the old
-/// prefix. The rest of each name
-/// did not change, so the new name is [`PREFIX`] plus the same suffix.
-pub const RENAMED: &[&str] = &[
-    "allow_shaders",
-    "batch",
-    "clear_decals",
-    "console_in_panel",
-    "deathmsg",
-    "debug_hd_misses",
-    "debug_keep_detail_cache",
-    "debug_log_spectator_target",
-    "debug_log_texture_loads",
-    "debug_log_weapon_model",
-    "debug_msglog",
-    "debug_position",
-    "debug_status",
-    "demo_list_count_subfolders",
-    "demo_list_folders",
-    "demo_list_hide_empty",
-    "ex_interp_max",
-    "hd_enabled",
-    "hd_style",
-    "hide_asset",
-    "hide_clan_text",
-    "hide_crosshair",
-    "hide_hand_signals",
-    "hide_headshot_red_screen",
-    "hide_hltv_messages",
-    "hide_hudelement",
-    "hide_map_text",
-    "hide_scoreboard",
-    "hide_screen_shake",
-    "hide_spectator_bars",
-    "hud_map_players",
-    "hud_map_team_marker",
-    "mute_voice_commands",
-    "objectives",
-    "overviewmap",
-    "panel",
-    "reload_demo",
-    "remember_window_layout",
-    "resizable_windows",
-    "review",
-    "run_in_background",
-    "schedule",
-    "seek_by",
-    "seek_skip_between",
-    "seek_to",
-    "show_demo_scope",
-    "spec_lock",
-    "spec_match_pov",
-    "spec_target",
-    "stay_behind_while_capturing",
-    "viewdemo_in_panel",
-];
+#[path = "../../../goldsrc-hooks/src/old_names.rs"]
+mod old_names;
+pub use old_names::OLD_NAMES;
 
-/// The current name for a pre-#555 one (`dodstudio_hide_scoreboard` gives
-/// `ds_hide_scoreboard`), or `None` for any other word. Case does not matter,
-/// as it does not to the console; a folder or file that shares the old prefix
-/// (`dodstudio_hd`, `dodstudio_helper`) is no console name and gives `None`.
+/// The name that replaced a pre-#555 one (`dodstudio_hide_scoreboard` gives
+/// `ds_hud_hide_scoreboard`), or `None` for any other word. Case does not
+/// matter, as it does not to the console; a folder or file that shares the old
+/// prefix (`dodstudio_hd`, `dodstudio_helper`) is no console name and gives
+/// `None`.
 pub fn current_name(word: &str) -> Option<String> {
-    let head = word.get(..OLD_PREFIX.len())?;
-    if !head.eq_ignore_ascii_case(OLD_PREFIX) {
-        return None;
-    }
-    let suffix = word[OLD_PREFIX.len()..].to_ascii_lowercase();
-    RENAMED
-        .contains(&suffix.as_str())
-        .then(|| format!("{PREFIX}{suffix}"))
+    OLD_NAMES
+        .iter()
+        .find(|(old, _)| old.eq_ignore_ascii_case(word))
+        .map(|(_, new)| (*new).to_string())
 }
 
 /// Each word of `text` (a run of letters, digits and `_`) with its byte range.
@@ -154,15 +97,22 @@ pub fn migrated(command: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Names the hook registers that never had a `dodstudio_` one.
+    const NEW_SINCE_555: &[&str] = &[];
+
     #[test]
-    fn an_old_name_becomes_the_same_name_with_the_new_prefix() {
+    fn an_old_name_becomes_the_name_in_the_table() {
         assert_eq!(
             current_name("dodstudio_hide_scoreboard").as_deref(),
-            Some("ds_hide_scoreboard")
+            Some("ds_hud_hide_scoreboard")
         );
         assert_eq!(
             current_name("DodStudio_Seek_To").as_deref(),
-            Some("ds_seek_to")
+            Some("ds_demo_seek_to")
+        );
+        assert_eq!(
+            current_name("dodstudio_pov_live_bob").as_deref(),
+            Some("ds_view_bob")
         );
         // Not console names: folders, files, the bare prefix, unknown names,
         // names already moved.
@@ -175,6 +125,7 @@ mod tests {
             "dodstudio_",
             "dodstudio_hide_sprite",
             "ds_hide_scoreboard",
+            "ds_hud_hide_scoreboard",
             "hide_scoreboard",
             "",
         ] {
@@ -191,13 +142,16 @@ mod tests {
             vec![
                 (
                     "dodstudio_clear_decals".to_string(),
-                    "ds_clear_decals".to_string()
+                    "ds_map_clear_decals".to_string()
                 ),
-                ("dodstudio_seek_by".to_string(), "ds_seek_by".to_string()),
+                (
+                    "dodstudio_seek_by".to_string(),
+                    "ds_demo_seek_by".to_string()
+                ),
             ]
         );
         assert!(old_names_in("exec dodstudio_helper.cfg").is_empty());
-        assert!(old_names_in("ds_hide_scoreboard 1").is_empty());
+        assert!(old_names_in("ds_hud_hide_scoreboard 1").is_empty());
         assert!(old_names_in("xdodstudio_hide_scoreboard 1").is_empty());
     }
 
@@ -205,12 +159,12 @@ mod tests {
     fn a_command_is_migrated_word_by_word() {
         assert_eq!(
             migrated("dodstudio_hide_scoreboard 1").as_deref(),
-            Some("ds_hide_scoreboard 1")
+            Some("ds_hud_hide_scoreboard 1")
         );
         assert_eq!(
             migrated("dodstudio_deathmsg block !76561197962734863;dodstudio_spec_lock 1")
                 .as_deref(),
-            Some("ds_deathmsg block !76561197962734863;ds_spec_lock 1")
+            Some("ds_hud_deathmsg block !76561197962734863;ds_spec_lock 1")
         );
         assert_eq!(migrated("mirv_fov 90"), None);
         assert_eq!(migrated("ds_spec_lock 1"), None);
@@ -219,9 +173,8 @@ mod tests {
 
     /// The new names have to be ones the hook registers, or a migrated
     /// setting and a config warning would both point at a name that does
-    /// nothing. The hook is a cdylib, so its sources are read instead. A
-    /// later rename (#555's area layout) fails here: then this list becomes
-    /// old -> new pairs.
+    /// nothing. The hook is a cdylib, so its sources are read instead. And
+    /// every name the hook registers is in the table, so none was missed.
     #[test]
     fn every_new_name_is_one_the_hook_registers() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../goldsrc-hooks/src");
@@ -241,10 +194,35 @@ mod tests {
             code.contains(&format!("concat!(\"{PREFIX}\", $suffix)")),
             "names.rs no longer uses {PREFIX}"
         );
-        for suffix in RENAMED {
+        for (old, new) in OLD_NAMES {
+            assert!(old.starts_with(OLD_PREFIX), "{old}");
+            let suffix = new.strip_prefix(PREFIX).unwrap();
             assert!(
                 code.contains(&format!("console_name!(\"{suffix}\")")),
-                "{PREFIX}{suffix} is not registered by goldsrc-hooks"
+                "{old} -> {new}: {new} is not registered by goldsrc-hooks"
+            );
+        }
+        // Every other suffix but the two doc examples in names.rs, and
+        // comments that write `console_name!("...")`.
+        let mut registered: Vec<&str> = code
+            .split("console_name!(\"")
+            .skip(1)
+            .filter_map(|s| s.split('"').next())
+            .filter(|s| {
+                !s.is_empty()
+                    && *s != "status"
+                    && *s != "killfeed"
+                    && s.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            })
+            .collect();
+        registered.sort_unstable();
+        registered.dedup();
+        for suffix in registered {
+            let name = format!("{PREFIX}{suffix}");
+            assert!(
+                OLD_NAMES.iter().any(|(_, new)| *new == name) || NEW_SINCE_555.contains(&suffix),
+                "{name} has no old name in old_names.rs; a name added since #555 goes in NEW_SINCE_555"
             );
         }
     }

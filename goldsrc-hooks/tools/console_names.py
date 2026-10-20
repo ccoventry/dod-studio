@@ -203,7 +203,7 @@ def dodstudio_names():
         if row:
             hints.setdefault(row.group(1), first_sentence(row.group(2)))
         if line.startswith("### "):
-            # A heading may name several commands ("`ds_seek_to` / `ds_seek_by`").
+            # A heading may name several commands ("`ds_demo_seek_to` / `ds_demo_seek_by`").
             for name in re.findall(r"`ds_([a-z0-9_]+)", line):
                 hints.setdefault(name, first_sentence(section_text(doc, i + 1)))
     return [["ds_" + n, hints.get(n, "")] for n in sorted(names)]

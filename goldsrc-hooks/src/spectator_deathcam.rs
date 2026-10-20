@@ -1,7 +1,7 @@
-//! `dodstudio_spec_deathcam 1`: when the player being watched in first person
+//! `ds_spec_deathcam 1`: when the player being watched in first person
 //! in an HLTV demo dies, the view becomes the death cam his own recording
 //! shows (issue #709). A switch of its own rather than part of
-//! `dodstudio_spec_match_pov`: a movie wants it, a shoutcast following the
+//! `ds_spec_match_pov`: a movie wants it, a shoutcast following the
 //! fight does not.
 //!
 //! ## What the player sees
@@ -50,7 +50,7 @@
 //! the dead player again (in his eyes, as without this switch) until he
 //! respawns. His own recording leaves the death cam after that long too, for a
 //! respawn or an observer view of a teammate (not reproduced); the pull-back
-//! itself takes 1.1 s. So with `dodstudio_spec_lock 1` a long reinforcement
+//! itself takes 1.1 s. So with `ds_spec_lock 1` a long reinforcement
 //! wait is spent in his eyes, not circling the body.
 //!
 //! Stands down in a POV demo like the `spec_match_pov` fixes: that recording
@@ -156,7 +156,7 @@ static RESULT: [AtomicU32; 6] = [
 /// Who last killed each player (by entity index), from `DeathMsg`. 0 is the
 /// world, or no death seen yet.
 static LAST_KILLER: [AtomicI32; MAX_PLAYERS + 1] = [const { AtomicI32::new(0) }; MAX_PLAYERS + 1];
-/// Death cams shown this session, for `dodstudio_debug_status`.
+/// Death cams shown this session, for `ds_debug_status`.
 static DEATHS: AtomicU64 = AtomicU64::new(0);
 
 /// Called once the cvar is registered.
@@ -433,7 +433,7 @@ pub unsafe fn after_calc_refdef(pparams: *mut RefParamsPartial) {
     }
 }
 
-/// One line for `dodstudio_debug_status`, while the switch is on.
+/// One line for `ds_debug_status`, while the switch is on.
 pub fn status_line() -> Option<String> {
     if !enabled() {
         return None;

@@ -1,7 +1,7 @@
 # The spectator camera under `spec_match_pov`: following one player, the in-eye height, and the death cam
 
 Three fixes to where the camera sits while watching a player from an HLTV
-demo, all part of the `dodstudio_spec_match_pov` / `spec_lock` / `spec_target`
+demo, all part of the `ds_spec_match_pov` / `spec_lock` / `spec_target`
 family in the hook DLL: which player the camera is on (#206, first section),
 how high the in-eye camera is when that player goes prone (#329, second), and
 what it shows when he dies (#709, third). The first two were
@@ -16,7 +16,7 @@ Two settings in the hook DLL (`goldsrc-hooks/src/spectator_follow.rs`):
 | | |
 | --- | --- |
 | `ds_spec_lock 1` | the camera stays on the player being watched when he dies, instead of moving to the next player four seconds later. A cvar, off by default. |
-| `ds_spec_target <player>` | puts the camera on a player, by number. `ds_deathmsg players` lists the numbers. With no number it says who the camera is on. A command. |
+| `ds_spec_target <player>` | puts the camera on a player, by number. `ds_hud_deathmsg players` lists the numbers. With no number it says who the camera is on. A command. |
 
 Both act on HLTV demo playback only. A first-person demo's view is the
 recording player's own.
@@ -108,7 +108,7 @@ pre-Anniversary and 25th Anniversary builds, and both were tested.
   as if the player were still dead. Not reproduced here; with the lock on the
   death switch cannot fire, which is the only unprompted writer found.
 - The view while the player is dead is the game's own for a dead target
-  unless `dodstudio_spec_deathcam` is on, which gives it his recording's death
+  unless `ds_spec_deathcam` is on, which gives it his recording's death
   cam first (third section).
 
 ---
@@ -176,7 +176,7 @@ to frame only the float changes. The standing and dead branches are untouched.
 wall at about 9:15, recorded with the switch on and off, on both builds. On:
 the camera is at ground level and the wall fills the view. Off: the camera
 looks over the wall from crouch height.
-`dodstudio_debug_log_weapon_model 1` logs each change of stance it sees.
+`ds_debug_log_weapon_model 1` logs each change of stance it sees.
 
 ---
 
@@ -185,8 +185,8 @@ looks over the wall from crouch height.
 Watching a player in first person from an HLTV demo, the camera stays in his
 eyes when he dies: the game rolls it 80° and drops it 8 units, and the clip
 shows the ground and his dropped weapon. His own recording shows something
-else. `dodstudio_spec_deathcam 1` gives the spectated view the same, for 2.4 s.
-A switch of its own rather than part of `dodstudio_spec_match_pov`: a movie
+else. `ds_spec_deathcam 1` gives the spectated view the same, for 2.4 s.
+A switch of its own rather than part of `ds_spec_match_pov`: a movie
 wants it, a shoutcast following the fight does not. The code
 is `goldsrc-hooks/src/spectator_deathcam.rs`.
 
@@ -244,7 +244,7 @@ since an HLTV demo can be late with `solid`):
 - After 2.4 s (what the measured recordings held it for, see below; the
   pull-back itself takes 1.1 s) nothing is touched until he respawns: the view is the
   game's own for the dead player, from his eyes, as without the switch. With
-  `dodstudio_spec_lock 1` a long reinforcement wait is spent there, not
+  `ds_spec_lock 1` a long reinforcement wait is spent there, not
   circling the body. A seek back across the death ends it too.
 - Once he is solid again nothing is touched: the game's in-eye view is his.
 

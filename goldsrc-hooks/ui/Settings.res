@@ -26,12 +26,12 @@
 		"enabled"		"1"
 		"labelText"		"Keep the camera on one player"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_spec_lock: the camera stays on the player when they die."
+		"helptext"		"ds_spec_lock: the camera stays on the player when they die."
 	}
-	"cvar_ds_hide_spectator_bars"
+	"cvar_ds_spec_hide_bars"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_hide_spectator_bars"
+		"fieldName"		"cvar_ds_spec_hide_bars"
 		"xpos"		"8"
 		"ypos"		"50"
 		"wide"		"256"
@@ -40,12 +40,12 @@
 		"enabled"		"1"
 		"labelText"		"Hide the spectator bars"
 		"textAlignment"		"west"
-		"helptext"		"ds_hide_spectator_bars: hide the spectator bars."
+		"helptext"		"ds_spec_hide_bars: hide the spectator bars."
 	}
-	"cvar_ds_hide_hltv_messages"
+	"cvar_ds_spec_hide_hltv_messages"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_hide_hltv_messages"
+		"fieldName"		"cvar_ds_spec_hide_hltv_messages"
 		"xpos"		"8"
 		"ypos"		"72"
 		"wide"		"256"
@@ -54,12 +54,12 @@
 		"enabled"		"1"
 		"labelText"		"Hide HLTV messages"
 		"textAlignment"		"west"
-		"helptext"		"ds_hide_hltv_messages: hide the HLTV proxy's messages."
+		"helptext"		"ds_spec_hide_hltv_messages: hide the HLTV proxy's messages."
 	}
-	"cvar_ds_hide_scoreboard"
+	"cvar_ds_hud_hide_scoreboard"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_hide_scoreboard"
+		"fieldName"		"cvar_ds_hud_hide_scoreboard"
 		"xpos"		"8"
 		"ypos"		"94"
 		"wide"		"256"
@@ -68,12 +68,12 @@
 		"enabled"		"1"
 		"labelText"		"Hide the scoreboard"
 		"textAlignment"		"west"
-		"helptext"		"ds_hide_scoreboard: recorded TAB presses don't show the scoreboard."
+		"helptext"		"ds_hud_hide_scoreboard: recorded TAB presses don't show the scoreboard."
 	}
-	"cvar_ds_hide_crosshair"
+	"cvar_ds_hud_hide_crosshair"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_hide_crosshair"
+		"fieldName"		"cvar_ds_hud_hide_crosshair"
 		"xpos"		"8"
 		"ypos"		"116"
 		"wide"		"256"
@@ -82,12 +82,12 @@
 		"enabled"		"1"
 		"labelText"		"Hide the crosshair"
 		"textAlignment"		"west"
-		"helptext"		"ds_hide_crosshair: hide the crosshair."
+		"helptext"		"ds_hud_hide_crosshair: hide the crosshair."
 	}
-	"cvar_ds_hide_hand_signals"
+	"cvar_ds_player_hide_hand_signals"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_hide_hand_signals"
+		"fieldName"		"cvar_ds_player_hide_hand_signals"
 		"xpos"		"8"
 		"ypos"		"138"
 		"wide"		"256"
@@ -96,12 +96,12 @@
 		"enabled"		"1"
 		"labelText"		"Hide hand signals"
 		"textAlignment"		"west"
-		"helptext"		"ds_hide_hand_signals: no hand-signal animations."
+		"helptext"		"ds_player_hide_hand_signals: no hand-signal animations."
 	}
-	"cvar_ds_mute_voice_commands"
+	"cvar_ds_sound_mute_voice_commands"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_mute_voice_commands"
+		"fieldName"		"cvar_ds_sound_mute_voice_commands"
 		"xpos"		"8"
 		"ypos"		"160"
 		"wide"		"256"
@@ -110,7 +110,7 @@
 		"enabled"		"1"
 		"labelText"		"Mute voice commands"
 		"textAlignment"		"west"
-		"helptext"		"ds_mute_voice_commands: silence voice commands."
+		"helptext"		"ds_sound_mute_voice_commands: silence voice commands."
 	}
 	"cvar_ds_hd_enabled"
 	{
@@ -126,10 +126,10 @@
 		"textAlignment"		"west"
 		"helptext"		"ds_hd_enabled: HD textures (walls, detail and sky change from the next map)."
 	}
-	"cvar_ds_viewdemo_in_panel"
+	"cvar_ds_ui_viewdemo_in_panel"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_viewdemo_in_panel"
+		"fieldName"		"cvar_ds_ui_viewdemo_in_panel"
 		"xpos"		"272"
 		"ypos"		"6"
 		"wide"		"256"
@@ -138,12 +138,12 @@
 		"enabled"		"1"
 		"labelText"		"viewdemo opens this window"
 		"textAlignment"		"west"
-		"helptext"		"ds_viewdemo_in_panel: viewdemo opens this window instead of the VCR bar."
+		"helptext"		"ds_ui_viewdemo_in_panel: viewdemo opens this window instead of the VCR bar."
 	}
-	"cvar_ds_console_in_panel"
+	"cvar_ds_ui_console_in_panel"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_console_in_panel"
+		"fieldName"		"cvar_ds_ui_console_in_panel"
 		"xpos"		"272"
 		"ypos"		"28"
 		"wide"		"256"
@@ -152,12 +152,12 @@
 		"enabled"		"1"
 		"labelText"		"The console key opens this window"
 		"textAlignment"		"west"
-		"helptext"		"ds_console_in_panel: the console key opens this window's Console tab."
+		"helptext"		"ds_ui_console_in_panel: the console key opens this window's Console tab."
 	}
-	"cvar_ds_resizable_windows"
+	"cvar_ds_ui_resizable_windows"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_resizable_windows"
+		"fieldName"		"cvar_ds_ui_resizable_windows"
 		"xpos"		"272"
 		"ypos"		"50"
 		"wide"		"256"
@@ -166,12 +166,12 @@
 		"enabled"		"1"
 		"labelText"		"Resizable windows"
 		"textAlignment"		"west"
-		"helptext"		"ds_resizable_windows: every game window can be resized."
+		"helptext"		"ds_ui_resizable_windows: every game window can be resized."
 	}
-	"cvar_ds_remember_window_layout"
+	"cvar_ds_ui_remember_layout"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_remember_window_layout"
+		"fieldName"		"cvar_ds_ui_remember_layout"
 		"xpos"		"272"
 		"ypos"		"72"
 		"wide"		"256"
@@ -180,12 +180,12 @@
 		"enabled"		"1"
 		"labelText"		"Remember where windows were"
 		"textAlignment"		"west"
-		"helptext"		"ds_remember_window_layout: game windows come back where you left them."
+		"helptext"		"ds_ui_remember_layout: game windows come back where you left them."
 	}
-	"cvar_ds_demo_list_folders"
+	"cvar_ds_ui_demo_list_folders"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_demo_list_folders"
+		"fieldName"		"cvar_ds_ui_demo_list_folders"
 		"xpos"		"272"
 		"ypos"		"94"
 		"wide"		"256"
@@ -194,12 +194,12 @@
 		"enabled"		"1"
 		"labelText"		"Demo lists show folders"
 		"textAlignment"		"west"
-		"helptext"		"ds_demo_list_folders: the Demos tab and the Load Demo window list folders too."
+		"helptext"		"ds_ui_demo_list_folders: the Demos tab and the Load Demo window list folders too."
 	}
-	"cvar_ds_demo_list_hide_empty"
+	"cvar_ds_ui_demo_list_hide_empty"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_demo_list_hide_empty"
+		"fieldName"		"cvar_ds_ui_demo_list_hide_empty"
 		"xpos"		"288"
 		"ypos"		"138"
 		"wide"		"116"
@@ -208,12 +208,12 @@
 		"enabled"		"1"
 		"labelText"		"Hide empty folders"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_demo_list_hide_empty: a folder with no demos anywhere inside, subfolders included, isn't listed."
+		"helptext"		"ds_ui_demo_list_hide_empty: a folder with no demos anywhere inside, subfolders included, isn't listed."
 	}
-	"cvar_ds_demo_list_count_subfolders"
+	"cvar_ds_ui_demo_list_count_subfolders"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_demo_list_count_subfolders"
+		"fieldName"		"cvar_ds_ui_demo_list_count_subfolders"
 		"xpos"		"406"
 		"ypos"		"138"
 		"wide"		"122"
@@ -222,12 +222,12 @@
 		"enabled"		"1"
 		"labelText"		"Include subfolders"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_demo_list_count_subfolders: a folder's demo count includes the demos in its subfolders."
+		"helptext"		"ds_ui_demo_list_count_subfolders: a folder's demo count includes the demos in its subfolders."
 	}
-	"cvar_dodstudio_demo_list_show_counts"
+	"cvar_ds_ui_demo_list_show_counts"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_dodstudio_demo_list_show_counts"
+		"fieldName"		"cvar_ds_ui_demo_list_show_counts"
 		"xpos"		"288"
 		"ypos"		"116"
 		"wide"		"240"
@@ -236,12 +236,12 @@
 		"enabled"		"1"
 		"labelText"		"Show folders' demo counts"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_demo_list_show_counts: folder rows show their demo count. Off: no counting, so folders open faster."
+		"helptext"		"ds_ui_demo_list_show_counts: folder rows show their demo count. Off: no counting, so folders open faster."
 	}
-	"cvar_ds_seek_skip_between"
+	"cvar_ds_demo_seek_skip_between"
 	{
 		"ControlName"		"CheckButton"
-		"fieldName"		"cvar_ds_seek_skip_between"
+		"fieldName"		"cvar_ds_demo_seek_skip_between"
 		"xpos"		"272"
 		"ypos"		"160"
 		"wide"		"256"
@@ -250,7 +250,7 @@
 		"enabled"		"1"
 		"labelText"		"Seeking skips what it jumps over"
 		"textAlignment"		"west"
-		"helptext"		"ds_seek_skip_between: a jump skips the events it passes over."
+		"helptext"		"ds_demo_seek_skip_between: a jump skips the events it passes over."
 	}
 	"cvar_hud_draw"
 	{

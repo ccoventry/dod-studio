@@ -1,4 +1,4 @@
-//! `ds_hide_scoreboard`: stop a POV demo's recorded TAB presses from putting
+//! `ds_hud_hide_scoreboard`: stop a POV demo's recorded TAB presses from putting
 //! the scoreboard on screen.
 //!
 //! ## The problem this exists for
@@ -73,7 +73,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_scoreboard");
+pub const NAME: &str = console_name!("hud_hide_scoreboard");
 
 /// The whole `+showscores` handler, wildcarded over the two absolute addresses
 /// and the one relative call.

@@ -1,4 +1,4 @@
-//! `ds_hide_asset` for DoD's own particles: the impact debris, the
+//! `ds_map_hide_asset` for DoD's own particles: the impact debris, the
 //! grenade dirt cloud (`sprites/effects/adrian/dirt_puff.spr`), smoke trails,
 //! splashes, snow (#614).
 //!
@@ -35,7 +35,7 @@
 //! [`crate::hide_asset::should_hide`] about the sprite and, for a listed one,
 //! returns NULL straight away: the `cl_particlefx 0` path, for that one sprite.
 //!
-//! Installed the first time `ds_hide_asset add` runs, not at startup:
+//! Installed the first time `ds_map_hide_asset add` runs, not at startup:
 //! nobody who never hides anything gets `client.dll` patched for it.
 
 use std::sync::Mutex;

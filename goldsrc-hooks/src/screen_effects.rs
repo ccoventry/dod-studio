@@ -1,4 +1,4 @@
-//! `ds_hide_headshot_red_screen` and `ds_hide_screen_shake`: keep two
+//! `ds_view_hide_headshot_red_screen` and `ds_view_hide_screen_shake`: keep two
 //! server effects out of a POV demo's picture (#606).
 //!
 //! ## What they are
@@ -33,8 +33,8 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use crate::engine::{self, CvarSPartial, UserMsgHookFn};
 use crate::names::console_name;
 
-pub const FLASH_NAME: &str = console_name!("hide_headshot_red_screen");
-pub const SHAKE_NAME: &str = console_name!("hide_screen_shake");
+pub const FLASH_NAME: &str = console_name!("view_hide_headshot_red_screen");
+pub const SHAKE_NAME: &str = console_name!("view_hide_screen_shake");
 
 static FLASH: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static SHAKE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());

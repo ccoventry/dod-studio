@@ -472,8 +472,9 @@ impl AppSettings {
     }
 
     /// Moves every hook console name from before #555 (`dodstudio_*`) in
-    /// Initial Commands, Scheduled Commands and the command profiles to its
-    /// `ds_` name (`native::patch::console_prefix::migrated`). The game has no
+    /// Initial Commands, Scheduled Commands and the command profiles to the
+    /// name that replaced it (`native::patch::console_prefix::migrated`, from
+    /// the hook's own old -> new table). The game has no
     /// aliases for the old names, so a list left as it was would do nothing.
     /// True when anything changed.
     pub fn migrate_console_names(&mut self) -> bool {
@@ -708,7 +709,8 @@ mod tests {
     }
 
     /// #555: Initial Commands, Scheduled Commands and every profile move from
-    /// the old `dodstudio_` hook names to `ds_`; anything else is kept as is.
+    /// the old `dodstudio_` hook names to the names that replaced them;
+    /// anything else is kept as is.
     #[test]
     fn test_old_console_names_migrate_on_load() {
         let scheduled = |command: &str| CustomCommandPayload {
@@ -738,20 +740,20 @@ mod tests {
         assert_eq!(
             settings.init_commands,
             [
-                "ds_hide_scoreboard 1",
+                "ds_hud_hide_scoreboard 1",
                 "mirv_fov 90",
-                "ds_deathmsg block !76561197962734863"
+                "ds_hud_deathmsg block !76561197962734863"
             ]
         );
         assert_eq!(settings.custom_commands[0].command, "ds_spec_lock 1");
         assert_eq!(settings.custom_commands[1].command, "host_timescale 0.5");
         assert_eq!(
             settings.command_profiles[0].init_commands,
-            ["ds_clear_decals"]
+            ["ds_map_clear_decals"]
         );
         assert_eq!(
             settings.command_profiles[0].custom_commands[0].command,
-            "ds_seek_by -10;ds_spec_target 3"
+            "ds_demo_seek_by -10;ds_spec_target 3"
         );
 
         // Already moved: nothing to do, so nothing is saved again.

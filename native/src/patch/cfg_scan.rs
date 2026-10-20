@@ -469,10 +469,10 @@ pub const FAST_FORWARD_CVARS: &[&str] = &["fps_override", "fps_max", "gl_vsync"]
 ///   `sv_cheats` is `0` the engine resets it to `1.0` and the value never
 ///   survives long enough for DoD's client to see it. Verified live and in
 ///   the binaries — `hw.dll` `0x1d455c9`, gated on `sv_cheats` at `0x1e56404`.
-/// - `ds_batch` / `ds_schedule` — the hook DLL's runners for a
+/// - `ds_capture_batch` / `ds_capture_schedule` — the hook DLL's runners for a
 ///   batch run without patched demos (#434). One started from a batch's own
 ///   commands would replace the batch that is running.
-/// - `dodstudio_spray` — writes the game's own spray file (`tempdecal.wad`)
+/// - `ds_player_spray` — writes the game's own spray file (`tempdecal.wad`)
 ///   (#428). A demo draws the sprays it recorded (or Configuration > Players'),
 ///   never that file, so from a batch it would change the user's spray on
 ///   disk and nothing on screen.
@@ -482,9 +482,9 @@ pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_movie_ffmpeg",
     "host_framerate",
     "r_norefresh",
-    "dodstudio_batch",
-    "dodstudio_schedule",
-    "dodstudio_spray",
+    "ds_capture_batch",
+    "ds_capture_schedule",
+    "ds_player_spray",
     "r_drawentities",
     "cl_lw",
 ];
@@ -829,13 +829,13 @@ pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
 /// pipeline itself always overwrites the value before anything downstream
 /// could read it. Scheduling one instead is a different, genuinely dangerous
 /// story — see `SCHEDULED_BANNED_COMMANDS`.
-/// `ds_run_in_background` and `ds_stay_behind_while_capturing` are set by every
+/// `ds_capture_run_in_background` and `ds_capture_stay_behind` are set by every
 /// batch after the user's own commands, the second from
 /// `PatcherConfig::keep_game_behind`.
 pub const NOOP_IN_INIT_COMMANDS: &[&str] = &[
     "mirv_movie_filename",
-    "ds_run_in_background",
-    "ds_stay_behind_while_capturing",
+    "ds_capture_run_in_background",
+    "ds_capture_stay_behind",
 ];
 
 /// `NOOP_IN_INIT_COMMANDS` checked against Initial Commands. What the demo
@@ -1162,7 +1162,7 @@ mod tests {
                       exec dodstudio_helper.cfg\n";
         let movie = "// dodstudio_spec_lock 1\n\
                      bind F7 \"dodstudio_clear_decals\"\n\
-                     ds_hide_crosshair 1; dodstudio_hide_crosshair 1\n";
+                     ds_hud_hide_crosshair 1; dodstudio_hide_crosshair 1\n";
         std::fs::write(dir.join("config.cfg"), config).unwrap();
         std::fs::write(dir.join("movie.cfg"), movie).unwrap();
 
@@ -1177,19 +1177,19 @@ mod tests {
             vec![
                 (
                     "dodstudio_hide_scoreboard",
-                    "ds_hide_scoreboard",
+                    "ds_hud_hide_scoreboard",
                     "config.cfg".to_string(),
                     1
                 ),
                 (
                     "dodstudio_clear_decals",
-                    "ds_clear_decals",
+                    "ds_map_clear_decals",
                     "movie.cfg".to_string(),
                     2
                 ),
                 (
                     "dodstudio_hide_crosshair",
-                    "ds_hide_crosshair",
+                    "ds_hud_hide_crosshair",
                     "movie.cfg".to_string(),
                     3
                 ),

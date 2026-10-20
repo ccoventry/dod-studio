@@ -15,7 +15,7 @@ use std::path::{Component, Path};
 pub const MAX_DEMO_ARG: usize = 240;
 
 /// The in-game window's Highlights tab, opened once the demo is playing.
-pub const OPEN_HIGHLIGHTS: &str = "ds_panel highlights";
+pub const OPEN_HIGHLIGHTS: &str = "ds_ui_panel highlights";
 
 /// `demo` as `viewdemo` finds it from the mod folder `mod_dir`: relative,
 /// with `/`, without `.dem`. `None` when there is no such path (another

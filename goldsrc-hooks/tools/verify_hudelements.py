@@ -60,7 +60,7 @@ BASE_DRAW_CODE = b"\x33\xc0\xc2\x04\x00"
 # out of `hudelement.rs` on purpose. See that file's "What is not listed"
 # section for why each one is here.
 KNOWN_EXCLUDED = {
-    # Removed from the table in #312: ds_hide_crosshair patches
+    # Removed from the table in #312: ds_hud_hide_crosshair patches
     # CHudDoDCrossHair::Draw by signature, and dodstudio_match_pov_crosshair
     # defers to it, so one owner is enough.
     ".?AVCHudDoDCrossHair@@",

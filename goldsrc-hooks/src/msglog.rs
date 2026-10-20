@@ -244,7 +244,7 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     } else {
         Some(unsafe { CStr::from_ptr(name) }.to_string_lossy())
     };
-    // Logged above either way; hidden here when ds_hide_map_text says
+    // Logged above either way; hidden here when ds_hud_hide_map_text says
     // so, since this record sits in front of map_text's own while both want
     // HudText.
     if name_str
@@ -260,14 +260,14 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
-    // Same for ds_hide_clan_text's three messages.
+    // Same for ds_hud_hide_clan_text's three messages.
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::clan_text::filter(n, size, buf))
     {
         return result;
     }
-    // And for dodstudio_hide_voice_menus' ShowMenu.
+    // And for ds_hud_hide_voice_menus' ShowMenu.
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::voice_menus::filter(n, size, buf))
@@ -399,7 +399,7 @@ fn dispatch(argv: &[String]) -> String {
     }
     // Anything else is a list of message names, replacing whatever was
     // wanted before -- the same "each call restates the whole set" shape
-    // `ds_deathmsg block <id>...` uses.
+    // `ds_hud_deathmsg block <id>...` uses.
     let canonical = match resolve_names(rest) {
         Ok(names) => names,
         Err(unknown) => {
@@ -479,7 +479,7 @@ mod tests {
     fn a_mixed_known_and_unknown_list_is_rejected_wholesale() {
         // Silently dropping just the bad name and logging the rest would
         // hide a typo instead of naming it -- the same reasoning
-        // ds_hide_hudelement's own fix (commit 3e44cd7) applied.
+        // ds_hud_hide_element's own fix (commit 3e44cd7) applied.
         let err = resolve_names(&["SayText".to_string(), "Nope".to_string()]).unwrap_err();
         assert_eq!(err, vec!["Nope".to_string()]);
     }

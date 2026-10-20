@@ -1,4 +1,4 @@
-//! `ds_overviewmap`: move and resize DoD's overview map.
+//! `ds_hud_overview_layout`: move and resize DoD's overview map.
 //!
 //! ## Four dwords, not a patch
 //!
@@ -26,7 +26,7 @@
 //! map down regardless of where this module put it, and hands it back once
 //! the FOV returns to 90. Preventing that would mean hooking
 //! `OverviewMapMode` itself (a new gate to bypass, not a placement change) --
-//! out of scope for `ds_overviewmap`, not attempted here.
+//! out of scope for `ds_hud_overview_layout`, not attempted here.
 //!
 //! ## The survey has the two rectangles the wrong way round
 //!
@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("overviewmap");
+pub const NAME: &str = console_name!("hud_overview_layout");
 
 /// `mov ecx, gHUD; call CHud::ComputeOverviewMapRects` at the end of
 /// `CHudDoDMap::VidInit`. Both operands are wildcards: the first gives `gHUD`,

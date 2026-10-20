@@ -1,4 +1,4 @@
-//! `ds_mute_voice_commands`: silence DoD's spoken voice commands without
+//! `ds_sound_mute_voice_commands`: silence DoD's spoken voice commands without
 //! overwriting the game's own `.wav` files.
 //!
 //! ## The problem this exists for
@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("mute_voice_commands");
+pub const NAME: &str = console_name!("sound_mute_voice_commands");
 
 /// `call dword ptr [ebx]` -- `pEventAPI->EV_PlaySound`.
 const CALL: &[u8] = &[0xff, 0x13];

@@ -216,13 +216,13 @@ pub const SPEC_LOCK: &str = "ds_spec_lock";
 /// otherwise plays in a chase camera behind the player.
 pub const IN_EYE: &str = "spec_mode 4";
 
-/// The hook DLL's `ds_run_in_background` (goldsrc-hooks
+/// The hook DLL's `ds_capture_run_in_background` (goldsrc-hooks
 /// `run_in_background.rs`), which every batch turns on.
-pub const RUN_IN_BACKGROUND: &str = "ds_run_in_background";
+pub const RUN_IN_BACKGROUND: &str = "ds_capture_run_in_background";
 
-/// The hook DLL's `ds_stay_behind_while_capturing` (goldsrc-hooks `hlae_window.rs`),
+/// The hook DLL's `ds_capture_stay_behind` (goldsrc-hooks `hlae_window.rs`),
 /// which every batch sets from `PatcherConfig::keep_game_behind`.
-pub const STAY_BEHIND: &str = "ds_stay_behind_while_capturing";
+pub const STAY_BEHIND: &str = "ds_capture_stay_behind";
 
 /// On a capture batch's game launch line, with `keep_game_behind` on: the hook
 /// DLL keeps the window behind from the moment it opens, before the pipe can

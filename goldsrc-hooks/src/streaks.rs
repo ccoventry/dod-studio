@@ -18,7 +18,7 @@
 //! ## Times
 //!
 //! A streak's time is its first kill's on the `viewdemo` bar, the units
-//! `ds_seek_to` takes (`analysis`' `viewdemo_offset`).
+//! `ds_demo_seek_to` takes (`analysis`' `viewdemo_offset`).
 
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]

@@ -2,7 +2,7 @@
 
 > **Status 2026-09-16 — implemented and live-tested.**
 > Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
-> `ds_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
+> `ds_hud_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
 > plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
 > `font` (§6, #562) and `scale` (§7, #728) came later, in `deathmsg/`.
 
@@ -365,13 +365,13 @@ are checked against `Y_STOLEN` before anything is written.
 ## 4. The console surface
 
 ```
-ds_deathmsg max <4..127>      lines shown at once (default 4)
-ds_deathmsg offset <0..127>   y the feed starts at (default 20)
-ds_deathmsg offset default    put the y back
-ds_deathmsg block <id>...     hide frags involving these players
-ds_deathmsg block !<id>...    hide everything EXCEPT these players
-ds_deathmsg block clear       stop hiding anything
-ds_deathmsg fake <killer> <victim> <weapon>
+ds_hud_deathmsg max <4..127>      lines shown at once (default 4)
+ds_hud_deathmsg offset <0..127>   y the feed starts at (default 20)
+ds_hud_deathmsg offset default    put the y back
+ds_hud_deathmsg block <id>...     hide frags involving these players
+ds_hud_deathmsg block !<id>...    hide everything EXCEPT these players
+ds_hud_deathmsg block clear       stop hiding anything
+ds_hud_deathmsg fake <killer> <victim> <weapon>
 ```
 
 `max 4` restores the shipped bytes exactly, array included, so there is always a
@@ -427,7 +427,7 @@ the bar. `goldsrc-hooks/src/spectator_hud.rs` sets the feed's y through this
 detour whenever no `offset` has been typed:
 
 - bar shown: 20 below the bar;
-- `ds_hide_spectator_bars 1`: 20, as in a POV demo.
+- `ds_spec_hide_bars 1`: 20, as in a POV demo.
 
 The minimap is the exception: while it is up, the game already places the feed
 under it. So the layout leaves the feed alone and moves the minimap instead. A

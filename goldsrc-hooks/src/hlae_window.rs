@@ -1,8 +1,8 @@
-//! `ds_stay_behind_while_capturing`: keeps a background capture in the background.
+//! `ds_capture_stay_behind`: keeps a background capture in the background.
 //! With it on, HLAE no longer pulls the game window to the front when a
 //! recording starts, and a minimised game is parked off-screen instead, since
 //! a minimised game records black frames (#434, #723). Its own setting, apart
-//! from `dodstudio_run_in_background`'s speed, so a user can watch a batch at
+//! from `ds_capture_run_in_background`'s speed, so a user can watch a batch at
 //! full speed with the game in front.
 //!
 //! ## What HLAE does
@@ -68,7 +68,7 @@ use crate::names::console_name;
 pub const CLOAK_NAME: &str = console_name!("debug_cloak_instead");
 static CLOAK_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-pub const NAME: &str = console_name!("stay_behind_while_capturing");
+pub const NAME: &str = console_name!("capture_stay_behind");
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -859,7 +859,7 @@ mod tests {
 
     #[test]
     fn the_cloak_name_is_a_debug_cvar() {
-        assert_eq!(CLOAK_NAME, "dodstudio_debug_cloak_instead");
+        assert_eq!(CLOAK_NAME, "ds_debug_cloak_instead");
     }
 
     #[test]

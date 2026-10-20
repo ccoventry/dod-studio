@@ -2,7 +2,7 @@
 //! of the screen while spectating, in a demo or live, and everything drawn on
 //! them -- with a cvar, on screen, without a capture running (issue #328).
 //!
-//! `ds_hide_spectator_bars 1` hides the whole spectator panel: the
+//! `ds_spec_hide_bars 1` hides the whole spectator panel: the
 //! bands, the score, timer and player name on them, the DUCK menu row and the
 //! inset outline. An earlier version had a second cvar for the bands alone,
 //! with the text left floating; nobody wanted that, and it went.
@@ -71,7 +71,7 @@ use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
 /// Hides the spectator panel: the bands and everything on them.
-pub const NAME: &str = console_name!("hide_spectator_bars");
+pub const NAME: &str = console_name!("spec_hide_bars");
 
 /// `IPanel` (`VGUI_Panel007`) vtable slots, 0-based; slot 0 is the virtual
 /// destructor. The same in both builds' `vgui2.dll`.

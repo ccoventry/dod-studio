@@ -60,7 +60,7 @@
 //! the spectator mode, is the dword before it.
 //!
 //! The number is the player's entity index, the same number
-//! `ds_deathmsg players` lists.
+//! `ds_hud_deathmsg players` lists.
 
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
@@ -270,7 +270,7 @@ pub unsafe extern "C" fn target_command() {
         Request::Report => {
             return say(if mode_now == 0 || target_now == 0 {
                 format!(
-                    "the camera is on no player. usage: {TARGET_NAME} <1-{MAX_PLAYERS}> (ds_deathmsg players lists the numbers)"
+                    "the camera is on no player. usage: {TARGET_NAME} <1-{MAX_PLAYERS}> (ds_hud_deathmsg players lists the numbers)"
                 )
             } else {
                 format!("the camera is on player {target_now}")
@@ -278,7 +278,7 @@ pub unsafe extern "C" fn target_command() {
         }
         Request::Invalid => {
             return say(format!(
-                "expected a player number, 1-{MAX_PLAYERS} (ds_deathmsg players lists them)"
+                "expected a player number, 1-{MAX_PLAYERS} (ds_hud_deathmsg players lists them)"
             ));
         }
         Request::Player(n) => n,

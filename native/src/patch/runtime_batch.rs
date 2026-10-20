@@ -1,4 +1,4 @@
-//! A capture batch the hook DLL runs on the original demos (`ds_batch`,
+//! A capture batch the hook DLL runs on the original demos (`ds_capture_batch`,
 //! goldsrc-hooks `batch.rs`), instead of patched copies (issue #434, step 3).
 //!
 //! `build_batch_queue` still plans the batch: the blocks, their take folders,
@@ -46,7 +46,7 @@ pub struct RuntimeBatch {
 pub const HEADER: &str = "dodstudio-batch 1";
 
 /// The hook DLL's decal clear (goldsrc-hooks `commands.rs`).
-pub const CLEAR_DECALS: &str = "dodstudio_clear_decals";
+pub const CLEAR_DECALS: &str = "ds_map_clear_decals";
 
 /// How much of the run-up to each clip is fast-forwarded rather than jumped
 /// over (see the module doc): longer than the kill feed's longest usual hold
@@ -54,7 +54,7 @@ pub const CLEAR_DECALS: &str = "dodstudio_clear_decals";
 pub const SETTLE_SECONDS: f64 = 30.0;
 
 /// The hook DLL's batch command.
-pub const BATCH_COMMAND: &str = "ds_batch";
+pub const BATCH_COMMAND: &str = "ds_capture_batch";
 
 /// One kill whose frame and `viewdemo` time are both known.
 #[derive(Debug, Clone, Copy)]
@@ -172,7 +172,7 @@ fn seconds_text(s: f64) -> String {
 /// The batch file for `jobs` (from `build_batch_queue`, primer included or
 /// not), with `streaks` the highlights the batch was planned from. With
 /// `clear_decals` (the Flush Decals setting), every seek lands on
-/// `dodstudio_clear_decals`: the original demo still holds the decals the
+/// `ds_map_clear_decals`: the original demo still holds the decals the
 /// patched copy's flush strips. `Err` says why this batch can't run from the
 /// hook and has to be patched.
 pub fn batch_file(
@@ -458,7 +458,7 @@ mod tests {
         )];
         let text = batch_file(&jobs, &streaks, true).unwrap();
         assert!(
-            text.contains("at\t325.000\tdodstudio_clear_decals\n"),
+            text.contains("at\t325.000\tds_map_clear_decals\n"),
             "{text}"
         );
     }
@@ -486,18 +486,18 @@ mod tests {
         assert_eq!(
             early_lines(true),
             [
-                "ds_run_in_background 1",
-                "ds_stay_behind_while_capturing 1",
-                "ds_batch away"
+                "ds_capture_run_in_background 1",
+                "ds_capture_stay_behind 1",
+                "ds_capture_batch away"
             ]
         );
         assert_eq!(
             early_lines(false),
-            ["ds_run_in_background 1", "ds_stay_behind_while_capturing 0"]
+            ["ds_capture_run_in_background 1", "ds_capture_stay_behind 0"]
         );
         assert_eq!(
             start_lines(Path::new("C:/x y/b.txt")),
-            ["ds_batch start \"C:/x y/b.txt\""]
+            ["ds_capture_batch start \"C:/x y/b.txt\""]
         );
     }
 }

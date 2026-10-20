@@ -1,6 +1,8 @@
-//! `dodstudio_pov_live_bob`: a POV demo bobs the view and the gun by the
-//! `cl_bob` set now (#359). Without it a POV demo doesn't bob at all,
-//! whatever `cl_bob` says.
+//! `ds_view_bob`: a POV demo bobs the view and the gun by the `cl_bob`,
+//! `cl_bobcycle` and `cl_bobup` set now (#359). Off (0), a POV demo shows the
+//! bob it recorded, the recording player's own, whatever `cl_bob` says here:
+//! about 13 of 20 POV demos from different recorders carry one, the rest
+//! were recorded with none.
 //!
 //! ## What the engine does
 //!
@@ -15,10 +17,10 @@
 //! `ClientDLL_CalcRefdef` it calls the demo view override (pre-Anniversary
 //! `hw.dll+0xd75d`, 25th Anniversary `+0x198e90`; `playdemo` and `viewdemo`
 //! alike), which copies the recorded `ref_params_s` over the live one and
-//! puts the gun at the recorded position. Neither carries any bob: measured
-//! on wsod25_grp2_h1_m00cat, the recorded `vieworg` sits exactly at
-//! `simorg + viewheight + 1/32` on every frame, and the recorded gun height
-//! never moves. So changing `cl_bob` does nothing. HLTV demos skip the
+//! puts the gun at the recorded position. Both carry the recorder's bob, not
+//! ours: on wsod25_grp2_h1_m00cat, recorded with no bob, the recorded
+//! `vieworg` sits exactly at `simorg + viewheight + 1/32` on every frame, and
+//! the recorded gun height never moves. So changing `cl_bob` does nothing. HLTV demos skip the
 //! override (the engine's spectator flag), which is why the cvar works there.
 //!
 //! ## The change
@@ -43,7 +45,7 @@ use crate::engine::{self, CvarSPartial, RefParamsPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("pov_live_bob");
+pub const NAME: &str = console_name!("view_bob");
 
 /// One build's call to the demo view override in `V_RenderView`.
 struct Site {

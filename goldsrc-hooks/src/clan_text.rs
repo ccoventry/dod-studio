@@ -1,4 +1,4 @@
-//! `ds_hide_clan_text`: hide all of DoD's clan-match text -- the
+//! `ds_hud_hide_clan_text`: hide all of DoD's clan-match text -- the
 //! warm-up and ready rules, "Warmup Mode", the countdown to the match and
 //! "MATCH IS LIVE!" -- so clips from a match's warm-up and start don't carry
 //! it (#608).
@@ -60,7 +60,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_clan_text");
+pub const NAME: &str = console_name!("hud_hide_clan_text");
 
 const TEXT_MSG: &str = "TextMsg";
 const CLAN_TIMER: &str = "ClanTimer";
@@ -104,7 +104,7 @@ struct Last {
     game_rules: Option<Vec<u8>>,
 }
 
-/// Called by `commands.rs` once `ds_hide_clan_text` is registered.
+/// Called by `commands.rs` once `ds_hud_hide_clan_text` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

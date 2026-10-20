@@ -1,6 +1,6 @@
 # The spectator top/bottom bars: why one `.res` edit sticks and the other doesn't
 
-> **Shipped 2026-09-30 (issue #328):** `ds_hide_spectator_bars 1` hides
+> **Shipped 2026-09-30 (issue #328):** `ds_spec_hide_bars 1` hides
 > the spectator panel: the two dark bands and the text and menu row on them.
 > It works on screen with no capture running, on both builds.
 > Code: `goldsrc-hooks/src/spectator_bars.rs`. The "Shipped mechanism" section
@@ -69,7 +69,7 @@ patched, and the log and console say why.
 Mean brightness of the band regions in frames recorded with
 `mirv_movie_hidepanels 0`:
 
-| build | bands showing (top / bottom) | `ds_hide_spectator_bars 1` | turned off again |
+| build | bands showing (top / bottom) | `ds_spec_hide_bars 1` | turned off again |
 | --- | --- | --- | --- |
 | pre-Anniversary | 27 / 27 | 114 / 115, the scene's own level | 27 / 27 |
 | 25th Anniversary | 24 / 18 | 94 / 76 | 24 / 19 |

@@ -220,7 +220,7 @@ test.describe('renamed hook names', () => {
     await loadHarness(page, {
       ...EMPTY_REPORT,
       renamed: [
-        { old: 'dodstudio_hide_scoreboard', new: 'ds_hide_scoreboard', source: 'movie.cfg, line 4' },
+        { old: 'dodstudio_hide_scoreboard', new: 'ds_hud_hide_scoreboard', source: 'movie.cfg, line 4' },
         { old: 'dodstudio_spec_lock', new: 'ds_spec_lock', source: 'Initial Commands' },
       ],
     });
@@ -229,7 +229,7 @@ test.describe('renamed hook names', () => {
     await expect(banner).toContainText('These DoD Studio commands have new names:');
     const rows = banner.locator('li code');
     await expect(rows).toHaveCount(2);
-    await expect(rows.nth(0)).toHaveText('dodstudio_hide_scoreboard → ds_hide_scoreboard (movie.cfg, line 4)');
+    await expect(rows.nth(0)).toHaveText('dodstudio_hide_scoreboard → ds_hud_hide_scoreboard (movie.cfg, line 4)');
     await expect(rows.nth(1)).toHaveText('dodstudio_spec_lock → ds_spec_lock');
     await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
   });
@@ -237,11 +237,11 @@ test.describe('renamed hook names', () => {
   test('a Scheduled Command shows under Scheduled Commands', async ({ page }) => {
     await loadHarness(page, {
       ...EMPTY_REPORT,
-      renamed: [{ old: 'dodstudio_seek_by', new: 'ds_seek_by', source: 'Scheduled Commands' }],
+      renamed: [{ old: 'dodstudio_seek_by', new: 'ds_demo_seek_by', source: 'Scheduled Commands' }],
     });
 
     const banner = page.locator('#scheduled-commands-warning-banner');
-    await expect(banner).toContainText('dodstudio_seek_by → ds_seek_by');
+    await expect(banner).toContainText('dodstudio_seek_by → ds_demo_seek_by');
     await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
   });
 });

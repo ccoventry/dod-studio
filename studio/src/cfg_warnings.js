@@ -348,7 +348,7 @@ function render() {
   renderInto('#scheduled-commands-warning-banner', joinSections(schedParts));
 }
 
-/** Old `dodstudio_` hook names, each with the `ds_` name that replaced it. */
+/** Old `dodstudio_` hook names, each with the name that replaced it. */
 function renamedSection(rows) {
   const items = rows
     .map((r) => `<li><code>${escapeHtml(STRINGS.CFG.renamedRow(r.old, r.new, r.source))}</code></li>`)

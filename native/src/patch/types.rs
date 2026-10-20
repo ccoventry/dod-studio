@@ -465,14 +465,14 @@ pub struct PatcherConfig {
     /// batches have vetted this one.
     #[serde(default = "default_hook_runs_batch")]
     pub hook_runs_batch: bool,
-    /// The hook DLL's `ds_stay_behind_while_capturing` for the batch: the game stays
+    /// The hook DLL's `ds_capture_stay_behind` for the batch: the game stays
     /// behind the user's windows. Off, it comes to the front while it records,
     /// so the user can watch. Full speed either way
-    /// (`ds_run_in_background`).
+    /// (`ds_capture_run_in_background`).
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
     /// Configuration > Players' "Use in the game" box (#428), sent to the
-    /// game as `dodstudio_player_overrides` when its pipe first answers.
+    /// game as `ds_player_overrides` when its pipe first answers.
     /// `None` sends nothing: a config not built from the saved settings.
     #[serde(default)]
     pub player_overrides: Option<bool>,

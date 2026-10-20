@@ -1,4 +1,4 @@
-//! `ds_hud_map_team_marker`: in HLTV, mark the player being watched
+//! `ds_hud_overview_team_marker`: in HLTV, mark the player being watched
 //! on the overview map with his team's camera icon, not `spec_camera.spr`.
 //!
 //! ## What the game does
@@ -34,7 +34,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hud_map_team_marker");
+pub const NAME: &str = console_name!("hud_overview_team_marker");
 
 /// From the `IsSpectateOnly` call to the team test's `jne`.
 const PATTERN: &str = "FF 15 ?? ?? ?? ?? 85 C0 74 08 8B 35 ?? ?? ?? ?? EB 26 \

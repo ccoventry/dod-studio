@@ -2,16 +2,16 @@
 
 The shared pattern behind the `client.dll` patches in `goldsrc-hooks` that hide
 or silence something DoD draws, and why each needed a patch rather than a
-setting. This doc keeps the pattern, `ds_mute_voice_commands` and the
+setting. This doc keeps the pattern, `ds_sound_mute_voice_commands` and the
 per-frame re-apply loop; the other topics have their own docs:
 
 | topic | command(s) | doc |
 |---|---|---|
-| scoreboard | `ds_hide_scoreboard` | `docs/goldsrc_scoreboard.md` |
-| crosshair, and the spectator crosshair under `spec_match_pov` | `ds_hide_crosshair`, `ds_spec_match_pov` | `docs/goldsrc_crosshair.md` |
-| any HUD element by name, and the notes on the `CHudDoD*` elements that are not offered | `ds_hide_hudelement` | `docs/goldsrc_hud_elements.md` |
-| the spectator bars (VGUI2 panel) | `ds_hide_spectator_bars` | `docs/goldsrc_spectator_bars.md` |
-| objective icons and timer position | `ds_objectives` | `docs/goldsrc_objective_icons.md` |
+| scoreboard | `ds_hud_hide_scoreboard` | `docs/goldsrc_scoreboard.md` |
+| crosshair, and the spectator crosshair under `spec_match_pov` | `ds_hud_hide_crosshair`, `ds_spec_match_pov` | `docs/goldsrc_crosshair.md` |
+| any HUD element by name, and the notes on the `CHudDoD*` elements that are not offered | `ds_hud_hide_element` | `docs/goldsrc_hud_elements.md` |
+| the spectator bars (VGUI2 panel) | `ds_spec_hide_bars` | `docs/goldsrc_spectator_bars.md` |
+| objective icons and timer position | `ds_hud_objectives` | `docs/goldsrc_objective_icons.md` |
 
 Everything here is from offline analysis of DoD 1.3's `client.dll` (`pefile` +
 `capstone`, the house method in `docs/goldsrc_client_dll_internals.md` §10),
@@ -40,7 +40,7 @@ the install.
 
 ---
 
-## 2. `ds_mute_voice_commands`
+## 2. `ds_sound_mute_voice_commands`
 
 ### Where the sound comes from
 
@@ -148,7 +148,7 @@ For the spectator crosshair (`docs/goldsrc_crosshair.md` §2) the same loop earn
 
 ## 4. The spectator bars
 
-Done: `ds_hide_spectator_bars` (2026-09-30), by vgui2's own
+Done: `ds_spec_hide_bars` (2026-09-30), by vgui2's own
 `IPanel::PaintTraverse`. See `docs/goldsrc_spectator_bars.md`. This section used
 to hold the pre-shipping guesswork; the durable parts of it (HLAE's
 `mirv_disable_specmenu` failing on DoD with `"Error: Hook not installed."`, and

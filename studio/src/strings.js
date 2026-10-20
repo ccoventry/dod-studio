@@ -2589,7 +2589,7 @@ export const STRINGS = {
   // Configuration > Players (#428): players_ui.js.
   PLAYERS: {
     USE_IN_GAME_LABEL: 'Use in the game',
-    USE_IN_GAME_TITLE: 'On: sprays and crosshairs in your demos follow this table (dodstudio_player_overrides 1, sent when Studio starts the game, a review or a batch, and right away to a game already running). Off: the game\'s own.',
+    USE_IN_GAME_TITLE: 'On: sprays and crosshairs in your demos follow this table (ds_player_overrides 1, sent when Studio starts the game, a review or a batch, and right away to a game already running). Off: the game\'s own.',
     HELP: "Pick the spray and the crosshair each player shows in your demos: sprays are PNGs from the game's logos folder, crosshairs a 64x64 tile of a sprite in its sprites folder. Players are matched by SteamID, or by name when there is none.",
     PLAYER_PLACEHOLDER: 'A player from the queue, a SteamID or a name',
     ADD_BUTTON: 'Add Player',

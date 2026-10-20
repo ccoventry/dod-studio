@@ -269,13 +269,13 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 
 ---
 
-## 12. The other direction: `ds_hide_hand_signals`
+## 12. The other direction: `ds_player_hide_hand_signals`
 
 Everything above puts an animation *back*. This one takes one away, and it
 belongs here because it works on the same field, from the same per-frame hook.
 
 Using a voice command in DoD also plays a gesture on the player -- a nod for
-"Yes Sir!", a point for "Enemy Ahead". `ds_mute_voice_commands` silences
+"Yes Sir!", a point for "Enemy Ahead". `ds_sound_mute_voice_commands` silences
 the sound and leaves the mime, because the two are unrelated mechanisms:
 `client.dll` contains **no `hs_` string at all**. The client never picks these
 by name. The server picks a sequence index and it arrives as replicated

@@ -3,9 +3,9 @@
 //!
 //! Writes a copy of a demo with `echo [dod-studio] INJ <n>` injected as a
 //! `ConsoleCommand` frame at several points, the way a capture batch injects
-//! Scheduled Commands, and a schedule file for `ds_schedule` with
+//! Scheduled Commands, and a schedule file for `ds_capture_schedule` with
 //! `echo [dod-studio] HOOK <n>` at the viewdemo clock each injected frame
-//! runs at. Play the copy with `viewdemo` after `ds_schedule load
+//! runs at. Play the copy with `viewdemo` after `ds_capture_schedule load
 //! "<schedule>"`: the hook log then has a `marker at <clock>` line for every
 //! INJ and HOOK, on the same clock, and the difference per pair is the gap
 //! between the two routes.
