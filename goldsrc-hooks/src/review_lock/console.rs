@@ -109,6 +109,9 @@ static CVARS: [AtomicUsize; GUARDED_CVARS.len()] =
 static KEPT: [AtomicU32; GUARDED_CVARS.len()] = [const { AtomicU32::new(0) }; GUARDED_CVARS.len()];
 static PUTTING_BACK: [AtomicBool; GUARDED_CVARS.len()] =
     [const { AtomicBool::new(false) }; GUARDED_CVARS.len()];
+/// Whether this review has printed the cvar's note already.
+static NOTED: [AtomicBool; GUARDED_CVARS.len()] =
+    [const { AtomicBool::new(false) }; GUARDED_CVARS.len()];
 
 fn cvar(i: usize) -> *mut CvarSPartial {
     let known = CVARS[i].load(Ordering::Relaxed);
@@ -156,12 +159,15 @@ fn guard_cvars() {
         if PUTTING_BACK[i].swap(true, Ordering::Relaxed) {
             continue;
         }
-        crate::commands::console_print(&super::console_note(cvar_name));
-        unsafe {
-            crate::debug::report(&format!(
-                "review_lock: {cvar_name} changed to {now} during a review; put back to {kept}"
-            ))
-        };
+        // Once per review: HLAE recording sets host_framerate every frame.
+        if !NOTED[i].swap(true, Ordering::Relaxed) {
+            crate::commands::console_print(&super::console_note(cvar_name));
+            unsafe {
+                crate::debug::report(&format!(
+                    "review_lock: {cvar_name} changed to {now} during a review; put back to {kept}"
+                ))
+            };
+        }
         if let Ok(line) = std::ffi::CString::new(format!("{cvar_name} \"{kept}\"\n")) {
             engine::client_cmd(&line);
         }
@@ -203,6 +209,9 @@ pub fn poll() {
     match (locked, ARMED.load(Ordering::Relaxed)) {
         (true, false) => {
             note_cvars();
+            for noted in &NOTED {
+                noted.store(false, Ordering::Relaxed);
+            }
             ARMED.store(true, Ordering::Relaxed);
         }
         (true, true) => guard_cvars(),

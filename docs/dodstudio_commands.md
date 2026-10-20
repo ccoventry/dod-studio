@@ -226,7 +226,7 @@ move the camera off the highlight's player (#826), and the console refuses
 the commands that move the demo or the camera (seeks, `dem_*`, `viewdemo`
 and other loads, `stop`, `disconnect`, `spec_mode`, `dodstudio_spec_target`,
 `spec_autodirector`, `mirv_input`, ...) with one line saying so; a typed
-`host_framerate`, `spec_autodirector_internal` or `chase_active` is put back
+`host_framerate` or `spec_autodirector_internal` is put back
 (#855). The lists are in `src/review_lock.rs`; `dodstudio_review` itself
 always works.
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events

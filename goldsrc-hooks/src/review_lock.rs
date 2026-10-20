@@ -199,13 +199,11 @@ pub const CONSOLE_CAMERA: &[&str] = &[
 /// Cvars that move the demo or the camera. A cvar has no handler to wrap, so
 /// a typed value is put back the frame it changes: `host_framerate` sets
 /// how much demo time each frame plays, `spec_autodirector_internal` lets
-/// the demo's director move the camera, `chase_active` the engine's chase
-/// camera.
-pub const GUARDED_CVARS: &[&str] = &[
-    "host_framerate",
-    "spec_autodirector_internal",
-    "chase_active",
-];
+/// the demo's director move the camera. (`chase_active` would be one, but the
+/// engine itself refuses it in a demo: "Can't set chase_active in
+/// multiplayer".) The note is printed once per cvar per review, since HLAE
+/// sets `host_framerate` every frame while it records.
+pub const GUARDED_CVARS: &[&str] = &["host_framerate", "spec_autodirector_internal"];
 
 /// Whether the console command `name` is refused while a review runs.
 pub fn console_locks(name: &str) -> bool {
