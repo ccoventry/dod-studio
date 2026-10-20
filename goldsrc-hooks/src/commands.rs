@@ -1701,6 +1701,9 @@ pub fn install() {
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
         crate::detail_cache::set_keep_cvar(keep);
     }
+    if let Some(restyled) = register(crate::restyled_hud::NAME, "0") {
+        crate::restyled_hud::set_cvar(restyled);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
@@ -1862,6 +1865,7 @@ mod tests {
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,
             crate::detail_cache::KEEP_NAME,
+            crate::restyled_hud::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }

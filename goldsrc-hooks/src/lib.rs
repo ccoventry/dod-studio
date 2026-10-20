@@ -245,6 +245,7 @@ mod pmove_guard;
 mod position;
 mod pov_live_bob;
 mod remote;
+mod restyled_hud;
 mod review;
 mod review_lock;
 mod run_in_background;
