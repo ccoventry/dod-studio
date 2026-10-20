@@ -48,7 +48,7 @@ export const OLD_NAMES = Object.freeze({
   dodstudio_overviewmap: 'ds_hud_overview_layout',
   dodstudio_panel: 'ds_ui_panel',
   dodstudio_player_overrides: 'ds_player_overrides',
-  dodstudio_pov_live_bob: 'ds_view_bob',
+  dodstudio_pov_live_bob: 'ds_view_use_cl_bob',
   dodstudio_reload_demo: 'ds_demo_reload',
   dodstudio_remember_window_layout: 'ds_ui_remember_layout',
   dodstudio_resizable_windows: 'ds_ui_resizable_windows',

@@ -1,4 +1,4 @@
-//! `ds_view_bob`: a POV demo bobs the view and the gun by the `cl_bob`,
+//! `ds_view_use_cl_bob`: a POV demo bobs the view and the gun by the `cl_bob`,
 //! `cl_bobcycle` and `cl_bobup` set now (#359). Off (0), a POV demo shows the
 //! bob it recorded, the recording player's own, whatever `cl_bob` says here:
 //! about 13 of 20 POV demos from different recorders carry one, the rest
@@ -45,7 +45,7 @@ use crate::engine::{self, CvarSPartial, RefParamsPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("view_bob");
+pub const NAME: &str = console_name!("view_use_cl_bob");
 
 /// One build's call to the demo view override in `V_RenderView`.
 struct Site {

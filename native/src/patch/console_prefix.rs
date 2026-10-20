@@ -112,7 +112,7 @@ mod tests {
         );
         assert_eq!(
             current_name("dodstudio_pov_live_bob").as_deref(),
-            Some("ds_view_bob")
+            Some("ds_view_use_cl_bob")
         );
         // Not console names: folders, files, the bare prefix, unknown names,
         // names already moved.

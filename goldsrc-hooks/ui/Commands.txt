@@ -39,8 +39,8 @@ HUD
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
 VIEW (POV demos: the recording player's own view)
-  ds_view_bob 0/1
-      0: the bob the demo recorded (the recording player's own settings). 1: the bob from your cl_bob, cl_bobcycle and cl_bobup now.
+  ds_view_use_cl_bob 0/1
+      POV demos: the view and gun bob by your cl_bob, cl_bobcycle and cl_bobup (0: the bob the demo recorded, the recording player's own).
   ds_view_hide_headshot_red_screen 0/1
       No red screen when the player is hit in the head.
   ds_view_hide_screen_shake 0/1

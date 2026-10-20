@@ -11,7 +11,7 @@ describe('console_renames (#555)', () => {
       'utf8',
     );
     const pairs = Object.fromEntries(
-      [...rust.matchAll(/\("(dodstudio_[a-z0-9_]+)", "(ds_[a-z0-9_]+)"\)/g)].map((m) => [m[1], m[2]]),
+      [...rust.matchAll(/\(\s*"(dodstudio_[a-z0-9_]+)",\s*"(ds_[a-z0-9_]+)",?\s*\)/g)].map((m) => [m[1], m[2]]),
     );
     expect(Object.keys(pairs).length).toBeGreaterThan(0);
     expect({ ...OLD_NAMES }).toEqual(pairs);
@@ -25,8 +25,8 @@ describe('console_renames (#555)', () => {
   });
 
   it('reads an old name in any case, and nothing else', () => {
-    expect(currentName('DodStudio_Pov_Live_Bob')).toBe('ds_view_bob');
+    expect(currentName('DodStudio_Pov_Live_Bob')).toBe('ds_view_use_cl_bob');
     expect(currentName('dodstudio_hd')).toBeNull();
-    expect(currentName('ds_view_bob')).toBeNull();
+    expect(currentName('ds_view_use_cl_bob')).toBeNull();
   });
 });
