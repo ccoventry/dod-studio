@@ -31,7 +31,7 @@ mod updater_manager;
 #[cfg(test)]
 mod test_support;
 
-use audit_manager::{AuditManager, SerializedDuplicateGroup};
+use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
 use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
     generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
@@ -46,6 +46,7 @@ use render_manager::{
     reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
 };
 use settings_manager::{AppSettings, SettingsManager};
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -169,24 +170,59 @@ async fn load_project_session(path: String) -> Result<String, String> {
 
 // ── Auditor IPC Commands ───────────────────────────────────────────────────────
 
+/// `paths` plus every fixed drive when `all_drives`, in one key pass (#844).
+/// `queued` is the project's queue: copies there, or in the install's game
+/// folder, are kept first.
 #[tauri::command]
 async fn run_demo_audit(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AuditManager>,
+    settings: tauri::State<'_, SettingsManager>,
     paths: Vec<String>,
-) -> Result<Vec<SerializedDuplicateGroup>, String> {
+    all_drives: bool,
+    queued: Vec<String>,
+) -> Result<AuditOutcome, String> {
+    let hl_path = settings
+        .inner
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .hl_path
+        .clone();
+    let game_folders: Vec<PathBuf> = native::shared::paths::mod_dir_for_exe(Path::new(&hl_path))
+        .filter(|_| !hl_path.trim().is_empty())
+        .into_iter()
+        .collect();
     audit_manager::run_demo_audit_impl(
         app_handle,
         Arc::clone(&state.is_running),
         Arc::clone(&state.cancel_token),
         paths,
+        all_drives,
+        (game_folders, queued),
     )
     .await
 }
 
+/// The roots "All drives" walks, for its label.
 #[tauri::command]
-fn delete_audit_files(paths: Vec<String>) -> Result<(), String> {
-    audit_manager::delete_audit_files_impl(paths)
+async fn list_fixed_drives() -> Result<Vec<String>, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(
+        audit_manager::fixed_drive_roots,
+    ))
+    .await
+}
+
+/// To the Recycle Bin, or for good when `permanent` (#844).
+#[tauri::command]
+async fn delete_audit_files(
+    app_handle: tauri::AppHandle,
+    paths: Vec<String>,
+    permanent: bool,
+) -> Result<DeleteOutcome, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        audit_manager::delete_audit_files_impl(&app_handle, paths, permanent)
+    }))
+    .await
 }
 
 #[tauri::command]
@@ -293,11 +329,18 @@ fn volume_key(path: &std::path::Path) -> Option<String> {
 }
 
 /// Free space across the capture folders, each drive counted once: two
-/// folders on one drive share its space. Off the main thread (#853): a
-/// cache miss re-lists every volume, which waits on a sleeping or network
-/// drive, and start-up asks for this while the window is up.
-#[tauri::command(async)]
-fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
+/// folders on one drive share its space. On the blocking pool (#853): a
+/// cache miss re-lists every volume, which can wait on a sleeping or network
+/// drive, and start-up asks for this alongside the other disk queries.
+#[tauri::command]
+async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        export_pool_space(paths)
+    }))
+    .await
+}
+
+fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
     let mut seen = std::collections::HashSet::new();
     for path_str in paths {
@@ -329,9 +372,18 @@ struct CaptureOutputDiagnostic {
     usable: bool,
 }
 
-/// Off the main thread for the same reason as `calculate_export_pool_space`.
-#[tauri::command(async)]
-fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
+/// On the blocking pool for the same reason as `calculate_export_pool_space`.
+#[tauri::command]
+async fn diagnose_capture_output_paths(
+    paths: Vec<String>,
+) -> Result<Vec<CaptureOutputDiagnostic>, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        capture_output_diagnostics(paths)
+    }))
+    .await
+}
+
+fn capture_output_diagnostics(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
     paths
         .into_iter()
         .map(|path_str| {
@@ -374,8 +426,21 @@ async fn validate_paths(hlae_path: String, hl_path: String) -> Result<bool, Stri
 /// the app's resolution chain, so this has to be reported before a batch rather
 /// than discovered after one — the failure is a capture that runs to completion
 /// and produces no video. See `native::shared::hlae_ffmpeg`.
+///
+/// On the blocking pool (#853): it searches PATH and runs `ffmpeg -version`,
+/// polling for up to 5 s, and start-up calls it twice.
 #[tauri::command]
 async fn check_hlae_ffmpeg(
+    hlae_path: String,
+    ffmpeg_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        hlae_ffmpeg_report(hlae_path, ffmpeg_path)
+    }))
+    .await
+}
+
+fn hlae_ffmpeg_report(
     hlae_path: String,
     ffmpeg_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -654,9 +719,15 @@ async fn analyze_demo_full(
 /// `native::patch::scanner` bakes into a kill streak's timeline text, so the
 /// frontend's weapon tables (analyzer_pane.js) can show identical text
 /// instead of independently re-deriving a name from the raw enum tag.
+///
+/// On the blocking pool (#853): the first call at every boot loads the
+/// localization files from disk.
 #[tauri::command]
-fn get_weapon_display_names() -> std::collections::HashMap<String, String> {
-    analysis::all_weapon_display_names()
+async fn get_weapon_display_names() -> Result<std::collections::HashMap<String, String>, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(
+        analysis::all_weapon_display_names,
+    ))
+    .await
 }
 
 /// The overview image for `map_name` and how it lies over the world, for the
@@ -759,6 +830,7 @@ pub fn run() {
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
+            players_tab::add_crosshair_file,
             players_tab::set_player_overrides,
             link_hlae_ffmpeg,
             analyze_demo_full,
@@ -827,6 +899,7 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             demo_split_manager::split_demo_auto,
             delete_audit_files,
+            list_fixed_drives,
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
