@@ -42,6 +42,8 @@ const SETTLE_LIMIT: Duration = Duration::from_secs(120);
 /// How often a settling take and a held batch are looked at.
 const POLL: Duration = Duration::from_millis(500);
 const HOLD_POLL: Duration = Duration::from_secs(1);
+/// A block folder holding less than this has no take left in it.
+const GONE_BELOW_BYTES: u64 = 1024 * 1024;
 /// A hold with nothing queued or rendering this long can't end on its own.
 const IDLE_HOLD_LIMIT: Duration = Duration::from_secs(60);
 
@@ -67,6 +69,9 @@ struct State {
     watching: bool,
     /// The game said it is holding.
     held: bool,
+    /// Takes recorded but not yet settled: their size isn't learned yet, so
+    /// no hold gives up while one is.
+    settling: usize,
 }
 
 /// One look at the drive before a clip boundary.
@@ -210,9 +215,15 @@ impl CaptureRoom {
         state
             .recorded
             .iter()
-            .filter_map(|&(index, raw_bytes)| {
+            .filter_map(|&(index, _)| {
                 let block = self.blocks.get(index)?;
-                if volume_of(&block.folder) != volume || !block.folder.is_dir() {
+                if volume_of(&block.folder) != volume {
+                    return None;
+                }
+                // Measured now: a deleted take leaves its block folder with
+                // only the render history in it.
+                let raw_bytes = folder_bytes(&block.folder);
+                if raw_bytes < GONE_BELOW_BYTES {
                     return None;
                 }
                 let renders = render.renders_under(&block.folder.to_string_lossy());
@@ -243,7 +254,7 @@ impl CaptureRoom {
         let state = self.lock();
         let next_bytes = self.clip_bytes(&state, next)?;
         let folder = &self.blocks[next].folder;
-        let free = native::sys::disk::get_available_bytes(folder.parent().unwrap_or(folder));
+        let free = native::sys::disk::get_available_bytes(existing_ancestor(folder));
         if free == u64::MAX {
             return None;
         }
@@ -301,11 +312,13 @@ impl CaptureRoom {
         let Some(block) = self.blocks.get(index).cloned() else {
             return;
         };
+        self.lock().settling += 1;
         let room = Arc::clone(self);
         std::thread::spawn(move || {
             let bytes = settle(&block.folder, &room.cancel);
             {
                 let mut state = room.lock();
+                state.settling = state.settling.saturating_sub(1);
                 if state.recording == Some(index) {
                     state.recording = None;
                 }
@@ -359,7 +372,10 @@ impl CaptureRoom {
                 break;
             }
             self.learn_ratio();
-            let held = self.lock().held;
+            let (held, settling) = {
+                let state = self.lock();
+                (state.held, state.settling > 0)
+            };
             let writing = if held {
                 0
             } else {
@@ -388,13 +404,7 @@ impl CaptureRoom {
                     &self.app,
                     crate::take_cleanup_manager::RoomFor::Capture,
                     native::hlcr::take_cleanup::SpaceNeed {
-                        targets: vec![
-                            self.blocks[next]
-                                .folder
-                                .parent()
-                                .map(Path::to_path_buf)
-                                .unwrap_or_default(),
-                        ],
+                        targets: vec![existing_ancestor(&self.blocks[next].folder).to_path_buf()],
                         needed_bytes: check.writing.saturating_add(check.next_bytes),
                         headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
                     },
@@ -420,6 +430,7 @@ impl CaptureRoom {
                 idle_since.or(Some(Instant::now()))
             };
             let stuck = held
+                && !settling
                 && (matches!(check.decision, RoomDecision::CannotFit { .. })
                     || idle_since.is_some_and(|t| t.elapsed() >= IDLE_HOLD_LIMIT));
             if stuck {
@@ -519,6 +530,12 @@ fn settle(folder: &Path, cancel: &AtomicBool) -> u64 {
         std::thread::sleep(POLL * 2);
     }
     last.unwrap_or(0)
+}
+
+/// The nearest folder of `path` that exists, for the free-space query: a
+/// block's folder (and its session's) only appear once HLAE writes there.
+fn existing_ancestor(path: &Path) -> &Path {
+    path.ancestors().find(|p| p.is_dir()).unwrap_or(path)
 }
 
 /// HLAE writes the take into a numbered folder inside the block's.
