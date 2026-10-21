@@ -283,6 +283,42 @@ class PassesTest(unittest.TestCase):
         self.assertEqual(out[26, 20, 3], 1.0)  # the slit is filled as before
         self.assertEqual(out[20, 3, 3], 1.0)  # outside: the full 3 px rim (2 px out)
 
+    def test_holes_keeps_a_trigger_s_gaps_open_together(self):
+        img = np.zeros((40, 40, 4))
+        img[5:35, 5:35, 3] = 1
+        img[10:20, 10:13, 3] = 0  # 3 px gap behind the trigger
+        img[10:20, 14:17, 3] = 0  # 3 px gap in front of it (trigger: column 13)
+        img[25:27, 10:30, 3] = 0  # a lone slit
+        h = K.holes(img[..., 3])
+        self.assertTrue(h[10:20, 10:13].all() and h[10:20, 14:17].all())
+        self.assertFalse(h[10:20, 13].any())  # the trigger itself stays
+        self.assertFalse(h[25:27].any())
+        self.assertFalse(K.holes(img[..., 3], bridge=0)[10:20, 10:17].any())  # each alone is a slit
+
+    def test_keep_thin_keeps_a_faint_line_but_not_a_soft_edge_or_a_corner(self):
+        img = self.square()
+        img[5:15, 15, 3] = 0.4  # the square's soft right edge
+        img[18, 2:12] = (0.5, 0.5, 0.5, 0.3)  # a wire under it, a third of a pixel thick
+        img[2, 2] = (0.5, 0.5, 0.5, 0.3)  # a lone faint corner pixel
+        out = K.keep_thin(img)
+        self.assertTrue((out[18, 2:12, 3] == 1).all())
+        self.assertTrue((out[5:15, 15, 3] == 0.4).all())
+        self.assertEqual(out[2, 2, 3], 0.3)
+        self.assertTrue((out[5:15, 5:15, 3] == 1).all())
+
+    def test_keep_thin_joins_a_dotted_wire(self):
+        img = np.zeros((10, 20, 4))
+        img[5, 2:14, 3] = [0.3, 0.6] * 6  # every other pixel already over the cut
+        out = K.keep_thin(img)
+        self.assertTrue((out[5, 2:14, 3] >= 0.6).all())
+
+    def test_drop_specks_keeps_a_bar_joined_at_a_corner(self):
+        img = self.square()
+        for i in range(4):
+            img[15 + i, 15 + i] = (0.5, 0.5, 0.5, 1)  # a 1 px diagonal bar off the corner
+        self.assertEqual(K.drop_specks(img, 40)[17, 17, 3], 1)
+        self.assertEqual(K.drop_specks(img, 40, corners=False)[17, 17, 3], 0)
+
     def test_drop_specks(self):
         img = self.square()
         img[0, 0] = (1, 1, 1, 1)

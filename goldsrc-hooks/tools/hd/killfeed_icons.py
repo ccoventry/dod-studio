@@ -37,8 +37,10 @@ Per icon (ICONS):
      dark background; a light inner edge (rim_light) inside a 3 px dark
      outline (outline), so the icon reads over a bright one too; a gap
      inside the gun (a trigger guard) keeps only a 1 px rim, so it stays
-     open (holes), and a guard the skin paints black on a solid plate is
-     cut out where the table says so (see_through);
+     open, also where a trigger splits it into narrow gaps (holes), and a
+     guard the skin paints black on a solid plate is cut out where the
+     table says so (see_through); a part thinner than half a pixel (a
+     guard's bar, a wire) is kept as a 1 px line (keep_thin);
   7. in the sheet: Valve's icon and any detached part of it inside the box
      (the Kar's loose bayonet, a rocket beside a launcher) cleared, the
      render painted over; other pixels stay as sprites_hd.py made them.
@@ -75,7 +77,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 7  # 7: see-through trigger guards, thin outline inside holes, K43 raised to fit
+VERSION = 8  # 8: thin parts kept, a trigger inside its guard keeps the thin rim
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -87,6 +89,12 @@ SPECK = 40  # px at 4x: loose blobs smaller than this are dropped
 HOLE_MIN = 12  # px at 4x: a gap inside the icon this big stays open (outline)
 HOLE_WIDTH = 5  # px at 4x: ...and at least this wide somewhere (no slits)
 HOLE_OUTLINE = 1.5  # px at 4x: the rim inside such a gap (one solid pixel)
+HOLE_BRIDGE = 2  # px at 4x: gaps this close (a trigger between them) count as one hole
+# keep_thin: a part thinner than half a pixel (a guard's bar, a wire) never
+# reaches the game's alpha cut of 0.5, so it vanishes.
+THIN_LO = 0.15  # coverage a thin line's pixel needs
+THIN_MARGIN = 0.10  # ...above both of its neighbours across the line
+THIN_MIN_RUN = 3  # px at 4x: shorter runs (a lone tip on an edge) aren't kept
 
 ROLLS = tuple(range(-10, 11, 2))
 WIDE_ROLLS = tuple(range(-40, 41, 4))  # pistols: the grip pulls the main axis
@@ -718,11 +726,13 @@ def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT
     return bleed(np.dstack([rgb, a]))
 
 
-def drop_specks(rgba, min_px=SPECK):
+def drop_specks(rgba, min_px=SPECK, corners=True):
     """Clears loose blobs smaller than `min_px` pixels: a sling swivel or
     a stray vertex far from the gun renders as a dot that reads as dirt at
-    icon size."""
-    lab, n = ndimage.label(rgba[..., 3] >= 0.5)
+    icon size. With `corners`, pixels touching at a corner are one blob: a
+    1 px guard bar running diagonally into the ring is not a speck (the
+    Bren's)."""
+    lab, n = ndimage.label(rgba[..., 3] >= 0.5, structure=np.ones((3, 3)) if corners else None)
     if n <= 1:
         return rgba
     sizes = ndimage.sum(np.ones_like(lab), lab, range(1, n + 1))
@@ -730,6 +740,35 @@ def drop_specks(rgba, min_px=SPECK):
     for i, s in enumerate(sizes, 1):
         if s < min_px:
             out[ndimage.binary_dilation(lab == i, iterations=1), 3] = 0
+    return out
+
+
+def keep_thin(rgba, lo=THIN_LO, margin=THIN_MARGIN, min_run=THIN_MIN_RUN):
+    """Makes a part thinner than half a pixel opaque, so the game's alpha
+    cut keeps it as a 1 px line rather than dropping it (a trigger guard's
+    lower bar, a launcher's wire guard). Such a part is a ridge in the
+    coverage: a pixel brighter than both neighbours across it (along a row,
+    a column or a diagonal), where a thick part's soft edge only rises
+    inwards. A run is joined through its pixels already over the cut (a
+    dotted wire), and is kept only when at least `min_run` of its pixels
+    are under it: a sharp corner has one or two, which stay as they are."""
+    a = rgba[..., 3]
+    h, w = a.shape
+    p = np.pad(a, 1)
+    ridge = np.zeros(a.shape, bool)
+    for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        n1 = p[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+        n2 = p[1 - dy:1 - dy + h, 1 - dx:1 - dx + w]
+        ridge |= a - np.maximum(n1, n2) > margin
+    line = ridge & (a >= lo)
+    lab, n = ndimage.label(line, structure=np.ones((3, 3)))
+    if n == 0:
+        return rgba
+    faint = a < 0.5
+    sizes = ndimage.sum(faint, lab, range(1, n + 1))  # the run's pixels the cut would drop
+    keep = np.isin(lab, [i for i, s in enumerate(sizes, 1) if s >= min_run]) & faint
+    out = rgba.copy()
+    out[keep, 3] = 1.0
     return out
 
 
@@ -743,22 +782,48 @@ def rim_light(rgba, width=RIM_WIDTH, strength=RIM_STRENGTH):
     return np.dstack([rgb, a])
 
 
-def holes(alpha, min_px=HOLE_MIN, min_width=HOLE_WIDTH):
+def _big_regions(region, inner, border_ok, min_px, min_width):
+    """Mask of the components of `region` that are at least `min_px`
+    pixels and `min_width` across (in `inner`'s distance), and, unless
+    `border_ok`, don't reach the image's border."""
+    lab, n = ndimage.label(region)
+    if n == 0:
+        return np.zeros(region.shape, bool)
+    border = set() if border_ok else set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])))
+    ids = range(1, n + 1)
+    sizes = ndimage.sum(np.ones_like(lab), lab, ids)
+    # the widest point: twice the distance to the nearest pixel outside
+    widths = 2 * np.asarray(ndimage.maximum(ndimage.distance_transform_edt(inner), lab, ids))
+    keep = [i for i, s, wd in zip(ids, sizes, widths) if i not in border and s >= min_px and wd >= min_width]
+    return np.isin(lab, keep)
+
+
+def holes(alpha, min_px=HOLE_MIN, min_width=HOLE_WIDTH, bridge=HOLE_BRIDGE):
     """The see-through gaps inside an icon (a trigger guard's inside): the
     clear regions that don't reach the image's border, of at least `min_px`
     pixels and `min_width` px across at their widest (a slit, such as a gas
-    tube's gap under a barrel, stays closed)."""
+    tube's gap under a barrel, stays closed). Enclosed gaps less than
+    2 x `bridge` px apart count as one: a trigger inside its guard splits
+    the inside into gaps too narrow on their own, and they all stay open."""
     clear = alpha < 0.5
-    lab, n = ndimage.label(clear)
+    out = _big_regions(clear, clear, False, min_px, min_width)
+    if bridge <= 0:
+        return out
+    enclosed = clear & ndimage.binary_fill_holes(~clear)
+    merged = ndimage.binary_closing(enclosed, structure=np.ones((3, 3)), iterations=bridge) & ~(clear & ~enclosed)
+    lab, n = ndimage.label(merged)
     if n == 0:
-        return np.zeros(alpha.shape, bool)
-    border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])))
-    ids = range(1, n + 1)
-    sizes = ndimage.sum(np.ones_like(lab), lab, ids)
-    # the widest point: twice the distance to the nearest opaque pixel
-    widths = 2 * np.asarray(ndimage.maximum(ndimage.distance_transform_edt(clear), lab, ids))
-    keep = [i for i, s, wd in zip(ids, sizes, widths) if i not in border and s >= min_px and wd >= min_width]
-    return np.isin(lab, keep)
+        return out
+    # a group of gaps counts when the gaps themselves, not the merge, are
+    # the hole's size: at least two of them, together min_px, and the merged
+    # region min_width across
+    big = _big_regions(merged, merged, True, min_px, min_width)
+    for i in np.unique(lab[big]):
+        comp = lab == i
+        parts, k = ndimage.label(enclosed & comp)
+        if k >= 2 and (enclosed & comp).sum() >= min_px:
+            out |= enclosed & comp
+    return out
 
 
 def outline(rgba, radius=OUTLINE, colour=OUTLINE_COLOUR, hole_radius=HOLE_OUTLINE):
@@ -902,18 +967,29 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
     skins = hd_skins(textures, style, models_dir)
     n_hd = len(skins)
     skins, cutouts = apply_see_through(skins, textures, icon.see_through)
+    # Thin parts are kept on guns only: a blade's or grenade's thin bit is
+    # the end of a crossguard or a lever, which reads as a stray tip.
+    gun = not NOT_LEVELLED.search(name)
+
+    def draw(f):
+        lit = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts)
+        return keep_thin(lit) if gun else lit
+
+    def specks(lit):
+        return drop_specks(lit, corners=gun)
+
     fit = fit_transform(tris, basis, box)
-    lit = drop_specks(render(tris, basis, *fit, w * scale, h * scale, skins, masked_names=cutouts))
+    lit = specks(draw(fit))
     if icon.barrel_top is not None:
         fit = place_barrel(tris, basis, fit, lit[..., 3], box, icon.barrel_top * scale, icon.cut_below)
-        lit = render(tris, basis, *fit, w * scale, h * scale, skins, masked_names=cutouts)
+        lit = draw(fit)
         if icon.cut_below:
             lit = cut_under(lit, box[3])
-        lit = drop_specks(lit)
+        lit = specks(lit)
     else:
         refit = refit_transform(fit, lit[..., 3], box)
         if refit is not None:
-            lit = drop_specks(render(tris, basis, *refit, w * scale, h * scale, skins, masked_names=cutouts))
+            lit = specks(draw(refit))
     img = outline(rim_light(lit))
     info = {"model": os.path.basename(path), "iou": round(float(score), 2),
             "roll": round(float(pick[2] + icon.turn), 1), "clipped_tris": cut,
