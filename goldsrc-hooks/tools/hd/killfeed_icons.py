@@ -26,7 +26,10 @@ Per icon (ICONS):
      and a roll, scored by silhouette overlap with Valve's icon, so the
      muzzle points right and the gun fills its box as Valve's does
      (choose_view); then, for guns, the model's own side view, tilted so
-     the end of the barrel is level (level_view);
+     the end of the barrel is level (level_view); then the table's hand
+     adjustments, where the user's review asked for them: an extra turn,
+     and the barrel put at Valve's height with a long magazine or bipod
+     cut off at the bottom (turned, place_barrel);
   5. the skin in the HD style: the model skin models_hd.py built for this
      style when there is one, else upscaled here, else the stock skin;
   6. rendered orthographically, supersampled, two-sided Lambert with a
@@ -69,7 +72,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 5  # 5: the end of the barrel levelled (level_view)
+VERSION = 6  # 6: hand turns and barrel placement from the user's review
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -99,36 +102,54 @@ class Icon:
     the `w_` ones, tried when none of `models` exists. clip_tip: drop the
     parts past the muzzle. rolls: the view rolls choose_view tries.
     muzzle: see MUZZLE. skip_tex: meshes whose texture name matches one of
-    these regexes are left out (a bayonet with a skin of its own)."""
+    these regexes are left out (a bayonet with a skin of its own).
+
+    Hand adjustments from the user's review of the levelled set:
+    turn: degrees added to the view's roll after it is chosen, positive
+    clockwise as seen in the icon (the right end goes down; turned).
+    barrel_top: the row (stock pixels from the rect's top, as in Valve's
+    icon) the top of the barrel's end is put on, instead of centring the
+    whole gun: a tall bipod or magazine otherwise pushes the gun up
+    (place_barrel). cut_below: with barrel_top, whatever hangs below the
+    rect is cut off at its bottom edge (the outline closes the cut) rather
+    than shrinking the gun to fit it."""
     models: tuple
     fallback: tuple = ()
     clip_tip: bool = False
     rolls: tuple = ROLLS
     muzzle: tuple = MUZZLE
     skip_tex: tuple = ()
+    turn: float = 0.0
+    barrel_top: float | None = None
+    cut_below: bool = False
     note: str = ""
 
 
 ICONS = {
     # Allies
-    "d_thompson": Icon(("p_tommy.mdl",), ("w_tommy.mdl",)),
+    "d_thompson": Icon(("p_tommy.mdl",), ("w_tommy.mdl",), turn=1.0, note="turned: the forend level"),
     "d_greasegun": Icon(("p_grease.mdl",), ("w_greasegun.mdl",)),
     "d_bar": Icon(("p_barbu.mdl", "p_barbd.mdl"), ("w_bar.mdl",), note="bipod up or down, closest wins"),
     "d_garand": Icon(("p_garand.mdl",), ("w_garand.mdl",)),
     "d_spring": Icon(("p_spring.mdl",), ("w_spring.mdl",)),
     "d_m1carbine": Icon(("p_m1carb.mdl",), ("w_m1carb.mdl",)),
     "d_fcarbine": Icon(("p_fcarb.mdl",), ("w_fcarb.mdl",), note="folding-stock carbine"),
-    "d_30cal": Icon(("p_30cal.mdl",), ("w_30cal.mdl",)),
+    "d_30cal": Icon(("p_30cal.mdl",), ("w_30cal.mdl",), barrel_top=10, cut_below=True,
+                    note="barrel at Valve's height; the taller bipod runs off the bottom"),
     "d_colt": Icon(("p_colt.mdl",), ("w_colt.mdl",), rolls=WIDE_ROLLS),
     "d_bazooka": Icon(("p_bazooka.mdl",), ("w_bazooka.mdl",), note="no rocket beside it"),
-    "d_grenade": Icon(("p_grenade.mdl",), ("w_grenade.mdl",), rolls=UPRIGHT_ROLLS),
+    "d_grenade": Icon(("p_grenade.mdl",), ("w_grenade.mdl",), rolls=UPRIGHT_ROLLS, turn=6.0,
+                      note="turned: the grooves level"),
     "d_amerknife": Icon(("p_amerk.mdl",), ("w_amerk.mdl",)),
     # Axis
     "d_kar": Icon(("p_k98.mdl",), ("w_98k.mdl",), clip_tip=True, note="bayonet tip clipped, as Valve's icon"),
     "d_scopedkar": Icon(("p_k98s.mdl",), ("w_scoped98k.mdl",)),
-    "d_k43": Icon(("p_k43.mdl",), ("w_k43.mdl",)),
-    "d_mp40": Icon(("p_mp40.mdl",), ("w_mp40.mdl",)),
-    "d_mp44": Icon(("p_stg44.mdl",), ("w_mp44.mdl",)),
+    "d_k43": Icon(("p_k43.mdl",), ("w_k43.mdl",), barrel_top=7, cut_below=True,
+                  note="barrel top on the middle line, as Valve's"),
+    "d_mp40": Icon(("p_mp40.mdl",), ("w_mp40.mdl",), barrel_top=6, cut_below=True,
+                   note="barrel at Valve's height; the longer magazine runs off the bottom"),
+    "d_mp44": Icon(("p_stg44.mdl",), ("w_mp44.mdl",), barrel_top=7, cut_below=True,
+                   note="barrel at Valve's height; the longer magazine runs off the bottom"),
     # p_fg42.mdl and p_bren.mdl are left out: both carry p_bar.bmp, BAR leftovers.
     "d_fg42": Icon(("p_fg42bu.mdl", "p_fg42bd.mdl"), ("w_fg42.mdl",), note="bipod up or down, closest wins"),
     "d_scopedfg42": Icon(("p_fg42s.mdl", "p_scopedfg42bu.mdl"), ("w_fg42s.mdl",)),
@@ -140,17 +161,19 @@ ICONS = {
     "d_spade": Icon(("p_spade.mdl",), ("w_spade.mdl",)),
     "d_gerknife": Icon(("p_youthk.mdl",), (), note="the Hitler Youth knife"),
     "d_paraknife": Icon(("p_paraknife.mdl",), ("w_paraknife.mdl",), muzzle=(1.0, 0.0, 0.0),
-                        note="lies along X; blade kept on the right"),
+                        turn=4.5, note="lies along X; blade kept on the right; turned: both ends level"),
     # British
-    "d_enfield": Icon(("p_enfield.mdl",), ("w_enfield.mdl",), skip_tex=(r"bayonet",),
-                      note="bayonet (its own mesh) left out, as Valve's icon"),
-    "d_scopedenfield": Icon(("p_enfields.mdl",), ("w_enfields.mdl", "w_enfield_scoped.mdl")),
+    "d_enfield": Icon(("p_enfield.mdl",), ("w_enfield.mdl",), skip_tex=(r"bayonet",), turn=-4.0,
+                      note="bayonet (its own mesh) left out, as Valve's icon; turned: the forend level"),
+    "d_scopedenfield": Icon(("p_enfields.mdl",), ("w_enfields.mdl", "w_enfield_scoped.mdl"), turn=-3.5,
+                            note="turned: the forend level"),
     "d_sten": Icon(("p_sten.mdl",), ("w_sten.mdl",)),
     "d_bren": Icon(("p_brenbu.mdl", "p_brenbd.mdl"), ("w_bren.mdl",), note="bipod up or down, closest wins"),
     "d_webley": Icon(("p_webley.mdl",), ("w_webley.mdl",), rolls=WIDE_ROLLS),
     "d_piat": Icon(("p_piat.mdl",), ("w_piat.mdl",)),
-    "d_britgrenade": Icon(("p_mills.mdl",), ("w_mills.mdl",), rolls=UPRIGHT_ROLLS),
-    "d_britknife": Icon(("p_fairbairn.mdl",), (), note="the Fairbairn-Sykes knife"),
+    "d_britgrenade": Icon(("p_mills.mdl",), ("w_mills.mdl",), rolls=UPRIGHT_ROLLS, turn=8.0,
+                          note="turned: the base level"),
+    "d_britknife": Icon(("p_fairbairn.mdl",), (), turn=2.5, note="the Fairbairn-Sykes knife; turned: both ends level"),
 }
 
 # Kill-feed icons that keep the #733 upscale, and why.
@@ -502,6 +525,58 @@ def level_view(tris, pick):
     return side_view(angle), (sx, sy, angle)
 
 
+def turned(basis, degrees):
+    """`basis` rolled by `degrees`, clockwise as seen in the icon (screen
+    y runs down, so the right end goes down for a positive turn)."""
+    r = np.radians(degrees)
+    right, up, toward = basis
+    return np.array([np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up, toward])
+
+
+def barrel_top_row(alpha, front=0.15):
+    """The row of the barrel's top edge at its end: the most common top
+    row of the silhouette's columns in the front `front` of its length (a
+    front sight post is a few columns, the barrel most of them)."""
+    sil = alpha >= 0.5
+    xs = np.nonzero(sil.any(0))[0]
+    if not len(xs):
+        return None
+    x1 = xs.max()
+    cols = range(max(xs.min(), int(x1 - front * (x1 - xs.min()))), x1 + 1)
+    tops = [int(np.argmax(sil[:, x])) for x in cols if sil[:, x].any()]
+    vals, counts = np.unique(tops, return_counts=True)
+    return float(vals[np.argmax(counts)])
+
+
+def place_barrel(tris, basis, fit, alpha, box, row, cut=False):
+    """A transform that puts the top of the barrel's end (measured in
+    `alpha`, rendered with `fit`) on screen row `row`, as wide as `box`
+    allows: shrunk only so nothing pokes out above the box, and, unless
+    `cut`, nothing below it either. Centred across as fit_transform is."""
+    kx, ky, ox, oy = fit
+    r0 = barrel_top_row(alpha)
+    if r0 is None:
+        return fit
+    pts = np.concatenate([t[0].reshape(-1, 3) for t in tris]) @ basis.T
+    lo, hi = pts[:, :2].min(0), pts[:, :2].max(0)
+    ub = (oy - r0) / ky  # the barrel top, model units up
+    k = (box[2] - box[0]) / max(hi[0] - lo[0], 1e-6)
+    if hi[1] > ub:
+        k = min(k, (row - box[1]) / (hi[1] - ub))
+    if not cut and ub > lo[1]:
+        k = min(k, (box[3] - row) / (ub - lo[1]))
+    cx = (box[0] + box[2]) / 2
+    return k, k, cx - k * (lo[0] + hi[0]) / 2, row + k * ub
+
+
+def cut_under(rgba, bottom):
+    """Clears every pixel from row `bottom` down (a magazine or bipod cut
+    at the rect's edge, `bottom` leaving room for the outline)."""
+    out = rgba.copy()
+    out[int(np.ceil(bottom)):, :, 3] = 0
+    return out
+
+
 # ── rasterizer ───────────────────────────────────────────────────────────────
 
 
@@ -735,17 +810,31 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
     tris, score, pick, basis, path, cut = best
     if not NOT_LEVELLED.search(name):
         basis, pick = level_view(tris, pick)
+    if icon.turn:
+        basis = turned(basis, icon.turn)
     textures = sorted({id(t[3]): t[3] for t in tris}.values(), key=lambda t: t.name)
     skins = hd_skins(textures, style, models_dir)
     fit = fit_transform(tris, basis, box)
     lit = drop_specks(render(tris, basis, *fit, w * scale, h * scale, skins))
-    refit = refit_transform(fit, lit[..., 3], box)
-    if refit is not None:
-        lit = drop_specks(render(tris, basis, *refit, w * scale, h * scale, skins))
+    if icon.barrel_top is not None:
+        fit = place_barrel(tris, basis, fit, lit[..., 3], box, icon.barrel_top * scale, icon.cut_below)
+        lit = render(tris, basis, *fit, w * scale, h * scale, skins)
+        if icon.cut_below:
+            lit = cut_under(lit, box[3])
+        lit = drop_specks(lit)
+    else:
+        refit = refit_transform(fit, lit[..., 3], box)
+        if refit is not None:
+            lit = drop_specks(render(tris, basis, *refit, w * scale, h * scale, skins))
     img = outline(rim_light(lit))
-    info = {"model": os.path.basename(path), "iou": round(float(score), 2), "roll": round(float(pick[2]), 1),
-            "clipped_tris": cut,
+    info = {"model": os.path.basename(path), "iou": round(float(score), 2),
+            "roll": round(float(pick[2] + icon.turn), 1), "clipped_tris": cut,
             "skin": f"{style} ({len(skins)} of {len(textures)})" if skins else "stock"}
+    if icon.turn:
+        info["turn"] = icon.turn
+    if icon.barrel_top is not None:
+        info["barrel_top"] = icon.barrel_top
+        info["cut_below"] = icon.cut_below
     return img, info
 
 

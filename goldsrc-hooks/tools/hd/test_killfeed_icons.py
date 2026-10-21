@@ -49,6 +49,27 @@ class TableTest(unittest.TestCase):
         self.assertIn("p_k98s.mdl", K.ICONS["d_scopedkar"].models)
         self.assertTrue(K.ICONS["d_kar"].clip_tip)
 
+    def test_hand_adjustments(self):
+        # Defaults leave the auto view alone.
+        plain = K.Icon(("p_a.mdl",))
+        self.assertEqual((plain.turn, plain.barrel_top, plain.cut_below), (0.0, None, False))
+        for name, icon in K.ICONS.items():
+            self.assertLess(abs(icon.turn), 15, name)  # a nudge, not a new view
+            if icon.cut_below:
+                self.assertIsNotNone(icon.barrel_top, f"{name}: cut_below needs barrel_top")
+            if icon.barrel_top is not None:
+                self.assertGreaterEqual(icon.barrel_top, 0, name)
+        # The icons the user's review named, and only those.
+        adjusted = {n for n, i in K.ICONS.items() if i.turn or i.barrel_top is not None}
+        self.assertEqual(adjusted, {"d_30cal", "d_britgrenade", "d_britknife", "d_enfield", "d_grenade", "d_k43",
+                                    "d_mp40", "d_mp44", "d_paraknife", "d_scopedenfield", "d_thompson"})
+        for n in ("d_britgrenade", "d_britknife", "d_grenade", "d_paraknife", "d_thompson"):
+            self.assertGreater(K.ICONS[n].turn, 0, f"{n}: the review asked for clockwise")
+        for n in ("d_enfield", "d_scopedenfield"):
+            self.assertLess(K.ICONS[n].turn, 0, f"{n}: the review asked for counter-clockwise")
+        for n in ("d_30cal", "d_mp40", "d_mp44"):
+            self.assertTrue(K.ICONS[n].cut_below, n)
+
     def test_candidates_prefer_p_then_w(self):
         with tempfile.TemporaryDirectory() as dod:
             os.makedirs(os.path.join(dod, "models"))
@@ -147,6 +168,49 @@ class GeometryTest(unittest.TestCase):
             self.assertGreater(muzzle @ basis[0], xy[:, 0].mean(), tilt)
             # the model's +X (the top of the gun) still points up
             self.assertGreater(basis[1][0] * np.cos(np.radians(tilt)) + basis[1][1] * np.sin(np.radians(tilt)), 0, tilt)
+
+
+    def test_a_positive_turn_is_clockwise(self):
+        basis = K.turned(np.eye(3), 10)
+        right_end = np.array([1.0, 0, 0])
+        # screen y = oy - ky * up: the right end's `up` drops, so it goes down
+        self.assertLess(right_end @ basis[1], 0)
+        self.assertGreater(right_end @ basis[0], 0.98)
+        np.testing.assert_allclose(K.turned(K.turned(np.eye(3), 7), -7), np.eye(3), atol=1e-12)
+
+    def test_barrel_top_row_ignores_a_front_sight(self):
+        a = np.zeros((40, 100))
+        a[20:24, 10:100] = 1  # barrel, top at row 20
+        a[14:20, 96:98] = 1  # front sight post
+        a[24:38, 30:40] = 1  # magazine
+        self.assertEqual(K.barrel_top_row(a), 20.0)
+        self.assertIsNone(K.barrel_top_row(np.zeros((4, 4))))
+
+    def magazine_gun(self):
+        # a barrel along x at up 0..1 and a magazine hanging 6 below
+        return [box_tris(0, 20, 0, 1), box_tris(8, 10, -6, 0)]
+
+    def test_place_barrel_puts_the_barrel_on_the_row(self):
+        tris, basis, box = self.magazine_gun(), np.eye(3), (0, 0, 100, 40)
+        fit = K.fit_transform(tris, basis, box)
+        alpha = K.silhouette(tris, basis, *fit, 100, 40, ss=1)
+        # cut: as wide as the box, the barrel top on row 10, the magazine past the bottom
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, cut=True)
+        self.assertAlmostEqual(kx, 5.0)  # 100 / 20
+        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)
+        self.assertGreater(oy + ky * 6, 40)
+        # no cut: shrunk so the magazine still ends inside the box
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, cut=False)
+        self.assertLessEqual(oy + ky * 6, 40 + 1e-6)
+        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)
+        self.assertAlmostEqual(ox + kx * 10, 50)  # still centred across
+
+    def test_cut_under_clears_below_the_row(self):
+        img = np.ones((10, 4, 4))
+        out = K.cut_under(img, 6.5)
+        self.assertTrue((out[:7, :, 3] == 1).all())
+        self.assertTrue((out[7:, :, 3] == 0).all())
+        self.assertTrue((img[..., 3] == 1).all())  # the input is left alone
 
 
 class PassesTest(unittest.TestCase):
