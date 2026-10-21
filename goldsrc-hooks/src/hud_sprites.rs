@@ -38,7 +38,9 @@
 
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicU32, AtomicUsize, Ordering,
+};
 
 use crate::hide_asset::DrawnAs;
 
@@ -199,10 +201,10 @@ static CURRENT_HIDDEN: AtomicBool = AtomicBool::new(false);
 static CURRENT_HANDLE: AtomicI32 = AtomicI32::new(0);
 static CURRENT_RGB: [AtomicI32; 3] = [const { AtomicI32::new(0) }; 3];
 static CURRENT_SHEET: AtomicU8 = AtomicU8::new(0);
-/// Whether the sheet `SPR_Set` picked last is a kill-feed sheet uploaded
-/// with soft edges, whose `SPR_DrawHoles` then blends
-/// (`hud_sprite_edges.rs`, #841).
-static CURRENT_SOFT: AtomicBool = AtomicBool::new(false);
+/// The `weapons<N>` number of the sheet `SPR_Set` picked last when it is a
+/// kill-feed sheet uploaded with soft edges, whose `SPR_DrawHoles` then
+/// blends and drops shared rows (`hud_sprite_edges.rs`, #841); 0 otherwise.
+static CURRENT_SOFT: AtomicU32 = AtomicU32::new(0);
 
 type SprLoadFn = unsafe extern "C" fn(*const c_char) -> i32;
 type SprSetFn = unsafe extern "C" fn(i32, i32, i32, i32);
@@ -232,6 +234,10 @@ unsafe extern "C" fn hook_spr_load(name: *const c_char) -> i32 {
         if crate::player_crosshair::Sheet::of(&path) == crate::player_crosshair::Sheet::Custom {
             crate::player_crosshair::hud_reloaded();
         }
+        // The kill feed's shared rows, from hud.txt, once (#841).
+        if crate::hud_sprite_edges::sheet_of_path(&path).is_some() {
+            crate::hud_sprite_edges::load_trims(hud_icons);
+        }
         if let Ok(mut map) = HANDLES.write() {
             match map.iter_mut().find(|(h, _)| *h == handle) {
                 Some(entry) => entry.1 = path,
@@ -253,12 +259,12 @@ unsafe extern "C" fn hook_spr_set(handle: i32, r: i32, g: i32, b: i32) {
                     i,
                     crate::hide_asset::should_hide(path, DrawnAs::HudSprite),
                     Sheet::of(path),
-                    crate::hud_sprite_edges::is_soft_path(path),
+                    crate::hud_sprite_edges::soft_sheet(path),
                 )
             }
-            None => (usize::MAX, false, Sheet::Other, false),
+            None => (usize::MAX, false, Sheet::Other, 0),
         },
-        Err(_) => (usize::MAX, false, Sheet::Other, false),
+        Err(_) => (usize::MAX, false, Sheet::Other, 0),
     };
     CURRENT.store(index, Ordering::Relaxed);
     CURRENT_SOFT.store(soft, Ordering::Relaxed);
@@ -336,7 +342,15 @@ unsafe extern "C" fn hook_spr_draw_holes(frame: i32, x: i32, y: i32, prc: *const
     if skip_draw(prc) {
         return;
     }
-    if CURRENT_SOFT.load(Ordering::Relaxed) {
+    let soft = CURRENT_SOFT.load(Ordering::Relaxed);
+    if soft != 0 {
+        // A kill-feed icon without the rows the icon below it owns; same
+        // top, so it draws at the same place.
+        // Safety: `prc` is the game's rect, null or valid for the call.
+        let trimmed =
+            (!prc.is_null()).then(|| crate::hud_sprite_edges::trimmed(soft, unsafe { &*prc }));
+        let rect = trimmed.flatten();
+        let prc = rect.as_ref().map_or(prc, |r| r as *const Wrect);
         // Safety: a HUD draw, on the engine's GL thread.
         unsafe {
             crate::hud_sprite_edges::draw_blended(|| {

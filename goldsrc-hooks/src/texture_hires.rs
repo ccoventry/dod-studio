@@ -3799,8 +3799,15 @@ pub fn status() -> String {
             crate::hud_sprite_edges::describe_draws(),
         ) {
             (soft, _) if soft.is_empty() => "none".to_string(),
-            (soft, draws) if draws.is_empty() => soft,
-            (soft, draws) => format!("{soft}, {draws}"),
+            (soft, draws) => format!(
+                "{soft}, {} icon(s) without the rows the icon below owns{}",
+                crate::hud_sprite_edges::trim_count(),
+                if draws.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {draws}")
+                }
+            ),
         },
     );
     let decals = format!(

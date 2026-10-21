@@ -11,7 +11,7 @@
 //! (`texture_hires::match_engine_expansion`), so every texel was fully in or
 //! out, and a 4x sheet drawn at 3x showed that texel grid as uneven steps.
 //!
-//! Two changes, for HD-replaced `weapons<N>` HUD sheets only (the sheets
+//! Three changes, for HD-replaced `weapons<N>` HUD sheets only (the sheets
 //! `hud.txt`'s `d_*` kill-feed icons come from):
 //!
 //! 1. **Upload** ([`prepare_soft_alpha`]): the file's alpha is kept as it
@@ -35,6 +35,18 @@
 //! and every other draw is the engine's as before; a `weapons<N>` sheet with
 //! no HD file is not marked and draws as stock.
 //!
+//! 3. **Shared rows** ([`shared_row_trims`]): some `d_*` rects in `hud.txt`
+//!    run one to four rows into the top of the `d_*` icon below them on the
+//!    same sheet (`d_mg34` into `d_k43`, `d_mp44` into `d_kar`, `d_enfield`
+//!    into `d_scopedenfield`...). Those rows belong to the lower icon: a soft
+//!    sheet's icon is drawn without them, so an HD icon that fills them
+//!    (#860's K43) does not show under the one above. They are empty in
+//!    Valve's sheets, and stock or non-HD sheets are never trimmed. The rect
+//!    is swapped in the `SPR_DrawHoles` hook, which `deathmsg::scale` calls
+//!    with the unscaled rect under its scaled modelview, so the trim is the
+//!    same at every scale, and the rects the line layout reads are not
+//!    touched.
+//!
 //! No switch: the engine keeps an uploaded sprite until the process exits
 //! (`GL_LoadTexture` returns it by name), so a cvar could only change the
 //! draw half, not bring the hard-cut upload back.
@@ -42,6 +54,8 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::hud_sprites::{HudIcon, Wrect};
 
 /// How many texels out from a showing texel its colour is bled: enough for
 /// the 4x sheet's level 2 (the 1:1 HUD's), whose texels average 4x4 of
@@ -95,10 +109,99 @@ pub fn mark_soft(sheet: u32) {
     }
 }
 
-/// Whether the sheet at `path` went up with soft edges.
-pub fn is_soft_path(path: &str) -> bool {
+/// The sheet number of the sheet at `path` when it went up with soft edges,
+/// else 0.
+pub fn soft_sheet(path: &str) -> u32 {
     let soft = SOFT_SHEETS.load(Ordering::Relaxed);
-    soft != 0 && sheet_of_path(path).is_some_and(|n| soft & (1 << n) != 0)
+    if soft == 0 {
+        return 0;
+    }
+    sheet_of_path(path)
+        .filter(|n| soft & (1 << n) != 0)
+        .unwrap_or(0)
+}
+
+/// A kill-feed icon whose bottom rows are also the top rows of another
+/// `d_*` icon's rect below it on the same sheet: drawn down to `bottom`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Trim {
+    pub sheet: u32,
+    pub rect: Wrect,
+    pub bottom: i32,
+}
+
+/// The shared rows of `hud.txt`'s kill-feed icons, which belong to the lower
+/// icon (#841): for every `d_*` entry on a `weapons<N>` sheet whose rect
+/// runs into the top of another `d_*` entry's rect below it (same sheet,
+/// overlapping columns), the trim to that entry's top. Rows shared with
+/// other sprites (`weapon_luger`...) are left alone, and entries with the
+/// same top (`d_mortar` and `d_germortar`) are not "below" each other.
+pub fn shared_row_trims(icons: &[HudIcon]) -> Vec<Trim> {
+    let feed: Vec<(u32, Wrect)> = icons
+        .iter()
+        .filter(|i| {
+            i.name
+                .get(..2)
+                .is_some_and(|p| p.eq_ignore_ascii_case("d_"))
+        })
+        .filter_map(|i| sheet_of_path(&i.sheet).map(|s| (s, i.rect)))
+        .collect();
+    let mut trims: Vec<Trim> = Vec::new();
+    for &(sheet, a) in &feed {
+        let bottom = feed
+            .iter()
+            .filter(|&&(s, b)| {
+                s == sheet
+                    && b.top > a.top
+                    && b.top < a.bottom
+                    && b.left < a.right
+                    && a.left < b.right
+            })
+            .map(|&(_, b)| b.top)
+            .min();
+        if let Some(bottom) = bottom
+            && !trims.iter().any(|t| t.sheet == sheet && t.rect == a)
+        {
+            trims.push(Trim {
+                sheet,
+                rect: a,
+                bottom,
+            });
+        }
+    }
+    trims
+}
+
+/// [`shared_row_trims`] of the game's `hud.txt`, worked out once, on the
+/// first `weapons<N>` sheet load (`hud_sprites`' `SPR_Load` hook).
+static TRIMS: OnceLock<Vec<Trim>> = OnceLock::new();
+
+/// Works [`TRIMS`] out from `icons` unless already done.
+pub fn load_trims(icons: impl FnOnce() -> Vec<HudIcon>) {
+    TRIMS.get_or_init(|| shared_row_trims(&icons()));
+}
+
+/// The rect to draw for `rect` of soft sheet `sheet`: `rect` without the
+/// rows it shares with the kill-feed icon below it, or `None` to draw it as
+/// given. The draw starts at the same `y` either way, so only the rows drawn
+/// change, never the line's layout.
+pub fn trimmed(sheet: u32, rect: &Wrect) -> Option<Wrect> {
+    trim_in(TRIMS.get()?, sheet, rect)
+}
+
+fn trim_in(trims: &[Trim], sheet: u32, rect: &Wrect) -> Option<Wrect> {
+    trims
+        .iter()
+        .find(|t| t.sheet == sheet && t.rect == *rect)
+        .map(|t| Wrect {
+            bottom: t.bottom,
+            ..*rect
+        })
+}
+
+/// How many kill-feed icons lose shared rows, for `dodstudio_debug_status`.
+pub fn trim_count() -> usize {
+    TRIMS.get().map_or(0, Vec::len)
 }
 
 /// The soft sheets for `dodstudio_debug_status`: `weapons1 weapons2`, or
@@ -331,11 +434,68 @@ mod tests {
     #[test]
     fn marks_follow_the_sheet() {
         mark_soft(4);
-        assert!(is_soft_path("sprites/weapons4.spr"));
-        assert!(!is_soft_path("sprites/hud_icons.spr"));
+        assert_eq!(soft_sheet("sprites/weapons4.spr"), 4);
+        assert_eq!(soft_sheet("sprites/hud_icons.spr"), 0);
         assert!(describe_soft().contains("weapons4"));
         mark_soft(0);
         mark_soft(40);
+    }
+
+    /// `hud.txt`'s own lines for weapons3 around the MG34 and K43, plus a
+    /// non-kill-feed sprite sharing rows and the two mortars' identical
+    /// rects.
+    const HUD: &str = "9\n\
+        d_mg34\t640 weapons3 167 173 89 23\n\
+        d_k43\t640 weapons3 167 192 89 14\n\
+        d_gerknife\t640 weapons3 167 223 45 13\n\
+        d_luger\t640 weapons3 167 235 45 20\n\
+        weapon_luger\t640 weapons3 0 0 170 50\n\
+        d_mp40\t640 weapons3 0 40 160 20\n\
+        d_mortar\t640 weapons4 0 0 50 20\n\
+        d_germortar\t640 weapons4 0 0 50 20\n\
+        d_piat\t640 hud_icons 0 10 50 20\n";
+
+    #[test]
+    fn shared_rows_go_to_the_lower_kill_feed_icon() {
+        let icons = crate::hud_sprites::parse_hud_txt(HUD);
+        let trims = shared_row_trims(&icons);
+        let mg34 = icons[0].rect;
+        let gerknife = icons[2].rect;
+        assert_eq!(
+            trims,
+            vec![
+                Trim {
+                    sheet: 3,
+                    rect: mg34,
+                    bottom: 192
+                },
+                Trim {
+                    sheet: 3,
+                    rect: gerknife,
+                    bottom: 235
+                },
+            ],
+            "only d_* over d_* on one weapons sheet; weapon_luger over d_mp40 is left"
+        );
+        // The trimmed rect keeps its top, so the draw's y and the layout stay.
+        assert_eq!(
+            trim_in(&trims, 3, &mg34),
+            Some(Wrect {
+                bottom: 192,
+                ..mg34
+            })
+        );
+        // The lower icon draws whole, and other sheets never match.
+        assert_eq!(trim_in(&trims, 3, &icons[1].rect), None);
+        assert_eq!(trim_in(&trims, 4, &mg34), None);
+    }
+
+    #[test]
+    fn icons_side_by_side_share_nothing() {
+        let icons = crate::hud_sprites::parse_hud_txt(
+            "2\nd_a 640 weapons1 0 0 50 30\nd_b 640 weapons1 50 20 50 30\n",
+        );
+        assert!(shared_row_trims(&icons).is_empty());
     }
 
     #[test]
