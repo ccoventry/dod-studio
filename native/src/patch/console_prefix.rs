@@ -98,7 +98,7 @@ mod tests {
     use super::*;
 
     /// Names the hook registers that never had a `dodstudio_` one.
-    const NEW_SINCE_555: &[&str] = &[];
+    const NEW_SINCE_555: &[&str] = &["demo_show_load_progress"];
 
     #[test]
     fn an_old_name_becomes_the_name_in_the_table() {
