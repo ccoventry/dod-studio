@@ -260,8 +260,9 @@ their payloads to the log file, forwarded to the game untouched. See
 
 ### `ds_hud_objectives`
 
-Places the territory-flag icon row and the objective timer beside it, which
-the game draws ~117px lower at 1080p while spectating than in a POV demo. See
+Places the territory-flag icon row and the objective timer beside it, or
+draws them bigger for high resolutions. The game draws both ~117px lower at
+1080p while spectating than in a POV demo. See
 [`goldsrc_objective_icons.md`](goldsrc_objective_icons.md).
 
 | subcommand | does |
@@ -269,6 +270,7 @@ the game draws ~117px lower at 1080p while spectating than in a POV demo. See
 | `ds_hud_objectives offset <y>` | y the objective icons are drawn at |
 | `ds_hud_objectives xoffset <x>` | x the icon row starts at |
 | `ds_hud_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
+| `ds_hud_objectives scale <1..8>` | draw the icons (with their capture bars and player counts) and the timer that many times bigger, from the next frame (#891); each grows from its top-left corner, so `offset`, `xoffset` and `timer` still place that corner, and the game's own icon x scales with the timer so the row stays clear of it. `scale 1` or `scale default` is the game's own size. Not on the full overview map (`_cl_minimap 1`), where the icons sit at map positions |
 | `ds_hud_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
 
 ### `ds_debug_hd_misses`
