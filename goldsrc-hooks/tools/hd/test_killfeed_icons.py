@@ -6,6 +6,7 @@ usage: python -m unittest test_killfeed_icons   (from this folder)
 import json, os, tempfile, unittest
 
 import numpy as np
+from scipy import ndimage
 
 import killfeed_icons as K
 from studiomodel import Texture
@@ -326,8 +327,27 @@ class PassesTest(unittest.TestCase):
         self.assertTrue(mask[19:23].all() and not mask[5:19, 0:30].any())
         self.assertEqual((top, bottom), (0, 19))  # the K43's four rows off the bottom
         self.assertTrue(mask[0:2, 33:53].all())  # a narrow sprite: masked, rows kept
+        # the K43 is the lower icon: the rows it shares with the MG34 are its own
         mask, top, bottom = K.shared_area(entries, "d_k43")
-        self.assertEqual((top, bottom), (4, 14))
+        self.assertEqual((top, bottom), (0, 14))
+        self.assertFalse(mask.any())
+
+    def test_shared_rows_belong_to_the_lower_kill_feed_icon_only(self):
+        # weapons1: the weapon menu's weapon_luger over the scoped FG42; a
+        # kill-feed icon over a menu sprite (the scoped Enfield over
+        # weapon_britgrenade)
+        entries = {"weapon_luger": ("weapons1", 160, 115, 80, 35), "d_scopedfg42": ("weapons1", 167, 147, 89, 26),
+                   "d_scopedenfield": ("weapons4", 167, 75, 89, 19), "weapon_britgrenade": ("weapons4", 167, 92, 80, 46),
+                   "d_enfield": ("weapons4", 168, 57, 88, 19)}
+        mask, top, bottom = K.shared_area(entries, "d_scopedfg42")
+        self.assertEqual((top, bottom), (3, 26))  # a menu sprite above: still kept out
+        self.assertTrue(mask[0:3].any())
+        mask, top, bottom = K.shared_area(entries, "d_scopedenfield")
+        self.assertEqual((top, bottom), (0, 17))  # its top row (the Enfield's) its own; the menu sprite's not
+        self.assertFalse(mask[0].any())
+        mask, top, bottom = K.shared_area(entries, "d_enfield")
+        self.assertEqual((top, bottom), (0, 18))  # the upper icon keeps out of its bottom row
+        self.assertTrue(mask[18, 1:].all())
 
     def test_drop_specks(self):
         img = self.square()
@@ -365,6 +385,110 @@ class PassesTest(unittest.TestCase):
         out = K.as_uploaded(img)
         self.assertEqual(tuple(out[0, 0]), (0, 0, 0, 0))
         self.assertEqual(tuple(out[0, 1]), (0.5, 0.5, 0.5, 1))
+
+
+class SoftEdgeTest(unittest.TestCase):
+    """soft_finish: coverage alpha on the edges, colour downsampled
+    premultiplied, and the hand fixes still deciding the shape."""
+
+    def tilted(self):
+        """A grey slab tilted 20 degrees, rendered as render_icon renders
+        (4x4 samples per pixel)."""
+        v, n, uv, tex = box_tris(-12, 12, -3, 3)
+        a = np.radians(20)
+        rot = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+        return K.render([(v @ rot.T, n, uv, tex)], np.eye(3), 1, 1, 20, 12, 40, 24, {}, hires=True)
+
+    @staticmethod
+    def from_mask(mask4, ss=K.SS, rgb=(0.5, 0.5, 0.5)):
+        """`lit` and its samples for a shape whose edges lie on pixel edges."""
+        cov = np.kron(mask4, np.ones((ss, ss))).astype(float)
+        col = np.zeros(cov.shape + (3,))
+        col[cov > 0] = rgb
+        lit = np.zeros(mask4.shape + (4,))
+        lit[..., :3] = rgb
+        lit[..., 3] = mask4
+        return lit, col, cov
+
+    def test_render_hires_returns_the_samples_it_averaged(self):
+        lit, (col, cov) = self.tilted()
+        self.assertEqual(cov.shape, (24 * K.SS, 40 * K.SS))
+        self.assertEqual(col.shape, (24 * K.SS, 40 * K.SS, 3))
+        np.testing.assert_allclose(cov.reshape(24, K.SS, 40, K.SS).mean((1, 3)), lit[..., 3])
+
+    def test_a_slanted_edge_gets_coverage_alpha(self):
+        lit, hi = self.tilted()
+        out = K.soft_finish(lit, *hi)
+        a = out[..., 3]
+        partial = (a > 0.02) & (a < 0.98)
+        self.assertGreater(partial.sum(), 40)  # the whole slanted rim is soft
+        self.assertGreater(len(np.unique(np.round(a[partial], 2))), 8)  # a ramp, not a few steps
+        # going up through the top edge, alpha falls from 1 to 0 within 2 px
+        for x in range(12, 28):
+            col = a[:, x]
+            top = int(np.argmax(col > 0.02))
+            self.assertGreaterEqual(col[top + 2], 0.98, x)
+
+    def test_partial_texels_hold_the_outline_colour(self):
+        lit, hi = self.tilted()
+        red = (0.9, 0.2, 0.2)
+        out = K.soft_finish(lit, *hi, colour=red)
+        a = out[..., 3]
+        # the outer edge: partial texels with nothing but transparency outside
+        outer = (a > 0.02) & (a < 0.98) & ~np.pad(a >= 0.98, 1)[2:, 1:-1] & ~np.pad(a >= 0.98, 1)[1:-1, 2:]
+        self.assertGreater(outer.sum(), 10)
+        # premultiplied: the colour of the covered part, not darkened by the
+        # transparent samples averaged with it
+        np.testing.assert_allclose(out[outer, :3], np.tile(red, (outer.sum(), 1)), atol=1e-6)
+
+    def test_the_outline_is_three_pixels_past_the_edge(self):
+        mask = np.zeros((20, 30))
+        mask[6:14, 8:22] = 1
+        out = K.soft_finish(*self.from_mask(mask))
+        a = out[..., 3]
+        self.assertTrue((a[10, 5:8] == 1).all() and (a[3:6, 15] == 1).all())
+        self.assertEqual(a[10, 4], 0)
+        self.assertEqual(a[2, 15], 0)
+        np.testing.assert_allclose(out[10, 5:8, :3], np.tile(K.OUTLINE_COLOUR, (3, 1)))
+        self.assertAlmostEqual(out[10, 15, 0], 0.5)  # the middle keeps its colour
+
+    def test_the_rect_s_border_stays_clear(self):
+        mask = np.zeros((20, 30))
+        mask[3:17, 3:27] = 1  # touching the box, OUTLINE px in from every side
+        a = K.soft_finish(*self.from_mask(mask))[..., 3]
+        self.assertTrue((a[0] == 0).all() and (a[-1] == 0).all() and (a[:, 0] == 0).all() and (a[:, -1] == 0).all())
+        self.assertTrue((a[1:3, 10] == 1).all())  # the outline thins to 2 px there
+
+    def test_keep_thin_lines_stay_whole_and_cleared_pixels_stay_out(self):
+        mask = np.zeros((30, 40))
+        mask[5:12, 5:35] = 1
+        lit, col, cov = self.from_mask(mask)
+        lit[20, 5:20, 3] = 1  # keep_thin's line: no coverage of its own, opaque
+        cov[24 * K.SS:26 * K.SS, 30 * K.SS:34 * K.SS] = 1  # a speck drop_specks cleared
+        col[cov > 0] = 0.5
+        out = K.soft_finish(lit, col, cov)
+        a = out[..., 3]
+        self.assertTrue((a[20, 5:20] == 1).all())
+        self.assertTrue((a[17:24, 10] == 1).all())  # its 3 px outline
+        self.assertGreater(out[20, 10, 0], 0.4)  # body colour, not the outline's
+        self.assertTrue((a[24:26, 30:34] == 0).all())
+
+    def test_a_hole_stays_open(self):
+        lit, col, cov = self.from_mask(PassesTest().ring()[..., 3])
+        a = K.soft_finish(lit, col, cov)[..., 3]
+        self.assertEqual(a[15, 10], 1.0)  # 1 px rim inside the hole
+        self.assertEqual(a[15, 11], 0.0)
+        self.assertEqual(a[15, 15], 0.0)
+        self.assertEqual(a[26, 20], 1.0)  # the slit is filled
+
+    def test_the_shape_stays_where_outline_put_it(self):
+        lit, hi = self.tilted()
+        old = K.as_uploaded(K.outline(K.rim_light(lit)))[..., 3] > 0
+        new = K.soft_finish(lit, *hi)[..., 3] >= 0.5
+        edge = old ^ ndimage.binary_erosion(old)
+        near_edge = ndimage.binary_dilation(edge | (~old & ndimage.binary_dilation(old)))
+        self.assertTrue(((old ^ new) <= near_edge).all())  # only the edge row moves
+        self.assertLess((old ^ new).sum(), 0.15 * old.sum())
 
 
 class RecordTest(unittest.TestCase):
