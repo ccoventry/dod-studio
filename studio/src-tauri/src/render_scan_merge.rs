@@ -22,6 +22,8 @@ pub(super) struct ScannedTake {
     /// `last_finished_output` of `history`: the newest finished render of
     /// this stream whose file is still there.
     pub finished_output: Option<(String, Option<u64>)>,
+    /// The rate the take records it was captured at, if it does.
+    pub take_fps: Option<u32>,
 }
 
 /// What a new row is queued with: the panel's settings at scan time.
@@ -136,6 +138,7 @@ pub(super) fn merge_scan(
             {
                 job.clip = take.clip;
                 job.history = take.history;
+                job.take_fps = take.take_fps;
             }
             summary.kept += 1;
             merged.push(job);
@@ -148,6 +151,7 @@ pub(super) fn merge_scan(
             }
             job.clip = take.clip;
             job.history = take.history;
+            job.take_fps = take.take_fps;
             summary.refreshed += 1;
             merged.push(job);
         } else if gone {
@@ -176,6 +180,7 @@ pub(super) fn merge_scan(
             codec: settings.codec,
             custom_codec_args: settings.custom_codec_args.clone(),
             fps: settings.fps,
+            take_fps: take.take_fps,
             history: take.history,
             current_attempt: None,
         });
@@ -221,6 +226,7 @@ mod tests {
             codec: RenderCodec::ProRes,
             custom_codec_args: String::new(),
             fps: 300,
+            take_fps: None,
             history: Vec::new(),
             current_attempt: None,
         }
@@ -233,6 +239,7 @@ mod tests {
             clip: c,
             history: Vec::new(),
             finished_output: None,
+            take_fps: None,
         }
     }
 
@@ -299,6 +306,7 @@ mod tests {
         finished.output_path = "E:/out/old.mov".to_string();
         let mut take = scanned("T:/a", 450);
         take.finished_output = Some(("E:/out/new.mov".to_string(), Some(9)));
+        take.take_fps = Some(120);
         let (rows, summary) = merge(vec![finished], vec![take], &[]);
         assert_eq!(rows[0].id, "2");
         assert_eq!(rows[0].status, "Finished");
@@ -306,6 +314,7 @@ mod tests {
         assert_eq!(rows[0].output_path, "E:/out/new.mov");
         assert_eq!(rows[0].output_size_bytes, Some(9));
         assert_eq!(rows[0].codec, RenderCodec::ProRes, "its own codec stays");
+        assert_eq!(rows[0].take_fps, Some(120), "the take's rate is re-read");
         assert_eq!(summary.refreshed, 1);
     }
 

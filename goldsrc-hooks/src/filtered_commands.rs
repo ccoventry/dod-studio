@@ -27,7 +27,7 @@
 //! lands, lets go of every key the dropped commands may have left down
 //! ([`RELEASE_KEYS`]). What the demo presses after the landing plays as
 //! recorded; a key held across the landing reads as up until its next press,
-//! as with `dodstudio_seek_skip_between`.
+//! as with `ds_demo_seek_skip_between`.
 //!
 //! Found by a byte pattern of `Cbuf_Execute` per build, each unique in its own
 //! `hw.dll`; `tools/verify_filtered_commands_offsets.py` re-derives both.

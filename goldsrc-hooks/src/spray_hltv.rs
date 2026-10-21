@@ -66,7 +66,7 @@
 //! ## Installing
 //!
 //! Only once the table asks for something (`Table::active`) and
-//! `dodstudio_player_overrides` is 1: [`poll`] reads the file's time once a
+//! `ds_player_overrides` is 1: [`poll`] reads the file's time once a
 //! second and installs both detours the first time. The `Draw_DecalTexture`
 //! one goes in first, because a decal shot through step 1 without step 2
 //! would crash the next frame. Each site's bytes are checked before
@@ -782,7 +782,7 @@ pub fn playing_demo() -> bool {
 }
 
 /// A slot's name and SteamID (`slot` 0-based, as `cl.players` and the
-/// spray texture names count), the way `dodstudio_deathmsg players` reads
+/// spray texture names count), the way `ds_hud_deathmsg players` reads
 /// them.
 pub fn player(slot: usize) -> Option<(String, u64)> {
     let engfuncs = engine::engfuncs()?;
@@ -834,7 +834,7 @@ pub fn has_customdata(slot: usize) -> bool {
 
 /// What the Players table makes of the spray `slot` (0-based) shoots now,
 /// in the demo playing. `None` outside a demo, with the table at its
-/// defaults or `dodstudio_player_overrides` 0, or with nobody in the slot:
+/// defaults or `ds_player_overrides` 0, or with nobody in the slot:
 /// the engine's own then.
 pub fn choice_for_slot(slot: usize) -> Option<Choice> {
     if !ACTIVE.load(Ordering::Relaxed)
@@ -919,7 +919,7 @@ unsafe extern "C" fn slot_texture(playernum: i32) -> usize {
 
 // ── Reporting ───────────────────────────────────────────────────────────────
 
-/// How a PNG the table names stands, for `dodstudio_spray players`.
+/// How a PNG the table names stands, for `ds_player_spray players`.
 pub fn png_state(png: &str) -> String {
     let source = Choice::Png(png.to_string());
     match PREPARED.read().ok().and_then(|p| p.get(&source).cloned()) {
@@ -949,7 +949,7 @@ pub fn status() -> String {
     }
 }
 
-/// The `dodstudio_debug_status` line, once installed.
+/// The `ds_debug_status` line, once installed.
 pub fn status_line() -> Option<String> {
     INSTALLED
         .load(Ordering::Relaxed)
