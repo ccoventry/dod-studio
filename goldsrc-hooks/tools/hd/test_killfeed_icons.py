@@ -69,6 +69,7 @@ class TableTest(unittest.TestCase):
             self.assertLess(K.ICONS[n].turn, 0, f"{n}: the review asked for counter-clockwise")
         for n in ("d_30cal", "d_mp40", "d_mp44"):
             self.assertTrue(K.ICONS[n].cut_below, n)
+        self.assertFalse(K.ICONS["d_k43"].cut_below)  # the stock must stay whole
 
     def test_candidates_prefer_p_then_w(self):
         with tempfile.TemporaryDirectory() as dod:
@@ -199,11 +200,39 @@ class GeometryTest(unittest.TestCase):
         self.assertAlmostEqual(kx, 5.0)  # 100 / 20
         self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)
         self.assertGreater(oy + ky * 6, 40)
-        # no cut: shrunk so the magazine still ends inside the box
-        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, cut=False)
+        # no cut: the same size, raised until the magazine ends inside the box
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 15, cut=False)
+        self.assertAlmostEqual(kx, 5.0)
         self.assertLessEqual(oy + ky * 6, 40 + 1e-6)
-        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)
+        self.assertAlmostEqual(oy - ky * 1.0, 5, delta=0.6)  # 15 asked, 5 is as low as it fits (7 tall x 5)
         self.assertAlmostEqual(ox + kx * 10, 50)  # still centred across
+        # ...and left on the row when it already fits
+        _, _, _, oy = K.place_barrel(tris, basis, fit, alpha, box, 3, cut=False)
+        self.assertAlmostEqual(oy - 5.0, 3, delta=0.6)
+
+    def test_see_through_mask_takes_the_dark_region_round_the_seed(self):
+        ind = np.ones((8, 8), np.uint8)  # index 1: grey metal
+        ind[2:5, 2:5] = 0  # a black hole
+        ind[6, 6] = 0  # a black speck elsewhere
+        pal = np.full((256, 3), 128, np.uint8)
+        pal[0] = (0, 0, 0)
+        tex = Texture("gun.bmp", 0, 8, 8, ind, pal)
+        m = K.see_through_mask(tex, [(3, 3)])
+        self.assertEqual(int(m.sum()), 9)
+        self.assertFalse(m[6, 6])
+        self.assertFalse(K.see_through_mask(tex, [(0, 0)]).any())  # seed on metal: no hole
+        skins, cut = K.apply_see_through({}, [tex], (("GUN.bmp", 3, 3),))
+        self.assertEqual(cut, {"gun.bmp"})
+        self.assertEqual(skins["gun.bmp"].shape, (8, 8, 4))
+        self.assertEqual(skins["gun.bmp"][3, 3, 3], 0)
+        self.assertEqual(skins["gun.bmp"][0, 0, 3], 1)
+        self.assertEqual(K.apply_see_through({}, [tex], ()), ({}, frozenset()))
+
+    def test_see_through_seeds_are_on_the_icons_models(self):
+        for name, icon in K.ICONS.items():
+            for tex, x, y in icon.see_through:
+                self.assertTrue(tex.endswith(".bmp"), name)
+                self.assertTrue(x >= 0 and y >= 0, name)
 
     def test_cut_under_clears_below_the_row(self):
         img = np.ones((10, 4, 4))
@@ -231,6 +260,28 @@ class PassesTest(unittest.TestCase):
         self.assertEqual(out[10, 1, 3], 0.0)  # 4 px out
         self.assertLess(out[10, 3, :3].max(), 0.1)
         self.assertAlmostEqual(out[10, 10, 0], 0.1)
+
+    def ring(self):
+        """A 30 px square with a 10 px hole and a 2 px slit inside."""
+        img = np.zeros((40, 40, 4))
+        img[5:35, 5:35] = (0.5, 0.5, 0.5, 1)
+        img[10:20, 10:20, 3] = 0  # the hole (a trigger guard's inside)
+        img[25:27, 10:30, 3] = 0  # a slit
+        return img
+
+    def test_holes_finds_a_gap_but_not_a_slit_or_the_outside(self):
+        h = K.holes(self.ring()[..., 3])
+        self.assertTrue(h[10:20, 10:20].all())
+        self.assertFalse(h[25:27].any())
+        self.assertFalse(h[0].any())
+
+    def test_outline_keeps_a_hole_open(self):
+        out = K.outline(self.ring(), 3)
+        self.assertEqual(out[15, 10, 3], 1.0)  # 1 px rim inside the hole
+        self.assertEqual(out[15, 12, 3], 0.0)  # the rest still clear
+        self.assertEqual(out[15, 15, 3], 0.0)
+        self.assertEqual(out[26, 20, 3], 1.0)  # the slit is filled as before
+        self.assertEqual(out[20, 3, 3], 1.0)  # outside: the full 3 px rim (2 px out)
 
     def test_drop_specks(self):
         img = self.square()

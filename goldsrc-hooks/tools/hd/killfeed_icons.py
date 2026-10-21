@@ -35,7 +35,10 @@ Per icon (ICONS):
   6. rendered orthographically, supersampled, two-sided Lambert with a
      bright light (ambient 0.8, diffuse 0.55) so dark metal reads over a
      dark background; a light inner edge (rim_light) inside a 3 px dark
-     outline (outline), so the icon reads over a bright one too;
+     outline (outline), so the icon reads over a bright one too; a gap
+     inside the gun (a trigger guard) keeps only a 1 px rim, so it stays
+     open (holes), and a guard the skin paints black on a solid plate is
+     cut out where the table says so (see_through);
   7. in the sheet: Valve's icon and any detached part of it inside the box
      (the Kar's loose bayonet, a rocket beside a launcher) cleared, the
      render painted over; other pixels stay as sprites_hd.py made them.
@@ -72,7 +75,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 6  # 6: hand turns and barrel placement from the user's review
+VERSION = 7  # 7: see-through trigger guards, thin outline inside holes, K43 raised to fit
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -81,6 +84,9 @@ RIM_WIDTH, RIM_STRENGTH = 2.5, 0.35  # at 4x
 OUTLINE = 3  # px at 4x
 OUTLINE_COLOUR = (0.06, 0.06, 0.06)
 SPECK = 40  # px at 4x: loose blobs smaller than this are dropped
+HOLE_MIN = 12  # px at 4x: a gap inside the icon this big stays open (outline)
+HOLE_WIDTH = 5  # px at 4x: ...and at least this wide somewhere (no slits)
+HOLE_OUTLINE = 1.5  # px at 4x: the rim inside such a gap (one solid pixel)
 
 ROLLS = tuple(range(-10, 11, 2))
 WIDE_ROLLS = tuple(range(-40, 41, 4))  # pistols: the grip pulls the main axis
@@ -111,8 +117,11 @@ class Icon:
     icon) the top of the barrel's end is put on, instead of centring the
     whole gun: a tall bipod or magazine otherwise pushes the gun up
     (place_barrel). cut_below: with barrel_top, whatever hangs below the
-    rect is cut off at its bottom edge (the outline closes the cut) rather
-    than shrinking the gun to fit it."""
+    rect is cut off at its bottom edge (the outline closes the cut);
+    without it the gun keeps its width and is raised until it fits.
+    see_through: (texture, x, y) texels inside a hole the skin paints black
+    instead of modelling (a trigger guard drawn on a solid plate): the
+    near-black texels joined to each are drawn transparent (see_through)."""
     models: tuple
     fallback: tuple = ()
     clip_tip: bool = False
@@ -122,21 +131,26 @@ class Icon:
     turn: float = 0.0
     barrel_top: float | None = None
     cut_below: bool = False
+    see_through: tuple = ()
     note: str = ""
 
 
 ICONS = {
     # Allies
-    "d_thompson": Icon(("p_tommy.mdl",), ("w_tommy.mdl",), turn=1.0, note="turned: the forend level"),
+    "d_thompson": Icon(("p_tommy.mdl",), ("w_tommy.mdl",), turn=1.0, see_through=(("p_tommy.bmp", 129, 228),),
+                       note="turned: the forend level; trigger guard see-through"),
     "d_greasegun": Icon(("p_grease.mdl",), ("w_greasegun.mdl",)),
-    "d_bar": Icon(("p_barbu.mdl", "p_barbd.mdl"), ("w_bar.mdl",), note="bipod up or down, closest wins"),
+    "d_bar": Icon(("p_barbu.mdl", "p_barbd.mdl"), ("w_bar.mdl",), see_through=(("p_bar.bmp", 125, 224),),
+                  note="bipod up or down, closest wins; trigger guard see-through"),
     "d_garand": Icon(("p_garand.mdl",), ("w_garand.mdl",)),
     "d_spring": Icon(("p_spring.mdl",), ("w_spring.mdl",)),
-    "d_m1carbine": Icon(("p_m1carb.mdl",), ("w_m1carb.mdl",)),
+    "d_m1carbine": Icon(("p_m1carb.mdl",), ("w_m1carb.mdl",), see_through=(("p_m1carbine.bmp", 102, 47),),
+                        note="trigger guard see-through"),
     "d_fcarbine": Icon(("p_fcarb.mdl",), ("w_fcarb.mdl",), note="folding-stock carbine"),
     "d_30cal": Icon(("p_30cal.mdl",), ("w_30cal.mdl",), barrel_top=10, cut_below=True,
                     note="barrel at Valve's height; the taller bipod runs off the bottom"),
-    "d_colt": Icon(("p_colt.mdl",), ("w_colt.mdl",), rolls=WIDE_ROLLS),
+    "d_colt": Icon(("p_colt.mdl",), ("w_colt.mdl",), rolls=WIDE_ROLLS, see_through=(("p_colt.bmp", 73, 49),),
+                   note="trigger guard see-through"),
     "d_bazooka": Icon(("p_bazooka.mdl",), ("w_bazooka.mdl",), note="no rocket beside it"),
     "d_grenade": Icon(("p_grenade.mdl",), ("w_grenade.mdl",), rolls=UPRIGHT_ROLLS, turn=6.0,
                       note="turned: the grooves level"),
@@ -144,17 +158,21 @@ ICONS = {
     # Axis
     "d_kar": Icon(("p_k98.mdl",), ("w_98k.mdl",), clip_tip=True, note="bayonet tip clipped, as Valve's icon"),
     "d_scopedkar": Icon(("p_k98s.mdl",), ("w_scoped98k.mdl",)),
-    "d_k43": Icon(("p_k43.mdl",), ("w_k43.mdl",), barrel_top=7, cut_below=True,
-                  note="barrel top on the middle line, as Valve's"),
+    "d_k43": Icon(("p_k43.mdl",), ("w_k43.mdl",), barrel_top=7,
+                  note="barrel top towards the middle line, as Valve's, raised so the stock fits"),
     "d_mp40": Icon(("p_mp40.mdl",), ("w_mp40.mdl",), barrel_top=6, cut_below=True,
                    note="barrel at Valve's height; the longer magazine runs off the bottom"),
     "d_mp44": Icon(("p_stg44.mdl",), ("w_mp44.mdl",), barrel_top=7, cut_below=True,
                    note="barrel at Valve's height; the longer magazine runs off the bottom"),
     # p_fg42.mdl and p_bren.mdl are left out: both carry p_bar.bmp, BAR leftovers.
-    "d_fg42": Icon(("p_fg42bu.mdl", "p_fg42bd.mdl"), ("w_fg42.mdl",), note="bipod up or down, closest wins"),
-    "d_scopedfg42": Icon(("p_fg42s.mdl", "p_scopedfg42bu.mdl"), ("w_fg42s.mdl",)),
-    "d_mg42": Icon(("p_mg42bu.mdl", "p_mg42bd.mdl"), ("w_mg42.mdl",), note="bipod up or down, closest wins"),
-    "d_mg34": Icon(("p_mg34bu.mdl", "p_mg34bd.mdl"), ("w_mg34.mdl",), note="bipod up or down, closest wins"),
+    "d_fg42": Icon(("p_fg42bu.mdl", "p_fg42bd.mdl"), ("w_fg42.mdl",), see_through=(("p_fg42.bmp", 197, 30),),
+                   note="bipod up or down, closest wins; trigger guard see-through"),
+    "d_scopedfg42": Icon(("p_fg42s.mdl", "p_scopedfg42bu.mdl"), ("w_fg42s.mdl",),
+                         see_through=(("p_fg42.bmp", 197, 30),), note="trigger guard see-through"),
+    "d_mg42": Icon(("p_mg42bu.mdl", "p_mg42bd.mdl"), ("w_mg42.mdl",), see_through=(("p_mg42.bmp", 85, 31),),
+                   note="bipod up or down, closest wins; trigger guard see-through"),
+    "d_mg34": Icon(("p_mg34bu.mdl", "p_mg34bd.mdl"), ("w_mg34.mdl",), see_through=(("p_mg34b.bmp", 48, 35),),
+                   note="bipod up or down, closest wins; trigger guard see-through"),
     "d_luger": Icon(("p_luger.mdl",), ("w_luger.mdl",), rolls=WIDE_ROLLS),
     "d_pschreck": Icon(("p_pschreck.mdl",), ("w_pschreck.mdl",), note="no rocket beside it"),
     "d_stick": Icon(("p_stick.mdl",), ("w_stick.mdl",)),
@@ -167,7 +185,8 @@ ICONS = {
                       note="bayonet (its own mesh) left out, as Valve's icon; turned: the forend level"),
     "d_scopedenfield": Icon(("p_enfields.mdl",), ("w_enfields.mdl", "w_enfield_scoped.mdl"), turn=-3.5,
                             note="turned: the forend level"),
-    "d_sten": Icon(("p_sten.mdl",), ("w_sten.mdl",)),
+    "d_sten": Icon(("p_sten.mdl",), ("w_sten.mdl",), see_through=(("p_sten.bmp", 102, 44),),
+                   note="trigger guard see-through"),
     "d_bren": Icon(("p_brenbu.mdl", "p_brenbd.mdl"), ("w_bren.mdl",), note="bipod up or down, closest wins"),
     "d_webley": Icon(("p_webley.mdl",), ("w_webley.mdl",), rolls=WIDE_ROLLS),
     "d_piat": Icon(("p_piat.mdl",), ("w_piat.mdl",)),
@@ -551,8 +570,11 @@ def barrel_top_row(alpha, front=0.15):
 def place_barrel(tris, basis, fit, alpha, box, row, cut=False):
     """A transform that puts the top of the barrel's end (measured in
     `alpha`, rendered with `fit`) on screen row `row`, as wide as `box`
-    allows: shrunk only so nothing pokes out above the box, and, unless
-    `cut`, nothing below it either. Centred across as fit_transform is."""
+    allows. With `cut`, shrunk only so nothing pokes out above the box
+    (what hangs below is cut later). Without, the gun keeps that size and
+    is raised until its bottom fits, the barrel as near `row` as that
+    allows (shrunk only when it is taller than the box). Centred across as
+    fit_transform is."""
     kx, ky, ox, oy = fit
     r0 = barrel_top_row(alpha)
     if r0 is None:
@@ -561,12 +583,52 @@ def place_barrel(tris, basis, fit, alpha, box, row, cut=False):
     lo, hi = pts[:, :2].min(0), pts[:, :2].max(0)
     ub = (oy - r0) / ky  # the barrel top, model units up
     k = (box[2] - box[0]) / max(hi[0] - lo[0], 1e-6)
-    if hi[1] > ub:
-        k = min(k, (row - box[1]) / (hi[1] - ub))
-    if not cut and ub > lo[1]:
-        k = min(k, (box[3] - row) / (ub - lo[1]))
+    if cut:
+        if hi[1] > ub:
+            k = min(k, (row - box[1]) / (hi[1] - ub))
+    else:
+        k = min(k, (box[3] - box[1]) / max(hi[1] - lo[1], 1e-6))
+        row = min(row, box[3] - k * (ub - lo[1]))  # raised until the bottom fits
+        row = max(row, box[1] + k * (hi[1] - ub))  # never past the top
     cx = (box[0] + box[2]) / 2
     return k, k, cx - k * (lo[0] + hi[0]) / 2, row + k * ub
+
+
+HOLE_DARK = 16  # a see_through texel: every channel at most this (of 255)
+
+
+def see_through_mask(tex, seeds):
+    """The texels of `tex` drawn transparent: the near-black ones joined to
+    each (x, y) of `seeds` (a hole painted black on a solid plate, as some
+    DoD models draw their trigger guards). A seed off a dark texel is
+    ignored rather than cutting a hole in the gun."""
+    dark = (tex.palette[tex.indices] <= HOLE_DARK).all(2)
+    lab, _ = ndimage.label(dark)
+    out = np.zeros(dark.shape, bool)
+    for x, y in seeds:
+        if 0 <= y < dark.shape[0] and 0 <= x < dark.shape[1] and dark[y, x]:
+            out |= lab == lab[y, x]
+    return out
+
+
+def apply_see_through(skins, textures, see_through):
+    """`skins` (as render takes them) with each see_through hole's alpha 0;
+    returns (skins, names of the textures to draw as masked)."""
+    cut = set()
+    for t in textures:
+        seeds = [(x, y) for name, x, y in see_through if name.lower() == t.name.lower()]
+        if not seeds:
+            continue
+        m = see_through_mask(t, seeds)
+        if not m.any():
+            continue
+        base = skins.get(t.name)
+        base = (t.rgba().astype(float) / 255 if base is None else base).copy()
+        f = base.shape[0] // t.height
+        base[np.kron(m, np.ones((f, f), bool)), 3] = 0
+        skins = {**skins, t.name: base}
+        cut.add(t.name)
+    return skins, frozenset(cut)
 
 
 def cut_under(rgba, bottom):
@@ -592,9 +654,12 @@ def sample_bilinear(tex, u, v):
             + (tex[y1, x0] * (1 - fx) + tex[y1, x1] * fx) * fy)
 
 
-def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT, diffuse=DIFFUSE, ss=SS):
+def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT, diffuse=DIFFUSE, ss=SS,
+           masked_names=frozenset()):
     """RGBA (h, w, 4) float 0..1. skins: {texture name: RGBA float array}
-    to override a texture (an HD skin); others use the model's own."""
+    to override a texture (an HD skin); others use the model's own.
+    masked_names: textures drawn as masked (their alpha cut at 0.5) though
+    the model doesn't flag them (apply_see_through)."""
     W, H = w * ss, h * ss
     col = np.zeros((H, W, 3))
     cov = np.zeros((H, W))
@@ -605,7 +670,7 @@ def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT
         rgba = skins.get(tex.name)
         if rgba is None:
             rgba = tex.rgba().astype(float) / 255
-        masked = bool(tex.flags & STUDIO_NF_MASKED)
+        masked = bool(tex.flags & STUDIO_NF_MASKED) or tex.name in masked_names
         p = pos @ basis.T
         # Normals of the stretched model: the inverse-transpose scales y by kx/ky.
         n = (nrm @ basis.T) * np.array([1.0, kx / ky, 1.0])
@@ -678,11 +743,32 @@ def rim_light(rgba, width=RIM_WIDTH, strength=RIM_STRENGTH):
     return np.dstack([rgb, a])
 
 
-def outline(rgba, radius=OUTLINE, colour=OUTLINE_COLOUR):
-    """A dark rim `radius` px wide (soft-edged) under the icon."""
+def holes(alpha, min_px=HOLE_MIN, min_width=HOLE_WIDTH):
+    """The see-through gaps inside an icon (a trigger guard's inside): the
+    clear regions that don't reach the image's border, of at least `min_px`
+    pixels and `min_width` px across at their widest (a slit, such as a gas
+    tube's gap under a barrel, stays closed)."""
+    clear = alpha < 0.5
+    lab, n = ndimage.label(clear)
+    if n == 0:
+        return np.zeros(alpha.shape, bool)
+    border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])))
+    ids = range(1, n + 1)
+    sizes = ndimage.sum(np.ones_like(lab), lab, ids)
+    # the widest point: twice the distance to the nearest opaque pixel
+    widths = 2 * np.asarray(ndimage.maximum(ndimage.distance_transform_edt(clear), lab, ids))
+    keep = [i for i, s, wd in zip(ids, sizes, widths) if i not in border and s >= min_px and wd >= min_width]
+    return np.isin(lab, keep)
+
+
+def outline(rgba, radius=OUTLINE, colour=OUTLINE_COLOUR, hole_radius=HOLE_OUTLINE):
+    """A dark rim `radius` px wide (soft-edged) under the icon; inside a
+    hole only `hole_radius` px, so the full rim doesn't fill a trigger
+    guard back in."""
     a = rgba[..., 3]
     dist = ndimage.distance_transform_edt(a < 0.5)
-    rim = np.clip(radius + 0.5 - dist, 0, 1)
+    r = np.where(holes(a), hole_radius, radius)
+    rim = np.clip(r + 0.5 - dist, 0, 1)
     out_a = a + rim * (1 - a)
     rgb = (rgba[..., :3] * a[..., None] + np.array(colour) * (rim * (1 - a))[..., None]) / np.maximum(out_a, 1e-9)[..., None]
     return bleed(np.dstack([rgb, out_a]))
@@ -814,22 +900,26 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
         basis = turned(basis, icon.turn)
     textures = sorted({id(t[3]): t[3] for t in tris}.values(), key=lambda t: t.name)
     skins = hd_skins(textures, style, models_dir)
+    n_hd = len(skins)
+    skins, cutouts = apply_see_through(skins, textures, icon.see_through)
     fit = fit_transform(tris, basis, box)
-    lit = drop_specks(render(tris, basis, *fit, w * scale, h * scale, skins))
+    lit = drop_specks(render(tris, basis, *fit, w * scale, h * scale, skins, masked_names=cutouts))
     if icon.barrel_top is not None:
         fit = place_barrel(tris, basis, fit, lit[..., 3], box, icon.barrel_top * scale, icon.cut_below)
-        lit = render(tris, basis, *fit, w * scale, h * scale, skins)
+        lit = render(tris, basis, *fit, w * scale, h * scale, skins, masked_names=cutouts)
         if icon.cut_below:
             lit = cut_under(lit, box[3])
         lit = drop_specks(lit)
     else:
         refit = refit_transform(fit, lit[..., 3], box)
         if refit is not None:
-            lit = drop_specks(render(tris, basis, *refit, w * scale, h * scale, skins))
+            lit = drop_specks(render(tris, basis, *refit, w * scale, h * scale, skins, masked_names=cutouts))
     img = outline(rim_light(lit))
     info = {"model": os.path.basename(path), "iou": round(float(score), 2),
             "roll": round(float(pick[2] + icon.turn), 1), "clipped_tris": cut,
-            "skin": f"{style} ({len(skins)} of {len(textures)})" if skins else "stock"}
+            "skin": f"{style} ({n_hd} of {len(textures)})" if n_hd else "stock"}
+    if cutouts:
+        info["see_through"] = sorted(cutouts)
     if icon.turn:
         info["turn"] = icon.turn
     if icon.barrel_top is not None:
