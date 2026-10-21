@@ -570,6 +570,47 @@ class SkinArtTest(unittest.TestCase):
         self.assertTrue(all(0 <= c <= 256 for c in art.art + art.anchor))
 
 
+class VPartTest(unittest.TestCase):
+    """v_part: the guard and trigger from the first-person model (#900)."""
+
+    @staticmethod
+    def gun(k=1.0):
+        """A receiver with a grip under it, `k` times the size."""
+        a, b = box_tris(0, 20 * k, 0, 4 * k), box_tris(4 * k, 8 * k, -6 * k, 0)
+        return [a, b]
+
+    def test_match_v_model_finds_the_scale_and_place(self):
+        target = K.silhouette(self.gun(), np.eye(3), 4, 4, 10, 30, 120, 60) >= 0.5
+        fit, score = K.match_v_model(self.gun(2.0), np.eye(3), target, (0, 120), 4, scales=(0.3, 1.0))
+        self.assertGreater(score, 0.9)
+        self.assertAlmostEqual(fit[0] / 2, 1.0, delta=0.04)  # 2 px per unit of the bigger model
+        self.assertAlmostEqual(fit[2], 10, delta=2)
+        self.assertAlmostEqual(fit[3], 30, delta=2)
+
+    def test_v_side_view_puts_the_muzzle_right_and_the_top_up(self):
+        right, up, _ = K.v_side_view(0)
+        np.testing.assert_allclose(right, K.V_MUZZLE)
+        np.testing.assert_allclose(up, K.V_UP)
+
+    def test_a_missing_v_model_changes_nothing(self):
+        tris = self.gun()
+        lit, hi = K.render(tris, np.eye(3), 4, 4, 10, 40, 120, 60, {}, hires=True)
+        vp = K.VPart("v_none.mdl", (0, 30), (0, 0, 30, 15))
+        with tempfile.TemporaryDirectory() as d:
+            out, hi2, info = K.v_part(hi, tris, np.eye(3), (4, 4, 10, 40), vp, d, "ultrasharp", None, 4)
+        self.assertIsNone(info)
+        np.testing.assert_array_equal(hi2[1], hi[1])
+
+    def test_v_parts_in_the_table(self):
+        with_v = {n for n, i in K.ICONS.items() if i.v_part is not None}
+        self.assertEqual(with_v, {"d_garand", "d_kar", "d_scopedkar", "d_k43", "d_spring", "d_mp44"})
+        for n in with_v:
+            vp = K.ICONS[n].v_part
+            self.assertTrue(vp.model.startswith("v_") and vp.model.endswith(".mdl"), n)
+            x0, y0, x1, y1 = vp.box
+            self.assertTrue(vp.window[0] <= x0 < x1 <= vp.window[1] and 0 <= y0 < y1, n)
+
+
 class RecordTest(unittest.TestCase):
     def test_source_for(self):
         with tempfile.TemporaryDirectory() as d:
