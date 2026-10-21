@@ -75,8 +75,9 @@
 //!   `CHud::Redraw` forces the value back every frame.
 //! - `objicons`: the `ds_hud_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
-//!   different y while spectating than it does in a POV demo. Full design
-//!   write-up in `docs/goldsrc_objective_icons.md`.
+//!   different y while spectating than it does in a POV demo, and scale
+//!   both up for high resolutions. Full design write-up in
+//!   `docs/goldsrc_objective_icons.md`.
 //!
 //! - `lightmap_gamma`: the first demo of a session no longer renders with its
 //!   lighting far too dark (issue #365): the gamma tables are refreshed from the
@@ -216,6 +217,7 @@ mod folder_counts;
 mod frame_esc;
 mod game_dir_check;
 mod game_folder;
+mod gl_zoom;
 mod hand_signals;
 mod hide_asset;
 mod hlae_window;

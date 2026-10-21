@@ -57,11 +57,16 @@
 //! background sprite is drawn at a literal 0 and its four digits at literal
 //! 10, 24, 44 and 58, which is five sites rather than one value.
 //!
+//! `scale <S>` (#891) draws both S times bigger about their top-left corners;
+//! see `objicons/scale.rs`. The row stub records the row's corner for it.
+//!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
+
+mod scale;
 
 use crate::detour;
 use crate::engine;
@@ -113,6 +118,10 @@ const ROW_STOLEN: &[u8] = &[0x8b, 0x47, 0x18, 0x8b, 0x4f, 0x14];
 /// `jmp`, not a `call`, so the stub sees the same `esp` the function does.
 const X_SLOT: u8 = 0x14;
 const Y_SLOT: u8 = 0x18;
+/// Whether the row's x came from `spec_pip`'s picture-in-picture layout
+/// (`+0x30067`/`+0x3007f` set it, `+0x301f7` reads it). Read by the stub for
+/// `scale`, which keeps that x where the game put it.
+const PIP_SLOT: u8 = 0x24;
 
 // ── The timer's detour ───────────────────────────────────────────────────────
 
@@ -168,6 +177,12 @@ static Y_ACTIVE: AtomicU8 = AtomicU8::new(0);
 static Y_VALUE: AtomicI32 = AtomicI32::new(0);
 static TIMER_ACTIVE: AtomicU8 = AtomicU8::new(0);
 static TIMER_VALUE: AtomicI32 = AtomicI32::new(0);
+
+/// The icon row's corner as this frame draws it (after any override) and its
+/// pip flag, stored by the row stub every frame for `scale`'s zoom anchor.
+static ROW_X_DRAWN: AtomicI32 = AtomicI32::new(0);
+static ROW_Y_DRAWN: AtomicI32 = AtomicI32::new(0);
+static ROW_PIP: AtomicI32 = AtomicI32::new(0);
 
 /// Where each stub jumps back to: the instruction after its stolen bytes.
 static ROW_RESUME: AtomicUsize = AtomicUsize::new(0);
@@ -232,6 +247,25 @@ fn resume_jump(resume: usize) -> Vec<u8> {
     code
 }
 
+/// Where the row stub records the row's corner and pip flag: three dword
+/// addresses.
+#[derive(Clone, Copy)]
+struct RowCapture {
+    x: usize,
+    y: usize,
+    pip: usize,
+}
+
+impl RowCapture {
+    fn ours() -> Self {
+        RowCapture {
+            x: ROW_X_DRAWN.as_ptr() as usize,
+            y: ROW_Y_DRAWN.as_ptr() as usize,
+            pip: ROW_PIP.as_ptr() as usize,
+        }
+    }
+}
+
 /// The icon row's stub, hand-assembled.
 ///
 /// ```asm
@@ -245,6 +279,12 @@ fn resume_jump(resume: usize) -> Vec<u8> {
 /// mov eax, [Y_VALUE]
 /// mov dword ptr [esp + 0x18], eax     ; y = ours
 /// .game:
+/// mov eax, [esp + 0x14]               ; record the corner the row is drawn
+/// mov [ROW_X_DRAWN], eax              ;   from, and the pip flag, for scale
+/// mov eax, [esp + 0x18]
+/// mov [ROW_Y_DRAWN], eax
+/// mov eax, [esp + 0x24]
+/// mov [ROW_PIP], eax
 /// mov eax, [edi + 0x18]               ; the stolen instructions
 /// mov ecx, [edi + 0x14]
 /// jmp dword ptr [ROW_RESUME]
@@ -253,16 +293,27 @@ fn resume_jump(resume: usize) -> Vec<u8> {
 /// Hand-written rather than copied, because copying the span would mean
 /// relocating any relative branch inside it. The two overrides are independent
 /// flags rather than one, so `offset` alone leaves the game's x alone and
-/// `xoffset` alone leaves the game's y alone.
+/// `xoffset` alone leaves the game's y alone. The records only read the stack
+/// and write our statics; `eax` is loaded again by the stolen bytes.
 fn row_stub(
     x_active: usize,
     x_value: usize,
     y_active: usize,
     y_value: usize,
+    capture: RowCapture,
     resume: usize,
 ) -> Vec<u8> {
     let mut code = substitute_stack_slot(x_active, x_value, X_SLOT);
     code.extend_from_slice(&substitute_stack_slot(y_active, y_value, Y_SLOT));
+    for (slot, into) in [
+        (X_SLOT, capture.x),
+        (Y_SLOT, capture.y),
+        (PIP_SLOT, capture.pip),
+    ] {
+        code.extend_from_slice(&[0x8b, 0x44, 0x24, slot]); // mov eax, [esp+slot]
+        code.push(0xa3); // mov [abs32], eax
+        code.extend_from_slice(&(into as u32).to_le_bytes());
+    }
     code.extend_from_slice(ROW_STOLEN);
     code.extend_from_slice(&resume_jump(resume));
     code
@@ -409,6 +460,7 @@ impl Setting {
                     X_VALUE.as_ptr() as usize,
                     Y_ACTIVE.as_ptr() as usize,
                     Y_VALUE.as_ptr() as usize,
+                    RowCapture::ours(),
                     resume,
                 )
             }),
@@ -517,12 +569,15 @@ fn usage() -> String {
          \x20 {COMMAND} offset <y>         y the objective icons are drawn at\n\
          \x20 {COMMAND} xoffset <x>        x the icon row starts at\n\
          \x20 {COMMAND} timer <y>          y the objective timer beside them is drawn at\n\
+         \x20 {COMMAND} scale <1..8>       draw the icons and the timer that many times bigger\n\
          \x20 {COMMAND} <any> default      hand that one back to the default layout\n\
          \x20 All are absolute screen positions, and mean the same thing in a POV\n\
          \x20 demo and while spectating -- which the game's own values do not. The\n\
          \x20 timer has no x: the game draws it at a fixed one. While spectating,\n\
          \x20 the default layout puts the icons and timer just below the spectator\n\
-         \x20 bar, or at the top as in a POV demo while the bar is hidden.\n"
+         \x20 bar, or at the top as in a POV demo while the bar is hidden. A scale\n\
+         \x20 grows each from its top-left corner, so offset, xoffset and timer\n\
+         \x20 still say where that corner goes.\n"
     )
 }
 
@@ -537,8 +592,7 @@ fn status() -> String {
         };
         text.push_str(&format!(" {label} = {value},"));
     }
-    text.pop();
-    text.push('\n');
+    text.push_str(&format!(" {}\n", scale::describe()));
     text
 }
 
@@ -549,6 +603,12 @@ fn dispatch(argv: &[String]) -> String {
         return format!("{}{}", status(), usage());
     };
     let sub = sub.to_ascii_lowercase();
+    if sub == scale::SUBCOMMAND {
+        return match scale::parse_args(&argv[2..]).and_then(scale::apply) {
+            Ok(reply) => format!("{COMMAND}: {reply}\n"),
+            Err(why) => format!("{COMMAND} {sub}: {why}\n"),
+        };
+    }
 
     let Some(&(_, setting, label)) = SUBCOMMANDS.iter().find(|(name, _, _)| *name == sub) else {
         return format!("{COMMAND}: no subcommand {sub:?}\n{}", usage());
@@ -580,6 +640,12 @@ pub unsafe extern "C" fn command() {
 mod tests {
     use super::*;
 
+    const TEST_CAPTURE: RowCapture = RowCapture {
+        x: 0x6666_6666,
+        y: 0x7777_7777,
+        pip: 0x8888_8888,
+    };
+
     /// Every `je` in a stub, as `(index of the 0x74, index it lands on)`.
     ///
     /// Found by looking for the `cmp byte ptr [abs32], 0` that precedes each
@@ -600,6 +666,7 @@ mod tests {
             0x2222_2222,
             0x3333_3333,
             0x4444_4444,
+            TEST_CAPTURE,
             0x5555_5555,
         );
         #[rustfmt::skip]
@@ -614,6 +681,12 @@ mod tests {
                 0x74, 0x09,                               // je  over the y assignment
                 0xa1, 0x44, 0x44, 0x44, 0x44,             // mov eax, [Y_VALUE]
                 0x89, 0x44, 0x24, 0x18,                   // mov [esp+0x18], eax
+                0x8b, 0x44, 0x24, 0x14,                   // mov eax, [esp+0x14]
+                0xa3, 0x66, 0x66, 0x66, 0x66,             // mov [ROW_X_DRAWN], eax
+                0x8b, 0x44, 0x24, 0x18,                   // mov eax, [esp+0x18]
+                0xa3, 0x77, 0x77, 0x77, 0x77,             // mov [ROW_Y_DRAWN], eax
+                0x8b, 0x44, 0x24, 0x24,                   // mov eax, [esp+0x24]
+                0xa3, 0x88, 0x88, 0x88, 0x88,             // mov [ROW_PIP], eax
                 0x8b, 0x47, 0x18, 0x8b, 0x4f, 0x14,       // the stolen instructions
                 0xff, 0x25, 0x55, 0x55, 0x55, 0x55,       // jmp dword [ROW_RESUME]
             ]
@@ -646,16 +719,20 @@ mod tests {
             0xbbbb_bbbb,
             0xcccc_cccc,
             0xdddd_dddd,
+            TEST_CAPTURE,
             0xeeee_eeee,
         );
         let row_guards = guards(&row);
         assert_eq!(row_guards.len(), 2, "one guarded assignment per axis");
-        // The first lands on the second guard; the second on the stolen bytes.
+        // The first lands on the second guard; the second on the records,
+        // which run on every frame, then the stolen bytes.
         assert_eq!(row_guards[0].1, row_guards[1].0 - 7);
         assert_eq!(
-            &row[row_guards[1].1..row_guards[1].1 + ROW_STOLEN.len()],
-            ROW_STOLEN
+            &row[row_guards[1].1..row_guards[1].1 + 4],
+            &[0x8b, 0x44, 0x24, X_SLOT]
         );
+        let stolen_at = row_guards[1].1 + 3 * 9;
+        assert_eq!(&row[stolen_at..stolen_at + ROW_STOLEN.len()], ROW_STOLEN);
 
         let timer = timer_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc);
         let timer_guards = guards(&timer);
@@ -676,6 +753,7 @@ mod tests {
             0xbbbb_bbbb,
             0xcccc_cccc,
             0xdddd_dddd,
+            TEST_CAPTURE,
             0xeeee_eeee,
         );
         for ((_, landing), slot) in guards(&code).iter().zip([X_SLOT, Y_SLOT]) {
