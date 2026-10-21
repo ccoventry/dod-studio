@@ -7,7 +7,6 @@
 import { saveSettings } from './ipc_bridge.js';
 import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
-import { captureModeToSave, loadCaptureMode } from './capture_mode_default.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -116,7 +115,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       decal_flush: decalFlush,
       ffmpeg_capture: ffmpegCapture,
       ffmpeg_capture_codec: ffmpegCaptureCodec,
-      capture_mode: captureModeToSave(captureMode),
+      capture_mode: captureMode,
       obs_host: obsHost,
       obs_port: obsPort,
       obs_password: obsPassword,
@@ -265,10 +264,9 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (captureModeEl) {
     // A settings file written before the selector existed has no
     // capture_mode and only ffmpeg_capture, so fall back to it rather than
-    // silently resetting the user's choice to frame sequence. Neither: a new
-    // install, which shows frame sequence until HLAE's FFmpeg is found
-    // (capture_mode_default.js).
-    captureModeEl.value = loadCaptureMode(settings);
+    // silently resetting the user's choice to frame sequence.
+    captureModeEl.value =
+      settings.capture_mode || (settings.ffmpeg_capture ? 'direct_to_video' : 'frame_sequence');
   }
   const obsHostEl = document.querySelector('#config-obs-host');
   if (obsHostEl) obsHostEl.value = settings.obs_host || '127.0.0.1';

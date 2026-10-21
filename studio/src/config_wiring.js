@@ -15,12 +15,7 @@ import { numberField } from './number_field.js';
 import { EXE_NAMES, isSteamPlayInstall, sameDriveFolders, wrongExeName } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
 import { createGameFolderUi } from './game_folder_ui.js';
-import { settleCaptureMode, captureModeChosen } from './capture_mode_default.js';
 import { wireReviewSettings } from './review_settings.js';
-
-// persistAppSettings, once initConfigWiring has it: a new install's capture
-// mode is saved the moment HLAE's FFmpeg settles it.
-let persistSettings = null;
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -228,14 +223,6 @@ export async function refreshHlaeFfmpegStatus() {
     return unknown();
   }
 
-  // A new install's mode turns to Video once HLAE's FFmpeg is found
-  // (capture_mode_default.js); before that it shows Frame sequence.
-  if (settleCaptureMode(result, document.querySelector('#config-capture-mode'))) {
-    applyCaptureModeUI();
-    refreshLaunchGuard();
-    persistSettings?.();
-  }
-
   const s = result?.state || {};
   // Outranks every message below it, because it questions the thing they are
   // all about: if the hook DLL is not there, capture cannot work regardless of
@@ -346,7 +333,6 @@ export async function linkHlaeToFfmpeg() {
  * @param {object} app  persistAppSettings() from settings_sync.js
  */
 export function initConfigWiring({ persistAppSettings }) {
-  persistSettings = persistAppSettings;
   wireReviewSettings(persistAppSettings);
   // Game Folder (#402): its list comes from the folder holding hl.exe, so it
   // is re-read whenever that path changes.
@@ -418,8 +404,6 @@ export function initConfigWiring({ persistAppSettings }) {
   // — both of which already hang off that event — keep working unchanged.
   document.querySelector('#config-capture-mode')
     ?.addEventListener('change', () => {
-      // Picked by hand: no longer a new install's default to settle.
-      captureModeChosen();
       applyCaptureModeUI();
       const legacy = document.querySelector('#config-ffmpeg-capture');
       if (legacy) legacy.dispatchEvent(new Event('change', { bubbles: true }));

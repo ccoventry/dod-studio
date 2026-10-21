@@ -104,12 +104,6 @@ pub struct AppSettings {
     /// A file written before this existed has no value here and only
     /// `ffmpeg_capture`; `PatcherConfig::normalise_capture_mode` promotes that,
     /// so an upgrade keeps whatever the user had selected.
-    ///
-    /// Empty means nobody has picked one yet (a new install). The frontend
-    /// then shows frame sequence, which always records, and switches to
-    /// direct-to-video once HLAE's FFmpeg is found
-    /// (`studio/src/capture_mode_default.js`); picking a mode by hand ends
-    /// that for good.
     #[serde(default = "default_capture_mode")]
     pub capture_mode: String,
     /// obs-websocket host, when `capture_mode` is `obs`.
@@ -344,10 +338,10 @@ fn default_capture_codec() -> String {
         .to_str_id()
         .to_string()
 }
-/// Empty: not picked yet (see the field). The batch itself falls back to
-/// `CaptureMode::default()`, frame sequence.
 fn default_capture_mode() -> String {
-    String::new()
+    native::patch::CaptureMode::default()
+        .to_str_id()
+        .to_string()
 }
 /// 120 rather than 300: 1280x720 frames at 300 fps are ~50 GB per minute of
 /// clip and more than a SATA SSD writes.
@@ -915,7 +909,7 @@ mod tests {
         for s in [&fresh, &minimal] {
             assert_eq!((s.resolution_width, s.resolution_height), screen);
             assert_eq!(s.capture_fps, 120);
-            assert_eq!(s.capture_mode, "", "not picked yet");
+            assert_eq!(s.capture_mode, "frame_sequence");
             assert_eq!(s.record_start_lead, 5.0);
             assert_eq!(s.record_stop_trail, 5.0);
             assert!(s.auto_clear_temp_demos);
