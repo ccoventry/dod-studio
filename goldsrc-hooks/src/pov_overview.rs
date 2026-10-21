@@ -105,6 +105,39 @@ fn on() -> bool {
     !cvar.is_null() && unsafe { (*cvar).value } != 0.0
 }
 
+/// Called by `engine.rs` right before `client.dll`'s `V_CalcRefdef`: a call
+/// that arrives with `nextView` already 1 is the engine's second (map) view.
+pub fn before_calc_refdef(params: *const RefParamsPartial) {
+    if params.is_null() || INSTALLED_BASE.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    // Safety: as in `after_calc_refdef`.
+    let next =
+        unsafe { std::ptr::read_unaligned((params as *const u8).add(NEXT_VIEW_AT) as *const i32) };
+    let counter = if next != 0 {
+        &SECOND_VIEWS
+    } else {
+        &FIRST_VIEWS
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Views counted since the detour went in, for `ds_debug_status`.
+static FIRST_VIEWS: AtomicUsize = AtomicUsize::new(0);
+static SECOND_VIEWS: AtomicUsize = AtomicUsize::new(0);
+
+/// One line for `ds_debug_status`, once the detour is in.
+pub fn status_line() -> Option<String> {
+    (INSTALLED_BASE.load(Ordering::Relaxed) != 0).then(|| {
+        format!(
+            "{NAME} = {}: {} main views and {} map views rendered since it went in",
+            on() as i32,
+            FIRST_VIEWS.load(Ordering::Relaxed),
+            SECOND_VIEWS.load(Ordering::Relaxed)
+        )
+    })
+}
+
 /// Called by `engine.rs` right after `client.dll`'s `V_CalcRefdef`. The demo
 /// view override runs only after the first view's call, so what this keeps
 /// when the stub reads it is that view's request.

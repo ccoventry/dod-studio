@@ -1346,6 +1346,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         return;
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
+    crate::pov_overview::before_calc_refdef(pparams);
     unsafe { real(pparams) };
     unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {

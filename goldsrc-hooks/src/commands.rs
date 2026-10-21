@@ -797,6 +797,9 @@ fn status_text() -> String {
     if let Some(icons) = crate::overview_players::status_line() {
         lines.push(icons);
     }
+    if let Some(pov_overview) = crate::pov_overview::status_line() {
+        lines.push(pov_overview);
+    }
     if let Some(marker) = crate::overview_marker::status_line() {
         lines.push(marker);
     }
