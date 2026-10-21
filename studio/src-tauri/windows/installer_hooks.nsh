@@ -36,9 +36,34 @@
   ${If} $R1 != ""
   ${AndIf} $R1 != $INSTDIR
   ${AndIf} ${FileExists} "$R1\uninstall.exe"
+    ; Whether the old install had a desktop shortcut, before its uninstaller removes it.
+    StrCpy $R4 0
+    ${If} ${FileExists} "$DESKTOP\${DODSTUDIO_OLD_PRODUCTNAME}.lnk"
+      StrCpy $R4 1
+    ${EndIf}
     DetailPrint "Removing the old ${DODSTUDIO_OLD_PRODUCTNAME} install from $R1"
     ExecWait '"$R1\uninstall.exe" /S _?=$R1'
     Delete "$R1\uninstall.exe"
+    ; Files older builds installed that the last old uninstaller no longer lists, by name only,
+    ; so the empty folders can go; anything else keeps its folder.
+    Delete "$R1\resources\goldsrc-hooks\dodstudio_goldsrc_hooks.dll"
+    RMDir "$R1\resources\goldsrc-hooks"
+    RMDir "$R1\resources"
+    Delete "$R1\localizations\dod_tools_english.txt"
+    RMDir "$R1\localizations"
     RMDir "$R1"
+
+    ; The updater runs this installer in update mode, which never creates shortcuts: Tauri
+    ; assumes the app's own are already there. Under the new name they aren't (the old
+    ; uninstaller just took the old ones), so the renamed app had no Start-menu entry (#258).
+    ${IfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+      CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+      !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    ${EndIf}
+    ${If} $R4 = 1
+    ${AndIfNot} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
+      CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+      !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+    ${EndIf}
   ${EndIf}
 !macroend
