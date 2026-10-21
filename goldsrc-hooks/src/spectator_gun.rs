@@ -1,4 +1,4 @@
-//! The gun-lowering part of `dodstudio_spec_match_pov`: the spectated
+//! The gun-lowering part of `ds_spec_match_pov`: the spectated
 //! first-person gun drops off the bottom of the screen when the player's own
 //! would (issue #559).
 //!
@@ -133,7 +133,7 @@ pub unsafe fn after_calc_refdef(pparams: *mut RefParamsPartial) {
     origin.z += z;
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let offscreen = f32::from_bits(OFFSCREEN.load(Ordering::Relaxed));
     format!(

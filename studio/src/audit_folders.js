@@ -1,11 +1,13 @@
 // audit_folders.js — the Duplicates tab's "Folders to check" list (#844):
-// the Target Folder above, folders added with the native picker (never
-// typed), and the All drives choice. auditor_pane.js reads it through
-// `getRequest()` when Start Audit is clicked.
+// folders added with the native picker (never typed), and the All drives
+// choice. The page's Target Folder row is hidden on this tab, so the list is
+// the one place folders are picked here: it starts from the Target Folder,
+// and follows it until a folder is added or removed. auditor_pane.js reads it
+// through `getRequest()` when Start Audit is clicked.
 import { open } from '@tauri-apps/plugin-dialog';
 import { listFixedDrives } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
-import { addFolders, auditFolders, allDrivesLabel, canStartAudit } from './audit_duplicates.js';
+import { addFolders, allDrivesLabel, canStartAudit } from './audit_duplicates.js';
 
 export function createAuditFolders({ onChange = () => {} } = {}) {
   const $ = (sel) => document.querySelector(sel);
@@ -14,44 +16,44 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
   const addBtn = $('#audit-add-folder-btn');
   const allDrivesCb = $('#audit-all-drives');
   const allDrivesText = $('#audit-all-drives-label');
-  let extra = [];
+  let folders = [];
+  // Set once the list is edited here: from then on it no longer follows the
+  // Target Folder the other tabs use.
+  let edited = false;
   let locked = false;
 
-  const target = () => targetInput?.value ?? '';
   const allDrives = () => !!allDrivesCb?.checked;
 
-  function row(path, { isTarget }) {
+  function followTarget() {
+    if (edited) return;
+    folders = addFolders([], targetInput?.value?.trim() ? [targetInput.value.trim()] : []);
+  }
+
+  function row(path) {
     const li = document.createElement('li');
     const name = document.createElement('span');
     name.className = 'audit-folder-path';
     name.textContent = path;
-    li.appendChild(name);
-    if (isTarget) {
-      const tag = document.createElement('span');
-      tag.className = 'text-muted';
-      tag.textContent = STRINGS.AUDITOR.TARGET_FOLDER_TAG;
-      li.appendChild(tag);
-    } else {
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'audit-folder-remove';
-      remove.textContent = STRINGS.AUDITOR.REMOVE_FOLDER_BUTTON;
-      remove.disabled = locked || allDrives();
-      remove.addEventListener('click', () => {
-        extra = extra.filter((f) => f !== path);
-        render();
-        onChange();
-      });
-      li.appendChild(remove);
-    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'audit-folder-remove';
+    remove.textContent = STRINGS.AUDITOR.REMOVE_FOLDER_BUTTON;
+    remove.disabled = locked || allDrives();
+    remove.addEventListener('click', () => {
+      folders = folders.filter((f) => f !== path);
+      // Emptied: follow the Target Folder again, as at the start.
+      edited = folders.length > 0;
+      render();
+      onChange();
+    });
+    li.append(name, remove);
     return li;
   }
 
   function render() {
     if (!listEl) return;
     listEl.innerHTML = '';
-    const t = target().trim();
-    auditFolders(t, extra).forEach((f, i) => listEl.appendChild(row(f, { isTarget: !!t && i === 0 })));
+    folders.forEach((f) => listEl.appendChild(row(f)));
     if (!listEl.children.length) {
       const li = document.createElement('li');
       li.className = 'text-muted';
@@ -68,7 +70,8 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
     try {
       const picked = await open({ directory: true, multiple: true, title: STRINGS.AUDITOR.ADD_FOLDER_DIALOG_TITLE });
       if (!picked) return;
-      extra = addFolders(extra, picked);
+      edited = true;
+      folders = addFolders(folders, picked);
       render();
       onChange();
     } catch (err) {
@@ -76,18 +79,19 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
     }
   });
   allDrivesCb?.addEventListener('change', () => { render(); onChange(); });
-  targetInput?.addEventListener('input', () => { render(); onChange(); });
+  targetInput?.addEventListener('input', () => { followTarget(); render(); onChange(); });
 
   listFixedDrives()
     .then((roots) => { if (allDrivesText && Array.isArray(roots)) allDrivesText.textContent = allDrivesLabel(roots); })
     .catch(() => {});
 
+  followTarget();
   render();
 
   return {
     /// What Start Audit sends: the folders, and whether to add every drive.
-    getRequest: () => ({ paths: auditFolders(target(), extra), allDrives: allDrives() }),
-    canStart: () => canStartAudit(target(), extra, allDrives()),
+    getRequest: () => ({ paths: [...folders], allDrives: allDrives() }),
+    canStart: () => canStartAudit('', folders, allDrives()),
     /// Locks the list while an audit runs.
     setLocked: (value) => { locked = value; render(); },
   };

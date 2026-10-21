@@ -26,7 +26,7 @@ Usage:
     python goldsrc-hooks/tools/console_names.py --pre <install> --post <install> --hlae <AfxHookGoldSrc.dll>
 
 `command_suggest.test.js` fails when a `console_name!` is missing from the
-output, so a new `dodstudio_` name is a re-run away from being suggested.
+output, so a new `ds_` name is a re-run away from being suggested.
 """
 
 import argparse
@@ -179,7 +179,7 @@ def section_text(doc, start):
         if not para or para.startswith(("|", "```", "-")):
             continue
         # A bare usage line is skipped; prose that opens with the command
-        # ("`dodstudio_x <n>` puts the camera...") is the description.
+        # ("`ds_x <n>` puts the camera...") is the description.
         if para.startswith("`") and len(para.split("`", 2)[-1].strip()) < 4:
             continue
         return para
@@ -199,14 +199,14 @@ def dodstudio_names():
     hints = {}
     doc = (REPO / "docs" / "dodstudio_commands.md").read_text(encoding="utf-8").splitlines()
     for i, line in enumerate(doc):
-        row = re.match(r"^\| `dodstudio_([a-z0-9_]+)` \|[^|]*\| (.*?) \|", line)
+        row = re.match(r"^\| `ds_([a-z0-9_]+)` \|[^|]*\| (.*?) \|", line)
         if row:
             hints.setdefault(row.group(1), first_sentence(row.group(2)))
         if line.startswith("### "):
-            # A heading may name several commands ("`dodstudio_seek_to` / `dodstudio_seek_by`").
-            for name in re.findall(r"`dodstudio_([a-z0-9_]+)", line):
+            # A heading may name several commands ("`ds_demo_seek_to` / `ds_demo_seek_by`").
+            for name in re.findall(r"`ds_([a-z0-9_]+)", line):
                 hints.setdefault(name, first_sentence(section_text(doc, i + 1)))
-    return [["dodstudio_" + n, hints.get(n, "")] for n in sorted(names)]
+    return [["ds_" + n, hints.get(n, "")] for n in sorted(names)]
 
 
 def main():

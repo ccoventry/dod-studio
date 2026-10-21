@@ -11,7 +11,7 @@ directly are overwritten by the next sync.
 
 ## Pages
 
-- **[Commands](Commands)** — every `dodstudio_*` console variable and command
+- **[Commands](Commands)** — every `ds_*` console variable and command
   the DoD Studio hook DLL adds to the game, with defaults and what each does.
 
 ## In the repository

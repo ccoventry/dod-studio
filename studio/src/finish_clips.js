@@ -113,8 +113,8 @@ export function finishSkipReason({ enabled, outcome, folders, exportDirs }) {
   // behind it is not what stopping asked for. Its takes stay for the Render tab.
   if (outcome === 'cancelled') return 'cancelled';
   if (!folders || folders.length === 0) return 'nothing';
-  // With no export folder, run_render_job writes into the app's own working
-  // directory — somewhere nobody would think to look.
+  // With no export folder, run_render_job refuses every render; said once
+  // here rather than as a failed row per take.
   if (!exportDirs || exportDirs.length === 0) return 'no_export_dir';
   return null;
 }
