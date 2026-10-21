@@ -29,9 +29,9 @@ always ends the game it started, and only that one.
     clip <name> [secs] [fps]    record HLAE frames for a few seconds into <run>/<name>/
                                 and a contact sheet <run>/<name>.png (default 2 s, 30 fps);
                                 demo seconds while a demo plays
-    grab <name>                 screen capture of the game window (VGUI panels included);
-                                needs focus first. Closes the console first
-                                (`hideconsole`) unless --keep-console
+    grab <name> [keep]          screen capture of the game window (VGUI panels included);
+                                needs focus first. Closes the console window first
+                                (`hideconsole`), unless `keep` or --keep-console
     focus                       bring the game window to the front (25th Anniversary
                                 frames are black while it's behind other windows)
     key <name>                  press and release one key in the game window: esc,
@@ -400,6 +400,12 @@ KEYS = {"esc": 0x1B, "enter": 0x0D, "tab": 0x09, "space": 0x20, "backquote": 0xC
         **{f"f{n}": 0x6F + n for n in range(1, 13)}}
 
 
+# Closes the console window before a grab. A menu the console came up with
+# stays: no engine command closes only that, and `toggleconsole` closes
+# neither reliably when sent from here.
+CLOSE_CONSOLE = ["hideconsole"]
+
+
 def press_key(pid, name):
     """Presses one key in the game's window. The key goes wherever the
     foreground is, so this refuses unless that is the game's own window."""
@@ -743,10 +749,12 @@ def run(args):
                 if err is None:
                     report["shots"].append(str(out / f"{name}.png"))
             elif kind == "grab":
-                path = out / f"{rest}.png"
+                name, _, keep = rest.partition(" ")
+                path = out / f"{name}.png"
                 # A console left open by a stray key would cover what the
-                # grab is for (#894); `--keep-console` grabs it as it is.
-                if not args.keep_console and not send_commands(pid, ["hideconsole"]):
+                # grab is for (#894); `--keep-console` or `keep` grabs it as it is.
+                keep = args.keep_console or keep.strip() == "keep"
+                if not keep and not send_commands(pid, CLOSE_CONSOLE):
                     time.sleep(0.3)
                 result["note"] = screen_grab(pid, path)
                 result["ok"] = result["note"] is None

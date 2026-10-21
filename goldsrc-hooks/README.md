@@ -339,9 +339,9 @@ already running, and the install is one of the two movie installs. See the
 script's docstring for the steps and flags; `--check` runs only the refusal
 checks. `--at-launch` starts the demo from the launch command line, as a
 capture batch without the hook DLL starts its primer, which matters for
-first-demo bugs (#546). Each `grab` closes the console first (`hideconsole`)
-so a stray key can't cover the screenshot; `--keep-console` grabs it as it
-is (#894).
+first-demo bugs (#546). Each `grab` closes the console window first
+(`hideconsole`) so a stray key can't cover the screenshot; `grab <name> keep`
+or `--keep-console` grabs it as it is (#894).
 
 ## Status
 
