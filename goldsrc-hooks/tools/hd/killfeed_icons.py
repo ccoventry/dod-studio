@@ -148,7 +148,11 @@ class Icon:
     without it the gun keeps its width and is raised until it fits.
     see_through: (texture, x, y) texels inside a hole the skin paints black
     instead of modelling (a trigger guard drawn on a solid plate): the
-    near-black texels joined to each are drawn transparent (see_through)."""
+    near-black texels joined to each are drawn transparent (see_through).
+    cut_part: (x0, x1, row) stock pixels: everything in columns x0..x1 from
+    `row` down is cut off, the outline closing the cut (a magazine drawn
+    shorter, as Valve draws the MP44's; cut_columns). Unset in the table:
+    the MP44's is a preview option (#900)."""
     models: tuple
     fallback: tuple = ()
     clip_tip: bool = False
@@ -161,6 +165,7 @@ class Icon:
     see_through: tuple = ()
     skin_art: tuple = ()
     v_part: "VPart | None" = None
+    cut_part: tuple = ()
     note: str = ""
 
 
@@ -709,6 +714,14 @@ def cut_under(rgba, bottom):
     at the rect's edge, `bottom` leaving room for the outline)."""
     out = rgba.copy()
     out[int(np.ceil(bottom)):, :, 3] = 0
+    return out
+
+
+def cut_columns(rgba, x0, x1, row):
+    """Clears the pixels of columns x0..x1 from `row` down (Icon.cut_part,
+    in the render's pixels)."""
+    out = rgba.copy()
+    out[int(np.ceil(row)):, max(int(np.floor(x0)), 0):int(np.ceil(x1)), 3] = 0
     return out
 
 
@@ -1462,6 +1475,9 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
         return keep_thin(lit) if gun else lit
 
     def specks(lit):
+        if icon.cut_part:
+            x0, x1, row = icon.cut_part
+            lit = cut_columns(lit, x0 * scale, x1 * scale, row * scale)
         return drop_specks(lit, corners=gun)
 
     fit = fit_transform(tris, basis, box)

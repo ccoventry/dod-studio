@@ -570,6 +570,18 @@ class SkinArtTest(unittest.TestCase):
         self.assertTrue(all(0 <= c <= 256 for c in art.art + art.anchor))
 
 
+class CutPartTest(unittest.TestCase):
+    def test_cut_columns_clears_only_its_columns_below_the_row(self):
+        rgba = np.ones((10, 12, 4))
+        out = K.cut_columns(rgba, 4, 8, 6)
+        self.assertEqual(out[6:, 4:8, 3].max(), 0)
+        self.assertTrue((out[:6, :, 3] == 1).all() and (out[:, :4, 3] == 1).all() and (out[:, 8:, 3] == 1).all())
+
+    def test_no_icon_cuts_a_part_by_default(self):
+        # the MP44's shorter magazine is a preview option, not applied
+        self.assertEqual({n for n, i in K.ICONS.items() if i.cut_part}, set())
+
+
 class VPartTest(unittest.TestCase):
     """v_part: the guard and trigger from the first-person model (#900)."""
 
