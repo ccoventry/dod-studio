@@ -30,12 +30,13 @@ always ends the game it started, and only that one.
                                 and a contact sheet <run>/<name>.png (default 2 s, 30 fps);
                                 demo seconds while a demo plays
     grab <name>                 screen capture of the game window (VGUI panels included);
-                                needs focus first
+                                needs focus first. Closes the console first
+                                (`hideconsole`) unless --keep-console
     focus                       bring the game window to the front (25th Anniversary
                                 frames are black while it's behind other windows)
     key <name>                  press and release one key in the game window: esc,
                                 enter, tab, space, backquote, backspace, up, down,
-                                left, right, f1..f12, or a letter
+                                left, right, alt, f1..f12, or a letter
                                 or digit. Focuses the game first, and refuses unless
                                 the game's window really is in front
     click <x> <y> [2]           left-click at a point in the game window, in the same
@@ -378,6 +379,10 @@ def focus_window(pid):
     hwnd = game_hwnd(pid)
     if not hwnd:
         return "no visible window"
+    # Already in front: no Alt press, which the game would see. In a POV demo
+    # an Alt press opens the console without the hook's fix (#894).
+    if user32.GetForegroundWindow() == hwnd:
+        return "foreground"
     # Windows only hands the foreground to the process that has input; a
     # synthetic Alt press satisfies that rule (the usual workaround).
     user32.keybd_event(0x12, 0, 0, 0)
@@ -391,6 +396,7 @@ def focus_window(pid):
 # Virtual-key codes for the `key` step. Letters and digits map to themselves.
 KEYS = {"esc": 0x1B, "enter": 0x0D, "tab": 0x09, "space": 0x20, "backquote": 0xC0,
         "backspace": 0x08, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "alt": 0x12,
         **{f"f{n}": 0x6F + n for n in range(1, 13)}}
 
 
@@ -738,6 +744,10 @@ def run(args):
                     report["shots"].append(str(out / f"{name}.png"))
             elif kind == "grab":
                 path = out / f"{rest}.png"
+                # A console left open by a stray key would cover what the
+                # grab is for (#894); `--keep-console` grabs it as it is.
+                if not args.keep_console and not send_commands(pid, ["hideconsole"]):
+                    time.sleep(0.3)
                 result["note"] = screen_grab(pid, path)
                 result["ok"] = result["note"] is None
                 if result["note"] is None:
@@ -882,6 +892,8 @@ def main():
                    help="the -game folder beside hl.exe (default dod; a copy such as dod_movies, #402)")
     p.add_argument("--addons", action="store_true",
                    help="add -addons, so dod_addon is read (as Studio does once #412 is merged)")
+    p.add_argument("--keep-console", action="store_true",
+                   help="leave the console as it is before each grab (default: hideconsole first, #894)")
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
     p.add_argument("--out", help="report folder (default: local/game-probe/<timestamp>)")

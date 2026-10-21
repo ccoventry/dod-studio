@@ -140,6 +140,11 @@
 //!   folder (`-game dod_movies`), which the engine otherwise refuses with
 //!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
 //!   check, both builds; only when the game folder is not `dod`.
+//! - `demo_console_keys`: in a POV demo only the console key opens the
+//!   console; the engine otherwise opens it for Alt (so Alt+Tab), Tab and
+//!   every printable key, as it never does in an HLTV demo (#894). One byte in
+//!   `Key_Event`, both builds. On by default;
+//!   `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -197,6 +202,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;
 mod demo_other_drives;
@@ -365,6 +371,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
         Ordering::Relaxed,
     );
+    // Makes a POV demo's keys behave as an HLTV demo's already do, so on
+    // unless asked not to.
+    demo_console_keys::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS", true),
+        Ordering::Relaxed,
+    );
     // Only this user's own processes can reach the pipe, and only a game
     // Studio launched has it, so on unless asked not to.
     remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
@@ -475,6 +487,8 @@ fn install_fixes() {
     sprite_blend::install();
     // Before the first demo's svc_serverinfo; does nothing in `dod`.
     game_dir_check::install();
+    // Before any demo plays; the console commands are registered by now.
+    demo_console_keys::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

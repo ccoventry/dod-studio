@@ -772,6 +772,9 @@ fn status_text() -> String {
     if let Some(game_dir) = crate::game_dir_check::status_line() {
         lines.push(game_dir);
     }
+    if let Some(keys) = crate::demo_console_keys::status_line() {
+        lines.push(keys);
+    }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
     }
