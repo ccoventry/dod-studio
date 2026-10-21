@@ -10,10 +10,18 @@ the stock sheet's pixels), so nothing else changes.
 
 The kill feed draws its icon with SPR_Set(icon, 255, 255, 255) and
 SPR_DrawHoles (docs/goldsrc_death_notices.md section 6): the sprite's own
-colours, untinted, its transparent texels cut out. An alpha-test sheet's
-replacement is uploaded with its alpha cut at 128 and the cut-out texels
-black (texture_hires.rs, match_engine_expansion), so an icon's edge is the
-4x render's own, and the review sheets simulate exactly that.
+colours, untinted, its transparent texels cut out, blended while
+gl_spriteblend is on. The renders carry coverage alpha on every edge
+(soft_finish). An alpha-test sheet's replacement is uploaded with its
+alpha cut at 128 and the cut-out texels black (texture_hires.rs,
+match_engine_expansion), which steps those edges again; #890 keeps the
+kill-feed sheets' alpha instead, and only with it do the edges show soft.
+The --review sheets simulate the cut.
+
+hud.txt's rects overlap: the MG34's bottom four rows are the K43's top
+four. Rows two kill-feed icons share belong to the lower one, and #890
+draws the upper one without them; rows shared with any other sprite stay
+empty (shared_area).
 
 Per icon (ICONS):
   1. the model: the `p_` one (a bigger skin than `w_`), `w_` where there is
@@ -40,7 +48,10 @@ Per icon (ICONS):
      open, also where a trigger splits it into narrow gaps (holes), and a
      guard the skin paints black on a solid plate is cut out where the
      table says so (see_through); a part thinner than half a pixel (a
-     guard's bar, a wire) is kept as a 1 px line (keep_thin);
+     guard's bar, a wire) is kept as a 1 px line (keep_thin); the light
+     edge and the outline are drawn on the supersamples and downsampled
+     premultiplied, so every edge ramps over a pixel or two and a partial
+     edge texel holds the outline's colour (soft_finish);
   7. in the sheet: Valve's icon and any detached part of it inside the box
      (the Kar's loose bayonet, a rocket beside a launcher) cleared, the
      render painted over; other pixels stay as sprites_hd.py made them.
@@ -77,7 +88,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 9  # 9: nothing drawn in rows another sprite shares (the K43's top under the MG34)
+VERSION = 10  # 10: soft edges (soft_finish); shared rows belong to the lower kill-feed icon
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -90,6 +101,7 @@ HOLE_MIN = 12  # px at 4x: a gap inside the icon this big stays open (outline)
 HOLE_WIDTH = 5  # px at 4x: ...and at least this wide somewhere (no slits)
 HOLE_OUTLINE = 1.5  # px at 4x: the rim inside such a gap (one solid pixel)
 HOLE_BRIDGE = 2  # px at 4x: gaps this close (a trigger between them) count as one hole
+HOLE_RIM = 1.0  # px at 4x past the edge: soft_finish's rim inside a hole (outline's HOLE_OUTLINE)
 # keep_thin: a part thinner than half a pixel (a guard's bar, a wire) never
 # reaches the game's alpha cut of 0.5, so it vanishes.
 THIN_LO = 0.15  # coverage a thin line's pixel needs
@@ -663,11 +675,13 @@ def sample_bilinear(tex, u, v):
 
 
 def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT, diffuse=DIFFUSE, ss=SS,
-           masked_names=frozenset()):
+           masked_names=frozenset(), hires=False):
     """RGBA (h, w, 4) float 0..1. skins: {texture name: RGBA float array}
     to override a texture (an HD skin); others use the model's own.
     masked_names: textures drawn as masked (their alpha cut at 0.5) though
-    the model doesn't flag them (apply_see_through)."""
+    the model doesn't flag them (apply_see_through). With `hires`, returns
+    (rgba, (colour, coverage)): also the samples before the downsample,
+    (h*ss, w*ss, 3) and (h*ss, w*ss), for soft_finish."""
     W, H = w * ss, h * ss
     col = np.zeros((H, W, 3))
     cov = np.zeros((H, W))
@@ -723,7 +737,8 @@ def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT
     c4 = col.reshape(h, ss, w, ss, 3) * cov.reshape(h, ss, w, ss, 1)
     a = cov.reshape(h, ss, w, ss).mean((1, 3))
     rgb = c4.mean((1, 3)) / np.maximum(a, 1e-9)[..., None]
-    return bleed(np.dstack([rgb, a]))
+    out = bleed(np.dstack([rgb, a]))
+    return (out, (col, cov)) if hires else out
 
 
 def drop_specks(rgba, min_px=SPECK, corners=True):
@@ -839,6 +854,58 @@ def outline(rgba, radius=OUTLINE, colour=OUTLINE_COLOUR, hole_radius=HOLE_OUTLIN
     return bleed(np.dstack([rgb, out_a]))
 
 
+def _up(mask, ss):
+    return np.kron(mask, np.ones((ss, ss), bool))
+
+
+def soft_finish(lit, col_hi, cov_hi, ss=SS, radius=OUTLINE, colour=OUTLINE_COLOUR, hole_radius=HOLE_RIM,
+                rim_width=RIM_WIDTH, rim_strength=RIM_STRENGTH, edge_gap=1.0):
+    """rim_light and outline drawn on the supersamples, then box-downsampled
+    with the colour premultiplied: the icon's edges get coverage alpha (a
+    ramp over a pixel or two) and partial texels hold the outline's colour,
+    not the body's or the background's (#841; #890 keeps that alpha on
+    screen). Interior lines, the body's edge against the outline and the
+    rim light are smoothed the same way.
+
+    `lit` is the pixel-size render after the hand fixes (keep_thin,
+    drop_specks, cut_under), and those fixes decide the shape: the body is
+    the supersamples of render's own coverage inside its kept pixels (those
+    of alpha 0.5 or more and their neighbours that kept any alpha), plus
+    the whole of a pixel keep_thin made opaque. `radius` and `hole_radius`
+    are measured from the body's edge (outline's are from pixel centres,
+    so its 3 px rim is about 2.5 px past the edge; the cut at 128 made it 3).
+    The holes are holes() of `lit`, as outline finds them. The outline
+    keeps `edge_gap` px off the rect's border, so the last pixel row and
+    column stay clear (the quad's edge never cuts a soft edge off)."""
+    a = lit[..., 3]
+    h, w = a.shape
+    cov = cov_hi > 0
+    cov4 = cov.reshape(h, ss, w, ss).mean((1, 3))
+    body4 = a >= 0.5
+    forced = body4 & (cov4 < 0.5)  # keep_thin's lines: the whole pixel
+    near = ndimage.binary_dilation(body4, structure=np.ones((3, 3))) & (a > 0)
+    body = (cov & _up(near, ss)) | _up(forced, ss)
+    # distances in pixels from a sample's centre to the body's edge
+    out_d = ndimage.distance_transform_edt(~body) / ss - 0.5 / ss
+    in_d = ndimage.distance_transform_edt(body) / ss - 0.5 / ss
+    r = np.where(_up(holes(a), ss), hole_radius, radius)
+    # the outline stops short of the rect's last pixel (2 px wide where the
+    # gun touches its box), so the quad's edge never cuts through it
+    H, W = body.shape
+    yy, xx = np.mgrid[0:H, 0:W]
+    to_border = np.minimum(np.minimum(yy, H - 1 - yy), np.minimum(xx, W - 1 - xx)) / ss
+    rim = ~body & (out_d <= r) & (to_border >= edge_gap)
+    rgb = np.where(cov[..., None], col_hi, np.repeat(np.repeat(lit[..., :3], ss, 0), ss, 1))
+    f = np.clip(1 - in_d / rim_width, 0, 1) * rim_strength
+    rgb = rgb + (1 - rgb) * f[..., None]
+    rgb = np.where(rim[..., None], np.array(colour, float), np.where(body[..., None], rgb, 0.0))
+    occ = (body | rim).astype(float)
+    pre = (rgb * occ[..., None]).reshape(h, ss, w, ss, 3).mean((1, 3))
+    alpha = occ.reshape(h, ss, w, ss).mean((1, 3))
+    out = np.dstack([pre / np.maximum(alpha, 1e-9)[..., None], alpha])
+    return bleed(out)
+
+
 # ── skins ────────────────────────────────────────────────────────────────────
 
 
@@ -931,13 +998,22 @@ def shared_area(entries, name):
     [top, bottom) left once the overlaps that span at least half the
     width are taken off its top and bottom. Whatever is drawn there shows
     in both sprites: the MG34's bottom four rows are the K43's top four,
-    so a render reaching into them draws a line under the other gun."""
+    so a render reaching into them draws a line under the other gun.
+
+    Rows two kill-feed icons share belong to the lower one: the hook draws
+    the upper icon without them on an HD sheet (#890), so they are left out
+    here only for the icon above. Rows shared with any other sprite (the
+    weapon menu's weapon_luger over the scoped FG42) stay empty, as Valve
+    keeps them."""
     sheet, x, y, w, h = entries[name]
     mask = np.zeros((h, w), bool)
     top, bottom = 0, h
     for other, (s2, x2, y2, w2, h2) in entries.items():
         if other == name or s2 != sheet:
             continue
+        if name.startswith("d_") and other.startswith("d_") and y2 < y:
+            continue  # a kill-feed icon above: the shared rows are this one's
+
         c0, c1 = max(x, x2) - x, min(x + w, x2 + w2) - x
         r0, r1 = max(y, y2) - y, min(y + h, y2 + h2) - y
         if c0 >= c1 or r0 >= r1:
@@ -1001,9 +1077,11 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     # Thin parts are kept on guns only: a blade's or grenade's thin bit is
     # the end of a crossguard or a lever, which reads as a stray tip.
     gun = not NOT_LEVELLED.search(name)
+    samples = {}  # the last draw's supersamples, for soft_finish
 
     def draw(f):
-        lit = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts)
+        lit, samples["last"] = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts,
+                                      hires=True)
         return keep_thin(lit) if gun else lit
 
     def specks(lit):
@@ -1021,7 +1099,7 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
         refit = refit_transform(fit, lit[..., 3], box)
         if refit is not None:
             lit = specks(draw(refit))
-    img = outline(rim_light(lit))
+    img = soft_finish(lit, *samples["last"])
     if shared.any():  # nothing of the render in another sprite's area
         shared4 = np.kron(shared, np.ones((scale, scale), bool))
         # A gun reaching more than a pixel row in (the K43's stock, the
@@ -1131,6 +1209,10 @@ def build(out_dir, only=None, review=None, force=False, log=print):
     done_icons, total, step = 0, len(names), 0
     report = []
     for sheet, icons in sorted(by_sheet.items()):
+        # top to bottom: an icon's paint clears Valve's icon round it, so
+        # the lower of two icons sharing rows (which owns them, shared_area)
+        # is painted after the upper one
+        icons = sorted(icons, key=lambda n: (entries[n][2], n))
         try:
             fw, fh, idx, pal, _ = sheet_frame(dod, sheet)
         except (OSError, ValueError) as e:
