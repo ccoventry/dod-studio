@@ -940,6 +940,8 @@ export const STRINGS = {
     ORIGINAL_FILE_TITLE: 'The copy this group keeps. Pick another copy to keep that one instead.',
     KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
     KEEP_CHANGED_NOTE: 'Kept copy changed by you',
+    NOT_A_COPY_LABEL: '   ≠ Not an exact copy',
+    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy when you deleted, and it's different: another demo that only starts the same way. It isn't deleted or counted as a copy.",
     KEEP_RESET_BUTTON: 'Reset',
     keepResetTitle: (path) => `Keep the copy the audit picked again: ${path}`,
     PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',

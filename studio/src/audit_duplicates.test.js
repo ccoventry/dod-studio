@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
   deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
-  withAuditOrder, shownFiles, keptChanged,
+  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -101,6 +101,17 @@ describe('audit_duplicates (#844)', () => {
     expect(keptChanged(keepFile(changed, 0, d).groups[0])).toBe(false);
     // The audit's pick deleted: nothing to go back to.
     expect(keptChanged(withoutDeleted(changed, [d])[0])).toBe(false);
+  });
+
+  it('marks a copy the delete found different, counts it out, and clears the mark when the pick changes', () => {
+    const groups = [{ size: 10, header_hash: 1, files: [{ path: 'a' }, { path: 'b' }, { path: 'c' }] }];
+    const marked = markNotCopies(groups, ['c', 'a', 'elsewhere']);
+    // The kept copy is never marked.
+    expect(marked[0].notCopies).toEqual(['c']);
+    expect(isNotCopy(marked[0], 'c')).toBe(true);
+    expect(auditTotals(marked)).toEqual({ copies: 1, wastedBytes: 10 });
+    expect(markNotCopies(groups, [])).toBe(groups);
+    expect(keepFile(marked, 0, 'b').groups[0].notCopies).toEqual([]);
   });
 
   it('an old pick the game uses is not ticked when another copy is kept', () => {

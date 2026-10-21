@@ -118,7 +118,8 @@ export function keepFile(groups, groupIdx, path) {
   if (at <= 0) return { groups, untick: null, tick: null };
   const files = [group.files[at], ...group.files.filter((_, i) => i !== at)];
   const was = group.files[0];
-  const out = groups.map((g, i) => (i === groupIdx ? { ...g, files } : g));
+  // "Not an exact copy" was measured against the old pick, so it goes too.
+  const out = groups.map((g, i) => (i === groupIdx ? { ...g, files, notCopies: [] } : g));
   return { groups: out, untick: path, tick: startsTicked(was, 1) ? was.path : null };
 }
 
@@ -146,13 +147,32 @@ export function withoutDeleted(groups, deleted) {
     .filter((g) => g.files.length > 1);
 }
 
-/// Copies and the space they take, over every group.
+/// The groups with each of `paths` marked as not an exact copy of its
+/// group's kept copy: a delete compared them and found other bytes, so they
+/// are different demos that only share the audit's key.
+export function markNotCopies(groups, paths) {
+  const marked = new Set(paths);
+  if (!marked.size) return groups;
+  return groups.map((g) => {
+    const add = g.files.slice(1).map((f) => f.path).filter((p) => marked.has(p));
+    return add.length ? { ...g, notCopies: [...new Set([...(g.notCopies ?? []), ...add])] } : g;
+  });
+}
+
+/// Whether `path` is marked not an exact copy in `group`.
+export function isNotCopy(group, path) {
+  return (group.notCopies ?? []).includes(path);
+}
+
+/// Copies and the space they take, over every group. A file marked not an
+/// exact copy isn't one.
 export function auditTotals(groups) {
   let copies = 0;
   let wastedBytes = 0;
   for (const g of groups) {
-    copies += g.files.length - 1;
-    wastedBytes += g.size * (g.files.length - 1);
+    const n = g.files.slice(1).filter((f) => !isNotCopy(g, f.path)).length;
+    copies += n;
+    wastedBytes += g.size * n;
   }
   return { copies, wastedBytes };
 }

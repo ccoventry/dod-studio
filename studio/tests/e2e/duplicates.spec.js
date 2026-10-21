@@ -265,6 +265,30 @@ test('Delete Permanently, when offered, asks on its own and sends permanent', as
   await expect(page.locator('#audit-status-text')).toHaveText('Deleted: 2.');
 });
 
+test('a copy the delete finds different is marked, unticked and counted out', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({
+      deleted: [copies[0].path],
+      failed: [{ path: copies[1].path, error: 'Not deleted: E:\\old\\a.dem is not an exact copy of D:\\a.dem', not_a_copy: true }],
+    });
+  });
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  const row = page.locator('#audit-results-body tr.audit-file-row', { hasText: 'E:\\old\\a.dem' });
+  await expect(row.locator('.audit-file-status')).toHaveText('≠ Not an exact copy');
+  await expect(row.locator('input.audit-row-cb')).toBeDisabled();
+  await expect(row.locator('input.audit-row-cb')).not.toBeChecked();
+  // Select all skips it; the footer no longer counts it as wasted space.
+  await page.check('#audit-select-all');
+  await expect(row.locator('input.audit-row-cb')).not.toBeChecked();
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 1 | Wasted Space: 2.0 MB');
+  // Keeping another copy clears the mark: it was measured against the old pick.
+  await row.locator('input[type=radio]').click();
+  await expect(page.locator('#audit-results-body')).not.toContainText('Not an exact copy');
+});
+
 test('a file that fails to delete stays listed and is reported', async ({ page }) => {
   await loadHarness(page);
   await runAudit(page);

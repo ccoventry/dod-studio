@@ -310,6 +310,32 @@ pub async fn run_demo_audit_impl(
 pub struct DeleteFailure {
     pub path: String,
     pub error: String,
+    /// It differs from the copy its group keeps: not a duplicate, so the
+    /// table marks it rather than leaving it ticked.
+    pub not_a_copy: bool,
+}
+
+/// Why [`check_same_contents`] refused a copy.
+#[derive(Debug, PartialEq)]
+enum Refusal {
+    /// The bytes differ: a different demo.
+    NotACopy(String),
+    /// Anything else: the kept copy is gone, is the same file, can't be read.
+    Other(String),
+}
+
+impl Refusal {
+    fn into_failure(self, path: String) -> DeleteFailure {
+        let (error, not_a_copy) = match self {
+            Refusal::NotACopy(e) => (e, true),
+            Refusal::Other(e) => (e, false),
+        };
+        DeleteFailure {
+            path,
+            error,
+            not_a_copy,
+        }
+    }
 }
 
 #[derive(Serialize, Debug, Default)]
@@ -356,17 +382,22 @@ fn read_chunk(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize
 /// Whether `copy` is a true copy of `keep`: another file with every byte
 /// the same. The audit's key reads only the first 64 KiB, so two different
 /// demos can share a group; this keeps the delete from trusting that.
-fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), String> {
+fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), Refusal> {
     let kept_is_there = keep.symlink_metadata().is_ok_and(|m| m.is_file());
     if !kept_is_there {
-        return Err(crate::messages::kept_copy_missing(copy, keep));
+        return Err(Refusal::Other(crate::messages::kept_copy_missing(
+            copy, keep,
+        )));
     }
     if let (Ok(a), Ok(b)) = (std::fs::canonicalize(copy), std::fs::canonicalize(keep))
         && a == b
     {
-        return Err(crate::messages::copy_is_the_kept_copy(copy));
+        return Err(Refusal::Other(crate::messages::copy_is_the_kept_copy(copy)));
     }
-    let unreadable = |e: std::io::Error| crate::messages::copy_compare_failed(copy, keep, e);
+    let unreadable =
+        |e: std::io::Error| Refusal::Other(crate::messages::copy_compare_failed(copy, keep, e));
+    let differs =
+        |at: u64| Refusal::NotACopy(crate::messages::copy_differs_from_kept(copy, keep, at));
     let mut a = std::fs::File::open(copy).map_err(unreadable)?;
     let mut b = std::fs::File::open(keep).map_err(unreadable)?;
     let (len_a, len_b) = (
@@ -374,11 +405,7 @@ fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), String> {
         b.metadata().map_err(unreadable)?.len(),
     );
     if len_a != len_b {
-        return Err(crate::messages::copy_differs_from_kept(
-            copy,
-            keep,
-            len_a.min(len_b),
-        ));
+        return Err(differs(len_a.min(len_b)));
     }
     let mut buf_a = vec![0u8; COMPARE_CHUNK];
     let mut buf_b = vec![0u8; COMPARE_CHUNK];
@@ -391,19 +418,11 @@ fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), String> {
             .zip(&buf_b[..n_a.min(n_b)])
             .position(|(x, y)| x != y)
         {
-            return Err(crate::messages::copy_differs_from_kept(
-                copy,
-                keep,
-                offset + i as u64,
-            ));
+            return Err(differs(offset + i as u64));
         }
         if n_a != n_b {
             // The file changed size while it was read.
-            return Err(crate::messages::copy_differs_from_kept(
-                copy,
-                keep,
-                offset + n_a.min(n_b) as u64,
-            ));
+            return Err(differs(offset + n_a.min(n_b) as u64));
         }
         if n_a == 0 {
             return Ok(());
@@ -437,13 +456,12 @@ pub fn delete_audit_files_impl(
     let mut deletable = vec![];
     for (i, copy) in copies.into_iter().enumerate() {
         let path = Path::new(&copy.path);
-        match check_deletable(path).and_then(|()| check_same_contents(path, Path::new(&copy.keep)))
+        match check_deletable(path)
+            .map_err(Refusal::Other)
+            .and_then(|()| check_same_contents(path, Path::new(&copy.keep)))
         {
             Ok(()) => deletable.push(copy.path),
-            Err(error) => outcome.failed.push(DeleteFailure {
-                path: copy.path,
-                error,
-            }),
+            Err(refusal) => outcome.failed.push(refusal.into_failure(copy.path)),
         }
         emit("checking", i + 1, checking);
     }
@@ -467,6 +485,7 @@ pub fn delete_audit_files_impl(
             Some(e) => outcome.failed.push(DeleteFailure {
                 error: crate::messages::failed_to_delete_audit_file(Path::new(&path), e),
                 path,
+                not_a_copy: false,
             }),
         }
     }
@@ -567,9 +586,13 @@ mod tests {
         let s = Scratch::new("differs");
         let keep = s.file("keep.dem", &demo_bytes(1));
         let copy = s.file("copy.dem", &demo_bytes(2));
-        let err = check_same_contents(&copy, &keep).unwrap_err();
+        let Err(Refusal::NotACopy(err)) = check_same_contents(&copy, &keep) else {
+            panic!("a different file must be refused as not a copy");
+        };
         let last = (COMPARE_CHUNK + 70_000 - 1).to_string();
         assert!(err.contains(&format!("differ from byte {last}")), "{err}");
+        let failure = Refusal::NotACopy(err).into_failure("copy.dem".into());
+        assert!(failure.not_a_copy);
     }
 
     #[test]
@@ -577,7 +600,9 @@ mod tests {
         let s = Scratch::new("size");
         let keep = s.file("keep.dem", b"abcdef");
         let copy = s.file("copy.dem", b"abc");
-        let err = check_same_contents(&copy, &keep).unwrap_err();
+        let Err(Refusal::NotACopy(err)) = check_same_contents(&copy, &keep) else {
+            panic!("another size must be refused as not a copy");
+        };
         assert!(err.contains("differ from byte 3"), "{err}");
     }
 
@@ -585,11 +610,16 @@ mod tests {
     fn the_kept_copy_itself_or_a_missing_one_is_never_a_reason_to_delete() {
         let s = Scratch::new("self");
         let keep = s.file("keep.dem", b"abc");
-        let err = check_same_contents(&keep, &keep).unwrap_err();
+        let Err(Refusal::Other(err)) = check_same_contents(&keep, &keep) else {
+            panic!("the kept file itself must be refused");
+        };
         assert!(err.contains("is the copy being kept"), "{err}");
         let gone = s.0.join("gone.dem");
-        let err = check_same_contents(&keep, &gone).unwrap_err();
+        let Err(Refusal::Other(err)) = check_same_contents(&keep, &gone) else {
+            panic!("a missing kept copy must be refused");
+        };
         assert!(err.contains("no longer there"), "{err}");
+        assert!(!Refusal::Other(err).into_failure("x".into()).not_a_copy);
     }
 
     fn kept_order(files: &[&str], rules: &KeepRules) -> Vec<String> {
