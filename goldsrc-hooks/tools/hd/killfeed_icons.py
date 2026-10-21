@@ -77,7 +77,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 8  # 8: thin parts kept, a trigger inside its guard keeps the thin rim
+VERSION = 9  # 9: nothing drawn in rows another sprite shares (the K43's top under the MG34)
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -925,7 +925,35 @@ def candidates(dod, icon):
     return found or [os.path.join(models, m) for m in icon.fallback if os.path.exists(os.path.join(models, m))]
 
 
-def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
+def shared_area(entries, name):
+    """(mask, top, bottom): the part of `name`'s rect that another hud.txt
+    entry of the same sheet also covers (h, w bool), and the free rows
+    [top, bottom) left once the overlaps that span at least half the
+    width are taken off its top and bottom. Whatever is drawn there shows
+    in both sprites: the MG34's bottom four rows are the K43's top four,
+    so a render reaching into them draws a line under the other gun."""
+    sheet, x, y, w, h = entries[name]
+    mask = np.zeros((h, w), bool)
+    top, bottom = 0, h
+    for other, (s2, x2, y2, w2, h2) in entries.items():
+        if other == name or s2 != sheet:
+            continue
+        c0, c1 = max(x, x2) - x, min(x + w, x2 + w2) - x
+        r0, r1 = max(y, y2) - y, min(y + h, y2 + h2) - y
+        if c0 >= c1 or r0 >= r1:
+            continue
+        mask[r0:r1, c0:c1] = True
+        if c1 - c0 >= w / 2:
+            if r0 == 0 and r1 < h:
+                top = max(top, r1)
+            elif r1 == h and r0 > 0:
+                bottom = min(bottom, r0)
+    if top >= bottom:
+        top, bottom = 0, h
+    return mask, top, bottom
+
+
+def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_rows=False):
     """(rgba at `scale`x the rect, info dict) or (None, reason)."""
     sheet, x, y, w, h = hud_rect(dod, name)
     stock, _, _ = stock_icon(dod, sheet, x, y, w, h)
@@ -933,10 +961,13 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
     if not target.any():
         return None, "blank in this install's sheet"
     ys, xs = np.nonzero(target)
+    shared, top, bottom = shared_area(hud_entries(dod), name)
     # Valve's width, the rect's whole height: a real gun is stubbier than
     # Valve's drawing (a knife most of all), so the height Valve's thin
-    # line leaves free lets it grow to the width.
-    box1 = (xs.min(), 0, xs.max() + 1, h)
+    # line leaves free lets it grow to the width. When the gun then
+    # reaches into rows another sprite shares, it is drawn again in the
+    # free rows only (shared_area).
+    box1 = (xs.min(), top, xs.max() + 1, bottom) if _free_rows else (xs.min(), 0, xs.max() + 1, h)
     m = OUTLINE
     box = (box1[0] * scale + m, box1[1] * scale + m, box1[2] * scale - m, box1[3] * scale - m)
     best = None
@@ -991,6 +1022,15 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print):
         if refit is not None:
             lit = specks(draw(refit))
     img = outline(rim_light(lit))
+    if shared.any():  # nothing of the render in another sprite's area
+        shared4 = np.kron(shared, np.ones((scale, scale), bool))
+        # A gun reaching more than a pixel row in (the K43's stock, the
+        # MG34's bipod foot) is drawn again in the free rows; a single
+        # edge row (a sight's tip) is just cut there.
+        deep = ((lit[..., 3] >= 0.5) & shared4).any(1).sum() > 1
+        if not _free_rows and (top > 0 or bottom < h) and deep:
+            return render_icon(dod, name, icon, style, models_dir, scale, log, _free_rows=True)
+        img[shared4, 3] = 0
     info = {"model": os.path.basename(path), "iou": round(float(score), 2),
             "roll": round(float(pick[2] + icon.turn), 1), "clipped_tris": cut,
             "skin": f"{style} ({n_hd} of {len(textures)})" if n_hd else "stock"}

@@ -319,6 +319,16 @@ class PassesTest(unittest.TestCase):
         self.assertEqual(K.drop_specks(img, 40)[17, 17, 3], 1)
         self.assertEqual(K.drop_specks(img, 40, corners=False)[17, 17, 3], 0)
 
+    def test_shared_area_finds_a_neighbour_s_rows(self):
+        entries = {"d_mg34": ("weapons3", 167, 173, 89, 23), "d_k43": ("weapons3", 167, 192, 89, 14),
+                   "d_other": ("weapons4", 167, 180, 89, 23), "weapon_x": ("weapons3", 200, 170, 20, 5)}
+        mask, top, bottom = K.shared_area(entries, "d_mg34")
+        self.assertTrue(mask[19:23].all() and not mask[5:19, 0:30].any())
+        self.assertEqual((top, bottom), (0, 19))  # the K43's four rows off the bottom
+        self.assertTrue(mask[0:2, 33:53].all())  # a narrow sprite: masked, rows kept
+        mask, top, bottom = K.shared_area(entries, "d_k43")
+        self.assertEqual((top, bottom), (4, 14))
+
     def test_drop_specks(self):
         img = self.square()
         img[0, 0] = (1, 1, 1, 1)
