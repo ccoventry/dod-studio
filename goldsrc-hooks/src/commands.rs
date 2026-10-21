@@ -1550,11 +1550,13 @@ pub fn install() {
         Some(cvar) => demo_other_drives::set_cvar(cvar),
         None => add_command(demo_other_drives::NAME, cmd_demo_other_drives),
     }
-    match register(demo_list_folders::HIDE_EMPTY.name, "1") {
+    // The three below default off (0.2.0): each lists more by reading every
+    // folder, which slows the window on a big demo library.
+    match register(demo_list_folders::HIDE_EMPTY.name, "0") {
         Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),
         None => add_command(demo_list_folders::HIDE_EMPTY.name, cmd_demo_list_hide_empty),
     }
-    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "1") {
+    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "0") {
         Some(cvar) => demo_list_folders::COUNT_SUBFOLDERS.set_cvar(cvar),
         None => add_command(
             demo_list_folders::COUNT_SUBFOLDERS.name,
@@ -1566,7 +1568,7 @@ pub fn install() {
         Some(cvar) => crate::fast_load::set_cvar(cvar),
         None => add_command(crate::fast_load::NAME, cmd_demo_fast_load),
     }
-    match register(demo_list_folders::SHOW_COUNTS.name, "1") {
+    match register(demo_list_folders::SHOW_COUNTS.name, "0") {
         Some(cvar) => demo_list_folders::SHOW_COUNTS.set_cvar(cvar),
         None => add_command(
             demo_list_folders::SHOW_COUNTS.name,
@@ -1577,9 +1579,11 @@ pub fn install() {
     // Standalone, like `ds_hd_enabled`: window_layout reads them where
     // it walks the windows, so they need no poll here, and a failed
     // registration costs only their type-ahead -- plain toggles stand in.
+    // Both on by default: a window you can resize and that opens where you
+    // left it is a win for everyone.
     match (
-        register(window_layout::RESIZABLE_NAME, "0"),
-        register(window_layout::REMEMBER_NAME, "0"),
+        register(window_layout::RESIZABLE_NAME, "1"),
+        register(window_layout::REMEMBER_NAME, "1"),
     ) {
         (Some(resizable), Some(remember)) => window_layout::set_cvars(resizable, remember),
         _ => {
@@ -1609,9 +1613,8 @@ pub fn install() {
         SPECTATOR_TARGET_LOG_NAME,
         bit(spectator_target::LOG.load(Ordering::Relaxed)),
     );
-    // These three default to the game's own behaviour. Nothing this DLL does
-    // should change what a session looks like until it is asked to -- which is
-    // why the mute defaults to 0 while the other two default to 1.
+    // These four default to the game's own behaviour (0): hiding part of the
+    // HUD is a big change not everyone wants, so it waits to be asked for.
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
@@ -1672,7 +1675,8 @@ pub fn install() {
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
         crate::overview_marker::set_cvar(marker);
     }
-    if let Some(scope) = register(crate::demo_scope::NAME, "0") {
+    // On by default: a demo then shows the sniper scope the player saw.
+    if let Some(scope) = register(crate::demo_scope::NAME, "1") {
         crate::demo_scope::set_cvar(scope);
     }
     if let Some(background) = register(crate::run_in_background::NAME, "0") {

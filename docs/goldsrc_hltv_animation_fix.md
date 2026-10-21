@@ -3,7 +3,7 @@
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
 > Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
 > [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
-> Defaults **off**. It is one of the things `ds_spec_match_pov` turns
+> Defaults **on** (0.2.0). It is one of the things `ds_spec_match_pov` turns
 > on (with the lost gunshots and the POV crosshair): `ds_spec_match_pov 1` in
 > the console, `+ds_spec_match_pov 1` on the launch line, or from any `.cfg`
 > the session execs. It had a cvar of its own,

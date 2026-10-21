@@ -12,8 +12,8 @@ The DLL reads the game folder from the game's own `-game <folder>` (Studio's
 Game Folder setting, #402; `src/game_folder.rs`), so under `-game dod_movies`
 they are `dod_movies`, `dod_movies_addon` and `dod_movies_downloads`.
 
-**Match POV** (`ds_spec_match_pov 1`, off by default;
-`GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
+**Match POV** (`ds_spec_match_pov 1`, on by default;
+`GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts a session with it off): one switch for
 making a spectated first-person view look and sound like the player's own
 recording. Five things come on together, and anything else of that kind
 joins this switch rather than adding a command:
@@ -106,7 +106,7 @@ is the complete list):
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
   map's one team test in `client.dll`; see `src/overview_players.rs`.
-- **Sniper scope in demos** (`ds_hud_show_scope 1`): the game turns
+- **Sniper scope in demos** (`ds_hud_show_scope 1`, on by default): the game turns
   the scope off for demo playback; this turns it back on, so a POV demo shows
   it whenever the recorder zoomed, and in-eye it is the watched player's rifle
   rather than the Springfield DoD always picks there. Two one-byte patches in
@@ -203,7 +203,7 @@ is the complete list):
   path is opened under it. On by default. See `src/demo_other_drives.rs`
   and `docs/goldsrc_viewdemo.md` (#776).
 - **Window layout** (`ds_ui_resizable_windows 1`,
-  `ds_ui_remember_layout 1`): every GameUI window can be resized
+  `ds_ui_remember_layout 1`, both on by default): every GameUI window can be resized
   like the console, and each comes back where it was left after a restart
   (the console loads no `.res`, so build mode can't save its place). Walks
   the engine surface's popups through vgui2's own interfaces; only
