@@ -2,7 +2,7 @@
 
 An HLTV demo is quieter than the match was. Whole bursts play with no sound,
 no muzzle flash and no bullet impact, while the player's model stands there
-firing. `dodstudio_spec_match_pov 1` puts those rounds back (it also turns on the
+firing. `ds_spec_match_pov 1` puts those rounds back (it also turns on the
 viewmodel animations and the POV crosshair; until 2026-10-01 this part had a
 cvar of its own, `dodstudio_hltv_play_missing_gunshots`).
 
@@ -195,7 +195,7 @@ for each weapon script and forwards the call. The log says how many it got:
 
 ## 5. Checking it
 
-`dodstudio_spec_match_pov 2` logs every round it plays (1 logs the
+`ds_spec_match_pov 2` logs every round it plays (1 logs the
 first twenty, then every 200th):
 
 ```
@@ -215,7 +215,7 @@ player, within 0.08 s, clock offset 2.403 s) with none left over on either
 side. Another 38 rounds came with their own event and were left alone. The
 25th Anniversary build, same demo and stretch: 70 of 70, 40 left alone.
 
-`dodstudio_debug_status` adds a line once the switch has been on:
+`ds_debug_status` adds a line once the switch has been on:
 
 ```
 missing gunshots: 412 played, 280 rounds had their own event, 0 skipped (weapon not known)

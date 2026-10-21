@@ -1,4 +1,4 @@
-//! `dodstudio_allow_shaders`: let the 25th Anniversary engine draw the world
+//! `ds_map_allow_shaders`: let the 25th Anniversary engine draw the world
 //! through its own GLSL shaders while a demo plays.
 //!
 //! ## What the engine does
@@ -27,7 +27,7 @@
 //!
 //! ## What this does
 //!
-//! With `dodstudio_allow_shaders 1`, `poll` writes `1.0` into
+//! With `ds_map_allow_shaders 1`, `poll` writes `1.0` into
 //! `sv_allow_shaders`' `value` whenever a demo is playing and it reads 0,
 //! which catches the reset after every demo load. It finds the cvar through
 //! `pfnGetCvarPointer` by name, so no engine address is involved and nothing
@@ -37,7 +37,7 @@
 //! Only `value` is written, because that is the only field the draw code
 //! reads. The engine owns the `string` field and frees it on the next real
 //! set, so it is left alone -- which means typing `sv_allow_shaders` in the
-//! console still prints `"0"` while shaders are on. `dodstudio_debug_status`
+//! console still prints `"0"` while shaders are on. `ds_debug_status`
 //! reports the value that counts.
 //!
 //! It acts only while `pDemoAPI->IsPlayingback()` is true, so it never
@@ -45,7 +45,7 @@
 //! touched: it is archived, so writing it would end up in the user's
 //! `config.cfg`. If it is 0, turning this on says so in the console.
 //!
-//! Default 0, like every other `dodstudio_` switch: nothing changes until it
+//! Default 0, like every other `ds_` switch: nothing changes until it
 //! is asked for.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
@@ -53,7 +53,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, ClEngineFuncsPartial, CvarSPartial};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("allow_shaders");
+pub const NAME: &str = console_name!("map_allow_shaders");
 
 /// The engine's own gate. See the module docs.
 const ENGINE_CVAR: &std::ffi::CStr = c"sv_allow_shaders";
@@ -73,7 +73,7 @@ static OURS: AtomicBool = AtomicBool::new(false);
 /// How many times the engine's 0 was raised -- roughly once per demo load.
 static RAISES: AtomicU32 = AtomicU32::new(0);
 
-/// Called by `commands.rs` once `dodstudio_allow_shaders` is registered.
+/// Called by `commands.rs` once `ds_map_allow_shaders` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
@@ -89,7 +89,7 @@ fn target(engfuncs: &ClEngineFuncsPartial) -> Option<*mut CvarSPartial> {
             TARGET.store(found, Ordering::Release);
             "world_shaders: found sv_allow_shaders (25th Anniversary engine)".to_string()
         } else if found.is_null() {
-            "world_shaders: this engine has no sv_allow_shaders -- the pre-Anniversary build has no world shaders, so dodstudio_allow_shaders does nothing".to_string()
+            "world_shaders: this engine has no sv_allow_shaders -- the pre-Anniversary build has no world shaders, so ds_map_allow_shaders does nothing".to_string()
         } else {
             "world_shaders: pfnGetCvarPointer returned a cvar with the wrong name -- not touching it".to_string()
         };
@@ -162,7 +162,7 @@ pub fn poll() {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {

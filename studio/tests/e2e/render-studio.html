@@ -113,7 +113,10 @@
     // scan input is the same shared Capture Locations list Capture Studio
     // writes to, not its own separate list — see #81).
     window.__testCaptureLocations = [];
-    window.__testExportDirs = [];
+    // One export folder, as Start needs one; a test clears it to check that.
+    window.__testExportDirs = ['E:/exports'];
+    window.__mockInvokeHandlers = window.__mockInvokeHandlers || {};
+    window.__mockInvokeHandlers['get_export_pool_free_gb'] = () => 100;
     window.__testSettingsChangeCount = 0;
 
     initRenderUI(

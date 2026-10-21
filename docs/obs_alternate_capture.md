@@ -366,7 +366,7 @@ both tiers — `captured` becomes "OBS reported a file of about the right length
 the shared predicate.
 
 `take_meta` needs no structural change: it records the capture rate per take, and OBS's rate from
-`GetVideoSettings` goes in the same field. The existing `[render-fps-mismatch]` check keeps working.
+`GetVideoSettings` goes in the same field. A render follows that recorded rate (`take_meta::render_fps`).
 
 ---
 

@@ -40,12 +40,12 @@ pub const ASSET_TYPES: [&str; 6] = ["world", "models", "sprites", "decals", "det
 /// Per-file picks that win over any style (`texture_hires.rs`'s `OVERRIDES`).
 pub const OVERRIDES: &str = "overrides";
 
-/// What `dodstudio_hd_style` is when nothing sets it.
+/// What `ds_hd_style` is when nothing sets it.
 pub const DEFAULT_STYLE: &str = "ultrasharp";
 
 /// The console lines that turn HD on and pick a style.
-pub const ENABLED_CVAR: &str = "dodstudio_hd_enabled";
-pub const STYLE_CVAR: &str = "dodstudio_hd_style";
+pub const ENABLED_CVAR: &str = "ds_hd_enabled";
+pub const STYLE_CVAR: &str = "ds_hd_style";
 
 /// A style the scripts know without `my_styles.txt`.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -142,7 +142,7 @@ pub struct HdStatus {
     pub hd_root_exists: bool,
     pub types: Vec<TypeStatus>,
     /// Every style with a folder under at least one type, sorted: what
-    /// `dodstudio_hd_style` can usefully be set to.
+    /// `ds_hd_style` can usefully be set to.
     pub built_styles: Vec<String>,
     /// Every built-in style, built or not, so the page can offer them all.
     pub known_styles: Vec<&'static str>,
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn the_names_match_the_hook_and_the_scripts() {
         let hook = include_str!("../../../goldsrc-hooks/src/texture_hires.rs");
-        let prefix = "dodstudio_";
+        let prefix = "ds_";
         for (cvar, suffix) in [(ENABLED_CVAR, "hd_enabled"), (STYLE_CVAR, "hd_style")] {
             assert_eq!(cvar, format!("{prefix}{suffix}"));
             assert!(

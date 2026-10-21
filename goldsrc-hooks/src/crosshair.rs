@@ -1,4 +1,4 @@
-//! `dodstudio_crosshair`: hide DoD's crosshair, and make it stay hidden.
+//! `ds_hud_hide_crosshair`: hide DoD's crosshair, and make it stay hidden.
 //!
 //! ## Why the stock cvar is not enough
 //!
@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_crosshair");
+pub const NAME: &str = console_name!("hud_hide_crosshair");
 
 /// `CHudDoDCrossHair::Draw`'s prologue. The wildcards cover the relative call
 /// and the one absolute address that follows it, both of which move with the
@@ -177,7 +177,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "the crosshair draws normally (the stock `crosshair` cvar cannot turn it off -- CHud::Redraw forces the value back every frame)".into();
