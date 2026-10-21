@@ -181,6 +181,20 @@ pub fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
     Ok(FileKey { size, header_hash })
 }
 
+/// An FNV-1a hash of a file's last [`KEY_BYTES`], or 0 when the file is no
+/// longer than that (its key already covers all of it).
+pub fn tail_hash(path: &Path, size: u64) -> Result<u64, std::io::Error> {
+    use std::io::{Seek, SeekFrom};
+    if size <= KEY_BYTES {
+        return Ok(0);
+    }
+    let mut file = fs::File::open(path)?;
+    file.seek(SeekFrom::Start(size - KEY_BYTES))?;
+    let mut buffer = vec![0; KEY_BYTES as usize];
+    file.read_exact(&mut buffer)?;
+    Ok(fnv1a_hash(&buffer))
+}
+
 /// Identifies duplicates within a list of file paths.
 /// Returns unique files, structured duplicate groups, total duplicates count, and total wasted space in bytes.
 pub fn find_duplicates(
@@ -226,8 +240,29 @@ pub fn find_duplicates(
         }
     }
 
+    // The key reads only the start, so two cuts of one recording can share
+    // it. Files that end differently are different demos: split each group
+    // by its last bytes too. Only grouped files pay the extra read. The key
+    // itself stays as it is, since project files save its text.
+    let mut split: HashMap<(FileKey, u64), Vec<PathBuf>> = HashMap::new();
+    for (key, paths) in groups {
+        if paths.len() < 2 {
+            split.insert((key, 0), paths);
+            continue;
+        }
+        for path in paths {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            // Unreadable here: a group of its own, as when keying fails.
+            let tail = tail_hash(&path, key.size)
+                .unwrap_or_else(|_| fnv1a_hash(path.to_string_lossy().as_bytes()));
+            split.entry((key.clone(), tail)).or_default().push(path);
+        }
+    }
+
     // Sort paths alphabetically within each group so original vs duplicate selection is stable
-    for paths in groups.values_mut() {
+    for paths in split.values_mut() {
         paths.sort();
     }
 
@@ -236,7 +271,7 @@ pub fn find_duplicates(
     let mut duplicate_count = 0;
     let mut space_wasted_bytes: u64 = 0;
 
-    for (key, paths) in groups {
+    for ((key, _), paths) in split {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
@@ -287,6 +322,39 @@ mod tests {
         assert_eq!(FileKey::from_text("12-abc"), None);
         assert_eq!(FileKey::from_text("x-00c0ffee00c0ffee"), None);
         assert_eq!(FileKey::from_text(""), None);
+    }
+
+    #[test]
+    fn a_file_that_ends_differently_is_not_grouped_with_copies() {
+        let dir = std::env::temp_dir().join(format!("auditor_tail_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = vec![7u8; 3 * KEY_BYTES as usize];
+        let mut other = bytes.clone();
+        *other.last_mut().unwrap() = 8;
+        let paths: Vec<PathBuf> = [("a.dem", &bytes), ("b.dem", &bytes), ("c.dem", &other)]
+            .iter()
+            .map(|(name, data)| {
+                let p = dir.join(name);
+                fs::write(&p, data).unwrap();
+                p
+            })
+            .collect();
+        // Same size and first 64 KB: one key for all three.
+        assert_eq!(
+            get_file_key(&paths[0]).unwrap(),
+            get_file_key(&paths[2]).unwrap()
+        );
+        let (_, groups, count, _) = find_duplicates(paths.clone(), &AtomicBool::new(false), &None);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(count, 1);
+        let names: Vec<_> = groups[0]
+            .files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["a.dem", "b.dem"]);
     }
 
     #[test]
