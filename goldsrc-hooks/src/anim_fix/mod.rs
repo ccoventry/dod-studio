@@ -70,14 +70,15 @@ mod classify;
 mod crosshair_rule;
 mod grenade;
 mod sequences;
+mod sprint_turn;
 mod trace;
 
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use classify::{
-    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, classify_body_sequence,
-    deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, model_stem,
-    third_person_stem,
+    ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, MELEE_SEQUENCES,
+    classify_body_sequence, deploy_state_from_body_sequence, find_deployable_weapon,
+    is_grenade_viewmodel, model_stem, third_person_stem,
 };
 pub(crate) use crosshair_rule::Hidden as CrosshairHidden;
 pub(crate) use sequences::sequence_label;
@@ -91,7 +92,7 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// The animation part of `dodstudio_spec_match_pov`: 0 is off, 1 is on.
+/// The animation part of `ds_spec_match_pov`: 0 is off, 1 is on.
 ///
 /// This used to be a ladder of four ways to treat the hand after a grenade
 /// throw (leave it empty, draw at once, never throw, draw after a second),
@@ -104,7 +105,7 @@ pub static LEVEL: AtomicI32 = AtomicI32::new(0);
 pub const LEVEL_OFF: i32 = 0;
 pub const LEVEL_MAX: i32 = 1;
 
-/// What each value is, for `dodstudio_debug_status` and the startup line.
+/// What each value is, for `ds_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -128,7 +129,13 @@ pub fn enabled() -> bool {
 /// its recorder spends dead and watching someone in-eye: that is what they saw
 /// live, recorded. Live play and HLTV demos are unchanged.
 pub fn active() -> bool {
-    enabled() && !engine::engfuncs().is_some_and(playing_pov_demo)
+    enabled() && !pov_demo_playing()
+}
+
+/// Whether a POV demo is playing now (see [`active`]). Also what
+/// `spectator_deathcam` stands down for.
+pub fn pov_demo_playing() -> bool {
+    engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
 /// A demo is playing and the engine is not connected as a spectator.
@@ -754,7 +761,7 @@ pub fn apply() {
                     // have fired, and its draw plays below.
                     unsafe {
                         crate::debug::report(
-                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                            "anim_fix: spectated player fired just as they switched -- the previous gun's round, the draw plays instead",
                         )
                     };
                 }
@@ -790,6 +797,14 @@ pub fn apply() {
                     play_viewmodel_animation(
                         animation_lookup_sequence("reload", state, viewmodel_model),
                         "spectated player reloaded",
+                        state,
+                        viewmodel_model,
+                    );
+                }
+                Some(BodyAction::Melee) => {
+                    play_viewmodel_animation(
+                        animation_lookup_any(MELEE_SEQUENCES, state, viewmodel_model),
+                        "spectated player stabbed or swung his rifle",
                         state,
                         viewmodel_model,
                     );
@@ -846,6 +861,11 @@ pub fn apply() {
         body_label.as_deref().unwrap_or(""),
         gait_label.as_deref().unwrap_or(""),
     ));
+    sprint_turn::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        spectated.curstate.origin.x,
+        spectated.curstate.origin.y,
+    );
     let pov_view = crosshair_rule::View {
         body: body_label.as_deref().unwrap_or(""),
         gait: gait_label.as_deref().unwrap_or(""),
@@ -1070,8 +1090,9 @@ pub(crate) mod tests {
 
     /// Resets state and holds the lock for the caller's lifetime.
     ///
-    /// Turns the fix on, because it defaults to *off* and most tests below
-    /// would otherwise be asserting against a disabled fix.
+    /// Turns the fix on, because `LEVEL` starts at *off* (the game's default
+    /// is stored at startup by `lib.rs`) and most tests below would otherwise
+    /// be asserting against a disabled fix.
     #[must_use = "the guard must outlive the test, or the statics are not actually reserved"]
     fn reset_settle_state() -> std::sync::MutexGuard<'static, ()> {
         let guard = lock_statics();
@@ -1082,7 +1103,7 @@ pub(crate) mod tests {
         guard
     }
 
-    /// Every option in range needs its own description -- `dodstudio_debug_status`
+    /// Every option in range needs its own description -- `ds_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {

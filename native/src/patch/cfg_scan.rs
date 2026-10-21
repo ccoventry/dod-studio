@@ -78,6 +78,25 @@ pub struct CfgScan {
     /// they set nothing today, but a `movie.cfg` is one `exec` away from doing
     /// so, and a user reading a warning deserves to know it is there.
     pub unreferenced: Vec<PathBuf>,
+    /// Lines that use a hook console name from before #555 (`dodstudio_*`),
+    /// which the game no longer knows. Reported, never rewritten.
+    pub renamed: Vec<RenamedConsoleName>,
+}
+
+/// A config line using a console name #555 renamed: the old name as written,
+/// the name that replaced it, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedConsoleName {
+    pub old: String,
+    pub new: String,
+    pub file: PathBuf,
+    pub line: usize,
+}
+
+impl RenamedConsoleName {
+    pub fn file_name(&self) -> String {
+        display_name(&self.file)
+    }
 }
 
 impl CfgScan {
@@ -98,7 +117,7 @@ impl CfgScan {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.settings.is_empty() && self.unreferenced.is_empty()
+        self.settings.is_empty() && self.unreferenced.is_empty() && self.renamed.is_empty()
     }
 }
 
@@ -369,7 +388,10 @@ pub fn value_warnings(
 /// `host_framerate` is `sys_fast_forward`/`sys_normal_speed`'s own mechanism
 /// for the real-time run-up before recording (`docs/goldsrc_dod_quirks.md`'s
 /// audio-resync entry) — a scheduled one races that timing, not the record
-/// itself (recording pins its own timestep regardless).
+/// itself (recording pins its own timestep regardless). `r_norefresh` is the
+/// same pair's other switch (#724): the fast-forward draws nothing, and the
+/// pre-roll turns drawing back on; a scheduled `1` inside a clip records
+/// frames with no world in them.
 ///
 /// All of these share the same failure mode: the capture still completes and
 /// still looks plausible.
@@ -383,8 +405,17 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
     "mirv_movie_fps",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "r_norefresh",
     "mirv_agr",
 ];
+
+/// The cvars `sys_fast_forward` sets to run uncapped between clips and
+/// `sys_normal_speed` puts back at every pre-roll (#724; the values are
+/// `builder::speed`'s). Not a tier of their own: in Initial Commands they are
+/// honoured exactly — that value is what every clip gets back — and scheduled
+/// they are reported with `mid_demo_hazards`, because a scheduled one lasts
+/// only until the next clip's pre-roll restores the Initial value.
+pub const FAST_FORWARD_CVARS: &[&str] = &["fps_override", "fps_max", "gl_vsync"];
 
 /// Commands refused wherever a command can be typed (Initial Commands and
 /// Scheduled Commands alike), not merely shadowed or flagged as a mid-demo
@@ -394,7 +425,7 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   * **the pipeline owns it outright** — no dedicated setting exists, and no
 ///     scenario has been found where a user typing one is anything but a
 ///     misunderstanding (`mirv_recordmovie_start`/`_stop`, `mirv_movie_ffmpeg`,
-///     `host_framerate`);
+///     `host_framerate`, `r_norefresh`);
 ///   * **DoD's own client has no legitimate non-default value for it at
 ///     all** — `r_drawentities`, `cl_lw`.
 ///
@@ -419,6 +450,11 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   legitimate creative use (frame-by-frame stepping, per
 ///   `docs/goldsrc_dod_quirks.md`'s High-Precision Frame Pacing entry) and
 ///   rejected: "It's dangerous and nobody uses that."
+/// - `r_norefresh` — the same pair's drawing switch (#724): `sys_fast_forward`
+///   sets it so the fast-forward skips the 3D pass, `sys_normal_speed` clears
+///   it at every pre-roll. A user's `1` is either undone before any clip
+///   records (Initial Commands) or records clips with no world drawn
+///   (scheduled); there is no value of it a capture can want.
 /// - `r_drawentities` / `cl_lw` — DoD 1.3's `client.dll` runs a cvar-enforcement
 ///   check inside `CHud::Redraw`: if either is not `1`, it forces the correct
 ///   value back, prints an error, and calls `quit` — the process exits
@@ -433,11 +469,22 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   `sv_cheats` is `0` the engine resets it to `1.0` and the value never
 ///   survives long enough for DoD's client to see it. Verified live and in
 ///   the binaries — `hw.dll` `0x1d455c9`, gated on `sv_cheats` at `0x1e56404`.
+/// - `ds_capture_batch` / `ds_capture_schedule` — the hook DLL's runners for a
+///   batch run without patched demos (#434). One started from a batch's own
+///   commands would replace the batch that is running.
+/// - `ds_player_spray` — writes the game's own spray file (`tempdecal.wad`)
+///   (#428). A demo draws the sprays it recorded (or Configuration > Players'),
+///   never that file, so from a batch it would change the user's spray on
+///   disk and nothing on screen.
 pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_recordmovie_start",
     "mirv_recordmovie_stop",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "r_norefresh",
+    "ds_capture_batch",
+    "ds_capture_schedule",
+    "ds_player_spray",
     "r_drawentities",
     "cl_lw",
 ];
@@ -555,9 +602,13 @@ fn commands_matching(list: &[&str], commands: &[String]) -> Vec<(String, String)
         .collect()
 }
 
-/// Commands from `MID_DEMO_HAZARDS` that must not be run during playback.
+/// Commands from `MID_DEMO_HAZARDS` that must not be run during playback, and
+/// the `FAST_FORWARD_CVARS` the next pre-roll would put back. Only meaningful
+/// against Scheduled Commands: the latter are honoured in Initial Commands.
 pub fn mid_demo_hazards(commands: &[String]) -> Vec<(String, String)> {
-    commands_matching(MID_DEMO_HAZARDS, commands)
+    let mut hits = commands_matching(MID_DEMO_HAZARDS, commands);
+    hits.extend(commands_matching(FAST_FORWARD_CVARS, commands));
+    hits
 }
 
 /// Commands from `BANNED_COMMANDS` present anywhere in `commands` — Initial
@@ -778,12 +829,36 @@ pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
 /// pipeline itself always overwrites the value before anything downstream
 /// could read it. Scheduling one instead is a different, genuinely dangerous
 /// story — see `SCHEDULED_BANNED_COMMANDS`.
-pub const NOOP_IN_INIT_COMMANDS: &[&str] = &["mirv_movie_filename"];
+/// `ds_capture_run_in_background` and `ds_capture_stay_behind` are set by every
+/// batch after the user's own commands, the second from
+/// `PatcherConfig::keep_game_behind`.
+pub const NOOP_IN_INIT_COMMANDS: &[&str] = &[
+    "mirv_movie_filename",
+    "ds_capture_run_in_background",
+    "ds_capture_stay_behind",
+];
 
 /// `NOOP_IN_INIT_COMMANDS` checked against Initial Commands. What the demo
 /// filter drops is reported separately, by `demo_filtered_commands`.
 pub fn noop_commands_in_init(commands: &[String]) -> Vec<(String, String)> {
     commands_matching(NOOP_IN_INIT_COMMANDS, commands)
+}
+
+/// Hook console names from before #555 in Initial or Scheduled Commands, as
+/// (old name, new name, whole trimmed command). Studio moves its saved lists
+/// to the new names when settings load, so this only finds one typed or
+/// pasted since. Reported as doing nothing, like `NOOP_IN_INIT_COMMANDS`: the
+/// game no longer knows the name.
+pub fn renamed_commands(commands: &[String]) -> Vec<(String, String, String)> {
+    commands
+        .iter()
+        .flat_map(|raw| {
+            let trimmed = raw.trim();
+            super::console_prefix::old_names_in(trimmed)
+                .into_iter()
+                .map(move |(old, new)| (old, new, trimmed.to_string()))
+        })
+        .collect()
 }
 
 /// Commands from `SCHEDULED_BANNED_COMMANDS` present in `commands`. Only
@@ -915,6 +990,19 @@ fn read_config(
             let mut parts = command.split_whitespace();
             let Some(head) = parts.next() else { continue };
             let head_lower = head.to_lowercase();
+
+            // Ahead of the bind/alias skip: an old name in a bind fails just
+            // the same, only later, when the key is pressed.
+            for (old, new) in super::console_prefix::old_names_in(&command) {
+                if out.renamed.len() < MAX_SETTINGS {
+                    out.renamed.push(RenamedConsoleName {
+                        old,
+                        new,
+                        file: path.to_path_buf(),
+                        line: index + 1,
+                    });
+                }
+            }
 
             if NOT_EXECUTED.contains(&head_lower.as_str()) {
                 continue;
@@ -1061,6 +1149,77 @@ mod tests {
 
         let scan = scan(&dir);
         assert!(scan.effective("r_decals").is_none(), "{:?}", scan.settings);
+    }
+
+    /// #555: a config line still using a `dodstudio_` hook name is reported
+    /// with the name that replaced it, a bound key's included, and the file
+    /// is left exactly as it was.
+    #[test]
+    fn an_old_hook_name_in_a_config_is_reported_with_its_new_name() {
+        let dir = scratch("renamed");
+        let config = "dodstudio_hide_scoreboard 1\n\
+                      exec movie.cfg\n\
+                      exec dodstudio_helper.cfg\n";
+        let movie = "// dodstudio_spec_lock 1\n\
+                     bind F7 \"dodstudio_clear_decals\"\n\
+                     ds_hud_hide_crosshair 1; dodstudio_hide_crosshair 1\n";
+        std::fs::write(dir.join("config.cfg"), config).unwrap();
+        std::fs::write(dir.join("movie.cfg"), movie).unwrap();
+
+        let scan = scan(&dir);
+        let found: Vec<(&str, &str, String, usize)> = scan
+            .renamed
+            .iter()
+            .map(|r| (r.old.as_str(), r.new.as_str(), r.file_name(), r.line))
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (
+                    "dodstudio_hide_scoreboard",
+                    "ds_hud_hide_scoreboard",
+                    "config.cfg".to_string(),
+                    1
+                ),
+                (
+                    "dodstudio_clear_decals",
+                    "ds_map_clear_decals",
+                    "movie.cfg".to_string(),
+                    2
+                ),
+                (
+                    "dodstudio_hide_crosshair",
+                    "ds_hud_hide_crosshair",
+                    "movie.cfg".to_string(),
+                    3
+                ),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.cfg")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("movie.cfg")).unwrap(),
+            movie
+        );
+    }
+
+    #[test]
+    fn an_old_hook_name_typed_into_a_command_list_is_reported() {
+        let commands = vec![
+            " dodstudio_spec_lock 1 ".to_string(),
+            "ds_spec_lock 1".to_string(),
+            "mirv_fov 90".to_string(),
+        ];
+        assert_eq!(
+            renamed_commands(&commands),
+            vec![(
+                "dodstudio_spec_lock".to_string(),
+                "ds_spec_lock".to_string(),
+                "dodstudio_spec_lock 1".to_string()
+            )]
+        );
     }
 
     #[test]
@@ -1513,6 +1672,7 @@ mod tests {
             "mirv_recordmovie_stop".to_string(),
             "mirv_movie_ffmpeg all enabled 1".to_string(),
             "host_framerate 0.05".to_string(),
+            "r_norefresh 1".to_string(),
             "r_drawentities 0".to_string(),
             "cl_lw 0".to_string(),
         ]);
@@ -1525,10 +1685,36 @@ mod tests {
                 "mirv_recordmovie_stop",
                 "mirv_movie_ffmpeg",
                 "host_framerate",
+                "r_norefresh",
                 "r_drawentities",
                 "cl_lw",
             ]
         );
+    }
+
+    #[test]
+    fn the_fast_forward_cvars_are_a_hazard_only_when_scheduled() {
+        // sys_fast_forward sets them between clips and sys_normal_speed puts
+        // the Initial Commands value back at every pre-roll (#724): typed in
+        // Initial Commands they are honoured, so no tier reports them there;
+        // scheduled, they last only until the next clip.
+        let commands: Vec<String> = ["fps_override 1", "FPS_MAX 300", "gl_vsync 0"]
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        let hits = mid_demo_hazards(&commands);
+        let hazards: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
+        assert_eq!(hazards, FAST_FORWARD_CVARS);
+        assert!(banned_commands(&commands).is_empty());
+        assert!(scheduled_banned_commands(&commands).is_empty());
+        assert!(noop_commands_in_init(&commands).is_empty());
+    }
+
+    #[test]
+    fn r_norefresh_is_the_fast_forwards_and_refused_like_host_framerate() {
+        let commands = vec!["r_norefresh 1".to_string()];
+        assert_eq!(banned_commands(&commands).len(), 1);
+        assert_eq!(mid_demo_hazards(&commands).len(), 1);
     }
 
     #[test]
@@ -1856,6 +2042,7 @@ mod tests {
             .chain(SCHEDULED_BANNED_COMMANDS)
             .chain(MID_DEMO_HAZARDS)
             .chain(NOOP_IN_INIT_COMMANDS)
+            .chain(FAST_FORWARD_CVARS)
         {
             assert_eq!(demo_filter_rule(&format!("{name} 1")), None, "{name}");
         }

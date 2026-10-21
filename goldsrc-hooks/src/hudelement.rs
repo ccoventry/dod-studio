@@ -1,4 +1,4 @@
-//! `dodstudio_hide_hudelement`: hide any one of DoD's HUD elements, by name.
+//! `ds_hud_hide_element`: hide any one of DoD's HUD elements, by name.
 //!
 //! ## One dword, not a code patch
 //!
@@ -51,7 +51,7 @@
 //! only the second is the element's. It is not offered here, but the next
 //! person to add an entry should know the trap exists.
 //!
-//! `CHudDoDCrossHair` was listed until #312. `dodstudio_hide_crosshair` already
+//! `CHudDoDCrossHair` was listed until #312. `ds_hud_hide_crosshair` already
 //! owns the crosshair (a signature patch that `dodstudio_match_pov_crosshair`
 //! defers to), so two ways to hide one element went down to one; it is in
 //! `verify_hudelements.py`'s `KNOWN_EXCLUDED`.
@@ -98,12 +98,8 @@
 //!   slot.
 //! - `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
 //!   observer-mode global, then unconditionally returns 1 without drawing.
-//!   The actual scope vignette is a `ScreenFade` engine call inside
-//!   `CHudScope::Think` (vftable slot 4, not 3), gated on the *local*
-//!   player's own current weapon -- which is never populated while
-//!   spectating, live-confirmed: no scope overlay ever appears in a demo.
-//!   Reaching the real effect would mean hooking `Think`/`ScreenFade`
-//!   instead, a materially different job (issue #307/#308 territory).
+//!   The scope is drawn by `CHudScope::DrawTriApiScope` (`client+0x46690`),
+//!   which refuses while a demo plays; `demo_scope` lifts that (#307).
 //!
 //! ## One more excluded, for a third reason: never observed to fire
 //!
@@ -165,7 +161,7 @@ use crate::engine;
 use crate::names::console_name;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_hudelement");
+pub const NAME: &str = console_name!("hud_hide_element");
 
 /// `Draw` is the fourth virtual: destructor, `Init`, `VidInit`, `Draw`.
 const DRAW_SLOT: usize = 3;
@@ -215,7 +211,7 @@ pub const ELEMENTS: &[Element] = &[
         name: "menu",
         class: ".?AVCHudMenu@@",
         vftable_rva: 0xac1a0,
-        what: "the team and class menus",
+        what: "the voice-command menus and server plugin menus (ShowMenu)",
     },
     Element {
         name: "message",
@@ -284,7 +280,7 @@ unsafe fn read_u32(address: usize) -> u32 {
 /// image-relative.
 ///
 /// Safety: `vftable` must be a mapped address inside the module.
-unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
+pub(crate) unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
     unsafe {
         let locator = read_u32(vftable - 4) as usize;
         if locator == 0 {
@@ -445,7 +441,7 @@ pub fn listing() -> String {
     out
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let hidden: Vec<&str> = ELEMENTS
         .iter()
@@ -562,7 +558,7 @@ pub(crate) mod tests {
         assert!(find("saytext").is_some());
         assert!(find("say").is_none());
         assert!(find("saytextt").is_none());
-        // Removed in #312: dodstudio_hide_crosshair owns the crosshair.
+        // Removed in #312: ds_hud_hide_crosshair owns the crosshair.
         assert!(find("crosshair").is_none());
         assert!(find("").is_none());
     }

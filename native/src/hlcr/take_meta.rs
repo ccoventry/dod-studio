@@ -19,16 +19,19 @@
 //! which point it would inherit whatever the folder it landed in says. That is
 //! this exact bug reintroduced one level up.
 //!
-//! Deliberately **advisory**. Nothing here overrides the user's render setting —
-//! a take folder can be moved, copied or hand-assembled, and a renderer that
-//! silently substituted a number found in a neighbouring file would be a worse
-//! surprise than the one it fixes. It exists so the disagreement can be *stated*.
+//! **The render follows it.** A frame sequence is read at the rate the take's
+//! own file records (`render_fps`); Render Settings' Source FPS is only the
+//! fallback for a take without one, and the render row and the activity log
+//! say which was used. #14 first kept this advisory, out of worry that a moved
+//! or hand-assembled folder would carry the wrong number; the file is per take
+//! and the walk stops two folders up, so it describes the frames beside it,
+//! and a fixed 300 made every take captured at another rate the wrong speed.
 
 use std::path::{Path, PathBuf};
 
 /// Bump when the shape changes. A file with an unrecognised format is ignored
-/// rather than guessed at — an advisory check that mis-reads is worse than one
-/// that stays quiet. 2 added `renders` (#438); a format-1 file still reads,
+/// rather than guessed at — a render that mis-reads a rate is worse than one
+/// that falls back to the setting. 2 added `renders` (#438); a format-1 file still reads,
 /// with no history.
 pub const FORMAT: u32 = 2;
 
@@ -110,13 +113,15 @@ impl SessionMeta {
     }
 }
 
-/// How a render attempt ended. `Interrupted` is what an attempt says from the
+/// How a render attempt ended. `Started` is what an attempt says from the
 /// moment it starts until it ends, so a crash mid-render leaves that behind
-/// rather than nothing.
+/// rather than nothing: a `Started` attempt no running job owns was cut off.
+/// Files written before #818's fix say `interrupted` for the same thing.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RenderOutcome {
-    Interrupted,
+    #[serde(alias = "interrupted")]
+    Started,
     Finished,
     Failed,
     Cancelled,
@@ -236,7 +241,7 @@ fn update_history(
     std::fs::write(path, json)
 }
 
-/// Records an attempt as it starts (outcome `Interrupted`).
+/// Records an attempt as it starts (outcome `Started`).
 pub fn record_render_start(take_folder: &Path, attempt: &RenderAttempt) -> std::io::Result<()> {
     update_history(take_folder, |renders| renders.push(attempt.clone()))
 }
@@ -276,8 +281,27 @@ fn search_path(take_folder: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The rate a take was captured at, when its file says (a positive number).
+pub fn recorded_fps(take_folder: &Path) -> Option<u32> {
+    read_for_take(take_folder)
+        .map(|meta| meta.capture_fps)
+        .filter(|&fps| fps > 0)
+        .map(|fps| fps as u32)
+}
+
+/// The rate a render reads a take's frames at, and whether it is the take's
+/// own: the recorded capture rate when there is one, else `setting` (Render
+/// Settings' Source FPS).
+pub fn render_fps(take_folder: &Path, setting: u32) -> (u32, bool) {
+    match recorded_fps(take_folder) {
+        Some(fps) => (fps, true),
+        None => (setting.max(1), false),
+    }
+}
+
 /// The warning to show when a render is about to interpret a take at a rate it
-/// was not captured at, or `None` when there is nothing to say.
+/// was not captured at, or `None` when there is nothing to say. `render_fps`
+/// keeps a render from doing that; this stays for a caller with its own rate.
 ///
 /// Returns a message rather than logging, so the same wording can go to the
 /// activity log and to a job's own render log without drifting apart.
@@ -421,14 +445,14 @@ mod tests {
             codec: "prores".to_string(),
             custom_codec_args: String::new(),
             fps: 300,
-            outcome: RenderOutcome::Interrupted,
+            outcome: RenderOutcome::Started,
             output_path: String::new(),
             output_size_bytes: None,
             error: None,
         }
     }
 
-    /// #438: an attempt reads as interrupted until it ends, both streams of
+    /// #438: an attempt reads as started until it ends, both streams of
     /// a take keep their own entries, and capture settings survive.
     #[test]
     fn render_history_records_each_attempt_and_its_outcome() {
@@ -437,7 +461,7 @@ mod tests {
 
         record_render_start(&take, &attempt_at(10, "all")).expect("start all");
         record_render_start(&take, &attempt_at(10, "hudcolor")).expect("start hud");
-        assert_eq!(read_history(&take)[0].outcome, RenderOutcome::Interrupted);
+        assert_eq!(read_history(&take)[0].outcome, RenderOutcome::Started);
 
         record_render_end(
             &take,
@@ -468,6 +492,18 @@ mod tests {
         assert_eq!(history[1].error.as_deref(), Some("ffmpeg exited 1"));
         let meta = read_for_take(&take).expect("meta");
         assert_eq!((meta.capture_fps, meta.format), (120, FORMAT));
+    }
+
+    /// A started attempt is written as `started`, and one an older build
+    /// wrote as `interrupted` reads as the same thing.
+    #[test]
+    fn started_outcome_reads_the_old_interrupted_name() {
+        assert_eq!(
+            serde_json::to_string(&RenderOutcome::Started).unwrap(),
+            "\"started\""
+        );
+        let old: RenderOutcome = serde_json::from_str("\"interrupted\"").unwrap();
+        assert_eq!(old, RenderOutcome::Started);
     }
 
     /// A take captured before the file existed gets one, in its block folder,
@@ -512,6 +548,23 @@ mod tests {
         let read = read_for_take(&take).expect("an AGR take reads back");
         assert_eq!(read.capture_mode.as_deref(), Some("agr"));
         assert_eq!(read.agr_fps, Some(60));
+    }
+
+    #[test]
+    fn a_render_uses_the_takes_own_rate_and_the_setting_only_without_one() {
+        let (_root, block, take) =
+            block_with_take("render_fps", "session_x", "dodstudio_chain_01_b0");
+        assert_eq!(render_fps(&take, 300), (300, false), "no file: the setting");
+        write(&block, &SessionMeta::new("s", 0)).expect("write");
+        assert_eq!(
+            render_fps(&take, 300),
+            (300, false),
+            "an unknown rate: the setting"
+        );
+        write(&block, &SessionMeta::new("s", 120)).expect("write");
+        assert_eq!(render_fps(&take, 300), (120, true));
+        assert_eq!(render_fps(&block, 60), (120, true));
+        assert_eq!(recorded_fps(&take), Some(120));
     }
 
     #[test]

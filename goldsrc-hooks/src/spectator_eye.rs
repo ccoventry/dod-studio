@@ -1,4 +1,4 @@
-//! The eye-height part of `dodstudio_spec_match_pov`: the in-eye camera drops
+//! The eye-height part of `ds_spec_match_pov`: the in-eye camera drops
 //! to the ground when the spectated player goes prone, as his own view does
 //! (issue #329).
 //!
@@ -114,7 +114,7 @@ pub fn set_prone(prone: bool) {
             crate::debug::report(&format!(
                 "spectator_eye: the spectated player is {}",
                 if prone {
-                    "prone -- eye 6 below his origin"
+                    "prone -- eye 6 below their origin"
                 } else {
                     "not prone -- the game's own eye height"
                 }
@@ -203,13 +203,13 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     Ok(true)
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     if !PATCHED.load(Ordering::Relaxed) {
         return "the in-eye camera uses the game's own heights (a prone player is seen from crouch height)".to_string();
     }
     format!(
-        "the in-eye camera drops to the ground for a prone player; right now he is {}",
+        "the in-eye camera drops to the ground for a prone player; right now they are {}",
         if PRONE.load(Ordering::Relaxed) {
             "prone"
         } else {

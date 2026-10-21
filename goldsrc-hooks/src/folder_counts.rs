@@ -208,10 +208,10 @@ fn fresh(path: &Path) -> Option<Counted> {
     (c.at.elapsed() < FRESH_FOR).then_some(c)
 }
 
-/// `path`'s demo count, if counted lately: at any depth with `subfolders`,
-/// otherwise only the demos directly in it.
-pub fn count(path: &Path, subfolders: bool) -> Option<FolderCount> {
-    fresh(path).map(|c| if subfolders { c.all } else { c.direct })
+/// `path`'s demo counts, if counted lately: directly in it, and at any
+/// depth.
+pub fn counts(path: &Path) -> Option<(FolderCount, FolderCount)> {
+    fresh(path).map(|c| (c.direct, c.all))
 }
 
 /// Whether `path` is known to hold no demo at any depth (counted lately, and
@@ -276,7 +276,11 @@ pub fn count_later(listing: &str, folders: Vec<PathBuf>, up: Option<(PathBuf, Pa
             FINISHED.store(true, Ordering::Release);
             let line = format!(
                 "folder_counts: {} -- {} folder(s) counted in {} ms, off the game thread",
-                if listing.is_empty() { "dod/" } else { &listing },
+                if listing.is_empty() {
+                    format!("{}/", crate::game_folder::name())
+                } else {
+                    listing.clone()
+                },
                 todo.len(),
                 started.elapsed().as_millis()
             );
@@ -390,7 +394,7 @@ mod tests {
     fn a_job_counts_in_the_background_then_says_so() {
         let root = scratch("job");
         let (rounds, empty) = (root.join("rounds"), root.join("empty"));
-        assert_eq!(count(&rounds, true), None, "not counted yet");
+        assert_eq!(counts(&rounds), None, "not counted yet");
         assert!(!known_empty(&empty), "not counted is not empty");
         count_later("test", vec![rounds.clone(), empty.clone()], None);
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -400,18 +404,17 @@ mod tests {
         }
         assert_eq!(progress(), None);
         assert_eq!(
-            count(&rounds, true),
-            Some(FolderCount {
-                demos: 2,
-                complete: true
-            })
-        );
-        assert_eq!(
-            count(&rounds, false),
-            Some(FolderCount {
-                demos: 0,
-                complete: true
-            })
+            counts(&rounds),
+            Some((
+                FolderCount {
+                    demos: 0,
+                    complete: true
+                },
+                FolderCount {
+                    demos: 2,
+                    complete: true
+                }
+            ))
         );
         assert!(known_empty(&empty));
         assert!(!known_empty(&rounds));

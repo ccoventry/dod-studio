@@ -22,7 +22,7 @@ const PIPE_WAIT: Duration = Duration::from_secs(90);
 /// opens while the engine is still starting.
 const SETTLE: Duration = Duration::from_secs(5);
 /// After `viewdemo`, how long before the Highlights tab is opened. With
-/// `dodstudio_viewdemo_in_panel 1`, `viewdemo` opens the window on its
+/// `ds_ui_viewdemo_in_panel 1`, `viewdemo` opens the window on its
 /// Playback tab a frame after the command runs, so a tab command sent in
 /// the same message loses to it.
 const TAB_AFTER: Duration = Duration::from_secs(3);
@@ -97,8 +97,9 @@ pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String
 }
 
 /// Waits for the game launched after `before` was listed to open its pipe,
-/// then sends it `lines`. Returns the game's pid once they were sent.
-fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
+/// then sends it `lines`. Returns the game's pid once they were sent. Also
+/// used by the patched Launch Preview (#662).
+pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
     let started = Instant::now();
     while started.elapsed() < PIPE_WAIT {
         std::thread::sleep(Duration::from_millis(500));

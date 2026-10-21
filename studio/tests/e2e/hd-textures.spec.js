@@ -29,8 +29,8 @@ const STATUS = {
   built_styles: ['plain'],
   known_styles: ['ultrasharp', 'remacri', 'siax', 'generalv3', 'x4plus', 'plain', 'blend'],
   default_style: 'ultrasharp',
-  enabled_cvar: 'dodstudio_hd_enabled',
-  style_cvar: 'dodstudio_hd_style',
+  enabled_cvar: 'ds_hd_enabled',
+  style_cvar: 'ds_hd_style',
   tools: {
     dir: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan',
     upscaler: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan/realesrgan-ncnn-vulkan.exe',
@@ -80,6 +80,10 @@ async function loadHarness(page, handlers) {
     window.__mockInvokeHandlers.hd_preview = () =>
       new Promise((resolve, reject) => { window.__finishPreview = { resolve, reject }; });
     if (h.mapSaveError) window.__mockInvokeHandlers.hd_save_map_list = () => Promise.reject(h.mapSaveError);
+    if (h.coverage) {
+      window.__mockInvokeHandlers.hd_world_coverage = () =>
+        new Promise((resolve, reject) => { window.__finishCoverage = { resolve, reject }; });
+    }
   }, handlers);
   await page.goto('/tests/e2e/hd-textures.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -100,11 +104,11 @@ test('a status report fills the table, picks the built style and writes the cfg 
 
   // The default isn't built, so the built one is picked.
   await expect(page.locator('#hd-style-select')).toHaveValue('plain');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain\ngl_max_size 1024');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style plain\ngl_max_size 1024');
   await expect(page.locator('#hd-style-select option[value="ultrasharp"]')).toContainText('(default) (not built yet)');
 
   await page.selectOption('#hd-style-select', 'remacri');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style remacri\ngl_max_size 1024');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style remacri\ngl_max_size 1024');
 
   await expect(page.locator('#hd-tools-text')).toContainText('Upscaler: none found');
   await expect(page.locator('#hd-realesrgan-line')).toHaveText(`set REALESRGAN=${STATUS.tools.upscaler}`);
@@ -199,7 +203,7 @@ test('build choices: AI styles wait for the upscaler, and the request carries wh
   await expect(page.locator('#hd-build-styles label', { hasText: 'x4plus' })).toContainText('(needs Download)');
   await expect(page.locator('#hd-build-styles input[value="plain"]')).toBeEnabled();
   // Every file type starts ticked.
-  await expect(page.locator('#hd-build-types input:checked')).toHaveCount(5);
+  await expect(page.locator('#hd-build-types input:checked')).toHaveCount(6);
 
   await page.check('#hd-build-styles input[value="plain"]');
   await page.uncheck('#hd-build-types input[value="world"]');
@@ -207,7 +211,7 @@ test('build choices: AI styles wait for the upscaler, and the request carries wh
   const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args);
   expect(request).toEqual({
     gamePath: 'C:/games/Half-Life/hl.exe',
-    request: { styles: ['plain'], types: ['sky', 'sprites', 'models', 'detail'], cap: 1024 },
+    request: { styles: ['plain'], types: ['sky', 'decals', 'sprites', 'models', 'detail'], cap: 1024 },
   });
 });
 
@@ -219,7 +223,7 @@ test('the largest size goes into the build and the cfg lines, and says what it c
 
   await page.selectOption('#hd-build-cap', '2048');
   await expect(page.locator('#hd-build-cap-hint')).toContainText('detail textures');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain\ngl_max_size 2048');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style plain\ngl_max_size 2048');
   await page.check('#hd-build-styles input[value="plain"]');
   await page.click('#hd-build-btn');
   const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args.request);
@@ -426,7 +430,7 @@ test('Build is off until at least one style and one kind of file are ticked', as
   await page.check('#hd-build-styles input[value="plain"]');
   await expect(page.locator('#hd-build-btn')).toBeEnabled();
 
-  for (const type of ['sky', 'sprites', 'models', 'detail', 'world']) {
+  for (const type of ['sky', 'decals', 'sprites', 'models', 'detail', 'world']) {
     await page.uncheck(`#hd-build-types input[value="${type}"]`);
   }
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
@@ -460,12 +464,12 @@ test('a partial style says what it is missing, in the table, beside the style an
     + ' Wherever it has none, the game shows the stock texture.';
   await expect(page.locator('#hd-style-coverage')).toHaveText(sentence);
   await expect(page.locator('#hd-cfg-lines')).toHaveText(
-    `dodstudio_hd_enabled 1\ndodstudio_hd_style remacri\ngl_max_size 1024\n// ${sentence}`);
+    `ds_hd_enabled 1\nds_hd_style remacri\ngl_max_size 1024\n// ${sentence}`);
 });
 
 /** native::hd::misses::MissesView, as serde sends it. */
 const MISSES = {
-  command: 'dodstudio_debug_hd_misses',
+  command: 'ds_debug_hd_misses',
   report: {
     log_file: 'C:/Users/me/AppData/Roaming/dod-studio/logs/dodstudio_goldsrc_hooks_20260924.log',
     date: '2026-09-24',
@@ -503,9 +507,9 @@ const MISSES = {
 };
 
 test('misses: nothing in the log says how to get a list, and names the command', async ({ page }) => {
-  await loadHarness(page, { status: STATUS, misses: { command: 'dodstudio_debug_hd_misses', report: null } });
+  await loadHarness(page, { status: STATUS, misses: { command: 'ds_debug_hd_misses', report: null } });
   await page.click('.nav-tab-btn[data-nav="hd-textures"]');
-  await expect(page.locator('#hd-misses-command')).toHaveText('dodstudio_debug_hd_misses');
+  await expect(page.locator('#hd-misses-command')).toHaveText('ds_debug_hd_misses');
   await expect(page.locator('#hd-misses-text')).toContainText('No list in the game');
   await expect(page.locator('#hd-misses-maps details')).toHaveCount(0);
 });
@@ -895,4 +899,76 @@ test('map list: a map two patterns pick points at both; its own line plus a patt
   // Every map: no Add button, nothing to point at.
   await page.check('#hd-maps-every');
   await expect(page.locator('#hd-maps-add-btn')).toBeHidden();
+});
+
+/** native::hd::map_textures::WorldCoverage: ultrasharp built for every map,
+ *  remacri for anzio, part of railroad, and nothing else. */
+const WORLD_COVERAGE = {
+  styles: ['remacri', 'ultrasharp'],
+  maps: [
+    { map: 'dod_anzio', total: 12, built: { remacri: 12, ultrasharp: 12 } },
+    { map: 'dod_caen', total: 8, built: { remacri: 0, ultrasharp: 8 } },
+    { map: 'dod_railroad', total: 10, built: { remacri: 3, ultrasharp: 10 } },
+    { map: 'dod_railroad2_s9a', total: 9, built: { remacri: 0, ultrasharp: 9 } },
+  ],
+  unreadable: [],
+  millis: 5,
+};
+
+test('map coverage (#426): checks off the page thread, then says which maps a style covers and warns about the map list', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
+  await page.click('#hd-refresh-btn');
+
+  // While the scan runs: a checking line, and a bar once it reports.
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Checking which maps each style has map textures for…');
+  await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
+  await page.evaluate(() => window.__mockEmit('hd_coverage_progress', { done: 2, total: 4 }));
+  await expect(page.locator('#hd-style-maps-summary')).toContainText('(2 of 4 maps)');
+  await expect(page.locator('#hd-style-maps-progress')).toBeVisible();
+  await expect(page.locator('#hd-style-maps-progress')).toHaveAttribute('max', '4');
+
+  await page.evaluate((c) => window.__finishCoverage.resolve(c), WORLD_COVERAGE);
+  await expect(page.locator('#hd-style-maps-progress')).toBeHidden();
+  await page.selectOption('#hd-style-select', 'ultrasharp');
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('ultrasharp has every map texture for all 3 maps in your map list.');
+  await expect(page.locator('#hd-style-map-warning')).toBeHidden();
+  await expect(page.locator('#hd-cfg-lines')).not.toContainText('//');
+
+  // The list picks railroad* and anzio: remacri has part of one, none of the other.
+  await page.selectOption('#hd-style-select', 'remacri');
+  await expect(page.locator('#hd-style-maps-summary'))
+    .toHaveText('remacri, in your map list: every map texture for 1 map, some for 1 map and none for 1 map.');
+  const warning = 'remacri is missing map textures for dod_railroad and 1 more map in your map list; those maps will show stock textures wherever it has none.';
+  await expect(page.locator('#hd-style-map-warning')).toHaveText(warning);
+  await expect(page.locator('#hd-cfg-lines')).toContainText(`// ${warning}`);
+  await page.click('#hd-style-maps summary');
+  await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
+    'Every map texture (1)dod_anzio',
+    'Some of the map textures (1)dod_railroad (3 of 10)',
+    'No map textures (1)dod_railroad2_s9a',
+  ]);
+
+  // Show every map: the lists and the line cover the whole game folder.
+  await page.check('.hd-style-maps-every input');
+  await expect(page.locator('#hd-style-maps-summary'))
+    .toHaveText('remacri: every map texture for 1 map, some for 1 map and none for 2 maps.');
+  await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
+    'Every map texture (1)dod_anzio',
+    'Some of the map textures (1)dod_railroad (3 of 10)',
+    'No map textures (2)dod_caen, dod_railroad2_s9a',
+  ]);
+  await page.uncheck('.hd-style-maps-every input');
+
+  // Every map, as edited (not saved yet): the warning follows.
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-style-map-warning')).toHaveText(
+    'remacri is missing map textures for dod_caen and 2 more maps; those maps will show stock textures wherever it has none.');
+});
+
+test('map coverage (#426): a failed check says so and warns about nothing', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
+  await page.click('#hd-refresh-btn');
+  await page.evaluate(() => window.__finishCoverage.reject('disk gone'));
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Could not check which maps are covered: disk gone');
+  await expect(page.locator('#hd-style-map-warning')).toBeHidden();
 });

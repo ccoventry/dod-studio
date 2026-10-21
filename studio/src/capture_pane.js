@@ -21,8 +21,9 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
-import { requestFinishClips } from './finish_clips.js';
-import { syncCommandProfileRow } from './command_profiles_ui.js';
+import { requestFinishClips, finishSummary } from './finish_clips.js';
+import { syncCommandProfileRow, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
@@ -106,6 +107,19 @@ const FIELDS_THAT_BECOME_COMMANDS = [
 // — a real streak's length varies per capture; this is just enough to make
 // Start Lead/Stop Trail visually distinct from Pre-roll/Post-roll.
 const TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS = 8.0;
+
+/** Seconds of demo per frame while a batch fast-forwards (`host_framerate`),
+ *  the settings' `fast_forward_speed`. Fixed, and no longer shown: batches
+ *  skip straight to each clip, and fast-forward is only their fallback. */
+export const FAST_FORWARD_STEP = 0.05;
+let fastForwardStep = FAST_FORWARD_STEP;
+/** The saved value, kept as it is (settings_sync.js sets it on load). */
+export function setFastForwardStep(value) {
+  fastForwardStep = Number.isFinite(value) && value > 0 ? value : FAST_FORWARD_STEP;
+}
+export function getFastForwardStep() {
+  return fastForwardStep;
+}
 
 /**
  * Rebuilds the Timings tab's execution-timeline table (#150) — revives the
@@ -558,8 +572,10 @@ let customCommandsEditor = null;
 function currentCaptureSetup() {
   const state = (currentGetState ? currentGetState() : null) || {};
   const codecEl = document.querySelector('#config-capture-codec');
+  const mode = document.querySelector('#config-capture-mode')?.value || 'frame_sequence';
+  const lists = getCommandsState();
   return {
-    mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
+    mode,
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
     // An empty AGR FPS records at Capture FPS, as the batch does.
@@ -567,9 +583,12 @@ function currentCaptureSetup() {
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
-    scheduledCount: getCommandsState().custom_commands.length,
+    // The same reading the Commands tab's profile row shows.
+    commandProfile: profileState(getCommandProfiles(), getActiveCommandProfile(), lists),
+    scheduledCount: lists.custom_commands.length,
     bannedCount: bannedCommandCount(),
     decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
+    finish: finishSummary(mode),
     destinations: (state.targetDrives || []).filter(Boolean).length > 0,
   };
 }
@@ -850,14 +869,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   const statusEl = document.querySelector('#batch-status');
   const progressContainer = document.querySelector('#capture-progress-container');
   const progressBar = document.querySelector('#capture-progress-bar');
-  const focusReminder = document.querySelector('#batch-focus-reminder');
 
-  // Tied to the progress bar rather than tracked separately: the reminder is
-  // only true while a batch is actually running, and two flags for one state
-  // is how they come to disagree.
+  // No "keep the game focused" reminder: every batch turns on
+  // ds_capture_run_in_background, so a game behind other windows or minimised
+  // fast-forwards at full speed (#701, #722).
   const setBatchRunning = (running) => {
     if (progressContainer && running) progressContainer.style.display = 'block';
-    if (focusReminder) focusReminder.style.display = running ? 'block' : 'none';
   };
 
   currentGetState = getState;
@@ -1243,16 +1260,18 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const sessionId = generateSessionId();
     lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths };
 
-    const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+    const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
     const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
     // Empty is 0, "the same as Capture FPS" — resolved by the backend.
     const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRollVal = numberField('#config-pre-roll', 2.0);
     const postRollVal = numberField('#config-post-roll', 0.6);
-    const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
-    const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
+    const recordStartLeadVal = numberField('#config-record-start-lead', 5.0);
+    const recordStopTrailVal = numberField('#config-record-stop-trail', 5.0);
     const initialDelayVal = numberField('#config-initial-delay', 3.0);
-    const fastForwardSpeedVal = numberField('#config-fast-forward-speed', 0.05, { positive: true });
+    // The fast-forward step (`host_framerate`), not a setting: batches skip to
+    // each clip, and fast-forward is only the fallback.
+    const fastForwardSpeedVal = getFastForwardStep();
 
     const hlaePathVal = document.querySelector("#hlae-path-input")?.value?.trim() || "";
     const hlPathVal = document.querySelector("#hl-path-input")?.value?.trim() || "";
@@ -1277,6 +1296,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsPortVal = parseInt(document.querySelector("#config-obs-port")?.value, 10) || 4455;
     const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
     const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
+    const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked ?? true;
+    const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
 
     const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;
     const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
@@ -1327,6 +1348,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       obs_port: obsPortVal,
       obs_password: obsPasswordVal,
       save_local_patched_copy: saveLocalPatchedCopyVal,
+      hook_runs_batch: hookRunsBatchVal,
+      keep_game_behind: keepGameBehindVal,
       streaks: selectedStreaks,
       pre_roll_seconds: preRollVal,
       post_roll_seconds: postRollVal,

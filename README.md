@@ -34,7 +34,7 @@ The capture and render pipeline is a frag-movie workflow and is unrelated.
     analysis/         match analytics built on top of dod/
     dem-patch/        vendored + patched `dem` crate (GoldSrc demo read/write)
     native/           capture engine, demo patcher, take management, FFmpeg
-    hl-demo-auditor/  duplicate-demo detector
+    hl-demo-auditor/  duplicate-demo detector and lost-frames check (--integrity)
     benchmark/        parsing/patching performance harness
     goldsrc-hooks/    32-bit DLL injected into hl.exe: HLTV fixes, HUD control, HD textures
     studio/           Tauri v2 + Vite frontend
@@ -49,6 +49,11 @@ Analyse a demo and print match analytics:
 Headless preview CLI (accepts a demo or a folder):
 
     cargo run -p native --bin preview_cli -- path/to/demo-or-folder
+
+Check demos for silently lost frames, one line each, non-zero exit if any is
+broken (#41; see `docs/goldsrc_demo_salvage.md`):
+
+    cargo run --release -p hl-demo-auditor -- --integrity path/to/demo-or-folder
 
 Desktop app:
 
@@ -121,5 +126,5 @@ above and are themselves LGPL-3.0, being changes to an LGPL work.
 
 Engineering notes live in `docs/` — architecture decisions, GoldSrc and DoD
 engine quirks, and HLAE protocol constraints. `docs/dodstudio_commands.md`
-lists the in-game `dodstudio_*` console commands. Bugs and planned work are
+lists the in-game `ds_*` console commands. Bugs and planned work are
 tracked in GitHub Issues; retired planning docs are in `docs/archive/`.

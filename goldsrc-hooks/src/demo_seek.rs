@@ -1,4 +1,4 @@
-//! `dodstudio_seek_to <seconds>` / `dodstudio_seek_by <seconds>`: jump
+//! `ds_demo_seek_to <seconds>` / `ds_demo_seek_by <seconds>`: jump
 //! `viewdemo` playback to a time, the way the demo editor's **Goto** button
 //! does, instead of fast-forwarding to it with `host_framerate` (issue #405).
 //!
@@ -36,7 +36,7 @@
 //! between the old and new position do not fire" holds only going back.
 //!
 //! By default these commands do exactly what the engine does. Set
-//! `dodstudio_seek_skip_between 1` to make a seek land clean instead: it moves
+//! `ds_demo_seek_skip_between 1` to make a seek land clean instead: it moves
 //! the two "last sent" marks to the landing frame, so the next frame runs that
 //! frame's own commands and nothing before it. That is what a capture batch
 //! wants -- the commands in between belong to other clips -- but it is wrong
@@ -53,16 +53,21 @@
 //! stream overflow." in the console) and the player carries on from the landing
 //! frame alone. A 20-minute jump in an HLTV demo did exactly that (2026-10-04):
 //! a player who joined after the recording began had no name and no team, the
-//! scoreboard read 0/0, and `dodstudio_spec_target` found no such player.
+//! scoreboard read 0/0, and `ds_spec_target` found no such player.
 //!
 //! So a forward seek of more than [`STEP_SECONDS`] moves the clock that far per
 //! frame instead, from [`poll`], until it lands. Each step's catch-up is a few
 //! seconds of the demo, which always fits, so everything in between reaches the
 //! client in order, as if played very fast. A whole HLTV demo takes a few
-//! hundred frames. `dodstudio_seek_skip_between 1` seeks still jump at once:
+//! hundred frames. `ds_demo_seek_skip_between 1` seeks still jump at once:
 //! they skip the in-between on purpose.
 //!
-//! A command after the time (`dodstudio_seek_to <seconds> <command ...>`) runs
+//! The console commands the steps replay are the exception: the engine runs
+//! only one of those a frame, so a POV demo's key presses from the whole jump
+//! would play on for tens of seconds after the landing. A stepped seek drops
+//! them and lets go of the keys once it lands (`filtered_commands.rs`, #702).
+//!
+//! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
 //! client: the Highlights tab's Go uses it to put the camera on a player who
 //! may only exist once the jump has caught up.
@@ -81,7 +86,8 @@
 //! ## Still loading
 //!
 //! The world fills in the background -- `Core.dll`'s `Server::RunFrame` reads at
-//! most 33 packets per engine frame -- while playback has already started. A
+//! most 33 packets per engine frame, or for a time budget per frame with
+//! `ds_demo_fast_load` (#798) -- while playback has already started. A
 //! seek past what is loaded lands on the last loaded frame. `IsLoading()`
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.
@@ -114,9 +120,9 @@ use crate::commands::console_print;
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const SEEK_TO_NAME: &str = console_name!("seek_to");
-pub const SEEK_BY_NAME: &str = console_name!("seek_by");
-pub const SKIP_BETWEEN_NAME: &str = console_name!("seek_skip_between");
+pub const SEEK_TO_NAME: &str = console_name!("demo_seek_to");
+pub const SEEK_BY_NAME: &str = console_name!("demo_seek_by");
+pub const SKIP_BETWEEN_NAME: &str = console_name!("demo_seek_skip_between");
 
 /// How far one step of a long forward seek moves the clock. Measured on four
 /// HLTV demos (`analysis/examples/seek_burst.rs`, 2026-10-04): no 5-second
@@ -137,6 +143,9 @@ struct Pending {
     /// Frames spent waiting for the player to send the last step.
     waited: u32,
     steps: u32,
+    /// Bytes of replayed console commands a stepped seek dropped
+    /// (`filtered_commands`).
+    dropped: usize,
     started: std::time::Instant,
 }
 
@@ -174,7 +183,7 @@ fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
     !skip_between && to - now > STEP_SECONDS
 }
 
-/// `dodstudio_seek_skip_between`: 1 lands a seek without running the director
+/// `ds_demo_seek_skip_between`: 1 lands a seek without running the director
 /// events and console commands it jumps over. Off by default, so a seek does
 /// what the engine's own Goto does until asked otherwise.
 ///
@@ -184,7 +193,7 @@ fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
 pub static SKIP_BETWEEN: AtomicBool = AtomicBool::new(false);
 static SKIP_BETWEEN_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once `dodstudio_seek_skip_between` is registered.
+/// Called by `commands.rs` once `ds_demo_seek_skip_between` is registered.
 pub fn set_skip_between_cvar(cvar: *mut CvarSPartial) {
     SKIP_BETWEEN_CVAR.store(cvar, Ordering::Release);
 }
@@ -348,6 +357,13 @@ pub fn poll() {
     let Some(seek) = pending.as_mut() else {
         return;
     };
+    // A stepped seek drops the console commands each step replays: the
+    // engine runs only one a frame, so they would play on long after the
+    // landing (`filtered_commands`).
+    let stepped = seek.steps > 0 || !seek.landed;
+    if stepped {
+        seek.dropped += crate::filtered_commands::clear().unwrap_or(0);
+    }
     #[cfg(target_arch = "x86")]
     let done = player::step(seek);
     #[cfg(not(target_arch = "x86"))]
@@ -355,22 +371,41 @@ pub fn poll() {
     let line = match done {
         Ok(false) => return,
         Ok(true) => {
+            // What the dropped commands pressed would stay down.
+            if stepped
+                && let Ok(line) =
+                    std::ffi::CString::new(format!("{}\n", crate::filtered_commands::RELEASE_KEYS))
+            {
+                engine::client_cmd(&line);
+            }
             if let Some(then) = &seek.then
                 && let Ok(line) = std::ffi::CString::new(format!("{then}\n"))
             {
                 engine::client_cmd(&line);
             }
             format!(
-                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms",
+                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
                 seek.target,
                 seek.steps,
-                seek.started.elapsed().as_millis()
+                seek.started.elapsed().as_millis(),
+                seek.dropped,
+                engine::engine_client_time().unwrap_or(-1.0)
             )
         }
         Err(why) => format!("{SEEK_TO_NAME}: stopped stepping: {why}"),
     };
     *pending = None;
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
+}
+
+/// Whether a seek is still on its way (a stepped one, or one waiting to land),
+/// for the capture batch (#434), which runs nothing until it has.
+pub fn seeking() -> bool {
+    match PENDING.try_lock() {
+        Ok(pending) => pending.is_some(),
+        // Held only by `poll` and a seek starting, both mid-seek.
+        Err(_) => true,
+    }
 }
 
 /// Where the demo player is, for the review mode (#623).
@@ -390,6 +425,15 @@ pub struct Clock {
 
 /// The demo player's clock, or `None` with no demo player (or one of a
 /// build this was not checked against).
+/// The demo player's `IDemoPlayer` interface, for checking a GameUI dialog
+/// points at the same player (#663).
+pub fn player_object() -> Option<*mut std::ffi::c_void> {
+    #[cfg(target_arch = "x86")]
+    return player::find().ok().map(|(p, _)| p);
+    #[cfg(not(target_arch = "x86"))]
+    None
+}
+
 pub fn clock() -> Option<Clock> {
     #[cfg(target_arch = "x86")]
     return player::clock();
@@ -421,22 +465,28 @@ pub fn set_time_scale(scale: f32) -> Result<(), String> {
 
 /// [`SEEK_TO_NAME`]'s seek, for code: lands on `seconds` of the world clock.
 pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
+    seek_to_seconds_then(seconds, None)
+}
+
+/// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
+/// landed, as `ds_demo_seek_to <seconds> <command>` does.
+pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
     #[cfg(target_arch = "x86")]
-    return player::seek(seconds, false, skip_between(), None);
+    return player::seek(seconds, false, skip_between(), then);
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = seconds;
+        let _ = (seconds, then);
         Err("only the 32-bit build has a demo player".to_string())
     }
 }
 
-/// `dodstudio_seek_to <seconds>`: an absolute world time, the clock the events
+/// `ds_demo_seek_to <seconds>`: an absolute world time, the clock the events
 /// list shows and the analysis calls `viewdemo_offset`.
 pub unsafe extern "C" fn seek_to() {
     run(SEEK_TO_NAME, false);
 }
 
-/// `dodstudio_seek_by <seconds>`: forward, or back when negative.
+/// `ds_demo_seek_by <seconds>`: forward, or back when negative.
 pub unsafe extern "C" fn seek_by() {
     run(SEEK_BY_NAME, true);
 }
@@ -464,7 +514,7 @@ mod player {
 
     /// The `IDemoPlayer` singleton, once `DemoPlayer.dll` is loaded and is a
     /// build in [`BUILDS`].
-    fn find() -> Result<(*mut c_void, &'static Build), String> {
+    pub(super) fn find() -> Result<(*mut c_void, &'static Build), String> {
         let module = unsafe { GetModuleHandleA(c"DemoPlayer.dll".as_ptr() as *const u8) };
         if module.is_null() {
             return Err("DemoPlayer.dll is not loaded; start the demo with viewdemo".into());
@@ -646,6 +696,7 @@ mod player {
                     last_set: now,
                     waited: 0,
                     steps: 0,
+                    dropped: 0,
                     started: std::time::Instant::now(),
                 });
                 return Ok(format!(
@@ -662,6 +713,7 @@ mod player {
                 last_set: to,
                 waited: 0,
                 steps: 0,
+                dropped: 0,
                 started: std::time::Instant::now(),
             });
             drop(pending);
@@ -781,8 +833,8 @@ mod tests {
         let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(follow_up(&words(&[])), None);
         assert_eq!(
-            follow_up(&words(&["dodstudio_spec_target", "13"])),
-            Some("dodstudio_spec_target 13".to_string())
+            follow_up(&words(&["ds_spec_target", "13"])),
+            Some("ds_spec_target 13".to_string())
         );
     }
 

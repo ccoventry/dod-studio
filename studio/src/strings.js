@@ -14,10 +14,15 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
-/** "(3 already cached, 1 failed)", or nothing when both are 0 (#569). */
-function cacheCounts(already, failed) {
+/**
+ * "(2 upgraded, 3 already cached, 1 failed)", or nothing when all are 0
+ * (#569). `already` counts the upgraded ones too: they are in the cache by
+ * the time they are counted.
+ */
+function cacheCounts(already, failed, upgraded = 0) {
   const parts = [];
-  if (already) parts.push(`${already} already cached`);
+  if (upgraded) parts.push(`${upgraded} upgraded`);
+  if (already > upgraded) parts.push(`${already - upgraded} already cached`);
   if (failed) parts.push(`${failed} failed`);
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
@@ -85,6 +90,36 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    // #685, #823: the queue grouped by match, player, map, ..., with a header line per group.
+    GROUP_BY_LABEL: 'Group by:',
+    GROUP_BY_TITLE: 'Show the queue in groups, each under a line with its counts. Only the order changes: '
+      + 'the same demos stay shown, and Review highlights and the bulk actions use them as before.\n'
+      + 'Match puts the demos of one match together: the HLTV demo and every POV of each half. '
+      + 'Which match and half a demo is comes from what it recorded (the players, their sides, the kills and the chat), never from its file name. '
+      + 'The same numbers feed {match} and {half} in clip names.\n'
+      + 'Player groups POV demos by who recorded them. Date is the day the demo file was last changed.',
+    GROUP_BY_NONE: 'None',
+    GROUP_BY_MATCH: 'Match',
+    GROUP_BY_PLAYER: 'Player',
+    GROUP_BY_MAP: 'Map',
+    GROUP_BY_FOLDER: 'Folder',
+    GROUP_BY_DATE: 'Date',
+    GROUP_BY_TYPE: 'Demo type',
+    groupHeader: (label, demos, highlights) =>
+      `${label} · ${demos} demo${demos === 1 ? '' : 's'}, ${highlights} highlight${highlights === 1 ? '' : 's'}`,
+    GROUP_HLTV: 'HLTV demos',
+    GROUP_POV: 'POV demos',
+    GROUP_NO_RECORDER: 'No recording player found',
+    GROUP_NO_MAP: 'Map not known',
+    GROUP_NO_DATE: 'Date not known',
+    GROUP_NO_TYPE: 'Demo type not known',
+    groupDateTitle: (day) => `Demo files last changed on ${day}`,
+    groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
+    matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
+    matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
+    matchHalfCount: (half, count) => `${half ? `h${half}` : 'half unknown'}: ${count} demo${count === 1 ? '' : 's'}`,
+    UNGROUPED_HEADER: 'Not in a match: these demos could not be read',
+    halfTooltip: (detail) => `What decided the half: ${detail}`,
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Pending/Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
@@ -96,9 +131,13 @@ export const STRINGS = {
     TABLE_HEADER_DEMO_FILE: 'Demo File',
     TABLE_HEADER_HIGHLIGHTS: 'Highlights',
     TABLE_HEADER_SELECTED: 'Selected',
-    TABLE_HEADER_PENDING: 'Pending',
-    TABLE_HEADER_CAPTURED: 'Captured',
-    TABLE_HEADER_RENDERED: 'Rendered',
+    // One cell each of coloured counts, legend letters under the name.
+    TABLE_HEADER_STATUS: 'Status',
+    TABLE_HEADER_STATUS_TITLE: 'How many of the demo\'s highlights are Pending / Captured / Rendered (P / C / R), each in its status colour. Hover a row for the numbers in words.',
+    TABLE_HEADER_REVIEW: 'Review',
+    TABLE_HEADER_REVIEW_TITLE: 'How many of the demo\'s highlights have no Review mark yet / Keep / Maybe / Skip (– / K / M / S), each in its colour. Hover a row for the numbers in words.',
+    COUNT_LABELS: { Pending: 'Pending', Captured: 'Captured', Rendered: 'Rendered', Unmarked: 'not reviewed', Keep: 'Keep', Maybe: 'Maybe', Skip: 'Skip' },
+    COUNT_LETTERS: { Pending: 'P', Captured: 'C', Rendered: 'R', Unmarked: '–', Keep: 'K', Maybe: 'M', Skip: 'S' },
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
@@ -125,7 +164,7 @@ export const STRINGS = {
     REASON_STATUS: 'a Pending/Captured/Rendered status',
     REASON_NOTE: 'a note',
     REASON_CLIP_NAME: 'a typed clip name',
-    REASON_REVIEW: 'a Keep/Skip review mark',
+    REASON_REVIEW: 'a Keep/Maybe/Skip review mark',
     REASON_RANGE: 'an edited kill range',
     EMPTY_DASH: '—',
   },
@@ -159,13 +198,21 @@ export const STRINGS = {
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
     COL_KILLS: 'Kills',
+    // #247: an HLTV demo lists every player's highlights; a capture follows that player.
+    COL_PLAYER: 'Player',
+    COL_PLAYER_TITLE: 'Whose highlight. An HLTV demo lists every player\'s, and its capture keeps the camera on that player.',
+    PLAYER_FILTER_LABEL: 'Player:',
+    PLAYER_FILTER_TITLE: 'Show one player\'s highlights. An HLTV demo lists everyone\'s; the pick carries over to the next HLTV demo that has the same name.',
+    playerFilterAll: (n) => `All players (${n})`,
+    playerFilterOption: (name, n) => `${name} (${n})`,
     COL_TIME: 'Time',
     COL_DUR: 'Dur.',
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
-    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, or Skip. Skip unticks the row and locks it out of every capture batch.',
+    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',
     CURATION_UNREVIEWED: '–',
     CURATION_KEEP: 'Keep',
+    CURATION_MAYBE: 'Maybe',
     CURATION_SKIP: 'Skip',
     SKIPPED_CB_TITLE: 'Marked Skip in the Review column, so it can\'t be captured. Set Review back to use it.',
     COL_STATUS: 'Status',
@@ -228,11 +275,26 @@ export const STRINGS = {
     TAB_CAPTURE_OUTPUT: 'Destinations',
     TAB_CUSTOM_COMMANDS: 'Commands',
     TAB_RENDER_OUTPUT: 'Render Settings',
+    TAB_PLAYERS: 'Players',
     TAB_NOTIFICATIONS: 'Notifications',
     HLAE_EXEC_LABEL: 'HLAE Executable:',
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // Game Folder (#402): game_folder_ui.js.
+    GAME_FOLDER_LABEL: 'Game Folder:',
+    GAME_FOLDER_TIP:
+        "The folder beside hl.exe that DoD Studio starts with -game, and where it finds your configs, maps and demos. Almost always dod; pick another if you keep several versions of DoD side by side (dod_movies, dod_1_2, ...).",
+    GAME_FOLDER_EMPTY: 'Give the name of a folder beside hl.exe, such as dod.',
+    GAME_FOLDER_DOTS: 'Give just the name of a folder beside hl.exe, without "..".',
+    GAME_FOLDER_OPTION: "A folder name can't start with - or +: the game would read it as another launch option.",
+    gameFolderBadChar: (c) => (/\s/.test(c)
+      ? "A folder name can't contain spaces here: the game would split it on the launch line."
+      : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
+    gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
+    gameFolderMissing: (name) =>
+        `There's no "${name}" folder beside hl.exe with a liblist.gam and a cl_dlls/client.dll, so the game can't start it. Pick one from the list.`,
+    GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -259,15 +321,6 @@ export const STRINGS = {
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
-    // Shown beside the progress bar while a batch runs, not in the settings —
-    // there is nothing to configure and no mode it does not apply to. The
-    // throttle is the engine's: GoldSrc slows its frame loop when the window is
-    // not focused and `host_framerate` fast-forward stops with it, so the gaps
-    // between clips play out in real time. Nothing is lost and no HLAE flag
-    // defeats it — `engine_no_focus_sleep` is Source 2 only. See
-    // docs/goldsrc_dod_quirks.md.
-    FOCUS_REMINDER:
-        'Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses focus, and the batch takes far longer.',
     // ── OBS connection ──────────────────────────────────────────────────────
     OBS_SECTION_TITLE: 'OBS Connection',
     OBS_EXE_PATH_LABEL: 'OBS Path:',
@@ -337,9 +390,10 @@ export const STRINGS = {
         "Capture to video is on, but HLAE has no FFmpeg — the capture would run and produce no video. Sort the HLAE FFmpeg row above first.",
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
+    wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
     // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
+        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended (made from the 25th Anniversary build): it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -382,16 +436,22 @@ export const STRINGS = {
     DECAL_FLUSH_TITLE:
       'Clear bullet holes and blood off the walls between one clip and the next, so a later capture does not inherit the damage from an earlier one. Off captures the walls exactly as the engine leaves them. How many decals the engine keeps is a separate thing — set r_decals in Initial Commands.',
     SAVE_LOCAL_PATCHED_LABEL: 'Save Local Patched Copy',
+    HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips',
+    HOOK_RUNS_BATCH_TITLE:
+      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. A demo on another drive than the game is copied into the game folder for the batch and removed afterwards. Needs the DoD Studio hook DLL; a batch that cannot run this way is patched as before. Turn off to patch every batch.',
+    KEEP_GAME_BEHIND_LABEL: 'Keep the Game Behind Your Windows While Capturing',
+    KEEP_GAME_BEHIND_TITLE:
+      'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
     PRE_ROLL_LABEL: 'Pre-roll (s):',
-    PRE_ROLL_HINT: 'Time between fast-forward stopping and capture starting.',
+    PRE_ROLL_HINT: 'Time between the game reaching the clip and capture starting.',
     POST_ROLL_LABEL: 'Post-roll (s):',
-    POST_ROLL_HINT: 'Time between capture stopping and fast-forward resuming.',
+    POST_ROLL_HINT: 'Time between capture stopping and the game moving on to the next clip.',
     START_LEAD_LABEL: 'Start Lead (s):',
     START_LEAD_HINT: 'Time between capture starting and the first kill.',
     STOP_TRAIL_LABEL: 'Stop Trail (s):',
     STOP_TRAIL_HINT: 'Time between the last kill and capture stopping.',
     INITIAL_DELAY_LABEL: 'Initial Delay (s):',
-    INITIAL_DELAY_HINT: 'Time between the demo loading and fast-forward starting.',
+    INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
     // showing how they relate to each other and to the recording window.
     timingDiagramInitialDelayNote: (v) => `This timeline starts after Initial Delay (${v}s) has already passed — a once-per-demo wait, not part of the per-clip cycle below.`,
@@ -400,15 +460,12 @@ export const STRINGS = {
     // Signed offset from the first kill (0.0s) — matches the pre-Tauri egui
     // build's "+{n} sec" / "{n} sec" formatting.
     timingDiagramTime: (v) => (v >= 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`),
-    timingDiagramPreRollEvent: (v) => `Pre-roll ends (speed back to normal) — Pre-roll is ${v}s`,
+    timingDiagramPreRollEvent: (v) => `Normal speed, Pre-roll starts — Pre-roll is ${v}s`,
     timingDiagramRecordStartEvent: (v) => `Recording starts — Start Lead is ${v}s`,
     TIMING_DIAGRAM_FIRST_KILL_EVENT: 'First kill (anchor)',
     TIMING_DIAGRAM_LAST_KILL_EVENT: 'Last kill (anchor — illustrative gap, not a real streak length)',
     timingDiagramRecordStopEvent: (v) => `Recording stops — Stop Trail is ${v}s`,
-    timingDiagramPostRollEvent: (v) => `Post-roll ends, fast-forward resumes — Post-roll is ${v}s`,
-    FF_SPEED_LABEL: 'FF Speed (x):',
-    FF_SPEED_TITLE: 'Locked, matching dev — not currently user-editable.',
-    FF_SPEED_HINT: 'How fast playback races toward each clip between kills, as a multiple of real time. Locked at 0.05x, matching dev — not currently user-editable.',
+    timingDiagramPostRollEvent: (v) => `Post-roll ends, on to the next clip — Post-roll is ${v}s`,
     CAPTURE_FPS_LABEL: 'Capture FPS:',
     // Worth stating outright. This used to sit under Timing Options, and the
     // adjacency invited exactly the confusion that cost real time: the demo's
@@ -562,7 +619,7 @@ export const STRINGS = {
     TABLE_HEADER_HISTORY_TITLE: 'Every time this take was rendered, kept beside the take so it survives restarts. ▸ lists each attempt.',
     HISTORY_NEW: 'New',
     historyRendered: (count) => `Rendered ×${count}`,
-    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' },
+    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted', rendering: 'Rendering…' },
     HISTORY_SKIPPED_SETTINGS: 'Skip (kept original)',
     HISTORY_TOGGLE_TITLE: 'Show or hide every render of this take',
     historyFileNotFound: (name) => `${name} was moved or deleted`,
@@ -593,6 +650,7 @@ export const STRINGS = {
     CUSTOM_CODEC_PLACEHOLDER: '-c:v mpeg4 -q:v 3',
     CUSTOM_CODEC_ARGS_REQUIRED: 'Enter the FFmpeg video-codec arguments to use for Custom (e.g. -c:v mpeg4 -q:v 3).',
     SOURCE_FPS_LABEL: 'Source FPS:',
+    SOURCE_FPS_TITLE: 'The frame rate a take is read at when it does not say what it was captured at (takes from older versions). Takes captured by this version render at their own capture FPS, and each row says which it used.',
     MAX_CONCURRENT_LABEL: 'Max Concurrent Renders:',
     EXPORT_DIR_PLACEHOLDER: 'Add export drive/folder...',
     EXPORT_DIR_ROW_PLACEHOLDER: 'Export drive/folder path...',
@@ -619,9 +677,32 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY: 'No render jobs queued. Scan a folder, then click Start Render Batch.',
     START_RENDER_BUTTON: 'Start Render Batch',
-    CANCEL_ALL_BUTTON: 'Cancel All',
-    RESET_ALL_BUTTON: 'Reset All',
-    REMOVE_ALL_BUTTON: 'Remove All (Not Rendering)',
+    // #70: Start renders every queued row; the other footer buttons act on
+    // the ticked rows, and say on how many.
+    startRenderBatch: (n) => `Start Render Batch (${n})`,
+    START_RENDER_TITLE: 'Render every queued row. Cancel or remove a row to leave it out.',
+    START_RENDER_NONE_TITLE: 'Nothing is queued. Scan for takes, or Retry a finished row.',
+    START_RENDER_NO_EXPORT_DIR_TITLE: 'Add an export folder in Configuration → Render Settings first.',
+    cancelSelected: (n) => `Cancel (${n})`,
+    CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
+    retrySelected: (n) => `Retry (${n})`,
+    RETRY_SELECTED_TITLE: 'Queue the ticked rows that finished, failed or were cancelled again.',
+    removeSelected: (n) => `Remove (${n})`,
+    REMOVE_SELECTED_TITLE: 'Take the ticked rows off the list. A rendering row stays.',
+    deleteTakesSelected: (n) => `Delete Take folders (${n})`,
+    DELETE_TAKES_SELECTED_TITLE: "Move the ticked rows' take folders to the Recycle Bin. A take that is rendering stays; a queued one leaves the queue.",
+    CLEAR_QUEUE_BUTTON: 'Clear Queue',
+    CLEAR_QUEUE_TITLE: 'Empty the list. Anything rendering is cancelled first.',
+    CLEAR_QUEUE_CONFIRM_TITLE: 'Clear Queue',
+    clearQueueConfirmMessage: (rendering) => (rendering === 1
+      ? 'A take is rendering. Stop it and empty the list?'
+      : `${rendering} takes are rendering. Stop them and empty the list?`),
+    CLEAR_QUEUE_CONFIRM_BUTTON: 'Stop and clear',
+    SELECT_UNRENDERED_BUTTON: 'Select unrendered',
+    SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
+    SELECT_ALL_CB_TITLE: 'Tick or untick every row',
+    SELECT_ROW_TITLE: 'Tick this row for Cancel, Retry, Remove and Delete Take folders below',
+    selectedCount: (ticked, total) => `${ticked} of ${total} selected`,
     STATUS_WAITING: 'Status: Waiting...',
 
     CANCEL_JOB_TITLE: 'Cancel this job',
@@ -636,6 +717,27 @@ export const STRINGS = {
     OPEN_TAKE_FOLDER_TITLE: 'Open the source take folder',
     OPEN_OUTPUT_BUTTON: '📁 Open Output',
     OPEN_TAKE_FOLDER_BUTTON: '📁 Open Take Folder',
+    // #644: Delete Take sends the take folder to the Recycle Bin.
+    DELETE_TAKE_BUTTON: 'Delete Take',
+    DELETE_TAKE_TITLE: "Move this take's folder to the Recycle Bin. Its render history stays.",
+    DELETE_TAKE_RENDERING_TITLE: 'This job is rendering. Cancel it first.',
+    DELETE_TAKE_PAIR_RENDERING_TITLE: 'Another stream of this take is rendering. Cancel it first.',
+    DELETE_TAKE_RUNNING_TITLE: 'A take is being deleted.',
+    deleteTakeConfirmTitle: (n) => (n === 1 ? 'Delete Take' : `Delete ${n} Takes`),
+    deleteTakeConfirmMessage: (n, size) => (n === 1
+      ? `Move this take (${size}) to the Recycle Bin?`
+      : `Move these ${n} takes (${size}) to the Recycle Bin?`),
+    DELETE_TAKE_CONFIRM_FOOTER: 'The space comes back when the Recycle Bin is emptied. The render history stays.',
+    deleteTakeQueuedNote: (n) => (n === 1
+      ? 'Its queued render is removed from the queue.'
+      : `${n} queued renders are removed from the queue.`),
+    DELETE_TAKE_CONFIRM_BUTTON: 'Move to Recycle Bin',
+    deleteTakeMeasuring: (done, total) => `Measuring takes: ${done} of ${total}`,
+    deleteTakeRecycling: (done, total) => `Moving to the Recycle Bin: ${done} of ${total}`,
+    takesDeleted: (n, size) => `${n === 1 ? 'Take' : `${n} takes`} moved to the Recycle Bin (${size}).`,
+    takesDeleteFailed: (deleted, failed, firstError) =>
+      `${failed} take${failed === 1 ? '' : 's'} not deleted${deleted > 0 ? ` (${deleted} moved to the Recycle Bin)` : ''}: ${firstError}. Scan for Takes to list ${failed === 1 ? 'it' : 'them'} again.`,
+    deleteTakeRefused: (err) => `Couldn't delete the take: ${err}`,
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -650,6 +752,8 @@ export const STRINGS = {
     REQUIRED_ESTIMATED_DEFAULT: 'Required (Over-estimated): 0.00 GB',
     recoveredJobsToast: (completed, pending) => `Recovered ${completed} completed, ${pending} pending render job(s).`,
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
+    STATUS_RECOVERING: 'Status: Recovering the render batch…',
+    recoveredStatus: (queued) => `Status: Render batch recovered — ${queued} take(s) queued`,
     renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
@@ -661,12 +765,21 @@ export const STRINGS = {
     countCancelled: (n) => `${n} cancelled`,
     batchSummary: (parts) => `Render batch finished — ${parts}.`,
     STATUS_FINISHED: 'Status: Finished',
+    STATUS_CANCELLED: 'Status: Cancelled',
+    statusFinishedWith: (parts) => `Status: Finished — ${parts}`,
     scanFoundSoFar: (n) => `Status: Scanning… found ${n} take(s) so far`,
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
     SCANNING_TOAST: 'Scanning render directories...',
     STATUS_SCANNING: 'Status: Scanning…',
-    scannedTakesToast: (count) => `Scanned ${count} render take(s).`,
     scanCompleteStatus: (count) => `Status: Scan complete — ${count} take(s) found`,
+    // What a scan changed in the queue (#772); render_scan_summary.js joins them.
+    scanNewTakes: (n) => (n === 1 ? '1 new take' : `${n} new takes`),
+    scanRefreshed: (n) => `${n} refreshed`,
+    scanGone: (n, queued) => (queued > 0 ? `${n} gone (${queued} ${queued === 1 ? 'was' : 'were'} queued)` : `${n} gone`),
+    scanMergedToast: (parts) => `Scan complete: ${parts}.`,
+    scanMergedStatus: (parts) => `Status: Scan complete — ${parts}`,
+    SCAN_NO_CHANGES: 'Scan complete: no changes, every take found is already in the queue.',
+    STATUS_SCAN_NO_CHANGES: 'Status: Scan complete — no changes',
     NO_RENDER_TAKES_DETECTED: 'No render takes detected.',
     scanDirError: (err) => `Error scanning render directories: ${err}`,
     STATUS_SCAN_FAILED: 'Status: Scan failed',
@@ -735,6 +848,13 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    COL_NUM: '#',
+    COL_MAP: 'Map',
+    COL_WHEN: 'Length',
+    COL_DONE: 'Already split',
+    ALREADY_SPLIT_CHIP: 'Already split',
+    ALREADY_SPLIT_TITLE: 'A split already wrote this map next to the demo, so it starts unticked. Tick it to write it again (as a new file beside the old one).',
+    footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
     progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
@@ -745,20 +865,23 @@ export const STRINGS = {
     FIND_BUTTON: 'Find Multi-Map Demos',
     CANCEL_BUTTON: 'Cancel',
     CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
-    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    scanning: (done, total, demo) => `Finding demos: ${done} of ${total} checked${demo ? ` (${demo})` : ''}`,
+    readingLengths: (n, total, demo) => `Reading map lengths: ${n} of ${total} demos (${demo})`,
+    cancelledListed: (listed, total) => `Cancelled: ${listed} of ${total} demos with more than one map listed.`,
     CANCELLING: 'Cancelling...',
     found: (n, total) => n === 0
       ? 'No demo here has more than one map.'
       : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
     scanFailed: (e) => `Couldn't check the folder: ${e}`,
     mapsCount: (n) => `${n} maps`,
-    LOADING_DETAILS: 'Reading lengths...',
     detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
-    startsAt: (start, length) => `${start} · ${length} long`,
     SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
     SPLIT_BUTTON: 'Split Checked Maps',
+    CANCEL_SPLIT_BUTTON: 'Cancel',
+    CANCELLING_SPLIT: 'Cancelling after this step…',
+    cancelledSplit: (n) => n === 0 ? 'Cancelled. Nothing was written.' : `Cancelled after ${n} demo${n === 1 ? '' : 's'}:`,
     SHOW_IN_FOLDER: 'Show in folder',
-    NOTHING_TICKED: 'Tick at least one map.',
+    NOTHING_TICKED: 'Tick at least one map to split.',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
@@ -777,35 +900,76 @@ export const STRINGS = {
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     STATUS_READY: 'Status: Ready to audit',
     RESULTS_TITLE: 'Duplicate Groups Found',
-    DELETE_SELECTED_BUTTON: 'Delete Selected Files',
+    DELETE_SELECTED_BUTTON: 'Move to Recycle Bin',
     TABLE_HEADER_STATUS: 'Status',
     TABLE_HEADER_SIZE: 'Size',
     TABLE_HEADER_FILE_PATH: 'File Path',
     TABLE_HEADER_ACTION: 'Action',
     TABLE_EMPTY: 'Choose a folder and run audit to find duplicate demo files.',
-    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.00 GB',
-    footerSummary: (count, gb) => `Duplicates Found: ${count} | Wasted Space: ${gb} GB`,
+    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.0 MB',
+    footerSummary: (count, size) => `Duplicates Found: ${count} | Wasted Space: ${size}`,
 
     SELECT_FOLDER_DIALOG_TITLE: 'Select Folder to Audit',
-    foundSoFarHtml: (n) => `<strong>Found ${n} demo file(s) so far&hellip;</strong>`,
-    statusLineHtml: (status) => `<br><span class="text-muted">${status}</span>`,
-    CHOOSE_FOLDER_FIRST: 'Choose a target folder before starting an audit.',
-    INITIALIZING_HTML: '<strong>Initializing&hellip;</strong>',
+    // Duplicates' "Folders to check" (audit_folders.js, #844).
+    FOLDERS_TO_CHECK_LABEL: 'Folders to check:',
+    ADD_FOLDER_BUTTON: 'Add Folder…',
+    ADD_FOLDER_DIALOG_TITLE: 'Add Folders to Check for Duplicates',
+    REMOVE_FOLDER_BUTTON: 'Remove',
+    NO_FOLDERS_YET: 'No folders yet: add a folder, or tick All drives.',
+    ALL_DRIVES_LABEL: 'All drives',
+    allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
+    ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
+    CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
-    CANCELLING_HTML: '<strong>Cancelling&hellip;</strong>',
+    CANCELLING_STATUS: 'Cancelling…',
+    CANCELLED_STATUS: 'Cancelled. Nothing was listed.',
+    CANCELLED_ROW: 'The audit was cancelled before it finished, so no groups are listed.',
+    // The progress line (audit_duplicates.js): listing folders, then keying.
+    listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
+    keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
+    deletingLine: (done, total, permanent) => (permanent
+      ? `Deleting permanently: ${done} / ${total}`
+      : `Moving to the Recycle Bin: ${done} / ${total}`),
+    doneStatus: (demos, groups) => `Done: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
-    ORIGINAL_FILE_TITLE: 'Original file (kept)',
-    FILE_ROW_LABEL: '   ↳ File',
+    ORIGINAL_FILE_TITLE: 'The copy this group keeps. Pick another copy to keep that one instead.',
+    KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
+    KEEP_CHANGED_NOTE: 'Kept copy changed by you',
+    NOT_A_COPY_LABEL: '   ≠ Not an exact copy',
+    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy when you deleted, and it's different: another demo that only starts the same way. It isn't deleted or counted as a copy.",
+    KEEP_RESET_BUTTON: 'Reset',
+    keepResetTitle: (path) => `Keep the copy the audit picked again: ${path}`,
+    PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',
+    PREFER_FOLDER_TITLE: 'Moves nothing. Pick a folder: every group that already has a copy in it (or in a folder inside it) keeps that copy, so a long list needs no picking row by row.',
+    PREFER_FOLDER_DIALOG_TITLE: 'Keep the copies that are already in this folder',
+    preferFolderToast: (found, changed, folder) => (found
+      ? `Keeping the copy in ${folder} in ${found} group${found === 1 ? '' : 's'} (${changed} changed).`
+      : `No group has a copy in ${folder}. This only picks which copy to keep; it doesn't move demos.`),
+    IN_USE_TITLE: "The game or this project reads this copy, so it isn't ticked. Tick it only if you're sure.",
+    // Why a copy is kept or left unticked (audit_manager.rs's InUse).
+    IN_USE: { game_folder: 'in the game folder', queue: "in this project's queue" },
+    KEPT_LABEL: 'Kept',
+    keptBecause: (why) => `Kept (${why})`,
+    COPY_LABEL: '   ↳ Copy',
+    inUseCopy: (why) => `   ↳ Copy, ${why}`,
     COPY_PATH_BUTTON: '📋 Copy Path',
     OPEN_FOLDER_BUTTON: '📁 Open Folder',
     PATH_COPIED_TOAST: 'Path copied to clipboard.',
     COPY_PATH_FAILED_TOAST: 'Failed to copy path.',
-    deleteNSelectedFiles: (n) => `Delete ${n} Selected File(s)`,
-    deleteConfirm: (n) => `Are you sure you want to permanently delete ${n} files?`,
-    deletedFilesToast: (n) => `Successfully deleted ${n} duplicate files.`,
+    DELETE_PERMANENT_BUTTON: 'Delete Permanently…',
+    recycleNSelectedFiles: (n) => `Move ${n} to Recycle Bin`,
+    deleteNPermanently: (n) => `Delete ${n} Permanently…`,
+    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? Each is first compared byte for byte with the copy kept, and any that differ stay where they are. You can put them back from the Recycle Bin.`,
+    deletePermanentlyConfirm: (n) => `Delete ${n} duplicate file${n === 1 ? '' : 's'} permanently? They skip the Recycle Bin and can't be put back.`,
+    recycledFilesToast: (n) => `Moved ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin.`,
+    deletedFilesToast: (n) => `Deleted ${n} duplicate file${n === 1 ? '' : 's'} permanently.`,
+    someNotDeletedToast: (n, first) => `${n} file${n === 1 ? ' was' : 's were'} not deleted. ${first}`,
+    deletedStatus: (deleted, failed, permanent) =>
+      `${permanent ? 'Deleted' : 'Moved to the Recycle Bin'}: ${deleted}${failed ? `, ${failed} not deleted` : ''}.`,
     deletionFailedToast: (e) => `Deletion failed: ${e}`,
     megabytesLabel: (mb) => `${mb} MB`,
   },
@@ -833,6 +997,8 @@ export const STRINGS = {
     INTRO: "Tags found in players' names, one per side of each demo. Type the name you want a team to go by, or pick another tag it is the same team as.",
     HEADER_TAG: 'Tag',
     HEADER_DEMOS: 'Demos',
+    HEADER_SIDES: 'Played as',
+    sides: (allied, axis) => `${allied} Allied, ${axis} Axis`,
     HEADER_NAME: 'Name',
     HEADER_SAME_AS: 'Same team as',
     SAME_AS_NONE: '—',
@@ -858,14 +1024,18 @@ export const STRINGS = {
     DEMOS_TITLE: 'Demos',
     CACHE_ALL_BUTTON: 'Cache all',
     CACHE_STOP_BUTTON: 'Stop',
-    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped, and ones an older version of DoD Studio cached are upgraded instead of analysed again where possible.',
     CACHE_NOTHING: 'No demos in this folder to cache.',
     CACHE_STOPPING: 'Stopping after the demos in progress…',
-    cacheProgress: ({ done, total, already, failed }) =>
-      `Caching ${done} / ${total}` + cacheCounts(already, failed),
-    cacheDone: ({ done, total, already, failed, cancelled }) =>
+    // A cache-format change leaves older analyses behind; they are upgraded
+    // first, which is fast, and only the rest are parsed.
+    cacheUpgrading: ({ upgrade: { done = 0, total = 0 } = {} }) =>
+      `Upgrading cached analyses: ${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`,
+    cacheProgress: ({ done, total, already, failed, upgrade }) =>
+      `Caching ${done} / ${total}` + cacheCounts(already, failed, upgrade?.upgraded),
+    cacheDone: ({ done, total, already, failed, cancelled, upgrade }) =>
       (cancelled ? `Stopped at ${done} / ${total}` : `Cached ${total} demo${total === 1 ? '' : 's'}`) +
-      cacheCounts(already, failed),
+      cacheCounts(already, failed, upgrade?.upgraded),
     SEARCH_NAME_MAP_PLACEHOLDER: 'Search name/map...',
     TYPE_ALL: 'All',
     TYPE_POV: 'POV',
@@ -927,6 +1097,10 @@ export const STRINGS = {
       + 'the Demo Auditor\'s Split Maps tab lets you pick.',
     multiMapSplitDone: (names) => `Split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
     multiMapSplitFailed: (err) => `Could not split it: ${err}`,
+    // #811: a demo damaged partway, read up to the break.
+    damagedDemoNotice: (clock, rest, reason) => `Damaged demo: read up to ${clock}. `
+      + `The rest of the file (${rest}) doesn't parse (${reason}), so everything here stops at ${clock}.`,
+    DAMAGED_DEMO_REASON_UNKNOWN: 'no reason given',
 
     NO_PLAYERS_FOUND: 'No players found in this demo.',
     NO_WEAPON_DATA: 'No weapon data.',
@@ -1059,7 +1233,7 @@ export const STRINGS = {
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.
     FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
-    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    flagsTeamBadge: (captures, fromEnemy, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${fromEnemy} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
     FLAGS_TITLE: 'Flags',
     flagArea: (area) => `Area ${area}`,
     COL_FLAG: 'Flag',
@@ -1070,12 +1244,14 @@ export const STRINGS = {
     CAPTURES_TITLE: 'Captures',
     COL_TEAM: 'Team',
     COL_CAPPERS: 'Cappers',
-    FLAGS_BREAK: 'from the other team',
+    FLAGS_FROM_ENEMY: 'from the other team',
     FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
     CAPPERS_TITLE: 'Cappers',
     COL_PLAYER: 'Player',
     COL_CAP_CREDITS: 'Caps',
     COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_CAP_BREAKS: 'Breaks',
+    COL_CAP_BREAKS_TITLE: 'Enemy captures the player stopped: a timed capture cancelled within 1.1 seconds of the player killing one of its cappers',
     COL_OBJ_POINTS: 'Objective points',
     COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
@@ -1244,9 +1420,9 @@ export const STRINGS = {
       'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
     tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
-    HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
+    HAZARD_TITLE: 'These Scheduled Commands fight a value DoD Studio sets itself:',
     HAZARD_ADVICE:
-      "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
+      "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting, so a scheduled one just fights it. fps_max, fps_override and gl_vsync are set by the fast-forward between clips and put back to your Initial Commands (or config) value at every clip's pre-roll, so a scheduled one lasts only until the next clip. Not dangerous, just short-lived — set them in Initial Commands instead.",
     hazardRow: (command) => `${command} — runs during playback`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
@@ -1276,6 +1452,14 @@ export const STRINGS = {
     noopRow: (command, reason, source) => {
       const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
       return isPlainSource ? `${command} — ${reason}` : `${command} — ${reason} (${source})`;
+    },
+    // #555: the hook's console names went from dodstudio_ to ds_.
+    RENAMED_TITLE: 'These DoD Studio commands have new names:',
+    RENAMED_ADVICE:
+      "DoD Studio's in-game commands now start with ds_ instead of dodstudio_. The old names do nothing in the game any more, so change these lines to the new name. DoD Studio never changes your config files.",
+    renamedRow: (oldName, newName, source) => {
+      const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
+      return isPlainSource ? `${oldName} → ${newName}` : `${oldName} → ${newName} (${source})`;
     },
     // #679: the engine's filter for commands a demo carries.
     FILTERED_TITLE: 'The game drops these commands without running them:',
@@ -1379,18 +1563,56 @@ export const STRINGS = {
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
-    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_QUESTION: "Rescan them now? Their highlights are replaced by the new scan; marks, notes, status and kill ranges go with any highlight found again.",
     CHANGED_DEMOS_RESCAN: 'Rescan',
+    // Opening a project with demos an older DoD Studio scanned (scan_version.js).
+    OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
+    outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
+    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    OUTDATED_DEMOS_RESCAN: 'Rescan',
+    OUTDATED_DEMOS_NOT_NOW: 'Not now',
+    // What a rescan did with the highlights' work (rescan_carry.js).
+    rescanCarryToast: (kept, total) => kept === total
+      ? `Rescan kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `Rescan kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the new scan; their marks and notes are listed in the activity log (View Logs).`,
+    rescanCarryLog: (kept, total, demos) => `[rescan] kept the work on ${kept} of ${total} highlight(s) across ${demos} demo(s)`,
+    rescanDemoLog: (name) => `[rescan] ${name}:`,
+    rescanNarrowedLog: (time, player) => `[rescan]   ${time} ${player}: the new scan splits its Kill Range over two highlights; kept on the one holding most of its kills`,
+    rescanUncarriedLog: (time, player, timeline, reason, work) => `[rescan]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    RESCAN_UNCARRIED_REASON: {
+      'no-piece': 'the demo did not scan',
+      'not-found': 'no highlight in the new scan has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
     // #217: splitting a queued demo that recorded more than one map.
-    SPLIT_TRACKED_DEMO_TITLE: 'Split Tracked Demo',
-    VERB_SPLITS: 'splits and replaces',
-    SPLIT_ANYWAY: 'Split Anyway',
     queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    // What happened to the original's highlight work (split_carry.js).
+    splitCarryToast: (name, kept, total) => kept === total
+      ? `${name}: kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `${name}: kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the split demos; their marks and notes are listed in the activity log (View Logs).`,
+    splitCarryLog: (name, kept, total, pieces) => `[split] ${name} -> ${pieces.join(', ')}: kept the work on ${kept} of ${total} highlight(s)`,
+    splitNarrowedLog: (time, player, piece) => `[split]   ${time} ${player}: its Kill Range spans two highlights in ${piece}; kept on the one holding most of its kills`,
+    splitUncarriedLog: (time, player, timeline, reason, work) => `[split]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    SPLIT_UNCARRIED_REASON: {
+      'no-piece': 'its map was not written as a demo of its own (shorter than a minute), or the piece did not scan',
+      'not-found': 'no highlight in the split demo has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
+    splitWorkText: ({ curation, status, picked, notes, clipName, range }) => [
+      curation && `Review: ${curation}`,
+      status && `Status: ${status}`,
+      picked && 'Picked',
+      range && `Kill Range: ${range}`,
+      clipName && `Clip name: "${clipName}"`,
+      notes && `Note: "${notes}"`,
+    ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
     queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue; their picks don\'t carry over, so pick the highlights again in each one.',
+    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
     MULTI_MAP_PICKED_SPLIT: 'Split Them',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
@@ -1406,7 +1628,7 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
+    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
@@ -1414,6 +1636,10 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    scanCancelledToast: (count) =>
+      count > 0
+        ? `Scan cancelled (${count} demo(s) added before cancel)`
+        : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 
@@ -1522,10 +1748,15 @@ export const STRINGS = {
     modeObs: (fps) => `OBS @ ${fps} fps`,
     modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
+    commands: (name, edited) => `Commands: ${name}${edited ? ' (edited)' : ''}`,
+    COMMANDS_NONE: 'Commands: none',
     scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
     banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,
     DECALS_CLEARED: 'Decals cleared',
     DECALS_KEPT: 'Decals kept',
+    finish: (codec) => (codec ? `Finish: ${codec}` : 'Finish: on'),
+    FINISH_OFF: 'Finish: off',
+    FINISH_KEEP: 'Keep as captured',
     NO_DESTINATION: 'No destination folder',
     LINK_TITLE: 'Open this setting in Configuration',
   },
@@ -1583,7 +1814,7 @@ export const STRINGS = {
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
-    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
+    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
     // #426: how much of the game a style covers.
@@ -1591,7 +1822,7 @@ export const STRINGS = {
     CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
     largestSize: (width, height) => `up to ${width}×${height}`,
     LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
-    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', decals: 'decals', detail: 'detail textures', sky: 'skies' },
     someOf: (files, most, type) => `${files} of ${most} ${type}`,
     styleGaps: (style, none, some) => {
       const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
@@ -1601,6 +1832,36 @@ export const STRINGS = {
       return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
     },
     cfgGapsComment: (sentence) => `// ${sentence}`,
+    // #426: which maps a style has map textures for, and the warning when
+    // the maps being built include one it hasn't.
+    COVERAGE_CHECKING: 'Checking which maps each style has map textures for…',
+    coverageChecking: (done, total) => `Checking which maps each style has map textures for… (${done} of ${total} maps)`,
+    coverageFailed: (err) => `Could not check which maps are covered: ${err}`,
+    coverageAll: (style, maps, listed) => `${style} has every map texture for ${maps === 1 ? 'the 1 map' : `all ${maps} maps`}${listed ? ' in your map list' : ''}.`,
+    coverageCounts: (style, full, part, none, listed) => {
+      const maps = (n) => `${n} map${n === 1 ? '' : 's'}`;
+      const parts = [];
+      if (full) parts.push(`every map texture for ${maps(full)}`);
+      if (part) parts.push(`${parts.length ? 'some' : 'some of the map textures'} for ${maps(part)}`);
+      if (none) parts.push(`${parts.length ? 'none' : 'no map textures'} for ${maps(none)}`);
+      const last = parts.pop();
+      return `${style}${listed ? ', in your map list' : ''}: ${parts.length ? `${parts.join(', ')} and ${last}` : last}.`;
+    },
+    COVERAGE_SHOW: 'Click to see which maps',
+    COVERAGE_SHOW_EVERY_MAP: 'Show every map, not only the ones in your map list',
+    coverageGroupFull: (n) => `Every map texture (${n})`,
+    coverageGroupPart: (n) => `Some of the map textures (${n})`,
+    coverageGroupNone: (n) => `No map textures (${n})`,
+    coveragePartMap: (map, built, total) => `${map} (${built} of ${total})`,
+    coverageUnreadable: (n) => `${n} map file${n === 1 ? '' : 's'} could not be read.`,
+    mapListWarning: (style, kind, first, more, listed) => {
+      const which = `${first}${more ? ` and ${more} more map${more === 1 ? '' : 's'}` : ''}${listed ? ' in your map list' : ''}`;
+      return {
+        none: `${style} has no map textures for ${which}; those maps will show stock textures.`,
+        some: `${style} has only some of the map textures for ${which}; those maps will show stock textures wherever it has none.`,
+        missing: `${style} is missing map textures for ${which}; those maps will show stock textures wherever it has none.`,
+      }[kind];
+    },
     // #680: the gl_max_size the selected install runs with (native::hd::gl_max_size).
     glMaxSizeSource: (source) => ({
       initial_commands: "Studio's Initial Commands",
@@ -1714,7 +1975,7 @@ export const STRINGS = {
       blend: () => `${def.percent}% ${def.a}, ${100 - def.percent}% ${def.b}`,
     })[def.kind](),
     STYLE_NEEDS_MODEL: ' (needs its model)',
-    // The misses view: what dodstudio_debug_hd_misses last wrote to the hook log.
+    // The misses view: what ds_debug_hd_misses last wrote to the hook log.
     MISSES_TITLE: 'Textures that kept their original',
     MISSES_BUTTON: "Read the game's log",
     MISSES_READING: 'Reading...',
@@ -1733,12 +1994,12 @@ export const STRINGS = {
     // What to do about each reason, after the hook's own heading.
     MISSES_ADVICE: {
       wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
-      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      no_file: "Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps. A decal that isn't in decals.wad is a player's spray, which has no HD version.",
       failed: "A file was found but couldn't be used; each line says why.",
       on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
     },
     // The hook's asset kinds in the miss list (singular, unlike the folders).
-    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', decal: 'Decal', detail: 'Detail texture', sky: 'Sky' },
   },
 
   // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
@@ -1765,6 +2026,25 @@ export const STRINGS = {
     demos: (names) => (names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`),
     seen: (count, date, build) => `Seen ${count === 1 ? 'once' : `${count} times`}, last on ${date}${build ? `, ${build} build` : ''}.`,
     START_ANYWAY: 'Start anyway',
+  },
+
+  // ── demo_links.js: demo folders linked into the game folder (#376) ─────
+  DEMO_LINKS: {
+    TITLE: 'Demo folders the game can play',
+    HINT: 'The game plays demos on its own drive through a relative path (../), but cannot reach another drive. Link a demo folder from another drive and the game plays its demos where they are, with nothing copied.',
+    LINK_BUTTON: '+ Link Folder to Game',
+    LINK_BUTTON_TITLE: 'Make a demo folder on any drive playable in the game, without copying it',
+    LINKING: 'Linking…',
+    PICK_TITLE: 'Choose a demo folder to link into the game',
+    NEED_GAME: 'Set the Half-Life executable in Configuration → Paths first: the link goes into that game folder.',
+    EMPTY: 'No folders linked yet.',
+    REMOVE: 'Remove',
+    removeTitle: (target) => `Remove this link. ${target} and its demos stay where they are.`,
+    pointsTo: (target) => `→ ${target}`,
+    consoleLine: (prefix) => `In the game's console: viewdemo "${prefix}<demo name>"`,
+    linked: (name) => `Linked as ${name}. In the game's console: viewdemo "demos/${name}/<demo name>"`,
+    removed: (name) => `Removed the link ${name}. The folder and its demos are untouched.`,
+    listFailed: (reason) => `Could not read the linked folders: ${reason}`,
   },
 
   // ── packet_entity_limit.js: demos the engine can't play (#207) ─────────
@@ -1818,6 +2098,7 @@ export const STRINGS = {
     droppedFromDemo: (pattern) => `Does nothing: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
+    FAST_FORWARD_RESTORED: "Lasts until the next clip: the fast-forward between clips sets this, and every clip's pre-roll puts your Initial Commands value back.",
     describe: (source, kind, builds) => {
       const what = source === 'hlae' ? 'HLAE' : source === 'dodstudio' ? 'DoD Studio' : kind === 'cvar' ? 'setting' : 'command';
       const where = builds === 'pre' ? ', pre-Anniversary only' : builds === 'post' ? ', 25th Anniversary only' : '';
@@ -1855,15 +2136,20 @@ export const STRINGS = {
      *  mismatch answer. */
     message({ running, wanted, differs }) {
       const install = differs.includes('install');
+      // The Game folder setting, `-game` (#402).
+      const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
       const size = (s) => `${s.width}×${s.height}`;
+      const folderName = (s) => `the "${s.game_folder}" game folder`;
       const now = [
         install && `from "${running.install}"`,
+        folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
       ].filter(Boolean).join(' ');
       const set = [
         install && `"${wanted.install}"`,
-        resolution && (install ? `at ${size(wanted)}` : size(wanted)),
+        folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
+        resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },
@@ -1990,13 +2276,56 @@ export const STRINGS = {
   // ── Review highlights (#623) ─────────────────────────────────────────────
   REVIEW: {
     BUTTON: 'Review highlights',
-    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, No marks it Skip.',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
+    // #661: which Review marks a review plays.
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
+    COVERS_ALL: 'All',
+    COVERS_UNMARKED: 'Unmarked',
+    COVERS_KEEP: 'Keep',
+    COVERS_MAYBE: 'Maybe',
+    COVERS_SKIP: 'Skip',
+    // #822: whose highlights an HLTV demo's review plays.
+    HLTV_LABEL: 'HLTV:',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; any players you pick from the HLTV demos (a whole team at once from the Teams list), kept in the project; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
+    HLTV_MISSING: 'Players missing their POV for this half',
+    HLTV_RECORDERS: 'Players with a POV demo in the queue',
+    HLTV_ALL: 'Everyone',
+    // #828: any players from the HLTV demos, picked beside the box.
+    HLTV_PICKED: 'Players I pick',
+    PICK_ADD_PLAYER: 'Add a player…',
+    PICK_ADD_PLAYER_TITLE: 'Everyone with a highlight in the queue\'s HLTV demos, one line per player with every name they used.',
+    PICK_NO_PLAYERS: 'No HLTV highlights in the queue',
+    PICK_ADD_TEAM: 'Add a team…',
+    PICK_ADD_TEAM_TITLE: 'Adds every player of a team from the Teams list: whoever played on its side in an HLTV demo, or has its tag in their name.',
+    PICK_NO_TEAMS: 'No teams in the HLTV demos',
+    pickTeamOption: (name, count) => `${name} (${count} player${count === 1 ? '' : 's'})`,
+    PICK_NONE: 'Nobody picked yet',
+    PICK_REMOVE: 'Take this player out',
+    PICK_NOT_IN_QUEUE_TITLE: 'No highlights in the queue\'s HLTV demos. Kept in the pick for when their demo is back.',
+    ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
+    ORDER_TIME: 'Chronological',
+    ORDER_PLAYER: 'By player (A–Z)',
+    // The HLTV box left out every highlight there was (#822).
+    hltvNoneChosen: (choice, count, pickedCount = 0) => {
+      const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;
+      if (choice === 'picked' && pickedCount === 0) {
+        return `Nothing to review: HLTV is set to Players I pick and nobody is picked, so the ${n} were left out. Add players or a team beside the HLTV box, or set HLTV to Everyone.`;
+      }
+      if (choice === 'missing' || !choice) {
+        return `Nothing to review: every player with a POV demo in the queue recorded this half themselves, so the ${n} were left out. To review a player from the HLTV demo, add one of their POV demos from another half, or set HLTV to Everyone.`;
+      }
+      return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
+    },
+    nothingCovered: (covers, ticked) => {
+      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
+      return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
+    },
     TICK_YES_LABEL: 'Tick Yes for capture',
-    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep.',
+    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
     FAST_FORWARD_UNIT: 's',
     FAST_FORWARD_TITLE: 'When two kills in a highlight are further apart than this, the stretch between them plays at 4x: from 2 s after one kill to 4 s before the next. You still see everything, just quicker. Takes effect when a review starts.',
-    NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
+    NOTHING_TO_REVIEW: 'The Master Demo Queue shows no demos to review: add some, or clear its search and filters.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
     startedToast: (count, launched, skipped) =>
@@ -2038,6 +2367,7 @@ export const STRINGS = {
     auditFailed: (err) => `Audit failed: ${err}`,
     combineFailed: (err) => `Combining the clips failed: ${err}`,
     demoRenameFailed: (err) => `Renaming demos failed: ${err}`,
+    matchGroupsFailed: (err) => `Grouping the demos by match failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
@@ -2061,6 +2391,14 @@ export const STRINGS = {
     CHECK_UPDATES_TITLE: 'Check for app updates',
     UPDATE_AVAILABLE_BUTTON: 'Update Available',
     UPDATE_AVAILABLE_TITLE: 'A new version is ready — click to install it.',
+  },
+
+  // ── The menu bar's update button (#868) ──────────────────────────────────
+  UPDATE_CHIP: {
+    available: (v) => `Update ${v} available`,
+    AVAILABLE_TITLE: 'A new version of DoD Studio is out. Click to download and install it.',
+    READY: 'Restart to update',
+    READY_TITLE: 'The update has downloaded. Click, then Restart to Apply.',
   },
 
   // ── About modal (issue #122) ─────────────────────────────────────────────
@@ -2160,6 +2498,7 @@ export const STRINGS = {
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
+    footer: (count, renames) => `Demos listed: ${count} | To rename: ${renames}`,
     CANCELLED: 'Stopped. The demos read so far are listed.',
     STATUS_SAME: 'already named this way',
     STATUS_SKIPPED: 'not ticked',
@@ -2172,47 +2511,60 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
-    fallbackNotAllowed: (raw) => `${raw}: only the name, faction and team placeholders take a word after |.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
+    // Rename Demos' own meaning of a placeholder, where it isn't the one in
+    // PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
       name: "The recording player's name without their team's tag",
       full_name: "The recording player's name as it is, tag included",
-      kills: "The recording player's kills",
+      kills: "The recording player's kills in the whole demo (a clip name's {kills} is the highlight's kills instead)",
       deaths: "The recording player's deaths",
       faction: "The recording player's side: Allies, British or Axis",
       enemy_faction: 'The other side',
-      map: 'The map, without dod_',
-      date: "The demo file's date, YYYY-MM-DD",
-      demo_type: 'pov or hltv',
-      team_name: "The recording player's team",
-      opponent: 'The other team',
-      allies: 'The team on the Allied side',
-      axis: 'The team on the Axis side',
-      team1: 'The two teams in alphabetical order, so both halves agree: the first',
-      team2: 'The second of the two teams in alphabetical order',
+      team_name: "The recording player's team: its display name from the project's Teams list, or unknown when their side has no tag",
+      opponent: "The other team: its display name from the project's Teams list, or unknown when that side has no tag",
       demo: 'The current file name, without .dem',
-      lower: 'Add after a placeholder name to lower-case it: {map:lower}',
-      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
-      first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
+      half: 'Which half of its match the demo records, h1 or h2, told from the players\' sides and the chat across the demos listed together. '
+        + 'When nothing says, it gives unknown or your word after |, never a guess',
+      match: 'The match\'s number among the demos listed together, by date. Every demo of one match gets the same number: the HLTV demo and each POV of both halves',
     },
-    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the placeholder has no value, '
-      + `like the team names in a pug. {team_name|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
     chipTitle: (description, value) => (value ? `${description}. First demo: ${value}` : description),
-    noValueNote: (name) => `With no value (a pug has no team names) it gives unknown, or your word after |, as in {${name}|mix}.`,
-    // The chip rows, by what the placeholders hold.
+  },
+
+  // The name placeholders both templates share (#751): their chip rows, and
+  // what each means where the clip name and Rename Demos agree. Each
+  // template's own meanings are in CLIP_NAME.DESCRIPTIONS and
+  // DEMO_RENAME.DESCRIPTIONS.
+  PLACEHOLDERS: {
     GROUPS: {
       player: 'Player',
       sides: 'Sides',
       teams: 'Teams',
       demo: 'Demo',
+      highlight: 'Highlight',
       format: 'Format',
     },
+    DESCRIPTIONS: {
+      map: 'The map, without dod_',
+      date: "The demo file's date, YYYY-MM-DD",
+      demo_type: 'pov or hltv',
+      allies: 'The team on the Allied side',
+      axis: 'The team on the Axis side',
+      team1: 'The two teams in alphabetical order, so both halves agree: the first',
+      team2: 'The second of the two teams in alphabetical order',
+      lower: 'Add after a placeholder name to lower-case it: {map:lower}',
+      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
+      first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
+    },
+    fallbackNotAllowed: (raw) => `${raw}: only the name, faction, team, half and match placeholders take a word after |.`,
+    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the placeholder has no value, '
+      + `like the team names in a pug. {team_name|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
+    noValueNote: (name) => `With no value (a pug has no team names) it gives unknown, or your word after |, as in {${name}|mix}.`,
   },
 
   CLIP_NAME: {
     TEMPLATE_LABEL: 'Clip Name Template:',
     TEMPLATE_TITLE: 'How each highlight\'s automatic clip name is built. The finished file is named after it. A name typed on a Highlight Details row wins over this.',
-    INSERT_LABEL: 'Insert:',
     RESET_BUTTON: 'Default',
     RESET_TITLE: 'Go back to the default template.',
     MISSING_VALUE: 'unknown',
@@ -2220,8 +2572,7 @@ export const STRINGS = {
     unclosedBrace: (pos) => `The "{" at character ${pos} is never closed.`,
     EMPTY_PLACEHOLDER: '"{}" has no placeholder name in it.',
     unknownPlaceholder: (raw) => `${raw} isn't a placeholder. Pick one from the list below.`,
-    unknownModifier: (raw) => `${raw}: only :lower and :upper can follow a placeholder name.`,
-    fallbackNotAllowed: (raw) => `${raw}: only {team_name} and {opponent} take a word after |.`,
+    unknownModifier: (raw) => `${raw}: only :lower, :upper and :first can follow a placeholder name.`,
     invalidCharacters: (text) => `Windows doesn't allow \\ / : * ? " < > | in a file name: ${text}`,
     EMPTY_TEMPLATE: 'This template gives an empty name.',
     NO_DISTINGUISHING: 'No {row}, {time} or {demo}, so two highlights can get the same name. Their files still stay separate (a _2 is added), but the names won\'t say which is which.',
@@ -2231,12 +2582,14 @@ export const STRINGS = {
     TRIMMED: 'Shortened so the full path stays under the Windows limit (victims, demo and weapons are cut first).',
     PREVIEW_TYPED: 'The selected highlight has a typed name, which wins over the template:',
     PREVIEW_NONE: 'Select a demo with highlights to see a preview.',
+    // The clip name's own meaning of a placeholder, where it isn't the one
+    // in PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
-      player: 'The player whose highlight it is',
+      name: "The highlight player's name without their team's tag ({player} still works: the name as it is)",
+      full_name: "The highlight player's name as it is, tag included",
       faction: 'Their side: Allies, British, Axis',
       enemy_faction: 'The side of the players they killed',
-      map: 'The map, without dod_',
-      kills: 'Kills in the chosen Kill Range',
+      kills: "Kills in the chosen Kill Range (Rename Demos' {kills} is the player's kills in the whole demo instead)",
       weapons: 'Each weapon used, joined with -',
       first_weapon: 'The weapon of the first kill',
       victims: 'The players killed, joined with -',
@@ -2244,16 +2597,208 @@ export const STRINGS = {
       row: 'The highlight\'s row number',
       time: 'Time into the demo, like 12m34s',
       demo: 'The demo file name, without .dem',
-      date: 'The demo file\'s date, YYYY-MM-DD',
-      team_name: 'Their team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
-      opponent: 'The other team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
-      lower: 'Add after a placeholder name to lower-case it: {faction:lower}',
-      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
-      first: 'Add after a placeholder name to keep only its first word: {player:first} gives m00cat for "m00cat :D"',
+      team_name: "Their team's display name from the project's Teams list; unknown (or your word after |) when the side has no tag",
+      opponent: "The first victim's team: its display name from the project's Teams list; unknown (or your word after |) when the side has no tag",
+      half: 'Which half of its match the demo records, h1 or h2, as the Master Demo Queue\'s match grouping tells it from the demos\' contents. '
+        + 'When nothing says, it gives unknown or your word after |, never a guess',
+      match: 'The demo\'s match number in the Master Demo Queue\'s match grouping: every demo of one match shares it',
     },
-    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the team has no name, '
-      + `like in a pug. {opponent|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
     chipTitle: (description, value) => (value ? `${description}. Selected highlight: ${value}` : description),
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
+  },
+
+  // ── First-run Setup window and the Capture page's checklist (#599) ──────
+  // Configuration > Players (#428): players_ui.js.
+  PLAYERS: {
+    USE_IN_GAME_LABEL: 'Use in the game',
+    USE_IN_GAME_TITLE: 'On: sprays and crosshairs in your demos follow this table (ds_player_overrides 1, sent when Studio starts the game, a review or a batch, and right away to a game already running). Off: the game\'s own.',
+    HELP: "Pick the spray and the crosshair each player shows in your demos: sprays are PNGs from the game's logos folder, crosshairs a 64x64 tile of a sprite in its sprites folder. Players are matched by SteamID, or by name when there is none.",
+    PLAYER_PLACEHOLDER: 'A player from the queue, a SteamID or a name',
+    ADD_BUTTON: 'Add Player',
+    REFRESH_BUTTON: 'Refresh',
+    REFRESH_TITLE: "Read the logos and sprites folders and the queue's players again",
+    COLUMN_PLAYER: 'Player',
+    COLUMN_SPRAY: 'Spray',
+    COLUMN_CROSSHAIR: 'Crosshair',
+    PICK_PNG: 'Pick a PNG…',
+    FALLBACK_SPRAY_OPTION: 'Fallback spray',
+    FALLBACK_CROSSHAIR_OPTION: 'Fallback crosshair',
+    pngMissingOption: (name) => `${name} (not in logos)`,
+    spriteMissingOption: (name) => `${name} (not in sprites)`,
+    SPRITE_TITLE: "The crosshair's sprite, in the game's sprites folder (or dod_addon's, where Add a crosshair file… puts them)",
+    TILE_TITLE: 'Pick the tile: the sprite is a 4x4 grid of 64x64 crosshairs, numbered as cl_xhair_style numbers them',
+    PICK_TILE: 'Pick a tile',
+    tileLabel: (tile) => `Tile ${tile}`,
+    NO_PREVIEW: "This sprite couldn't be read for a preview: pick by number (1 top left, 16 bottom right).",
+    notGridSize: (w, h) => `This sprite is ${w}x${h}, not 256x256: its tiles are still cut 64x64 from the top left.`,
+    NO_PLAYERS: 'No players listed yet: everyone gets the fallbacks below.',
+    MATCHED_BY_STEAMID: 'Matched by SteamID, whatever name they play under',
+    MATCHED_BY_NAME: 'Matched by name, ignoring case',
+    REMOVE_TITLE: 'Remove this player',
+    removeAria: (who) => `Remove ${who}`,
+    readingPlayers: (done, total) => `Reading the queue's players… ${done} of ${total} demos`,
+    playersFound: (players, demos) => (demos
+      ? `${players} player${players === 1 ? '' : 's'} in the queue's ${demos} demo${demos === 1 ? '' : 's'}`
+      : 'No demos in the queue: type a SteamID or a name.'),
+    NO_PNGS: "No PNG in the game's logos folder (in the game folder beside hl.exe). Put your spray pictures there, then Refresh.",
+    pngsMissing: (names) => `Not in the logos folder: ${names.join(', ')}. Those sprays stay as the game draws them.`,
+    spritesMissing: (names) => `Not in the sprites folder: ${names.join(', ')}. Those crosshairs stay the game's own.`,
+    HLTV_FALLBACK_UNSET: 'HLTV demos: pick the fallback spray. Without one, players not listed show no spray (with nobody listed at all, the game\'s bullet hole).',
+    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray, or players not listed keep their own (no spray where the demo saved none).',
+    NOT_IN_GAME: "Use in the game is off: the game draws its own sprays and crosshairs.",
+    POV_FALLBACK_LABEL: 'Spray, players not listed, POV demos:',
+    POV_FALLBACK_TITLE: 'Their own spray is the one the demo saved, drawn as it is. A player who joined before the recording started has none saved and shows no spray, never a bullet hole.',
+    HLTV_FALLBACK_LABEL: 'Spray, players not listed, HLTV demos:',
+    HLTV_FALLBACK_TITLE: 'An HLTV demo records that a player sprayed, never the picture, so "their own" is not offered.',
+    FALLBACK_OWN: 'Their own spray',
+    FALLBACK_PNG: 'One fallback spray',
+    FALLBACK_NONE: 'No spray',
+    CROSSHAIR_FALLBACK_LABEL: 'Crosshair, players not listed:',
+    CROSSHAIR_FALLBACK_TITLE: "The game's own is your cl_xhair_style tile of customXHair.spr, as without this table. The crosshair shown is the recorder's in a POV demo, and the watched player's in an HLTV demo's in-eye view.",
+    CROSSHAIR_GAME: "Game's own",
+    CROSSHAIR_ONE: 'One fallback crosshair',
+    HD_NOTE: "Every spray from a PNG is drawn at the spray size in every demo, whether or not the demo saved one, with or without HD textures (with them on, it's sharper). A spray change shows from the next demo you play. A crosshair changes on the next frame, and in a POV demo needs your cl_xhair_style at 1-16 (0 is DoD's classic crosshair, which has no tile to swap).",
+    SPRAY_SIZE_LABEL: 'Spray size:',
+    SPRAY_SIZE_TITLE: "How big a spray built from a PNG is on the wall (its longer side; the picture's shape is kept): every listed player's spray, and every fallback spray. A spray from the demo keeps its real size. A change shows from the next demo you play.",
+    spraySizeOption: (n) => `${n}${n === 64 ? ' (like a saved spray)' : ''}`,
+    // "Make your own crosshair…" / "Add a crosshair file…" (#842).
+    MAKE_CROSSHAIR_BUTTON: 'Make your own crosshair…',
+    MAKE_CROSSHAIR_TITLE: "Opens Vertex's crosshair maker in your web browser. Draw your crosshairs there and download them.",
+    ADD_CROSSHAIR_BUTTON: 'Add a crosshair file…',
+    ADD_CROSSHAIR_TITLE: 'Pick the file the crosshair maker gave you (customxhair.spr, or the ZIP it came in). Studio copies it into the game\'s dod_addon\\sprites folder under a name you choose, and never replaces a file already there.',
+    MAKE_CROSSHAIR_HELP: 'The crosshair maker gives you a file called customxhair.spr, or a ZIP with it inside. Click Add a crosshair file… and pick it (no need to unzip): it then shows in the crosshair lists above.',
+    CROSSHAIR_NAME_LABEL: 'Name:',
+    CROSSHAIR_NAME_TITLE: 'A short name for this crosshair, so several can sit side by side',
+    CROSSHAIR_SAVE_BUTTON: 'Add',
+    CROSSHAIR_CANCEL_BUTTON: 'Cancel',
+    CROSSHAIR_PICK_TITLE: 'Pick a crosshair file',
+    CROSSHAIR_FILTER: 'Crosshair (.spr or .zip)',
+    CROSSHAIR_NEEDS_HL: 'Set the Half-Life executable first (Setup): the crosshair goes into that game.',
+    CROSSHAIR_NAME_EMPTY: 'Type a name (letters or numbers).',
+    crosshairSavedAs: (file) => `Saved as ${file}`,
+    crosshairNameTaken: (file) => `There's already a crosshair called ${file}: pick another name.`,
+    CROSSHAIR_ADDING: 'Adding…',
+    crosshairAdded: (file) => `Added ${file}. Pick it in a crosshair list above.`,
+    crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
+    FROM_DEMO_OPTION: 'From the demo',
+    FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  SETUP: {
+    MENU_ITEM: 'Setup…',
+    MENU_ITEM_TITLE: 'Walk through what DoD Studio needs: the game, HLAE, FFmpeg, output folders and demos',
+    TITLE: 'Setup',
+    // The card's heading and its "3 of 6" chip.
+    CARD_TITLE: 'Finish setting up',
+    cardProgress: (done, total) => `${done} of ${total}`,
+    cardTitleAttr: (requiredDone, requiredTotal) =>
+      `${requiredDone} of ${requiredTotal} required items set. Start Capture Batch needs all of them.`,
+    OPEN_SETUP: 'Open Setup',
+    // One row per step: the name, then what to do about it.
+    STEP_NAMES: {
+      hl: 'Half-Life movie copy',
+      hlae: 'HLAE',
+      ffmpeg: 'FFmpeg',
+      captures: 'Where captures go',
+      renders: 'Where finished clips go',
+      demos: 'Your demos',
+    },
+    // Short labels for the window's progress strip.
+    STEP_TABS: {
+      hl: 'Half-Life',
+      hlae: 'HLAE',
+      ffmpeg: 'FFmpeg',
+      captures: 'Captures',
+      renders: 'Clips',
+      demos: 'Demos',
+    },
+    REQUIRED: 'Required',
+    OPTIONAL: 'Optional',
+    CARD_TODO: {
+      hl: 'Pick the hl.exe of a separate copy of Half-Life used only for movies.',
+      hlae: 'Pick HLAE.exe. HLAE records the game.',
+      ffmpeg: 'Optional. Needed for Video capture mode, Render and Finish clips.',
+      captures: 'Required. Pick a folder on a drive with room.',
+      renders: 'Optional. Needed for Render and Finish clips.',
+      demos: 'Add a folder of .dem files to scan.',
+    },
+    CARD_FIX: {
+      hl: 'Browse',
+      hlae: 'Browse',
+      ffmpeg: 'Check',
+      captures: 'Choose folder',
+      renders: 'Choose folder',
+      demos: 'Add folder',
+    },
+    CARD_CHANGE: 'Change',
+    CARD_ROW_TITLE: 'Opens Setup on this step',
+    FFMPEG_FOUND: 'HLAE can find FFmpeg.',
+    foldersSummary: (count) => (count === 1 ? '1 folder' : `${count} folders`),
+    demosSummary: (count) => (count === 1 ? '1 demo in the queue' : `${count} demos in the queue`),
+
+    // Step 1: Half-Life.
+    HL_TITLE: 'Set up a movie copy of Half-Life',
+    HL_INTRO: 'DoD Studio loads HLAE and its own add-on into the game. Do that in a separate copy of Half-Life used only for movies, never the one you play online with. To make one, copy your Half-Life folder somewhere else and pick the hl.exe inside the copy here.',
+    HL_RECOMMEND: 'Make the copy from the 25th Anniversary build. DoD Studio fixes the problems that build brought in (ESC closing the demo bar, textures glitching as you walk past them), and it is the build DoD Studio is developed on.',
+    HL_FIELD: 'Movie copy: hl.exe',
+    HL_FOUND: 'Found hl.exe.',
+    HL_BUILD: {
+      anniversary: '25th Anniversary build',
+      pre_anniversary: 'pre-Anniversary build',
+    },
+    HL_PLAY_INSTALL: "This is Steam's own Half-Life, the one you play online with. Pick your movie copy instead: copy the Half-Life folder to a new folder and pick its hl.exe here.",
+
+    // Step 2: HLAE.
+    HLAE_TITLE: 'Point DoD Studio at HLAE',
+    HLAE_INTRO: "HLAE (Half-Life Advanced Effects) records the game. Download it from its project page if you don't have it yet, unzip it anywhere, and pick HLAE.exe here.",
+    HLAE_FIELD: 'HLAE.exe',
+    HLAE_FOUND: 'Found HLAE.',
+    HLAE_GET: 'Get HLAE (advancedfx.org)',
+    HLAE_URL: 'https://www.advancedfx.org/download/',
+
+    // Step 3: FFmpeg.
+    FFMPEG_TITLE: 'FFmpeg (optional)',
+    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. HLAE looks for FFmpeg in its own folder; the button below points it at the one DoD Studio uses.',
+    FFMPEG_CHECKING: 'Checking…',
+    FFMPEG_MISSING: "HLAE can't find FFmpeg yet.",
+    FFMPEG_LINK_NOTE: 'Windows may ask for permission if HLAE is in a protected folder.',
+    FFMPEG_NEEDS_HLAE: 'Set HLAE first (the step before this one); then this step can check for FFmpeg.',
+
+    // Steps 4 and 5: folders.
+    CAPTURES_TITLE: 'Choose where captures go',
+    CAPTURES_INTRO: 'Captures are large: a frame sequence runs to many gigabytes a minute. Add folders on as many drives as you like; DoD Studio fills them in order and checks the space before every batch.',
+    CAPTURES_FIELD: 'Capture folders (required)',
+    RENDERS_TITLE: 'Choose where finished clips go',
+    RENDERS_INTRO: 'Render and Finish clips write finished videos here. Optional: a batch captures without it. Several folders work the same way as for captures.',
+    RENDERS_FIELD: 'Clip folders (optional)',
+    ADD_FOLDER: 'Add a folder',
+    ADD_ANOTHER_DRIVE: 'Add another drive',
+    REMOVE: 'Remove',
+    NO_FOLDERS_YET: 'No folder yet.',
+    freeOn: (free, drive) => (drive ? `${free} free on ${drive}` : `${free} free`),
+    NO_SPACE_FOUND: 'Drive not found',
+    sameDrive: (path, drive, first) =>
+      `${path} is on ${drive}, like ${first} above it. Both share ${drive}'s free space, so this folder adds no room. Pick a folder on another drive, or remove it.`,
+
+    // Step 6: demos.
+    DEMOS_TITLE: 'Add your demos',
+    DEMOS_INTRO: "DoD Studio scans a folder of .dem files for highlights. Your movie copy's dod folder is a good start; you can add more folders later from the Capture page.",
+    DEMOS_FIELD: 'Demo folder',
+    DEMOS_NONE: 'No folder picked yet.',
+    DEMOS_FINISH_NOTE: 'Finish scans this folder and opens the Capture page with your demos listed.',
+    DEMOS_SCANNING: 'Scanning…',
+    USE_SUGGESTED: 'Use this folder',
+
+    // Footer.
+    SKIP_SETUP: 'Skip setup for now',
+    SKIP_SETUP_TITLE: 'Close this window. The Capture page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
+    BACK: 'Back',
+    NEXT: 'Next',
+    SKIP_STEP: 'Skip this step',
+    FINISH: 'Finish',
+    BROWSE: 'Browse',
+    NOT_SET: 'Not set yet',
+    PATH_NOT_FOUND: "There's no file at this path.",
+    PATH_IS_A_FOLDER: 'That is a folder, not the program itself.',
+    wrongExe: (found, expected) => `That is ${found}, not ${expected}. Pick ${expected}.`,
   },
 };

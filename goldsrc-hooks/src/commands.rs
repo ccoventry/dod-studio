@@ -1,4 +1,4 @@
-//! The `dodstudio_*` console surface: its cvars and commands (`install`
+//! The `ds_*` console surface: its cvars and commands (`install`
 //! registers them all).
 //!
 //! ## Why cvars rather than commands
@@ -13,8 +13,8 @@
 //! variables existed.
 //!
 //! A cvar is a named box the *engine* owns. It shows up in the type-ahead with
-//! its value, answers `dodstudio_spec_match_pov` on its own, takes
-//! `+dodstudio_spec_match_pov 1` on the launch line, and can be set from any
+//! its value, answers `ds_spec_match_pov` on its own, takes
+//! `+ds_spec_match_pov 1` on the launch line, and can be set from any
 //! `.cfg` the user execs. `poll()` copies the values into the same atomics the
 //! rest of the crate already reads, once per frame, so nothing downstream
 //! changed.
@@ -40,7 +40,7 @@
 //!
 //! ## One switch for the spectator's first-person view
 //!
-//! `dodstudio_spec_match_pov` drives five modules at once: the viewmodel's
+//! `ds_spec_match_pov` drives five modules at once: the viewmodel's
 //! animations, the gunshots an HLTV demo lost, the spectator crosshair, the
 //! in-eye camera's height for a prone player, and the gun lowering off screen
 //! (`spectator_gun`). The first three used to
@@ -65,9 +65,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, demo_list_folders, demo_seek, ex_interp, fire_sounds,
-    hand_signals, hudelement, missing_shots, overview_map, scoreboard, spectator_crosshair,
-    spectator_eye, spectator_target, texture_hires, voice, window_layout,
+    anim_fix, crosshair, decals, demo_list_folders, demo_other_drives, demo_seek, ex_interp,
+    fire_sounds, hand_signals, hudelement, missing_shots, overview_map, scoreboard,
+    spectator_crosshair, spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -175,7 +175,7 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 
 /// Like `poll_flag`, but into the level `anim_fix` reads -- see
 /// `anim_fix::LEVEL`. Out-of-range values are clamped rather than refused, so
-/// `dodstudio_spec_match_pov 2` (which also asks `missing_shots` to log every
+/// `ds_spec_match_pov 2` (which also asks `missing_shots` to log every
 /// round) still means on here.
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
@@ -393,7 +393,7 @@ fn poll_overviewmap() {
     }
 }
 
-/// `dodstudio_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
+/// `ds_hud_hide_element` keeps its own state -- a bitmask, not a cvar --
 /// so it cannot go through `poll_code_patch`. Everything else about it is the
 /// same: applied every frame, reported only when it writes, and complaining
 /// once rather than sixty times a second while `client.dll` is not loaded.
@@ -522,7 +522,7 @@ pub fn poll() {
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
-    // dodstudio_overviewmap keeps its own state -- held rects, not a cvar --
+    // ds_hud_overview_layout keeps its own state -- held rects, not a cvar --
     // so it belongs here alongside hudelement rather than in the gated block
     // above.
     poll_overviewmap();
@@ -533,17 +533,20 @@ pub fn poll() {
     // callback slot), so its viewmodel-entity half reads apply()'s previous
     // frame's result, not this one's -- see spectator_target.rs's module doc.
     spectator_target::poll();
-    // Same reason, for whichever messages dodstudio_debug_msglog currently wants.
+    // Same reason, for whichever messages ds_debug_msglog currently wants.
     crate::msglog::poll();
     // Reads the map's own on-screen strings once per level while
-    // dodstudio_hide_map_text is on, and keeps its HudText handler prepended.
+    // ds_hud_hide_map_text is on, and keeps its HudText handler prepended.
     crate::map_text::poll();
     // Keeps the TextMsg, ClanTimer and GameRules handlers prepended, and puts
     // the game's countdown and warm-up flag right when
-    // dodstudio_hide_clan_text changes.
+    // ds_hud_hide_clan_text changes.
     crate::clan_text::poll();
-    // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
-    // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
+    // Keeps the ShowMenu handler prepended and the voice and command menus
+    // hidden while ds_hud_hide_voice_menus is on.
+    crate::voice_menus::poll();
+    // Follows ds_hd_enabled / ds_hd_style, then notes what each map
+    // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
     crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
@@ -551,6 +554,8 @@ pub fn poll() {
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
     // one atomic load.
     demo_list_folders::poll();
+    // Installs once FileSystem_Stdio.dll is found, then costs one atomic load.
+    demo_other_drives::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::frame_esc::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
@@ -562,6 +567,9 @@ pub fn poll() {
     crate::remote::poll();
     // One step of a long forward seek, or a landed seek's follow-up command.
     crate::demo_seek::poll();
+    // Patches Core.dll's packet loop once viewdemo loads it, and logs each
+    // load's time (#798).
+    crate::fast_load::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
@@ -570,6 +578,12 @@ pub fn poll() {
     crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
+    // Once a second: rereads Studio's Players table when it changed and
+    // installs the demo spray detours once it asks for anything (#428).
+    crate::spray_hltv::poll();
+    // After the table is read: this frame's crosshair for the player on
+    // screen, which the HUD's sprite draws then pick up (#428).
+    crate::player_crosshair::poll();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
     crate::gun_log::poll();
@@ -578,10 +592,21 @@ pub fn poll() {
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    // While a review runs, the viewer's clicks don't move its camera (#826).
+    crate::spectator_buttons::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
+    // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
+    crate::demo_scope::poll();
+    crate::run_in_background::poll();
+    crate::pov_live_bob::poll();
+    crate::screen_effects::poll();
+    crate::hlae_window::poll();
+    crate::detail_cache::poll();
     crate::studio_panel::poll();
     crate::review::poll();
+    crate::schedule::poll();
+    crate::batch::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -614,10 +639,10 @@ fn log_level_changes() {
 /// Everything in one place, for debugging -- not the settings surface a
 /// player is expected to type. That is what `debug_` in the name signals:
 /// every value here is also visible piecemeal (a suppression cvar's own
-/// bare-name query, the console type-ahead, `dodstudio_deathmsg`'s own
+/// bare-name query, the console type-ahead, `ds_hud_deathmsg`'s own
 /// status), but this is the one command that dumps all of it together, which
 /// is what a support question actually needs -- so it covers the *entire*
-/// `dodstudio_*` surface, not a subset.
+/// `ds_*` surface, not a subset.
 ///
 /// The suppression cvars and `log_weapon_model` are listed unconditionally,
 /// on or off, because there is no progress to gate them on -- they are just
@@ -647,7 +672,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair and the prone eye height, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -668,6 +693,9 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
+    }
+    if let Some(deathcam) = crate::spectator_deathcam::status_line() {
+        lines.push(deathcam);
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
     // Always shown (#430): the one fact that decides how big HD textures can
@@ -720,6 +748,16 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(fast_load) = crate::fast_load::status_line() {
+        lines.push(fast_load);
+    }
+    lines.push(crate::player_overrides::status());
+    if let Some(sprays) = crate::spray_hltv::status_line() {
+        lines.push(sprays);
+    }
+    if let Some(crosshair) = crate::player_crosshair::status_line() {
+        lines.push(crosshair);
+    }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
     }
@@ -731,6 +769,9 @@ fn status_text() -> String {
     }
     if let Some(sprites) = crate::sprite_blend::status_line() {
         lines.push(sprites);
+    }
+    if let Some(game_dir) = crate::game_dir_check::status_line() {
+        lines.push(game_dir);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
@@ -759,6 +800,9 @@ fn status_text() -> String {
     if let Some(marker) = crate::overview_marker::status_line() {
         lines.push(marker);
     }
+    if let Some(scope) = crate::demo_scope::status_line() {
+        lines.push(scope);
+    }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
     }
@@ -767,6 +811,9 @@ fn status_text() -> String {
     }
     if let Some(clan_text) = crate::clan_text::status_line() {
         lines.push(clan_text);
+    }
+    if let Some(voice_menus) = crate::voice_menus::status_line() {
+        lines.push(voice_menus);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -782,7 +829,7 @@ fn status_text() -> String {
 unsafe extern "C" fn cmd_status() {
     // A console line's semicolon-joined commands all run together, in one
     // pass, before `poll` gets another turn as the per-frame prologue -- so
-    // `dodstudio_hide_scoreboard 1;dodstudio_debug_status` on one line would
+    // `ds_hud_hide_scoreboard 1;ds_debug_status` on one line would
     // otherwise report the state from *before* that same line's own change.
     // `poll` is cheap and idempotent (it already runs every frame), so
     // forcing one here just makes this report always current.
@@ -863,7 +910,7 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
     };
 }
 
-/// `dodstudio_spec_match_pov` as a plain command. With no cvar for `poll` to copy
+/// `ds_spec_match_pov` as a plain command. With no cvar for `poll` to copy
 /// from, the handler sets every part itself.
 unsafe extern "C" fn cmd_spec_match_pov() {
     handle_level(SPEC_MATCH_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
@@ -1026,7 +1073,7 @@ unsafe extern "C" fn cmd_crosshair() {
     );
 }
 
-/// `dodstudio_hide_hudelement [<name> <0|1>]`.
+/// `ds_hud_hide_element [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
 /// value cannot carry, and there is one per element -- a cvar for each would
@@ -1098,10 +1145,12 @@ unsafe extern "C" fn cmd_hudelement() {
     if is_all {
         if on {
             // Deliberately refused. Hiding every element at once includes the
-            // menus, and a capture session that cannot see the class menu is a
-            // support question, not a feature.
+            // text menus (`menu`: voice commands and server votes; the team
+            // and class menus are VGUI and not on this list), and a capture
+            // session that cannot see a vote is a support question, not a
+            // feature.
             console_print(&format!(
-                "{HUDELEMENT_NAME}: `all 1` would hide the team and class menus too -- name the elements you want gone\n"
+                "{HUDELEMENT_NAME}: `all 1` would hide every text menu too -- name the elements you want gone\n"
             ));
             return;
         }
@@ -1133,7 +1182,7 @@ unsafe extern "C" fn cmd_hudelement() {
     }
 }
 
-/// `dodstudio_clear_decals` -- takes no arguments and holds no state, so a
+/// `ds_map_clear_decals` -- takes no arguments and holds no state, so a
 /// command is the whole of what it needs to be.
 unsafe extern "C" fn cmd_clear_decals() {
     match decals::clear() {
@@ -1160,7 +1209,7 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
-/// `dodstudio_debug_log_texture_loads` -- verbose per-texture logging for the
+/// `ds_debug_log_texture_loads` -- verbose per-texture logging for the
 /// (opt-in, `GOLDSRC_HOOKS_TEXTURE_HIRES`-gated) world-texture swap: one line
 /// per world texture uploaded, saying whether it was replaced and why not. Registering the toggle unconditionally, whether or not
 /// the hook is actually installed this session, matches every other cvar
@@ -1174,7 +1223,7 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_folders` could not be a cvar.
+/// Only registered when `ds_ui_demo_list_folders` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_folders() {
     handle_toggle(
         demo_list_folders::NAME,
@@ -1183,7 +1232,16 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
+/// Only registered when `ds_demo_other_drives` could not be a cvar.
+unsafe extern "C" fn cmd_demo_other_drives() {
+    handle_toggle(
+        demo_other_drives::NAME,
+        &demo_other_drives::ENABLED,
+        demo_other_drives::status,
+    );
+}
+
+/// Only registered when `ds_ui_demo_list_hide_empty` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_hide_empty() {
     handle_toggle(
         demo_list_folders::HIDE_EMPTY.name,
@@ -1192,7 +1250,7 @@ unsafe extern "C" fn cmd_demo_list_hide_empty() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_count_subfolders` could not be
+/// Only registered when `ds_ui_demo_list_count_subfolders` could not be
 /// a cvar.
 unsafe extern "C" fn cmd_demo_list_count_subfolders() {
     handle_toggle(
@@ -1202,8 +1260,28 @@ unsafe extern "C" fn cmd_demo_list_count_subfolders() {
     );
 }
 
+/// Only registered when `ds_ui_demo_list_show_counts` could not be a
+/// cvar.
+unsafe extern "C" fn cmd_demo_list_show_counts() {
+    handle_toggle(
+        demo_list_folders::SHOW_COUNTS.name,
+        &demo_list_folders::SHOW_COUNTS.fallback,
+        demo_list_folders::show_counts_status,
+    );
+}
+
+/// Only registered when `ds_demo_fast_load` could not be a cvar: on
+/// is the default budget.
+unsafe extern "C" fn cmd_demo_fast_load() {
+    handle_toggle(
+        crate::fast_load::NAME,
+        &crate::fast_load::FALLBACK_ON,
+        crate::fast_load::status,
+    );
+}
+
 /// Only registered when the window-layout cvars could not be registered.
-/// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
+/// Only registered when `ds_ui_viewdemo_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_viewdemo_in_panel() {
     handle_toggle(
         crate::studio_panel::VIEWDEMO_NAME,
@@ -1212,7 +1290,7 @@ unsafe extern "C" fn cmd_viewdemo_in_panel() {
     );
 }
 
-/// Only registered when `dodstudio_console_in_panel` could not be a cvar.
+/// Only registered when `ds_ui_console_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
         crate::studio_panel::CONSOLE_NAME,
@@ -1237,7 +1315,7 @@ unsafe extern "C" fn cmd_remember_window_layout() {
     );
 }
 
-/// Only registered when `dodstudio_seek_skip_between` could not be a cvar.
+/// Only registered when `ds_demo_seek_skip_between` could not be a cvar.
 unsafe extern "C" fn cmd_seek_skip_between() {
     handle_toggle(
         demo_seek::SKIP_BETWEEN_NAME,
@@ -1246,7 +1324,7 @@ unsafe extern "C" fn cmd_seek_skip_between() {
     );
 }
 
-/// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
+/// `ds_hud_overview_layout [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
 /// value, and two cvars per rectangle would be eight names in the type-ahead
@@ -1418,7 +1496,7 @@ pub fn install() {
         return;
     }
 
-    // `dodstudio_debug_status` is a command under either path: it takes no value, so
+    // `ds_debug_status` is a command under either path: it takes no value, so
     // there is nothing for a cvar to hold.
     add_command(STATUS_NAME, cmd_status);
 
@@ -1443,8 +1521,11 @@ pub fn install() {
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
     add_command(crate::studio_panel::NAME, crate::studio_panel::command);
     add_command(crate::review::NAME, crate::review::command);
+    add_command(crate::schedule::NAME, crate::schedule::command);
+    add_command(crate::batch::NAME, crate::batch::command);
+    add_command(crate::spray::NAME, crate::spray::command);
 
-    // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
+    // Standalone, like `ds_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
     // setting's type-ahead -- a plain toggle stands in for it.
     match register(demo_seek::SKIP_BETWEEN_NAME, "0") {
@@ -1457,7 +1538,7 @@ pub fn install() {
     );
     add_command(crate::position::NAME, crate::position::command);
 
-    // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
+    // Standalone, like `ds_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll, and a failed
     // registration costs only this one setting's type-ahead -- a plain toggle
     // stands in for it.
@@ -1465,24 +1546,45 @@ pub fn install() {
         Some(cvar) => demo_list_folders::set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
     }
-    match register(demo_list_folders::HIDE_EMPTY.name, "1") {
+    // Read by the file system's Open hook on a `D:/...` name (#776).
+    match register(demo_other_drives::NAME, "1") {
+        Some(cvar) => demo_other_drives::set_cvar(cvar),
+        None => add_command(demo_other_drives::NAME, cmd_demo_other_drives),
+    }
+    // The three below default off (0.2.0): each lists more by reading every
+    // folder, which slows the window on a big demo library.
+    match register(demo_list_folders::HIDE_EMPTY.name, "0") {
         Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),
         None => add_command(demo_list_folders::HIDE_EMPTY.name, cmd_demo_list_hide_empty),
     }
-    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "1") {
+    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "0") {
         Some(cvar) => demo_list_folders::COUNT_SUBFOLDERS.set_cvar(cvar),
         None => add_command(
             demo_list_folders::COUNT_SUBFOLDERS.name,
             cmd_demo_list_count_subfolders,
         ),
     }
+    // On by default (#798); read by fast_load::poll each frame.
+    match register(crate::fast_load::NAME, "1") {
+        Some(cvar) => crate::fast_load::set_cvar(cvar),
+        None => add_command(crate::fast_load::NAME, cmd_demo_fast_load),
+    }
+    match register(demo_list_folders::SHOW_COUNTS.name, "0") {
+        Some(cvar) => demo_list_folders::SHOW_COUNTS.set_cvar(cvar),
+        None => add_command(
+            demo_list_folders::SHOW_COUNTS.name,
+            cmd_demo_list_show_counts,
+        ),
+    }
 
-    // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
+    // Standalone, like `ds_hd_enabled`: window_layout reads them where
     // it walks the windows, so they need no poll here, and a failed
     // registration costs only their type-ahead -- plain toggles stand in.
+    // Both on by default: a window you can resize and that opens where you
+    // left it is a win for everyone.
     match (
-        register(window_layout::RESIZABLE_NAME, "0"),
-        register(window_layout::REMEMBER_NAME, "0"),
+        register(window_layout::RESIZABLE_NAME, "1"),
+        register(window_layout::REMEMBER_NAME, "1"),
     ) {
         (Some(resizable), Some(remember)) => window_layout::set_cvars(resizable, remember),
         _ => {
@@ -1512,9 +1614,8 @@ pub fn install() {
         SPECTATOR_TARGET_LOG_NAME,
         bit(spectator_target::LOG.load(Ordering::Relaxed)),
     );
-    // These three default to the game's own behaviour. Nothing this DLL does
-    // should change what a session looks like until it is asked to -- which is
-    // why the mute defaults to 0 while the other two default to 1.
+    // These four default to the game's own behaviour (0): hiding part of the
+    // HUD is a big change not everyone wants, so it waits to be asked for.
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
@@ -1554,6 +1655,9 @@ pub fn install() {
     if let Some(clan_text) = register(crate::clan_text::NAME, "0") {
         crate::clan_text::set_cvar(clan_text);
     }
+    if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
+        crate::voice_menus::set_cvar(voice_menus);
+    }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
@@ -1566,11 +1670,44 @@ pub fn install() {
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
     }
+    if let Some(deathcam) = register(crate::spectator_deathcam::NAME, "0") {
+        crate::spectator_deathcam::set_cvar(deathcam);
+    }
     if let Some(icons) = register(crate::overview_players::NAME, "0") {
         crate::overview_players::set_cvar(icons);
     }
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
         crate::overview_marker::set_cvar(marker);
+    }
+    // On by default: a demo then shows the sniper scope the player saw.
+    if let Some(scope) = register(crate::demo_scope::NAME, "1") {
+        crate::demo_scope::set_cvar(scope);
+    }
+    if let Some(background) = register(crate::run_in_background::NAME, "0") {
+        crate::run_in_background::set_cvar(background);
+    }
+    if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
+        crate::hlae_window::set_cloak_cvar(cloak);
+    }
+    if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
+        crate::pov_live_bob::set_cvar(bob);
+    }
+    // Off unless Studio turns it on: a game not started from Studio keeps
+    // its own sprays and crosshair (#428).
+    if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
+        crate::player_overrides::set_cvar(overrides);
+    }
+    if let (Some(flash), Some(shake)) = (
+        register(crate::screen_effects::FLASH_NAME, "0"),
+        register(crate::screen_effects::SHAKE_NAME, "0"),
+    ) {
+        crate::screen_effects::set_cvars(flash, shake);
+    }
+    if let Some(behind) = register(crate::hlae_window::NAME, "0") {
+        crate::hlae_window::set_cvar(behind);
+    }
+    if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
+        crate::detail_cache::set_keep_cvar(keep);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
@@ -1668,7 +1805,7 @@ mod tests {
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
-        assert!(idle.contains("dodstudio_deathmsg"), "{idle}");
+        assert!(idle.contains("ds_hud_deathmsg"), "{idle}");
         for part in [
             "viewmodel animations:",
             "gunshot sounds:",
@@ -1700,11 +1837,11 @@ mod tests {
     }
 
     /// The console's type-ahead completes to the longest match, so a name
-    /// that starts with `dodstudio_spec_match_pov` would be offered in its
+    /// that starts with `ds_spec_match_pov` would be offered in its
     /// place. A fix that joins this switch must not bring a name like that.
     #[test]
     fn nothing_else_starts_with_the_spec_match_pov_name() {
-        assert_eq!(SPEC_MATCH_POV_NAME, "dodstudio_spec_match_pov");
+        assert_eq!(SPEC_MATCH_POV_NAME, "ds_spec_match_pov");
         for other in [
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
@@ -1722,8 +1859,17 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::spectator_deathcam::NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
+            crate::demo_scope::NAME,
+            crate::run_in_background::NAME,
+            crate::hlae_window::CLOAK_NAME,
+            crate::pov_live_bob::NAME,
+            crate::screen_effects::FLASH_NAME,
+            crate::screen_effects::SHAKE_NAME,
+            crate::hlae_window::NAME,
+            crate::detail_cache::KEEP_NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }
@@ -1779,13 +1925,15 @@ mod tests {
     }
 
     /// The names have to carry the sense, since the value alone cannot. A cvar
-    /// called after its subject (`dodstudio_scoreboard`) leaves the reader to
+    /// called after its subject (`ds_scoreboard`) leaves the reader to
     /// guess whether 1 means "scoreboard" or "suppress the scoreboard"; one
     /// called after the action does not.
     #[test]
     fn suppression_cvars_are_named_after_the_action() {
         for name in [SCOREBOARD_NAME, CROSSHAIR_NAME, VOICE_NAME] {
-            let verb = name.trim_start_matches("dodstudio_");
+            // After the prefix comes the area (`hud_`, `sound_`, #555).
+            let rest = name.trim_start_matches(console_name!(""));
+            let verb = rest.split_once('_').map_or(rest, |(_, verb)| verb);
             assert!(
                 verb.starts_with("hide_") || verb.starts_with("mute_"),
                 "{name} is named after its subject, not the action it performs"

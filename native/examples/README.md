@@ -25,12 +25,14 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `frame_inspector` | What frames are in this demo, in what order, at what ordinal? |
 | `debug_cmds` | Which `ConsoleCommand` frames does a demo already carry? |
 | `stufftext_probe` | Which injected commands does the engine's demo command filter drop? Writes a demo for the in-game check (#679) |
+| `schedule_timing_probe` | How close `ds_capture_schedule` runs a command to an injected frame: writes a demo with marker frames and the matching schedule file (#434) |
 | `debug_scanner` | What does the highlight scanner see in this demo? |
+| `game_dir_patch_probe` | Writes one patched copy whose header and svc_serverinfo name a given game folder, for the in-game check that a copy of DoD plays it (#402) |
 | `check_ticks` | Do the batch queue's computed tick boundaries line up with the demo? |
 | `demo_tickrate` | What frame rate was this demo actually recorded at? |
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
-| `demo_integrity` | Does every delta in this demo decode against a frame the file actually has? (#41) |
+| `demo_integrity` | Which deltas in this demo decode against a frame the file doesn't have, and what if frames A..B were lost? Lists what `hl-demo-auditor --integrity` counts (#41) |
 
 ### HLTV and the director channel
 

@@ -1,8 +1,9 @@
 // patch/builder/mod.rs
 // Batch job construction: `build_batch_queue` and the init commands it adds.
 // The helpers it uses live beside it — `timing` (tick walks, roll floors,
-// block merging), `alloc` (drive allocation), `workspace` (junctions and the
-// legacy channel-based worker spawner), `preview` (preview patches).
+// block merging), `speed` (the fast-forward and normal-speed aliases),
+// `alloc` (drive allocation), `workspace` (junctions and the legacy
+// channel-based worker spawner), `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
 use crate::patch::engine::StreamPatcher;
@@ -14,11 +15,13 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 mod alloc;
 mod preview;
+mod speed;
 mod timing;
 mod workspace;
 
 use alloc::allocate_blocks_first_fit_decreasing;
 pub use preview::*;
+pub use speed::*;
 pub use timing::*;
 pub use workspace::*;
 
@@ -145,6 +148,19 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
     out.push("sys_autodir".to_string());
     out.push(format!("mirv_movie_fps {}", config.capture_fps));
 
+    // A batch runs at full speed with another window in front: without it the
+    // engine waits up to 20 ms for input every frame while it isn't the active
+    // app, which slows the fast-forward between clips 5-8x (measured on both
+    // builds). The hook DLL's setting; without the hook it is an unknown
+    // command and does nothing. Whether the window stays behind is a separate
+    // setting, sent as 0 too when the user wants to watch, so a game left
+    // running from an earlier batch (#666) drops it.
+    out.push(format!("{RUN_IN_BACKGROUND} 1"));
+    out.push(format!(
+        "{STAY_BEHIND} {}",
+        u8::from(config.keep_game_behind)
+    ));
+
     // OBS mode is real time: HLAE issues no `mirv_movie_start` at all, so
     // `mirv_movie_fps` above is inert on this path — nothing reads it. What
     // OBS actually records is however fast the engine renders, so that rate
@@ -189,6 +205,45 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
     }
 
     out
+}
+
+/// The hook DLL's camera follow for HLTV demos (goldsrc-hooks
+/// `spectator_follow.rs`, #206): the command that puts the camera on a
+/// player by number, and the setting that keeps it there through their death.
+pub const SPEC_TARGET: &str = "ds_spec_target";
+pub const SPEC_LOCK: &str = "ds_spec_lock";
+/// The game's first-person spectator mode (HL's `OBS_IN_EYE`): an HLTV demo
+/// otherwise plays in a chase camera behind the player.
+pub const IN_EYE: &str = "spec_mode 4";
+
+/// The hook DLL's `ds_capture_run_in_background` (goldsrc-hooks
+/// `run_in_background.rs`), which every batch turns on.
+pub const RUN_IN_BACKGROUND: &str = "ds_capture_run_in_background";
+
+/// The hook DLL's `ds_capture_stay_behind` (goldsrc-hooks `hlae_window.rs`),
+/// which every batch sets from `PatcherConfig::keep_game_behind`.
+pub const STAY_BEHIND: &str = "ds_capture_stay_behind";
+
+/// On a capture batch's game launch line, with `keep_game_behind` on: the hook
+/// DLL keeps the window behind from the moment it opens, before the pipe can
+/// carry the setting (goldsrc-hooks `hlae_window::START_BEHIND_FLAG`; keep the
+/// two in step). The engine ignores a `-` argument it doesn't know.
+pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
+
+/// Whether a patched batch plays the primer demo before its first chain job,
+/// given whether the launch injects the hook DLL (`config.goldsrc_hooks_dll()`,
+/// the test `build_hlae_process` makes).
+///
+/// The primer loads the first map once so the real first demo isn't dark, and
+/// plays [`crate::patch::PRIMER_DELAY_TICKS`] before `playdemo`. With the hook
+/// DLL neither is needed (#365): its `lightmap_gamma` fixes the first load's
+/// lighting (#397), the first demo goes over its pipe only after config.cfg
+/// and movie.cfg have run (#705), and `GameHandoff`'s settle wait covers the
+/// delay. Every chain job carries `init_commands` and `sys_autodir` itself
+/// ([`final_init_commands`]). Without the DLL nothing else covers the first
+/// two, so the primer stays.
+pub fn plays_primer(hook_dll: bool) -> bool {
+    !hook_dll
 }
 
 pub fn build_batch_queue(
@@ -248,7 +303,7 @@ pub fn build_batch_queue(
 
     let game_path_buf = std::path::PathBuf::from(&config.game_path);
     let dod_dir = match game_path_buf.parent() {
-        Some(parent) => parent.join("dod"),
+        Some(parent) => crate::shared::paths::mod_dir(parent),
         None => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -319,11 +374,14 @@ pub fn build_batch_queue(
 
     helper_cfg_content.push_str("# Global aliases\n");
     helper_cfg_content.push_str("alias sys_autodir \"spec_autodirector 1\"\n");
-    helper_cfg_content
-        .push_str("alias sys_normal_speed \"sys_autodir; clear; host_framerate 0\"\n");
-    helper_cfg_content.push_str(&format!(
-        "alias sys_fast_forward \"host_framerate {}\"\n",
-        fast_forward_host_framerate(config)
+    // The fast-forward runs uncapped with nothing drawn, and the pre-roll
+    // puts back whatever the user's own commands and configs had (#724). An
+    // alias body is not a ConsoleCommand frame: the demo carries only the
+    // name, so the 64-byte frame limit does not apply to it.
+    helper_cfg_content.push_str(&speed_alias_lines(
+        config,
+        &final_init_commands(config),
+        Some(&crate::patch::cfg_scan::scan_cached(&dod_dir)),
     ));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
@@ -404,9 +462,15 @@ pub fn build_batch_queue(
         ));
     }
 
-    // 1. Primer Job. Always first when there is any work, so a test asserting
-    // on this queue gets one job more than the streak groups it passed in.
     if total_jobs > 0 {
+        helper_cfg_content.push_str("# Demo specific next demos\n");
+    }
+
+    // 1. Primer Job, only when the launch has no hook DLL ([`plays_primer`],
+    // #365). It is then first, so a test asserting on this queue gets one job
+    // more than the streak groups it passed in; with the DLL the game starts
+    // on dodstudio_chain_01 directly.
+    if total_jobs > 0 && plays_primer(config.goldsrc_hooks_dll().is_some()) {
         let first_source = sorted_groups[0].0.0.to_string();
         let mut primer_init = config.init_commands.clone();
         primer_init.push("sys_autodir".to_string());
@@ -424,7 +488,6 @@ pub fn build_batch_queue(
         // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the
         // 2-second GoldSrc server handshake without buffer overflows before jumping to the first real chain.
         let mut primer_scheduled = Vec::new();
-        helper_cfg_content.push_str("# Demo specific next demos\n");
         let primer_next_alias = format!("{PRIMER_DEMO_STEM}_next");
         helper_cfg_content.push_str(&format!(
             "alias {primer_next_alias} \"playdemo {CHAIN_DEMO_PREFIX}01\"\n"
@@ -461,6 +524,15 @@ pub fn build_batch_queue(
             .unzip();
 
         let total_demo_frames = streaks.first().map(|s| s.total_demo_frames).unwrap_or(0);
+
+        // An HLTV demo's camera follows no one by itself (#247): every clip
+        // puts it on the highlight's player, by number (slot + 1), and the
+        // lock keeps it there through their death. A job is one player's
+        // highlights (grouped by demo and player above).
+        let spectate = streaks
+            .first()
+            .filter(|s| s.spectated)
+            .map(|s| format!("{SPEC_TARGET} {}", s.player_index + 1));
 
         // One svc_director STUFFTEXT event per streak — label mirrors the highlight table:
         // "#<row>: <kill_count> kills: <timeline_string>"
@@ -538,12 +610,10 @@ pub fn build_batch_queue(
             let next_start = first_kill_frame(&current);
 
             // Recordings overlap, or sit too close for a safe stop/start cycle.
-            // OBS needs longer between takes than HLAE does, and the number is
-            // measured rather than guessed: ~1.065s to finalise a file after
-            // `StopRecord` returned, against the 1.0s this guard promises. So
-            // the HLAE-derived constant is already too tight for that path by a
-            // small margin, and two highlights that merge today would otherwise
-            // ask OBS for a stop/start cycle it cannot service.
+            // OBS needs longer between takes than HLAE does: ~1.065s to
+            // finalise a file after `StopRecord` returned, against HLAE's
+            // ~0.28s (#9). So each mode brings its own separation, and the
+            // HLAE one would ask OBS for a stop/start cycle it cannot service.
             let min_separation_ticks = (take_separation_seconds(config) * demo_fps) as i32;
             if blocks_merge(
                 prev_stop,
@@ -683,6 +753,10 @@ pub fn build_batch_queue(
         // Initialize Engine Speed after Initial Load Delay
         let initial_delay_ticks = (config.initial_delay * demo_fps) as i32;
         scheduled_commands.push((initial_delay_ticks, "sys_fast_forward".to_string()));
+        if let Some(target) = &spectate {
+            scheduled_commands.push((initial_delay_ticks, IN_EYE.to_string()));
+            scheduled_commands.push((initial_delay_ticks, target.clone()));
+        }
 
         // One marker per demo, at its very first scheduled tick — the engine's
         // own live signal that this demo has started playing. Read back by
@@ -863,7 +937,8 @@ pub fn build_batch_queue(
                 ) {
                     scheduled_commands.push((t, echo_cmd));
                 }
-                // Playback runs at `host_framerate 0.05` until the pre-roll
+                // Playback runs at `host_framerate 0.05`, uncapped and with
+                // nothing drawn (`r_norefresh 1`, #724), until the pre-roll
                 // drops it back to real time at `s_speed_tick`, and resumes
                 // fast-forwarding once the post-roll ends at `s_end`. A command
                 // landing outside that window still executes, but it executes
@@ -895,8 +970,8 @@ pub fn build_batch_queue(
                          usually fine — it simply takes effect early. It is worth checking only \
                          for commands that depend on playback running at real speed: anything \
                          touching sound, recording, or rendering, since the engine is at \
-                         `host_framerate {}` with its audio buffers unflushed. To have it run \
-                         at normal speed instead, {}.",
+                         `host_framerate {}`, drawing nothing, with its audio buffers unflushed. \
+                         To have it run at normal speed instead, {}.",
                         custom.command,
                         relation_str.to_lowercase(),
                         custom.offset,
@@ -920,6 +995,13 @@ pub fn build_batch_queue(
             let resumes_from_fast_forward = !chained_to_previous.get(i).copied().unwrap_or(false);
 
             if resumes_from_fast_forward {
+                // Back on the player as playback drops to real time: the
+                // camera may have been moved while fast-forwarding.
+                if let Some(target) = &spectate {
+                    scheduled_commands.push((s_speed_tick, IN_EYE.to_string()));
+                    scheduled_commands.push((s_speed_tick, target.clone()));
+                }
+
                 // At Speed Flush (Stage 1)
                 scheduled_commands.push((s_speed_tick, "sys_normal_speed".to_string()));
                 scheduled_commands.push((s_speed_tick + 1, "sys_normal_speed".to_string()));
@@ -1027,7 +1109,10 @@ pub fn build_batch_queue(
         // Sort scheduled_commands by tick
         scheduled_commands.sort_by_key(|(tick, _)| *tick);
 
-        let final_init_commands = final_init_commands(config);
+        let mut final_init_commands = final_init_commands(config);
+        if spectate.is_some() {
+            final_init_commands.push(format!("{SPEC_LOCK} 1"));
+        }
 
         jobs.push(PatchJob {
             source_demo: source_demo.to_string(),

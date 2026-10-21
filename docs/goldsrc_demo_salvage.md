@@ -14,7 +14,7 @@ Every fact below was measured on real demos or confirmed live in the engine, not
 - **`entity_count` is not the number of listed entities.** A packet declares the size of the *resulting* snapshot (median 20) while listing only the changed entities (median 6). Anything reconstructing entity state must model the carry-forward or it undercounts badly.
 - **`CL_FlushEntityPacket`** (string at `hw.dll` `0x1e38be8`) is the engine discarding a whole entity packet it cannot resolve: the cause of missing crates and doors after a bad join. It prints to the screen only, never to `qconsole.log`, but the condition is exact and computable from the file alone (`flush_predict`): see "The flush predicate" below.
 - **Healthy demo shape**: 160–165 bytes per frame, no single frame of 4 KB or more, and type 4 and type 9 frame counts pair exactly (197642/197642, 191043/191043, 103747/103747).
-- **Different players' POV recordings of one match share the server clock** (`svc_time` agrees to 5 decimals once offset) but **not their entity index sets** (each leaves out different entities, including the recorder). Matching size or a matching kill feed doesn't make two files the same recording.
+- **Different players' POV recordings of one match share the server clock** (`svc_time` is the server's `sv.time`, so it agrees to 5 decimals with no offset at all; the HLTV recording's `svc_time` is the proxy's own clock, a per-half constant away, see `goldsrc_dod_quirks.md` and #708) but **not their entity index sets** (each leaves out different entities, including the recorder). Matching size or a matching kill feed doesn't make two files the same recording.
 - **The HLTV recording of the same match is ground truth** for checking a recovered POV demo: kills and deaths per player matched exactly in all four recoveries. Compare event *rates*, not totals: a POV demo that runs 22 minutes against HLTV's 29 has fewer events for that reason alone.
 
 ## The flush predicate
@@ -40,6 +40,14 @@ Established by static analysis of the pre-Anniversary `hw.dll` (2026-09-09).
 Supporting probes: `salvage_probe`, `salvage_demo`, `bridge_ceiling` (swallowed-frame and backwards-time checks), `snapshot_check` (declared vs. replayed entity counts), `event_rate` (events per minute, to spot silent loss), `graft_signon`, `inject_breadcrumbs`, `patch_resource_url`, `find_crash_spot`, `deathmsg_diag`. Superseded and not to be revived: re-numbering the tail's `delta_sequence` (it stops `svc_bad` only by making the engine discard every entity packet after the join), `bridge_search`/`bridge_best`/`reseq_probe`.
 
 Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1 hole; `m1_h1` 525,086, 2 holes, 96.7% of the original bytes; `m1_h2` 701,898, 3 holes, 97.7%; `m3_h1-1` 524,407, 3 holes).
+
+## Checking a copy for lost frames (#41)
+
+A copy that silently lost frames (a bad thumb-drive transfer) still parses, because frames are length-prefixed with no checksum, and then crashes the engine. `hl-demo-auditor --integrity <demo-or-folder>...` catches it: it reports every packet-entity or client-data delta whose from-frame is not in the file, so the engine would decode it against stale ring state (`analysis::integrity::check_delta_continuity`; `native/examples/demo_integrity.rs` lists each one and can drop frames in memory to simulate a loss). It finds nothing on healthy demos and fires on a single dropped network frame; a demo that does not parse at all is reported as such. The recovered `_v10` builds above are flagged too, by client-data deltas only: the ramp's cloned `svc_clientdata` keeps one from-frame for its whole length. `m3_h2` played anyway, so a client-data-only hit on a salvaged build means stale client data, not necessarily a crash.
+
+## Analysing a damaged demo without repairing it (#811)
+
+The analyzer reads a damaged demo up to its first frame that does not parse and keeps everything before it (`dem::demo_parser::parse_demo_tolerant`; the patcher and writer keep to the strict parse). The result says where it stopped (`DemoInfo::damage`: the viewdemo clock there, the frame, the byte offset and why), and the Demo Analyzer and the in-game Highlights tab show it. A directory lost with the end of the file is rebuilt by walking the frames, as for an unfinalised demo. On the four originals above it stops at the first hole: `m1_h1` at 8:27, `m1_h2` 12:09, `m3_h1-1` 18:23, `m3_h2` 10:59.
 
 ## What each live crash taught
 

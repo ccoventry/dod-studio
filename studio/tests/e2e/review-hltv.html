@@ -1,0 +1,97 @@
+<!doctype html>
+<!--
+  Minimal harness for the Review box's HLTV choices (#822) and its
+  "Players I pick" (#828) — see tests/e2e/README.md for the general shape.
+
+  Carries the Review highlights button, the Review and HLTV boxes and the
+  pick's chips and lists, copied from index.html, and wires
+  review_hltv_picker.js and review_mode.js the way main.js does. Two HLTV
+  demos of one match and a POV demo stand in for the queue; the game's
+  start_highlight_review is answered so a test can read what was sent, and
+  `window.__checked` is the ticked demos.
+  `window.__changes` counts the picker's onChange calls (project dirty).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>review_hltv_picker.js harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input type="number" id="input-min-kills" value="1" />
+  <button id="review-highlights-btn">Review highlights</button>
+  <select id="review-covers-select"><option value="all">All</option></select>
+  <label>
+    <span>HLTV:</span>
+    <select id="review-hltv-select"></select>
+  </label>
+  <span id="review-hltv-pick" class="review-hltv-pick" hidden>
+    <select id="review-hltv-add-player"></select>
+    <select id="review-hltv-add-team"></select>
+  </span>
+  <select id="review-order-select"><option value="time">Chronological</option></select>
+  <span id="review-hltv-chips" class="review-hltv-chips review-hltv-chips-row" hidden></span>
+
+  <script type="module">
+    import { createHltvPicker } from '/src/review_hltv_picker.js';
+    import { initReviewMode } from '/src/review_mode.js';
+    import { emptyProjectTeams } from '/src/project_teams.js';
+
+    const life = (player, index, at, extra = {}) => ({
+      target_player: player, player_index: index, kills: [[at, at, 'K98']], viewdemo_times: [at], kill_count: 1, ...extra,
+    });
+    const demos = [
+      {
+        path: 'h1.dem', name: 'h1.dem', is_pov: false,
+        teams: [{ side: 'Allies', tag: 'dicE' }, { side: 'Axis', tag: 'over' }],
+        streaks: [
+          life('dicE | stealth', 2, 10, { steam_id: '76561197960265729', faction: 'Allies' }),
+          life('gorilla', 3, 20, { steam_id: '76561197960265731', faction: 'Allies' }),
+          life('overlord', 5, 30, { steam_id: '76561197960265733', faction: 'Axis' }),
+          life('oldie', 6, 40),
+        ],
+      },
+      {
+        path: 'h2.dem', name: 'h2.dem', is_pov: false,
+        teams: [{ side: 'Allies', tag: 'over' }, { side: 'Axis', tag: 'dicE' }],
+        streaks: [life('dicE | gorilla', 3, 50, { steam_id: '76561197960265731', faction: 'Axis' })],
+      },
+      {
+        path: 'p.dem', name: 'p.dem', is_pov: true, recorder_id: '76561197960265730', recorder_name: 'm00cat',
+        streaks: [life('m00cat', 1, 70, { steam_id: '76561197960265730' })],
+      },
+    ];
+    const projectTeams = emptyProjectTeams();
+    projectTeams.names.dicE = 'DICE';
+    window.__changes = 0;
+    // The ticked demos; none ticked reviews every demo shown.
+    window.__checked = [];
+    window.__mockInvokeHandlers.start_highlight_review = ({ highlights }) => ({ count: highlights.length, launched: false });
+    window.__sent = () => window.__mockInvocations
+      .filter((c) => c.cmd === 'start_highlight_review')
+      .map((c) => c.args.highlights.map((h) => `${h.demo}:${h.player}`));
+
+    // Empties the queue the picker sees, as before a scan (#828's lists
+    // must refill once demos arrive).
+    let queueEmpty = false;
+    window.__emptyQueue = (empty) => { queueEmpty = empty; };
+    const hltvPick = createHltvPicker({
+      getDemos: () => (queueEmpty ? [] : demos),
+      getProjectTeams: () => projectTeams,
+      onChange: () => { window.__changes += 1; },
+    });
+    window.__pick = hltvPick;
+    initReviewMode({
+      getDemos: () => demos,
+      getCheckedPaths: () => window.__checked,
+      getShownPaths: () => demos.map((d) => d.path),
+      getRecorders: () => [{ id: '76561197960265730', names: ['m00cat'], label: 'm00cat (STEAM_0:0:1)' }],
+      recorderOf: (d) => (d.recorder_id ? { id: d.recorder_id, name: d.recorder_name } : null),
+      onChanged: () => {},
+      hltvPick,
+    });
+
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

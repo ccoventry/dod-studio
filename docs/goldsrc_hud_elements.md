@@ -1,4 +1,4 @@
-# `dodstudio_hide_hudelement` and the CHudDoD* element notes
+# `ds_hud_hide_element` and the CHudDoD* element notes
 
 Split out of `docs/goldsrc_hud_suppression.md` (the shared pattern, voice
 muting and the per-frame re-apply loop stay there; the crosshair is in
@@ -11,7 +11,7 @@ Same method as the rest: offline `client.dll` analysis, plus
 
 ---
 
-## `dodstudio_hide_hudelement` -- the general case
+## `ds_hud_hide_element` -- the general case
 
 The voice mute, the crosshair hide and the spectator crosshair each patch one function for one purpose, and the crosshair hide's
 own module doc says why it is not this: patching a function needs no vftable
@@ -97,7 +97,7 @@ cvar or hook:
   no calls. The overview map is rendered some other way entirely; not yet
   found, plausibly VGUI2 like the scoreboard. *(Update: the map's placement is
   cached geometry in `.data`, not drawn by a `Draw` override, and
-  `dodstudio_overviewmap` (`goldsrc-hooks/src/overview_map.rs`, see
+  `ds_hud_overview_layout` (`goldsrc-hooks/src/overview_map.rs`, see
   `docs/goldsrc_client_dll_survey.md` §5) moves and resizes it. Hiding it
   outright is still not done.)*
 - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks a
@@ -111,11 +111,17 @@ cvar or hook:
   checks observer mode and conditionally calls a method on what looks like a
   VGUI2 interface pointer, plausibly telling a panel to hide, but never draws.
 - `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
-  observer-mode global, then unconditionally returns 1. The actual scope
-  vignette is a `ScreenFade` engine call inside `CHudScope::Think` (vftable
-  slot 4, not 3), gated on the *local* player's own current weapon -- never
-  populated while spectating, live-confirmed: no scope overlay appears in a
-  demo, matching the disassembly exactly.
+  observer-mode global, then unconditionally returns 1. The `ScreenFade` in
+  `CHudScope::Think` (vftable slot 4) is only the black blink when a `Scope`
+  message changes the rifle. The scope itself is
+  `CHudScope::DrawTriApiScope` (`client+0x46690`): the rifle's `scope_*.spr`
+  as four TriAPI quads, refused outright while a demo plays
+  (`IsPlayingback()`, `+0x46701`), which is why no demo showed it.
+  `ds_hud_show_scope` now lifts that gate, so the scope shows in a
+  POV demo whenever the recorder zoomed, and in-eye it gives the watched
+  player's rifle instead of the Springfield DoD forces there (#307,
+  `goldsrc-hooks/src/demo_scope.rs`). Hiding it needs nothing: it already
+  draws only on request.
 
 Writing `CHudBase::Draw` over a function that already draws nothing changes
 nothing observable, so offering these five would only mislead.
@@ -168,11 +174,15 @@ code path this element's vtable slot cannot see.
 
 `all 0` shows everything again, which is what a way out looks like. `all 1` is
 refused on purpose: it would hide `CHudMenu` too, and a session that cannot see
-the class menu is a support question rather than a feature.
+a server's text menus (a vote) is a support question rather than a feature.
+`CHudMenu` draws only `ShowMenu` text menus: DoD's voice-command menus and
+server plugin menus. The team and class menus are VGUI2 and not on this list.
+`ds_hud_hide_voice_menus` hides only the voice menus
+(`goldsrc-hooks/src/voice_menus.rs`).
 
 ### What it reaches that nothing else did
 
-Chat, the kill feed, the status bar under the crosshair, the team and class
+Chat, the kill feed, the status bar under the crosshair, the voice-command
 menus, the tram controls, the objective icons, and `CHudDodIcons` -- which
 owns **both** the MG-deploy icon (#288) and the capture-area icon (#289),
 along with blood and bandage. Those two were filed
@@ -189,7 +199,7 @@ way to keep one and drop the other without patching inside the function.
 
 It does **not** reach the VGUI2 spectator bars (`goldsrc_spectator_bars.md`) or the auto-help panel
 (#286). Those are not HUD elements and are not on this list. It also does not
-reach the overview map, a mortar aiming HUD, or the sniper scope vignette --
-see the five exclusions above, none of which turned out to be drawn by any
-`Draw` override at all.
+reach the overview map, a mortar aiming HUD, or the sniper scope -- see the
+five exclusions above, none of which turned out to be drawn by any `Draw`
+override at all.
 

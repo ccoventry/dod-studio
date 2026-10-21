@@ -6,14 +6,14 @@
 > **Working end to end:** capture through `mirv_movie_ffmpeg` (Video capture mode), take verification,
 > Render Studio scanning and rendering, frame counts and render progress from the AVI header, and a
 > lossless capture codec dropdown. The Separate HUD checkbox was removed in PR #214: the
-> `-afxForceAlpha8 1` launch flags are now sent on every launch, so a HUD alpha stream still works if
+> `-afxForceAlpha8 1` launch flag is now sent on every launch, so a HUD alpha stream still works if
 > `mirv_movie_separate_hud 1` is typed into Initial Commands (see "Separate HUD does not survive
 > `mirv_movie_ffmpeg`" below; those sections stay as the measurements behind that decision).
 >
 > **Still open:** the stream-copy fast path — remuxing instead of re-encoding for the simple
 > non-HUD case, which was the headline win — is not built; every take still goes through a full
-> render. Capture-time codec throughput is unmeasured. The launch-flag set is not bisected
-> ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
+> render. Capture-time codec throughput is unmeasured. The launch-flag set is bisected down to
+> `-afxForceAlpha8 1` ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
 >
 > Read `docs/goldsrc_dod_quirks.md` and `docs/hlae_protocols.md` first — the engine and HLAE facts
 > this rests on are recorded there and must not be re-derived.
@@ -206,10 +206,9 @@ to trade quality for speed.
   and re-encoding the result.
 - **`studio/src-tauri/src/capture_manager.rs`** — `take_folder_has_content` and
   `VerifiedBlock`'s two tiers, if the output layout changes shape.
-- **`native/src/hlcr/take_meta.rs`** — records the capture FPS per take and warns when a render
-  interprets it at a different rate. A video take should carry the same record and the existing
-  `[render-fps-mismatch]` check keeps working unchanged. *Note: that module lands with
-  `feature/decal-flush-r-and-d`, not on `dev` — so it is not present on this branch yet.*
+- **`native/src/hlcr/take_meta.rs`** — records the capture FPS per take, and a frame-sequence render
+  reads the frames at that rate (`render_fps`, Render Settings' Source FPS only without one). A
+  video take carries the same record; its own file has its rate, so the render reads no FPS for it.
 
 ---
 
@@ -358,7 +357,7 @@ without the flag — which is what made it look like the flag was being ignored 
 This is invisible to static analysis: the binary's string table gives you the switch names but cannot
 tell you which ones consume an argument. Reading `Launcher.cs` is what settled it.
 
-The set now sent, on every `-customLoader` launch:
+The fix sent this set on every `-customLoader` launch:
 
     -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1
 
@@ -371,8 +370,15 @@ Measured after the fix — `hudalpha` frame 600, same clip:
 
 A real matte: white on the kill feed, weapon icons and objective boxes, black everywhere else.
 `-afxOptimizeCaptureVis` is deliberately still not sent — a visibility optimisation, unrelated to
-alpha — and the set has not been bisected to find the minimum; `-32bpp` in particular is untested on
-its own, though a framebuffer without 32-bit colour has no alpha bits to force.
+alpha.
+
+**Only `-afxForceAlpha8 1` is sent now** ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
+A bisect on the pre-Anniversary build captured the same 30 demo frames with `mirv_movie_separate_hud 1`
+once per flag removed: without `-gl`, `-32bpp` or `-afxRenderMode standard`, `hudalpha` (0 / 255 /
+mean 6.2), `hudcolor` and `all` measured the same, with the same frame count and capture time; without
+`-afxForceAlpha8 1`, `hudalpha` went flat 255. The engine already runs OpenGL with a 32-bit
+framebuffer, and `standard` is HLAE's default render mode, so the other three were never doing
+anything. The flags are HLAE's, read the same way on both engine builds.
 
 ### Ungated, 2026-09-08
 

@@ -224,6 +224,14 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
     false
 }
 
+/// Whether this exact folder is what the scan hands out as a clip's
+/// `take_folder`: it holds the streams itself, not through a nested `take*`.
+/// Delete Take (#644) asks this, so it can never act on a block or session
+/// folder that merely contains a take.
+pub fn is_take_folder(folder: &Path) -> bool {
+    take_shape_is_renderable(folder)
+}
+
 /// The two admissible shapes, checked against one specific folder.
 ///
 /// 1. **Audio beside a stream folder.** How HLAE writes a take, whether that
@@ -279,9 +287,18 @@ pub fn scan_folder_background(
             continue;
         }
 
+        // walkdir does not follow links by default; the depth cap is #376's.
+        // An output folder can be a drive root, whose Recycle Bin keeps
+        // deleted takes under their own names (#843).
         for entry in WalkDir::new(&source_folder)
+            .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
             .into_iter()
-            .filter_entry(|e| !is_bmp_stream_folder(e))
+            .filter_entry(|e| {
+                !is_bmp_stream_folder(e)
+                    && !(e.depth() > 0
+                        && e.file_type().is_dir()
+                        && crate::sys::folder_walk::is_system_folder(e.file_name()))
+            })
             .filter_map(|e| e.ok())
         {
             if !entry.file_type().is_dir() {

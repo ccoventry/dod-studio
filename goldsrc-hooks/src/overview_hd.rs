@@ -60,7 +60,7 @@ type TexParameterFn = unsafe extern "system" fn(u32, u32, i32);
 type GetIntegerFn = unsafe extern "system" fn(u32, *mut i32);
 
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
-/// What the last overview load did, for `dodstudio_debug_status`.
+/// What the last overview load did, for `ds_debug_status`.
 static LAST: Mutex<Option<String>> = Mutex::new(None);
 
 /// Puts [`load_map_sprite`] into the engine's function table. Called from
@@ -133,10 +133,14 @@ fn hd_file(image: &str) -> Option<PathBuf> {
     }
     let relative = format!("{stem}_hd.tga");
     let root = game_root();
-    [root.join("dod_addon"), root.join("dod")]
-        .into_iter()
-        .map(|f| f.join(&relative))
-        .find(|p| p.is_file())
+    // Named after `-game`'s folder (#402).
+    [
+        root.join(crate::game_folder::addon_name()),
+        root.join(crate::game_folder::name()),
+    ]
+    .into_iter()
+    .map(|f| f.join(&relative))
+    .find(|p| p.is_file())
 }
 
 /// The tile of `hd` for frame `index` of a `columns` x `rows` grid, with pure
@@ -239,7 +243,7 @@ unsafe fn upgrade(model: *mut c_void, path: &Path) -> Result<usize, String> {
     Ok(size)
 }
 
-/// One line for `dodstudio_debug_status`, once an overview with an `_hd`
+/// One line for `ds_debug_status`, once an overview with an `_hd`
 /// image has loaded.
 pub fn status_line() -> Option<String> {
     LAST.lock()

@@ -8,8 +8,8 @@ Written for the question behind #405: can the capture batch move from
 `playdemo` to `viewdemo`, so each clip is reached by a jump rather than a
 `host_framerate` fast-forward?
 
-> **Status 2026-10:** the jump is built as `dodstudio_seek_to` / `_by` /
-> `dodstudio_seek_skip_between` (`goldsrc-hooks/src/demo_seek.rs`), and #405
+> **Status 2026-10:** the jump is built as `ds_demo_seek_to` / `_by` /
+> `ds_demo_seek_skip_between` (`goldsrc-hooks/src/demo_seek.rs`), and #405
 > (batch under `viewdemo`) is still open. Long forward jumps drop joins and team
 > picks (#596); a fix that steps them 5 s per frame is the open PR #601, not yet
 > on `dev`.
@@ -93,7 +93,7 @@ patched demos with `+viewdemo`.
 
 `viewdemo` does not compute the view for an HLTV demo, so it does not get
 around DoD's client discarding `DRC_CMD_CHASE`/`DRC_CMD_INEYE` (#222), and it
-is no route to #206 (closed since: `dodstudio_spec_lock`, see
+is no route to #206 (closed since: `ds_spec_lock`, see
 `docs/goldsrc_spectator_camera.md`).
 
 - `Server::ParseHLTV` marks an HLTV demo (`HLTV_ACTIVE`), and an HLTV world's
@@ -133,6 +133,23 @@ memory: the world keeps every frame (`SetBufferSize(-1)`), inside a 32-bit
 process. The console prints `Demo file completely loaded.` when the loader
 disconnects, which is what `IsLoading()` reports.
 
+Measured on #797 (both builds, the DoD Studio window open or closed): the
+loader runs about 163 engine frames a second, 59.6 s of demo per wall second.
+
+**With the hook DLL** the cap is a time budget instead (#798,
+`ds_demo_fast_load`, on by default, `goldsrc-hooks/src/fast_load.rs`).
+A detour over the counter's `inc eax` through its `cmp eax, 0x20`
+(pre-Anniversary `Core.dll+0x10db2`, 8 bytes; 25th Anniversary `+0x12db9`,
+7 bytes) redoes the increment and the store, calls into the hook, and
+compares the count against what it returns, so the engine's own `jg` still
+decides: no cap while this frame's loading has taken under the budget (8 ms
+by default), the engine's `0x20` once it has. A frame therefore still reads
+at least 33 packets. `0` returns `0x20` every time, the engine's own decision.
+`Core.dll` loads with the first `viewdemo`, so the patch goes in then, found
+by signature; `tools/verify_fast_load_offsets.py` checks both builds' loops
+(the count's init, the span, what follows the `jg`). The hook log has one
+`fast_load:` line per load with its time, packets and frame times.
+
 `Core.dll` also holds 256 entities per frame on the pre-Anniversary build
 (1024 on the Anniversary one); see the entity-limit entry in
 `docs/goldsrc_dod_quirks.md`. That limit is the same `viewdemo` or not.
@@ -160,9 +177,9 @@ The engine already has `dem_jump <seconds>` (relative, then pauses),
 `dem_start`, `dem_pause <0|1>`, `dem_speed <rate>` and `dem_save`, all from
 `DemoPlayer.dll`.
 
-`dodstudio_seek_to <seconds>` and `dodstudio_seek_by <seconds>`
+`ds_demo_seek_to <seconds>` and `ds_demo_seek_by <seconds>`
 (`goldsrc-hooks/src/demo_seek.rs`) jump without pausing and refuse while the
-demo is still loading. With `dodstudio_seek_skip_between 1` they also move the
+demo is still loading. With `ds_demo_seek_skip_between 1` they also move the
 two "last sent" marks (`this+0x3c0`, `this+0x3d8`) to the landing frame, so
 the next frame runs that frame's commands and nothing before it. That suits a
 batch, whose skipped commands belong to other clips; it does not suit a POV
@@ -182,19 +199,78 @@ The player sends a jump's whole catch-up as **one** message, built in its
   overflow.`, and the player carries on from the landing frame alone.
 
 A 20-minute jump in an HLTV demo did exactly that on 2026-10-04
-(`dodstudio_seek_to: 90.10 -> 1335.30 s`, then the overflow line): a player
+(`ds_demo_seek_to: 90.10 -> 1335.30 s`, then the overflow line): a player
 who joined 6:42 into the recording had no name in the kill feed and no team,
-the scoreboard counted 0 Allies and 0 Axis, and `dodstudio_spec_target` found
+the scoreboard counted 0 Allies and 0 Axis, and `ds_spec_target` found
 no such player. Players already on the server when the recording began were
 fine, since their info is in the signon data.
 
-So `dodstudio_seek_to`/`_by` take a forward jump of more than 5 seconds in
+So `ds_demo_seek_to`/`_by` take a forward jump of more than 5 seconds in
 5-second steps, one per sent frame (each step waits for `m_LastFrameTime` to
 reach it). Measured with `analysis/examples/seek_burst.rs` on four HLTV
 demos: no 5-second window held more than 55 KB of network data, entities
 included, and the catch-up leaves entities out. Backward jumps replay nothing
 either way, so going back past a join or a team change still shows the later
-state. `dodstudio_seek_skip_between 1` jumps at once, as before.
+state. `ds_demo_seek_skip_between 1` jumps at once, as before.
+
+### The replayed console commands (#702)
+
+A POV demo's type-3 frames (`+forward`, `-moveleft`, `+speed`...) are
+replayed by the steps too, into `hw.dll`'s `filteredcmd_text`, the 16 KB
+buffer for text the game didn't type itself. `Cbuf_Execute` runs that buffer
+**one command per frame** (both builds), so a 30-minute jump's ~15,000
+commands overflowed it about 6,600 times and then drained for 40 seconds of
+the demo after the landing, one stale key press a frame. DoD's gun lowering
+reads those keys, so the crosshair blinked through the first clip of a
+capture batch. A stepped seek now empties that buffer every frame until it
+lands, then sends `-forward`, `-speed` and the rest
+(`goldsrc-hooks/src/filtered_commands.rs`). The 31:01 clip of
+wsod25_grp2_h1_m00cat (PRE): 18 blinks under 0.1 s before, none after, the
+same as reaching it by fast-forward.
+
+## Demos on another drive (#376, #776)
+
+`viewdemo` and `playdemo` take a path relative to `dod\`, `../` included,
+and nothing else. Where that comes from, read out of both installs' DLLs
+(#776): every demo open ends in the file system's `Open(name, "rb", pathID
+= 0)` -- `hw.dll`'s `FS_Open` for `playdemo`, `Core.dll`'s
+`DemoFile::LoadDemo` (through `DemoPlayer.dll`'s `IDemoPlayer::LoadDemo`,
+slot 41) for `viewdemo` -- and `FileSystem_Stdio.dll`'s `Open` only tries
+`<search path> + name` for each search path in turn. Nothing on the way
+checks the name (the "Relative pathnames are not allowed" test belongs to
+`record`, `appenddemo` and the other demo-editing commands). So on the
+pre-Anniversary build `viewdemo "D:/x"` is "Coudn't open demo file"; on the
+25th Anniversary build its `Open` first asserts `!strchr(pFileName, ':')`
+(`BaseFileSystem.cpp` line 471, `_wassert`: a fatal dialog), the assert the
+old version of this section mentioned without a place.
+
+**With the hook DLL**, `viewdemo "D:/folder/demo"` works
+(`ds_demo_other_drives`, `goldsrc-hooks/src/demo_other_drives.rs`):
+its `Open` slot adds `D:\` as a search path the first time the drive is
+named (`AddSearchPath` takes a path with a drive letter as it is and
+appends it last; its own path ID keeps the engine's `GAME` lookups out of
+it) and opens `folder/demo.dem` under it, before the original `Open` and
+its assert. `tools/verify_demo_other_drives.py` checks the slots and the
+assert on both installs.
+
+**Without it**, a demo on `D:\` needs a path under `dod\`. A directory
+junction gives it one with no copy and no engine change: Studio's + Link
+Folder to Game makes `dod\demos\<name>` point at the folder
+(`native::demo_links`), and the game follows it like any folder, for
+opening and for the Load Demo list (#409).
+
+The link's rules, each there so no folder walk can loop through it: it
+points at the folder picked, never a drive root; a folder that holds the
+install or is inside it is refused, as are links and network paths; Remove
+unlinks the junction only (`RemoveDirectoryW` on the link, never a
+recursive delete). Studio's own walks skip every junction and symlink and
+stop at a depth cap (`native::sys::folder_walk`); the hook's walks read the
+entry kind from the listing, which never follows a link.
+
+Checked in game on the Anniversary install (#764): `viewdemo
+"demos/<link>/<demo>"` from the console, and the link's folder and demos in
+the Load Demo window. Still unchecked: the same path on the launch line
+(`+viewdemo "demos/<link>/<demo>"`).
 
 ## What this means for moving the batch
 
@@ -203,5 +279,17 @@ Nothing found blocks it. Today's patched chain demos would run under
 hook holds the clip list and seeks through it by world time -- is the one that
 needs the skip: without it, a jump over earlier clips replays their
 `mirv_recordmovie_start`/`stop`. Still to measure live: one batch under
-`viewdemo`, and the load times above. (`dodstudio_seek_*` is in use; its
+`viewdemo`, and the load times above. (`ds_demo_seek_*` is in use; its
 forward-jump problem is #596.)
+
+### The first ESC after a second demo (#663)
+
+GameUI's VCR bar (`CDemoPlayerDialog`) treats "the slider's value differs
+from the one I set last" as the user dragging it, and seeks there and
+pauses. Its `OnThink` only runs while the bar shows, so after a second
+`viewdemo` the hidden bar still holds the first demo's slider state, and the
+first ESC sent playback to the new demo's first whole second, paused (PRE,
+traced: `SetWorldTime(726.00)`, `SetPaused(1)` from 1706 s). The hook keeps
+the hidden bar's slider range, value and last value in step with playback
+(`goldsrc-hooks/src/studio_panel/hook/vcr_sync.rs`), so that first think
+finds nothing changed.

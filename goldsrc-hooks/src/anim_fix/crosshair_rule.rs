@@ -40,7 +40,7 @@
 //! | deploy | the viewmodel settling on a new weapon |
 //! | reload | the body sequence reading `*_reload` |
 //! | bolt-rifle shot | a shot (body animation or fire sound) while holding one |
-//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys |
+//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`) |
 //! | prone transition | 1.5s from the body entering `get_down` / `get_up` |
 //! | crawl | gait `prone_forward` (`dod_crawl` is the crouched walk) |
 //! | jump | body `jump`, from take-off until landing |
@@ -147,6 +147,7 @@ pub(super) fn forget() {
     BOLT_SHOT_AT.store(0, Ordering::Relaxed);
     PRONE_TRANSITION_AT.store(0, Ordering::Relaxed);
     IN_TRANSITION.store(0, Ordering::Relaxed);
+    super::sprint_turn::forget();
 }
 
 /// Starts the prone timer on the frame the body enters `get_down` or
@@ -215,7 +216,7 @@ pub(super) struct View<'a> {
 }
 
 /// Why POV would hide the crosshair. A small enum rather than text so the
-/// current reason fits in one atomic for `dodstudio_debug_status`.
+/// current reason fits in one atomic for `ds_debug_status`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub(crate) enum Hidden {
@@ -313,7 +314,7 @@ fn gun_lowered(view: &View, now: f64) -> bool {
     lowered_because(view, now).is_some()
 }
 
-/// `gun_lowered` with the reason, for `dodstudio_debug_log_gun_lowered`
+/// `gun_lowered` with the reason, for `ds_debug_log_gun_lowered`
 /// (#704): 0 when the gun is up, else the [`Hidden`] value.
 pub(super) fn gun_lowered_code(view: &View, now: f64) -> u8 {
     lowered_because(view, now).map_or(0, |why| why as u8)
@@ -329,7 +330,7 @@ fn lowered_because(view: &View, now: f64) -> Option<Hidden> {
         ..
     } = *view;
     if !is_deployed(body) {
-        if gait == "dod_sprint" {
+        if super::sprint_turn::lowered(gait == "dod_sprint", now) {
             return Some(Hidden::Sprinting);
         }
         if since(&PRONE_TRANSITION_AT, now).is_some_and(|s| s < PRONE_TRANSITION_SECONDS) {

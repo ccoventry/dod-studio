@@ -1,4 +1,4 @@
-//! `dodstudio_debug_log_gun_lowered`: logs each time the first-person gun goes
+//! `ds_debug_log_gun_lowered`: logs each time the first-person gun goes
 //! down or comes back up, with the demo's clock, so a POV demo and the HLTV
 //! demo of the same match can be lined up and compared (issue #704).
 //!
@@ -6,7 +6,7 @@
 //!   `DoDGunGoOnOffScreen` sets to 1 on every frame the gun is lowered and to
 //!   0 otherwise (`+0x2c9c6` / `+0x2c9da` / `+0x2ca0a`; the same file on both
 //!   installs).
-//! - **HLTV in-eye** (`dodstudio_spec_match_pov`'s copy of it): whether
+//! - **HLTV in-eye** (`ds_spec_match_pov`'s copy of it): whether
 //!   `spectator_gun` was told the watched player's gun is lowered this frame.
 //!
 //! Each line carries the demo player's clock under `viewdemo` (the same clock

@@ -10,6 +10,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
+import { renderDamageBanner } from './analyzer_damage.js';
 import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
 import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
@@ -676,6 +677,9 @@ async function setCurrentDir(path) {
   try {
     listing = await browseDirectory(path);
   } catch (err) {
+    // A slow read can finish after the user has moved on (#789): only the
+    // folder still open may set the table.
+    if (currentDir !== path) return;
     browserError = String(err);
     currentFolderDemos = [];
     await forgetInvalidFolder(path);
@@ -686,6 +690,7 @@ async function setCurrentDir(path) {
   }
 
   dirCache.set(path, listing);
+  if (currentDir !== path) return;
   browserError = null;
   currentFolderDemos = listing.demos;
   startPlayerIndex(listing.demos);
@@ -1098,6 +1103,7 @@ async function loadAnalyzerDemo(path) {
   setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
   // The last demo's multi-map notice isn't about this one.
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
+  renderDamageBanner(document.querySelector('#analyzer-damage-banner'), null);
   const seq = ++analyzerLoadSeq;
   analyzerLoadingPath = path;
   try {
@@ -1111,6 +1117,7 @@ async function loadAnalyzerDemo(path) {
     renderDemoTable();
     renderActiveTab();
     renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, (update) => splitAnalyzedDemo(path, update));
+    renderDamageBanner(document.querySelector('#analyzer-damage-banner'), report);
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {

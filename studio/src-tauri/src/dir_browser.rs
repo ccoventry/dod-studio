@@ -7,7 +7,9 @@
 // scan_demo_folders_async) — see docs/archive/tauri_parity_audit.md Area 3 for the
 // full corrected design this was rebuilt against.
 
+use native::sys::folder_walk::{Kind, Step, Walker};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -118,8 +120,19 @@ fn native_roots() -> Vec<DirEntryLite> {
 
 /// Lists the immediate subfolders and `.dem` files of `path`. `path: None`
 /// returns the drive roots (Windows) or `/` (elsewhere) as the top of the tree.
+///
+/// Runs on a blocking thread: on a cloud drive each subfolder's demo count
+/// can be a network round trip, and on the main thread that froze the whole
+/// window for ~30 s (#789).
 #[tauri::command]
-pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
+pub async fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        list_directory(path)
+    }))
+    .await
+}
+
+fn list_directory(path: Option<String>) -> Result<DirListing, String> {
     let Some(path) = path else {
         return Ok(DirListing {
             path: None,
@@ -190,7 +203,7 @@ pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
 
 /// A sensible starting folder for the picker — the user's Documents
 /// directory, falling back to their home directory.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn default_browse_dir() -> Option<String> {
     dirs::document_dir()
         .or_else(dirs::home_dir)
@@ -233,9 +246,14 @@ mod tests {
 /// Non-recursive `.dem` count for a single folder — used by the Explorer
 /// sidebar's Quick Links rows (Pinned/Recent/Local), which don't otherwise
 /// need a full directory listing.
+///
+/// On a blocking thread for the same reason as `browse_directory` (#789).
 #[tauri::command]
-pub fn count_demo_files_in_folder(path: String) -> usize {
-    count_demo_files(&PathBuf::from(path))
+pub async fn count_demo_files_in_folder(path: String) -> Result<usize, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        count_demo_files(&PathBuf::from(path))
+    }))
+    .await
 }
 
 fn is_drive_root(path: &Path) -> bool {
@@ -259,11 +277,8 @@ pub struct DemoFolderHit {
 const SCAN_SKIP_DIRS: [&str; 5] = ["target", "node_modules", ".git", "src", "assets"];
 
 /// Bounded background scan for folders containing at least one `.dem` file,
-/// rooted at `root` (falling back to the default browse dir). Mirrors dev's
-/// `tree.rs::scan_demo_folders_async` bounds exactly: depth-limited to 4,
-/// capped at 2000 folders checked, skips `.`/`$`-prefixed and
-/// target/node_modules/.git/src/assets dirs. Feeds the Explorer sidebar's
-/// "Local" Quick Links tier.
+/// rooted at `root` (falling back to the default browse dir). Feeds the
+/// Explorer sidebar's "Local" Quick Links tier.
 #[tauri::command]
 pub async fn scan_demo_folders(root: Option<String>) -> Result<Vec<DemoFolderHit>, String> {
     crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
@@ -272,63 +287,88 @@ pub async fn scan_demo_folders(root: Option<String>) -> Result<Vec<DemoFolderHit
             .or_else(dirs::document_dir)
             .or_else(dirs::home_dir)
             .unwrap_or_else(|| PathBuf::from("."));
-        if !root_dir.is_dir() {
-            return Vec::new();
-        }
-
-        let mut folders = Vec::new();
-        let walk_recursive = !is_drive_root(&root_dir);
-        let mut stack = vec![(root_dir, 0usize)];
-        let max_depth = 4;
-        let mut folders_checked = 0;
-        let max_folders_checked = 2000;
-
-        while let Some((dir, depth)) = stack.pop() {
-            folders_checked += 1;
-            if folders_checked > max_folders_checked {
-                break;
-            }
-
-            let mut demo_count = 0;
-            let mut subdirs = Vec::new();
-
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.filter_map(Result::ok) {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        if walk_recursive
-                            && depth < max_depth
-                            && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                        {
-                            let name_lower = name.to_lowercase();
-                            if !name.starts_with('.')
-                                && !name.starts_with('$')
-                                && !SCAN_SKIP_DIRS.contains(&name_lower.as_str())
-                            {
-                                subdirs.push(path);
-                            }
-                        }
-                    } else if is_dem_file(&path) {
-                        demo_count += 1;
-                    }
-                }
-            }
-
-            if demo_count > 0 {
-                folders.push(DemoFolderHit {
-                    path: dir.to_string_lossy().into_owned(),
-                    demo_count,
-                });
-            }
-
-            subdirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-            for subdir in subdirs {
-                stack.push((subdir, depth + 1));
-            }
-        }
-
-        folders.sort_by(|a, b| a.path.cmp(&b.path));
-        folders
+        demo_folders_under(&root_dir)
     }))
     .await
+}
+
+/// The folders under `root_dir` with a `.dem` directly in them, sorted by
+/// path. Four folder levels down, 2000 folders at most, skipping `.`/`$`
+/// folders and build trees; a drive root is only looked at itself. Junctions
+/// and symlinks are never entered (`folder_walk`, #376).
+fn demo_folders_under(root_dir: &Path) -> Vec<DemoFolderHit> {
+    if !root_dir.is_dir() {
+        return Vec::new();
+    }
+    let max_depth = if is_drive_root(root_dir) { 1 } else { 5 };
+    let max_folders_checked = 2000;
+    let mut folders_checked = 1;
+    let mut counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    Walker::new()
+        .max_depth(max_depth)
+        .skip_system_folders()
+        .walk(root_dir, &mut |found| match found.kind {
+            Kind::Dir => {
+                let name = found.file_name();
+                let skip = name.starts_with('.')
+                    || name.starts_with('$')
+                    || SCAN_SKIP_DIRS.contains(&name.to_lowercase().as_str())
+                    || folders_checked >= max_folders_checked;
+                if !skip {
+                    folders_checked += 1;
+                }
+                (!skip).into()
+            }
+            Kind::File => {
+                if is_dem_file(&found.path)
+                    && let Some(dir) = found.path.parent()
+                {
+                    *counts.entry(dir.to_path_buf()).or_default() += 1;
+                }
+                Step::Enter
+            }
+            Kind::Link => Step::Skip,
+        });
+
+    counts
+        .into_iter()
+        .map(|(dir, demo_count)| DemoFolderHit {
+            path: dir.to_string_lossy().into_owned(),
+            demo_count,
+        })
+        .collect()
+}
+
+#[cfg(all(test, windows))]
+mod scan_tests {
+    use super::*;
+
+    #[test]
+    fn the_folder_scan_counts_each_folder_once_past_a_loop() {
+        let root = std::env::temp_dir().join(format!("dir_browser_scan_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("lan/day2")).unwrap();
+        std::fs::create_dir_all(root.join(".hidden")).unwrap();
+        for f in ["lan/a.dem", "lan/b.dem", "lan/day2/c.dem", ".hidden/d.dem"] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        native::sys::junction::create(&root.join("lan/day2/loop"), &root).unwrap();
+
+        let hits = demo_folders_under(&root);
+
+        let found: Vec<(String, usize)> = hits
+            .iter()
+            .map(|h| {
+                let rel = Path::new(&h.path)
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                (rel, h.demo_count)
+            })
+            .collect();
+        assert_eq!(found, [("lan".to_string(), 2), ("lan/day2".to_string(), 1)]);
+        let _ = native::sys::junction::remove(&root.join("lan/day2/loop"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

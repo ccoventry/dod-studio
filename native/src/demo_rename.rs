@@ -37,8 +37,59 @@ pub struct DemoFacts {
     pub side: Option<String>,
     /// Each playing side's clan tag (#445).
     pub teams: Vec<TeamTag>,
+    /// Which half of its match this demo records, 1 or 2 (#685): decided
+    /// over every demo listed together, by `crate::match_groups`. `None`
+    /// when nothing decided it, which `{half}` shows as its fallback.
+    pub half: Option<u8>,
+    /// The match's number among the demos listed together, by date (#685).
+    pub match_number: Option<u32>,
     /// Why the demo couldn't be read. Its other facts are then empty.
     pub error: Option<String>,
+}
+
+/// The facts for one demo, with its analysis kept (trimmed to what the
+/// grouping reads) for the match and half pass over the whole list
+/// (`crate::match_groups::group_demos`).
+pub fn facts_for_grouping(path: &Path) -> (DemoFacts, Option<Analysis>) {
+    match crate::run_analyzer_cached(&path.to_path_buf(), |_, _| {}) {
+        Ok((_, mut analysis, _)) => {
+            let facts = facts_from(path, &analysis);
+            analysis::trim_for_grouping(&mut analysis);
+            (facts, Some(analysis))
+        }
+        Err(error) => (
+            DemoFacts {
+                path: path.to_string_lossy().to_string(),
+                file_name: file_name(path),
+                modified_unix_secs: modified_unix_secs(path),
+                error: Some(error),
+                ..DemoFacts::default()
+            },
+            None,
+        ),
+    }
+}
+
+/// Fills every fact's `half` and `match_number` from a grouping of the
+/// demos listed together (`facts[i]` was read with `analyses[i]`).
+pub fn apply_grouping(facts: &mut [DemoFacts], analyses: &[Option<Analysis>]) {
+    let demos: Vec<(String, &Analysis, Option<u64>)> = facts
+        .iter()
+        .zip(analyses)
+        .filter_map(|(f, a)| Some((f.path.clone(), a.as_ref()?, f.modified_unix_secs)))
+        .collect();
+    let grouping = crate::match_groups::group_demos(&demos);
+    let by_path: std::collections::HashMap<&str, &crate::match_groups::DemoMatch> = grouping
+        .demos
+        .iter()
+        .map(|d| (d.path.as_str(), d))
+        .collect();
+    for f in facts.iter_mut() {
+        if let Some(d) = by_path.get(f.path.as_str()) {
+            f.half = d.half;
+            f.match_number = Some(d.match_number);
+        }
+    }
 }
 
 /// One player, as much of them as the facts need.
@@ -109,6 +160,8 @@ pub fn facts_from(path: &Path, analysis: &Analysis) -> DemoFacts {
             .and_then(|t| side_name(t, state.allies_are_british))
             .map(str::to_string),
         teams: analysis::team_tags(state),
+        half: None,
+        match_number: None,
         error: None,
     }
 }
@@ -141,20 +194,12 @@ fn modified_unix_secs(path: &Path) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Every `.dem` under `folder`, subfolders too, sorted by path.
+/// Every `.dem` under `folder`, subfolders too, sorted by path. Never the
+/// Recycle Bin's: renaming a deleted demo there would be wrong (#843).
 pub fn demos_in(folder: &Path) -> Vec<PathBuf> {
-    let mut demos: Vec<PathBuf> = walkdir::WalkDir::new(folder)
-        .into_iter()
-        .flatten()
-        .filter(|e| e.file_type().is_file())
-        .map(walkdir::DirEntry::into_path)
-        .filter(|p| {
-            p.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
-        })
-        .collect();
-    demos.sort();
-    demos
+    crate::sys::folder_walk::Walker::new()
+        .skip_system_folders()
+        .demos(folder)
 }
 
 /// One rename: full paths.
@@ -380,6 +425,31 @@ mod tests {
             kills: 7,
             deaths: 3,
         }
+    }
+
+    #[test]
+    fn listed_demos_get_their_match_and_an_unread_one_gets_none() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let (_, mut analysis) =
+            crate::run_analyzer_with_progress(&PathBuf::from(fixture), |_, _| {})
+                .expect("fixture parses");
+        let mut facts = vec![
+            facts_from(Path::new(fixture), &analysis),
+            DemoFacts {
+                path: "C:/demos/broken.dem".into(),
+                error: Some("no frames".into()),
+                ..DemoFacts::default()
+            },
+        ];
+        analysis::trim_for_grouping(&mut analysis);
+        apply_grouping(&mut facts, &[Some(analysis), None]);
+        assert_eq!(facts[0].match_number, Some(1));
+        // One bot game alone: nothing says which half.
+        assert_eq!(facts[0].half, None);
+        assert_eq!(facts[1].match_number, None);
     }
 
     #[test]

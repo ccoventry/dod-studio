@@ -1,6 +1,7 @@
 # The crosshair: hiding it, and matching it while spectating
 
-`dodstudio_hide_crosshair` and the crosshair half of `dodstudio_spec_match_pov`.
+`ds_hud_hide_crosshair`, the crosshair half of `ds_spec_match_pov`,
+and each player's crosshair from Studio's Players table (§3).
 Split out of `docs/goldsrc_hud_suppression.md` (which holds the shared
 patch-instead-of-edit-a-file pattern and the per-frame re-apply loop, there §4
 and §1). Same method and verification: offline analysis of DoD 1.3's
@@ -13,7 +14,7 @@ is needed at all is the fork §1 had to map.
 
 ---
 
-## 1. `dodstudio_hide_crosshair`
+## 1. `ds_hud_hide_crosshair`
 
 ### Why the stock cvar is not enough
 
@@ -53,7 +54,7 @@ Issue #265's idea — write `CHudBase::Draw`'s address into vftable slot 3 — i
 one dword and cheaper. It also needs the vftable's address at runtime, which
 means resolving RTTI in the loaded module or signature-matching the constructor
 that stores it. Patching the function needs neither. The general
-`dodstudio_hudelement` command in #265 (shipped as `dodstudio_hide_hudelement`, see `docs/goldsrc_hud_elements.md`) is still worth having; this is not it and
+`dodstudio_hudelement` command in #265 (shipped as `ds_hud_hide_element`, see `docs/goldsrc_hud_elements.md`) is still worth having; this is not it and
 does not block it.
 
 ### Both the POV and the spectator crosshair
@@ -84,12 +85,12 @@ is.
 
 ---
 
-## 2. The spectator crosshair (`dodstudio_spec_match_pov`)
+## 2. The spectator crosshair (`ds_spec_match_pov`)
 
 > This had a cvar of its own, `dodstudio_match_pov_crosshair`, until
-> 2026-10-01. It is now one of the things `dodstudio_spec_match_pov` turns
+> 2026-10-01. It is now one of the things `ds_spec_match_pov` turns
 > on. Where the text below says `dodstudio_match_pov_crosshair`, read
-> `dodstudio_spec_match_pov`.
+> `ds_spec_match_pov`.
 
 The other half of §1's finding. Mapping the fork to prove the hide covered both
 crosshairs also showed *why* they never look alike:
@@ -162,7 +163,7 @@ stock rect alone rather than guessing.
 The spectator branch draws its crosshair whenever the camera is in a player's
 eyes. The player's own view does not: `ShouldDrawCrossHair` (`client+0x2d0e0`)
 hides it while the gun is lowered and for weapons that have none. With
-`dodstudio_spec_match_pov 1` the spectated view hides it in the same states
+`ds_spec_match_pov 1` the spectated view hides it in the same states
 (#310).
 
 **The reference is the game being played, not a POV demo.** The two differ.
@@ -237,7 +238,7 @@ is the one frame at a change.
 
 ### It loses to §1, by construction
 
-`dodstudio_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
+`ds_hud_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
 patches instructions *inside* a function that is then never reached, so hiding
 wins with no interlock written anywhere.
 
@@ -249,3 +250,56 @@ half: it never reads `cl_xhair_style` either. The third was *when* it draws,
 answered above. Still open: accuracy spread, which the POV crosshair shows and
 a spectator cannot know (it comes from the player's own prediction).
 
+---
+
+## 3. Each player's crosshair (Configuration > Players, #428)
+
+`ds_player_overrides 1` and a crosshair in Studio's Players table give
+the crosshair on screen a sprite and tile per player: the recorder's in a POV
+demo, the in-eye target's in an HLTV demo (`spectator_target::in_eye_target`).
+`goldsrc-hooks/src/player_crosshair.rs`.
+
+### No patch: the sprite calls are already hooked
+
+Both branches of §1's fork draw through the engine's sprite API: `SPR_Set`
+with the handle, then one `SPR_Draw*` with the rect, centred on the screen.
+`hud_sprites.rs` (#808) already redirects those five pointers in client.dll's
+own `gEngfuncs` copy, so a draw can be changed as it happens without touching
+`CHudDoDCrossHair` or `hw.dll`. client.dll is byte-identical across installs,
+so there is no per-build table.
+
+A draw is the crosshair's when its sheet is `customXHair.spr` (only this
+element uses it: the POV tile path, and the spectator path under
+`ds_spec_match_pov`), or when it is exactly the stock spectator rect of
+`crosshairs.spr` (left 24, right 48, top 0, bottom 24) while the in-eye camera
+is up. Then the hook sets the table's sprite, draws its tile -- §2's
+`tile_rect`, DoD's own 4x4 grid of 64x64 -- moved by half the size difference
+so its centre stays where the game centred its own rect, and sets the game's
+handle and colour back for whatever draws next.
+
+### Loading the sprite
+
+Once per level, from `HUD_Frame`, with the engine's `SPR_Load` (past the
+hook, so it doesn't count as the HUD reloading): handles are reused across a
+level load, and the HUD's own load of `customXHair.spr` in `VidInit` is the
+signal to load again. The file is checked first (in the `-addons` folder, then
+the game folder; `IDSP`, version 2), so a missing or broken sprite is said in
+the log and the game's crosshair stays, rather than the engine meeting it.
+
+Studio's crosshair lists read the same two folders (`player_overrides::list_sprites`,
+the addon's copy first). The Players tab's **Add a crosshair file…** (#842)
+takes the `customxhair.spr` Vertex's crosshair creator downloads, alone or
+from its ZIP, and copies it to `<game>_addon\sprites\customxhair-<name>.spr`
+(`native/src/crosshair_import.rs`): never into the game folder, and never
+over a file already there.
+
+### What it leaves alone
+
+When the crosshair shows. `ShouldDrawCrossHair`, §1's stub and §2's gate all
+decide whether a draw happens; this only changes what an existing draw draws.
+In a POV demo with `cl_xhair_style 0`, DoD draws its classic dynamic
+crosshair (`client+0x2cda0`), which has no `customXHair.spr` tile, and the
+table's crosshair does not appear.
+
+The draw path reads three atomics; the decision (the player, their row, the
+handle) is made once a frame in `HUD_Frame`.

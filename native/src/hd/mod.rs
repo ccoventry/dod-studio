@@ -13,13 +13,15 @@
 //! The layout and names here mirror the hook's and the scripts', and must stay
 //! in step with both:
 //!
-//! - `texture_hires.rs`: the five type folders, `overrides`, and the default
+//! - `texture_hires.rs`: the six type folders, `overrides`, and the default
 //!   style;
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
 pub mod build;
 pub mod gl_max_size;
+pub mod map_keys_cache;
 pub mod map_list;
+pub mod map_textures;
 pub mod misses;
 pub mod my_styles;
 pub mod preview;
@@ -33,17 +35,17 @@ use serde::Serialize;
 
 /// The asset types, one folder each under `dodstudio_hd`, in the order the
 /// hook's own docs list them.
-pub const ASSET_TYPES: [&str; 5] = ["world", "models", "sprites", "detail", "sky"];
+pub const ASSET_TYPES: [&str; 6] = ["world", "models", "sprites", "decals", "detail", "sky"];
 
 /// Per-file picks that win over any style (`texture_hires.rs`'s `OVERRIDES`).
 pub const OVERRIDES: &str = "overrides";
 
-/// What `dodstudio_hd_style` is when nothing sets it.
+/// What `ds_hd_style` is when nothing sets it.
 pub const DEFAULT_STYLE: &str = "ultrasharp";
 
 /// The console lines that turn HD on and pick a style.
-pub const ENABLED_CVAR: &str = "dodstudio_hd_enabled";
-pub const STYLE_CVAR: &str = "dodstudio_hd_style";
+pub const ENABLED_CVAR: &str = "ds_hd_enabled";
+pub const STYLE_CVAR: &str = "ds_hd_style";
 
 /// A style the scripts know without `my_styles.txt`.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -140,7 +142,7 @@ pub struct HdStatus {
     pub hd_root_exists: bool,
     pub types: Vec<TypeStatus>,
     /// Every style with a folder under at least one type, sorted: what
-    /// `dodstudio_hd_style` can usefully be set to.
+    /// `ds_hd_style` can usefully be set to.
     pub built_styles: Vec<String>,
     /// Every built-in style, built or not, so the page can offer them all.
     pub known_styles: Vec<&'static str>,
@@ -177,11 +179,12 @@ pub struct HdStatus {
 /// `<game>\dod_addon\dodstudio_hd` (#415), or `<game>\dod\dodstudio_hd`
 /// while that one exists and the `dod_addon` one doesn't -- where an install
 /// built before #415 has them. The hook and `tools/hd/hdcommon.py` pick the
-/// same way, so a build lands where the game reads.
+/// same way, so a build lands where the game reads. Both folders are named
+/// from the Game folder setting (#402).
 pub fn hd_root(game_exe: &Path) -> Option<PathBuf> {
     let game = game_exe.parent()?;
-    let addon = game.join("dod_addon").join("dodstudio_hd");
-    let dod = game.join("dod").join("dodstudio_hd");
+    let addon = crate::shared::paths::addon_dir(game).join("dodstudio_hd");
+    let dod = crate::shared::paths::mod_dir(game).join("dodstudio_hd");
     Some(if dod.is_dir() && !addon.is_dir() {
         dod
     } else {
@@ -258,7 +261,9 @@ fn count_files(dir: &Path) -> (u64, u64, Option<PathBuf>) {
     let mut files = 0;
     let mut bytes = 0;
     let mut biggest: Option<(u64, PathBuf)> = None;
+    // walkdir does not follow links by default; the depth cap is #376's.
     for e in walkdir::WalkDir::new(dir)
+        .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
         .into_iter()
         .flatten()
         .filter(|e| e.file_type().is_file())
@@ -489,7 +494,7 @@ mod tests {
     #[test]
     fn the_names_match_the_hook_and_the_scripts() {
         let hook = include_str!("../../../goldsrc-hooks/src/texture_hires.rs");
-        let prefix = "dodstudio_";
+        let prefix = "ds_";
         for (cvar, suffix) in [(ENABLED_CVAR, "hd_enabled"), (STYLE_CVAR, "hd_style")] {
             assert_eq!(cvar, format!("{prefix}{suffix}"));
             assert!(

@@ -104,6 +104,7 @@ pub(crate) fn send(label: &str) {
 unsafe extern "C" fn wrapped_echo() {
     if let Some(line) = marker_line(&cmd_list::args()) {
         crate::batch_end::on_marker(&line);
+        crate::schedule::note_marker(&line);
         emit(line);
     }
     unsafe { call_real(&REAL_ECHO) };
@@ -181,7 +182,7 @@ pub fn studio_connected() -> bool {
     server::CONNECTED.load(Ordering::Relaxed)
 }
 
-/// One `dodstudio_debug_status` line.
+/// One `ds_debug_status` line.
 pub fn status_line() -> Option<String> {
     WRAPPED.load(Ordering::Relaxed).then(|| {
         format!(

@@ -1,8 +1,8 @@
 //! Keeping the camera on one player in an HLTV demo (issue #206):
 //!
-//! - `dodstudio_spec_lock 1` stops the game moving the camera to the next
+//! - `ds_spec_lock 1` stops the game moving the camera to the next
 //!   player four seconds after the one being watched dies;
-//! - `dodstudio_spec_target <player>` puts the camera on a player by number.
+//! - `ds_spec_target <player>` puts the camera on a player by number.
 //!
 //! ## What moves the camera
 //!
@@ -34,7 +34,7 @@
 //!     +0x2c7af  mov [fl_DeadTargetSwitch], 0
 //! ```
 //!
-//! Seen live with `dodstudio_debug_log_spectator_target 1`: the watched
+//! Seen live with `ds_debug_log_spectator_target 1`: the watched
 //! player dies at 587.78, `client.dll ClientCmd: "+attack;wait;-attack"` is
 //! logged at 591.77, and `g_iUser2` goes from 2 to 3 on the next frame.
 //!
@@ -44,7 +44,8 @@
 //! treated as alive by this routine alone, the timer stays cleared and the
 //! keypress is never issued. Nothing is corrected after the fact, so there
 //! is no frame in which the camera has already moved. A viewer's own
-//! `+attack` still changes player.
+//! `+attack` still changes player, except during Review highlights
+//! (`spectator_buttons`, #826).
 //!
 //! While the watched player is dead the view is the game's own for a dead
 //! target (`V_GetInEyePos` rolls the camera and lowers it by 8), and it is
@@ -59,7 +60,7 @@
 //! the spectator mode, is the dword before it.
 //!
 //! The number is the player's entity index, the same number
-//! `dodstudio_deathmsg players` lists.
+//! `ds_hud_deathmsg players` lists.
 
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
@@ -98,6 +99,21 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 static LOCKED: AtomicBool = AtomicBool::new(false);
 /// Whether a failure to apply has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
+/// Review highlights holds the lock for the whole review (#822), so a death
+/// before an HLTV highlight ends can't move the camera off its player; the
+/// cvar itself is left as the user set it.
+static REVIEW_HOLD: AtomicBool = AtomicBool::new(false);
+
+/// Holds the lock on (or lets the cvar decide again) for Review highlights.
+pub fn hold_for_review(on: bool) {
+    REVIEW_HOLD.store(on, Ordering::Relaxed);
+}
+
+/// Whether a review holds the lock: `spectator_buttons` ignores the viewer's
+/// spectator buttons for as long (#826).
+pub fn review_holds() -> bool {
+    REVIEW_HOLD.load(Ordering::Relaxed)
+}
 
 /// Called once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
@@ -147,13 +163,14 @@ pub fn set_locked(locked: bool) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Follows the cvar. Called every frame from `commands::poll`.
+/// Follows the cvar, or a review's hold. Called every frame from
+/// `commands::poll`.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
         return;
     }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = unsafe { (*cvar).value } != 0.0 || REVIEW_HOLD.load(Ordering::Relaxed);
     match set_locked(wanted) {
         Ok(false) => COMPLAINED.store(false, Ordering::Relaxed),
         Ok(true) => {
@@ -181,13 +198,13 @@ pub fn poll() {
 
 fn describe(locked: bool) -> &'static str {
     if locked {
-        "1: the camera stays on the player being watched when he dies"
+        "1: the camera stays on the player being watched when they die"
     } else {
-        "0: the game moves the camera on four seconds after he dies"
+        "0: the game moves the camera on four seconds after they die"
     }
 }
 
-/// One line for `dodstudio_debug_status`, once the lock has ever been on.
+/// One line for `ds_debug_status`, once the lock has ever been on.
 pub fn status_line() -> Option<String> {
     LOCKED
         .load(Ordering::Relaxed)
@@ -203,7 +220,7 @@ fn globals() -> Result<(*mut i32, *mut i32), String> {
     Ok(((target - 4) as *mut i32, target as *mut i32))
 }
 
-/// What `dodstudio_spec_target`'s argument asks for.
+/// What `ds_spec_target`'s argument asks for.
 #[derive(Debug, PartialEq, Eq)]
 enum Request {
     /// No argument: say who the camera is on.
@@ -222,7 +239,7 @@ fn parse(argument: Option<&str>) -> Request {
     }
 }
 
-/// `dodstudio_spec_target [player]`.
+/// `ds_spec_target [player]`.
 pub unsafe extern "C" fn target_command() {
     let Some(engfuncs) = engine::engfuncs() else {
         return;
@@ -253,7 +270,7 @@ pub unsafe extern "C" fn target_command() {
         Request::Report => {
             return say(if mode_now == 0 || target_now == 0 {
                 format!(
-                    "the camera is on no player. usage: {TARGET_NAME} <1-{MAX_PLAYERS}> (dodstudio_deathmsg players lists the numbers)"
+                    "the camera is on no player. usage: {TARGET_NAME} <1-{MAX_PLAYERS}> (ds_hud_deathmsg players lists the numbers)"
                 )
             } else {
                 format!("the camera is on player {target_now}")
@@ -261,7 +278,7 @@ pub unsafe extern "C" fn target_command() {
         }
         Request::Invalid => {
             return say(format!(
-                "expected a player number, 1-{MAX_PLAYERS} (dodstudio_deathmsg players lists them)"
+                "expected a player number, 1-{MAX_PLAYERS} (ds_hud_deathmsg players lists them)"
             ));
         }
         Request::Player(n) => n,

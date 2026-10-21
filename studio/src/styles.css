@@ -185,11 +185,28 @@ body {
   color: #ffffff;
 }
 
-.menu-update-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #5fb85f;
+/* The menu bar's update button (#868), beside Help: seen without opening a
+   menu, quiet enough to leave while you work. */
+.update-chip {
+  align-self: center;
+  margin-left: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: #5fb85f;
+  background: rgba(95, 184, 95, 0.12);
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.update-chip:hover {
+  background: rgba(95, 184, 95, 0.25);
+  color: #ffffff;
+}
+
+.update-chip[hidden] {
+  display: none;
 }
 
 .menu-dropdown-panel {
@@ -460,6 +477,10 @@ body {
   gap: 8px;
 }
 
+.analyzer-cache-bar {
+  width: 120px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;
@@ -642,8 +663,8 @@ button.primary-btn:hover:not(:disabled) {
   font-weight: 600;
 }
 
-/* Every centered <td> column in this table (checkbox, Highlights, Pending,
-   Captured, Rendered, Actions — master_pane.js) needs its <th> centered too,
+/* Every centered <td> column in this table (checkbox, Highlights, Selected,
+   Status, Review, Actions — master_pane.js) needs its <th> centered too,
    or a header/body mismatch that's invisible while the column is barely
    wider than its content visibly drifts apart once the table stretches
    wider than that content (e.g. a maximized window) and the extra slack
@@ -660,6 +681,25 @@ button.primary-btn:hover:not(:disabled) {
 
 #master-demo-table tr:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+/* Status and Review: coloured counts joined by slashes (queue_counts.js);
+   the header's legend shows the same letters in the same colours. */
+#master-demo-table td.queue-counts-cell {
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+#master-demo-table .count-legend {
+  font-size: 10px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+#master-demo-table .count-slash {
+  color: #555;
 }
 
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of
@@ -1050,6 +1090,44 @@ button.primary-btn:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Demo folders linked into the game folder (demo_links.js, #376) */
+.demo-links {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.demo-links summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.demo-links-hint {
+  color: var(--text-muted);
+  margin: 4px 0 6px;
+}
+.demo-links-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.demo-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-color);
+}
+.demo-link-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.demo-link-target,
+.demo-link-empty {
+  color: var(--text-muted);
+}
+.demo-link-console {
+  user-select: text;
 }
 
 /* Small inline scan/audit-in-progress indicator */
@@ -2159,6 +2237,23 @@ tr.keyboard-selected {
   color: #ffb74d;
 }
 
+.hd-style-maps summary {
+  cursor: pointer;
+}
+
+.hd-style-maps-groups p {
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-every {
+  display: block;
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-progress {
+  width: 100%;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
@@ -2286,13 +2381,15 @@ tr.keyboard-selected {
   overflow-wrap: anywhere;
 }
 
-.split-maps {
-  margin: 6px 0;
-  border-collapse: collapse;
+/* The app's table style (analyzer-table), sized to its content. */
+.split-maps.analyzer-table {
+  width: auto;
+  min-width: 420px;
+  margin: 8px 0;
 }
 
-.split-maps td {
-  padding: 2px 10px 2px 0;
+.split-maps th {
+  position: static;
 }
 
 .split-map-num,
@@ -2301,13 +2398,31 @@ tr.keyboard-selected {
   font-variant-numeric: tabular-nums;
 }
 
+.split-done td {
+  opacity: 0.75;
+}
+
+.split-map-done {
+  color: var(--text-muted, #aaa);
+  font-size: 0.9em;
+}
+
+.split-done-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  color: #5fb85f;
+}
+
 .split-short td {
   opacity: 0.6;
 }
 
+/* The result goes under the button, not beside it. */
 .split-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   align-items: flex-start;
 }
@@ -2931,8 +3046,9 @@ input[type="checkbox"].hd-box-pattern {
   color: #ef5350;
 }
 
-/* One row per placeholder group: its label, then its chips (#469). */
-.rename-chips {
+/* One row per placeholder group: its label, then its chips (#469), under
+   both name templates (#751, placeholder_chips.js). */
+.placeholder-chips {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 4px 10px;
@@ -2941,28 +3057,39 @@ input[type="checkbox"].hd-box-pattern {
   font-size: 0.85em;
 }
 
-.rename-chip-group-label {
+.placeholder-chip-group-label {
   color: var(--text-muted);
   font-size: 0.95em;
   text-align: right;
 }
 
-.rename-chip-group {
+.placeholder-chip-group {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.rename-chip {
+.placeholder-chip {
   padding: 1px 6px;
   font-family: monospace;
   font-size: 1em;
 }
 
 /* A placeholder the focused template's demo type doesn't have. */
-.rename-chip:disabled {
+.placeholder-chip:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* The Master Queue grouped by match (#685): one header line per match. */
+#master-demo-table .queue-match-header td {
+  padding: 6px 8px 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: default;
 }
 
 /* The list: the shared .analyzer-table look, with fixed columns so the two
@@ -3031,3 +3158,581 @@ input[type="checkbox"].hd-box-pattern {
   background: rgba(206, 147, 216, 0.12);
 }
 
+/* ── Setup window and checklist card (#599) ─────────────────────────────── */
+.setup-modal-content {
+  max-width: 600px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+}
+
+.setup-header {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* One bar per step: grey to come, blue now, green done. */
+.setup-steps {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.setup-steps li {
+  flex: 1 1 70px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup-steps li::before {
+  content: "";
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-accent);
+}
+
+.setup-steps li.done::before { background: #4caf7a; }
+.setup-steps li.now::before { background: #4a86c5; }
+.setup-steps li.now { color: #ffffff; }
+
+.setup-content {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 280px;
+}
+
+.setup-content p {
+  margin: 0;
+}
+
+.setup-footer {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.setup-footer-spacer {
+  flex: 1;
+}
+
+/* "Skip setup for now": a link, not a button, so Next stays the obvious one. */
+button.setup-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  padding: 4px 0;
+}
+
+button.setup-skip:hover:not(:disabled) {
+  background: none;
+  color: #ffffff;
+}
+
+.setup-note {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+}
+
+.setup-note.info { border-color: #2f4a68; }
+.setup-note.warn { border-color: #6b5226; color: #ffb74d; }
+.setup-note.ok { border-color: #2e5a42; }
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setup-path-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.setup-path {
+  flex: 1;
+  min-width: 0;
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 5px 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.setup-path.empty {
+  color: var(--text-muted);
+  font-family: inherit;
+  font-style: italic;
+}
+
+.setup-path .setup-free {
+  color: var(--text-muted);
+  font-family: inherit;
+  margin-left: 8px;
+}
+
+.setup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.setup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.setup-dot.ok { background: #4caf7a; }
+.setup-dot.warn { background: #ffb74d; }
+.setup-dot.bad { background: #f44336; }
+
+.setup-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-accent);
+  white-space: nowrap;
+}
+
+.setup-chip.info { border-color: #4a86c5; color: #4a86c5; }
+.setup-chip.ok { border-color: #4caf7a; color: #4caf7a; }
+.setup-chip.warn { border-color: #ffb74d; color: #ffb74d; }
+
+.setup-btn-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.setup-muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* The Capture page's card. */
+.setup-card {
+  margin: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--primary-accent);
+  border-radius: 3px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-card[hidden] {
+  display: none;
+}
+
+.setup-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+}
+
+.setup-card-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.setup-meter {
+  flex: 1 1 100px;
+  height: 6px;
+  background: #2b2c30;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.setup-meter i {
+  display: block;
+  height: 100%;
+  background: #4a86c5;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.setup-row.done {
+  opacity: 0.7;
+}
+
+.setup-row small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.setup-tick {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #111;
+  box-sizing: border-box;
+}
+
+.setup-tick.ok { background: #4caf7a; }
+.setup-tick.todo { border: 1.5px solid #ffb74d; }
+.setup-tick.opt { border: 1.5px dashed var(--border-accent); }
+
+
+.setup-row-text {
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* Configuration > Players (#428): one row per player -- name, spray,
+   crosshair, remove x -- and the crosshair tile picker under it. */
+.players-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 6px;
+}
+
+.players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.players-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(200px, 1.4fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.players-head {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.players-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.players-crosshair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.players-crosshair select {
+  min-width: 0;
+  max-width: 160px;
+}
+
+.players-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.players-tile-preview {
+  width: 24px;
+  height: 24px;
+  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 8px 8px;
+  border-radius: 3px;
+}
+
+.players-picker {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 4px 12px;
+}
+
+.players-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 48px);
+  grid-template-rows: repeat(4, 48px);
+  width: 192px;
+  height: 192px;
+  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 16px 16px;
+}
+
+.players-grid-image {
+  position: absolute;
+  inset: 0;
+  width: 192px;
+  height: 192px;
+  pointer-events: none;
+}
+
+.players-cell {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
+  text-align: left;
+  vertical-align: top;
+  padding: 2px 3px;
+  cursor: pointer;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.players-grid-numbers .players-cell {
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+}
+
+.players-cell:hover {
+  border-color: var(--accent-color, #4a90d9);
+}
+
+.players-cell.selected {
+  border: 2px solid var(--accent-color, #4a90d9);
+  color: #fff;
+}
+
+.players-picker-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+}
+
+.players-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.players-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.players-x:hover {
+  color: #fff;
+}
+
+/* The HLTV box's "Players I pick" (#828): the lists that add a player or a
+   team stay together; the picked players, as chips with an x, take a line
+   of their own at the end of the toolbar, so more chips never move the
+   lists (#845). */
+.review-hltv-pick {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+/* Fixed widths: a list sized to its longest name narrows as players are
+   picked out of it, and the lists after it shift. */
+#review-hltv-add-player {
+  width: 200px;
+}
+
+#review-hltv-add-team {
+  width: 160px;
+}
+
+.review-hltv-pick[hidden],
+.review-hltv-chips[hidden] {
+  display: none;
+}
+
+.review-hltv-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.review-hltv-chips-row {
+  flex-basis: 100%;
+}
+
+.review-hltv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-input);
+}
+
+/* Picked, but no highlight in the queue's HLTV demos right now. */
+.review-hltv-chip-away {
+  opacity: 0.5;
+}
+
+.review-hltv-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.review-hltv-chip-x:hover {
+  color: #fff;
+}
+
+.review-hltv-none {
+  color: var(--text-muted);
+}
+
+/* Demo Auditor › Duplicates: Folders to check (audit_folders.js, #844). */
+.audit-folder-list {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.audit-folder-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.audit-folder-path {
+  word-break: break-all;
+}
+
+/* All drives walks every fixed drive, so the list doesn't apply: dimmed, not hidden. */
+.audit-folder-list.dimmed {
+  opacity: 0.45;
+}
+
+.audit-all-drives {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 12px;
+}
+
+/* Duplicates (#844): a group's header row stands out from its files, and the
+   row buttons are the compact kind the render list uses. */
+.audit-table .audit-group-row td {
+  background: #1c1c1c;
+  border-top: 1px solid var(--border-color);
+}
+
+.audit-table .group-toggle-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.audit-table .audit-file-path {
+  word-break: break-all;
+}
+
+.audit-table th:nth-child(1) { width: 32px; }
+.audit-table th:nth-child(2) { width: 210px; }
+.audit-table th:nth-child(3) { width: 90px; }
+.audit-table th:nth-child(5) { width: 200px; }
+
+.audit-table .audit-keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(3),
+.audit-table td:last-child {
+  white-space: nowrap;
+}
+
+.audit-table td:last-child button {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.audit-status-current {
+  font-size: 0.9em;
+  word-break: break-all;
+}

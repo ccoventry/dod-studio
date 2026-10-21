@@ -1,4 +1,4 @@
-//! `dodstudio_reload_demo`: play the current demo again from the start (#330).
+//! `ds_demo_reload`: play the current demo again from the start (#330).
 //!
 //! ## Nothing in the engine keeps the name
 //!
@@ -8,7 +8,7 @@
 //! handle and the demo's header; the name is gone when the function returns.
 //! So the DLL remembers it: it wraps the engine's own `playdemo` and
 //! `viewdemo` commands, notes the name each time one runs, and hands straight
-//! on to the real handler. `dodstudio_reload_demo` then runs the same command
+//! on to the real handler. `ds_demo_reload` then runs the same command
 //! with the same name.
 //!
 //! ## Wrapping an engine command without an offset
@@ -25,7 +25,7 @@
 //! Launch Preview and capture start the game with `+viewdemo <name>` or
 //! `+playdemo <name>` on its command line, and the engine runs that before
 //! the wrap is in: live, the demo was a quarter of a second in when the wrap
-//! landed. So with no name noted, `dodstudio_reload_demo` takes the last
+//! landed. So with no name noted, `ds_demo_reload` takes the last
 //! `+playdemo`/`+viewdemo` from the game's own command line instead.
 
 // Only the 32-bit build installs anything; a host check still compiles it.
@@ -39,7 +39,7 @@ use crate::cmd_list::{self, call_real, wrap};
 use crate::engine;
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("reload_demo");
+pub const NAME: &str = console_name!("demo_reload");
 
 /// The engine's own handlers, called by the wrappers.
 static REAL_PLAYDEMO: AtomicUsize = AtomicUsize::new(0);
@@ -118,7 +118,7 @@ unsafe extern "C" fn wrapped_playdemo() {
 unsafe extern "C" fn wrapped_viewdemo() {
     // A bare viewdemo brings a closed VCR bar back without restarting the
     // demo (or prints its usage with none loaded). With
-    // dodstudio_viewdemo_in_panel it does that, so the bar can lend its slider
+    // ds_ui_viewdemo_in_panel it does that, so the bar can lend its slider
     // again, and then opens the DoD Studio window on Playback.
     if crate::cmd_list::args().is_empty() && crate::studio_panel::viewdemo_in_panel() {
         unsafe { call_real(&REAL_VIEWDEMO) };
@@ -127,7 +127,7 @@ unsafe extern "C" fn wrapped_viewdemo() {
     }
     remember("viewdemo");
     unsafe { call_real(&REAL_VIEWDEMO) };
-    // dodstudio_viewdemo_in_panel: the DoD Studio window stands in for the bar.
+    // ds_ui_viewdemo_in_panel: the DoD Studio window stands in for the bar.
     crate::studio_panel::after_viewdemo();
 }
 
@@ -206,7 +206,7 @@ pub fn current_demo() -> Option<String> {
     last_played().map(|(_, name)| name)
 }
 
-/// `dodstudio_reload_demo`: runs the last `playdemo`/`viewdemo` again.
+/// `ds_demo_reload`: runs the last `playdemo`/`viewdemo` again.
 pub unsafe extern "C" fn command() {
     let last = last_played();
     let Some((command, name)) = last else {
@@ -265,8 +265,8 @@ mod tests {
 
     #[test]
     fn a_launch_preview_command_line_gives_its_demo() {
-        let line = "hl.exe -game dod -insecure -demoedit -windowed -w 1280 -h 720 -gl -32bpp \
-                    -afxRenderMode standard -afxForceAlpha8 1 -condebug \
+        let line = "hl.exe -game dod -insecure -demoedit -windowed -w 1280 -h 720 \
+                    -afxForceAlpha8 1 -condebug \
                     +viewdemo k4_ktps9w1_gskill_allies_preview";
         assert_eq!(
             from_command_line(args(line)),

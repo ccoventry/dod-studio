@@ -27,6 +27,37 @@ pub struct DemoMaps {
     pub maps: Vec<String>,
     /// Where the answer came from: "cache", "analyzer" or "scan".
     pub source: String,
+    /// For each map, the file a split already wrote for it next to the
+    /// demo, if there is one (the name Split Maps gives it).
+    #[serde(default)]
+    pub split_files: Vec<Option<String>>,
+}
+
+/// For each of `maps`, the piece a split already wrote next to `demo`, by
+/// the name Split Maps gives it (`<demo>_split<N>_<map>.dem`) or the one it
+/// used before.
+pub fn split_files(demo: &Path, maps: &[String]) -> Vec<Option<String>> {
+    let (Some(dir), Some(stem)) = (demo.parent(), demo.file_stem()) else {
+        return vec![None; maps.len()];
+    };
+    let stem = stem.to_string_lossy();
+    let stems: Vec<String> = maps
+        .iter()
+        .map(|m| crate::demo_split::map_stem(m))
+        .collect();
+    let stems: Vec<&str> = stems.iter().map(String::as_str).collect();
+    // Today's name first, then the one splits used before `_split<N>`.
+    (0..maps.len())
+        .map(|i| {
+            [
+                crate::demo_split::split_name_at(&stem, &stems, i),
+                crate::demo_split::old_split_name_at(&stem, &stems, i),
+            ]
+            .into_iter()
+            .map(|n| format!("{n}.dem"))
+            .find(|name| dir.join(name).is_file())
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -84,27 +115,13 @@ fn from_analyzer_cache(root: &Path, demo: &Path) -> Option<Vec<String>> {
 }
 
 fn demos_in(folder: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
-    let Ok(read) = std::fs::read_dir(folder) else {
-        return;
+    let walker = crate::sys::folder_walk::Walker::new().skip_system_folders();
+    let walker = if recursive {
+        walker
+    } else {
+        walker.max_depth(1)
     };
-    let mut dirs = Vec::new();
-    for e in read.flatten() {
-        let p = e.path();
-        match e.file_type() {
-            Ok(t) if t.is_dir() => dirs.push(p),
-            Ok(t)
-                if t.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dem")) =>
-            {
-                out.push(p);
-            }
-            _ => {}
-        }
-    }
-    if recursive {
-        for d in dirs {
-            demos_in(&d, true, out);
-        }
-    }
+    out.extend(walker.demos(folder));
 }
 
 /// Every demo under `folder` with more than one map. `progress(done, total,
@@ -161,6 +178,7 @@ pub fn find_multi_map_demos(
         };
         if maps.len() > 1 {
             found.push(DemoMaps {
+                split_files: split_files(demo, &maps),
                 path: key,
                 size_bytes: size,
                 maps,
@@ -178,6 +196,28 @@ pub fn find_multi_map_demos(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_piece_already_written_next_to_the_demo_is_found() {
+        let dir = std::env::temp_dir().join(format!("demo_maps_split_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("m.dem");
+        std::fs::write(&demo, b"x").unwrap();
+        std::fs::write(dir.join("m_dod_anzio_1.dem"), b"x").unwrap();
+        let maps = vec!["dod_anzio".to_string(), "maps/dod_anzio.bsp".to_string()];
+        assert_eq!(
+            split_files(&demo, &maps),
+            vec![Some("m_dod_anzio_1.dem".to_string()), None]
+        );
+        // A map that doesn't repeat has no number.
+        std::fs::write(dir.join("m_dod_flash.dem"), b"x").unwrap();
+        let two = vec!["dod_anzio".to_string(), "dod_flash".to_string()];
+        assert_eq!(
+            split_files(&demo, &two),
+            vec![None, Some("m_dod_flash.dem".to_string())]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn reads_only_the_signon_maps_key() {

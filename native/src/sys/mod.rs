@@ -4,8 +4,17 @@ pub mod analysis_server;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod dialogs;
 pub mod disk;
+/// Every folder scan goes through this walker: it skips junctions and
+/// symlinks and stops at a depth cap (#376).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod folder_walk;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod foreground_lock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod game_remote;
+/// Directory junctions, made and unlinked through Win32 (#376).
+#[cfg(windows)]
+pub mod junction;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod minimize;
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,5 +23,10 @@ pub mod packet_limit;
 pub mod pe;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod process;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod recycle_bin;
+/// The primary screen's size, for a new install's capture resolution.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod screen;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod steam;

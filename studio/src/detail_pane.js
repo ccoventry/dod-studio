@@ -14,9 +14,14 @@ import { clockFloor, clockRound } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
+import { playersOf, matchesPlayer } from './detail_player_filter.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
+// The Player filter's pick (a name, '' for everyone), for a demo with no
+// single recorder (#247). Kept across demos; a demo without that player
+// shows everyone (detail_player_filter.js).
+let detailPlayer = '';
 // Getter supplied by main.js so "Generate All Previews" can aggregate selected
 // streaks across every loaded demo, not just the one currently displayed.
 let currentGetAllDemos = null;
@@ -32,11 +37,15 @@ let currentOnSelectionChange = null;
 // status, notes), never from a plain re-render, so loading a session or
 // switching the selected demo doesn't falsely flag unsaved changes.
 let currentOnDirty = null;
+// The project's Teams list (#445), for the automatic clip name's
+// {team_name} and {opponent}.
+let currentGetProjectTeams = () => null;
 
-export function initDetailPane(getAllDemos, onSelectionChange, onDirty) {
+export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
   currentGetAllDemos = getAllDemos;
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
+  if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -161,12 +170,10 @@ export function updateStreakVisuals(streak) {
   streak.timeline_string = parts.join(', ');
 }
 
-/** Selects every currently-visible (POV + Min Kills filtered) streak in
+/** Selects every currently-visible (Player + Min Kills filtered) streak in
  *  `currentDemo` — the header checkbox's checked state. Only the rows on
- *  screen. `demo.streaks` holds every player's streaks, and the table shows
- *  the recording player's at or above Min Kills — so selecting the raw list
- *  checked highlights belonging to other players that were never rendered
- *  and could not be unchecked. The batch groups by (demo, target player), so
+ *  screen: selecting the raw list once checked highlights that were never
+ *  rendered and could not be unchecked. The batch groups by (demo, target player), so
  *  each of those became its own chained demo: one 15-row table produced five
  *  passes over the same file. */
 function selectAllVisibleStreaks() {
@@ -356,33 +363,34 @@ window.addEventListener("DOMContentLoaded", () => {
 /**
  * Whether a streak is one of the rows the Highlights table actually shows.
  *
- * Two filters, and both matter to anything that acts on "all" of them:
+ * Whose highlights `demo.streaks` holds is the scan's decision, the same one
+ * the in-game Highlights tab makes (`analysis::highlights`: a POV demo's
+ * recorder's, an HLTV demo's everyone's; #247 D18, #573). The table only
+ * narrows them, and both filters matter to anything that acts on "all" rows:
  *
- *  1. **The recording player only.** `demo.streaks` holds every player's
- *     streaks — everyone in the server. Gated on `local_player_index` rather
- *     than `demo.is_pov`, because is_pov fires on any demo containing
- *     SvcHltv/SvcDirector messages, which a normal player recording also picks
- *     up when an HLTV caster happens to be spectating. `scan_demo_for_highlights`
- *     already rejects true HLTV proxy files, so a missing index means "no
- *     resolvable owner", not "spectator demo".
+ *  1. **The Player filter,** shown when the rows are every player's.
  *  2. **Min Kills.**
  *
- * Select All uses this too. When it did not, it checked highlights belonging to
- * other players that were never rendered and could not be unchecked — and since
- * the batch builder groups by (demo, target player), each of those became its
- * own chained demo. One fifteen-row table turned into five passes over the same
- * file.
+ * Select All uses this too. When it did not, it checked highlights that were
+ * never rendered and could not be unchecked — and since the batch builder
+ * groups by (demo, target player), each of those became its own chained demo.
+ * One fifteen-row table turned into five passes over the same file.
  */
 function isVisibleStreak(demo, streak, minKills) {
   if (!demo || !streak) return false;
-  if (demo.local_player_index !== null && demo.local_player_index !== undefined) {
-    if (streak.player_index !== demo.local_player_index) return false;
-  }
+  if (listsEveryPlayer(demo) && !matchesPlayer(demo, streak, detailPlayer)) return false;
   const threshold = minKills ?? parseInt(document.querySelector('#input-min-kills')?.value || "1", 10);
   return streak.kill_count >= threshold;
 }
 
-/** Every one of `demo`'s highlights for the recording player, regardless of
+/** The rows are every player's, each naming whose it is: the demo has no
+ *  single recorder (an HLTV demo, or a POV demo whose recorder can't be
+ *  told), which the scan says by leaving `local_player_index` null. */
+function listsEveryPlayer(demo) {
+  return demo.local_player_index === null || demo.local_player_index === undefined;
+}
+
+/** Every one of `demo`'s highlights, regardless of
  *  Min Kills or checkbox selection (minKills 0 bypasses that half of
  *  isVisibleStreak's filter, keeping only the player filter). Previewing is
  *  how you decide what's worth checking in the first place, not a view of
@@ -439,6 +447,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
     return;
   }
 
+  // A demo with no single recorder (an HLTV demo) lists every player's
+  // highlights, so each row says whose it is (#247, D18).
+  const showPlayer = listsEveryPlayer(demo);
+
   const tableWrapper = document.createElement('div');
   tableWrapper.className = 'table-wrapper';
   const table = document.createElement('table');
@@ -450,6 +462,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_SEL} <input type="checkbox" id="detail-select-all-cb" title="${STRINGS.HIGHLIGHTS.SELECT_ALL_CB_TITLE}" /></th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILL_RANGE}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILLS}</th>
+        ${showPlayer ? `<th title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
@@ -541,6 +554,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </div>
       </td>
       <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
+      ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
       <td style="padding: 8px;">${STRINGS.HIGHLIGHTS.secondsSuffix(durSecs)}</td>
       <td style="padding: 8px;">
@@ -558,6 +572,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <select class="streak-curation-select" style="font-size: 0.85em;">
           <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
           <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
+          <option value="${CURATION.MAYBE}" ${streak.curation === CURATION.MAYBE ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_MAYBE}</option>
           <option value="${CURATION.SKIP}" ${skipped ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_SKIP}</option>
         </select>
       </td>
@@ -638,7 +653,9 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // #441: the automatic name shows greyed until a typed one replaces it.
     const clipNameInput = tr.querySelector('.streak-clip-name-input');
     clipNameInput.value = streak.clipName || '';
-    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate()).name;
+    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate(), {
+      projectTeams: currentGetProjectTeams(),
+    }).name;
     clipNameInput.addEventListener('input', (e) => {
       streak.clipName = e.target.value;
     });
@@ -685,7 +702,35 @@ export function renderDetailView(demo, selectedDemoIdx) {
     });
   }
 
+  if (showPlayer) container.appendChild(playerFilterRow(demo, minKills));
   tableWrapper.appendChild(table);
   container.appendChild(tableWrapper);
+}
+
+/** The Player filter above an HLTV demo's table: everyone, or one player's
+ *  highlights, each with how many Min Kills keeps. */
+function playerFilterRow(demo, minKills) {
+  const players = playersOf(demo, minKills);
+  const row = document.createElement('div');
+  row.className = 'detail-player-filter-row';
+  // Sticky: an HLTV table runs to 150+ rows, and the filter is what shortens it.
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:#1e1e1e;';
+  const label = document.createElement('label');
+  label.htmlFor = 'detail-player-filter';
+  label.textContent = STRINGS.HIGHLIGHTS.PLAYER_FILTER_LABEL;
+  const select = document.createElement('select');
+  select.id = 'detail-player-filter';
+  select.title = STRINGS.HIGHLIGHTS.PLAYER_FILTER_TITLE;
+  select.style.cssText = 'padding:3px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:3px;max-width:260px;';
+  const total = players.reduce((n, p) => n + p.count, 0);
+  const all = new Option(STRINGS.HIGHLIGHTS.playerFilterAll(total), '');
+  select.append(all, ...players.map((p) => new Option(STRINGS.HIGHLIGHTS.playerFilterOption(p.name, p.count), p.name)));
+  select.value = players.some((p) => p.name === detailPlayer) ? detailPlayer : '';
+  select.addEventListener('change', (e) => {
+    detailPlayer = e.target.value || '';
+    renderDetailView(currentDemo, currentDemoIdx);
+  });
+  row.append(label, select);
+  return row;
 }
 
