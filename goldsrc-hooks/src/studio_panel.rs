@@ -1,4 +1,4 @@
-//! `dodstudio_panel`: DoD Studio's own window inside the game (issue #408,
+//! `ds_ui_panel`: DoD Studio's own window inside the game (issue #408,
 //! plan item 4). A window with real tabs, like the Options and Find Servers
 //! windows; its Playback tab drives the demo player the way the VCR bar's
 //! buttons do.
@@ -53,7 +53,7 @@
 //! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time; a
 //! later DLL with a changed default replaces a file only while it is still
 //! exactly what was written (`defaults.txt` keeps each one's hash), so
-//! build-mode edits stay. `dodstudio_panel reset` puts every default back and
+//! build-mode edits stay. `ds_ui_panel reset` puts every default back and
 //! rebuilds the window.
 //!
 //! ## Per build
@@ -73,7 +73,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("panel");
+pub const NAME: &str = console_name!("ui_panel");
 
 /// The window's panel name, which its `.res` entry and #410's saved layout
 /// (`GameUI/DodStudio`) are keyed by.
@@ -938,7 +938,7 @@ fn folder_count_text(
 }
 
 /// What a folder row shows in brackets: its count, "counting..." until that
-/// is in, or nothing while `dodstudio_demo_list_show_counts` is off (#787).
+/// is in, or nothing while `ds_ui_demo_list_show_counts` is off (#787).
 fn shown_count(hidden: bool, count: Option<String>) -> Option<String> {
     (!hidden).then(|| count.unwrap_or_else(|| COUNTING.to_string()))
 }
@@ -990,7 +990,7 @@ fn demos_hint(folders: bool) -> &'static CStr {
     if folders {
         c"Double-click a demo, or a folder to open it. Folders: on"
     } else {
-        c"Double-click a demo to play it. Folders: off (dodstudio_demo_list_folders 1)"
+        c"Double-click a demo to play it. Folders: off (ds_ui_demo_list_folders 1)"
     }
 }
 
@@ -1056,23 +1056,42 @@ fn parse_time(text: &str) -> Result<f64, String> {
 }
 
 /// One line of the saved settings file: `name value`, `name` a plain cvar
-/// name and `value` a number, so the file can never run anything else.
-fn settings_line(line: &str) -> Option<(&str, &str)> {
+/// name and `value` a number, so the file can never run anything else. A
+/// name a DLL from before #555 saved (`dodstudio_...`) reads as the name
+/// that replaced it: the file is ours, so it moves to the new names rather than losing
+/// the user's settings.
+fn settings_line(line: &str) -> Option<(std::borrow::Cow<'_, str>, &str)> {
     let (name, value) = line.trim().split_once(' ')?;
     let value = value.trim();
     (bound_cvar(&format!("{CVAR_BOX_PREFIX}{name}")).is_some() && value.parse::<f64>().is_ok())
-        .then_some((name, value))
+        .then(|| (crate::names::current_name(name), value))
 }
 
 /// The saved settings, `name value` per line, with `name` set to `value`.
 fn settings_with(text: &str, name: &str, value: &str) -> String {
     let mut lines: Vec<String> = text
         .lines()
-        .filter(|l| settings_line(l).is_some_and(|(n, _)| n != name))
-        .map(str::to_string)
+        .filter_map(settings_line)
+        .filter(|(n, _)| n != name)
+        .map(|(n, v)| format!("{n} {v}"))
         .collect();
     lines.push(format!("{name} {value}"));
     lines.join("\n") + "\n"
+}
+
+/// The saved settings with every pre-#555 name moved to its new name, or
+/// `None` when no line has one, so the file is rewritten once at most.
+fn migrated_settings(text: &str) -> Option<String> {
+    text.lines()
+        .any(|l| {
+            settings_line(l).is_some_and(|(name, _)| !l.trim_start().starts_with(name.as_ref()))
+        })
+        .then(|| {
+            text.lines()
+                .filter_map(settings_line)
+                .map(|(n, v)| format!("{n} {v}\n"))
+                .collect()
+        })
 }
 
 /// The cvar a Settings check box is bound to, from its name.
@@ -1091,17 +1110,17 @@ fn settle(checked: bool, last: Option<bool>, cvar_on: bool) -> (Option<bool>, bo
         _ => (None, checked != cvar_on),
     }
 }
-/// Where the VCR bar waits, off screen, while `dodstudio_viewdemo_in_panel` has
+/// Where the VCR bar waits, off screen, while `ds_ui_viewdemo_in_panel` has
 /// our window stand in for it. Off screen rather than hidden: a hidden panel
 /// stops thinking, and the bar's think is what updates the time and slider.
 const PARKED_AT: i32 = -20_000;
 /// How many frames after `viewdemo` to wait for the VCR bar to appear.
 const VIEWDEMO_WAIT_FRAMES: u32 = 600;
 
-/// `dodstudio_viewdemo_in_panel 1`: `viewdemo` opens our window on the
-/// Playback tab and parks the VCR bar off screen. Not `dodstudio_panel_...`:
+/// `ds_ui_viewdemo_in_panel 1`: `viewdemo` opens our window on the
+/// Playback tab and parks the VCR bar off screen. Not `ds_ui_panel_...`:
 /// no name may be the start of another (the console's autocomplete).
-pub const VIEWDEMO_NAME: &str = console_name!("viewdemo_in_panel");
+pub const VIEWDEMO_NAME: &str = console_name!("ui_viewdemo_in_panel");
 /// The fallback toggle, when the cvar could not be registered.
 pub static VIEWDEMO_IN_PANEL: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
@@ -1131,9 +1150,9 @@ pub fn parked_bar() -> u32 {
     PARKED.load(Ordering::Acquire)
 }
 
-/// `dodstudio_console_in_panel 1`: the console key (`toggleconsole`) opens our
+/// `ds_ui_console_in_panel 1`: the console key (`toggleconsole`) opens our
 /// window on its Console tab instead of the console window.
-pub const CONSOLE_NAME: &str = console_name!("console_in_panel");
+pub const CONSOLE_NAME: &str = console_name!("ui_console_in_panel");
 /// The fallback toggle, when the cvar could not be registered.
 pub static CONSOLE_IN_PANEL: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
@@ -1183,14 +1202,12 @@ fn wrap_toggleconsole() {
     if found {
         TOGGLECONSOLE_WRAPPED.store(true, Ordering::Relaxed);
         unsafe {
-            crate::debug::report(
-                "studio_panel: wrapped toggleconsole for dodstudio_console_in_panel",
-            )
+            crate::debug::report("studio_panel: wrapped toggleconsole for ds_ui_console_in_panel")
         };
     }
 }
 
-/// The console key. With `dodstudio_console_in_panel 1` it goes back to the
+/// The console key. With `ds_ui_console_in_panel 1` it goes back to the
 /// game when the Console tab is showing, leaving our window open for the next
 /// ESC; otherwise it runs the engine's own `toggleconsole` (which also brings
 /// up the menu when in game) and [`poll`] then swaps the console window for
@@ -1238,7 +1255,7 @@ pub fn viewdemo_status() -> String {
 }
 
 /// Called by `demo_reload`'s `viewdemo` wrapper for a bare `viewdemo`, which
-/// on its own only prints its usage. With `dodstudio_viewdemo_in_panel 1` it
+/// on its own only prints its usage. With `ds_ui_viewdemo_in_panel 1` it
 /// opens our window on the Playback tab instead, as `viewdemo` opens the VCR
 /// bar, and returns whether it did.
 pub fn bare_viewdemo() -> bool {
@@ -1570,14 +1587,26 @@ fn apply_saved_settings() {
     let Ok(text) = std::fs::read_to_string(settings_path()) else {
         return;
     };
+    if let Some(migrated) = migrated_settings(&text) {
+        let done = std::fs::write(settings_path(), migrated).is_ok();
+        unsafe {
+            crate::debug::report(&format!(
+                "studio_panel: {} the pre-#555 {}* names in {} to {}*",
+                if done { "moved" } else { "could not move" },
+                crate::names::OLD_PREFIX,
+                settings_path().display(),
+                console_name!("")
+            ))
+        };
+    }
     let mut defaults = DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
     let mut applied = Vec::new();
     for (name, value) in text.lines().filter_map(settings_line) {
-        let Ok(c_name) = std::ffi::CString::new(name) else {
+        let Ok(c_name) = std::ffi::CString::new(name.as_ref()) else {
             continue;
         };
         let before = unsafe { (engfuncs.pfn_get_cvar_float)(c_name.as_ptr()) };
-        if !defaults.iter().any(|(n, _)| n == name) {
+        if !defaults.iter().any(|(n, _)| *n == name) {
             defaults.push((name.to_string(), format!("{before}")));
         }
         if let Ok(line) = std::ffi::CString::new(format!("{name} {value}\n")) {
@@ -3590,6 +3619,10 @@ mod hook {
                 let Some(cvar) = bound_cvar(&name) else {
                     continue;
                 };
+                // A Settings.res edited under an older DLL still names the
+                // pre-#555 cvars; the layout is ours, so the box still works.
+                let current = crate::names::current_name(cvar);
+                let cvar: &str = &current;
                 if let Some(want) = folder_box_shown(
                     cvar,
                     crate::demo_list_folders::enabled(),
@@ -3815,7 +3848,7 @@ mod hook {
     /// as Resume Game does, so the window opened behind a closed menu and the
     /// menu flashed back. Taken in [`taskbar_on_command`] instead,
     /// it opens at once, the way Options does.
-    const MENU_COMMAND: &str = "engine dodstudio_panel 1";
+    const MENU_COMMAND: &str = "engine ds_ui_panel 1";
     /// GameUI's `CTaskbar`, whose `OnCommand` runs the main menu's items,
     /// once [`hook_taskbar`] has given it ours; and the class's own.
     static TASKBAR_HOOKED: AtomicUsize = AtomicUsize::new(0);
@@ -4114,6 +4147,9 @@ mod hook {
                 Ok(())
             }
             Action::Engine(line) => {
+                // A layout edited under an older DLL keeps its pre-#555
+                // names: the layouts are ours, so they still run.
+                let line = crate::names::current_command(line);
                 let ran = std::ffi::CString::new(format!("{line}\n"))
                     .is_ok_and(|l| crate::engine::client_cmd(&l));
                 if ran {
@@ -4482,7 +4518,7 @@ fn argument() -> Option<String> {
     }
 }
 
-/// What `dodstudio_panel` was asked to do.
+/// What `ds_ui_panel` was asked to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Request {
     /// Bare: open it when closed, close it when open.
@@ -4507,13 +4543,13 @@ fn request(argument: Option<&str>) -> Result<Request, String> {
             .map(Request::Tab)
             .ok_or_else(|| {
                 format!(
-                    "unknown argument {other:?} -- dodstudio_panel [1|0|reset|<tab>]: bare opens or closes it, 1 opens, 0 closes, reset restores the default layouts, a tab's name opens it on that tab"
+                    "unknown argument {other:?} -- ds_ui_panel [1|0|reset|<tab>]: bare opens or closes it, 1 opens, 0 closes, reset restores the default layouts, a tab's name opens it on that tab"
                 )
             }),
     }
 }
 
-/// `dodstudio_panel [1|0|reset|<tab>]`: bare opens the window or closes it,
+/// `ds_ui_panel [1|0|reset|<tab>]`: bare opens the window or closes it,
 /// `1` opens it, `0` closes it, `reset` writes the default layouts back and
 /// rebuilds it, a tab's name (`highlights`) opens it on that tab.
 pub unsafe extern "C" fn command() {
@@ -4591,7 +4627,7 @@ mod tests {
         );
         assert_eq!(game_menu_action(Some("\"GameMenu\" { }")), None);
         assert!(GAME_MENU.contains(GAME_MENU_MARK));
-        assert!(GAME_MENU.contains("engine dodstudio_panel 1"));
+        assert!(GAME_MENU.contains("engine ds_ui_panel 1"));
     }
 
     #[test]
@@ -4619,8 +4655,8 @@ mod tests {
         let res = PAGES[SETTINGS_PAGE].res.2;
         let boxes: Vec<&str> = res.split('"').filter_map(bound_cvar).collect();
         assert!(boxes.len() >= 10, "{boxes:?}");
-        assert!(boxes.contains(&"dodstudio_viewdemo_in_panel"));
-        assert!(boxes.contains(&"dodstudio_console_in_panel"));
+        assert!(boxes.contains(&"ds_ui_viewdemo_in_panel"));
+        assert!(boxes.contains(&"ds_ui_console_in_panel"));
     }
 
     #[test]
@@ -4637,11 +4673,52 @@ mod tests {
 
     #[test]
     fn the_settings_file_only_holds_cvar_number_lines() {
-        assert_eq!(settings_line("hud_draw 0"), Some(("hud_draw", "0")));
+        assert_eq!(settings_line("hud_draw 0"), Some(("hud_draw".into(), "0")));
         assert_eq!(settings_line("hud_draw 0;quit"), None);
         assert_eq!(settings_line("quit"), None);
         let text = settings_with("hud_draw 0\njunk\nr_drawviewmodel 1\n", "hud_draw", "1");
         assert_eq!(text, "r_drawviewmodel 1\nhud_draw 1\n");
+    }
+
+    /// #555 renamed every name. The settings file is ours, so a line an older
+    /// DLL saved still applies, under the new name, and is written back that
+    /// way.
+    #[test]
+    fn saved_settings_with_the_old_prefix_read_as_the_new_names() {
+        let old = format!("{}hide_scoreboard 1", crate::names::OLD_PREFIX);
+        assert_eq!(
+            settings_line(&old),
+            Some((console_name!("hud_hide_scoreboard").into(), "1"))
+        );
+        assert_eq!(
+            settings_line(&format!("{}spec_lock 1;quit", crate::names::OLD_PREFIX)),
+            None
+        );
+        // The bare old prefix is no name at all, and other names pass as is.
+        assert_eq!(
+            settings_line(&format!("{} 1", crate::names::OLD_PREFIX)),
+            Some((crate::names::OLD_PREFIX.into(), "1"))
+        );
+        assert_eq!(settings_line("hud_draw 0"), Some(("hud_draw".into(), "0")));
+
+        let file = format!(
+            "{old}\nhud_draw 0\n{}viewdemo_in_panel 0\njunk\n",
+            crate::names::OLD_PREFIX
+        );
+        assert_eq!(
+            migrated_settings(&file).as_deref(),
+            Some("ds_hud_hide_scoreboard 1\nhud_draw 0\nds_ui_viewdemo_in_panel 0\n")
+        );
+        assert_eq!(
+            migrated_settings("ds_hud_hide_scoreboard 1\nhud_draw 0\n"),
+            None
+        );
+
+        // Saving a setting over an old line replaces it instead of keeping both.
+        assert_eq!(
+            settings_with(&file, console_name!("hud_hide_scoreboard"), "0"),
+            "hud_draw 0\nds_ui_viewdemo_in_panel 0\nds_hud_hide_scoreboard 0\n"
+        );
     }
 
     #[test]
@@ -4698,7 +4775,7 @@ mod tests {
                 {
                     continue;
                 }
-                let full = format!("dodstudio_{name}");
+                let full = format!("{}{name}", console_name!(""));
                 if !commands.contains(&full) {
                     missing.push(full);
                 }
@@ -4964,9 +5041,9 @@ mod tests {
 
     #[test]
     fn the_folder_sub_options_show_only_with_folders_and_counts() {
-        let counts = "dodstudio_demo_list_show_counts";
-        let hide_empty = "dodstudio_demo_list_hide_empty";
-        let subfolders = "dodstudio_demo_list_count_subfolders";
+        let counts = "ds_ui_demo_list_show_counts";
+        let hide_empty = "ds_ui_demo_list_hide_empty";
+        let subfolders = "ds_ui_demo_list_count_subfolders";
         assert_eq!(folder_box_shown(counts, true, false), Some(true));
         assert_eq!(folder_box_shown(counts, false, true), Some(false));
         for cvar in [hide_empty, subfolders] {
@@ -4975,7 +5052,7 @@ mod tests {
             assert_eq!(folder_box_shown(cvar, false, true), Some(false), "{cvar}");
         }
         assert_eq!(
-            folder_box_shown("dodstudio_demo_list_folders", false, false),
+            folder_box_shown("ds_ui_demo_list_folders", false, false),
             None
         );
         assert_eq!(folder_box_shown("hud_draw", false, false), None);
@@ -4992,10 +5069,9 @@ mod tests {
         let on = demos_hint(true).to_str().unwrap();
         let off = demos_hint(false).to_str().unwrap();
         assert!(on.contains("Folders: on"));
-        assert!(off.contains("Folders: off") && off.contains("dodstudio_demo_list_folders 1"));
+        assert!(off.contains("Folders: off") && off.contains("ds_ui_demo_list_folders 1"));
         // The layout's own text fits its label; neither may run longer.
-        let first =
-            "Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1";
+        let first = "Double-click a demo, or pick one and Load. Folders: ds_ui_demo_list_folders 1";
         assert!(on.len() <= first.len() && off.len() <= first.len());
     }
 
@@ -5118,8 +5194,8 @@ mod tests {
         assert_eq!(action("play"), Action::Vcr("play"));
         assert_eq!(action("Faster"), Action::Vcr("faster"));
         assert_eq!(
-            action("engine dodstudio_debug_status"),
-            Action::Engine("dodstudio_debug_status")
+            action("engine ds_debug_status"),
+            Action::Engine("ds_debug_status")
         );
         assert_eq!(action("Close"), Action::Own);
         assert_eq!(action("goto"), Action::Goto);

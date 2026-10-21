@@ -2,7 +2,7 @@
 //! of the screen while spectating, in a demo or live, and everything drawn on
 //! them -- with a cvar, on screen, without a capture running (issue #328).
 //!
-//! `dodstudio_hide_spectator_bars 1` hides the whole spectator panel: the
+//! `ds_spec_hide_bars 1` hides the whole spectator panel: the
 //! bands, the score, timer and player name on them, the DUCK menu row and the
 //! inset outline. An earlier version had a second cvar for the bands alone,
 //! with the text left floating; nobody wanted that, and it went.
@@ -71,7 +71,7 @@ use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
 /// Hides the spectator panel: the bands and everything on them.
-pub const NAME: &str = console_name!("hide_spectator_bars");
+pub const NAME: &str = console_name!("spec_hide_bars");
 
 /// `IPanel` (`VGUI_Panel007`) vtable slots, 0-based; slot 0 is the virtual
 /// destructor. The same in both builds' `vgui2.dll`.
@@ -100,7 +100,7 @@ static STOCK_PAINT_TRAVERSE: AtomicUsize = AtomicUsize::new(0);
 static GET_NAME: AtomicUsize = AtomicUsize::new(0);
 /// Set once install has been tried and refused, so it is tried and logged once.
 static INSTALL_FAILED: AtomicBool = AtomicBool::new(false);
-/// Paints skipped so far, for `dodstudio_debug_status`.
+/// Paints skipped so far, for `ds_debug_status`.
 static SKIPPED: AtomicU32 = AtomicU32::new(0);
 
 /// Called once the cvar is registered.
@@ -326,7 +326,7 @@ pub fn poll() {
     unsafe { crate::debug::report(&report) };
 }
 
-/// One `dodstudio_debug_status` line, once the cvar has been turned on.
+/// One `ds_debug_status` line, once the cvar has been turned on.
 pub fn status_line() -> Option<String> {
     if INSTALL_FAILED.load(Ordering::Relaxed) {
         return Some(format!(

@@ -2,7 +2,7 @@
 //! label and `StudioLoadProgress` bar that DoD Studio's launch adds to the
 //! bar's layout, filled in while `viewdemo` is still reading the demo. The
 //! percent is the Playback tab's (`load_progress`); this is the same thing
-//! on the stock bar, for when the bar is in use (`dodstudio_viewdemo_in_panel
+//! on the stock bar, for when the bar is in use (`ds_ui_viewdemo_in_panel
 //! 0`). See `crate::demo_bar_progress`.
 
 use std::ffi::{CString, c_void};

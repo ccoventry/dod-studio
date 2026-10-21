@@ -1,7 +1,7 @@
 //! Configuration > Players (#428): the backend of the tab. Mirrors the table
 //! for the hook DLL, lists the PNGs and sprites the dropdowns offer, decodes
 //! a sprite for the tile picker, and tells running games the "Use in the
-//! game" box (`dodstudio_player_overrides`).
+//! game" box (`ds_player_overrides`).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

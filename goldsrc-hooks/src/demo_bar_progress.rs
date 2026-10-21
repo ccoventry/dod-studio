@@ -1,4 +1,4 @@
-//! `dodstudio_show_load_progress`: the stock demo player bar says how far a
+//! `ds_demo_show_load_progress`: the stock demo player bar says how far a
 //! `viewdemo` load has got (#465).
 //!
 //! While the demo player reads the file its title says "Loading <demo> ...",
@@ -12,9 +12,9 @@
 //! label shows through. The percent is the one the DoD Studio window's
 //! Playback tab shows: the buffered span over the demo's own playback length.
 //!
-//! On by default like `dodstudio_viewdemo_in_panel`: without the layout
+//! On by default like `ds_ui_viewdemo_in_panel`: without the layout
 //! Studio ships there is nothing to show, so it costs nothing elsewhere.
-//! With `dodstudio_viewdemo_in_panel 1` the bar is parked off screen and the
+//! With `ds_ui_viewdemo_in_panel 1` the bar is parked off screen and the
 //! Playback tab shows the progress instead, so this does nothing then.
 
 // Only the 32-bit build has the bar; a host check still compiles this.
@@ -23,13 +23,13 @@
 use crate::demo_list_folders::Setting;
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("show_load_progress");
+pub const NAME: &str = console_name!("demo_show_load_progress");
 
 /// The two controls' panel names, as `demo_bar_res` writes them.
 pub const PERCENT_LABEL: &str = "StudioLoadPercent";
 pub const PROGRESS_BAR: &str = "StudioLoadProgress";
 
-/// `dodstudio_show_load_progress 1` (the default).
+/// `ds_demo_show_load_progress 1` (the default).
 pub static SETTING: Setting = Setting::new(NAME, true);
 
 /// For the fallback toggle's bare-name query.
