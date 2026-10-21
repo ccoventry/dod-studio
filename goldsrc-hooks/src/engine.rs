@@ -908,6 +908,9 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 /// Slot indices within that table -- verified by resolving every address DoD's
 /// `F` writes back to its own export name.
 const SLOT_INITIALIZE: usize = 0;
+/// `HUD_Redraw` (`+0x2a5b0`): the client's 2D HUD pass, where
+/// `restyled_hud` draws after it (#849).
+const SLOT_HUD_REDRAW: usize = 3;
 /// `V_CalcRefdef`, the slot before `HUD_AddEntity` in `cldll_func_t`
 /// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
 const SLOT_CALC_REFDEF: usize = 19;
@@ -923,6 +926,7 @@ const SLOT_GET_STUDIO_MODEL_INTERFACE: usize = 39;
 
 const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_REDRAW < CLDLL_FUNC_SLOTS
         && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
@@ -934,6 +938,8 @@ const _: () = assert!(
 
 type InitializeFn = unsafe extern "C" fn(*mut ClEngineFuncsPartial, i32) -> i32;
 type HudFrameFn = unsafe extern "C" fn(f64);
+/// `int HUD_Redraw(float time, int intermission)`.
+type HudRedrawFn = unsafe extern "C" fn(f32, i32) -> i32;
 /// `void V_CalcRefdef(struct ref_params_s *pparams)`.
 type CalcRefdefFn = unsafe extern "C" fn(*mut RefParamsPartial);
 type GetStudioModelInterfaceFn =
@@ -958,6 +964,7 @@ static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mu
 static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_REDRAW: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -1359,6 +1366,19 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
 /// scope is drawn), after `demo_scope` has read the frame's render view, and
 /// with its black fill around the scope (#799).
+/// The client's 2D HUD pass, then whatever we draw over it.
+unsafe extern "C" fn tramp_hud_redraw(time: f32, intermission: i32) -> i32 {
+    let real = REAL_HUD_REDRAW.load(Ordering::Acquire);
+    if real.is_null() {
+        return 1;
+    }
+    let real: HudRedrawFn = unsafe { std::mem::transmute(real) };
+    // Safety: the client's own export, called on the engine's thread.
+    let result = unsafe { real(time, intermission) };
+    crate::restyled_hud::after_redraw();
+    result
+}
+
 unsafe extern "C" fn tramp_draw_transparent_triangles() {
     let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
     if real.is_null() {
@@ -1481,6 +1501,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_INITIALIZE,
             tramp_initialize as *mut c_void,
             "Initialize",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_REDRAW,
+            &REAL_HUD_REDRAW,
+            tramp_hud_redraw as *mut c_void,
+            "HUD_Redraw",
         );
         swap_slot(
             table,
