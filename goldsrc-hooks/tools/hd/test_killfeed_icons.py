@@ -491,6 +491,41 @@ class SoftEdgeTest(unittest.TestCase):
         self.assertLess((old ^ new).sum(), 0.15 * old.sum())
 
 
+class WireTest(unittest.TestCase):
+    """wire_lines: a part thinner than a pixel becomes a 1 px line (#900)."""
+
+    def test_model_parts_splits_pieces_that_share_no_vertex(self):
+        a, b = box_tris(0, 4), box_tris(6, 9)
+        v = np.concatenate([a[0], b[0]])
+        parts = K.model_parts([(v, np.concatenate([a[1], b[1]]), np.concatenate([a[2], b[2]]), a[3])])
+        self.assertEqual(sorted(sum(len(p[0]) for p in part) for part in parts), [2, 2])
+
+    def test_wire_size_and_widen(self):
+        part = [box_tris(2, 20, 5.0, 5.3)]  # 18 px long, 0.3 px thick
+        m, x0, y0 = K.part_mask(part, np.eye(3), (1, 1, 0, 10), pad=2)
+        w, length = K.wire_size(m)
+        self.assertLess(w, 0.5)
+        self.assertGreater(length, 17)
+        thick = K.widen(m, w)
+        self.assertAlmostEqual(K.wire_size(thick)[0], 1.0, delta=0.15)
+
+    def test_wire_lines_widens_a_wire_but_not_a_bar(self):
+        wire, bar = box_tris(2, 20, 5.0, 5.3), box_tris(2, 20, 0.0, 3.0)
+        for part, widened in ((wire, 1), (bar, 0)):
+            lit, hi = K.render([part], np.eye(3), 1, 1, 0, 12, 24, 16, {}, hires=True)
+            out, (col, cov), n = K.wire_lines(hi, [part], np.eye(3), (1, 1, 0, 12), {})
+            self.assertEqual(n, widened)
+            if widened:
+                self.assertLess(lit[..., 3].max(), 0.5)  # lost at the game's cut before
+                col_a = out[:, 10, 3]
+                self.assertGreaterEqual(col_a.max(), 0.5)
+                # one pixel's worth across, to a sample (SS per pixel) either way
+                self.assertAlmostEqual(col_a.sum(), 1.0, delta=1.01 / K.SS)
+                np.testing.assert_allclose(out[col_a.argmax(), 10, :3], lit[col_a.argmax(), 10, :3], atol=0.1)
+            else:
+                np.testing.assert_array_equal(out, lit)
+
+
 class RecordTest(unittest.TestCase):
     def test_source_for(self):
         with tempfile.TemporaryDirectory() as d:

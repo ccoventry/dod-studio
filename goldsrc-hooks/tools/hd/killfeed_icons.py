@@ -47,8 +47,10 @@ Per icon (ICONS):
      inside the gun (a trigger guard) keeps only a 1 px rim, so it stays
      open, also where a trigger splits it into narrow gaps (holes), and a
      guard the skin paints black on a solid plate is cut out where the
-     table says so (see_through); a part thinner than half a pixel (a
-     guard's bar, a wire) is kept as a 1 px line (keep_thin); the light
+     table says so (see_through); a separate part of a gun narrower than
+     a pixel (the PIAT's and bazooka's wire guards) is widened to a 1 px
+     line from its own silhouette (wire_lines), and any other part thinner
+     than half a pixel (a guard's bar) is kept as a 1 px line (keep_thin); the light
      edge and the outline are drawn on the supersamples and downsampled
      premultiplied, so every edge ramps over a pixel or two and a partial
      edge texel holds the outline's colour (soft_finish);
@@ -88,7 +90,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 10  # 10: soft edges (soft_finish); shared rows belong to the lower kill-feed icon
+VERSION = 11  # 11: wire-thin parts drawn as 1 px lines (wire_lines); 10: soft edges
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -733,12 +735,135 @@ def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT
             zbuf[py, px] = z
             col[py, px] = np.clip(texel[:, :3] * shade[:, None], 0, 1)
             cov[py, px] = 1
-    # Box-downsample, colour weighted by coverage.
+    out = downsample(col, cov, ss)
+    return (out, (col, cov)) if hires else out
+
+
+def downsample(col, cov, ss=SS):
+    """The pixel-size RGBA of render's samples: box-downsampled, the colour
+    weighted by coverage."""
+    H, W = cov.shape
+    h, w = H // ss, W // ss
     c4 = col.reshape(h, ss, w, ss, 3) * cov.reshape(h, ss, w, ss, 1)
     a = cov.reshape(h, ss, w, ss).mean((1, 3))
     rgb = c4.mean((1, 3)) / np.maximum(a, 1e-9)[..., None]
-    out = bleed(np.dstack([rgb, a]))
-    return (out, (col, cov)) if hires else out
+    return bleed(np.dstack([rgb, a]))
+
+
+def model_parts(tris, decimals=2):
+    """The model's separate pieces, as lists in model_triangles' format:
+    triangles joined through shared vertex positions (a wire guard modelled
+    on its own is one piece, the receiver another)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    sizes = [len(t[0]) for t in tris]
+    T = sum(sizes)
+    if T == 0:
+        return []
+    pos = np.concatenate([t[0] for t in tris])
+    _, inv = np.unique(np.round(pos.reshape(-1, 3), decimals), axis=0, return_inverse=True)
+    inv = np.asarray(inv).reshape(T, 3)
+    rows, cols = np.repeat(np.arange(T), 3), inv.ravel() + T
+    n = T + int(inv.max()) + 1
+    _, lab = connected_components(coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n)), directed=False)
+    lab = lab[:T]
+    starts = np.concatenate([[0], np.cumsum(sizes)])
+    out = []
+    for c in np.unique(lab):
+        part = []
+        for (v, nrm, uv, tex), s0, s1 in zip(tris, starts[:-1], starts[1:]):
+            sel = lab[s0:s1] == c
+            if sel.any():
+                part.append((v[sel], nrm[sel], uv[sel], tex))
+        out.append(part)
+    return out
+
+
+# wire_lines: a separate part of a gun narrower than WIRE_WIDTH px (at 4x,
+# at its widest) is drawn WIRE_WIDTH wide, so it shows (the PIAT's and the
+# bazooka's wire trigger guards).
+WIRE_WIDTH = 1.0
+WIRE_MIN_LENGTH = 4.0  # px at 4x: a shorter thin bit (a pin seen end-on) isn't a wire
+WIRE_RES = 16  # samples per px the part is measured and widened at
+
+
+def part_mask(part, basis, fit, res=WIRE_RES, pad=0):
+    """(mask, x0, y0): the part's silhouette at `res` samples per px, in a
+    crop whose corner is pixel (x0, y0), `pad` px wider than the part on
+    every side."""
+    kx, ky, ox, oy = fit
+    pts = [(ox + kx * (v @ basis.T)[..., 0], oy - ky * (v @ basis.T)[..., 1]) for v, _, _, _ in part]
+    allx = np.concatenate([p[0].ravel() for p in pts])
+    ally = np.concatenate([p[1].ravel() for p in pts])
+    x0, y0 = int(np.floor(allx.min())) - pad, int(np.floor(ally.min())) - pad
+    x1, y1 = int(np.ceil(allx.max())) + pad, int(np.ceil(ally.max())) + pad
+    img = Image.new("L", ((x1 - x0) * res, (y1 - y0) * res), 0)
+    d = ImageDraw.Draw(img)
+    for xs, ys in pts:
+        for tx, ty in zip((xs - x0) * res, (ys - y0) * res):
+            d.polygon(list(zip(tx.tolist(), ty.tolist())), fill=255)
+    return np.asarray(img) > 0, x0, y0
+
+
+def wire_size(mask, res=WIRE_RES):
+    """(width, length) in px of a part's silhouette: twice its deepest
+    point's distance to the edge, and its longer side."""
+    if not mask.any():
+        return 0.0, 0.0
+    ys, xs = np.nonzero(mask)
+    width = 2 * float(ndimage.distance_transform_edt(np.pad(mask, 1)).max()) / res
+    return width, max(xs.max() - xs.min() + 1, ys.max() - ys.min() + 1) / res
+
+
+def widen(mask, width, target=WIRE_WIDTH, res=WIRE_RES):
+    """`mask` grown on every side until it is `target` px across: a line
+    along the part's own shape, ends rounded."""
+    r = max(target - width, 0) / 2 * res
+    return ndimage.distance_transform_edt(~mask) <= r
+
+
+def wire_lines(hi, tris, basis, fit, skins, masked_names=frozenset(), ss=SS, res=WIRE_RES):
+    """render's samples (`hi`: colour, coverage) with every wire-thin part
+    of `tris` (wire_size under WIRE_WIDTH, at least WIRE_MIN_LENGTH long)
+    widened to a WIRE_WIDTH line from its own silhouette, in its own
+    colour, behind whatever the render already covers. Returns (lit, hi,
+    widened parts' count)."""
+    col, cov = hi
+    H, W = cov.shape
+    col, cov = col.copy(), cov.copy()
+    f = res // ss
+    pad = int(np.ceil(WIRE_WIDTH)) + 1
+    n = 0
+    for part in model_parts(tris):
+        mask, x0, y0 = part_mask(part, basis, fit, res, pad)
+        width, length = wire_size(mask, res)
+        if width >= WIRE_WIDTH or length < WIRE_MIN_LENGTH:
+            continue
+        thick = widen(mask, width, res=res)
+        mh, mw = thick.shape
+        samp = thick[:mh // f * f, :mw // f * f].reshape(mh // f, f, mw // f, f).mean((1, 3)) >= 0.5
+        sy, sx = np.nonzero(samp)
+        sy, sx = sy + y0 * ss, sx + x0 * ss
+        inb = (sy >= 0) & (sy < H) & (sx >= 0) & (sx < W)
+        sy, sx = sy[inb], sx[inb]
+        if not len(sy):
+            continue
+        _, (pc, pv) = render(part, basis, *fit, W // ss, H // ss, skins, masked_names=masked_names, ss=ss, hires=True)
+        own = pv > 0
+        if own.any():
+            _, (iy, ix) = ndimage.distance_transform_edt(~own, return_indices=True)
+            colour = pc[iy[sy, sx], ix[sy, sx]]
+        else:  # thinner than a sample everywhere: the skin's colour, lit flat
+            v, _, uv, tex = part[0]
+            rgba = skins.get(tex.name)
+            rgba = tex.rgba().astype(float) / 255 if rgba is None else rgba
+            c = sample_bilinear(rgba, uv[..., 0].mean(1), uv[..., 1].mean(1))[:, :3].mean(0)
+            colour = np.clip(c * (AMBIENT + DIFFUSE * 0.5), 0, 1)
+        free = cov[sy, sx] == 0
+        col[sy[free], sx[free]] = colour[free] if np.ndim(colour) == 2 else colour
+        cov[sy[free], sx[free]] = 1
+        n += 1
+    return downsample(col, cov, ss), (col, cov), n
 
 
 def drop_specks(rgba, min_px=SPECK, corners=True):
@@ -1080,8 +1205,10 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     samples = {}  # the last draw's supersamples, for soft_finish
 
     def draw(f):
-        lit, samples["last"] = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts,
-                                      hires=True)
+        lit, hi = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts, hires=True)
+        if gun:
+            lit, hi, samples["wires"] = wire_lines(hi, tris, basis, f, skins, cutouts)
+        samples["last"] = hi
         return keep_thin(lit) if gun else lit
 
     def specks(lit):
@@ -1114,6 +1241,8 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
             "skin": f"{style} ({n_hd} of {len(textures)})" if n_hd else "stock"}
     if cutouts:
         info["see_through"] = sorted(cutouts)
+    if samples.get("wires"):
+        info["wires"] = samples["wires"]
     if icon.turn:
         info["turn"] = icon.turn
     if icon.barrel_top is not None:
