@@ -1,4 +1,4 @@
-//! `dodstudio_seek_to <seconds>` / `dodstudio_seek_by <seconds>`: jump
+//! `ds_demo_seek_to <seconds>` / `ds_demo_seek_by <seconds>`: jump
 //! `viewdemo` playback to a time, the way the demo editor's **Goto** button
 //! does, instead of fast-forwarding to it with `host_framerate` (issue #405).
 //!
@@ -36,7 +36,7 @@
 //! between the old and new position do not fire" holds only going back.
 //!
 //! By default these commands do exactly what the engine does. Set
-//! `dodstudio_seek_skip_between 1` to make a seek land clean instead: it moves
+//! `ds_demo_seek_skip_between 1` to make a seek land clean instead: it moves
 //! the two "last sent" marks to the landing frame, so the next frame runs that
 //! frame's own commands and nothing before it. That is what a capture batch
 //! wants -- the commands in between belong to other clips -- but it is wrong
@@ -53,13 +53,13 @@
 //! stream overflow." in the console) and the player carries on from the landing
 //! frame alone. A 20-minute jump in an HLTV demo did exactly that (2026-10-04):
 //! a player who joined after the recording began had no name and no team, the
-//! scoreboard read 0/0, and `dodstudio_spec_target` found no such player.
+//! scoreboard read 0/0, and `ds_spec_target` found no such player.
 //!
 //! So a forward seek of more than [`STEP_SECONDS`] moves the clock that far per
 //! frame instead, from [`poll`], until it lands. Each step's catch-up is a few
 //! seconds of the demo, which always fits, so everything in between reaches the
 //! client in order, as if played very fast. A whole HLTV demo takes a few
-//! hundred frames. `dodstudio_seek_skip_between 1` seeks still jump at once:
+//! hundred frames. `ds_demo_seek_skip_between 1` seeks still jump at once:
 //! they skip the in-between on purpose.
 //!
 //! The console commands the steps replay are the exception: the engine runs
@@ -67,7 +67,7 @@
 //! would play on for tens of seconds after the landing. A stepped seek drops
 //! them and lets go of the keys once it lands (`filtered_commands.rs`, #702).
 //!
-//! A command after the time (`dodstudio_seek_to <seconds> <command ...>`) runs
+//! A command after the time (`ds_demo_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
 //! client: the Highlights tab's Go uses it to put the camera on a player who
 //! may only exist once the jump has caught up.
@@ -87,7 +87,7 @@
 //!
 //! The world fills in the background -- `Core.dll`'s `Server::RunFrame` reads at
 //! most 33 packets per engine frame, or for a time budget per frame with
-//! `dodstudio_demo_fast_load` (#798) -- while playback has already started. A
+//! `ds_demo_fast_load` (#798) -- while playback has already started. A
 //! seek past what is loaded lands on the last loaded frame. `IsLoading()`
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.
@@ -120,9 +120,9 @@ use crate::commands::console_print;
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const SEEK_TO_NAME: &str = console_name!("seek_to");
-pub const SEEK_BY_NAME: &str = console_name!("seek_by");
-pub const SKIP_BETWEEN_NAME: &str = console_name!("seek_skip_between");
+pub const SEEK_TO_NAME: &str = console_name!("demo_seek_to");
+pub const SEEK_BY_NAME: &str = console_name!("demo_seek_by");
+pub const SKIP_BETWEEN_NAME: &str = console_name!("demo_seek_skip_between");
 
 /// How far one step of a long forward seek moves the clock. Measured on four
 /// HLTV demos (`analysis/examples/seek_burst.rs`, 2026-10-04): no 5-second
@@ -183,7 +183,7 @@ fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
     !skip_between && to - now > STEP_SECONDS
 }
 
-/// `dodstudio_seek_skip_between`: 1 lands a seek without running the director
+/// `ds_demo_seek_skip_between`: 1 lands a seek without running the director
 /// events and console commands it jumps over. Off by default, so a seek does
 /// what the engine's own Goto does until asked otherwise.
 ///
@@ -193,7 +193,7 @@ fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
 pub static SKIP_BETWEEN: AtomicBool = AtomicBool::new(false);
 static SKIP_BETWEEN_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once `dodstudio_seek_skip_between` is registered.
+/// Called by `commands.rs` once `ds_demo_seek_skip_between` is registered.
 pub fn set_skip_between_cvar(cvar: *mut CvarSPartial) {
     SKIP_BETWEEN_CVAR.store(cvar, Ordering::Release);
 }
@@ -469,7 +469,7 @@ pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
 }
 
 /// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
-/// landed, as `dodstudio_seek_to <seconds> <command>` does.
+/// landed, as `ds_demo_seek_to <seconds> <command>` does.
 pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
     #[cfg(target_arch = "x86")]
     return player::seek(seconds, false, skip_between(), then);
@@ -480,13 +480,13 @@ pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String
     }
 }
 
-/// `dodstudio_seek_to <seconds>`: an absolute world time, the clock the events
+/// `ds_demo_seek_to <seconds>`: an absolute world time, the clock the events
 /// list shows and the analysis calls `viewdemo_offset`.
 pub unsafe extern "C" fn seek_to() {
     run(SEEK_TO_NAME, false);
 }
 
-/// `dodstudio_seek_by <seconds>`: forward, or back when negative.
+/// `ds_demo_seek_by <seconds>`: forward, or back when negative.
 pub unsafe extern "C" fn seek_by() {
     run(SEEK_BY_NAME, true);
 }
@@ -833,8 +833,8 @@ mod tests {
         let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(follow_up(&words(&[])), None);
         assert_eq!(
-            follow_up(&words(&["dodstudio_spec_target", "13"])),
-            Some("dodstudio_spec_target 13".to_string())
+            follow_up(&words(&["ds_spec_target", "13"])),
+            Some("ds_spec_target 13".to_string())
         );
     }
 

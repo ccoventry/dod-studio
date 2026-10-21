@@ -1,4 +1,4 @@
-//! `dodstudio_hide_map_text`: hide the text a map puts on screen itself --
+//! `ds_hud_hide_map_text`: hide the text a map puts on screen itself --
 //! the anzio mortar warning, the round result -- and nothing else (#287).
 //!
 //! ## What carries it
@@ -38,7 +38,7 @@
 //! (byte-identical across the stock, pre-Anniversary and 25th Anniversary
 //! installs).
 //!
-//! When `dodstudio_debug_msglog` is also watching `HudText`, this does not
+//! When `ds_debug_msglog` is also watching `HudText`, this does not
 //! install its own record: two modules re-prepending the same message every
 //! frame would each push the other off the head and grow the engine's list
 //! without end. `msglog`'s handler asks [`hide`] instead, so the text is still
@@ -64,7 +64,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_map_text");
+pub const NAME: &str = console_name!("hud_hide_map_text");
 
 /// The user message DoD puts map text on.
 pub(crate) const MESSAGE: &str = "HudText";
@@ -97,7 +97,7 @@ struct MapText {
     strings: BTreeSet<Vec<u8>>,
 }
 
-/// Called by `commands.rs` once `dodstudio_hide_map_text` is registered.
+/// Called by `commands.rs` once `ds_hud_hide_map_text` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
@@ -385,7 +385,7 @@ pub fn poll() {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {

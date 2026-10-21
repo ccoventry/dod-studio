@@ -193,6 +193,11 @@ impl Drop for ReservationGuard {
     }
 }
 
+/// Why a render with no export folder is refused. Studio's Render button
+/// says the same before it gets this far.
+pub const NO_EXPORT_FOLDER: &str =
+    "Not rendered: there is no export folder. Add one in Configuration → Render Settings.";
+
 pub async fn run_render_job(
     job_id: String,
     clip: ClipData,
@@ -205,9 +210,12 @@ pub async fn run_render_job(
     // just a copy into the export pool with the pipeline's naming applied.
     let is_source_copy = config.target_codec == super::config::RenderCodec::SourceCopy;
     let ffmpeg_path = PathBuf::from(&config.ffmpeg_path);
-    let fps = config.fps.to_string();
 
     let take_folder = PathBuf::from(&clip.take_folder);
+    // The take's own capture rate when its `dodstudio_take.json` says, else
+    // Render Settings' Source FPS (`take_meta::render_fps`).
+    let (fps_used, fps_from_take) = super::take_meta::render_fps(&take_folder, config.fps);
+    let fps = fps_used.to_string();
     // `None` is an OBS take: its audio is already muxed into `video_file`,
     // so there is nothing to join against a wav.
     let wav_file: Option<PathBuf> = clip.wav_file.as_ref().map(|w| take_folder.join(w));
@@ -287,24 +295,30 @@ pub async fn run_render_job(
         return;
     }
 
-    // The FPS below is fed to `-framerate` *before* the BMP input, so it is not
-    // an output preference — it is how FFmpeg is told to interpret the frame
+    // The FPS is fed to `-framerate` *before* the BMP input, so it is not an
+    // output preference — it is how FFmpeg is told to interpret the frame
     // sequence's timing. A value that disagrees with the capture produces a
     // wrong computed duration and `-shortest` then trims the audio to match, so
-    // the render succeeds and the clip is simply the wrong speed. This is
-    // advisory only: the take may have been moved or hand-assembled, and
-    // silently substituting a number found in a neighbouring file would be a
-    // worse surprise than the one it fixes. See `hlcr::take_meta`.
+    // the render would succeed and the clip simply be the wrong speed. Hence the
+    // take's own recorded rate wins over the setting (#14, `hlcr::take_meta`).
     //
     // Logged, not sent as a `Status` update: `job.status` is a state field with
     // a fixed vocabulary ("Queued" | "Rendering" | "Finished" | "Error" |
-    // "Cancelled") that the scheduler's own transitions test against, so putting
-    // a sentence in it would show a paragraph where a status chip belongs and
-    // strand the job if anything returned before "Rendering" overwrote it.
-    if let Some(warning) = super::take_meta::fps_mismatch_warning(&take_folder, config.fps) {
+    // "Cancelled") that the scheduler's own transitions test against. The row
+    // itself shows the rate through the job's settings summary.
+    if !is_source_copy && clip.video_file.is_none() {
         crate::log_markdown(&format!(
-            "[render-fps-mismatch] job {} — {}",
-            job_id, warning
+            "[render-fps] job {} — reading the frames at {} fps, {}",
+            job_id,
+            fps_used,
+            if fps_from_take {
+                "the rate the take was captured at".to_string()
+            } else {
+                format!(
+                    "Render Settings' Source FPS (the take doesn't say what it was captured at; {})",
+                    take_folder.display()
+                )
+            }
         ));
     }
 
@@ -324,6 +338,16 @@ pub async fn run_render_job(
     let reservation_estimate =
         job_reservation_estimate(&clip, config.target_codec, &config.custom_codec_args);
 
+    // No export folder: refused, never written into the working directory
+    // (for an installed app, its install folder), where nobody would look.
+    if config.export_directories.is_empty() {
+        let _ = tx.send(RenderUpdate::Finished(
+            job_id.clone(),
+            false,
+            Some(NO_EXPORT_FOLDER.to_string()),
+        ));
+        return;
+    }
     let mut selected_export_dir: Option<PathBuf> = None;
     {
         let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
@@ -352,18 +376,18 @@ pub async fn run_render_job(
             selected_export_dir = Some(dir);
         }
     }
-    if selected_export_dir.is_none() && !config.export_directories.is_empty() {
+    let Some(output_folder) = selected_export_dir.clone() else {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
             Some(format!(
-                "JIT routing failed: all {} export drive(s) have less than {:.1} GiB free once other in-flight renders' reservations are accounted for. Render halted.",
+                "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
                 config.export_directories.len(),
                 (reservation_estimate + SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
             )),
         ));
         return;
-    }
+    };
     // Releases this job's reservation on every remaining exit path below —
     // see `ReservationGuard`'s own doc comment.
     let _reservation_guard = selected_export_dir.as_ref().map(|dir| ReservationGuard {
@@ -373,8 +397,6 @@ pub async fn run_render_job(
         job_id: job_id.clone(),
     });
 
-    let output_folder =
-        selected_export_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     if let Err(e) = std::fs::create_dir_all(&output_folder) {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
@@ -1280,6 +1302,58 @@ mod tests {
         );
         // A copy, not a move — the original take is untouched.
         assert!(stream.join("video.mp4").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// No export folder: refused, with nothing written anywhere (it used to
+    /// land in the working directory).
+    #[tokio::test]
+    async fn a_render_with_no_export_folder_is_refused() {
+        let root = scratch("no_export");
+        let take_folder = root.join("take");
+        let stream = take_folder.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        std::fs::write(stream.join("video.mp4"), b"fake obs video bytes").unwrap();
+        let clip = ClipData {
+            clip_name: None,
+            take_folder: take_folder.to_string_lossy().into_owned(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "no-export-take".to_string(),
+            frame_count: 0,
+            width: 0,
+            height: 0,
+            date: "-".to_string(),
+            video_file: Some("video.mp4".to_string()),
+            alpha_folder: None,
+        };
+        let mut config = source_copy_config(&root);
+        config.export_directories.clear();
+
+        let (tx, rx) = mpsc::channel();
+        run_render_job(
+            "0".to_string(),
+            clip,
+            config,
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
+
+        let updates = drain(&rx);
+        assert_eq!(
+            last_finished(&updates),
+            Some((false, Some(NO_EXPORT_FOLDER.to_string()))),
+            "{:?}",
+            updates
+        );
+        assert!(
+            !updates
+                .iter()
+                .any(|u| matches!(u, RenderUpdate::OutputPath(..)))
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -1,4 +1,4 @@
-//! `dodstudio_demo_fast_load`: a `viewdemo` demo loads as fast as the frame
+//! `ds_demo_fast_load`: a `viewdemo` demo loads as fast as the frame
 //! allows, not 33 packets a frame (#798).
 //!
 //! ## The limit
@@ -50,7 +50,7 @@
 //! than the budget, and the engine's own `0x20` once it has, so a frame still
 //! reads at least the engine's 33 packets and loading is never slower than
 //! stock. The frame's clock starts at its first packet (count 1).
-//! `dodstudio_demo_fast_load 0` makes it return `0x20` every time: exactly the
+//! `ds_demo_fast_load 0` makes it return `0x20` every time: exactly the
 //! engine's own decision, through the stub.
 //!
 //! Why the stub may do what it does, checked against both builds by
@@ -104,7 +104,7 @@ const ENGINE_CAP: i32 = 0x20;
 /// fires on it.
 const NO_CAP: i32 = i32::MAX;
 
-/// Milliseconds of loading per frame that `dodstudio_demo_fast_load 1` means.
+/// Milliseconds of loading per frame that `ds_demo_fast_load 1` means.
 pub const DEFAULT_BUDGET_MS: u32 = 8;
 /// The largest budget accepted. More would freeze the picture for a tenth of
 /// a second at a time, which no load is worth.
@@ -232,7 +232,7 @@ fn stub(count: &[u8], callback: usize, resume_slot: usize) -> Vec<u8> {
     code
 }
 
-/// `dodstudio_demo_fast_load`, once registered.
+/// `ds_demo_fast_load`, once registered.
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 /// The fallback toggle's state when the cvar could not be registered: on
 /// means the default budget.
@@ -478,7 +478,7 @@ pub fn poll() {
     });
 }
 
-/// The `dodstudio_debug_status` line, or `None` while `Core.dll` isn't
+/// The `ds_debug_status` line, or `None` while `Core.dll` isn't
 /// patched.
 pub fn status_line() -> Option<String> {
     if PATCHED_BASE.load(Ordering::Relaxed) == 0 {
