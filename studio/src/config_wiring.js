@@ -15,6 +15,7 @@ import { numberField } from './number_field.js';
 import { EXE_NAMES, isSteamPlayInstall, sameDriveFolders, wrongExeName } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
 import { createGameFolderUi } from './game_folder_ui.js';
+import { wireReviewSettings } from './review_settings.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -332,6 +333,7 @@ export async function linkHlaeToFfmpeg() {
  * @param {object} app  persistAppSettings() from settings_sync.js
  */
 export function initConfigWiring({ persistAppSettings }) {
+  wireReviewSettings(persistAppSettings);
   // Game Folder (#402): its list comes from the folder holding hl.exe, so it
   // is re-read whenever that path changes.
   const gameFolderUi = createGameFolderUi({

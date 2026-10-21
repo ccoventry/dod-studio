@@ -390,7 +390,7 @@ fn breakdown() -> String {
     )
 }
 
-/// The `dodstudio_debug_status` line, or `None` when it was never installed.
+/// The `ds_debug_status` line, or `None` when it was never installed.
 pub fn status_line() -> Option<String> {
     if !INSTALLED.load(Ordering::Relaxed) {
         return None;

@@ -5,7 +5,7 @@
 //! Next, Stop and the Review tab's boxes).
 //!
 //! The lock lasts as long as the review holds `spectator_follow`'s lock (the
-//! same lifetime as `spectator_buttons`): from `dodstudio_review start` to the
+//! same lifetime as `spectator_buttons`): from `ds_demo_review start` to the
 //! frame after it stops or ends. ESC, the console and the Settings tab are
 //! left alone; Stop on the Review tab is the way out.
 //!
@@ -259,21 +259,16 @@ mod tests {
     #[test]
     fn seeks_speed_and_loads_move_the_demo() {
         for line in [
-            "dodstudio_seek_by -10",
-            "dodstudio_seek_by 10",
-            "dodstudio_seek_to 1850",
+            "ds_demo_seek_by -10",
+            "ds_demo_seek_by 10",
+            "ds_demo_seek_to 1850",
             "dem_speed 0.5",
-            "dodstudio_reload_demo",
+            "ds_demo_reload",
             "viewdemo x",
         ] {
             assert!(moves_the_demo(line), "{line}");
         }
-        for line in [
-            "dodstudio_clear_decals",
-            "dodstudio_viewdemo_in_panel 1",
-            "",
-            "  ",
-        ] {
+        for line in ["ds_map_clear_decals", "ds_ui_viewdemo_in_panel 1", "", "  "] {
             assert!(!moves_the_demo(line), "{line:?}");
         }
     }

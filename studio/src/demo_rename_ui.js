@@ -239,6 +239,8 @@ function refresh() {
   renderChips();
   renderTable();
   updateButtons();
+  // A tick or a template edit changes how many will be renamed.
+  if (listedOnce && !listing) showListed();
 }
 
 async function refreshUndo() {
@@ -277,7 +279,6 @@ async function listDemos() {
   listedOnce = true;
   refresh();
   if (cancelled) setStatus(STRINGS.DEMO_RENAME.CANCELLED);
-  else showListed();
 }
 
 function showListed() {
@@ -326,7 +327,6 @@ async function applyRenames() {
   } finally {
     busy = false;
     refresh();
-    showListed();
     refreshUndo();
   }
 }
@@ -344,7 +344,6 @@ async function undoLast() {
   } finally {
     busy = false;
     refresh();
-    if (listedOnce) showListed();
     refreshUndo();
   }
 }

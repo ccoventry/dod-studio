@@ -61,13 +61,16 @@ export function auditProgressView(p) {
   };
 }
 
-/// `audit_delete_progress` → the same bar, while copies are deleted.
+/// `audit_delete_progress` → the same bar, while copies are compared with
+/// the kept ones (`step` "checking"), then deleted.
 export function deleteProgressView(p, permanent) {
   const total = p?.total ?? 0;
   const done = Math.min(p?.done ?? 0, total);
   return {
     pct: total ? Math.round((done / total) * 100) : 0,
-    text: STRINGS.AUDITOR.deletingLine(done, total, permanent),
+    text: p?.step === 'checking'
+      ? STRINGS.AUDITOR.checkingCopiesLine(done, total)
+      : STRINGS.AUDITOR.deletingLine(done, total, permanent),
     current: '',
   };
 }
@@ -76,6 +79,33 @@ export function deleteProgressView(p, permanent) {
 /// one (the first), except copies the game folder or the project uses.
 export function startsTicked(file, index) {
   return index > 0 && !file.in_use;
+}
+
+/// The audit's groups, each remembering the audit's own pick (`auditPick`)
+/// and its row order (`order`), so picking another copy to keep moves no row
+/// and can be undone.
+export function withAuditOrder(groups) {
+  return (groups ?? []).map((g) => ({
+    ...g,
+    auditPick: g.files[0]?.path,
+    order: g.files.map((f) => f.path),
+  }));
+}
+
+/// Group `group`'s rows in the order the audit listed them, each with whether
+/// it's the kept copy, which is always `files[0]`.
+export function shownFiles(group) {
+  const kept = group.files[0]?.path;
+  const rank = new Map((group.order ?? []).map((p, i) => [p, i]));
+  return [...group.files]
+    .sort((a, b) => (rank.get(a.path) ?? Infinity) - (rank.get(b.path) ?? Infinity))
+    .map((file) => ({ file, kept: file.path === kept }));
+}
+
+/// Whether the group keeps another copy than the audit picked.
+export function keptChanged(group) {
+  return !!group.auditPick && group.files[0]?.path !== group.auditPick
+    && group.files.some((f) => f.path === group.auditPick);
 }
 
 /// The groups with `path` as the kept copy of group `groupIdx`: it moves to
@@ -88,7 +118,8 @@ export function keepFile(groups, groupIdx, path) {
   if (at <= 0) return { groups, untick: null, tick: null };
   const files = [group.files[at], ...group.files.filter((_, i) => i !== at)];
   const was = group.files[0];
-  const out = groups.map((g, i) => (i === groupIdx ? { ...g, files } : g));
+  // "Not an exact copy" was measured against the old pick, so it goes too.
+  const out = groups.map((g, i) => (i === groupIdx ? { ...g, files, notCopies: [] } : g));
   return { groups: out, untick: path, tick: startsTicked(was, 1) ? was.path : null };
 }
 
@@ -116,13 +147,32 @@ export function withoutDeleted(groups, deleted) {
     .filter((g) => g.files.length > 1);
 }
 
-/// Copies and the space they take, over every group.
+/// The groups with each of `paths` marked as not an exact copy of its
+/// group's kept copy: a delete compared them and found other bytes, so they
+/// are different demos that only share the audit's key.
+export function markNotCopies(groups, paths) {
+  const marked = new Set(paths);
+  if (!marked.size) return groups;
+  return groups.map((g) => {
+    const add = g.files.slice(1).map((f) => f.path).filter((p) => marked.has(p));
+    return add.length ? { ...g, notCopies: [...new Set([...(g.notCopies ?? []), ...add])] } : g;
+  });
+}
+
+/// Whether `path` is marked not an exact copy in `group`.
+export function isNotCopy(group, path) {
+  return (group.notCopies ?? []).includes(path);
+}
+
+/// Copies and the space they take, over every group. A file marked not an
+/// exact copy isn't one.
 export function auditTotals(groups) {
   let copies = 0;
   let wastedBytes = 0;
   for (const g of groups) {
-    copies += g.files.length - 1;
-    wastedBytes += g.size * (g.files.length - 1);
+    const n = g.files.slice(1).filter((f) => !isNotCopy(g, f.path)).length;
+    copies += n;
+    wastedBytes += g.size * n;
   }
   return { copies, wastedBytes };
 }
