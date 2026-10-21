@@ -8,6 +8,7 @@
 
 import { GAME_NAMES, HLAE_NAMES, DODSTUDIO_NAMES } from './console_commands_data.js';
 import { STRINGS } from './strings.js';
+import { OLD_NAMES, OLD_PREFIX } from './console_renames.js';
 
 /** At most this many suggestions show at once. */
 export const MAX_SUGGESTIONS = 12;
@@ -15,13 +16,13 @@ export const MAX_SUGGESTIONS = 12;
 // Copies of native::patch::cfg_scan's tiers (command_suggest.test.js checks
 // them against cfg_scan.rs). Banned for two reasons, so two lists.
 export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate',
-  'r_norefresh', 'dodstudio_batch', 'dodstudio_schedule', 'dodstudio_spray'];
+  'r_norefresh', 'ds_capture_batch', 'ds_capture_schedule', 'ds_player_spray'];
 export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
 export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'r_norefresh',
   'mirv_agr'];
-export const NOOP_IN_INIT = ['mirv_movie_filename', 'dodstudio_run_in_background', 'dodstudio_stay_behind_while_capturing'];
+export const NOOP_IN_INIT = ['mirv_movie_filename', 'ds_capture_run_in_background', 'ds_capture_stay_behind'];
 // Set by the fast-forward between clips and put back at every clip's pre-roll (#724):
 // honoured in Initial Commands, short-lived as a Scheduled Command.
 export const FAST_FORWARD_CVARS = ['fps_override', 'fps_max', 'gl_vsync'];
@@ -82,16 +83,31 @@ export function typedName(value, cursor = value.length) {
   return before.trimStart();
 }
 
+/** The new names of the pre-#555 names starting with `typed`, exact match
+ *  first, so an old name lists the name that replaced it and taking it fixes
+ *  the line. */
+function renamedFrom(typed) {
+  const olds = Object.keys(OLD_NAMES).filter((old) => old.startsWith(typed)).sort();
+  olds.sort((a, b) => (b === typed) - (a === typed));
+  return olds.map((old) => OLD_NAMES[old]);
+}
+
 /**
  * The names starting with `prefix` (case doesn't matter), an exact match
- * first, then alphabetical; at most `limit`. Each carries its `note` for
- * Initial (`scheduled: false`) or Scheduled Commands.
+ * first, then alphabetical; at most `limit`. A name typed the pre-#555 way
+ * (`dodstudio_…`) lists the names that replaced it. Each carries its `note`
+ * for Initial (`scheduled: false`) or Scheduled Commands.
  */
 export function suggestions(prefix, { scheduled = false, limit = MAX_SUGGESTIONS } = {}) {
   const p = String(prefix || '').toLowerCase();
   if (!p) return [];
-  const hits = ALL.filter((e) => e.name.startsWith(p));
-  hits.sort((a, b) => (b.name === p) - (a.name === p));
+  let hits;
+  if (p.startsWith(OLD_PREFIX)) {
+    hits = renamedFrom(p).map((name) => ALL.find((e) => e.name === name)).filter(Boolean);
+  } else {
+    hits = ALL.filter((e) => e.name.startsWith(p));
+    hits.sort((a, b) => (b.name === p) - (a.name === p));
+  }
   return hits.slice(0, limit).map((e) => ({ ...e, note: tierNote(e.name, { scheduled }) }));
 }
 

@@ -15,7 +15,7 @@ import { renderDetailView, initDetailPane } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { createBatchCatchUp } from './batch_catch_up.js';
-import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
+import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs, refreshRenderButtons } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { refreshPacketEntityLimit } from './packet_entity_limit.js';
@@ -223,7 +223,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.RENDER.EXPORT_DIR_ROW_PLACEHOLDER }],
     unique: true,
     browse: pickRenderExportDir,
-    onChange: () => { persistAppSettings(); setup?.refresh(); refreshSameDriveWarning(renderExportDirs, 'clips'); },
+    onChange: () => { persistAppSettings(); setup?.refresh(); refreshSameDriveWarning(renderExportDirs, 'clips'); refreshRenderButtons(); },
   });
 
   // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
@@ -294,6 +294,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         renderExportDirs = [...settings.render_export_dirs];
         renderExportDirsEditor.render();
         refreshSameDriveWarning(renderExportDirs, 'clips');
+        refreshRenderButtons();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
       setCommandProfiles(settings.command_profiles, settings.command_profile_active);

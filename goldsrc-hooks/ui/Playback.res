@@ -205,7 +205,7 @@
 		"enabled"		"1"
 		"labelText"		"-10 s"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_seek_by -10"
+		"Command"		"engine ds_demo_seek_by -10"
 		"helptext"		"Jump back 10 seconds."
 	}
 	"Forward10Button"
@@ -220,7 +220,7 @@
 		"enabled"		"1"
 		"labelText"		"+10 s"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_seek_by 10"
+		"Command"		"engine ds_demo_seek_by 10"
 		"helptext"		"Jump forward 10 seconds."
 	}
 	"HalfSpeedButton"
@@ -265,7 +265,7 @@
 		"enabled"		"1"
 		"labelText"		"Decals"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_clear_decals"
+		"Command"		"engine ds_map_clear_decals"
 		"helptext"		"Clear every decal (bullet holes, blood, sprays)."
 	}
 	"GotoLabel"
@@ -333,8 +333,8 @@
 		"enabled"		"1"
 		"labelText"		"Show the time and slider here (hides the VCR bar)"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_viewdemo_in_panel 1"
-		"helptext"		"Turns on dodstudio_viewdemo_in_panel: this tab shows the time and slider, and the VCR bar hides."
+		"Command"		"engine ds_ui_viewdemo_in_panel 1"
+		"helptext"		"Turns on ds_ui_viewdemo_in_panel: this tab shows the time and slider, and the VCR bar hides."
 	}
 	"LoadLabel"
 	{
@@ -374,7 +374,7 @@
 		"enabled"		"1"
 		"labelText"		"Reload"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_reload_demo"
-		"helptext"		"Play this demo again from the start (dodstudio_reload_demo)."
+		"Command"		"engine ds_demo_reload"
+		"helptext"		"Play this demo again from the start (ds_demo_reload)."
 	}
 }

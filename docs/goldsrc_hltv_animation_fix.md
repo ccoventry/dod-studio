@@ -3,9 +3,9 @@
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
 > Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
 > [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
-> Defaults **off**. It is one of the things `dodstudio_spec_match_pov` turns
-> on (with the lost gunshots and the POV crosshair): `dodstudio_spec_match_pov 1` in
-> the console, `+dodstudio_spec_match_pov 1` on the launch line, or from any `.cfg`
+> Defaults **on** (0.2.0). It is one of the things `ds_spec_match_pov` turns
+> on (with the lost gunshots and the POV crosshair): `ds_spec_match_pov 1` in
+> the console, `+ds_spec_match_pov 1` on the launch line, or from any `.cfg`
 > the session execs. It had a cvar of its own,
 > `dodstudio_hltv_show_viewmodel_animations`, until 2026-10-01.
 
@@ -152,12 +152,12 @@ refinement on top, not the point.
 
 ## 8. Diagnostics
 
-- `dodstudio_spec_match_pov <0|1>` — a **cvar**, so it also takes
-  `+dodstudio_spec_match_pov 1` on the launch line or a line in any `.cfg`,
+- `ds_spec_match_pov <0|1>` — a **cvar**, so it also takes
+  `+ds_spec_match_pov 1` on the launch line or a line in any `.cfg`,
   and shows its value in the console type-ahead.
-- `dodstudio_debug_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
+- `ds_debug_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
   every body-sequence change, which is the trail to read a session back from.
-- `dodstudio_debug_status` — what each fix is *doing*, not just what it is set to. A
+- `ds_debug_status` — what each fix is *doing*, not just what it is set to. A
   cvar can answer "what is this set to" on its own; whether the fix's
   preconditions are being met in the current view is a different question, and
   this is where it is answered.
@@ -257,7 +257,7 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
-2. `dodstudio_spec_match_pov 1`, `dodstudio_debug_log_weapon_model 1`.
+2. `ds_spec_match_pov 1`, `ds_debug_log_weapon_model 1`.
 3. Play an HLTV demo in-eye and let the director move between players.
 4. Read `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log`. The lines that matter, in order of value:
    - `now spectating … holding … viewmodel "…"` on every camera switch,
@@ -269,13 +269,13 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 
 ---
 
-## 12. The other direction: `dodstudio_hide_hand_signals`
+## 12. The other direction: `ds_player_hide_hand_signals`
 
 Everything above puts an animation *back*. This one takes one away, and it
 belongs here because it works on the same field, from the same per-frame hook.
 
 Using a voice command in DoD also plays a gesture on the player -- a nod for
-"Yes Sir!", a point for "Enemy Ahead". `dodstudio_mute_voice_commands` silences
+"Yes Sir!", a point for "Enemy Ahead". `ds_sound_mute_voice_commands` silences
 the sound and leaves the mime, because the two are unrelated mechanisms:
 `client.dll` contains **no `hs_` string at all**. The client never picks these
 by name. The server picks a sequence index and it arrives as replicated
@@ -320,7 +320,7 @@ surviving, the fallback is the one #283 names: the studio renderer's
 ### It applies to every player in view
 
 Not only the spectated one. That is what clean footage wants, but it is a
-behavioural choice rather than an obvious default, so `dodstudio_status` says so.
+behavioural choice rather than an obvious default, so `ds_debug_status` says so.
 
 ---
 

@@ -216,7 +216,7 @@ pub(super) struct View<'a> {
 }
 
 /// Why POV would hide the crosshair. A small enum rather than text so the
-/// current reason fits in one atomic for `dodstudio_debug_status`.
+/// current reason fits in one atomic for `ds_debug_status`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub(crate) enum Hidden {

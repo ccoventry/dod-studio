@@ -213,7 +213,7 @@ unsafe fn check_is_spriteblend_value(base: usize, operand: usize) -> Result<(), 
     Ok(())
 }
 
-/// One `dodstudio_debug_status` line, once installed.
+/// One `ds_debug_status` line, once installed.
 pub fn status_line() -> Option<String> {
     (PATCHED_RVA.load(Ordering::Relaxed) != 0)
         .then(|| "sprite uploads: edge colour always bled (gl_spriteblend at load no longer sticks, #467)".to_string())

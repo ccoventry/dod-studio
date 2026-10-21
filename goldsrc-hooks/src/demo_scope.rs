@@ -1,4 +1,4 @@
-//! `dodstudio_show_demo_scope`: draw the sniper scope while a demo plays
+//! `ds_hud_show_scope`: draw the sniper scope while a demo plays
 //! (#307).
 //!
 //! ## What the game does
@@ -129,7 +129,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("show_demo_scope");
+pub const NAME: &str = console_name!("hud_show_scope");
 
 /// From the `g_iUser1` load to the `xor bl, bl` the demo gate skips. The
 /// bytes this module writes are wildcards, so a rescan finds the site in
@@ -563,7 +563,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, while it is on: the setting, and
+/// One line for `ds_debug_status`, while it is on: the setting, and
 /// the rifle the in-eye camera currently draws.
 pub fn status_line() -> Option<String> {
     if !ON.load(Ordering::Relaxed) {

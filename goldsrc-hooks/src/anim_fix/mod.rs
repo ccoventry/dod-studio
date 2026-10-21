@@ -92,7 +92,7 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// The animation part of `dodstudio_spec_match_pov`: 0 is off, 1 is on.
+/// The animation part of `ds_spec_match_pov`: 0 is off, 1 is on.
 ///
 /// This used to be a ladder of four ways to treat the hand after a grenade
 /// throw (leave it empty, draw at once, never throw, draw after a second),
@@ -105,7 +105,7 @@ pub static LEVEL: AtomicI32 = AtomicI32::new(0);
 pub const LEVEL_OFF: i32 = 0;
 pub const LEVEL_MAX: i32 = 1;
 
-/// What each value is, for `dodstudio_debug_status` and the startup line.
+/// What each value is, for `ds_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -1088,8 +1088,9 @@ pub(crate) mod tests {
 
     /// Resets state and holds the lock for the caller's lifetime.
     ///
-    /// Turns the fix on, because it defaults to *off* and most tests below
-    /// would otherwise be asserting against a disabled fix.
+    /// Turns the fix on, because `LEVEL` starts at *off* (the game's default
+    /// is stored at startup by `lib.rs`) and most tests below would otherwise
+    /// be asserting against a disabled fix.
     #[must_use = "the guard must outlive the test, or the statics are not actually reserved"]
     fn reset_settle_state() -> std::sync::MutexGuard<'static, ()> {
         let guard = lock_statics();
@@ -1100,7 +1101,7 @@ pub(crate) mod tests {
         guard
     }
 
-    /// Every option in range needs its own description -- `dodstudio_debug_status`
+    /// Every option in range needs its own description -- `ds_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {

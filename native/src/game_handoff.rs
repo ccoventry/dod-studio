@@ -193,17 +193,14 @@ mod tests {
 
     #[test]
     fn the_players_box_goes_with_the_early_lines() {
-        let early = vec!["dodstudio_run_in_background 1".to_string()];
+        let early = vec!["ds_capture_run_in_background 1".to_string()];
         assert_eq!(
             with_player_overrides(early.clone(), Some(true), true),
-            [
-                "dodstudio_run_in_background 1",
-                "dodstudio_player_overrides 1"
-            ]
+            ["ds_capture_run_in_background 1", "ds_player_overrides 1"]
         );
         assert_eq!(
             with_player_overrides(Vec::new(), Some(false), true),
-            ["dodstudio_player_overrides 0"]
+            ["ds_player_overrides 0"]
         );
         assert_eq!(with_player_overrides(early.clone(), None, true), early);
         assert_eq!(
