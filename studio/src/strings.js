@@ -849,6 +849,13 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    COL_NUM: '#',
+    COL_MAP: 'Map',
+    COL_WHEN: 'Length',
+    COL_DONE: 'Already split',
+    ALREADY_SPLIT_CHIP: 'Already split',
+    ALREADY_SPLIT_TITLE: 'A split already wrote this map next to the demo, so it starts unticked. Tick it to write it again (as a new file beside the old one).',
+    footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
     progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
@@ -859,20 +866,23 @@ export const STRINGS = {
     FIND_BUTTON: 'Find Multi-Map Demos',
     CANCEL_BUTTON: 'Cancel',
     CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
-    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    scanning: (done, total, demo) => `Finding demos: ${done} of ${total} checked${demo ? ` (${demo})` : ''}`,
+    readingLengths: (n, total, demo) => `Reading map lengths: ${n} of ${total} demos (${demo})`,
+    cancelledListed: (listed, total) => `Cancelled: ${listed} of ${total} demos with more than one map listed.`,
     CANCELLING: 'Cancelling...',
     found: (n, total) => n === 0
       ? 'No demo here has more than one map.'
       : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
     scanFailed: (e) => `Couldn't check the folder: ${e}`,
     mapsCount: (n) => `${n} maps`,
-    LOADING_DETAILS: 'Reading lengths...',
     detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
-    startsAt: (start, length) => `${start} · ${length} long`,
     SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
     SPLIT_BUTTON: 'Split Checked Maps',
+    CANCEL_SPLIT_BUTTON: 'Cancel',
+    CANCELLING_SPLIT: 'Cancelling after this step…',
+    cancelledSplit: (n) => n === 0 ? 'Cancelled. Nothing was written.' : `Cancelled after ${n} demo${n === 1 ? '' : 's'}:`,
     SHOW_IN_FOLDER: 'Show in folder',
-    NOTHING_TICKED: 'Tick at least one map.',
+    NOTHING_TICKED: 'Tick at least one map to split.',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
@@ -897,8 +907,8 @@ export const STRINGS = {
     TABLE_HEADER_FILE_PATH: 'File Path',
     TABLE_HEADER_ACTION: 'Action',
     TABLE_EMPTY: 'Choose a folder and run audit to find duplicate demo files.',
-    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.00 GB',
-    footerSummary: (count, gb) => `Duplicates Found: ${count} | Wasted Space: ${gb} GB`,
+    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.0 MB',
+    footerSummary: (count, size) => `Duplicates Found: ${count} | Wasted Space: ${size}`,
 
     SELECT_FOLDER_DIALOG_TITLE: 'Select Folder to Audit',
     // Duplicates' "Folders to check" (audit_folders.js, #844).
@@ -906,8 +916,7 @@ export const STRINGS = {
     ADD_FOLDER_BUTTON: 'Add Folder…',
     ADD_FOLDER_DIALOG_TITLE: 'Add Folders to Check for Duplicates',
     REMOVE_FOLDER_BUTTON: 'Remove',
-    TARGET_FOLDER_TAG: '(Target Folder)',
-    NO_FOLDERS_YET: 'No folders yet: choose a Target Folder above, add folders, or tick All drives.',
+    NO_FOLDERS_YET: 'No folders yet: add a folder, or tick All drives.',
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
@@ -920,6 +929,7 @@ export const STRINGS = {
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
@@ -927,7 +937,19 @@ export const STRINGS = {
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
-    ORIGINAL_FILE_TITLE: 'Original file (kept)',
+    ORIGINAL_FILE_TITLE: 'The copy this group keeps. Pick another copy to keep that one instead.',
+    KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
+    KEEP_CHANGED_NOTE: 'Kept copy changed by you',
+    NOT_A_COPY_LABEL: '   ≠ Not an exact copy',
+    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy when you deleted, and it's different: another demo that only starts the same way. It isn't deleted or counted as a copy.",
+    KEEP_RESET_BUTTON: 'Reset',
+    keepResetTitle: (path) => `Keep the copy the audit picked again: ${path}`,
+    PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',
+    PREFER_FOLDER_TITLE: 'Moves nothing. Pick a folder: every group that already has a copy in it (or in a folder inside it) keeps that copy, so a long list needs no picking row by row.',
+    PREFER_FOLDER_DIALOG_TITLE: 'Keep the copies that are already in this folder',
+    preferFolderToast: (found, changed, folder) => (found
+      ? `Keeping the copy in ${folder} in ${found} group${found === 1 ? '' : 's'} (${changed} changed).`
+      : `No group has a copy in ${folder}. This only picks which copy to keep; it doesn't move demos.`),
     IN_USE_TITLE: "The game or this project reads this copy, so it isn't ticked. Tick it only if you're sure.",
     // Why a copy is kept or left unticked (audit_manager.rs's InUse).
     IN_USE: { game_folder: 'in the game folder', queue: "in this project's queue" },
@@ -942,7 +964,7 @@ export const STRINGS = {
     DELETE_PERMANENT_BUTTON: 'Delete Permanently…',
     recycleNSelectedFiles: (n) => `Move ${n} to Recycle Bin`,
     deleteNPermanently: (n) => `Delete ${n} Permanently…`,
-    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? You can put them back from there.`,
+    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? Each is first compared byte for byte with the copy kept, and any that differ stay where they are. You can put them back from the Recycle Bin.`,
     deletePermanentlyConfirm: (n) => `Delete ${n} duplicate file${n === 1 ? '' : 's'} permanently? They skip the Recycle Bin and can't be put back.`,
     recycledFilesToast: (n) => `Moved ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin.`,
     deletedFilesToast: (n) => `Deleted ${n} duplicate file${n === 1 ? '' : 's'} permanently.`,
@@ -2477,6 +2499,7 @@ export const STRINGS = {
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
+    footer: (count, renames) => `Demos listed: ${count} | To rename: ${renames}`,
     CANCELLED: 'Stopped. The demos read so far are listed.',
     STATUS_SAME: 'already named this way',
     STATUS_SKIPPED: 'not ticked',
