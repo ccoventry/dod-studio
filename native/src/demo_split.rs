@@ -365,15 +365,204 @@ pub fn extract(
     Some(out)
 }
 
-/// The file name for map `segment` of `demo_stem`: `<demo>_<map>`, with the
-/// map's place added when the same map appears twice.
+/// The file name for map `segment` of `demo_stem`:
+/// `<demo>_split<N>_<map>`, `N` the map's place in the original (from 1)
+/// so the pieces sort in playing order, and the map without its `dod_`.
 pub fn split_name(demo_stem: &str, segments: &[MapSegment], segment: &MapSegment) -> String {
-    let repeats = segments.iter().filter(|s| s.map == segment.map).count() > 1;
+    let maps: Vec<&str> = segments.iter().map(|s| s.map.as_str()).collect();
+    split_name_at(demo_stem, &maps, segment.index)
+}
+
+/// [`split_name`] from the demo's map names alone (`maps[index]` is the
+/// piece's map), for knowing a piece's file before the demo is parsed.
+pub fn split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String {
+    let map = maps.get(index).copied().unwrap_or_default();
+    let short = map.strip_prefix("dod_").unwrap_or(map);
+    format!("{demo_stem}_split{}_{short}", index + 1)
+}
+
+/// The name splits used before `_split<N>` (#844): `<demo>_<map>`, with the
+/// map's place added when the same map appears twice. Only for finding
+/// pieces a split already wrote.
+pub fn old_split_name_at(demo_stem: &str, maps: &[&str], index: usize) -> String {
+    let map = maps.get(index).copied().unwrap_or_default();
+    let repeats = maps.iter().filter(|m| **m == map).count() > 1;
     if repeats {
-        format!("{demo_stem}_{}_{}", segment.map, segment.index + 1)
+        format!("{demo_stem}_{map}_{}", index + 1)
     } else {
-        format!("{demo_stem}_{}", segment.map)
+        format!("{demo_stem}_{map}")
     }
+}
+
+/// The maps of the demo at `path`, without a full parse when it can: the
+/// frame headers and the signons are enough for [`segments`]' answer, in
+/// well under a second where a full parse takes 5-10 s (#844). Falls back to
+/// the full parse when the walk can't read a frame.
+pub fn quick_demo_segments(path: &std::path::Path) -> Result<Vec<MapSegment>, String> {
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    match quick_segments(&bytes) {
+        Some(segs) => Ok(segs),
+        None => {
+            let demo = dem::open_demo_from_bytes(&bytes)
+                .map_err(|e| format!("could not read the demo: {e}"))?;
+            Ok(segments(&demo))
+        }
+    }
+}
+
+/// One frame as [`quick_segments`] sees it: its time, and the map it signs
+/// on to when it carries a `SvcServerInfo`.
+struct QuickFrame {
+    time: f32,
+    signon: Option<(String, u32)>,
+}
+
+/// [`segments`] from the file's bytes: each directory entry's frames walked
+/// by their headers to the `NextSection`, a network frame's message checked
+/// for a `SvcServerInfo` as [`quick_maps`] recognises one. `None` when a
+/// frame can't be walked.
+pub fn quick_segments(bytes: &[u8]) -> Option<Vec<MapSegment>> {
+    let i32_at = |at: usize| -> Option<i32> {
+        Some(i32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+    };
+    let protocol = header_protocol(bytes)?;
+    // As `segments` reads the parsed header's map_name.
+    let header_map = String::from_utf8_lossy(bytes.get(16..276)?)
+        .trim_end_matches('\0')
+        .to_string();
+    let header_crc = i32_at(536)? as u32;
+    let directory = usize::try_from(i32_at(540)?).ok()?;
+    let count = usize::try_from(i32_at(directory)?).ok()?;
+    if count == 0 || count > 1024 {
+        return None;
+    }
+    let mut needle = vec![SVC_SERVERINFO];
+    needle.extend_from_slice(&protocol.to_le_bytes());
+    let mut entries: Vec<Vec<QuickFrame>> = Vec::with_capacity(count);
+    for e in 0..count {
+        let entry = directory + 4 + e * 92;
+        let mut at = usize::try_from(i32_at(entry + 84)?).ok()?;
+        let mut frames = Vec::new();
+        loop {
+            let kind = *bytes.get(at)?;
+            let time = f32::from_le_bytes(bytes.get(at + 1..at + 5)?.try_into().ok()?);
+            let body = at + 9;
+            let (next, signon) = match kind {
+                0 | 1 => {
+                    let size = usize::try_from(i32_at(body + 464)?).ok()?;
+                    let msg = bytes.get(body + 468..body + 468 + size)?;
+                    (body + 468 + size, signon_in(msg, &needle))
+                }
+                2 => (body, None),
+                3 => (body + 64, None),
+                4 => (body + 32, None),
+                5 => (body, None),
+                6 => (body + 84, None),
+                7 => (body + 8, None),
+                8 => {
+                    let sample = usize::try_from(i32_at(body + 4)?).ok()?;
+                    (body + 8 + sample + 16, None)
+                }
+                9 => (body + 4 + usize::try_from(i32_at(body)?).ok()?, None),
+                _ => return None,
+            };
+            frames.push(QuickFrame { time, signon });
+            at = next;
+            if kind == 5 {
+                break;
+            }
+        }
+        entries.push(frames);
+    }
+    Some(segments_from_frames(&entries, header_map, header_crc))
+}
+
+/// The map a network message signs on to, when it carries a `SvcServerInfo`
+/// that passes [`quick_maps`]' checks: (map, the checksum it carries).
+fn signon_in(msg: &[u8], needle: &[u8]) -> Option<(String, u32)> {
+    let printable = |s: &[u8]| s.iter().all(|&b| (0x20..0x7f).contains(&b));
+    let mut at = 0;
+    while let Some(found) = memchr_seq(msg.get(at..)?, needle) {
+        let start = at + found;
+        at = start + 1;
+        let Some((game_dir, next)) = c_string(msg, start + TO_GAME_DIR, 32) else {
+            continue;
+        };
+        if game_dir.is_empty() || !printable(game_dir) {
+            continue;
+        }
+        let Some((_host, next)) = c_string(msg, next, 256) else {
+            continue;
+        };
+        let Some((map_file, _)) = c_string(msg, next, 128) else {
+            continue;
+        };
+        let map_file = String::from_utf8_lossy(map_file);
+        if map_file.starts_with("maps/") && map_file.ends_with(".bsp") {
+            let crc = u32::from_le_bytes(msg.get(start + 9..start + 13)?.try_into().ok()?);
+            return Some((map_stem(&map_file), crc));
+        }
+    }
+    None
+}
+
+/// [`segments`]' rules over walked frames: the first map starts at entry 0,
+/// frame 0 and is the header's; a later one at each signon past entry 0.
+fn segments_from_frames(
+    entries: &[Vec<QuickFrame>],
+    header_map: String,
+    header_crc: u32,
+) -> Vec<MapSegment> {
+    let mut starts = vec![(0usize, 0usize)];
+    for (ei, frames) in entries.iter().enumerate().skip(1) {
+        for (fi, f) in frames.iter().enumerate() {
+            if f.signon.is_some() {
+                starts.push((ei, fi));
+            }
+        }
+    }
+    let last = entries.len().saturating_sub(1);
+    let end_of = |i: usize| -> (usize, usize) {
+        starts
+            .get(i + 1)
+            .copied()
+            .unwrap_or((last, entries.get(last).map_or(0, Vec::len)))
+    };
+    let frame_time = |(ei, fi): (usize, usize)| {
+        entries
+            .get(ei)
+            .and_then(|e| e.get(fi).or_else(|| e.last()).map(|f| f.time))
+    };
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, &(ei, fi))| {
+            let (map, crc) = if i == 0 {
+                (header_map.clone(), header_crc)
+            } else {
+                entries[ei][fi].signon.clone().unwrap_or_default()
+            };
+            let end = end_of(i);
+            let frames = if i == 0 {
+                entries.first().map_or(0, Vec::len) + if end.0 >= 1 { end.1 } else { 0 }
+            } else {
+                end.1.saturating_sub(fi)
+            };
+            MapSegment {
+                index: i,
+                map,
+                map_checksum: crc,
+                start_seconds: if i == 0 {
+                    0.0
+                } else {
+                    frame_time((ei, fi)).unwrap_or(0.0)
+                },
+                end_seconds: frame_time((end.0, end.1.saturating_sub(1))).unwrap_or(0.0),
+                frames,
+            }
+        })
+        .collect()
 }
 
 /// The maps of the demo at `path`, from a full parse.
@@ -476,6 +665,20 @@ pub fn split_file_with_progress(
     map_dirs: &[std::path::PathBuf],
     progress: &mut dyn FnMut(SplitProgress),
 ) -> Result<Vec<Written>, String> {
+    split_file_cancellable(path, keep, map_dirs, progress, &|| false).map(|(written, _)| written)
+}
+
+/// [`split_file_with_progress`] that stops when `cancel` answers true: after
+/// the demo is read, between maps, while a map is written, and before it is
+/// saved. A map already saved stays. Returns what was written and whether
+/// it stopped early.
+pub fn split_file_cancellable(
+    path: &std::path::Path,
+    keep: Keep,
+    map_dirs: &[std::path::PathBuf],
+    progress: &mut dyn FnMut(SplitProgress),
+    cancel: &dyn Fn() -> bool,
+) -> Result<(Vec<Written>, bool), String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
     let demo = dem::open_demo_from_bytes_with_progress(&bytes, &mut |read, total| {
@@ -510,6 +713,9 @@ pub fn split_file_with_progress(
     };
     let mut written = Vec::new();
     for (k, &i) in keep.iter().enumerate() {
+        if cancel() {
+            return Ok((written, true));
+        }
         let seg = segs
             .get(i)
             .ok_or_else(|| format!("the demo has no map {}", i + 1))?;
@@ -523,9 +729,9 @@ pub fn split_file_with_progress(
         });
         let part = extract(&demo, i, &find_bsp)
             .ok_or_else(|| format!("map {} ({}) could not be cut out", i + 1, seg.map))?;
-        let out = part
-            .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
-            .ok_or("writing was cancelled")?;
+        let Some(out) = part.write_to_bytes_reusing_source_cancellable(&bytes, cancel) else {
+            return Ok((written, true));
+        };
         let back = dem::open_demo_from_bytes_with_progress(&out, &mut |read, total| {
             progress(SplitProgress {
                 fraction: start + share * (0.5 + 0.5 * read as f32 / total.max(1) as f32),
@@ -545,6 +751,9 @@ pub fn split_file_with_progress(
                 back_segs.len()
             ));
         }
+        if cancel() {
+            return Ok((written, true));
+        }
         let target = free_path(dir, &split_name(&stem, &segs, seg));
         std::fs::write(&target, &out)
             .map_err(|e| format!("could not write {}: {e}", target.display()))?;
@@ -556,12 +765,66 @@ pub fn split_file_with_progress(
             size_bytes: out.len() as u64,
         });
     }
-    Ok(written)
+    Ok((written, false))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ci_fixture() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        ))
+        .expect("test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn the_quick_walk_gives_what_the_full_parse_gives() {
+        let bytes = ci_fixture();
+        let full = segments(&dem::open_demo_from_bytes(&bytes).unwrap());
+        assert_eq!(quick_segments(&bytes), Some(full));
+        // A file it can't walk gives no answer rather than a wrong one.
+        assert_eq!(quick_segments(&bytes[..bytes.len() / 2]), None);
+    }
+
+    /// Every multi-map demo in `DOD_SPLIT_DEMOS` (a folder), or the PRE
+    /// install's `dod` folder: the quick walk must match the full parse.
+    #[test]
+    #[ignore = "needs real multi-map demos (DOD_SPLIT_DEMOS or the PRE install)"]
+    fn the_quick_walk_matches_the_full_parse_on_real_multi_map_demos() {
+        let folder = std::env::var_os("DOD_SPLIT_DEMOS").map(std::path::PathBuf::from).unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+            )
+        });
+        let mut checked = 0;
+        for entry in
+            std::fs::read_dir(&folder).unwrap_or_else(|e| panic!("{}: {e}", folder.display()))
+        {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "dem") {
+                continue;
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            if quick_maps(&bytes, header_protocol(&bytes).unwrap_or(48)).len() < 2 {
+                continue;
+            }
+            let Ok(demo) = dem::open_demo_from_bytes(&bytes) else {
+                continue;
+            };
+            assert_eq!(
+                quick_segments(&bytes),
+                Some(segments(&demo)),
+                "{}",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "no multi-map demo in {}", folder.display());
+        eprintln!("{checked} multi-map demos match");
+    }
 
     fn server_info_bytes(map: &str) -> Vec<u8> {
         let mut b = vec![SVC_SERVERINFO];
@@ -593,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn a_repeated_map_gets_its_place_in_the_name() {
+    fn every_piece_gets_its_place_in_the_name() {
         let seg = |i: usize, map: &str| MapSegment {
             index: i,
             map: map.into(),
@@ -603,9 +866,21 @@ mod tests {
             frames: 0,
         };
         let two = [seg(0, "dod_anzio"), seg(1, "dod_flash")];
-        assert_eq!(split_name("m", &two, &two[1]), "m_dod_flash");
+        assert_eq!(split_name("m", &two, &two[0]), "m_split1_anzio");
+        assert_eq!(split_name("m", &two, &two[1]), "m_split2_flash");
+        // A map without the dod_ prefix keeps its name.
+        let other = [seg(0, "ktp_lobby")];
+        assert_eq!(split_name("m", &other, &other[0]), "m_split1_ktp_lobby");
+        assert_eq!(
+            old_split_name_at("m", &["dod_anzio", "dod_flash"], 1),
+            "m_dod_flash"
+        );
         let same = [seg(0, "dod_anzio"), seg(1, "dod_anzio")];
-        assert_eq!(split_name("m", &same, &same[1]), "m_dod_anzio_2");
+        assert_eq!(split_name("m", &same, &same[1]), "m_split2_anzio");
+        assert_eq!(
+            old_split_name_at("m", &["dod_anzio", "dod_anzio"], 1),
+            "m_dod_anzio_2"
+        );
     }
 
     #[test]
@@ -648,5 +923,20 @@ mod tests {
         h.extend(48i32.to_le_bytes());
         assert_eq!(header_protocol(&h), Some(48));
         assert_eq!(header_protocol(b"nope"), None);
+    }
+
+    #[test]
+    fn a_cancelled_split_writes_nothing_and_says_so() {
+        let dir = std::env::temp_dir().join(format!("demo_split_cancel_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let demo = dir.join("m.dem");
+        std::fs::write(&demo, ci_fixture()).unwrap();
+        let (written, cancelled) =
+            split_file_cancellable(&demo, Keep::These(&[0]), &[], &mut |_| {}, &|| true).unwrap();
+        assert!(cancelled);
+        assert!(written.is_empty());
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+        assert_eq!(left.len(), 1, "only the original");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

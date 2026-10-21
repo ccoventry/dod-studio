@@ -1,4 +1,4 @@
-//! `dodstudio_hud_map_players`: which players get an icon on DoD's overview
+//! `ds_hud_overview_players`: which players get an icon on DoD's overview
 //! map (issue #304).
 //!
 //! ## What the game does
@@ -56,7 +56,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hud_map_players");
+pub const NAME: &str = console_name!("hud_overview_players");
 
 /// From `mov esi, [edi]` to the `jne` after the team test, and the first
 /// instruction after it, so the span's end is checked too.
@@ -262,7 +262,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, once the setting has left 0.
+/// One line for `ds_debug_status`, once the setting has left 0.
 pub fn status_line() -> Option<String> {
     let mode = MODE.load(Ordering::Relaxed);
     (INSTALLED_BASE.load(Ordering::Relaxed) != 0 || mode != GAME)

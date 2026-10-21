@@ -227,7 +227,7 @@ fn check_jumps(span: &[u8], site: &Site) -> Result<(), String> {
     Ok(())
 }
 
-/// One `dodstudio_debug_status` line, once installed.
+/// One `ds_debug_status` line, once installed.
 pub fn status_line() -> Option<String> {
     let rva = PATCHED_RVA.load(Ordering::Relaxed);
     if rva == 0 {

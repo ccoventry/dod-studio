@@ -216,7 +216,7 @@ export async function addCrosshairFile(gamePath, gameFolder, source, name) {
 }
 
 /** Sends Configuration > Players' "Use in the game" box to every running
- *  game that takes commands (dodstudio_player_overrides); how many did. */
+ *  game that takes commands (ds_player_overrides); how many did. */
 export async function setPlayerOverrides(on) {
   return invoke('set_player_overrides', { on })
     .catch((err) => {
@@ -722,9 +722,11 @@ export async function listFixedDrives() {
     });
 }
 
-// To the Recycle Bin unless `permanent`; resolves to `{ deleted, failed }`.
-export async function deleteAuditFiles(paths, permanent = false) {
-  return invoke("delete_audit_files", { paths, permanent })
+// `copies` is `[{ path, keep }]`: each is deleted only once it matches its
+// group's kept copy byte for byte. To the Recycle Bin unless `permanent`;
+// resolves to `{ deleted, failed }`.
+export async function deleteAuditFiles(copies, permanent = false) {
+  return invoke("delete_audit_files", { copies, permanent })
     .catch((err) => {
       console.error("IPC Execution Error (delete_audit_files):", err);
       showToast(STRINGS.IPC.deletionFailed(err), 'error');
@@ -1176,7 +1178,7 @@ export async function hdSetPython(path) {
     });
 }
 
-/** { command, report }: the newest list `dodstudio_debug_hd_misses` wrote to
+/** { command, report }: the newest list `ds_debug_hd_misses` wrote to
  *  the hook log (null when there is none yet), and the command. No toast: the HD page shows the error in
  *  place. */
 export async function hdMisses() {
@@ -1366,6 +1368,15 @@ export async function splitDemoMaps(path, keep) {
   return invoke("split_demo_maps", { path, keep })
     .catch((err) => {
       console.error("IPC Execution Error (split_demo_maps):", err);
+      throw err;
+    });
+}
+
+// Stops a running Split Checked Maps at its next step (#844).
+export async function cancelDemoSplit(path) {
+  return invoke("cancel_demo_split", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_split):", err);
       throw err;
     });
 }
