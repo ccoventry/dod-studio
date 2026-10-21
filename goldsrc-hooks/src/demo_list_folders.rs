@@ -123,22 +123,23 @@ impl Setting {
     }
 }
 
-/// `ds_ui_demo_list_hide_empty 1` (the default): while folders are
-/// listed, a folder with no demo anywhere inside it, at any depth, isn't.
-pub static HIDE_EMPTY: Setting = Setting::new(console_name!("ui_demo_list_hide_empty"), true);
+/// `ds_ui_demo_list_hide_empty 1`: while folders are listed, a folder with
+/// no demo anywhere inside it, at any depth, isn't. Off by default, like the
+/// two below: each reads every folder, which slows a big library.
+pub static HIDE_EMPTY: Setting = Setting::new(console_name!("ui_demo_list_hide_empty"), false);
 
-/// `ds_ui_demo_list_count_subfolders 1` (the default): a folder's demo
+/// `ds_ui_demo_list_count_subfolders 1` (default 0): a folder's demo
 /// count on the Demos tab includes its subfolders, not just the demos
 /// directly in it.
 pub static COUNT_SUBFOLDERS: Setting =
-    Setting::new(console_name!("ui_demo_list_count_subfolders"), true);
+    Setting::new(console_name!("ui_demo_list_count_subfolders"), false);
 
-/// `ds_ui_demo_list_show_counts 1` (the default): folders are counted in
+/// `ds_ui_demo_list_show_counts 1` (default 0): folders are counted in
 /// the background, and folder rows on the Demos tab end in "(N demos)". At
 /// `0` nothing is counted at all (#787), so a folder opens with no progress
 /// bar and no second fill; [`HIDE_EMPTY`] and [`COUNT_SUBFOLDERS`] need the
 /// counts and are off with it.
-pub static SHOW_COUNTS: Setting = Setting::new(console_name!("ui_demo_list_show_counts"), true);
+pub static SHOW_COUNTS: Setting = Setting::new(console_name!("ui_demo_list_show_counts"), false);
 
 /// Whether empty folders are left out: only while folders are counted, the
 /// one way to know a folder is empty.
@@ -1514,7 +1515,8 @@ mod tests {
         assert!(!hides_empty(true, false));
         assert!(!hides_empty(false, true), "no counts, no way to know");
         assert!(!hides_empty(false, false));
-        assert!(SHOW_COUNTS.on(), "counts show by default");
+        assert!(!SHOW_COUNTS.on(), "nothing is counted by default");
+        assert!(!HIDE_EMPTY.on() && !COUNT_SUBFOLDERS.on());
     }
 
     #[test]

@@ -317,13 +317,13 @@ fn env_level(name: &str, default: i32) -> i32 {
     .clamp(anim_fix::LEVEL_OFF, anim_fix::LEVEL_MAX)
 }
 
-/// Matching POV starts **off**: a capture pipeline should not silently alter
-/// what a spectated view shows for anyone who happens to have the DLL loaded.
-/// Turn it on per session with `ds_spec_match_pov 1`, or set
-/// `GOLDSRC_HOOKS_SPEC_MATCH_POV` to have it start on. The value lands in
+/// Matching POV starts **on**: an HLTV in-eye view that plays like the
+/// player's own recording is a clear win
+/// for everyone. `ds_spec_match_pov 0` turns it off, and
+/// `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts it off. The value lands in
 /// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
 /// default, and the cvar then drives every part.
-const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
+const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_MAX;
 
 /// Whether to install `texture_hires` at startup: see
 /// `texture_hires::starts_on`. Off, `ds_hd_enabled 1` can still install it

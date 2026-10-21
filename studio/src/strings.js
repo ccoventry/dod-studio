@@ -443,15 +443,15 @@ export const STRINGS = {
     KEEP_GAME_BEHIND_TITLE:
       'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
     PRE_ROLL_LABEL: 'Pre-roll (s):',
-    PRE_ROLL_HINT: 'Time between fast-forward stopping and capture starting.',
+    PRE_ROLL_HINT: 'Time between the game reaching the clip and capture starting.',
     POST_ROLL_LABEL: 'Post-roll (s):',
-    POST_ROLL_HINT: 'Time between capture stopping and fast-forward resuming.',
+    POST_ROLL_HINT: 'Time between capture stopping and the game moving on to the next clip.',
     START_LEAD_LABEL: 'Start Lead (s):',
     START_LEAD_HINT: 'Time between capture starting and the first kill.',
     STOP_TRAIL_LABEL: 'Stop Trail (s):',
     STOP_TRAIL_HINT: 'Time between the last kill and capture stopping.',
     INITIAL_DELAY_LABEL: 'Initial Delay (s):',
-    INITIAL_DELAY_HINT: 'Time between the demo loading and fast-forward starting.',
+    INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
     // showing how they relate to each other and to the recording window.
     timingDiagramInitialDelayNote: (v) => `This timeline starts after Initial Delay (${v}s) has already passed — a once-per-demo wait, not part of the per-clip cycle below.`,
@@ -460,15 +460,12 @@ export const STRINGS = {
     // Signed offset from the first kill (0.0s) — matches the pre-Tauri egui
     // build's "+{n} sec" / "{n} sec" formatting.
     timingDiagramTime: (v) => (v >= 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`),
-    timingDiagramPreRollEvent: (v) => `Pre-roll ends (speed back to normal) — Pre-roll is ${v}s`,
+    timingDiagramPreRollEvent: (v) => `Normal speed, Pre-roll starts — Pre-roll is ${v}s`,
     timingDiagramRecordStartEvent: (v) => `Recording starts — Start Lead is ${v}s`,
     TIMING_DIAGRAM_FIRST_KILL_EVENT: 'First kill (anchor)',
     TIMING_DIAGRAM_LAST_KILL_EVENT: 'Last kill (anchor — illustrative gap, not a real streak length)',
     timingDiagramRecordStopEvent: (v) => `Recording stops — Stop Trail is ${v}s`,
-    timingDiagramPostRollEvent: (v) => `Post-roll ends, fast-forward resumes — Post-roll is ${v}s`,
-    FF_SPEED_LABEL: 'FF Speed (x):',
-    FF_SPEED_TITLE: 'Locked, matching dev — not currently user-editable.',
-    FF_SPEED_HINT: 'How fast playback races toward each clip between kills, as a multiple of real time. Locked at 0.05x, matching dev — not currently user-editable.',
+    timingDiagramPostRollEvent: (v) => `Post-roll ends, on to the next clip — Post-roll is ${v}s`,
     CAPTURE_FPS_LABEL: 'Capture FPS:',
     // Worth stating outright. This used to sit under Timing Options, and the
     // adjacency invited exactly the confusion that cost real time: the demo's
@@ -653,6 +650,7 @@ export const STRINGS = {
     CUSTOM_CODEC_PLACEHOLDER: '-c:v mpeg4 -q:v 3',
     CUSTOM_CODEC_ARGS_REQUIRED: 'Enter the FFmpeg video-codec arguments to use for Custom (e.g. -c:v mpeg4 -q:v 3).',
     SOURCE_FPS_LABEL: 'Source FPS:',
+    SOURCE_FPS_TITLE: 'The frame rate a take is read at when it does not say what it was captured at (takes from older versions). Takes captured by this version render at their own capture FPS, and each row says which it used.',
     MAX_CONCURRENT_LABEL: 'Max Concurrent Renders:',
     EXPORT_DIR_PLACEHOLDER: 'Add export drive/folder...',
     EXPORT_DIR_ROW_PLACEHOLDER: 'Export drive/folder path...',
@@ -684,6 +682,7 @@ export const STRINGS = {
     startRenderBatch: (n) => `Start Render Batch (${n})`,
     START_RENDER_TITLE: 'Render every queued row. Cancel or remove a row to leave it out.',
     START_RENDER_NONE_TITLE: 'Nothing is queued. Scan for takes, or Retry a finished row.',
+    START_RENDER_NO_EXPORT_DIR_TITLE: 'Add an export folder in Configuration → Render Settings first.',
     cancelSelected: (n) => `Cancel (${n})`,
     CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
     retrySelected: (n) => `Retry (${n})`,

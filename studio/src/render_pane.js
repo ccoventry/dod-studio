@@ -56,6 +56,8 @@ let lastJobsFingerprint = null;
 const batchJobIds = new Set();
 // Delete Take (#644), set up by initRenderUI.
 let takeDelete = null;
+// initRenderUI's getExportDirs, for the Start button's check.
+let exportDirsSource = null;
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
@@ -468,6 +470,17 @@ function renderJobsTable() {
  * waits while anything renders (the scheduler is already running) and
  * Delete Take folders while a delete runs, like the per-row button.
  */
+/** Whether Render Settings has at least one export folder. */
+function hasExportDir() {
+  return (exportDirsSource?.() || []).some(Boolean);
+}
+
+/** Re-checks the Render tab's buttons, for a change made elsewhere (an export
+ *  folder added or removed in Configuration). */
+export function refreshRenderButtons() {
+  syncSelectionControls();
+}
+
 function syncSelectionControls() {
   if (!selection) return;
   const { ticked, total } = selection.counts();
@@ -495,9 +508,12 @@ function syncSelectionControls() {
   const R = STRINGS.RENDER;
   // Start renders every Queued row, ticked or not (#70).
   const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+  // No export folder: the renderer refuses, so Start says where to add one.
+  const noExportDir = !hasExportDir();
   setButton('#start-render-btn', queued, R.startRenderBatch,
-    queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
-    queued === 0 || rendering > 0);
+    noExportDir ? R.START_RENDER_NO_EXPORT_DIR_TITLE
+      : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
+    queued === 0 || rendering > 0 || noExportDir);
   setButton('#cancel-render-btn', targets.cancel.length, R.cancelSelected, R.CANCEL_SELECTED_TITLE);
   setButton('#retry-render-btn', targets.retry.length, R.retrySelected, R.RETRY_SELECTED_TITLE);
   setButton('#remove-render-btn', targets.remove.length, R.removeSelected, R.REMOVE_SELECTED_TITLE);
@@ -632,6 +648,7 @@ async function exportMarkerList(getTakeIndex, getAllDemos) {
 }
 
 export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChange, takeTracking) {
+  exportDirsSource = getExportDirs;
   initSortableHeaders();
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
@@ -895,6 +912,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   if (startRenderBtn) {
     startRenderBtn.addEventListener('click', () => {
       if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
+      if (!hasExportDir()) {
+        showToast(STRINGS.RENDER.START_RENDER_NO_EXPORT_DIR_TITLE, 'error');
+        syncSelectionControls();
+        return;
+      }
       // A batch of Skip copies can end before any snapshot shows Rendering.
       for (const j of jobs) if (j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
       showToast(STRINGS.RENDER.INITIALIZING_RENDER_BATCH, 'info');
