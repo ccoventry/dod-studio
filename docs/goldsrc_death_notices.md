@@ -665,9 +665,16 @@ writes both -- and a swap needs a restore on every exit. Why not TriAPI: it
 would mean re-deriving the texture coordinates and the alpha-test state the
 engine's own draw already has.
 
-The magnified icon is the 640-set sprite under bilinear filtering with the
-engine's alpha test (`GL_GREATER 0.632`), so it is soft at 2×; HD HUD sprites
-(#728 (a), `texture_hires` with `mipmap = 1`) are what make it sharp.
+The magnified icon is the 640-set sprite under bilinear filtering, so it is
+soft at 2×; HD HUD sprites (#728 (a), `texture_hires` with `mipmap = 1`) are
+what make it sharp. `SPR_DrawHoles` (`Draw_SpriteFrameHoles`, pre-Anniversary
+`hw+0x3d430`) enables the alpha test and, while `gl_spriteblend` is non-zero,
+`GL_BLEND` with `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`; the alpha function in force
+for the HUD is the engine's default `GL_NOTEQUAL 0` (read live on both builds,
+`dodstudio_debug_status`). So the draw blends whatever alpha the texture has:
+an HD kill-feed sheet keeps its file's soft alpha and draws blended even at
+`gl_spriteblend 0` (`hud_sprite_edges.rs`, #841), and how smooth its edges
+are is down to the alpha the sheet carries.
 `tools/verify_killfeed_scale_offsets.py` checks the three operands, the
 line-start detour's span and registers, the field offsets, the stride, the
 vftable slot and that both installs ship the same `client.dll`.

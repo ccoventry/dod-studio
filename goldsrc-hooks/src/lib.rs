@@ -220,6 +220,7 @@ mod hand_signals;
 mod hide_asset;
 mod hlae_window;
 mod hltv_messages;
+mod hud_sprite_edges;
 mod hud_sprite_lod;
 mod hud_sprites;
 mod hudelement;
