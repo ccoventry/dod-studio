@@ -1088,8 +1088,9 @@ pub(crate) mod tests {
 
     /// Resets state and holds the lock for the caller's lifetime.
     ///
-    /// Turns the fix on, because it defaults to *off* and most tests below
-    /// would otherwise be asserting against a disabled fix.
+    /// Turns the fix on, because `LEVEL` starts at *off* (the game's default
+    /// is stored at startup by `lib.rs`) and most tests below would otherwise
+    /// be asserting against a disabled fix.
     #[must_use = "the guard must outlive the test, or the statics are not actually reserved"]
     fn reset_settle_state() -> std::sync::MutexGuard<'static, ()> {
         let guard = lock_statics();

@@ -54,7 +54,8 @@
 //! everything else goes through the vgui2 interfaces. Each DLL is named by PE
 //! timestamp and image size, and anything else is refused.
 //! `tools/verify_window_layout.py` checks every slot and address against both
-//! movie installs. Both settings default to 0, so nothing changes until asked.
+//! movie installs. Both settings default to 1: a window you can resize, that
+//! opens where you left it, is a win for everyone.
 
 // The addresses are only used by the 32-bit build; a host build compiles them
 // for the tests alone.
@@ -70,8 +71,8 @@ pub const RESIZABLE_NAME: &str = console_name!("ui_resizable_windows");
 pub const REMEMBER_NAME: &str = console_name!("ui_remember_layout");
 
 /// The fallback path's flags, when the cvars could not be registered.
-pub static RESIZABLE: AtomicBool = AtomicBool::new(false);
-pub static REMEMBER: AtomicBool = AtomicBool::new(false);
+pub static RESIZABLE: AtomicBool = AtomicBool::new(true);
+pub static REMEMBER: AtomicBool = AtomicBool::new(true);
 static RESIZABLE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static REMEMBER_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 

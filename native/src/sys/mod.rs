@@ -25,5 +25,8 @@ pub mod pe;
 pub mod process;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod recycle_bin;
+/// The primary screen's size, for a new install's capture resolution.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod screen;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod steam;
