@@ -526,6 +526,50 @@ class WireTest(unittest.TestCase):
                 np.testing.assert_array_equal(out, lit)
 
 
+class SkinArtTest(unittest.TestCase):
+    """skin_art: an unused drawing in the skin put beside the part whose
+    art it sits next to (the MP40's guard, #900)."""
+
+    @staticmethod
+    def textured_box():
+        """A 16x8 box on screen at (4..20, 4..12) whose UVs cover the left
+        half (texels 0..16 x 0..8) of a 32x8 skin; the right half holds a
+        dark 4x4 square on light grey, which no triangle uses."""
+        idx = np.zeros((8, 32), np.uint8)
+        idx[2:6, 22:26] = 1
+        pal = np.zeros((256, 3), np.uint8)
+        pal[0], pal[1] = 190, 20
+        tex = Texture("s.bmp", 0, 32, 8, idx, pal)
+        v = np.array([[[4, -4, 0], [20, -4, 0], [20, -12, 0]], [[4, -4, 0], [20, -12, 0], [4, -12, 0]]], float)
+        uv = np.array([[[0, 0], [16, 0], [16, 8]], [[0, 0], [16, 8], [0, 8]]], float) / np.array([32, 8])
+        return [(v, np.tile([0.0, 0.0, 1.0], (2, 3, 1)), uv, tex)]
+
+    def test_texel_to_screen_is_the_parts_own_map(self):
+        M = K.texel_to_screen(self.textured_box(), np.eye(3), (1, 1, 0, 0), "s.bmp", (0, 0, 16, 8))
+        np.testing.assert_allclose(np.array([16, 8, 1.0]) @ M, [20, 12], atol=1e-6)
+        np.testing.assert_allclose(np.array([0, 0, 1.0]) @ M, [4, 4], atol=1e-6)
+        self.assertIsNone(K.texel_to_screen(self.textured_box(), np.eye(3), (1, 1, 0, 0), "s.bmp", (20, 0, 30, 8)))
+
+    def test_skin_art_draws_the_dark_drawing_behind_the_render(self):
+        tris = self.textured_box()
+        lit, hi = K.render(tris, np.eye(3), 1, 1, 0, 0, 40, 16, {}, hires=True)
+        art = K.SkinArt("s.bmp", (20, 0, 28, 8), (0, 0, 16, 8), offset=(2, 0))
+        out, (col, cov), n = K.skin_art(hi, tris, np.eye(3), (1, 1, 0, 0), {}, (art,), scale=1)
+        self.assertEqual(n, 1)
+        # texels 22..26 x 2..6 land at x 26..30 (the box's map) + 2, y 6..10
+        a = out[..., 3]
+        self.assertTrue((a[6:10, 28:32] == 1).all())
+        self.assertEqual(a[6:10, 26].max(), 0)  # the light background isn't drawn (bilinear: half a texel's ramp)
+        self.assertEqual(a[:, 33:].max(), 0)
+        np.testing.assert_allclose(out[8, 30, :3], 20 / 255 * (K.AMBIENT + K.DIFFUSE * 0.55 / np.linalg.norm((-0.35, 0.75, 0.55))), atol=1e-3)
+        np.testing.assert_array_equal(out[4:12, 4:20], lit[4:12, 4:20])  # the render stays in front
+
+    def test_mp40_art_is_in_its_skin(self):
+        (art,) = K.ICONS["d_mp40"].skin_art
+        self.assertEqual(art.texture, "p_mp40.bmp")
+        self.assertTrue(all(0 <= c <= 256 for c in art.art + art.anchor))
+
+
 class RecordTest(unittest.TestCase):
     def test_source_for(self):
         with tempfile.TemporaryDirectory() as d:
