@@ -5,7 +5,7 @@
 //! Next, Stop and the Review tab's boxes).
 //!
 //! The lock lasts as long as the review holds `spectator_follow`'s lock (the
-//! same lifetime as `spectator_buttons`): from `dodstudio_review start` to the
+//! same lifetime as `spectator_buttons`): from `ds_demo_review start` to the
 //! frame after it stops or ends. ESC and the Settings tab are left alone;
 //! Stop on the Review tab is the way out.
 //!
@@ -409,21 +409,16 @@ mod tests {
     #[test]
     fn seeks_speed_and_loads_move_the_demo() {
         for line in [
-            "dodstudio_seek_by -10",
-            "dodstudio_seek_by 10",
-            "dodstudio_seek_to 1850",
+            "ds_demo_seek_by -10",
+            "ds_demo_seek_by 10",
+            "ds_demo_seek_to 1850",
             "dem_speed 0.5",
-            "dodstudio_reload_demo",
+            "ds_demo_reload",
             "viewdemo x",
         ] {
             assert!(moves_the_demo(line), "{line}");
         }
-        for line in [
-            "dodstudio_clear_decals",
-            "dodstudio_viewdemo_in_panel 1",
-            "",
-            "  ",
-        ] {
+        for line in ["ds_map_clear_decals", "ds_ui_viewdemo_in_panel 1", "", "  "] {
             assert!(!moves_the_demo(line), "{line:?}");
         }
     }
@@ -431,9 +426,9 @@ mod tests {
     #[test]
     fn every_seek_load_and_camera_command_is_locked_at_the_console() {
         for name in [
-            "dodstudio_seek_to",
-            "dodstudio_seek_by",
-            "dodstudio_reload_demo",
+            "ds_demo_seek_to",
+            "ds_demo_seek_by",
+            "ds_demo_reload",
             "DEM_JUMP",
             "dem_speed",
             "dem_pause",
@@ -441,7 +436,7 @@ mod tests {
             "playdemo",
             "stop",
             "disconnect",
-            "dodstudio_spec_target",
+            "ds_spec_target",
             "spec_mode",
             "spec_autodirector",
             "mirv_input",
@@ -451,13 +446,13 @@ mod tests {
         for name in [
             crate::review::NAME,
             "quit",
-            "dodstudio_panel",
-            "dodstudio_clear_decals",
+            "ds_ui_panel",
+            "ds_map_clear_decals",
             "toggleconsole",
             "+attack",
             "spec_pip",
             "echo",
-            "dodstudio_seek_skip_between",
+            "ds_demo_seek_skip_between",
         ] {
             assert!(!console_locks(name), "{name}");
         }
@@ -468,9 +463,9 @@ mod tests {
         // What the Playback tab's buttons refuse, where the name exists in a
         // build (hw.dll and DemoPlayer.dll have no `demo_pause` family).
         for line in [
-            "dodstudio_seek_to 1",
-            "dodstudio_seek_by 1",
-            "dodstudio_reload_demo",
+            "ds_demo_seek_to 1",
+            "ds_demo_seek_by 1",
+            "ds_demo_reload",
             "dem_speed 1",
             "viewdemo x",
             "playdemo x",
@@ -486,12 +481,12 @@ mod tests {
     #[test]
     fn a_line_names_each_locked_command_it_runs() {
         assert_eq!(
-            lockable_in("spec_mode 4; dodstudio_spec_target 7\n"),
-            ["spec_mode", "dodstudio_spec_target"]
+            lockable_in("spec_mode 4; ds_spec_target 7\n"),
+            ["spec_mode", "ds_spec_target"]
         );
         assert_eq!(lockable_in("viewdemo \"../a;b/demo\"\n"), ["viewdemo"]);
         assert_eq!(
-            lockable_in("echo hi; Dem_Speed 2;dodstudio_panel review"),
+            lockable_in("echo hi; Dem_Speed 2;ds_ui_panel review"),
             ["dem_speed"]
         );
         assert!(lockable_in("").is_empty());
@@ -511,14 +506,14 @@ mod tests {
         assert!(!decide(false, &mut own, "spec_mode"));
         assert_eq!(own.len(), 1);
         // A command the lock doesn't cover always runs.
-        assert!(!decide(true, &mut own, "dodstudio_panel"));
+        assert!(!decide(true, &mut own, "ds_ui_panel"));
     }
 
     #[test]
     fn the_note_says_how_to_end_the_review() {
         let note = console_note("spec_mode");
         assert!(note.starts_with("spec_mode is locked while a review runs"));
-        assert!(note.contains("dodstudio_review stop"));
+        assert!(note.contains("ds_demo_review stop"));
         assert!(note.ends_with('\n'));
     }
 

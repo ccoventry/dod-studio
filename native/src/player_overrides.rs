@@ -13,7 +13,7 @@
 //! the user adds a crosshair file, and then only into `<game>_addon\sprites\`
 //! (`crosshair_import`, #842).
 //!
-//! The hook applies the table only while `dodstudio_player_overrides` is 1;
+//! The hook applies the table only while `ds_player_overrides` is 1;
 //! Studio sets it from the tab's "Use in the game" box ([`cvar_line`]) when it
 //! starts the game, a review or a batch, and when the box changes.
 
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 /// The file the hook reads, in Studio's app-data folder.
 pub const TABLE_FILE: &str = "goldsrc_hooks_players.txt";
 /// The hook's switch for the whole table (`goldsrc-hooks/src/player_overrides.rs`).
-pub const OVERRIDES_CVAR: &str = "dodstudio_player_overrides";
+pub const OVERRIDES_CVAR: &str = "ds_player_overrides";
 /// The crosshair sprite DoD ships and `cl_xhair_style` picks a tile of.
 pub const DEFAULT_CROSSHAIR_SPRITE: &str = "customXHair.spr";
 /// `customXHair.spr`'s grid: 4x4 tiles of 64x64 (`docs/goldsrc_crosshair.md`).
@@ -598,8 +598,8 @@ mod tests {
 
     #[test]
     fn the_box_becomes_the_cvar_line() {
-        assert_eq!(cvar_line(true), "dodstudio_player_overrides 1");
-        assert_eq!(cvar_line(false), "dodstudio_player_overrides 0");
+        assert_eq!(cvar_line(true), "ds_player_overrides 1");
+        assert_eq!(cvar_line(false), "ds_player_overrides 0");
     }
 
     #[test]
