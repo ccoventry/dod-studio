@@ -148,20 +148,27 @@ test('the kept copy comes first and copies in use start unticked', async ({ page
   await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 3 | Wasted Space: 5.0 MB');
 });
 
-test('another copy can be kept: it moves to the top, the old pick becomes a ticked copy', async ({ page }) => {
+test('another copy can be kept: rows stay put, the old pick becomes a ticked copy, Reset undoes it', async ({ page }) => {
   await loadHarness(page);
   await runAudit(page);
   const rows = page.locator('#audit-results-body tr.audit-file-row');
+  const order = [
+    'C:\\Half-Life\\dod\\match.dem', 'F:\\downloads\\match.dem', 'G:\\project\\match.dem',
+    'D:\\a.dem', 'E:\\old\\a.dem',
+  ];
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(0);
   // Keep E:\old\a.dem instead of D:\a.dem.
   // A click, not check(): the list redraws at once, so check() can't see it stay ticked.
   await rows.nth(4).locator('input[type=radio]').click();
-  await expect(rows.locator('.audit-file-path')).toHaveText([
-    'C:\\Half-Life\\dod\\match.dem', 'F:\\downloads\\match.dem', 'G:\\project\\match.dem',
-    'E:\\old\\a.dem', 'D:\\a.dem',
-  ]);
-  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('Kept');
-  await expect(rows.nth(3).locator('input.audit-row-cb')).toBeDisabled();
-  await expect(rows.nth(4).locator('input.audit-row-cb')).toBeChecked();
+  await expect(rows.locator('.audit-file-path')).toHaveText(order);
+  await expect(rows.nth(4).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(4)).toHaveClass(/audit-kept/);
+  await expect(rows.nth(4).locator('input.audit-row-cb')).toBeDisabled();
+  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('↳ Copy');
+  await expect(rows.nth(3).locator('input.audit-row-cb')).toBeChecked();
+  // Only that group says its kept copy was changed.
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(1);
+  await expect(page.locator('.audit-keep-changed')).toContainText('Kept copy changed by you');
 
   await page.click('#delete-selected-audits-btn');
   await confirm(page);
@@ -173,6 +180,18 @@ test('another copy can be kept: it moves to the top, the old pick becomes a tick
   ]);
 });
 
+test('Reset keeps the audit\'s pick again', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await rows.nth(4).locator('input[type=radio]').click();
+  await page.click('.audit-keep-reset-btn');
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(0);
+  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(4).locator('input.audit-row-cb')).toBeChecked();
+  await expect(page.locator('#delete-selected-audits-btn')).toHaveText('Move 2 to Recycle Bin');
+});
+
 test('Keep copies already in a folder picks the copy in that folder in every group', async ({ page }) => {
   await loadHarness(page, { picked: 'E:\\old' });
   await expect(page.locator('#audit-prefer-folder-btn')).toBeDisabled();
@@ -180,8 +199,9 @@ test('Keep copies already in a folder picks the copy in that folder in every gro
   await page.click('#audit-prefer-folder-btn');
   await expect(page.locator('.toast').last()).toContainText('in 1 group (1 changed)');
   const rows = page.locator('#audit-results-body tr.audit-file-row');
-  await expect(rows.nth(3).locator('.audit-file-path')).toHaveText('E:\\old\\a.dem');
-  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(4).locator('.audit-file-path')).toHaveText('E:\\old\\a.dem');
+  await expect(rows.nth(4).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(1);
 });
 
 test('Move to Recycle Bin is the default delete, and the list follows it', async ({ page }) => {

@@ -81,6 +81,33 @@ export function startsTicked(file, index) {
   return index > 0 && !file.in_use;
 }
 
+/// The audit's groups, each remembering the audit's own pick (`auditPick`)
+/// and its row order (`order`), so picking another copy to keep moves no row
+/// and can be undone.
+export function withAuditOrder(groups) {
+  return (groups ?? []).map((g) => ({
+    ...g,
+    auditPick: g.files[0]?.path,
+    order: g.files.map((f) => f.path),
+  }));
+}
+
+/// Group `group`'s rows in the order the audit listed them, each with whether
+/// it's the kept copy, which is always `files[0]`.
+export function shownFiles(group) {
+  const kept = group.files[0]?.path;
+  const rank = new Map((group.order ?? []).map((p, i) => [p, i]));
+  return [...group.files]
+    .sort((a, b) => (rank.get(a.path) ?? Infinity) - (rank.get(b.path) ?? Infinity))
+    .map((file) => ({ file, kept: file.path === kept }));
+}
+
+/// Whether the group keeps another copy than the audit picked.
+export function keptChanged(group) {
+  return !!group.auditPick && group.files[0]?.path !== group.auditPick
+    && group.files.some((f) => f.path === group.auditPick);
+}
+
 /// The groups with `path` as the kept copy of group `groupIdx`: it moves to
 /// the front, where the kept copy always is, and the rest keep their order.
 /// Also says which ticks change: the new kept copy can't be deleted, and the

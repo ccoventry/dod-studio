@@ -9,6 +9,7 @@ import { setAuditorFooter } from './auditor_footer.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
+  withAuditOrder, shownFiles, keptChanged,
 } from './audit_duplicates.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
@@ -116,7 +117,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
 
       try {
         const outcome = await runDemoAudit(paths, allDrives, queued);
-        currentAuditResults = outcome?.groups ?? [];
+        currentAuditResults = withAuditOrder(outcome?.groups);
         renderAuditResults({ resetTicks: true });
         setStatus(outcome?.cancelled
           ? STRINGS.AUDITOR.CANCELLED_STATUS
@@ -203,13 +204,34 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         <td></td>
       `;
       groupRow.querySelector('.group-toggle-btn').addEventListener('click', () => toggleGroup(groupIdx));
+      // A kept copy picked by hand says so, with the way back to the
+      // audit's pick, so a stray click is easy to see and undo.
+      if (keptChanged(group)) {
+        const cell = groupRow.lastElementChild;
+        cell.className = 'audit-keep-changed';
+        const note = document.createElement('span');
+        note.textContent = STRINGS.AUDITOR.KEEP_CHANGED_NOTE;
+        note.style.color = '#f0c060';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'audit-keep-reset-btn';
+        reset.textContent = STRINGS.AUDITOR.KEEP_RESET_BUTTON;
+        reset.title = STRINGS.AUDITOR.keepResetTitle(shownPath(group.auditPick));
+        reset.disabled = running || !!deleting;
+        reset.addEventListener('click', () => keepInstead(groupIdx, group.auditPick));
+        cell.append(note, ' ', reset);
+      }
       tbody.appendChild(groupRow);
 
       if (!isExpanded) return;
 
-      group.files.forEach((file, fileIdx) => {
+      shownFiles(group).forEach(({ file, kept }) => {
+        const fileIdx = kept ? 0 : 1;
         const tr = document.createElement('tr');
-        tr.className = fileIdx === 0 ? 'audit-file-row audit-kept' : 'audit-file-row';
+        tr.className = kept ? 'audit-file-row audit-kept' : 'audit-file-row';
+        // The kept copy stands out where it is: rows don't move when
+        // another copy is picked.
+        if (kept) tr.style.background = 'rgba(90, 200, 120, 0.10)';
 
         const tdCb = document.createElement('td');
         const cb = document.createElement('input');
@@ -250,8 +272,14 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         const tdPath = document.createElement('td');
         tdPath.className = 'audit-file-path';
         tdPath.textContent = displayPath;
-        if (fileIdx > 0) tdPath.style.color = '#ff9999';
-        else tdPath.style.fontWeight = 'bold';
+        if (fileIdx > 0) {
+          tdPath.style.color = '#ff9999';
+        } else {
+          tdPath.style.fontWeight = 'bold';
+          tdPath.style.color = '#8fd18f';
+          keepLabel.style.color = '#8fd18f';
+          keepLabel.style.fontWeight = 'bold';
+        }
 
         const tdAction = document.createElement('td');
         const copyBtn = document.createElement('button');
