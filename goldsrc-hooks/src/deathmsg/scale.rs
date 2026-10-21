@@ -1,4 +1,4 @@
-//! `dodstudio_deathmsg scale <S>`: the kill feed's weapon icons S times
+//! `ds_hud_deathmsg scale <S>`: the kill feed's weapon icons S times
 //! bigger, with the lines spaced and right-anchored to match (#728).
 //!
 //! ## What the game does

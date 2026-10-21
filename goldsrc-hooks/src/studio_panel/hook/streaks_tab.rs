@@ -8,7 +8,7 @@
 //! Every life with a kill is listed. A POV demo lists only the recording
 //! player's (the footage follows no one else), named in a greyed-out Player
 //! box. An HLTV demo lists everyone's, the Player box narrows them, and Go
-//! also puts the camera on the streak's player (`dodstudio_spec_target`).
+//! also puts the camera on the streak's player (`ds_spec_target`).
 //! The hint line under the list says when there is nothing to list, and why;
 //! how far the analysis has got is the loading strip's and the progress bar's.
 
@@ -185,7 +185,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 show_filters(vgui, page, None);
             }
             Status::Ready(found) => {
-                let text = ready_hint(&found);
+                let text = streaks::with_damage(ready_hint(&found), &found);
                 show(vgui, page, build, (&text, &text), None);
                 let demo_key = format!("{generation}:ready");
                 {

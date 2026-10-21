@@ -2,9 +2,9 @@
 //! bar, the events list, the Load Demo window, Options and the rest
 //! (issue #408):
 //!
-//! - `dodstudio_resizable_windows 1`: every one of them can be resized by
+//! - `ds_ui_resizable_windows 1`: every one of them can be resized by
 //!   its edges and corners, like the console.
-//! - `dodstudio_remember_window_layout 1`: each one comes back where it was
+//! - `ds_ui_remember_layout 1`: each one comes back where it was
 //!   last left, at the size it was left, after the game restarts.
 //!
 //! ## Why neither is a `.res` setting
@@ -66,8 +66,8 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
-pub const RESIZABLE_NAME: &str = console_name!("resizable_windows");
-pub const REMEMBER_NAME: &str = console_name!("remember_window_layout");
+pub const RESIZABLE_NAME: &str = console_name!("ui_resizable_windows");
+pub const REMEMBER_NAME: &str = console_name!("ui_remember_layout");
 
 /// The fallback path's flags, when the cvars could not be registered.
 pub static RESIZABLE: AtomicBool = AtomicBool::new(false);

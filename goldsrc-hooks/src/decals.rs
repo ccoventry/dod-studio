@@ -1,4 +1,4 @@
-//! `dodstudio_clear_decals`: empty the engine's decal pool at runtime.
+//! `ds_map_clear_decals`: empty the engine's decal pool at runtime.
 //!
 //! ## What this replaces
 //!
@@ -80,7 +80,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("clear_decals");
+pub const NAME: &str = console_name!("map_clear_decals");
 
 /// `hw+0x4a000`, the engine's remove-every-decal-with-this-flag loop. The
 /// wildcards are the pool base, the two relative calls and the pool end.
@@ -160,7 +160,7 @@ static RESOLVED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// Whether the resolved build is the Anniversary one.
 static ANNIVERSARY: AtomicBool = AtomicBool::new(false);
 
-/// How many decals the last successful clear removed, for `dodstudio_status`.
+/// How many decals the last successful clear removed, for `ds_debug_status`.
 static LAST_CLEARED: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Reads a little-endian `u32` at `address`.
@@ -313,7 +313,7 @@ pub fn clear() -> Result<usize, String> {
     Ok(in_use)
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let build = if ANNIVERSARY.load(Ordering::Relaxed) {
         Build::Anniversary

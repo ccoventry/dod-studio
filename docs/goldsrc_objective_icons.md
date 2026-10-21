@@ -19,11 +19,11 @@ Implemented in `goldsrc-hooks/src/objicons.rs`; re-checked against a real
 ## 1. The console surface
 
 ```
-dodstudio_objectives offset <y>       y the objective icons are drawn at
-dodstudio_objectives xoffset <x>      x the icon row starts at
-dodstudio_objectives timer <y>        y the objective timer beside them is drawn at
-dodstudio_objectives <any> default    hand that one back to the game
-dodstudio_objectives                  what each is set to, and the usage above
+ds_hud_objectives offset <y>       y the objective icons are drawn at
+ds_hud_objectives xoffset <x>      x the icon row starts at
+ds_hud_objectives timer <y>        y the objective timer beside them is drawn at
+ds_hud_objectives <any> default    hand that one back to the game
+ds_hud_objectives                  what each is set to, and the usage above
 ```
 
 All three are **absolute screen positions**, and each means the same thing in a
@@ -260,7 +260,7 @@ and the per-frame update at `+0x36d1c`).
 The game's spectating y, `round(54 * ScreenHeight / 480)`, is not the spectator
 bar's height. The bar is `GetProportionalScaledValue(64)` tall (`client+0x82dae`),
 so the icons and timer overlap its bottom ~10 pixels. With
-`dodstudio_hide_spectator_bars 1` the bar is gone and the gap remains.
+`ds_spec_hide_bars 1` the bar is gone and the gap remains.
 
 `goldsrc-hooks/src/spectator_hud.rs` fixes both. While spectating, and while no
 value has been typed, it sets the icon row's y and the timer's y through the two

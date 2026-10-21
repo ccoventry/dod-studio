@@ -2,7 +2,7 @@
 // Configuration > Players (#428): one row per player with the spray and the
 // crosshair they get in a demo, what everyone not listed gets, and whether the
 // game uses the table at all ("Use in the game", sent to a running game as
-// dodstudio_player_overrides). The players come from the queue's demos (the
+// ds_player_overrides). The players come from the queue's demos (the
 // player index, lane 'players'); the sprays are the PNGs in the install's
 // logos folder, the crosshairs a 64x64 tile of a sprite in its sprites
 // folder, picked from a 4x4 preview of the sprite. settings_sync.js saves
@@ -17,6 +17,7 @@ import {
   indexDemoPlayers,
 } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { createCrosshairImport } from './crosshair_import_ui.js';
 import {
   normalizePlayers,
   playerOptions as groupOptions,
@@ -395,7 +396,16 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
     sprites = Array.isArray(listed[1]) ? listed[1] : [];
     spriteImages.clear();
     render();
+    crosshairImport.refresh();
   }
+
+  // "Make your own crosshair…" and "Add a crosshair file…" (#842); a file
+  // added re-lists the sprites so the crosshair lists offer it.
+  const crosshairImport = createCrosshairImport({
+    getPaths,
+    getSprites: () => sprites,
+    onAdded: () => refreshFiles(),
+  });
 
   async function refreshPlayers() {
     const paths = (getDemos() || []).map((d) => d.path).filter(Boolean);

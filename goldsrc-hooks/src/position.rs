@@ -1,4 +1,4 @@
-//! `dodstudio_debug_position`: where the view and the watched player are,
+//! `ds_debug_position`: where the view and the watched player are,
 //! for checking an overview's reach in the game (#581).
 //!
 //! The stock `spec_pos` prints the view's position, but only while the map
@@ -133,7 +133,7 @@ fn map() -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// `dodstudio_debug_position`.
+/// `ds_debug_position`.
 pub unsafe extern "C" fn command() {
     let line = describe(view(), player(), map().as_deref());
     console_print(&format!("{line}\n"));
@@ -159,11 +159,11 @@ mod tests {
         );
         assert_eq!(
             line,
-            "dodstudio_debug_position: eye 1.0 2.5 60.0, pitch 10.0 yaw 270.0; player 3 at 1.0 2.5 38.0 (feet at 2.0, standing); map dod_anzio"
+            "ds_debug_position: eye 1.0 2.5 60.0, pitch 10.0 yaw 270.0; player 3 at 1.0 2.5 38.0 (feet at 2.0, standing); map dod_anzio"
         );
         assert_eq!(
             describe(None, None, None),
-            "dodstudio_debug_position: no view drawn yet"
+            "ds_debug_position: no view drawn yet"
         );
     }
 }
