@@ -1,7 +1,7 @@
-//! `dodstudio_hide_voice_menus`: hide the numbered voice-command and
+//! `ds_hud_hide_voice_menus`: hide the numbered voice-command and
 //! hand-signal menus a POV demo's player opened, so they don't pop up over the
-//! shot. `dodstudio_mute_voice_commands` silences what the player then picked
-//! and `dodstudio_hide_hand_signals` hides the gesture; this hides the list
+//! shot. `ds_sound_mute_voice_commands` silences what the player then picked
+//! and `ds_player_hide_hand_signals` hides the gesture; this hides the list
 //! they picked it from.
 //!
 //! ## Two menus, two mechanisms
@@ -47,7 +47,7 @@
 //!
 //! Server plugin menus (AMX Mod X votes and the like) come through the same
 //! `ShowMenu` and are left alone: only the nine voice keys are hidden.
-//! `dodstudio_hide_hudelement menu 1` still hides every text menu.
+//! `ds_hud_hide_element menu 1` still hides every text menu.
 //!
 //! ## The command menu: one byte
 //!
@@ -70,7 +70,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hide_voice_menus");
+pub const NAME: &str = console_name!("hud_hide_voice_menus");
 
 /// The user message both menus' text comes in.
 pub(crate) const SHOW_MENU: &str = "ShowMenu";
@@ -408,7 +408,7 @@ pub fn poll() {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {

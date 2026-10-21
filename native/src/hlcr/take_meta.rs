@@ -19,16 +19,19 @@
 //! which point it would inherit whatever the folder it landed in says. That is
 //! this exact bug reintroduced one level up.
 //!
-//! Deliberately **advisory**. Nothing here overrides the user's render setting —
-//! a take folder can be moved, copied or hand-assembled, and a renderer that
-//! silently substituted a number found in a neighbouring file would be a worse
-//! surprise than the one it fixes. It exists so the disagreement can be *stated*.
+//! **The render follows it.** A frame sequence is read at the rate the take's
+//! own file records (`render_fps`); Render Settings' Source FPS is only the
+//! fallback for a take without one, and the render row and the activity log
+//! say which was used. #14 first kept this advisory, out of worry that a moved
+//! or hand-assembled folder would carry the wrong number; the file is per take
+//! and the walk stops two folders up, so it describes the frames beside it,
+//! and a fixed 300 made every take captured at another rate the wrong speed.
 
 use std::path::{Path, PathBuf};
 
 /// Bump when the shape changes. A file with an unrecognised format is ignored
-/// rather than guessed at — an advisory check that mis-reads is worse than one
-/// that stays quiet. 2 added `renders` (#438); a format-1 file still reads,
+/// rather than guessed at — a render that mis-reads a rate is worse than one
+/// that falls back to the setting. 2 added `renders` (#438); a format-1 file still reads,
 /// with no history.
 pub const FORMAT: u32 = 2;
 
@@ -278,8 +281,27 @@ fn search_path(take_folder: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The rate a take was captured at, when its file says (a positive number).
+pub fn recorded_fps(take_folder: &Path) -> Option<u32> {
+    read_for_take(take_folder)
+        .map(|meta| meta.capture_fps)
+        .filter(|&fps| fps > 0)
+        .map(|fps| fps as u32)
+}
+
+/// The rate a render reads a take's frames at, and whether it is the take's
+/// own: the recorded capture rate when there is one, else `setting` (Render
+/// Settings' Source FPS).
+pub fn render_fps(take_folder: &Path, setting: u32) -> (u32, bool) {
+    match recorded_fps(take_folder) {
+        Some(fps) => (fps, true),
+        None => (setting.max(1), false),
+    }
+}
+
 /// The warning to show when a render is about to interpret a take at a rate it
-/// was not captured at, or `None` when there is nothing to say.
+/// was not captured at, or `None` when there is nothing to say. `render_fps`
+/// keeps a render from doing that; this stays for a caller with its own rate.
 ///
 /// Returns a message rather than logging, so the same wording can go to the
 /// activity log and to a job's own render log without drifting apart.
@@ -526,6 +548,23 @@ mod tests {
         let read = read_for_take(&take).expect("an AGR take reads back");
         assert_eq!(read.capture_mode.as_deref(), Some("agr"));
         assert_eq!(read.agr_fps, Some(60));
+    }
+
+    #[test]
+    fn a_render_uses_the_takes_own_rate_and_the_setting_only_without_one() {
+        let (_root, block, take) =
+            block_with_take("render_fps", "session_x", "dodstudio_chain_01_b0");
+        assert_eq!(render_fps(&take, 300), (300, false), "no file: the setting");
+        write(&block, &SessionMeta::new("s", 0)).expect("write");
+        assert_eq!(
+            render_fps(&take, 300),
+            (300, false),
+            "an unknown rate: the setting"
+        );
+        write(&block, &SessionMeta::new("s", 120)).expect("write");
+        assert_eq!(render_fps(&take, 300), (120, true));
+        assert_eq!(render_fps(&block, 60), (120, true));
+        assert_eq!(recorded_fps(&take), Some(120));
     }
 
     #[test]
