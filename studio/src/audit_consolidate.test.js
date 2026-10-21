@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   consolidateRequest, hasDemos, planView, consolidateProgressView, singlesAfterDelete,
 } from './audit_consolidate.js';
+import { STRINGS } from './strings.js';
 
 const GROUPS = [
   {
@@ -44,9 +45,29 @@ describe('audit_consolidate (#872)', () => {
       { path: 'D:\\a.dem', size: 5, game_folder: false },
       { path: 'G:\\solo.dem', size: 7, game_folder: false },
     ]);
-    expect(req.recycle.map((d) => d.path)).toEqual(['F:\\dl\\m.dem', 'E:\\a.dem']);
+    // Each copy carries the kept copy the backend compares it with.
+    expect(req.recycle.map((d) => [d.path, d.keep])).toEqual([
+      ['F:\\dl\\m.dem', 'C:\\HL\\dod\\m.dem'],
+      ['E:\\a.dem', 'D:\\a.dem'],
+    ]);
     expect(req).toMatchObject({ destination: 'F:\\Demos', layout: 'subfolders', include_game_folders: false, roots: ['C:\\'] });
     expect(consolidateRequest({ groups: [], layout: 'nonsense' }).layout).toBe('flat');
+  });
+
+  it('never sends a row marked not an exact copy to be recycled', () => {
+    const marked = [{ ...GROUPS[0], files: [...GROUPS[0].files, { path: 'H:\\m.dem', in_use: null }], notCopies: ['F:\\dl\\m.dem'] }];
+    const req = consolidateRequest({ groups: marked, destination: 'F:\\Demos' });
+    expect(req.recycle.map((d) => d.path)).toEqual(['H:\\m.dem']);
+    expect(req.keep.map((d) => d.path)).toEqual(['C:\\HL\\dod\\m.dem']);
+  });
+
+  it('says which copies stayed because they differ from the demo kept', () => {
+    const outcome = {
+      moved: [{}], failed: [], recycled: [{}], cancelled: false,
+      recycle_failed: [{ path: 'E:\\a.dem', error: 'x', not_a_copy: true }, { path: 'F:\\b.dem', error: 'y', not_a_copy: false }],
+    };
+    expect(STRINGS.AUDITOR.consolidatedStatus(outcome, 0))
+      .toBe('Moved 1 demo, recycled 1 copy. 1 copy was kept: not an exact copy of the demo kept. 1 failed.');
   });
 
   it('needs an audit with demos', () => {
@@ -57,7 +78,7 @@ describe('audit_consolidate (#872)', () => {
 
   it('previews what moves, recycles and renames', () => {
     expect(planView(plan({ renamed: 1, stay_in_game_folders: 2 }))).toEqual({
-      text: 'Move 2 demos (3.00 GB) into F:\\Demos, recycle 1 copy, rename 1. 2 in game folders left where they are.',
+      text: 'Move 2 demos (3.00 GB) into F:\\Demos, recycle 1 copy (each first checked byte for byte against the demo kept), rename 1. 2 in game folders left where they are.',
       ready: true,
     });
     expect(planView(plan({ moves: [], recycle: [] })).ready).toBe(false);
@@ -77,6 +98,8 @@ describe('audit_consolidate (#872)', () => {
     expect(moving).toEqual({ pct: 50, text: 'Moving demos: 1 / 4 (512.0 MB of 1.00 GB)', current: 'C:\\a.dem' });
     expect(consolidateProgressView({ step: 'recycling', files_done: 3, files_total: 4 }).text)
       .toBe('Moving copies to the Recycle Bin: 3 / 4');
+    expect(consolidateProgressView({ step: 'checking', files_done: 1, files_total: 4, current: 'E:\\a.dem' }))
+      .toEqual({ pct: 25, text: 'Checking each copy matches the kept one byte for byte: 1 / 4', current: 'E:\\a.dem' });
     expect(consolidateProgressView({ step: 'undoing', files_done: 0, files_total: 2, bytes_done: 0, bytes_total: 0 }).text)
       .toMatch(/^Putting demos back: 0 \/ 2/);
     expect(consolidateProgressView(null).pct).toBe(0);

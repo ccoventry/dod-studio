@@ -349,6 +349,61 @@ pub fn consolidate_copy_mismatch(to: &std::path::Path) -> String {
     )
 }
 
+// ── demo_compare.rs (#871, #872) ─────────────────────────────────────────
+
+/// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`
+/// (or `\\?\UNC\`) prefix, which the Duplicates table hides too.
+pub fn shown(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        text
+    }
+}
+
+/// A copy kept because it isn't byte for byte the copy its group keeps:
+/// the audit's key reads only the first 64 KiB.
+pub fn copy_differs_from_kept(
+    copy: &std::path::Path,
+    keep: &std::path::Path,
+    offset: u64,
+) -> String {
+    format!(
+        "Not deleted: {} is not an exact copy of {} (they differ from byte {}), so it may be a different demo",
+        shown(copy),
+        shown(keep),
+        offset
+    )
+}
+
+pub fn kept_copy_missing(copy: &std::path::Path, keep: &std::path::Path) -> String {
+    format!(
+        "Not deleted: {} could not be checked against the copy being kept, {}, which is no longer there",
+        shown(copy),
+        shown(keep)
+    )
+}
+
+pub fn copy_is_the_kept_copy(copy: &std::path::Path) -> String {
+    format!("Not deleted: {} is the copy being kept", shown(copy))
+}
+
+pub fn copy_compare_failed(
+    copy: &std::path::Path,
+    keep: &std::path::Path,
+    err: impl Display,
+) -> String {
+    format!(
+        "Not deleted: {} could not be compared with {}: {}",
+        shown(copy),
+        shown(keep),
+        err
+    )
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any

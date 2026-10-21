@@ -6,9 +6,9 @@
 //! one before it is deleted.
 
 use hl_demo_auditor::{AuditProgress, find_duplicates, scan_dir};
+use native::demo_compare::{Refusal, check_same_contents};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
@@ -367,26 +367,13 @@ pub struct DeleteFailure {
     pub not_a_copy: bool,
 }
 
-/// Why [`check_same_contents`] refused a copy.
-#[derive(Debug, PartialEq)]
-enum Refusal {
-    /// The bytes differ: a different demo.
-    NotACopy(String),
-    /// Anything else: the kept copy is gone, is the same file, can't be read.
-    Other(String),
-}
-
-impl Refusal {
-    fn into_failure(self, path: String) -> DeleteFailure {
-        let (error, not_a_copy) = match self {
-            Refusal::NotACopy(e) => (e, true),
-            Refusal::Other(e) => (e, false),
-        };
-        DeleteFailure {
-            path,
-            error,
-            not_a_copy,
-        }
+/// A refused copy as the table reports it.
+fn failure_of(refusal: Refusal, path: String) -> DeleteFailure {
+    let (error, not_a_copy) = refusal.into_parts();
+    DeleteFailure {
+        path,
+        error,
+        not_a_copy,
     }
 }
 
@@ -414,73 +401,6 @@ fn check_deletable(path: &Path) -> Result<(), String> {
 pub struct DeleteCopy {
     pub path: String,
     pub keep: String,
-}
-
-/// Bytes read from each file per comparison step.
-const COMPARE_CHUNK: usize = 1 << 20;
-
-/// Fills `buf` from `file` until it is full or the file ends; how many bytes.
-fn read_chunk(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match file.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
-        }
-    }
-    Ok(filled)
-}
-
-/// Whether `copy` is a true copy of `keep`: another file with every byte
-/// the same. The audit's key reads only the first 64 KiB, so two different
-/// demos can share a group; this keeps the delete from trusting that.
-fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), Refusal> {
-    let kept_is_there = keep.symlink_metadata().is_ok_and(|m| m.is_file());
-    if !kept_is_there {
-        return Err(Refusal::Other(crate::messages::kept_copy_missing(
-            copy, keep,
-        )));
-    }
-    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(copy), std::fs::canonicalize(keep))
-        && a == b
-    {
-        return Err(Refusal::Other(crate::messages::copy_is_the_kept_copy(copy)));
-    }
-    let unreadable =
-        |e: std::io::Error| Refusal::Other(crate::messages::copy_compare_failed(copy, keep, e));
-    let differs =
-        |at: u64| Refusal::NotACopy(crate::messages::copy_differs_from_kept(copy, keep, at));
-    let mut a = std::fs::File::open(copy).map_err(unreadable)?;
-    let mut b = std::fs::File::open(keep).map_err(unreadable)?;
-    let (len_a, len_b) = (
-        a.metadata().map_err(unreadable)?.len(),
-        b.metadata().map_err(unreadable)?.len(),
-    );
-    if len_a != len_b {
-        return Err(differs(len_a.min(len_b)));
-    }
-    let mut buf_a = vec![0u8; COMPARE_CHUNK];
-    let mut buf_b = vec![0u8; COMPARE_CHUNK];
-    let mut offset: u64 = 0;
-    loop {
-        let n_a = read_chunk(&mut a, &mut buf_a).map_err(unreadable)?;
-        let n_b = read_chunk(&mut b, &mut buf_b).map_err(unreadable)?;
-        if let Some(i) = buf_a[..n_a.min(n_b)]
-            .iter()
-            .zip(&buf_b[..n_a.min(n_b)])
-            .position(|(x, y)| x != y)
-        {
-            return Err(differs(offset + i as u64));
-        }
-        if n_a != n_b {
-            // The file changed size while it was read.
-            return Err(differs(offset + n_a.min(n_b) as u64));
-        }
-        if n_a == 0 {
-            return Ok(());
-        }
-        offset += n_a as u64;
-    }
 }
 
 /// Deletes the picked copies: to the Recycle Bin, or for good when
@@ -513,7 +433,7 @@ pub fn delete_audit_files_impl(
             .and_then(|()| check_same_contents(path, Path::new(&copy.keep)))
         {
             Ok(()) => deletable.push(copy.path),
-            Err(refusal) => outcome.failed.push(refusal.into_failure(copy.path)),
+            Err(refusal) => outcome.failed.push(failure_of(refusal, copy.path)),
         }
         emit("checking", i + 1, checking);
     }
@@ -595,83 +515,11 @@ mod tests {
         list.iter().map(PathBuf::from).collect()
     }
 
-    /// A fresh folder for one test, removed when dropped.
-    struct Scratch(PathBuf);
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir =
-                std::env::temp_dir().join(format!("audit_compare_{}_{}", name, std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-        fn file(&self, name: &str, bytes: &[u8]) -> PathBuf {
-            let path = self.0.join(name);
-            std::fs::write(&path, bytes).unwrap();
-            path
-        }
-    }
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    /// Same size and first 64 KiB, so the audit groups them, but not the
-    /// same demo past that.
-    fn demo_bytes(tail: u8) -> Vec<u8> {
-        let mut bytes = vec![7u8; COMPARE_CHUNK + 70_000];
-        *bytes.last_mut().unwrap() = tail;
-        bytes
-    }
-
     #[test]
-    fn a_byte_for_byte_copy_can_be_deleted() {
-        let s = Scratch::new("same");
-        let keep = s.file("keep.dem", &demo_bytes(1));
-        let copy = s.file("copy.dem", &demo_bytes(1));
-        assert_eq!(check_same_contents(&copy, &keep), Ok(()));
-    }
-
-    #[test]
-    fn a_copy_that_differs_past_the_key_is_not_deleted() {
-        let s = Scratch::new("differs");
-        let keep = s.file("keep.dem", &demo_bytes(1));
-        let copy = s.file("copy.dem", &demo_bytes(2));
-        let Err(Refusal::NotACopy(err)) = check_same_contents(&copy, &keep) else {
-            panic!("a different file must be refused as not a copy");
-        };
-        let last = (COMPARE_CHUNK + 70_000 - 1).to_string();
-        assert!(err.contains(&format!("differ from byte {last}")), "{err}");
-        let failure = Refusal::NotACopy(err).into_failure("copy.dem".into());
+    fn a_copy_with_other_bytes_is_marked_not_a_copy() {
+        let failure = failure_of(Refusal::NotACopy("differs".into()), "copy.dem".into());
         assert!(failure.not_a_copy);
-    }
-
-    #[test]
-    fn a_copy_of_another_size_is_not_deleted() {
-        let s = Scratch::new("size");
-        let keep = s.file("keep.dem", b"abcdef");
-        let copy = s.file("copy.dem", b"abc");
-        let Err(Refusal::NotACopy(err)) = check_same_contents(&copy, &keep) else {
-            panic!("another size must be refused as not a copy");
-        };
-        assert!(err.contains("differ from byte 3"), "{err}");
-    }
-
-    #[test]
-    fn the_kept_copy_itself_or_a_missing_one_is_never_a_reason_to_delete() {
-        let s = Scratch::new("self");
-        let keep = s.file("keep.dem", b"abc");
-        let Err(Refusal::Other(err)) = check_same_contents(&keep, &keep) else {
-            panic!("the kept file itself must be refused");
-        };
-        assert!(err.contains("is the copy being kept"), "{err}");
-        let gone = s.0.join("gone.dem");
-        let Err(Refusal::Other(err)) = check_same_contents(&keep, &gone) else {
-            panic!("a missing kept copy must be refused");
-        };
-        assert!(err.contains("no longer there"), "{err}");
-        assert!(!Refusal::Other(err).into_failure("x".into()).not_a_copy);
+        assert!(!failure_of(Refusal::Other("gone".into()), "x".into()).not_a_copy);
     }
 
     fn kept_order(files: &[&str], rules: &KeepRules) -> Vec<String> {

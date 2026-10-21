@@ -12,8 +12,13 @@
 //! request asks for them, since the game plays demos from there (the audit's
 //! `InUse::GameFolder`). A move never replaces a file. A move between drives
 //! is a copy, checked for size, then a delete of the original.
+//!
+//! The audit pairs copies by size and first 64 KiB, so before a copy is
+//! recycled it is compared byte for byte with the kept copy, wherever that
+//! has moved to (`demo_compare`, as the Duplicates delete does). One that
+//! differs stays where it is and is reported.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,6 +47,10 @@ pub struct AuditedDemo {
     /// Inside an install's game folder (`<install>\dod`).
     #[serde(default)]
     pub game_folder: bool,
+    /// For a copy to recycle: its group's kept copy, which it must match
+    /// byte for byte. Empty for a demo that moves.
+    #[serde(default)]
+    pub keep: String,
 }
 
 /// What the frontend asks for.
@@ -73,11 +82,18 @@ pub struct PlannedMove {
     pub renamed: bool,
 }
 
+/// A copy to recycle once it matches the kept copy.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PlannedRecycle {
+    pub path: String,
+    pub keep: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct Plan {
     pub destination: String,
     pub moves: Vec<PlannedMove>,
-    pub recycle: Vec<String>,
+    pub recycle: Vec<PlannedRecycle>,
     /// Demos left where they are because they're in a game folder.
     pub stay_in_game_folders: usize,
     /// Copies not recycled because they're in a game folder.
@@ -269,7 +285,10 @@ pub fn plan(
         if copy.game_folder && !req.include_game_folders {
             out.copies_in_game_folders += 1;
         } else {
-            out.recycle.push(copy.path.clone());
+            out.recycle.push(PlannedRecycle {
+                path: copy.path.clone(),
+                keep: copy.keep.clone(),
+            });
         }
     }
     out.enough_space = out.copy_bytes <= free_bytes;
@@ -301,6 +320,9 @@ pub struct MovedPair {
 pub struct Failure {
     pub path: String,
     pub error: String,
+    /// A copy whose bytes differ from the kept copy's: a different demo,
+    /// marked "Not an exact copy" like the Duplicates delete marks it.
+    pub not_a_copy: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
@@ -319,6 +341,8 @@ pub struct Outcome {
 #[serde(rename_all = "snake_case")]
 pub enum Step {
     Moving,
+    /// Comparing each copy with the kept one before recycling.
+    Checking,
     Recycling,
     Undoing,
 }
@@ -556,6 +580,7 @@ fn run_plan(
             Err(MoveError::Failed(error)) => outcome.failed.push(Failure {
                 path: m.from.clone(),
                 error,
+                not_a_copy: false,
             }),
         }
     }
@@ -571,32 +596,96 @@ fn run_plan(
     }
 
     if !outcome.cancelled && !plan.recycle.is_empty() {
-        let total = plan.recycle.len();
-        let list: Vec<PathBuf> = plan.recycle.iter().map(PathBuf::from).collect();
-        let mut report = Progress {
-            step: Step::Recycling,
-            files_done: 0,
-            files_total: total,
-            bytes_done: 0,
-            bytes_total: 0,
-            current: String::new(),
-        };
-        on_progress(&report);
-        let errors = crate::sys::recycle_bin::recycle(list, |done| {
-            report.files_done = done;
-            on_progress(&report);
-        });
-        for (path, error) in plan.recycle.iter().zip(errors) {
-            match error {
-                None => outcome.recycled.push(path.clone()),
-                Some(error) => outcome.recycle_failed.push(Failure {
-                    path: path.clone(),
-                    error,
-                }),
-            }
+        let recyclable = check_copies(plan, &mut outcome, cancel, on_progress);
+        if !outcome.cancelled {
+            recycle_copies(recyclable, &mut outcome, on_progress);
         }
     }
     outcome
+}
+
+/// The copies that match their kept copy byte for byte, wherever the kept
+/// copy is now (moved this batch, or where it was). The others go into
+/// `outcome.recycle_failed`. A Cancel stops it, and then nothing is recycled.
+fn check_copies(
+    plan: &Plan,
+    outcome: &mut Outcome,
+    cancel: &AtomicBool,
+    on_progress: &mut dyn FnMut(&Progress),
+) -> Vec<String> {
+    let moved_to: HashMap<String, String> = outcome
+        .moved
+        .iter()
+        .map(|m| (comparable(&m.from), m.to.clone()))
+        .collect();
+    let mut report = Progress {
+        step: Step::Checking,
+        files_done: 0,
+        files_total: plan.recycle.len(),
+        bytes_done: 0,
+        bytes_total: 0,
+        current: String::new(),
+    };
+    let mut recyclable = Vec::new();
+    for copy in &plan.recycle {
+        if cancel.load(Ordering::Relaxed) {
+            outcome.cancelled = true;
+            return Vec::new();
+        }
+        report.current = plain(&copy.path);
+        on_progress(&report);
+        let keep = moved_to.get(&comparable(&copy.keep)).unwrap_or(&copy.keep);
+        match crate::demo_compare::check_same_contents(Path::new(&copy.path), Path::new(keep)) {
+            Ok(()) => recyclable.push(copy.path.clone()),
+            Err(refusal) => {
+                let (error, not_a_copy) = refusal.into_parts();
+                outcome.recycle_failed.push(Failure {
+                    path: copy.path.clone(),
+                    error,
+                    not_a_copy,
+                });
+            }
+        }
+        report.files_done += 1;
+    }
+    report.current.clear();
+    on_progress(&report);
+    recyclable
+}
+
+/// Sends the checked copies to the Recycle Bin.
+fn recycle_copies(
+    recyclable: Vec<String>,
+    outcome: &mut Outcome,
+    on_progress: &mut dyn FnMut(&Progress),
+) {
+    if recyclable.is_empty() {
+        return;
+    }
+    let mut report = Progress {
+        step: Step::Recycling,
+        files_done: 0,
+        files_total: recyclable.len(),
+        bytes_done: 0,
+        bytes_total: 0,
+        current: String::new(),
+    };
+    on_progress(&report);
+    let list: Vec<PathBuf> = recyclable.iter().map(PathBuf::from).collect();
+    let errors = crate::sys::recycle_bin::recycle(list, |done| {
+        report.files_done = done;
+        on_progress(&report);
+    });
+    for (path, error) in recyclable.into_iter().zip(errors) {
+        match error {
+            None => outcome.recycled.push(path),
+            Some(error) => outcome.recycle_failed.push(Failure {
+                path,
+                error,
+                not_a_copy: false,
+            }),
+        }
+    }
 }
 
 /// The logs in `log_dir`, newest first (their names sort by time).
@@ -700,6 +789,7 @@ pub fn undo_last(
             Err(MoveError::Failed(error)) => outcome.failed.push(Failure {
                 path: pair.to,
                 error,
+                not_a_copy: false,
             }),
         }
     }
@@ -722,7 +812,7 @@ mod tests {
         AuditedDemo {
             path: path.into(),
             size,
-            game_folder: false,
+            ..AuditedDemo::default()
         }
     }
 
@@ -747,6 +837,10 @@ mod tests {
             .iter()
             .map(|m| (m.from.as_str(), m.to.as_str()))
             .collect()
+    }
+
+    fn recycled(plan: &Plan) -> Vec<&str> {
+        plan.recycle.iter().map(|r| r.path.as_str()).collect()
     }
 
     fn nothing_exists(_: &Path) -> bool {
@@ -860,7 +954,7 @@ mod tests {
         );
         let plan = plan(&req, &nothing_exists, u64::MAX).unwrap();
         assert_eq!(targets(&plan), [(r"C:\keep.dem", r"F:\Demos\keep.dem")]);
-        assert_eq!(plan.recycle, [r"D:\copy.dem"]);
+        assert_eq!(recycled(&plan), [r"D:\copy.dem"]);
     }
 
     #[test]
@@ -881,7 +975,7 @@ mod tests {
         };
         let plan_ticked = super::plan(&ticked, &nothing_exists, u64::MAX).unwrap();
         assert_eq!(plan_ticked.moves.len(), 2);
-        assert_eq!(plan_ticked.recycle, [r"C:\HL\dod\copy.dem"]);
+        assert_eq!(recycled(&plan_ticked), [r"C:\HL\dod\copy.dem"]);
     }
 
     #[test]
@@ -970,6 +1064,131 @@ mod tests {
             undo_last(&logs, &AtomicBool::new(false), &mut |_| {}),
             Outcome::default()
         );
+    }
+
+    /// A batch whose kept copy moved into the destination: the copies are
+    /// compared with it where it is now.
+    fn moved_batch(dir: &Scratch) -> (Plan, Outcome, PathBuf, PathBuf, PathBuf) {
+        use crate::demo_compare::tests::demo_bytes;
+        let src = dir.path().join("src");
+        let dest = dir.path().join("all");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        let kept_was = src.join("m.dem");
+        let kept_now = dest.join("m.dem");
+        let same = src.join("same.dem");
+        let other = src.join("other.dem");
+        std::fs::write(&kept_now, demo_bytes(1)).unwrap();
+        std::fs::write(&same, demo_bytes(1)).unwrap();
+        std::fs::write(&other, demo_bytes(2)).unwrap();
+        let text = |p: &Path| p.to_string_lossy().into_owned();
+        let copy = |p: &Path| PlannedRecycle {
+            path: text(p),
+            keep: text(&kept_was),
+        };
+        let plan = Plan {
+            recycle: vec![copy(&same), copy(&other)],
+            ..Plan::default()
+        };
+        let outcome = Outcome {
+            moved: vec![MovedPair {
+                from: text(&kept_was),
+                to: text(&kept_now),
+            }],
+            ..Outcome::default()
+        };
+        (plan, outcome, same, other, kept_now)
+    }
+
+    #[test]
+    fn only_a_byte_for_byte_copy_of_the_moved_kept_demo_is_recycled() {
+        let dir = Scratch::new("consolidate_check");
+        let (plan, mut outcome, same, other, _) = moved_batch(&dir);
+        let mut steps = Vec::new();
+        let recyclable = check_copies(&plan, &mut outcome, &AtomicBool::new(false), &mut |p| {
+            steps.push((p.step, p.files_done, p.files_total))
+        });
+        assert_eq!(recyclable, [same.to_string_lossy().into_owned()]);
+        assert_eq!(outcome.recycle_failed.len(), 1);
+        let refused = &outcome.recycle_failed[0];
+        assert_eq!(refused.path, other.to_string_lossy());
+        assert!(refused.not_a_copy);
+        assert!(
+            refused.error.contains("not an exact copy"),
+            "{}",
+            refused.error
+        );
+        assert_eq!(steps.last(), Some(&(Step::Checking, 2, 2)));
+    }
+
+    #[test]
+    fn a_copy_whose_kept_demo_is_gone_or_is_itself_is_not_recycled() {
+        let dir = Scratch::new("consolidate_check_gone");
+        let (mut plan, mut outcome, same, _, kept_now) = moved_batch(&dir);
+        std::fs::remove_file(&kept_now).unwrap();
+        plan.recycle.truncate(1);
+        let itself = dir.path().join("itself.dem");
+        std::fs::write(&itself, b"x").unwrap();
+        let itself = itself.to_string_lossy().into_owned();
+        plan.recycle.push(PlannedRecycle {
+            path: itself.clone(),
+            keep: itself,
+        });
+        let no = AtomicBool::new(false);
+        assert!(check_copies(&plan, &mut outcome, &no, &mut |_| {}).is_empty());
+        let errors: Vec<(&str, bool)> = outcome
+            .recycle_failed
+            .iter()
+            .map(|f| (f.error.as_str(), f.not_a_copy))
+            .collect();
+        assert!(errors[0].0.contains("no longer there"), "{errors:?}");
+        assert!(errors[1].0.contains("is the copy being kept"), "{errors:?}");
+        assert!(errors.iter().all(|(_, not_a_copy)| !not_a_copy));
+        assert!(same.exists());
+    }
+
+    #[test]
+    fn a_cancel_before_the_check_recycles_nothing() {
+        let dir = Scratch::new("consolidate_check_cancel");
+        let (plan, mut outcome, _, _, _) = moved_batch(&dir);
+        let recyclable = check_copies(&plan, &mut outcome, &AtomicBool::new(true), &mut |_| {});
+        assert!(recyclable.is_empty());
+        assert!(outcome.cancelled);
+    }
+
+    #[test]
+    fn a_run_keeps_a_copy_that_differs_and_says_why() {
+        use crate::demo_compare::tests::demo_bytes;
+        let dir = Scratch::new("consolidate_differs");
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("m.dem"), demo_bytes(1)).unwrap();
+        std::fs::write(src.join("m_other.dem"), demo_bytes(2)).unwrap();
+        let dest = dir.path().join("all");
+        let path = |p: PathBuf| p.to_string_lossy().into_owned();
+        let size = demo_bytes(1).len() as u64;
+        let req = Request {
+            destination: path(dest.clone()),
+            keep: vec![demo(&path(src.join("m.dem")), size)],
+            recycle: vec![AuditedDemo {
+                keep: path(src.join("m.dem")),
+                ..demo(&path(src.join("m_other.dem")), size)
+            }],
+            ..Request::default()
+        };
+        let outcome = run(
+            &req,
+            &dir.path().join("logs"),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(outcome.moved.len(), 1, "{outcome:?}");
+        assert!(outcome.recycled.is_empty());
+        assert_eq!(outcome.recycle_failed.len(), 1);
+        assert!(outcome.recycle_failed[0].not_a_copy);
+        assert!(src.join("m_other.dem").exists());
+        assert!(dest.join("m.dem").exists());
     }
 
     #[test]

@@ -481,6 +481,11 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
     hideProgress,
     setStatus: (text) => setStatus(text),
     relocateMoved,
+    markNotCopies: (paths) => {
+      paths.forEach((p) => ticked.delete(p));
+      currentAuditResults = markNotCopies(currentAuditResults, paths);
+      renderAuditResults();
+    },
     // The list names files that have moved: it's stale until the next audit.
     onMoved: () => {
       currentAuditResults = [];

@@ -17,12 +17,13 @@ import { consolidateRequest, hasDemos, planView, consolidateProgressView } from 
  *   getAudit() → { groups, singles, roots } the current results,
  *   isBusy() an audit or delete is running, setBusy(on) lock the pane's
  *   other controls, showProgress(view) / hideProgress() / setStatus(text),
- *   relocateMoved(pairs) → how many queue rows followed their demo, and
- *   onMoved() the results are stale now.
+ *   relocateMoved(pairs) → how many queue rows followed their demo,
+ *   markNotCopies(paths) the copies found to differ from their kept demo,
+ *   and onMoved() the results are stale now.
  */
 export function createAuditConsolidate({
   getAudit, isBusy = () => false, setBusy = () => {}, showProgress = () => {}, hideProgress = () => {},
-  setStatus = () => {}, relocateMoved = () => 0, onMoved = () => {},
+  setStatus = () => {}, relocateMoved = () => 0, markNotCopies = () => {}, onMoved = () => {},
 }) {
   const toggleBtn = document.querySelector('#audit-consolidate-btn');
   const panel = document.querySelector('#audit-consolidate-panel');
@@ -150,6 +151,9 @@ export function createAuditConsolidate({
       const queued = relocateMoved(outcome.moved ?? []);
       setStatus(status(outcome, queued));
       reportFailures(outcome);
+      // A copy with other bytes is a different demo: marked, as the delete does.
+      const notCopies = (outcome.recycle_failed ?? []).filter((f) => f.not_a_copy).map((f) => f.path);
+      if (notCopies.length) markNotCopies(notCopies);
       if ((outcome.moved?.length ?? 0) + (outcome.recycled?.length ?? 0) > 0) onMoved();
     } catch (e) {
       // ipc_bridge toasts the error.

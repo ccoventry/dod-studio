@@ -310,16 +310,19 @@ test('Consolidate previews the plan, then moves, updates the queue and offers Un
   await page.click('#audit-consolidate-browse');
   await expect(page.locator('#audit-consolidate-dest')).toHaveValue('H:\\All');
   await expect(page.locator('#audit-consolidate-preview')).toHaveText(
-    'Move 2 demos (2.0 MB) into H:\\All, recycle 3 copies. 1 in game folders left where they are.',
+    'Move 2 demos (2.0 MB) into H:\\All, recycle 3 copies (each first checked byte for byte against the demo kept). 1 in game folders left where they are.',
   );
   const plans = await calls(page, 'consolidate_plan');
   const req = plans.at(-1).request;
   expect(req).toMatchObject({ destination: 'H:\\All', layout: 'subfolders', include_game_folders: false, roots: ['C:\\Demos'] });
-  // Each group's kept copy and the demo without copies move; the rest recycle.
+  // Each group's kept copy and the demo without copies move; the rest
+  // recycle, each once it matches its group's kept copy.
   expect(req.keep.map((d) => d.path)).toEqual(['\\\\?\\C:\\Half-Life\\dod\\match.dem', '\\\\?\\D:\\a.dem', '\\\\?\\G:\\solo.dem']);
   expect(req.keep[0].game_folder).toBe(true);
-  expect(req.recycle.map((d) => d.path)).toEqual([
-    '\\\\?\\F:\\downloads\\match.dem', '\\\\?\\G:\\project\\match.dem', '\\\\?\\E:\\old\\a.dem',
+  expect(req.recycle.map((d) => [d.path, d.keep])).toEqual([
+    ['\\\\?\\F:\\downloads\\match.dem', '\\\\?\\C:\\Half-Life\\dod\\match.dem'],
+    ['\\\\?\\G:\\project\\match.dem', '\\\\?\\C:\\Half-Life\\dod\\match.dem'],
+    ['\\\\?\\E:\\old\\a.dem', '\\\\?\\D:\\a.dem'],
   ]);
 
   // Nothing moves until it's confirmed.
@@ -340,6 +343,11 @@ test('Consolidate previews the plan, then moves, updates the queue and offers Un
   }));
   await expect(page.locator('#audit-status-text')).toHaveText('Moving demos: 1 / 2 (1.0 MB of 2.0 MB)');
   await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 50%/);
+  // The copies are compared before any is recycled.
+  await page.evaluate(() => window.__mockEmit('consolidate_progress', {
+    step: 'checking', files_done: 1, files_total: 3, bytes_done: 0, bytes_total: 0, current: 'E:\\old\\a.dem',
+  }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Checking each copy matches the kept one byte for byte: 1 / 3');
 
   await page.evaluate(() => {
     window.__undoable = { log: 'x.json', count: 2, destination: 'H:\\All', created_unix_secs: 1 };
@@ -425,6 +433,47 @@ test('a copy the delete finds different is marked, unticked and counted out', as
   // Keeping another copy clears the mark: it was measured against the old pick.
   await row.locator('input[type=radio]').click();
   await expect(page.locator('#audit-results-body')).not.toContainText('Not an exact copy');
+});
+
+test('Consolidate never sends a copy marked different, and marks one it finds', async ({ page }) => {
+  await loadHarness(page, { picked: 'H:\\All' });
+  await openConsolidate(page);
+  // The delete finds E:\old\a.dem differs from D:\a.dem.
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({
+      deleted: [],
+      failed: copies.filter((c) => c.path.includes('old')).map((c) => ({ path: c.path, error: 'differs', not_a_copy: true })),
+    });
+  });
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  await page.click('#audit-consolidate-browse');
+  await expect(page.locator('#audit-consolidate-start')).toBeEnabled();
+  const req = (await calls(page, 'consolidate_plan')).at(-1).request;
+  expect(req.recycle.map((d) => d.path)).toEqual(['\\\\?\\F:\\downloads\\match.dem', '\\\\?\\G:\\project\\match.dem']);
+
+  // The run's own check finds F:\downloads\match.dem differs: kept, said, marked.
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.consolidate_run = () => ({
+      moved: [],
+      failed: [],
+      recycled: [],
+      recycle_failed: [{
+        path: '\\\\?\\F:\\downloads\\match.dem',
+        error: 'Not deleted: F:\\downloads\\match.dem is not an exact copy of C:\\Half-Life\\dod\\match.dem (they differ from byte 9), so it may be a different demo',
+        not_a_copy: true,
+      }],
+      cancelled: false,
+      log: null,
+    });
+  });
+  await page.click('#audit-consolidate-start');
+  await confirm(page);
+  await expect(page.locator('#audit-status-text')).toHaveText('Moved 0 demos. 1 copy was kept: not an exact copy of the demo kept.');
+  await expect(page.locator('#toast-container')).toContainText('is not an exact copy of C:\\Half-Life\\dod\\match.dem');
+  const row = page.locator('#audit-results-body tr.audit-file-row', { hasText: 'F:\\downloads\\match.dem' });
+  await expect(row.locator('.audit-file-status')).toHaveText('≠ Not an exact copy');
+  await expect(row.locator('input.audit-row-cb')).toBeDisabled();
 });
 
 test('a file that fails to delete stays listed and is reported', async ({ page }) => {

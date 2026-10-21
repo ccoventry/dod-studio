@@ -940,7 +940,7 @@ export const STRINGS = {
     KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
     KEEP_CHANGED_NOTE: 'Kept copy changed by you',
     NOT_A_COPY_LABEL: '   ≠ Not an exact copy',
-    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy when you deleted, and it's different: another demo that only starts the same way. It isn't deleted or counted as a copy.",
+    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy, and it's different: another demo that only starts the same way. It isn't deleted, recycled or counted as a copy.",
     KEEP_RESET_BUTTON: 'Reset',
     keepResetTitle: (path) => `Keep the copy the audit picked again: ${path}`,
     PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',
@@ -975,7 +975,7 @@ export const STRINGS = {
 
     // Consolidate (#872): audit_consolidate.js and audit_consolidate_ui.js.
     CONSOLIDATE_BUTTON: 'Consolidate…',
-    CONSOLIDATE_TITLE: 'Move every demo the audit found into one folder. Only the kept copy of each group moves; the other copies go to the Recycle Bin.',
+    CONSOLIDATE_TITLE: 'Move every demo the audit found into one folder. Only the kept copy of each group moves; the other copies go to the Recycle Bin once each matches it byte for byte.',
     CONSOLIDATE_DEST_LABEL: 'Move every demo into:',
     CONSOLIDATE_DEST_PLACEHOLDER: 'Choose a folder…',
     CONSOLIDATE_BROWSE_BUTTON: 'Choose…',
@@ -995,7 +995,10 @@ export const STRINGS = {
     consolidatePlanFailed: (e) => `Can't consolidate: ${e}`,
     consolidatePreview: (p, size) => {
       const parts = [`Move ${p.moves.length} demo${p.moves.length === 1 ? '' : 's'} (${size}) into ${p.destination}`];
-      if (p.recycle.length) parts.push(`recycle ${p.recycle.length} cop${p.recycle.length === 1 ? 'y' : 'ies'}`);
+      if (p.recycle.length) {
+        const n = p.recycle.length;
+        parts.push(`recycle ${n} cop${n === 1 ? 'y' : 'ies'} (each first checked byte for byte against the demo kept)`);
+      }
       if (p.renamed) parts.push(`rename ${p.renamed}`);
       let text = parts.join(', ') + '.';
       if (p.already_there) text += ` ${p.already_there} already there.`;
@@ -1017,7 +1020,9 @@ export const STRINGS = {
       if (o.recycled.length) text += `, recycled ${o.recycled.length} cop${o.recycled.length === 1 ? 'y' : 'ies'}`;
       text += '.';
       if (o.cancelled) text += ' Cancelled: the rest stayed where they were, and no copies were recycled.';
-      const failed = o.failed.length + o.recycle_failed.length;
+      const notCopies = o.recycle_failed.filter((f) => f.not_a_copy).length;
+      if (notCopies) text += ` ${notCopies} cop${notCopies === 1 ? 'y was' : 'ies were'} kept: not an exact copy of the demo kept.`;
+      const failed = o.failed.length + o.recycle_failed.length - notCopies;
       if (failed) text += ` ${failed} failed.`;
       if (queued) text += ` ${queued} in this project's queue updated.`;
       return text;
