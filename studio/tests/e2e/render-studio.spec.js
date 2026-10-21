@@ -188,6 +188,16 @@ test.describe('scan stages a batch, Start is a separate step', () => {
     expect(await invocationsFor(page, 'start_queued_render')).toHaveLength(1);
   });
 
+  test('with no export folder, Start stays off and says where to add one', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => { window.__testExportDirs = []; });
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
+    const start = page.locator('#start-render-btn');
+    await expect(start).toBeDisabled();
+    await expect(start).toHaveAttribute('title', 'Add an export folder in Configuration → Render Settings first.');
+    expect(await invocationsFor(page, 'start_queued_render')).toHaveLength(0);
+  });
+
   test('once rendering starts, Start is disabled and Scan stays enabled (#772)', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);

@@ -1,8 +1,8 @@
 //! Keeping the camera on one player in an HLTV demo (issue #206):
 //!
-//! - `dodstudio_spec_lock 1` stops the game moving the camera to the next
+//! - `ds_spec_lock 1` stops the game moving the camera to the next
 //!   player four seconds after the one being watched dies;
-//! - `dodstudio_spec_target <player>` puts the camera on a player by number.
+//! - `ds_spec_target <player>` puts the camera on a player by number.
 //!
 //! ## What moves the camera
 //!
@@ -34,7 +34,7 @@
 //!     +0x2c7af  mov [fl_DeadTargetSwitch], 0
 //! ```
 //!
-//! Seen live with `dodstudio_debug_log_spectator_target 1`: the watched
+//! Seen live with `ds_debug_log_spectator_target 1`: the watched
 //! player dies at 587.78, `client.dll ClientCmd: "+attack;wait;-attack"` is
 //! logged at 591.77, and `g_iUser2` goes from 2 to 3 on the next frame.
 //!
@@ -60,7 +60,7 @@
 //! the spectator mode, is the dword before it.
 //!
 //! The number is the player's entity index, the same number
-//! `dodstudio_deathmsg players` lists.
+//! `ds_hud_deathmsg players` lists.
 
 use std::ffi::{CStr, c_char};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
@@ -204,7 +204,7 @@ fn describe(locked: bool) -> &'static str {
     }
 }
 
-/// One line for `dodstudio_debug_status`, once the lock has ever been on.
+/// One line for `ds_debug_status`, once the lock has ever been on.
 pub fn status_line() -> Option<String> {
     LOCKED
         .load(Ordering::Relaxed)
@@ -220,7 +220,7 @@ fn globals() -> Result<(*mut i32, *mut i32), String> {
     Ok(((target - 4) as *mut i32, target as *mut i32))
 }
 
-/// What `dodstudio_spec_target`'s argument asks for.
+/// What `ds_spec_target`'s argument asks for.
 #[derive(Debug, PartialEq, Eq)]
 enum Request {
     /// No argument: say who the camera is on.
@@ -239,7 +239,7 @@ fn parse(argument: Option<&str>) -> Request {
     }
 }
 
-/// `dodstudio_spec_target [player]`.
+/// `ds_spec_target [player]`.
 pub unsafe extern "C" fn target_command() {
     let Some(engfuncs) = engine::engfuncs() else {
         return;
@@ -270,7 +270,7 @@ pub unsafe extern "C" fn target_command() {
         Request::Report => {
             return say(if mode_now == 0 || target_now == 0 {
                 format!(
-                    "the camera is on no player. usage: {TARGET_NAME} <1-{MAX_PLAYERS}> (dodstudio_deathmsg players lists the numbers)"
+                    "the camera is on no player. usage: {TARGET_NAME} <1-{MAX_PLAYERS}> (ds_hud_deathmsg players lists the numbers)"
                 )
             } else {
                 format!("the camera is on player {target_now}")
@@ -278,7 +278,7 @@ pub unsafe extern "C" fn target_command() {
         }
         Request::Invalid => {
             return say(format!(
-                "expected a player number, 1-{MAX_PLAYERS} (dodstudio_deathmsg players lists them)"
+                "expected a player number, 1-{MAX_PLAYERS} (ds_hud_deathmsg players lists them)"
             ));
         }
         Request::Player(n) => n,
