@@ -1,9 +1,9 @@
-//! `dodstudio_review`: plays every highlight Studio queued, one after another,
+//! `ds_demo_review`: plays every highlight Studio queued, one after another,
 //! and sends what the user makes of each back to Studio (issue #623).
 //!
 //! ## The flow
 //!
-//! Studio writes the queue to a file and sends `dodstudio_review start
+//! Studio writes the queue to a file and sends `ds_demo_review start
 //! "<file>"` over the game's pipe (#413). For each highlight the review loads
 //! its demo with `viewdemo` (unless it is the one already in the player),
 //! waits for the whole file to be read, seeks to [`LEAD`] seconds before the
@@ -31,9 +31,9 @@
 //!
 //! An HLTV demo's camera follows no one by itself, so a highlight with a
 //! player number puts the camera on them in first person (`spec_mode 4` and
-//! `dodstudio_spec_target`) once each seek has landed, the way the
+//! `ds_spec_target`) once each seek has landed, the way the
 //! Highlights tab's Go does: the player may only exist after the seek. For
-//! the whole review it holds `dodstudio_spec_lock`'s lock on, so a death
+//! the whole review it holds `ds_spec_lock`'s lock on, so a death
 //! before a highlight ends can't move the camera to someone else. The hold
 //! adds to the cvar (the lock is on if either asks), never writes it, so a
 //! user who keeps the cvar at 1 still has the lock after the review ends.
@@ -54,7 +54,7 @@ use std::time::{Duration, Instant};
 
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("review");
+pub const NAME: &str = console_name!("demo_review");
 
 /// The queue file's first line.
 pub(crate) const QUEUE_HEADER: &str = "dodstudio-review 1";
@@ -759,7 +759,7 @@ fn rest_of_line(from: i32) -> String {
 
 const USAGE: &str = "start \"<queue file>\" | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
 
-/// `dodstudio_review <what>`.
+/// `ds_demo_review <what>`.
 pub unsafe extern "C" fn command() {
     let sub = rest_of_line(1);
     let mut words = sub.split_whitespace();
@@ -930,7 +930,7 @@ mod tests {
         assert_eq!(queue[0].spectate, Some(7));
         assert_eq!(
             queue[0].camera_line().as_deref(),
-            Some("spec_mode 4; dodstudio_spec_target 7")
+            Some("spec_mode 4; ds_spec_target 7")
         );
         // A POV demo's line has no number, or `-`; a number out of range is none.
         assert_eq!(queue[1].spectate, None);

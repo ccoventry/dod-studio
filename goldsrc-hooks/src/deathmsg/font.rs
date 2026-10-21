@@ -1,4 +1,4 @@
-//! `dodstudio_deathmsg font`: the kill feed's names in a font of our own, set
+//! `ds_hud_deathmsg font`: the kill feed's names in a font of our own, set
 //! from the console and shown on the next frame (#562).
 //!
 //! ## What the game does

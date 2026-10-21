@@ -1,4 +1,4 @@
-//! `dodstudio_player_overrides` (#428): 1 makes sprays and crosshairs in a
+//! `ds_player_overrides` (#428): 1 makes sprays and crosshairs in a
 //! demo follow Studio's Players table (`player_table.rs`); 0 leaves both to
 //! the game. Default 0, so a game nobody started from Studio behaves as
 //! stock. Studio sets it from the Players tab's "Use in the game" box when it
@@ -31,7 +31,7 @@ pub fn on() -> bool {
     !cvar.is_null() && unsafe { (*cvar).value } != 0.0
 }
 
-/// The `dodstudio_debug_status` line.
+/// The `ds_debug_status` line.
 pub fn status() -> String {
     if on() {
         format!("{NAME} 1: sprays and crosshairs in demos follow Studio's Players table")

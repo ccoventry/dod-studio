@@ -22,17 +22,19 @@
     <input type="checkbox" id="split-recursive" checked />
     <button id="split-find-btn" disabled>Find</button>
     <button id="split-cancel-btn" disabled>Cancel</button>
+    <div id="split-progress" hidden><div class="progress-bar-fill"></div></div>
     <p id="split-status"></p>
     <div id="split-list"></div>
   </div>
+  <div id="footer-audit-summary"></div>
 
   <script type="module">
     window.__mockInvokeHandlers = {
       find_multi_map_demos_cmd: () => [
-        { path: 'C:\\demos\\two.dem', size_bytes: 88000000, maps: ['dod_lennon2', 'dod_lennon2'], source: 'scan' },
+        { path: 'C:\\demos\\two.dem', size_bytes: 88000000, maps: ['dod_lennon2', 'dod_lennon2'], source: 'scan', split_files: ['two_dod_lennon2_1.dem', null] },
         { path: 'C:\\demos\\sub\\three.dem', size_bytes: 90000000, maps: ['dod_armory_b6', 'dod_avalanche', 'dod_armory_b6'], source: 'cache' },
       ],
-      demo_map_segments: ({ path }) => path.endsWith('two.dem')
+      demo_map_segments: ({ path }) => (window.__holdSegments ? new Promise((r) => { window.__releaseSegments = r; }) : Promise.resolve()).then(() => path.endsWith('two.dem')
         ? [
           { index: 0, map: 'dod_lennon2', map_checksum: 1, start_seconds: 0, end_seconds: 1288.3, frames: 1 },
           { index: 1, map: 'dod_lennon2', map_checksum: 2, start_seconds: 1288.3, end_seconds: 1300.6, frames: 1 },
@@ -41,10 +43,14 @@
           { index: 0, map: 'dod_armory_b6', map_checksum: 1, start_seconds: 0, end_seconds: 300, frames: 1 },
           { index: 1, map: 'dod_avalanche', map_checksum: 2, start_seconds: 300, end_seconds: 1500, frames: 1 },
           { index: 2, map: 'dod_armory_b6', map_checksum: 3, start_seconds: 1500, end_seconds: 1520, frames: 1 },
-        ],
-      split_demo_maps: ({ path, keep }) => keep.map((k) => ({
-        path: path.replace('.dem', `_part${k + 1}.dem`), map: 'm', seconds: 1200, size_bytes: 5e6,
+        ]),
+      split_demo_maps: ({ path, keep }) => (window.__holdSplit ? new Promise((r) => { window.__releaseSplit = r; }) : Promise.resolve()).then((how) => ({
+        cancelled: how === 'cancelled',
+        written: (how === 'cancelled' ? keep.slice(0, 1) : keep).map((k) => ({ index: k,
+          path: path.replace('.dem', `_part${k + 1}.dem`), map: 'm', seconds: 1200, size_bytes: 5e6,
+        })),
       })),
+      cancel_demo_split: () => null,
     };
     const { initAuditorTabs } = await import('/src/auditor_tabs.js');
     const { initSplitPane } = await import('/src/split_pane.js');

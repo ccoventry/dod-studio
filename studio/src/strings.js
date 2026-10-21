@@ -443,15 +443,15 @@ export const STRINGS = {
     KEEP_GAME_BEHIND_TITLE:
       'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
     PRE_ROLL_LABEL: 'Pre-roll (s):',
-    PRE_ROLL_HINT: 'Time between fast-forward stopping and capture starting.',
+    PRE_ROLL_HINT: 'Time between the game reaching the clip and capture starting.',
     POST_ROLL_LABEL: 'Post-roll (s):',
-    POST_ROLL_HINT: 'Time between capture stopping and fast-forward resuming.',
+    POST_ROLL_HINT: 'Time between capture stopping and the game moving on to the next clip.',
     START_LEAD_LABEL: 'Start Lead (s):',
     START_LEAD_HINT: 'Time between capture starting and the first kill.',
     STOP_TRAIL_LABEL: 'Stop Trail (s):',
     STOP_TRAIL_HINT: 'Time between the last kill and capture stopping.',
     INITIAL_DELAY_LABEL: 'Initial Delay (s):',
-    INITIAL_DELAY_HINT: 'Time between the demo loading and fast-forward starting.',
+    INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
     // showing how they relate to each other and to the recording window.
     timingDiagramInitialDelayNote: (v) => `This timeline starts after Initial Delay (${v}s) has already passed — a once-per-demo wait, not part of the per-clip cycle below.`,
@@ -460,15 +460,12 @@ export const STRINGS = {
     // Signed offset from the first kill (0.0s) — matches the pre-Tauri egui
     // build's "+{n} sec" / "{n} sec" formatting.
     timingDiagramTime: (v) => (v >= 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`),
-    timingDiagramPreRollEvent: (v) => `Pre-roll ends (speed back to normal) — Pre-roll is ${v}s`,
+    timingDiagramPreRollEvent: (v) => `Normal speed, Pre-roll starts — Pre-roll is ${v}s`,
     timingDiagramRecordStartEvent: (v) => `Recording starts — Start Lead is ${v}s`,
     TIMING_DIAGRAM_FIRST_KILL_EVENT: 'First kill (anchor)',
     TIMING_DIAGRAM_LAST_KILL_EVENT: 'Last kill (anchor — illustrative gap, not a real streak length)',
     timingDiagramRecordStopEvent: (v) => `Recording stops — Stop Trail is ${v}s`,
-    timingDiagramPostRollEvent: (v) => `Post-roll ends, fast-forward resumes — Post-roll is ${v}s`,
-    FF_SPEED_LABEL: 'FF Speed (x):',
-    FF_SPEED_TITLE: 'Locked, matching dev — not currently user-editable.',
-    FF_SPEED_HINT: 'How fast playback races toward each clip between kills, as a multiple of real time. Locked at 0.05x, matching dev — not currently user-editable.',
+    timingDiagramPostRollEvent: (v) => `Post-roll ends, on to the next clip — Post-roll is ${v}s`,
     CAPTURE_FPS_LABEL: 'Capture FPS:',
     // Worth stating outright. This used to sit under Timing Options, and the
     // adjacency invited exactly the confusion that cost real time: the demo's
@@ -653,6 +650,7 @@ export const STRINGS = {
     CUSTOM_CODEC_PLACEHOLDER: '-c:v mpeg4 -q:v 3',
     CUSTOM_CODEC_ARGS_REQUIRED: 'Enter the FFmpeg video-codec arguments to use for Custom (e.g. -c:v mpeg4 -q:v 3).',
     SOURCE_FPS_LABEL: 'Source FPS:',
+    SOURCE_FPS_TITLE: 'The frame rate a take is read at when it does not say what it was captured at (takes from older versions). Takes captured by this version render at their own capture FPS, and each row says which it used.',
     MAX_CONCURRENT_LABEL: 'Max Concurrent Renders:',
     EXPORT_DIR_PLACEHOLDER: 'Add export drive/folder...',
     EXPORT_DIR_ROW_PLACEHOLDER: 'Export drive/folder path...',
@@ -684,6 +682,7 @@ export const STRINGS = {
     startRenderBatch: (n) => `Start Render Batch (${n})`,
     START_RENDER_TITLE: 'Render every queued row. Cancel or remove a row to leave it out.',
     START_RENDER_NONE_TITLE: 'Nothing is queued. Scan for takes, or Retry a finished row.',
+    START_RENDER_NO_EXPORT_DIR_TITLE: 'Add an export folder in Configuration → Render Settings first.',
     cancelSelected: (n) => `Cancel (${n})`,
     CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
     retrySelected: (n) => `Retry (${n})`,
@@ -849,6 +848,13 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    COL_NUM: '#',
+    COL_MAP: 'Map',
+    COL_WHEN: 'Length',
+    COL_DONE: 'Already split',
+    ALREADY_SPLIT_CHIP: 'Already split',
+    ALREADY_SPLIT_TITLE: 'A split already wrote this map next to the demo, so it starts unticked. Tick it to write it again (as a new file beside the old one).',
+    footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
     progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
@@ -859,20 +865,23 @@ export const STRINGS = {
     FIND_BUTTON: 'Find Multi-Map Demos',
     CANCEL_BUTTON: 'Cancel',
     CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
-    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    scanning: (done, total, demo) => `Finding demos: ${done} of ${total} checked${demo ? ` (${demo})` : ''}`,
+    readingLengths: (n, total, demo) => `Reading map lengths: ${n} of ${total} demos (${demo})`,
+    cancelledListed: (listed, total) => `Cancelled: ${listed} of ${total} demos with more than one map listed.`,
     CANCELLING: 'Cancelling...',
     found: (n, total) => n === 0
       ? 'No demo here has more than one map.'
       : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
     scanFailed: (e) => `Couldn't check the folder: ${e}`,
     mapsCount: (n) => `${n} maps`,
-    LOADING_DETAILS: 'Reading lengths...',
     detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
-    startsAt: (start, length) => `${start} · ${length} long`,
     SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
     SPLIT_BUTTON: 'Split Checked Maps',
+    CANCEL_SPLIT_BUTTON: 'Cancel',
+    CANCELLING_SPLIT: 'Cancelling after this step…',
+    cancelledSplit: (n) => n === 0 ? 'Cancelled. Nothing was written.' : `Cancelled after ${n} demo${n === 1 ? '' : 's'}:`,
     SHOW_IN_FOLDER: 'Show in folder',
-    NOTHING_TICKED: 'Tick at least one map.',
+    NOTHING_TICKED: 'Tick at least one map to split.',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
@@ -897,8 +906,8 @@ export const STRINGS = {
     TABLE_HEADER_FILE_PATH: 'File Path',
     TABLE_HEADER_ACTION: 'Action',
     TABLE_EMPTY: 'Choose a folder and run audit to find duplicate demo files.',
-    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.00 GB',
-    footerSummary: (count, gb) => `Duplicates Found: ${count} | Wasted Space: ${gb} GB`,
+    FOOTER_DEFAULT: 'Duplicates Found: 0 | Wasted Space: 0.0 MB',
+    footerSummary: (count, size) => `Duplicates Found: ${count} | Wasted Space: ${size}`,
 
     SELECT_FOLDER_DIALOG_TITLE: 'Select Folder to Audit',
     // Duplicates' "Folders to check" (audit_folders.js, #844).
@@ -906,8 +915,7 @@ export const STRINGS = {
     ADD_FOLDER_BUTTON: 'Add Folder…',
     ADD_FOLDER_DIALOG_TITLE: 'Add Folders to Check for Duplicates',
     REMOVE_FOLDER_BUTTON: 'Remove',
-    TARGET_FOLDER_TAG: '(Target Folder)',
-    NO_FOLDERS_YET: 'No folders yet: choose a Target Folder above, add folders, or tick All drives.',
+    NO_FOLDERS_YET: 'No folders yet: add a folder, or tick All drives.',
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
@@ -920,6 +928,7 @@ export const STRINGS = {
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
@@ -927,7 +936,19 @@ export const STRINGS = {
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
-    ORIGINAL_FILE_TITLE: 'Original file (kept)',
+    ORIGINAL_FILE_TITLE: 'The copy this group keeps. Pick another copy to keep that one instead.',
+    KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
+    KEEP_CHANGED_NOTE: 'Kept copy changed by you',
+    NOT_A_COPY_LABEL: '   ≠ Not an exact copy',
+    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy when you deleted, and it's different: another demo that only starts the same way. It isn't deleted or counted as a copy.",
+    KEEP_RESET_BUTTON: 'Reset',
+    keepResetTitle: (path) => `Keep the copy the audit picked again: ${path}`,
+    PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',
+    PREFER_FOLDER_TITLE: 'Moves nothing. Pick a folder: every group that already has a copy in it (or in a folder inside it) keeps that copy, so a long list needs no picking row by row.',
+    PREFER_FOLDER_DIALOG_TITLE: 'Keep the copies that are already in this folder',
+    preferFolderToast: (found, changed, folder) => (found
+      ? `Keeping the copy in ${folder} in ${found} group${found === 1 ? '' : 's'} (${changed} changed).`
+      : `No group has a copy in ${folder}. This only picks which copy to keep; it doesn't move demos.`),
     IN_USE_TITLE: "The game or this project reads this copy, so it isn't ticked. Tick it only if you're sure.",
     // Why a copy is kept or left unticked (audit_manager.rs's InUse).
     IN_USE: { game_folder: 'in the game folder', queue: "in this project's queue" },
@@ -942,7 +963,7 @@ export const STRINGS = {
     DELETE_PERMANENT_BUTTON: 'Delete Permanently…',
     recycleNSelectedFiles: (n) => `Move ${n} to Recycle Bin`,
     deleteNPermanently: (n) => `Delete ${n} Permanently…`,
-    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? You can put them back from there.`,
+    recycleConfirm: (n) => `Move ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin? Each is first compared byte for byte with the copy kept, and any that differ stay where they are. You can put them back from the Recycle Bin.`,
     deletePermanentlyConfirm: (n) => `Delete ${n} duplicate file${n === 1 ? '' : 's'} permanently? They skip the Recycle Bin and can't be put back.`,
     recycledFilesToast: (n) => `Moved ${n} duplicate file${n === 1 ? '' : 's'} to the Recycle Bin.`,
     deletedFilesToast: (n) => `Deleted ${n} duplicate file${n === 1 ? '' : 's'} permanently.`,
@@ -1431,6 +1452,14 @@ export const STRINGS = {
     noopRow: (command, reason, source) => {
       const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
       return isPlainSource ? `${command} — ${reason}` : `${command} — ${reason} (${source})`;
+    },
+    // #555: the hook's console names went from dodstudio_ to ds_.
+    RENAMED_TITLE: 'These DoD Studio commands have new names:',
+    RENAMED_ADVICE:
+      "DoD Studio's in-game commands now start with ds_ instead of dodstudio_. The old names do nothing in the game any more, so change these lines to the new name. DoD Studio never changes your config files.",
+    renamedRow: (oldName, newName, source) => {
+      const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
+      return isPlainSource ? `${oldName} → ${newName}` : `${oldName} → ${newName} (${source})`;
     },
     // #679: the engine's filter for commands a demo carries.
     FILTERED_TITLE: 'The game drops these commands without running them:',
@@ -1946,7 +1975,7 @@ export const STRINGS = {
       blend: () => `${def.percent}% ${def.a}, ${100 - def.percent}% ${def.b}`,
     })[def.kind](),
     STYLE_NEEDS_MODEL: ' (needs its model)',
-    // The misses view: what dodstudio_debug_hd_misses last wrote to the hook log.
+    // The misses view: what ds_debug_hd_misses last wrote to the hook log.
     MISSES_TITLE: 'Textures that kept their original',
     MISSES_BUTTON: "Read the game's log",
     MISSES_READING: 'Reading...',
@@ -2480,6 +2509,7 @@ export const STRINGS = {
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
+    footer: (count, renames) => `Demos listed: ${count} | To rename: ${renames}`,
     CANCELLED: 'Stopped. The demos read so far are listed.',
     STATUS_SAME: 'already named this way',
     STATUS_SKIPPED: 'not ticked',
@@ -2592,7 +2622,7 @@ export const STRINGS = {
   // Configuration > Players (#428): players_ui.js.
   PLAYERS: {
     USE_IN_GAME_LABEL: 'Use in the game',
-    USE_IN_GAME_TITLE: 'On: sprays and crosshairs in your demos follow this table (dodstudio_player_overrides 1, sent when Studio starts the game, a review or a batch, and right away to a game already running). Off: the game\'s own.',
+    USE_IN_GAME_TITLE: 'On: sprays and crosshairs in your demos follow this table (ds_player_overrides 1, sent when Studio starts the game, a review or a batch, and right away to a game already running). Off: the game\'s own.',
     HELP: "Pick the spray and the crosshair each player shows in your demos: sprays are PNGs from the game's logos folder, crosshairs a 64x64 tile of a sprite in its sprites folder. Players are matched by SteamID, or by name when there is none.",
     PLAYER_PLACEHOLDER: 'A player from the queue, a SteamID or a name',
     ADD_BUTTON: 'Add Player',
