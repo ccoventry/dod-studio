@@ -62,6 +62,7 @@ test('unticking a demo, or a template with errors, keeps it out', async ({ page 
   await page.locator('#rename-body tr').nth(0).locator('input').uncheck();
   await expect(newNames(page).nth(0)).toHaveText('not ticked');
   await expect(page.locator('#rename-select-all')).not.toBeChecked();
+  await expect(page.locator('#rename-status')).toHaveText('3 demos, 1 to rename.');
 
   await page.fill('#rename-hltv-template', '{row}_{map}');
   await expect(page.locator('#rename-hltv-errors')).toContainText('{row}');

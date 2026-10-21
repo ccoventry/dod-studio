@@ -1,6 +1,6 @@
 //! R&D proof for #849: one stock HUD readout redrawn in a style of our own.
 //!
-//! `dodstudio_debug_restyled_health 1` draws the health as a TF2-like plus in
+//! `ds_debug_restyled_health 1` draws the health as a TF2-like plus in
 //! the bottom-left corner, filled from the bottom by the health left, with the
 //! number on it. Pair it with the stock `cl_hud_health 0`, which hides DoD's
 //! own health block (`CHud::ShouldDraw(1)`, `docs/goldsrc_client_dll_survey.md`

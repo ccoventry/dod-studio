@@ -13,7 +13,7 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
-//! - `dodstudio_spec_match_pov`, one cvar over five modules, for making a
+//! - `ds_spec_match_pov`, one cvar over five modules, for making a
 //!   spectated first-person view look and sound like the player's own
 //!   recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -30,63 +30,64 @@
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
 //!     player's own would (sprint, jump, prone, ladder).
-//! - `spectator_deathcam`: `dodstudio_spec_deathcam`, the game's own death cam
+//! - `spectator_deathcam`: `ds_spec_deathcam`, the game's own death cam
 //!   when the watched player dies, as his recording shows it, instead of the
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
 //!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
 //!   gunshots through. It changes no sound.
-//! - `deathmsg`: the `dodstudio_deathmsg` command -- raise the four-line cap on
+//! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
-//! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
+//! - `msglog`: the `ds_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_asset`: the `dodstudio_hide_asset list|add|del|clear` command
-//!   (renamed from `dodstudio_hide_sprite`, #333) -- suppress specific world entities
+//! - `hide_asset`: the `ds_map_hide_asset list|add|del|clear` command
+//!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
-//! - `spectator_follow`: `dodstudio_spec_lock`, which keeps the camera on a
-//!   player through his death in an HLTV demo, and `dodstudio_spec_target`,
+//! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
+//!   player through his death in an HLTV demo, and `ds_spec_target`,
 //!   which puts it on a player by number (issue #206).
-//! - `overview_players`: `dodstudio_hud_map_players`, which players get an
+//! - `overview_players`: `ds_hud_overview_players`, which players get an
 //!   icon on the overview map -- the game's own team, everyone, the other
 //!   team, only the player being watched, or nobody (issue #304).
-//! - `overview_marker`: `dodstudio_hud_map_team_marker`, which marks the
+//! - `overview_marker`: `ds_hud_overview_team_marker`, which marks the
 //!   player being watched in HLTV with his team's camera icon (#304).
-//! - `demo_scope`: `dodstudio_show_demo_scope`, which draws the sniper scope
+//! - `demo_scope`: `ds_hud_show_scope`, which draws the sniper scope
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
-//! - `run_in_background`: `dodstudio_run_in_background`, full speed while
+//! - `run_in_background`: `ds_capture_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
-//! - `hlae_window`: `dodstudio_stay_behind_while_capturing`, the game window stays behind
+//! - `hlae_window`: `ds_capture_stay_behind`, the game window stays behind
 //!   the user's windows while a batch records.
-//! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
+//! - `scoreboard`: the `ds_hud_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
 //!   `docs/goldsrc_scoreboard.md`.
-//! - `voice`: the `dodstudio_mute_voice_commands` cvar -- silence "fire in the
+//! - `voice`: the `ds_sound_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
-//! - `voice_menus`: the `dodstudio_hide_voice_menus` cvar -- hide the
+//! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
 //!   demo's player opened.
-//! - `crosshair`: the `dodstudio_hide_crosshair` cvar -- hide the crosshair and have
+//! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
-//! - `objicons`: the `dodstudio_objectives` command -- place the objective
+//! - `objicons`: the `ds_hud_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
-//!   different y while spectating than it does in a POV demo. Full design
-//!   write-up in `docs/goldsrc_objective_icons.md`.
+//!   different y while spectating than it does in a POV demo, and scale
+//!   both up for high resolutions. Full design write-up in
+//!   `docs/goldsrc_objective_icons.md`.
 //!
 //! - `lightmap_gamma`: the first demo of a session no longer renders with its
 //!   lighting far too dark (issue #365): the gamma tables are refreshed from the
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
 //!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
-//! - `hud_sprites`: `dodstudio_hide_asset` for the HUD's own 2D sprites, by
+//! - `hud_sprites`: `ds_map_hide_asset` for the HUD's own 2D sprites, by
 //!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
 //!   function pointers (#808). Installed when client.dll initialises.
-//! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
+//! - `particle_hide`: `ds_map_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
 //! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
@@ -96,17 +97,17 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
-//! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
+//! - `demo_list_folders`: the `ds_ui_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
-//! - `demo_other_drives`: the `dodstudio_demo_other_drives` cvar -- `viewdemo`
+//! - `demo_other_drives`: the `ds_demo_other_drives` cvar -- `viewdemo`
 //!   and `playdemo` open a demo on another drive by its full path, through a
 //!   swap of the file system's `Open` slot (issue #776).
 //! - `engine_buttons`: a button inside a GameUI window whose command is
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
 //!   would drop; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it off.
-//! - `demo_seek`: the `dodstudio_seek_to` / `dodstudio_seek_by` commands --
+//! - `demo_seek`: the `ds_demo_seek_to` / `ds_demo_seek_by` commands --
 //!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
 //!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
 //!   yet; they are there for a live test.
@@ -114,10 +115,10 @@
 //!   Load Demo window, the console -- open when ESC is pressed on the 25th
 //!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
 //!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
-//! - `window_layout`: the `dodstudio_resizable_windows` and
-//!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
+//! - `window_layout`: the `ds_ui_resizable_windows` and
+//!   `ds_ui_remember_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
-//! - `studio_panel`: `dodstudio_panel` -- DoD Studio's own window in the game,
+//! - `studio_panel`: `ds_ui_panel` -- DoD Studio's own window in the game,
 //!   a GameUI `Frame` with real tabs (a `PropertySheet` of `PropertyPage`s)
 //!   and VCR buttons, each tab laid out by its own `.res` (#408, plan item 4).
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
@@ -147,19 +148,19 @@
 //!   while the DLL is loaded, since joining a VAC-secured server with it
 //!   loaded is a ban risk (issue #451). `connect local` (`map`) still works;
 //!   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off.
-//! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
+//! - `world_shaders`: the `ds_map_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
-//! - `map_text`: the `dodstudio_hide_map_text` cvar -- hide the text a map
+//! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
-//! - `clan_text`: the `dodstudio_hide_clan_text` cvar -- hide all of DoD's
+//! - `clan_text`: the `ds_hud_hide_clan_text` cvar -- hide all of DoD's
 //!   clan-match text: the warm-up and ready rules, "Warmup Mode", the
 //!   countdown and "MATCH IS LIVE!" (issue #608).
-//! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
+//! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
-//! - `spectator_bars`: the `dodstudio_hide_spectator_bars` cvar -- hide the
+//! - `spectator_bars`: the `ds_spec_hide_bars` cvar -- hide the
 //!   two dark bands a spectator sees and everything on them, on screen and
 //!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
 //!   see `docs/goldsrc_spectator_bars.md`.
@@ -172,11 +173,11 @@
 //!
 //! See each module's docs for the full R&D reasoning.
 //!
-//! The settings are `dodstudio_*` **cvars**, so they behave like any other
-//! engine setting: `dodstudio_spec_match_pov 1` from the console,
-//! `+dodstudio_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
+//! The settings are `ds_*` **cvars**, so they behave like any other
+//! engine setting: `ds_spec_match_pov 1` from the console,
+//! `+ds_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
 //! user execs. `commands.rs` copies them into the runtime flags once per
-//! frame, and `dodstudio_debug_status` reports what each part is actually
+//! frame, and `ds_debug_status` reports what each part is actually
 //! doing rather than only what it is set to.
 //!
 //! The `GOLDSRC_HOOKS_SPEC_MATCH_POV` environment variable sets that cvar's
@@ -216,6 +217,7 @@ mod folder_counts;
 mod frame_esc;
 mod game_dir_check;
 mod game_folder;
+mod gl_zoom;
 mod hand_signals;
 mod hide_asset;
 mod hlae_window;
@@ -230,6 +232,7 @@ mod missing_shots;
 mod msglog;
 mod names;
 mod objicons;
+mod old_names;
 mod overview_hd;
 mod overview_map;
 mod overview_marker;
@@ -304,16 +307,16 @@ fn env_level(name: &str, default: i32) -> i32 {
     .clamp(anim_fix::LEVEL_OFF, anim_fix::LEVEL_MAX)
 }
 
-/// Matching POV starts **off**: a capture pipeline should not silently alter
-/// what a spectated view shows for anyone who happens to have the DLL loaded.
-/// Turn it on per session with `dodstudio_spec_match_pov 1`, or set
-/// `GOLDSRC_HOOKS_SPEC_MATCH_POV` to have it start on. The value lands in
+/// Matching POV starts **on**: an HLTV in-eye view that plays like the
+/// player's own recording is a clear win
+/// for everyone. `ds_spec_match_pov 0` turns it off, and
+/// `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts it off. The value lands in
 /// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
 /// default, and the cvar then drives every part.
-const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
+const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_MAX;
 
 /// Whether to install `texture_hires` at startup: see
-/// `texture_hires::starts_on`. Off, `dodstudio_hd_enabled 1` can still install it
+/// `texture_hires::starts_on`. Off, `ds_hd_enabled 1` can still install it
 /// later in the session.
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -376,7 +379,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // HD textures: on when there's a dodstudio_hd folder to load from (in
     // dod_addon, or dod for an install from before #415),
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
-    // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
+    // texture_hires::starts_on for why startup decides). `ds_hd_enabled` turns
     // it on and off in game.
     let hd = texture_hires::starts_on();
     TEXTURE_HIRES_ENABLED.store(hd, Ordering::Relaxed);
@@ -448,7 +451,7 @@ fn install_fixes() {
     // it's safe to install even if that capture hasn't landed yet.
     anim_fix::install();
 
-    // The dodstudio_* console surface. dodstudio_spec_match_pov drives the same
+    // The ds_* console surface. ds_spec_match_pov drives the same
     // flag the env var above set as its starting value.
     commands::install();
 
@@ -462,7 +465,7 @@ fn install_fixes() {
     // Also re-runs if client.dll is ever loaded again: install() compares the
     // module base and patches the new copy.
     tempent_fix::install();
-    // Only once dodstudio_hide_asset has been used this session; then a
+    // Only once ds_map_hide_asset has been used this session; then a
     // reloaded client.dll is patched again.
     particle_hide::reinstall_if_used();
     // hw.dll is loaded for the whole session, so once is enough.

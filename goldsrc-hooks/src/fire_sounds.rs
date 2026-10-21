@@ -34,7 +34,7 @@ use crate::engine::{self, EventApiPartial};
 static CALLS: AtomicU32 = AtomicU32::new(0);
 static SHOTS: AtomicU32 = AtomicU32::new(0);
 
-/// What the hook has seen this session, for `dodstudio_debug_status`.
+/// What the hook has seen this session, for `ds_debug_status`.
 pub fn status() -> String {
     format!(
         "{} sounds through the hook, {} of them gunshots",

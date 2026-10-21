@@ -1,4 +1,4 @@
-//! `dodstudio_hide_hudelement`: hide any one of DoD's HUD elements, by name.
+//! `ds_hud_hide_element`: hide any one of DoD's HUD elements, by name.
 //!
 //! ## One dword, not a code patch
 //!
@@ -51,7 +51,7 @@
 //! only the second is the element's. It is not offered here, but the next
 //! person to add an entry should know the trap exists.
 //!
-//! `CHudDoDCrossHair` was listed until #312. `dodstudio_hide_crosshair` already
+//! `CHudDoDCrossHair` was listed until #312. `ds_hud_hide_crosshair` already
 //! owns the crosshair (a signature patch that `dodstudio_match_pov_crosshair`
 //! defers to), so two ways to hide one element went down to one; it is in
 //! `verify_hudelements.py`'s `KNOWN_EXCLUDED`.
@@ -161,7 +161,7 @@ use crate::engine;
 use crate::names::console_name;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_hudelement");
+pub const NAME: &str = console_name!("hud_hide_element");
 
 /// `Draw` is the fourth virtual: destructor, `Init`, `VidInit`, `Draw`.
 const DRAW_SLOT: usize = 3;
@@ -441,7 +441,7 @@ pub fn listing() -> String {
     out
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let hidden: Vec<&str> = ELEMENTS
         .iter()
@@ -558,7 +558,7 @@ pub(crate) mod tests {
         assert!(find("saytext").is_some());
         assert!(find("say").is_none());
         assert!(find("saytextt").is_none());
-        // Removed in #312: dodstudio_hide_crosshair owns the crosshair.
+        // Removed in #312: ds_hud_hide_crosshair owns the crosshair.
         assert!(find("crosshair").is_none());
         assert!(find("").is_none());
     }

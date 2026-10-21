@@ -55,13 +55,13 @@ always ends the game it started, and only that one.
                                 back to normal speed (gives up after `secs`, default 300)
     spectate <index> [tries]    step the in-eye camera (+attack) to the player
                                 with that entity index; reads the animation fix's
-                                log, so it needs dodstudio_hltv_show_viewmodel_animations 1
+                                log, so it needs ds_spec_match_pov 1
 
 Examples:
 
     python goldsrc-hooks/tools/game_probe.py --install pre --demo ktps8w1-m00cat_soul_lenn_h2 ^
         --step "waitfor Playing demo from ktps8w1-m00cat" --step "wait 8" ^
-        --step "cmd dodstudio_deathmsg players" --step "wait 1" ^
+        --step "cmd ds_hud_deathmsg players" --step "wait 1" ^
         --step "expect STEAM_0:" --step "shot kill-feed"
 
     # A first-demo crash: start the demo at launch, as a batch does (#546),
