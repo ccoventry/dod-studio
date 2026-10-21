@@ -126,5 +126,5 @@ above and are themselves LGPL-3.0, being changes to an LGPL work.
 
 Engineering notes live in `docs/` — architecture decisions, GoldSrc and DoD
 engine quirks, and HLAE protocol constraints. `docs/dodstudio_commands.md`
-lists the in-game `dodstudio_*` console commands. Bugs and planned work are
+lists the in-game `ds_*` console commands. Bugs and planned work are
 tracked in GitHub Issues; retired planning docs are in `docs/archive/`.

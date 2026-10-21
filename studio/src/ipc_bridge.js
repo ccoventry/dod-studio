@@ -216,7 +216,7 @@ export async function addCrosshairFile(gamePath, gameFolder, source, name) {
 }
 
 /** Sends Configuration > Players' "Use in the game" box to every running
- *  game that takes commands (dodstudio_player_overrides); how many did. */
+ *  game that takes commands (ds_player_overrides); how many did. */
 export async function setPlayerOverrides(on) {
   return invoke('set_player_overrides', { on })
     .catch((err) => {
@@ -1178,7 +1178,7 @@ export async function hdSetPython(path) {
     });
 }
 
-/** { command, report }: the newest list `dodstudio_debug_hd_misses` wrote to
+/** { command, report }: the newest list `ds_debug_hd_misses` wrote to
  *  the hook log (null when there is none yet), and the command. No toast: the HD page shows the error in
  *  place. */
 export async function hdMisses() {

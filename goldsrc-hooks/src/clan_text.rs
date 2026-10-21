@@ -1,4 +1,4 @@
-//! `dodstudio_hide_clan_text`: hide all of DoD's clan-match text -- the
+//! `ds_hud_hide_clan_text`: hide all of DoD's clan-match text -- the
 //! warm-up and ready rules, "Warmup Mode", the countdown to the match and
 //! "MATCH IS LIVE!" -- so clips from a match's warm-up and start don't carry
 //! it (#608).
@@ -49,7 +49,7 @@
 //!
 //! `map_text`'s: `pfnHookUserMsg` prepends, the game's handler is called
 //! through `msglog`'s thunk table, nothing is patched. While
-//! `dodstudio_debug_msglog` watches one of these messages its record sits in
+//! `ds_debug_msglog` watches one of these messages its record sits in
 //! front and asks [`filter`] instead, so the two don't take turns at the head
 //! of the engine's list.
 
@@ -60,7 +60,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_clan_text");
+pub const NAME: &str = console_name!("hud_hide_clan_text");
 
 const TEXT_MSG: &str = "TextMsg";
 const CLAN_TIMER: &str = "ClanTimer";
@@ -104,7 +104,7 @@ struct Last {
     game_rules: Option<Vec<u8>>,
 }
 
-/// Called by `commands.rs` once `dodstudio_hide_clan_text` is registered.
+/// Called by `commands.rs` once `ds_hud_hide_clan_text` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
@@ -314,7 +314,7 @@ fn install_hook(message: &str) {
 /// last `ClanTimer` and `GameRules` are already known when the cvar is turned
 /// on mid-demo. Not before: hooks prepended at the main menu never saw a
 /// message (live test, 2026-10-08), while the same handler hooked once a demo
-/// was playing (through `dodstudio_debug_msglog`) saw every one -- the same
+/// was playing (through `ds_debug_msglog`) saw every one -- the same
 /// timing `map_text`, `deathmsg` and `msglog` use.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
@@ -345,7 +345,7 @@ pub fn poll() {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {

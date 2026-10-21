@@ -6,7 +6,7 @@
 //! and decides what one player's spray or crosshair becomes. The format is in
 //! that writer's doc, and both sides test against
 //! `test-fixtures/players_table.txt`. Pure, so the rules are tested without a
-//! game. Nothing here applies unless `dodstudio_player_overrides` is 1
+//! game. Nothing here applies unless `ds_player_overrides` is 1
 //! (`player_overrides.rs`).
 //!
 //! The rule, the same for both demo types: a player in the table gets their

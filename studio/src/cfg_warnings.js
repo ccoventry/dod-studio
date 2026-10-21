@@ -34,6 +34,7 @@ const EMPTY = {
   filteredInit: [],
   filteredScheduled: [],
   fatalCvars: [],
+  renamed: [],
   configCfgWritable: false,
 };
 
@@ -206,6 +207,11 @@ function render() {
   const filteredScheduled = report?.filteredScheduled ?? [];
   const fatalCvars = report?.fatalCvars ?? [];
   const configCfgWritable = report?.configCfgWritable ?? false;
+  const renamed = report?.renamed ?? [];
+  // A renamed name shows under the list it was typed in; config lines go
+  // with Initial Commands, like the other config findings.
+  const renamedScheduled = renamed.filter((r) => r.source === 'Scheduled Commands');
+  const renamedInit = renamed.filter((r) => r.source !== 'Scheduled Commands');
   // Banned commands are already flagged, more specifically, in the banned
   // section above — MID_DEMO_HAZARDS is a superset of BANNED_COMMANDS on the
   // Rust side, so without this a banned command would otherwise also show up
@@ -251,6 +257,10 @@ function render() {
   // A command the user typed never runs, and nothing in the game says so.
   if (filteredInit.length > 0) {
     initParts.push(filteredSection(filteredInit));
+  }
+  // Same: the game no longer knows an old dodstudio_ name (#555).
+  if (renamedInit.length > 0) {
+    initParts.push(renamedSection(renamedInit));
   }
   if (unseen.length > 0) {
     const rows = unseen
@@ -332,5 +342,16 @@ function render() {
   if (filteredScheduled.length > 0) {
     schedParts.push(filteredSection(filteredScheduled));
   }
+  if (renamedScheduled.length > 0) {
+    schedParts.push(renamedSection(renamedScheduled));
+  }
   renderInto('#scheduled-commands-warning-banner', joinSections(schedParts));
+}
+
+/** Old `dodstudio_` hook names, each with the name that replaced it. */
+function renamedSection(rows) {
+  const items = rows
+    .map((r) => `<li><code>${escapeHtml(STRINGS.CFG.renamedRow(r.old, r.new, r.source))}</code></li>`)
+    .join('');
+  return section(STRINGS.CFG.RENAMED_TITLE, STRINGS.CFG.RENAMED_ADVICE, items, '#ff8a5c');
 }

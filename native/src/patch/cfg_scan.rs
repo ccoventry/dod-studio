@@ -78,6 +78,25 @@ pub struct CfgScan {
     /// they set nothing today, but a `movie.cfg` is one `exec` away from doing
     /// so, and a user reading a warning deserves to know it is there.
     pub unreferenced: Vec<PathBuf>,
+    /// Lines that use a hook console name from before #555 (`dodstudio_*`),
+    /// which the game no longer knows. Reported, never rewritten.
+    pub renamed: Vec<RenamedConsoleName>,
+}
+
+/// A config line using a console name #555 renamed: the old name as written,
+/// the name that replaced it, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedConsoleName {
+    pub old: String,
+    pub new: String,
+    pub file: PathBuf,
+    pub line: usize,
+}
+
+impl RenamedConsoleName {
+    pub fn file_name(&self) -> String {
+        display_name(&self.file)
+    }
 }
 
 impl CfgScan {
@@ -98,7 +117,7 @@ impl CfgScan {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.settings.is_empty() && self.unreferenced.is_empty()
+        self.settings.is_empty() && self.unreferenced.is_empty() && self.renamed.is_empty()
     }
 }
 
@@ -450,10 +469,10 @@ pub const FAST_FORWARD_CVARS: &[&str] = &["fps_override", "fps_max", "gl_vsync"]
 ///   `sv_cheats` is `0` the engine resets it to `1.0` and the value never
 ///   survives long enough for DoD's client to see it. Verified live and in
 ///   the binaries — `hw.dll` `0x1d455c9`, gated on `sv_cheats` at `0x1e56404`.
-/// - `dodstudio_batch` / `dodstudio_schedule` — the hook DLL's runners for a
+/// - `ds_capture_batch` / `ds_capture_schedule` — the hook DLL's runners for a
 ///   batch run without patched demos (#434). One started from a batch's own
 ///   commands would replace the batch that is running.
-/// - `dodstudio_spray` — writes the game's own spray file (`tempdecal.wad`)
+/// - `ds_player_spray` — writes the game's own spray file (`tempdecal.wad`)
 ///   (#428). A demo draws the sprays it recorded (or Configuration > Players'),
 ///   never that file, so from a batch it would change the user's spray on
 ///   disk and nothing on screen.
@@ -463,9 +482,9 @@ pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_movie_ffmpeg",
     "host_framerate",
     "r_norefresh",
-    "dodstudio_batch",
-    "dodstudio_schedule",
-    "dodstudio_spray",
+    "ds_capture_batch",
+    "ds_capture_schedule",
+    "ds_player_spray",
     "r_drawentities",
     "cl_lw",
 ];
@@ -810,19 +829,36 @@ pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
 /// pipeline itself always overwrites the value before anything downstream
 /// could read it. Scheduling one instead is a different, genuinely dangerous
 /// story — see `SCHEDULED_BANNED_COMMANDS`.
-/// `dodstudio_run_in_background` and `dodstudio_stay_behind_while_capturing` are set by every
+/// `ds_capture_run_in_background` and `ds_capture_stay_behind` are set by every
 /// batch after the user's own commands, the second from
 /// `PatcherConfig::keep_game_behind`.
 pub const NOOP_IN_INIT_COMMANDS: &[&str] = &[
     "mirv_movie_filename",
-    "dodstudio_run_in_background",
-    "dodstudio_stay_behind_while_capturing",
+    "ds_capture_run_in_background",
+    "ds_capture_stay_behind",
 ];
 
 /// `NOOP_IN_INIT_COMMANDS` checked against Initial Commands. What the demo
 /// filter drops is reported separately, by `demo_filtered_commands`.
 pub fn noop_commands_in_init(commands: &[String]) -> Vec<(String, String)> {
     commands_matching(NOOP_IN_INIT_COMMANDS, commands)
+}
+
+/// Hook console names from before #555 in Initial or Scheduled Commands, as
+/// (old name, new name, whole trimmed command). Studio moves its saved lists
+/// to the new names when settings load, so this only finds one typed or
+/// pasted since. Reported as doing nothing, like `NOOP_IN_INIT_COMMANDS`: the
+/// game no longer knows the name.
+pub fn renamed_commands(commands: &[String]) -> Vec<(String, String, String)> {
+    commands
+        .iter()
+        .flat_map(|raw| {
+            let trimmed = raw.trim();
+            super::console_prefix::old_names_in(trimmed)
+                .into_iter()
+                .map(move |(old, new)| (old, new, trimmed.to_string()))
+        })
+        .collect()
 }
 
 /// Commands from `SCHEDULED_BANNED_COMMANDS` present in `commands`. Only
@@ -954,6 +990,19 @@ fn read_config(
             let mut parts = command.split_whitespace();
             let Some(head) = parts.next() else { continue };
             let head_lower = head.to_lowercase();
+
+            // Ahead of the bind/alias skip: an old name in a bind fails just
+            // the same, only later, when the key is pressed.
+            for (old, new) in super::console_prefix::old_names_in(&command) {
+                if out.renamed.len() < MAX_SETTINGS {
+                    out.renamed.push(RenamedConsoleName {
+                        old,
+                        new,
+                        file: path.to_path_buf(),
+                        line: index + 1,
+                    });
+                }
+            }
 
             if NOT_EXECUTED.contains(&head_lower.as_str()) {
                 continue;
@@ -1100,6 +1149,77 @@ mod tests {
 
         let scan = scan(&dir);
         assert!(scan.effective("r_decals").is_none(), "{:?}", scan.settings);
+    }
+
+    /// #555: a config line still using a `dodstudio_` hook name is reported
+    /// with the name that replaced it, a bound key's included, and the file
+    /// is left exactly as it was.
+    #[test]
+    fn an_old_hook_name_in_a_config_is_reported_with_its_new_name() {
+        let dir = scratch("renamed");
+        let config = "dodstudio_hide_scoreboard 1\n\
+                      exec movie.cfg\n\
+                      exec dodstudio_helper.cfg\n";
+        let movie = "// dodstudio_spec_lock 1\n\
+                     bind F7 \"dodstudio_clear_decals\"\n\
+                     ds_hud_hide_crosshair 1; dodstudio_hide_crosshair 1\n";
+        std::fs::write(dir.join("config.cfg"), config).unwrap();
+        std::fs::write(dir.join("movie.cfg"), movie).unwrap();
+
+        let scan = scan(&dir);
+        let found: Vec<(&str, &str, String, usize)> = scan
+            .renamed
+            .iter()
+            .map(|r| (r.old.as_str(), r.new.as_str(), r.file_name(), r.line))
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (
+                    "dodstudio_hide_scoreboard",
+                    "ds_hud_hide_scoreboard",
+                    "config.cfg".to_string(),
+                    1
+                ),
+                (
+                    "dodstudio_clear_decals",
+                    "ds_map_clear_decals",
+                    "movie.cfg".to_string(),
+                    2
+                ),
+                (
+                    "dodstudio_hide_crosshair",
+                    "ds_hud_hide_crosshair",
+                    "movie.cfg".to_string(),
+                    3
+                ),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.cfg")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("movie.cfg")).unwrap(),
+            movie
+        );
+    }
+
+    #[test]
+    fn an_old_hook_name_typed_into_a_command_list_is_reported() {
+        let commands = vec![
+            " dodstudio_spec_lock 1 ".to_string(),
+            "ds_spec_lock 1".to_string(),
+            "mirv_fov 90".to_string(),
+        ];
+        assert_eq!(
+            renamed_commands(&commands),
+            vec![(
+                "dodstudio_spec_lock".to_string(),
+                "ds_spec_lock".to_string(),
+                "dodstudio_spec_lock 1".to_string()
+            )]
+        );
     }
 
     #[test]

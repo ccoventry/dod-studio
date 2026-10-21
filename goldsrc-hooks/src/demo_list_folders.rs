@@ -1,4 +1,4 @@
-//! `dodstudio_demo_list_folders 1`: the Load Demo window lists folders too,
+//! `ds_ui_demo_list_folders 1`: the Load Demo window lists folders too,
 //! and opens them, instead of only the demos sitting in `dod/` (issue #408).
 //!
 //! ## How the window fills its list
@@ -69,13 +69,13 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("demo_list_folders");
+pub const NAME: &str = console_name!("ui_demo_list_folders");
 
 /// The fallback path's flag, when the cvar could not be registered.
 pub static ENABLED: AtomicBool = AtomicBool::new(true);
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once `dodstudio_demo_list_folders` is registered.
+/// Called by `commands.rs` once `ds_ui_demo_list_folders` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
@@ -123,22 +123,22 @@ impl Setting {
     }
 }
 
-/// `dodstudio_demo_list_hide_empty 1` (the default): while folders are
+/// `ds_ui_demo_list_hide_empty 1` (the default): while folders are
 /// listed, a folder with no demo anywhere inside it, at any depth, isn't.
-pub static HIDE_EMPTY: Setting = Setting::new(console_name!("demo_list_hide_empty"), true);
+pub static HIDE_EMPTY: Setting = Setting::new(console_name!("ui_demo_list_hide_empty"), true);
 
-/// `dodstudio_demo_list_count_subfolders 1` (the default): a folder's demo
+/// `ds_ui_demo_list_count_subfolders 1` (the default): a folder's demo
 /// count on the Demos tab includes its subfolders, not just the demos
 /// directly in it.
 pub static COUNT_SUBFOLDERS: Setting =
-    Setting::new(console_name!("demo_list_count_subfolders"), true);
+    Setting::new(console_name!("ui_demo_list_count_subfolders"), true);
 
-/// `dodstudio_demo_list_show_counts 1` (the default): folders are counted in
+/// `ds_ui_demo_list_show_counts 1` (the default): folders are counted in
 /// the background, and folder rows on the Demos tab end in "(N demos)". At
 /// `0` nothing is counted at all (#787), so a folder opens with no progress
 /// bar and no second fill; [`HIDE_EMPTY`] and [`COUNT_SUBFOLDERS`] need the
 /// counts and are off with it.
-pub static SHOW_COUNTS: Setting = Setting::new(console_name!("demo_list_show_counts"), true);
+pub static SHOW_COUNTS: Setting = Setting::new(console_name!("ui_demo_list_show_counts"), true);
 
 /// Whether empty folders are left out: only while folders are counted, the
 /// one way to know a folder is empty.
