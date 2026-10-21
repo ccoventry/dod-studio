@@ -11,6 +11,7 @@ import { setAuditorFooter } from './auditor_footer.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
+  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
 } from './audit_duplicates.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
@@ -126,7 +127,7 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
 
       try {
         const outcome = await runDemoAudit(paths, allDrives, queued);
-        currentAuditResults = outcome?.groups ?? [];
+        currentAuditResults = withAuditOrder(outcome?.groups);
         currentSingles = outcome?.singles ?? [];
         currentRoots = outcome?.roots ?? [];
         renderAuditResults({ resetTicks: true });
@@ -216,13 +217,35 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
         <td></td>
       `;
       groupRow.querySelector('.group-toggle-btn').addEventListener('click', () => toggleGroup(groupIdx));
+      // A kept copy picked by hand says so, with the way back to the
+      // audit's pick, so a stray click is easy to see and undo.
+      if (keptChanged(group)) {
+        const cell = groupRow.lastElementChild;
+        cell.className = 'audit-keep-changed';
+        const note = document.createElement('span');
+        note.textContent = STRINGS.AUDITOR.KEEP_CHANGED_NOTE;
+        note.style.color = '#f0c060';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'audit-keep-reset-btn';
+        reset.textContent = STRINGS.AUDITOR.KEEP_RESET_BUTTON;
+        reset.title = STRINGS.AUDITOR.keepResetTitle(shownPath(group.auditPick));
+        reset.disabled = running || !!deleting;
+        reset.addEventListener('click', () => keepInstead(groupIdx, group.auditPick));
+        cell.append(note, ' ', reset);
+      }
       tbody.appendChild(groupRow);
 
       if (!isExpanded) return;
 
-      group.files.forEach((file, fileIdx) => {
+      shownFiles(group).forEach(({ file, kept }) => {
+        const fileIdx = kept ? 0 : 1;
+        const notCopy = !kept && isNotCopy(group, file.path);
         const tr = document.createElement('tr');
-        tr.className = fileIdx === 0 ? 'audit-file-row audit-kept' : 'audit-file-row';
+        tr.className = kept ? 'audit-file-row audit-kept' : 'audit-file-row';
+        // The kept copy stands out where it is: rows don't move when
+        // another copy is picked.
+        if (kept) tr.style.background = 'rgba(90, 200, 120, 0.10)';
 
         const tdCb = document.createElement('td');
         const cb = document.createElement('input');
@@ -232,6 +255,9 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
         if (fileIdx === 0) {
           cb.disabled = true; // The kept copy is never deleted.
           cb.title = STRINGS.AUDITOR.ORIGINAL_FILE_TITLE;
+        } else if (notCopy) {
+          cb.disabled = true; // A different demo: nothing to delete.
+          cb.title = STRINGS.AUDITOR.NOT_A_COPY_TITLE;
         } else {
           cb.checked = ticked.has(file.path);
           if (file.in_use) cb.title = STRINGS.AUDITOR.IN_USE_TITLE;
@@ -253,7 +279,12 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
         keepRadio.name = `audit-keep-${groupIdx}`;
         keepRadio.checked = fileIdx === 0;
         keepRadio.addEventListener('change', () => keepInstead(groupIdx, file.path));
-        keepLabel.append(keepRadio, document.createTextNode(` ${fileStatus(file, fileIdx).trim()}`));
+        const status = notCopy ? STRINGS.AUDITOR.NOT_A_COPY_LABEL : fileStatus(file, fileIdx);
+        keepLabel.append(keepRadio, document.createTextNode(` ${status.trim()}`));
+        if (notCopy) {
+          keepLabel.title = STRINGS.AUDITOR.NOT_A_COPY_TITLE;
+          keepLabel.style.color = '#f0c060';
+        }
         tdStatus.appendChild(keepLabel);
 
         const tdSize = document.createElement('td');
@@ -263,8 +294,16 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
         const tdPath = document.createElement('td');
         tdPath.className = 'audit-file-path';
         tdPath.textContent = displayPath;
-        if (fileIdx > 0) tdPath.style.color = '#ff9999';
-        else tdPath.style.fontWeight = 'bold';
+        if (notCopy) {
+          tdPath.style.color = '#f0c060';
+        } else if (fileIdx > 0) {
+          tdPath.style.color = '#ff9999';
+        } else {
+          tdPath.style.fontWeight = 'bold';
+          tdPath.style.color = '#8fd18f';
+          keepLabel.style.color = '#8fd18f';
+          keepLabel.style.fontWeight = 'bold';
+        }
 
         const tdAction = document.createElement('td');
         const copyBtn = document.createElement('button');
@@ -341,10 +380,16 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
     showToast(STRINGS.AUDITOR.preferFolderToast(found, changed, folder), found ? 'success' : 'info');
   });
 
-  /// The ticked copies still in the results (a collapsed group's count too).
+  /// The ticked copies still in the results (a collapsed group's count too),
+  /// each with the copy its group keeps, which the delete compares it to.
+  function tickedCopies() {
+    return currentAuditResults.flatMap((g) => g.files.slice(1)
+      .filter((f) => ticked.has(f.path) && !isNotCopy(g, f.path))
+      .map((f) => ({ path: f.path, keep: g.files[0].path })));
+  }
+
   function tickedFiles() {
-    const listed = new Set(currentAuditResults.flatMap((g) => g.files.slice(1).map((f) => f.path)));
-    return [...ticked].filter((p) => listed.has(p));
+    return tickedCopies().map((c) => c.path);
   }
 
   function setDeleteButtons(n) {
@@ -368,14 +413,15 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
     selectAllCb.addEventListener('change', (e) => {
       const isChecked = e.target.checked;
       currentAuditResults.forEach((g) => g.files.slice(1).forEach((f) => {
-        if (isChecked) ticked.add(f.path); else ticked.delete(f.path);
+        if (isChecked && !isNotCopy(g, f.path)) ticked.add(f.path); else ticked.delete(f.path);
       }));
       renderAuditResults();
     });
   }
 
   async function deleteTicked(permanent) {
-    const filesToDelete = tickedFiles();
+    const copies = tickedCopies();
+    const filesToDelete = copies.map((c) => c.path);
     if (filesToDelete.length === 0) return;
     const question = permanent
       ? STRINGS.AUDITOR.deletePermanentlyConfirm(filesToDelete.length)
@@ -385,9 +431,9 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
     deleting = { permanent };
     setDeleteButtons(filesToDelete.length);
     refreshStartButtonState();
-    showProgress(deleteProgressView({ done: 0, total: filesToDelete.length }, permanent));
+    showProgress(deleteProgressView({ step: 'checking', done: 0, total: filesToDelete.length }, permanent));
     try {
-      const { deleted = [], failed = [] } = (await deleteAuditFiles(filesToDelete, permanent)) ?? {};
+      const { deleted = [], failed = [] } = (await deleteAuditFiles(copies, permanent)) ?? {};
       if (deleted.length) {
         showToast(permanent
           ? STRINGS.AUDITOR.deletedFilesToast(deleted.length)
@@ -400,6 +446,10 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0 }
       // A group left with one file has no copies now: Consolidate moves it.
       currentSingles = [...currentSingles, ...singlesAfterDelete(currentAuditResults, deleted)];
       currentAuditResults = withoutDeleted(currentAuditResults, deleted);
+      // A copy with other bytes is a different demo: marked, never ticked again.
+      const notCopies = failed.filter((f) => f.not_a_copy).map((f) => f.path);
+      notCopies.forEach((p) => ticked.delete(p));
+      currentAuditResults = markNotCopies(currentAuditResults, notCopies);
       setStatus(STRINGS.AUDITOR.deletedStatus(deleted.length, failed.length, permanent));
       if (selectAllCb) selectAllCb.checked = false;
     } catch (e) {

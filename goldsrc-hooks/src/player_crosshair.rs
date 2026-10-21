@@ -6,7 +6,7 @@
 //! player), in an HLTV demo the player the in-eye camera is on
 //! (`spectator_target::in_eye_target`). Free and chase cameras draw no
 //! crosshair, so nothing is decided for them. Outside a demo, and while
-//! `dodstudio_player_overrides` is 0, the game's own crosshair stays.
+//! `ds_player_overrides` is 0, the game's own crosshair stays.
 //!
 //! ## How, without a new patch
 //!
@@ -14,7 +14,7 @@
 //! and one `SPR_Draw*` call (`docs/goldsrc_crosshair.md`): in POV, a 64x64
 //! tile of `customXHair.spr` picked by the viewer's `cl_xhair_style`
 //! (`client+0x2ced0`); spectating in-eye, the 24x24 rect of `crosshairs.spr`
-//! (`client+0x2d1f0`), or with `dodstudio_spec_match_pov` the same
+//! (`client+0x2d1f0`), or with `ds_spec_match_pov` the same
 //! `customXHair.spr` tile as POV (`spectator_crosshair.rs`). `hud_sprites.rs`
 //! already sits on those calls in client.dll's own `gEngfuncs` copy (#808),
 //! the same pointers on every install since client.dll is byte-identical
@@ -27,8 +27,8 @@
 //! sets the game's sprite back for whatever draws next.
 //!
 //! When the crosshair shows is still the game's alone: `ShouldDrawCrossHair`,
-//! `dodstudio_hide_crosshair` (which stubs `Draw`, so no draw arrives here)
-//! and the spectator gate of `dodstudio_spec_match_pov` decide whether a
+//! `ds_hud_hide_crosshair` (which stubs `Draw`, so no draw arrives here)
+//! and the spectator gate of `ds_spec_match_pov` decide whether a
 //! draw happens; this only changes what it draws. In POV the swap needs the
 //! viewer's `cl_xhair_style` at 1..16: style 0 sends DoD to its classic
 //! dynamic crosshair (`client+0x2cda0`), which draws no `customXHair.spr`
@@ -298,7 +298,7 @@ pub fn poll() {
     }
 }
 
-/// The `dodstudio_debug_status` line, while the table gives a crosshair.
+/// The `ds_debug_status` line, while the table gives a crosshair.
 pub fn status_line() -> Option<String> {
     let last = LAST.lock().ok()?.clone();
     (!last.is_empty()).then(|| {
