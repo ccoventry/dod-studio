@@ -55,6 +55,8 @@
 //!   team, only the player being watched, or nobody (issue #304).
 //! - `overview_marker`: `ds_hud_overview_team_marker`, which marks the
 //!   player being watched in HLTV with his team's camera icon (#304).
+//! - `pov_overview`: `ds_debug_pov_overview`, an R&D prototype that lets
+//!   the overview map draw in POV demo playback (#897).
 //! - `demo_scope`: `ds_hud_show_scope`, which draws the sniper scope
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `ds_capture_run_in_background`, full speed while
@@ -247,6 +249,7 @@ mod player_table;
 mod pmove_guard;
 mod position;
 mod pov_live_bob;
+mod pov_overview;
 mod remote;
 mod review;
 mod review_lock;

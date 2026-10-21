@@ -599,6 +599,7 @@ pub fn poll() {
     crate::demo_scope::poll();
     crate::run_in_background::poll();
     crate::pov_live_bob::poll();
+    crate::pov_overview::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();
@@ -795,6 +796,9 @@ fn status_text() -> String {
     }
     if let Some(icons) = crate::overview_players::status_line() {
         lines.push(icons);
+    }
+    if let Some(pov_overview) = crate::pov_overview::status_line() {
+        lines.push(pov_overview);
     }
     if let Some(marker) = crate::overview_marker::status_line() {
         lines.push(marker);
@@ -1705,6 +1709,9 @@ pub fn install() {
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
         crate::detail_cache::set_keep_cvar(keep);
     }
+    if let Some(pov_overview) = register(crate::pov_overview::NAME, "0") {
+        crate::pov_overview::set_cvar(pov_overview);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
@@ -1866,6 +1873,7 @@ mod tests {
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,
             crate::detail_cache::KEEP_NAME,
+            crate::pov_overview::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }

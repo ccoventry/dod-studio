@@ -1346,6 +1346,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         return;
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
+    crate::pov_overview::before_calc_refdef(pparams);
     unsafe { real(pparams) };
     unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {
@@ -1354,6 +1355,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
     crate::pov_live_bob::after_calc_refdef(pparams);
+    crate::pov_overview::after_calc_refdef(pparams);
 }
 
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
