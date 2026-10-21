@@ -130,6 +130,7 @@ pub mod bsp_entities;
 pub mod builder;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
+pub mod console_prefix;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod decal_atlas;
 #[cfg(not(target_arch = "wasm32"))]

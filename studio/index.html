@@ -733,7 +733,7 @@
                  by default, each stage independently switchable. -->
             <!-- Tab Content: Players (#428) -- each player's spray and
                  crosshair in a demo. players_ui.js fills it; the hook DLL
-                 applies it while dodstudio_player_overrides is 1. -->
+                 applies it while ds_player_overrides is 1. -->
             <div id="tab-players" class="config-tab-content" style="display: none;">
               <div class="setting-toggle">
                 <span class="setting-label"><span data-str="PLAYERS.USE_IN_GAME_LABEL">Use in the game</span><span class="info-icon" data-str-title="PLAYERS.USE_IN_GAME_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
@@ -936,12 +936,14 @@
               <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
-              <div class="input-row">
+              <!-- Split Maps and Rename Demos use this folder; Duplicates has its
+                   own list, so auditor_tabs.js hides this row there (#844). -->
+              <div class="input-row" id="audit-target-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
                 <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <!-- One tab per tool; all of them work on the folder above (#624). -->
+              <!-- One tab per tool (#624). -->
               <div class="auditor-tabs" role="tablist">
                 <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
                 <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
@@ -953,9 +955,9 @@
           <div class="auditor-tab-panel" data-auditor-panel="duplicates">
             <div class="egui-panel" style="margin-top: 10px;">
               <div class="panel-body">
-                <!-- Folders to check (#844): audit_folders.js. The Target
-                     Folder above, folders added with the picker, or every
-                     fixed drive, in one pass. -->
+                <!-- Folders to check (#844): audit_folders.js. Folders added
+                     with the picker (starting from the Target Folder the other
+                     tabs use), or every fixed drive, in one pass. -->
                 <label data-str="AUDITOR.FOLDERS_TO_CHECK_LABEL">Folders to check:</label>
                 <ul id="audit-folder-list" class="audit-folder-list"></ul>
                 <div class="row-inputs">
@@ -981,12 +983,17 @@
             <div class="panel-header flex-between">
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
               <div class="row-inputs">
+                <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
                 <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
-                <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+                <!-- Hidden for 0.2.0, so every delete can be put back from the
+                     Recycle Bin; remove `hidden` to offer it again. -->
+                <button id="delete-permanent-audits-btn" hidden style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
               </div>
             </div>
-            <div class="table-wrapper" style="max-height: 400px;">
-              <table id="audit-results-table">
+            <!-- The app's table style; the list grows with the window, like the
+                 render list (#818), never shorter than 280px. -->
+            <div class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
+              <table id="audit-results-table" class="analyzer-table audit-table">
                 <thead>
                   <tr>
                     <th><input type="checkbox" id="audit-select-all" /></th>
@@ -1003,7 +1010,7 @@
                 </tbody>
               </table>
             </div>
-            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
           </div>
           </div>
 
@@ -1021,6 +1028,8 @@
                   <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
                   <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
                 </div>
+                <!-- Find's two steps: finding the demos, then reading each one's map lengths. -->
+                <div id="split-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="split-status" class="status-indicator"></p>
                 <div id="split-list" class="split-list"></div>
               </div>
@@ -1309,7 +1318,7 @@
               </div>
             </div>
 
-            <!-- What dodstudio_debug_hd_misses last wrote to the hook log, by map. -->
+            <!-- What ds_debug_hd_misses last wrote to the hook log, by map. -->
             <div class="egui-panel">
               <div class="panel-header flex-between">
                 <h3 data-str="HD.MISSES_TITLE">Textures that kept their original</h3>
@@ -1727,7 +1736,7 @@
              Configuration-specific later if a need comes up. -->
         <div id="footer-configuration" class="pinned-footer-content" style="display: none;"></div>
         <div id="footer-demo-auditor" class="pinned-footer-content" style="display: none;">
-          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
         </div>
         <div id="footer-demo-analyzer" class="pinned-footer-content" style="display: none;">
           <div id="footer-analyzer-current-file" data-str="ANALYZER.NO_DEMO_LOADED">No demo loaded</div>

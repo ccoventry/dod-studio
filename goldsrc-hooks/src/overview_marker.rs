@@ -1,4 +1,4 @@
-//! `dodstudio_hud_map_team_marker`: in HLTV, mark the player being watched
+//! `ds_hud_overview_team_marker`: in HLTV, mark the player being watched
 //! on the overview map with their team's camera icon, not `spec_camera.spr`
 //! (`1`), or leave the camera icon off the map altogether (`2`, #677).
 //!
@@ -57,7 +57,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hud_map_team_marker");
+pub const NAME: &str = console_name!("hud_overview_team_marker");
 
 /// From the `IsSpectateOnly` call, through the team sprite choice, to the
 /// `je` that skips the draw when no sprite was chosen.
@@ -181,7 +181,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, while it is not the game's own:
+/// One line for `ds_debug_status`, while it is not the game's own:
 /// the setting, and the team the game is choosing the icon by right now.
 pub fn status_line() -> Option<String> {
     let mode = MODE.load(Ordering::Relaxed);

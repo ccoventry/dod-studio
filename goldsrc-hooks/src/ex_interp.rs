@@ -1,4 +1,4 @@
-//! `dodstudio_ex_interp_max`: raise the engine's interpolation-window ceiling.
+//! `ds_demo_ex_interp_max`: raise the engine's interpolation-window ceiling.
 //!
 //! ## `ex_interp` is engine-managed, which is the whole problem
 //!
@@ -85,7 +85,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("ex_interp_max");
+pub const NAME: &str = console_name!("demo_ex_interp_max");
 
 /// One engine build's clamp.
 struct Build {
@@ -262,7 +262,7 @@ pub fn active() -> i32 {
     ACTIVE_MS.load(Ordering::Relaxed)
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let anniversary =
         SCANNED_BASE.load(Ordering::Relaxed) != 0 && BUILD.load(Ordering::Relaxed) == 1;
