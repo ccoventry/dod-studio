@@ -456,7 +456,9 @@
                    Lead, Stop Trail, Post-roll follow in the order they occur
                    around a single clip. -->
               <div class="grid-controls">
-                <div class="control-group control-group-stacked">
+                <!-- Hidden while Seek Between Clips is on: the hook waits for
+                     the demo itself (renderTimingDiagram). -->
+                <div class="control-group control-group-stacked" id="config-initial-delay-group">
                   <div class="control-group">
                     <label for="config-initial-delay" data-str="CAPTURE_CONFIG.INITIAL_DELAY_LABEL">Initial Delay (s):</label>
                     <input type="number" step="0.1" id="config-initial-delay" value="3.0" style="width: 80px;" />
@@ -466,7 +468,7 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-pre-roll" data-str="CAPTURE_CONFIG.PRE_ROLL_LABEL">Pre-roll (s):</label>
-                    <input type="number" step="0.1" id="config-pre-roll" value="2.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-pre-roll" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between the game reaching the clip and capture starting.</p>
                 </div>
@@ -487,7 +489,7 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-post-roll" data-str="CAPTURE_CONFIG.POST_ROLL_LABEL">Post-roll (s):</label>
-                    <input type="number" step="0.1" id="config-post-roll" value="0.6" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-post-roll" value="1.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>

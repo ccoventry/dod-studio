@@ -35,8 +35,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
     // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
     const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRoll = numberField('#config-pre-roll', 2.0);
-    const postRoll = numberField('#config-post-roll', 0.6);
+    const preRoll = numberField('#config-pre-roll', 5.0);
+    const postRoll = numberField('#config-post-roll', 1.0);
 
     const resWidth = numberField('#config-res-width', 1280, { integer: true, positive: true });
     const resHeight = numberField('#config-res-height', 720, { integer: true, positive: true });
@@ -336,6 +336,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
   if (hookRunsBatchEl) hookRunsBatchEl.checked = settings.hook_runs_batch !== false;
+  // Again: Initial Delay shows only with Seek Between Clips off.
+  renderTimingDiagram();
   const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
   if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {

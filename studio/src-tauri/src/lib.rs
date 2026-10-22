@@ -33,9 +33,9 @@ mod test_support;
 use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
 use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
-    kill_engine_processes, launch_demo_preview, launch_obs,
-    launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
-    send_preview_to_running_game, start_steam, steam_state,
+    kill_engine_processes, launch_demo_preview, launch_obs, launch_standalone_game,
+    read_cfg_commands, scan_orphaned_previews, send_preview_to_running_game, start_steam,
+    steam_state,
 };
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
