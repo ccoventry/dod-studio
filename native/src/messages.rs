@@ -88,6 +88,14 @@ pub fn did_not_identify_as_ffmpeg(path: impl Display) -> String {
     format!("{} did not identify itself as FFmpeg", path)
 }
 
+/// A picked file that isn't named like FFmpeg: refused without starting it.
+pub fn not_named_ffmpeg(name: impl Display) -> String {
+    format!(
+        "{} isn't ffmpeg.exe, so it wasn't started to check it. Pick ffmpeg.exe",
+        name
+    )
+}
+
 pub fn reports_itself_as(path: impl Display, banner: &str) -> String {
     format!(
         "{} is not FFmpeg — it reports itself as \"{}\"",

@@ -1,5 +1,5 @@
 //! A LOD bias of -1 on replaced HUD sprites (#841), so a kill feed drawn at
-//! `dodstudio_deathmsg scale 2` or `3` samples the full-detail mip level.
+//! `ds_hud_deathmsg scale 2` or `3` samples the full-detail mip level.
 //!
 //! A replaced HUD sheet goes up 4x with mipmaps (`texture_hires.rs`, #728).
 //! The GPU picks the level from texels per screen pixel: at scale 3 a 4x
@@ -17,7 +17,7 @@
 //! through `opengl32.dll`'s own export: no engine offsets, the same on both
 //! `hw.dll` builds. Only replaced HUD sprites get it; world textures, model
 //! skins, world sprites and the stock HUD sheets keep the engine's state.
-//! It is read back, so `dodstudio_debug_status` counts only biases the
+//! It is read back, so `ds_debug_status` counts only biases the
 //! driver took.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 

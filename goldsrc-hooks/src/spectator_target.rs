@@ -1,4 +1,4 @@
-//! `dodstudio_debug_log_spectator_target` — logs `CHudSpectator`'s own idea of who
+//! `ds_debug_log_spectator_target` — logs `CHudSpectator`'s own idea of who
 //! is being followed side by side with the entity the engine actually
 //! renders a first-person viewmodel for, whenever either one changes.
 //!
@@ -34,13 +34,13 @@
 //! `g_iUser2` stays constant while the viewmodel entity keeps changing, the
 //! engine hypothesis is confirmed and `client.dll` patching is the wrong
 //! layer to work in. #206 itself has since been fixed by `spectator_follow`
-//! (`dodstudio_spec_lock`); this stays as a diagnostic.
+//! (`ds_spec_lock`); this stays as a diagnostic.
 //!
 //! ## Caveats
 //!
 //! The viewmodel-entity half piggybacks on `anim_fix`'s own per-frame
 //! `GetViewModel()` read rather than duplicating that engine call, so it
-//! only has fresh data while `dodstudio_spec_match_pov` is on. Turn that on too
+//! only has fresh data while `ds_spec_match_pov` is on. Turn that on too
 //! when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!

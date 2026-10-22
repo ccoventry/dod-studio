@@ -2,7 +2,7 @@
 the HD `weapons*` sheets sprites_hd.py makes.
 
 Valve's kill-feed icons are 89x19-pixel drawings; upscaled 4x (#733) they
-keep their stair steps, and at `dodstudio_deathmsg scale 3` they look soft.
+keep their stair steps, and at `ds_hud_deathmsg scale 3` they look soft.
 This renders each icon from the weapon's own model instead, at the 4x size
 of its hud.txt box, and paints it into that install's 4x HD sheet over the
 upscaled icon. The hook loads the sheet as it loads any HD sprite (keyed by
@@ -47,8 +47,15 @@ Per icon (ICONS):
      inside the gun (a trigger guard) keeps only a 1 px rim, so it stays
      open, also where a trigger splits it into narrow gaps (holes), and a
      guard the skin paints black on a solid plate is cut out where the
-     table says so (see_through); a part thinner than half a pixel (a
-     guard's bar, a wire) is kept as a 1 px line (keep_thin); the light
+     table says so (see_through); a separate part of a gun narrower than
+     a pixel (the PIAT's and bazooka's wire guards) is widened to a 1 px
+     line from its own silhouette (wire_lines); a guard the skin paints
+     but no triangle uses (the MP40's) is drawn in from the skin at the
+     grip's size, placed by the table (skin_art); a guard and trigger
+     neither the p_ nor the w_ model has come from the first-person v_
+     model, its arms dropped, lined up with the render at the grip and cut
+     to a box the table sets (v_part); any other part thinner
+     than half a pixel (a guard's bar) is kept as a 1 px line (keep_thin); the light
      edge and the outline are drawn on the supersamples and downsampled
      premultiplied, so every edge ramps over a pixel or two and a partial
      edge texel holds the outline's colour (soft_finish);
@@ -88,7 +95,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 10  # 10: soft edges (soft_finish); shared rows belong to the lower kill-feed icon
+VERSION = 13  # 13: guards from the v_ models (v_part); 12: the MP40 skin's guard; 11: wires as 1 px lines
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -141,7 +148,11 @@ class Icon:
     without it the gun keeps its width and is raised until it fits.
     see_through: (texture, x, y) texels inside a hole the skin paints black
     instead of modelling (a trigger guard drawn on a solid plate): the
-    near-black texels joined to each are drawn transparent (see_through)."""
+    near-black texels joined to each are drawn transparent (see_through).
+    cut_part: (x0, x1, row) stock pixels: everything in columns x0..x1 from
+    `row` down is cut off, the outline closing the cut (a magazine drawn
+    shorter, as Valve draws the MP44's; cut_columns). Unset in the table:
+    the MP44's is a preview option (#900)."""
     models: tuple
     fallback: tuple = ()
     clip_tip: bool = False
@@ -152,18 +163,57 @@ class Icon:
     barrel_top: float | None = None
     cut_below: bool = False
     see_through: tuple = ()
+    skin_art: tuple = ()
+    v_part: "VPart | None" = None
+    cut_part: tuple = ()
     note: str = ""
+
+
+@dataclass(frozen=True)
+class SkinArt:
+    """Icon.skin_art: a drawing in a model's skin that no triangle uses
+    (p_mp40.bmp's trigger guard and trigger, painted beside the grip's art),
+    put into the icon (skin_art). texture: the skin's name. art: its texel
+    box (x0, y0, x1, y1). anchor: the texel box of the art a part of the
+    model does use (the grip's); the drawing gets that part's size and
+    facing on screen (texel_to_screen). offset: then it is moved by (dx, dy)
+    stock pixels of the icon's rect, set by hand to its place under the
+    receiver. dark: texels darker than this (0..255 grey) are the drawing;
+    the skin's light background round it is left out."""
+    texture: str
+    art: tuple
+    anchor: tuple
+    offset: tuple = (0.0, 0.0)
+    dark: float = 150.0
+
+
+@dataclass(frozen=True)
+class VPart:
+    """Icon.v_part: the trigger guard and trigger drawn from the gun's
+    first-person `v_` model, for a gun whose `p_` and `w_` models have none
+    (v_part). model: the v_ model. window: (x0, x1) stock pixels of the
+    icon's rect, the columns (the grip and the receiver above it) the v_
+    gun is lined up with the icon's render in (match_v_model). box: (x0,
+    y0, x1, y1) stock pixels, the part of the lined-up v_ gun that is drawn
+    in: its triangles centred there, cut to the box, behind the icon's own
+    render."""
+    model: str
+    window: tuple
+    box: tuple
 
 
 ICONS = {
     # Allies
     "d_thompson": Icon(("p_tommy.mdl",), ("w_tommy.mdl",), turn=1.0, see_through=(("p_tommy.bmp", 129, 228),),
                        note="turned: the forend level; trigger guard see-through"),
+    # v_greasegun.mdl's guard lies inside this one's outline: nothing to add.
     "d_greasegun": Icon(("p_grease.mdl",), ("w_greasegun.mdl",)),
     "d_bar": Icon(("p_barbu.mdl", "p_barbd.mdl"), ("w_bar.mdl",), see_through=(("p_bar.bmp", 125, 224),),
                   note="bipod up or down, closest wins; trigger guard see-through"),
-    "d_garand": Icon(("p_garand.mdl",), ("w_garand.mdl",)),
-    "d_spring": Icon(("p_spring.mdl",), ("w_spring.mdl",)),
+    "d_garand": Icon(("p_garand.mdl",), ("w_garand.mdl",), v_part=VPart("v_garand.mdl", (12, 44), (24, 7, 30.5, 10.75)),
+                     note="trigger guard and trigger from the v_ model"),
+    "d_spring": Icon(("p_spring.mdl",), ("w_spring.mdl",), v_part=VPart("v_spring.mdl", (12, 44), (25.5, 8, 29.25, 11)),
+                     note="trigger guard and trigger from the v_ model"),
     "d_m1carbine": Icon(("p_m1carb.mdl",), ("w_m1carb.mdl",), see_through=(("p_m1carbine.bmp", 102, 47),),
                         note="trigger guard see-through"),
     "d_fcarbine": Icon(("p_fcarb.mdl",), ("w_fcarb.mdl",), note="folding-stock carbine"),
@@ -176,14 +226,22 @@ ICONS = {
                       note="turned: the grooves level"),
     "d_amerknife": Icon(("p_amerk.mdl",), ("w_amerk.mdl",)),
     # Axis
-    "d_kar": Icon(("p_k98.mdl",), ("w_98k.mdl",), clip_tip=True, note="bayonet tip clipped, as Valve's icon"),
-    "d_scopedkar": Icon(("p_k98s.mdl",), ("w_scoped98k.mdl",)),
-    "d_k43": Icon(("p_k43.mdl",), ("w_k43.mdl",), barrel_top=7,
-                  note="barrel top towards the middle line, as Valve's, raised so the stock fits"),
+    "d_kar": Icon(("p_k98.mdl",), ("w_98k.mdl",), clip_tip=True, v_part=VPart("v_98k.mdl", (12, 44), (26, 7.5, 30.5, 11)),
+                  note="bayonet tip clipped, as Valve's icon; trigger guard and trigger from the v_ model"),
+    "d_scopedkar": Icon(("p_k98s.mdl",), ("w_scoped98k.mdl",),
+                        v_part=VPart("v_scoped98k.mdl", (12, 44), (26, 10.5, 30.5, 14)),
+                        note="trigger guard and trigger from the v_ model"),
+    "d_k43": Icon(("p_k43.mdl",), ("w_k43.mdl",), barrel_top=7, v_part=VPart("v_k43.mdl", (8, 40), (25.5, 7.5, 30.5, 11)),
+                  note="barrel top towards the middle line, as Valve's, raised so the stock fits; "
+                       "trigger guard and trigger from the v_ model"),
     "d_mp40": Icon(("p_mp40.mdl",), ("w_mp40.mdl",), barrel_top=6, cut_below=True,
-                   note="barrel at Valve's height; the longer magazine runs off the bottom"),
+                   skin_art=(SkinArt("p_mp40.bmp", (86, 46, 114, 70), (88, 0, 156, 66), (2.5, -5.0)),),
+                   note="barrel at Valve's height; the longer magazine runs off the bottom; "
+                        "the skin's unused trigger guard and trigger drawn in front of the grip"),
     "d_mp44": Icon(("p_stg44.mdl",), ("w_mp44.mdl",), barrel_top=7, cut_below=True,
-                   note="barrel at Valve's height; the longer magazine runs off the bottom"),
+                   v_part=VPart("v_mp44.mdl", (22, 54), (35.25, 11.25, 38.75, 15)),
+                   note="barrel at Valve's height; the longer magazine runs off the bottom; "
+                        "trigger from the v_ model"),
     # p_fg42.mdl and p_bren.mdl are left out: both carry p_bar.bmp, BAR leftovers.
     "d_fg42": Icon(("p_fg42bu.mdl", "p_fg42bd.mdl"), ("w_fg42.mdl",), see_through=(("p_fg42.bmp", 197, 30),),
                    note="bipod up or down, closest wins; trigger guard see-through"),
@@ -226,7 +284,7 @@ KEEP_UPSCALE = {
     "d_germortar": "a composite (mortar, shell and bipod)",
 }
 
-# ── hud.txt and the stock icon ───────────────────────────────────────────────
+# â”€â”€ hud.txt and the stock icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def hud_entries(dod):
@@ -315,7 +373,7 @@ def bleed(rgba):
     return out
 
 
-# ── geometry and view ────────────────────────────────────────────────────────
+# â”€â”€ geometry and view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def model_triangles(path):
@@ -659,7 +717,15 @@ def cut_under(rgba, bottom):
     return out
 
 
-# ── rasterizer ───────────────────────────────────────────────────────────────
+def cut_columns(rgba, x0, x1, row):
+    """Clears the pixels of columns x0..x1 from `row` down (Icon.cut_part,
+    in the render's pixels)."""
+    out = rgba.copy()
+    out[int(np.ceil(row)):, max(int(np.floor(x0)), 0):int(np.ceil(x1)), 3] = 0
+    return out
+
+
+# â”€â”€ rasterizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def sample_bilinear(tex, u, v):
@@ -733,12 +799,330 @@ def render(tris, basis, kx, ky, ox, oy, w, h, skins, light=None, ambient=AMBIENT
             zbuf[py, px] = z
             col[py, px] = np.clip(texel[:, :3] * shade[:, None], 0, 1)
             cov[py, px] = 1
-    # Box-downsample, colour weighted by coverage.
+    out = downsample(col, cov, ss)
+    return (out, (col, cov)) if hires else out
+
+
+def downsample(col, cov, ss=SS):
+    """The pixel-size RGBA of render's samples: box-downsampled, the colour
+    weighted by coverage."""
+    H, W = cov.shape
+    h, w = H // ss, W // ss
     c4 = col.reshape(h, ss, w, ss, 3) * cov.reshape(h, ss, w, ss, 1)
     a = cov.reshape(h, ss, w, ss).mean((1, 3))
     rgb = c4.mean((1, 3)) / np.maximum(a, 1e-9)[..., None]
-    out = bleed(np.dstack([rgb, a]))
-    return (out, (col, cov)) if hires else out
+    return bleed(np.dstack([rgb, a]))
+
+
+def model_parts(tris, decimals=2):
+    """The model's separate pieces, as lists in model_triangles' format:
+    triangles joined through shared vertex positions (a wire guard modelled
+    on its own is one piece, the receiver another)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    sizes = [len(t[0]) for t in tris]
+    T = sum(sizes)
+    if T == 0:
+        return []
+    pos = np.concatenate([t[0] for t in tris])
+    _, inv = np.unique(np.round(pos.reshape(-1, 3), decimals), axis=0, return_inverse=True)
+    inv = np.asarray(inv).reshape(T, 3)
+    rows, cols = np.repeat(np.arange(T), 3), inv.ravel() + T
+    n = T + int(inv.max()) + 1
+    _, lab = connected_components(coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n)), directed=False)
+    lab = lab[:T]
+    starts = np.concatenate([[0], np.cumsum(sizes)])
+    out = []
+    for c in np.unique(lab):
+        part = []
+        for (v, nrm, uv, tex), s0, s1 in zip(tris, starts[:-1], starts[1:]):
+            sel = lab[s0:s1] == c
+            if sel.any():
+                part.append((v[sel], nrm[sel], uv[sel], tex))
+        out.append(part)
+    return out
+
+
+# wire_lines: a separate part of a gun narrower than WIRE_WIDTH px (at 4x,
+# at its widest) is drawn WIRE_WIDTH wide, so it shows (the PIAT's and the
+# bazooka's wire trigger guards).
+WIRE_WIDTH = 1.0
+WIRE_MIN_LENGTH = 4.0  # px at 4x: a shorter thin bit (a pin seen end-on) isn't a wire
+WIRE_RES = 16  # samples per px the part is measured and widened at
+
+
+def part_mask(part, basis, fit, res=WIRE_RES, pad=0):
+    """(mask, x0, y0): the part's silhouette at `res` samples per px, in a
+    crop whose corner is pixel (x0, y0), `pad` px wider than the part on
+    every side."""
+    kx, ky, ox, oy = fit
+    pts = [(ox + kx * (v @ basis.T)[..., 0], oy - ky * (v @ basis.T)[..., 1]) for v, _, _, _ in part]
+    allx = np.concatenate([p[0].ravel() for p in pts])
+    ally = np.concatenate([p[1].ravel() for p in pts])
+    x0, y0 = int(np.floor(allx.min())) - pad, int(np.floor(ally.min())) - pad
+    x1, y1 = int(np.ceil(allx.max())) + pad, int(np.ceil(ally.max())) + pad
+    img = Image.new("L", ((x1 - x0) * res, (y1 - y0) * res), 0)
+    d = ImageDraw.Draw(img)
+    for xs, ys in pts:
+        for tx, ty in zip((xs - x0) * res, (ys - y0) * res):
+            d.polygon(list(zip(tx.tolist(), ty.tolist())), fill=255)
+    return np.asarray(img) > 0, x0, y0
+
+
+def wire_size(mask, res=WIRE_RES):
+    """(width, length) in px of a part's silhouette: twice its deepest
+    point's distance to the edge, and its longer side."""
+    if not mask.any():
+        return 0.0, 0.0
+    ys, xs = np.nonzero(mask)
+    width = 2 * float(ndimage.distance_transform_edt(np.pad(mask, 1)).max()) / res
+    return width, max(xs.max() - xs.min() + 1, ys.max() - ys.min() + 1) / res
+
+
+def widen(mask, width, target=WIRE_WIDTH, res=WIRE_RES):
+    """`mask` grown on every side until it is `target` px across: a line
+    along the part's own shape, ends rounded."""
+    r = max(target - width, 0) / 2 * res
+    return ndimage.distance_transform_edt(~mask) <= r
+
+
+def wire_lines(hi, tris, basis, fit, skins, masked_names=frozenset(), ss=SS, res=WIRE_RES):
+    """render's samples (`hi`: colour, coverage) with every wire-thin part
+    of `tris` (wire_size under WIRE_WIDTH, at least WIRE_MIN_LENGTH long)
+    widened to a WIRE_WIDTH line from its own silhouette, in its own
+    colour, behind whatever the render already covers. Returns (lit, hi,
+    widened parts' count)."""
+    col, cov = hi
+    H, W = cov.shape
+    col, cov = col.copy(), cov.copy()
+    f = res // ss
+    pad = int(np.ceil(WIRE_WIDTH)) + 1
+    n = 0
+    for part in model_parts(tris):
+        mask, x0, y0 = part_mask(part, basis, fit, res, pad)
+        width, length = wire_size(mask, res)
+        if width >= WIRE_WIDTH or length < WIRE_MIN_LENGTH:
+            continue
+        thick = widen(mask, width, res=res)
+        mh, mw = thick.shape
+        samp = thick[:mh // f * f, :mw // f * f].reshape(mh // f, f, mw // f, f).mean((1, 3)) >= 0.5
+        sy, sx = np.nonzero(samp)
+        sy, sx = sy + y0 * ss, sx + x0 * ss
+        inb = (sy >= 0) & (sy < H) & (sx >= 0) & (sx < W)
+        sy, sx = sy[inb], sx[inb]
+        if not len(sy):
+            continue
+        _, (pc, pv) = render(part, basis, *fit, W // ss, H // ss, skins, masked_names=masked_names, ss=ss, hires=True)
+        own = pv > 0
+        if own.any():
+            _, (iy, ix) = ndimage.distance_transform_edt(~own, return_indices=True)
+            colour = pc[iy[sy, sx], ix[sy, sx]]
+        else:  # thinner than a sample everywhere: the skin's colour, lit flat
+            v, _, uv, tex = part[0]
+            rgba = skins.get(tex.name)
+            rgba = tex.rgba().astype(float) / 255 if rgba is None else rgba
+            c = sample_bilinear(rgba, uv[..., 0].mean(1), uv[..., 1].mean(1))[:, :3].mean(0)
+            colour = np.clip(c * (AMBIENT + DIFFUSE * 0.5), 0, 1)
+        free = cov[sy, sx] == 0
+        col[sy[free], sx[free]] = colour[free] if np.ndim(colour) == 2 else colour
+        cov[sy[free], sx[free]] = 1
+        n += 1
+    return downsample(col, cov, ss), (col, cov), n
+
+
+def texel_to_screen(tris, basis, fit, texture, anchor, min_area=4.0):
+    """The affine map (3, 2) from texel coordinates (u, v, 1) to screen
+    pixels that the triangles of `texture` whose UVs lie in `anchor` (x0,
+    y0, x1, y1 texels) are drawn with, least squares; None when no such
+    triangle faces the view (bigger than `min_area` px on screen)."""
+    kx, ky, ox, oy = fit
+    U, S = [], []
+    for pos, _, uv, tex in tris:
+        if tex.name.lower() != texture.lower():
+            continue
+        t = uv * np.array([tex.width, tex.height])
+        p = pos @ basis.T
+        sx, sy = ox + kx * p[..., 0], oy - ky * p[..., 1]
+        area = np.abs((sx[:, 1] - sx[:, 0]) * (sy[:, 2] - sy[:, 0]) - (sx[:, 2] - sx[:, 0]) * (sy[:, 1] - sy[:, 0]))
+        c = t.mean(1)
+        sel = (c[:, 0] >= anchor[0]) & (c[:, 0] <= anchor[2]) & (c[:, 1] >= anchor[1]) & (c[:, 1] <= anchor[3]) \
+            & (area > min_area)
+        for i in np.nonzero(sel)[0]:
+            U.extend([[t[i, j, 0], t[i, j, 1], 1.0] for j in range(3)])
+            S.extend([[sx[i, j], sy[i, j]] for j in range(3)])
+    if len(U) < 3:
+        return None
+    M = np.linalg.lstsq(np.array(U), np.array(S), rcond=None)[0]
+    return M if abs(np.linalg.det(M[:2])) > 1e-9 else None
+
+
+def skin_art(hi, tris, basis, fit, skins, arts, scale, ss=SS, light=None):
+    """render's samples (`hi`) with each SkinArt drawn in, behind whatever
+    the render already covers, lit as a side facing the viewer. `scale`:
+    the icon's pixels per stock pixel (the offset's unit). Returns (lit,
+    hi, how many were drawn)."""
+    col, cov = hi
+    H, W = cov.shape
+    col, cov = col.copy(), cov.copy()
+    L = np.array(light if light is not None else (-0.35, 0.75, 0.55), float)
+    shade = AMBIENT + DIFFUSE * max(L[2] / np.linalg.norm(L), 0)
+    texes = {t[3].name.lower(): t[3] for t in tris}
+    n = 0
+    for art in arts:
+        tex = texes.get(art.texture.lower())
+        M = texel_to_screen(tris, basis, fit, art.texture, art.anchor) if tex else None
+        if M is None:
+            continue
+        M = M.copy()
+        M[2] += np.array(art.offset, float) * scale
+        x0, y0, x1, y1 = art.art
+        corners = np.array([[x0, y0, 1], [x1, y0, 1], [x1, y1, 1], [x0, y1, 1]], float) @ M
+        sx0, sy0 = np.floor(corners.min(0) * ss).astype(int)
+        sx1, sy1 = np.ceil(corners.max(0) * ss).astype(int)
+        sx0, sy0, sx1, sy1 = max(sx0, 0), max(sy0, 0), min(sx1, W), min(sy1, H)
+        if sx0 >= sx1 or sy0 >= sy1:
+            continue
+        gy, gx = np.mgrid[sy0:sy1, sx0:sx1]
+        pts = np.stack([(gx.ravel() + 0.5) / ss, (gy.ravel() + 0.5) / ss], 1) - M[2]
+        uv = pts @ np.linalg.inv(M[:2])  # texel coordinates of each sample
+        inside = (uv[:, 0] >= x0) & (uv[:, 0] < x1) & (uv[:, 1] >= y0) & (uv[:, 1] < y1)
+        rgba = skins.get(tex.name)
+        rgba = tex.rgba().astype(float) / 255 if rgba is None else rgba
+        texel = sample_bilinear(rgba, uv[:, 0] / tex.width, uv[:, 1] / tex.height)
+        draw_ = inside & (texel[:, :3].mean(1) * 255 < art.dark)
+        py, px = gy.ravel()[draw_], gx.ravel()[draw_]
+        free = cov[py, px] == 0
+        col[py[free], px[free]] = np.clip(texel[draw_][free, :3] * shade, 0, 1)
+        cov[py[free], px[free]] = 1
+        n += 1
+    return downsample(col, cov, ss), (col, cov), n
+
+
+# ── guards and triggers from the first-person model ──────────────────────────
+
+# A v_ model's arms: left out, only the gun is matched and drawn.
+V_HANDS = re.compile(r"hand|sleeve", re.I)
+# A view model's layout: the muzzle along +X, the top of the gun towards +Z.
+V_MUZZLE, V_UP = (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+V_SCALES = (0.5, 2.0)  # the v_ gun's size, relative to the p_ one's, searched in
+_V_CACHE = {}
+
+
+def v_gun(path):
+    """The gun of a v_ model (its arms dropped), cached: [tris]."""
+    if path not in _V_CACHE:
+        _V_CACHE[path] = [t for t in model_triangles(path) if not V_HANDS.search(t[3].name)]
+    return _V_CACHE[path]
+
+
+def v_side_view(angle):
+    """A view model's side view, tilted by `angle` degrees (side_view's,
+    in the view model's own layout)."""
+    right, up = np.array(V_MUZZLE, float), np.array(V_UP, float)
+    r = np.radians(angle)
+    rr, uu = np.cos(r) * right + np.sin(r) * up, -np.sin(r) * right + np.cos(r) * up
+    return np.array([rr, uu, np.cross(rr, uu)])
+
+
+def v_level_view(tris):
+    """The view model's side view with the end of its barrel level, as
+    level_view makes the icon's."""
+    w, h = LEVEL_SIZE
+    angle = 0.0
+    for _ in range(3):
+        basis = v_side_view(angle)
+        cov = silhouette(tris, basis, *fit_transform(tris, basis, (4, 4, w - 4, h - 4)), w, h)
+        angle += float(np.degrees(np.arctan(barrel_axis_slope(cov))))
+    return v_side_view(angle)
+
+
+def match_v_model(vtris, vbasis, target, window, k_ref, scales=V_SCALES, steps=25):
+    """(fit, IoU): the scale and offset that line the v_ gun's silhouette
+    up best with `target` (the icon's silhouette, bool (h, w)) inside the
+    columns `window` (x0, x1 in icon px): the v_ model is built to another
+    size and its stock or barrel may differ, so only the grip and the
+    receiver above it are compared. Scales are tried between `scales` x
+    `k_ref` (the icon's own pixels per unit); for each, every offset at
+    once (by FFT correlation), then finer round the best scale."""
+    h, w = target.shape
+    win = np.zeros((h, w), bool)
+    win[:, max(int(window[0]), 0):min(int(window[1]), w)] = True
+    A = target & win
+    if not A.any():
+        return None, 0.0
+    H2, W2 = 3 * h, 3 * w
+    big = np.zeros((2, H2, W2))
+    big[0, h:2 * h, w:2 * w], big[1, h:2 * h, w:2 * w] = A, win
+    FA, FW = np.fft.rfft2(big[0]), np.fft.rfft2(big[1])
+    pts = np.concatenate([t[0].reshape(-1, 3) for t in vtris]) @ vbasis.T
+    lo, hi = pts[:, :2].min(0), pts[:, :2].max(0)
+
+    def best_at(s):
+        k = k_ref * s
+        ox0, oy0 = W2 / 2 - k * (lo[0] + hi[0]) / 2, H2 / 2 + k * (lo[1] + hi[1]) / 2
+        B = silhouette(vtris, vbasis, k, k, ox0, oy0, W2, H2, ss=1) >= 0.5
+        FB = np.conj(np.fft.rfft2(B.astype(float)))
+        ov = np.fft.irfft2(FA * FB, s=(H2, W2))
+        bw = np.fft.irfft2(FW * FB, s=(H2, W2))
+        iou = ov / np.maximum(A.sum() + bw - ov, 1)
+        dy, dx = np.unravel_index(np.argmax(iou), iou.shape)
+        # a shift past half the canvas is the other way round
+        sx, sy = (dx + W2 // 2) % W2 - W2 // 2, (dy + H2 // 2) % H2 - H2 // 2
+        return float(iou[dy, dx]), (k, k, ox0 + sx - w, oy0 + sy - h)
+
+    grid = np.exp(np.linspace(np.log(scales[0]), np.log(scales[1]), steps))
+    score, s = max((best_at(s)[0], s) for s in grid)
+    step = grid[1] / grid[0]
+    fine = s * step ** np.linspace(-1, 1, 9)
+    score, fit = max((best_at(s) for s in fine), key=lambda r: r[0])
+    return fit, score
+
+
+def v_part(hi, tris, basis, fit, vp, dod, style, models_dir, scale, ss=SS):
+    """render's samples (`hi`) with the guard and trigger of `vp`'s v_
+    model drawn in (VPart). Returns (lit, hi, info or None when the model
+    is missing)."""
+    col, cov = hi
+    H, W = cov.shape
+    w, h = W // ss, H // ss
+    path = os.path.join(dod, "models", vp.model)
+    if not os.path.exists(path):
+        return downsample(col, cov, ss), hi, None
+    try:
+        vtris = v_gun(path)
+    except (OSError, MdlError):
+        return downsample(col, cov, ss), hi, None
+    if not vtris:
+        return downsample(col, cov, ss), hi, None
+    vbasis = v_level_view(vtris)
+    target = silhouette(tris, basis, *fit, w, h, ss=2) >= 0.5
+    vfit, score = match_v_model(vtris, vbasis, target, (vp.window[0] * scale, vp.window[1] * scale), fit[0])
+    if vfit is None:
+        return downsample(col, cov, ss), hi, None
+    x0, y0, x1, y1 = (c * scale for c in vp.box)
+    kx, ky, ox, oy = vfit
+    picked = []
+    for v, nrm, uv, tex in vtris:
+        p = v @ vbasis.T
+        cx, cy = ox + kx * p[..., 0].mean(1), oy - ky * p[..., 1].mean(1)
+        sel = (cx >= x0) & (cx <= x1) & (cy >= y0) & (cy <= y1)
+        if sel.any():
+            picked.append((v[sel], nrm[sel], uv[sel], tex))
+    if not picked:
+        return downsample(col, cov, ss), hi, None
+    textures = sorted({id(t[3]): t[3] for t in picked}.values(), key=lambda t: t.name)
+    vskins = hd_skins(textures, style, models_dir)
+    _, vhi = render(picked, vbasis, *vfit, w, h, vskins, ss=ss, hires=True)
+    # a guard's wire bar is thinner than a pixel here too (the K43's)
+    _, (vc, vv), _ = wire_lines(vhi, picked, vbasis, vfit, vskins, ss=ss)
+    col, cov = col.copy(), cov.copy()
+    yy, xx = np.mgrid[0:H, 0:W]
+    inbox = (xx >= x0 * ss) & (xx < x1 * ss) & (yy >= y0 * ss) & (yy < y1 * ss)
+    add = (vv > 0) & inbox & (cov == 0)
+    col[add], cov[add] = vc[add], 1
+    info = {"model": vp.model, "iou": round(score, 2), "scale": round(vfit[0] / fit[0], 3),
+            "tris": sum(len(t[0]) for t in picked)}
+    return downsample(col, cov, ss), (col, cov), info
 
 
 def drop_specks(rgba, min_px=SPECK, corners=True):
@@ -906,7 +1290,7 @@ def soft_finish(lit, col_hi, cov_hi, ss=SS, radius=OUTLINE, colour=OUTLINE_COLOU
     return bleed(out)
 
 
-# ── skins ────────────────────────────────────────────────────────────────────
+# â”€â”€ skins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def esrgan_path():
@@ -982,7 +1366,7 @@ def hd_skins(textures, style, models_dir):
         shutil.rmtree(work, ignore_errors=True)
 
 
-# ── one icon ─────────────────────────────────────────────────────────────────
+# â”€â”€ one icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def candidates(dod, icon):
@@ -1080,11 +1464,20 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     samples = {}  # the last draw's supersamples, for soft_finish
 
     def draw(f):
-        lit, samples["last"] = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts,
-                                      hires=True)
+        lit, hi = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts, hires=True)
+        if gun:
+            lit, hi, samples["wires"] = wire_lines(hi, tris, basis, f, skins, cutouts)
+        if icon.skin_art:
+            lit, hi, samples["skin_art"] = skin_art(hi, tris, basis, f, skins, icon.skin_art, scale)
+        if icon.v_part is not None:
+            lit, hi, samples["v_part"] = v_part(hi, tris, basis, f, icon.v_part, dod, style, models_dir, scale)
+        samples["last"] = hi
         return keep_thin(lit) if gun else lit
 
     def specks(lit):
+        if icon.cut_part:
+            x0, x1, row = icon.cut_part
+            lit = cut_columns(lit, x0 * scale, x1 * scale, row * scale)
         return drop_specks(lit, corners=gun)
 
     fit = fit_transform(tris, basis, box)
@@ -1114,6 +1507,12 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
             "skin": f"{style} ({n_hd} of {len(textures)})" if n_hd else "stock"}
     if cutouts:
         info["see_through"] = sorted(cutouts)
+    if samples.get("wires"):
+        info["wires"] = samples["wires"]
+    if samples.get("skin_art"):
+        info["skin_art"] = samples["skin_art"]
+    if samples.get("v_part"):
+        info["v_part"] = samples["v_part"]
     if icon.turn:
         info["turn"] = icon.turn
     if icon.barrel_top is not None:
@@ -1122,7 +1521,7 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     return img, info
 
 
-# ── the sheet ────────────────────────────────────────────────────────────────
+# â”€â”€ the sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def paint(sheet4, rect, stock_alpha, icon4):
@@ -1279,7 +1678,7 @@ def build(out_dir, only=None, review=None, force=False, log=print):
     return done_icons
 
 
-# ── engine simulation, for the review sheets ─────────────────────────────────
+# â”€â”€ engine simulation, for the review sheets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def gl_bilinear(img, out_w, out_h):

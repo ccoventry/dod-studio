@@ -491,6 +491,138 @@ class SoftEdgeTest(unittest.TestCase):
         self.assertLess((old ^ new).sum(), 0.15 * old.sum())
 
 
+class WireTest(unittest.TestCase):
+    """wire_lines: a part thinner than a pixel becomes a 1 px line (#900)."""
+
+    def test_model_parts_splits_pieces_that_share_no_vertex(self):
+        a, b = box_tris(0, 4), box_tris(6, 9)
+        v = np.concatenate([a[0], b[0]])
+        parts = K.model_parts([(v, np.concatenate([a[1], b[1]]), np.concatenate([a[2], b[2]]), a[3])])
+        self.assertEqual(sorted(sum(len(p[0]) for p in part) for part in parts), [2, 2])
+
+    def test_wire_size_and_widen(self):
+        part = [box_tris(2, 20, 5.0, 5.3)]  # 18 px long, 0.3 px thick
+        m, x0, y0 = K.part_mask(part, np.eye(3), (1, 1, 0, 10), pad=2)
+        w, length = K.wire_size(m)
+        self.assertLess(w, 0.5)
+        self.assertGreater(length, 17)
+        thick = K.widen(m, w)
+        self.assertAlmostEqual(K.wire_size(thick)[0], 1.0, delta=0.15)
+
+    def test_wire_lines_widens_a_wire_but_not_a_bar(self):
+        wire, bar = box_tris(2, 20, 5.0, 5.3), box_tris(2, 20, 0.0, 3.0)
+        for part, widened in ((wire, 1), (bar, 0)):
+            lit, hi = K.render([part], np.eye(3), 1, 1, 0, 12, 24, 16, {}, hires=True)
+            out, (col, cov), n = K.wire_lines(hi, [part], np.eye(3), (1, 1, 0, 12), {})
+            self.assertEqual(n, widened)
+            if widened:
+                self.assertLess(lit[..., 3].max(), 0.5)  # lost at the game's cut before
+                col_a = out[:, 10, 3]
+                self.assertGreaterEqual(col_a.max(), 0.5)
+                # one pixel's worth across, to a sample (SS per pixel) either way
+                self.assertAlmostEqual(col_a.sum(), 1.0, delta=1.01 / K.SS)
+                np.testing.assert_allclose(out[col_a.argmax(), 10, :3], lit[col_a.argmax(), 10, :3], atol=0.1)
+            else:
+                np.testing.assert_array_equal(out, lit)
+
+
+class SkinArtTest(unittest.TestCase):
+    """skin_art: an unused drawing in the skin put beside the part whose
+    art it sits next to (the MP40's guard, #900)."""
+
+    @staticmethod
+    def textured_box():
+        """A 16x8 box on screen at (4..20, 4..12) whose UVs cover the left
+        half (texels 0..16 x 0..8) of a 32x8 skin; the right half holds a
+        dark 4x4 square on light grey, which no triangle uses."""
+        idx = np.zeros((8, 32), np.uint8)
+        idx[2:6, 22:26] = 1
+        pal = np.zeros((256, 3), np.uint8)
+        pal[0], pal[1] = 190, 20
+        tex = Texture("s.bmp", 0, 32, 8, idx, pal)
+        v = np.array([[[4, -4, 0], [20, -4, 0], [20, -12, 0]], [[4, -4, 0], [20, -12, 0], [4, -12, 0]]], float)
+        uv = np.array([[[0, 0], [16, 0], [16, 8]], [[0, 0], [16, 8], [0, 8]]], float) / np.array([32, 8])
+        return [(v, np.tile([0.0, 0.0, 1.0], (2, 3, 1)), uv, tex)]
+
+    def test_texel_to_screen_is_the_parts_own_map(self):
+        M = K.texel_to_screen(self.textured_box(), np.eye(3), (1, 1, 0, 0), "s.bmp", (0, 0, 16, 8))
+        np.testing.assert_allclose(np.array([16, 8, 1.0]) @ M, [20, 12], atol=1e-6)
+        np.testing.assert_allclose(np.array([0, 0, 1.0]) @ M, [4, 4], atol=1e-6)
+        self.assertIsNone(K.texel_to_screen(self.textured_box(), np.eye(3), (1, 1, 0, 0), "s.bmp", (20, 0, 30, 8)))
+
+    def test_skin_art_draws_the_dark_drawing_behind_the_render(self):
+        tris = self.textured_box()
+        lit, hi = K.render(tris, np.eye(3), 1, 1, 0, 0, 40, 16, {}, hires=True)
+        art = K.SkinArt("s.bmp", (20, 0, 28, 8), (0, 0, 16, 8), offset=(2, 0))
+        out, (col, cov), n = K.skin_art(hi, tris, np.eye(3), (1, 1, 0, 0), {}, (art,), scale=1)
+        self.assertEqual(n, 1)
+        # texels 22..26 x 2..6 land at x 26..30 (the box's map) + 2, y 6..10
+        a = out[..., 3]
+        self.assertTrue((a[6:10, 28:32] == 1).all())
+        self.assertEqual(a[6:10, 26].max(), 0)  # the light background isn't drawn (bilinear: half a texel's ramp)
+        self.assertEqual(a[:, 33:].max(), 0)
+        np.testing.assert_allclose(out[8, 30, :3], 20 / 255 * (K.AMBIENT + K.DIFFUSE * 0.55 / np.linalg.norm((-0.35, 0.75, 0.55))), atol=1e-3)
+        np.testing.assert_array_equal(out[4:12, 4:20], lit[4:12, 4:20])  # the render stays in front
+
+    def test_mp40_art_is_in_its_skin(self):
+        (art,) = K.ICONS["d_mp40"].skin_art
+        self.assertEqual(art.texture, "p_mp40.bmp")
+        self.assertTrue(all(0 <= c <= 256 for c in art.art + art.anchor))
+
+
+class CutPartTest(unittest.TestCase):
+    def test_cut_columns_clears_only_its_columns_below_the_row(self):
+        rgba = np.ones((10, 12, 4))
+        out = K.cut_columns(rgba, 4, 8, 6)
+        self.assertEqual(out[6:, 4:8, 3].max(), 0)
+        self.assertTrue((out[:6, :, 3] == 1).all() and (out[:, :4, 3] == 1).all() and (out[:, 8:, 3] == 1).all())
+
+    def test_no_icon_cuts_a_part_by_default(self):
+        # the MP44's shorter magazine is a preview option, not applied
+        self.assertEqual({n for n, i in K.ICONS.items() if i.cut_part}, set())
+
+
+class VPartTest(unittest.TestCase):
+    """v_part: the guard and trigger from the first-person model (#900)."""
+
+    @staticmethod
+    def gun(k=1.0):
+        """A receiver with a grip under it, `k` times the size."""
+        a, b = box_tris(0, 20 * k, 0, 4 * k), box_tris(4 * k, 8 * k, -6 * k, 0)
+        return [a, b]
+
+    def test_match_v_model_finds_the_scale_and_place(self):
+        target = K.silhouette(self.gun(), np.eye(3), 4, 4, 10, 30, 120, 60) >= 0.5
+        fit, score = K.match_v_model(self.gun(2.0), np.eye(3), target, (0, 120), 4, scales=(0.3, 1.0))
+        self.assertGreater(score, 0.9)
+        self.assertAlmostEqual(fit[0] / 2, 1.0, delta=0.04)  # 2 px per unit of the bigger model
+        self.assertAlmostEqual(fit[2], 10, delta=2)
+        self.assertAlmostEqual(fit[3], 30, delta=2)
+
+    def test_v_side_view_puts_the_muzzle_right_and_the_top_up(self):
+        right, up, _ = K.v_side_view(0)
+        np.testing.assert_allclose(right, K.V_MUZZLE)
+        np.testing.assert_allclose(up, K.V_UP)
+
+    def test_a_missing_v_model_changes_nothing(self):
+        tris = self.gun()
+        lit, hi = K.render(tris, np.eye(3), 4, 4, 10, 40, 120, 60, {}, hires=True)
+        vp = K.VPart("v_none.mdl", (0, 30), (0, 0, 30, 15))
+        with tempfile.TemporaryDirectory() as d:
+            out, hi2, info = K.v_part(hi, tris, np.eye(3), (4, 4, 10, 40), vp, d, "ultrasharp", None, 4)
+        self.assertIsNone(info)
+        np.testing.assert_array_equal(hi2[1], hi[1])
+
+    def test_v_parts_in_the_table(self):
+        with_v = {n for n, i in K.ICONS.items() if i.v_part is not None}
+        self.assertEqual(with_v, {"d_garand", "d_kar", "d_scopedkar", "d_k43", "d_spring", "d_mp44"})
+        for n in with_v:
+            vp = K.ICONS[n].v_part
+            self.assertTrue(vp.model.startswith("v_") and vp.model.endswith(".mdl"), n)
+            x0, y0, x1, y1 = vp.box
+            self.assertTrue(vp.window[0] <= x0 < x1 <= vp.window[1] and 0 <= y0 < y1, n)
+
+
 class RecordTest(unittest.TestCase):
     def test_source_for(self):
         with tempfile.TemporaryDirectory() as d:

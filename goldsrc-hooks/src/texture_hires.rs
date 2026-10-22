@@ -137,7 +137,7 @@
 //!         overrides\                           <- single-file picks, win over any style
 //! ```
 //!
-//! `dodstudio_hd_style <name>` (default `ultrasharp`; `GOLDSRC_HOOKS_HD_STYLE`
+//! `ds_hd_style <name>` (default `ultrasharp`; `GOLDSRC_HOOKS_HD_STYLE`
 //! if the cvar can't be registered) picks the style subfolder. It's followed
 //! every frame, but the engine keeps what it has already loaded: a change
 //! reaches walls, detail textures and skies from the next map, and models and
@@ -227,11 +227,11 @@
 //!
 //! ## On and off
 //!
-//! `dodstudio_hd_enabled 1` / `0`, with the same timing as the style. It starts on
+//! `ds_hd_enabled 1` / `0`, with the same timing as the style. It starts on
 //! when there's a `dodstudio_hd` folder (nothing to load otherwise), and
 //! `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` overrides that; see [`starts_on`] for
 //! why the starting value is decided before any `.cfg` runs. Started off, the
-//! hook isn't installed at all until `dodstudio_hd_enabled 1` asks for it, and is then
+//! hook isn't installed at all until `ds_hd_enabled 1` asks for it, and is then
 //! installed between frames on the game's own thread. Turned off, it only
 //! stops replacing: the raised limits and the leftover-texture fix stay.
 //!
@@ -540,7 +540,7 @@ const DECALS_DIR: &str = "dodstudio_hd/decals";
 /// e.g. one texture a particular model got wrong, taken from another style.
 const OVERRIDES: &str = "overrides";
 
-/// `dodstudio_hd_style`: which style subfolder to use. Read every frame (see
+/// `ds_hd_style`: which style subfolder to use. Read every frame (see
 /// [`poll_hd`]); a change applies to whatever loads next. The engine keeps
 /// what it has loaded, so textures on screen stay as they are: walls, detail
 /// textures and skies follow from the next map, models and sprites loaded
@@ -558,7 +558,7 @@ static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
 /// where it hasn't changed costs a hash and nothing else.
 static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
 
-/// `dodstudio_hd_enabled`: HD replacements on (1) or off (0). Same timing as the
+/// `ds_hd_enabled`: HD replacements on (1) or off (0). Same timing as the
 /// style: a change applies to what loads next.
 pub const HD_NAME: &str = console_name!("hd_enabled");
 static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
@@ -569,12 +569,12 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 /// on screen was loaded the other way until the game restarts.
 static CHANGED_MID_SESSION: AtomicBool = AtomicBool::new(false);
 
-/// Called by `commands.rs` once `dodstudio_hd_style` is registered.
+/// Called by `commands.rs` once `ds_hd_style` is registered.
 pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
     STYLE_CVAR.store(cvar, Ordering::Release);
 }
 
-/// Called by `commands.rs` once `dodstudio_hd_enabled` is registered.
+/// Called by `commands.rs` once `ds_hd_enabled` is registered.
 pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
     HD_CVAR.store(cvar, Ordering::Release);
 }
@@ -585,7 +585,7 @@ pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
 ///
 /// Startup is when it has to be decided: the engine loads a few sprites
 /// (muzzle flashes, shell casings) while the game starts, before any `.cfg`
-/// runs, so a `dodstudio_hd_enabled 1` in `movie.cfg` alone would come too late for
+/// runs, so a `ds_hd_enabled 1` in `movie.cfg` alone would come too late for
 /// them.
 pub fn starts_on() -> bool {
     match std::env::var("GOLDSRC_HOOKS_TEXTURE_HIRES") {
@@ -699,8 +699,8 @@ impl<T> Cached<T> {
     }
 }
 
-/// Called every frame (`commands::poll`): follows `dodstudio_hd_enabled` and
-/// `dodstudio_hd_style`. A frame where neither changed costs a float read and
+/// Called every frame (`commands::poll`): follows `ds_hd_enabled` and
+/// `ds_hd_style`. A frame where neither changed costs a float read and
 /// a hash of the style text.
 pub fn poll_hd() {
     let cvar = HD_CVAR.load(Ordering::Acquire);
@@ -792,7 +792,7 @@ struct LastReplaced {
 }
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
-/// `dodstudio_debug_hd_misses`: lists every texture that kept its original this
+/// `ds_debug_hd_misses`: lists every texture that kept its original this
 /// session, and why. Registered in `commands.rs`.
 pub const MISSES_NAME: &str = console_name!("debug_hd_misses");
 pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
@@ -1103,9 +1103,9 @@ fn misses_report(only_map: Option<&str>) -> Vec<String> {
     lines
 }
 
-/// `dodstudio_debug_hd_misses` prints the list, map by map;
-/// `dodstudio_debug_hd_misses <map>` just that map's (e.g. `dod_anzio`);
-/// `dodstudio_debug_hd_misses clear` forgets the misses recorded so far.
+/// `ds_debug_hd_misses` prints the list, map by map;
+/// `ds_debug_hd_misses <map>` just that map's (e.g. `dod_anzio`);
+/// `ds_debug_hd_misses clear` forgets the misses recorded so far.
 pub unsafe extern "C" fn misses_command() {
     let args = misses_args();
     let arg = args.get(1).map(String::as_str);
@@ -1330,7 +1330,7 @@ fn bsp_textures_and_sky(bsp: &[u8]) -> (Vec<String>, Option<String>) {
 /// Called every frame (`commands::poll`). Costs a level-name hash and a walk
 /// of the precache list until one of them changes -- a new map, or more of
 /// the current one loaded -- and then records what the map uses, so
-/// `dodstudio_debug_hd_misses` can list a texture under every map that shares it.
+/// `ds_debug_hd_misses` can list a texture under every map that shares it.
 pub fn poll_map() {
     if !HOOK_ACTIVE.load(Ordering::Relaxed) {
         return;
@@ -3185,7 +3185,7 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         .and_then(|h| h.get(&(record as usize)).copied());
     let keep = same_size && incoming.is_some() && incoming == stored;
     // No hash noted for it: `settings_changed` forgot them all, because
-    // dodstudio_hd_enabled or the style changed since it loaded.
+    // ds_hd_enabled or the style changed since it loaded.
     let refreshed = !keep && same_size && stored.is_none();
     if keep {
         STALE_REUSED.fetch_add(1, Ordering::Relaxed);
@@ -3205,7 +3205,7 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         };
         let what = match (keep, refreshed, same_size) {
             (true, ..) => "identical, reused",
-            (_, true, _) => "reloading: dodstudio_hd_enabled or the style changed since it loaded",
+            (_, true, _) => "reloading: ds_hd_enabled or the style changed since it loaded",
             (_, _, true) => "different pixels, loading this map's own",
             _ => "different size, loading this map's own",
         };
@@ -3735,7 +3735,7 @@ pub fn install() -> Result<(), String> {
     Ok(())
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let detail_limit = &*format!("up to {DETAIL_MAX_SIDE}x{DETAIL_MAX_SIDE}");
     let world = WORLD_SEEN.load(Ordering::Relaxed);

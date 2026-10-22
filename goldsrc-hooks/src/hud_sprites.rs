@@ -1,4 +1,4 @@
-//! `dodstudio_hide_asset` for HUD sprites (#808): the sheets DoD's HUD draws
+//! `ds_map_hide_asset` for HUD sprites (#808): the sheets DoD's HUD draws
 //! in 2D (`sprites/hud_icons.spr`, `clip_bullets.spr`, `hud_mgbarrels.spr`...)
 //! and the icons `sprites/hud.txt` cuts out of them.
 //!
@@ -9,9 +9,9 @@
 //! every icon with its sheet and rectangle, and DoD's HUD code finds icons by
 //! those names (`GetSpriteIndex`), so a user can name one the same way:
 //!
-//! - `dodstudio_hide_asset add sprites/hud_icons.spr`: everything drawn from
+//! - `ds_map_hide_asset add sprites/hud_icons.spr`: everything drawn from
 //!   that sheet.
-//! - `dodstudio_hide_asset add icon_bandage`: that one `hud.txt` entry.
+//! - `ds_map_hide_asset add icon_bandage`: that one `hud.txt` entry.
 //!
 //! ## How
 //!
@@ -445,7 +445,7 @@ pub fn install() {
     }
     unsafe {
         crate::debug::report(&format!(
-            "hud_sprites: {done} of 5 SPR_* pointers in gEngfuncs at {gengfuncs:p} now go through dodstudio_hide_asset (#808)"
+            "hud_sprites: {done} of 5 SPR_* pointers in gEngfuncs at {gengfuncs:p} now go through ds_map_hide_asset (#808)"
         ))
     };
 }
