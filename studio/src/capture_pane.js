@@ -19,7 +19,6 @@ import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
-import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { requestFinishClips, finishSummary } from './finish_clips.js';
 import { syncCommandProfileRow, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
@@ -136,8 +135,17 @@ export function renderTimingDiagram() {
   const initialDelay = numberField('#config-initial-delay', 0);
   const streak = TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS;
 
+  // Initial Delay only applies to patched demos: with Seek Between Clips on,
+  // the hook waits for the demo to load and moves to clip 1 straight away
+  // (native::patch::runtime_batch), so the field and its note are hidden.
+  const seeks = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
+  const delayGroup = document.querySelector('#config-initial-delay-group');
+  if (delayGroup) delayGroup.style.display = seeks ? 'none' : '';
   const note = document.querySelector('#timing-diagram-initial-delay-note');
-  if (note) note.textContent = STRINGS.CAPTURE_CONFIG.timingDiagramInitialDelayNote(initialDelay);
+  if (note) {
+    note.textContent = seeks ? '' : STRINGS.CAPTURE_CONFIG.timingDiagramInitialDelayNote(initialDelay);
+    note.style.display = seeks ? 'none' : '';
+  }
 
   const C = STRINGS.CAPTURE_CONFIG;
   const events = [
@@ -383,8 +391,8 @@ export async function refreshLaunchGuard(state) {
 
   const resolvedState = state || (currentGetState ? currentGetState() : null) || { targetDrives: [], currentScannedDemos: [] };
 
-  const preRollVal = numberField('#config-pre-roll', 2.0);
-  const postRollVal = numberField('#config-post-roll', 0.6);
+  const preRollVal = numberField('#config-pre-roll', 5.0);
+  const postRollVal = numberField('#config-post-roll', 1.0);
   const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
   const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
@@ -712,13 +720,9 @@ async function initStandaloneLaunchButton() {
   const btn = document.querySelector('#btn-launch-standalone-game');
   if (!btn) return;
 
-  // Only useful for iterating on the pipeline itself — most users never need
-  // to open HLAE+DoD with no demo loaded, so this stays hidden outside a
-  // local/debug build.
-  if (!(await isLocalOrDebugBuild())) {
-    btn.style.display = 'none';
-    return;
-  }
+  // Shown in every build: previews and reviews reuse a game Studio started,
+  // and one started with other settings is offered a restart (#666), so
+  // starting the game ahead of them is safe.
 
   async function performLaunch() {
     btn.disabled = true;
@@ -982,6 +986,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
    '#config-record-stop-trail', '#config-initial-delay'].forEach(selector => {
     document.querySelector(selector)?.addEventListener('input', renderTimingDiagram);
   });
+  // Seek Between Clips shows or hides Initial Delay.
+  document.querySelector('#config-hook-runs-batch')?.addEventListener('change', renderTimingDiagram);
   renderTimingDiagram();
   // Checkboxes read by persistAppSettings/buildCapturePayload but with no
   // change listener of their own — same missing-wiring bug as the Timing
@@ -1264,8 +1270,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
     // Empty is 0, "the same as Capture FPS" — resolved by the backend.
     const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRollVal = numberField('#config-pre-roll', 2.0);
-    const postRollVal = numberField('#config-post-roll', 0.6);
+    const preRollVal = numberField('#config-pre-roll', 5.0);
+    const postRollVal = numberField('#config-post-roll', 1.0);
     const recordStartLeadVal = numberField('#config-record-start-lead', 5.0);
     const recordStopTrailVal = numberField('#config-record-stop-trail', 5.0);
     const initialDelayVal = numberField('#config-initial-delay', 3.0);

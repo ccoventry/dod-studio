@@ -149,6 +149,21 @@ pub fn local_git_branch() -> Option<String> {
     git_branch_from(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
 }
 
+/// Whether this build uses Configuration's GoldSrc Hooks DLL override: a
+/// debug build, or one made on this PC (its source tree is readable, as for
+/// [`local_git_branch`]). An installed release always runs the hook DLL it
+/// ships with, so an override saved while testing can't apply out of sight
+/// (the row is hidden there, `hook_dll_row.js`).
+#[tauri::command(async)]
+pub fn hook_dll_override_allowed() -> bool {
+    cfg!(debug_assertions) || local_git_branch().is_some()
+}
+
+/// `path` when this build uses the override, else `None` (the bundled DLL).
+pub(crate) fn allowed_hook_dll(path: Option<String>) -> Option<String> {
+    path.filter(|_| hook_dll_override_allowed())
+}
+
 /// Walks up from `start` to the nearest `.git` and reads its `HEAD`.
 /// Handles a worktree, where `.git` is a file holding `gitdir: <path>`.
 /// A detached HEAD gives the short commit id instead of a branch.
