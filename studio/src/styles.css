@@ -3297,8 +3297,14 @@ button.setup-skip:hover:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: 3px;
   padding: 5px 8px;
-  overflow-x: auto;
-  white-space: nowrap;
+  /* A long path wraps at its folder separators (setup_window.js adds a
+     <wbr> after each), never behind a scrollbar. */
+  overflow-wrap: anywhere;
+}
+
+.setup-path-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .setup-path.empty {
