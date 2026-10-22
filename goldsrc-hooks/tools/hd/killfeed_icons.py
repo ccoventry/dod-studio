@@ -2,7 +2,7 @@
 the HD `weapons*` sheets sprites_hd.py makes.
 
 Valve's kill-feed icons are 89x19-pixel drawings; upscaled 4x (#733) they
-keep their stair steps, and at `dodstudio_deathmsg scale 3` they look soft.
+keep their stair steps, and at `ds_hud_deathmsg scale 3` they look soft.
 This renders each icon from the weapon's own model instead, at the 4x size
 of its hud.txt box, and paints it into that install's 4x HD sheet over the
 upscaled icon. The hook loads the sheet as it loads any HD sprite (keyed by
