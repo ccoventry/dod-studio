@@ -76,10 +76,9 @@ Status can be changed by hand in either direction. A status set by hand shows a 
 
 Buttons:
 
-- **Launch Preview** patches a `<stem>_preview.dem` with a bookmark per highlight and opens it with `viewdemo`.
-- **Generate All Previews** does the patching for every demo without launching.
+- **Launch Preview** opens the demo with `viewdemo`: the original in place when the game can play it (#434), else a patched `<stem>_preview.dem` with a bookmark per highlight.
+- **Launch Game**, beside it, starts the game with no demo, in every build.
 - **View Match Telemetry** jumps to the Demo Analyzer on that demo.
-- **Launch Game (HLAE)** starts the game with no demo. It is hidden outside local and debug builds.
 
 If a game the hook DLL is in is already open, Launch Preview sends it `viewdemo <stem>_preview` over a local pipe (section 5.1) instead of relaunching. Otherwise, if `hl.exe` or HLAE is already running, a dialog offers Force Relaunch, Copy View Command, or Cancel. Before either, a game started with another install or resolution than Studio has now gets its own question, naming what differs: close it and start again, or Cancel to do nothing. Launch Game, Start Capture Batch and Review highlights ask the same (#666). The hook DLL's path isn't compared: HLAE passes it on its own command line and exits after injecting.
 

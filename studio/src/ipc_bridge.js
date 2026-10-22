@@ -433,18 +433,6 @@ export async function killEngineProcesses() {
     });
 }
 
-/** Patches every demo's highlights into its own `<stem>_preview.dem` (grouped
- *  server-side by source demo) without launching HLAE, skipping any demo that
- *  already has one. Resolves to the number of preview demos freshly generated
- *  this call. */
-export async function generateAllPreviews(hlaePath, gamePath, streaks) {
-  return invoke("generate_all_previews", { hlaePath, gamePath, streaks })
-    .catch((err) => {
-      console.error("IPC Execution Error (generate_all_previews):", err);
-      showToast(STRINGS.IPC.batchPreviewFailed(err), 'error');
-      throw err;
-    });
-}
 
 export async function cancelCaptureBatch() {
   return invoke("cancel_capture_batch")

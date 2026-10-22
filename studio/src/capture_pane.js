@@ -19,7 +19,6 @@ import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
-import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { requestFinishClips, finishSummary } from './finish_clips.js';
 import { syncCommandProfileRow, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
@@ -712,13 +711,9 @@ async function initStandaloneLaunchButton() {
   const btn = document.querySelector('#btn-launch-standalone-game');
   if (!btn) return;
 
-  // Only useful for iterating on the pipeline itself — most users never need
-  // to open HLAE+DoD with no demo loaded, so this stays hidden outside a
-  // local/debug build.
-  if (!(await isLocalOrDebugBuild())) {
-    btn.style.display = 'none';
-    return;
-  }
+  // Shown in every build: previews and reviews reuse a game Studio started,
+  // and one started with other settings is offered a restart (#666), so
+  // starting the game ahead of them is safe.
 
   async function performLaunch() {
     btn.disabled = true;

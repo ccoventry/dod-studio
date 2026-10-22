@@ -33,7 +33,7 @@ mod test_support;
 use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
 use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
-    generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
+    kill_engine_processes, launch_demo_preview, launch_obs,
     launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
     send_preview_to_running_game, start_steam, steam_state,
 };
@@ -841,7 +841,6 @@ pub fn run() {
             load_map_overview,
             start_capture_batch,
             launch_demo_preview,
-            generate_all_previews,
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,

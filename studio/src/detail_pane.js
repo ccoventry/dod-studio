@@ -1,6 +1,6 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
+import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
@@ -22,9 +22,6 @@ let currentDemoIdx = null;
 // single recorder (#247). Kept across demos; a demo without that player
 // shows everyone (detail_player_filter.js).
 let detailPlayer = '';
-// Getter supplied by main.js so "Generate All Previews" can aggregate selected
-// streaks across every loaded demo, not just the one currently displayed.
-let currentGetAllDemos = null;
 // Optional callback supplied by main.js — re-runs capture_pane.js's disk
 // space launch guard, since toggling a streak's selection changes the
 // required-bytes side of that comparison. Fired on every renderDetailView()
@@ -41,8 +38,9 @@ let currentOnDirty = null;
 // {team_name} and {opponent}.
 let currentGetProjectTeams = () => null;
 
-export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
-  currentGetAllDemos = getAllDemos;
+// The first argument (every demo) fed Generate All Previews, which a preview
+// that plays the demo in place made unnecessary; main.js still passes it.
+export function initDetailPane(_getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
   if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
@@ -57,7 +55,7 @@ export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getPro
 //
 // `pendingLaunch.run` is a generic no-arg callback so this one shared modal
 // can park intents from other panes too (e.g. capture_pane.js's standalone
-// "Launch Game (HLAE)" button) without each caller needing its own
+// "Launch Game" button) without each caller needing its own
 // duplicate set of click listeners on the same modal buttons.
 let pendingLaunch = null;
 
@@ -110,9 +108,9 @@ function applyProcessModalCopy(forBatch) {
   if (copyBtn) copyBtn.style.display = forBatch ? 'none' : '';
 }
 
-/** Reflects current demo-load state onto the Launch Preview (per-demo) and
- *  Generate All Previews (global) buttons — disabled only when there is no
- *  demo to act on at all. Neither button is gated on highlight selection
+/** Reflects current demo-load state onto the Launch Preview button —
+ *  disabled only when there is no demo to act on at all. It is not gated on
+ *  highlight selection
  *  (see #128): clicking with nothing checked now reaches the backend and
  *  surfaces its own "No highlights selected to preview." error as a toast,
  *  rather than silently no-op'ing with zero feedback. */
@@ -120,11 +118,6 @@ function updatePreviewButtonStates() {
   const launchBtn = document.querySelector('#btn-launch-preview');
   if (launchBtn) {
     launchBtn.disabled = !currentDemo;
-  }
-  const generateAllBtn = document.querySelector('#btn-generate-all-previews');
-  if (generateAllBtn) {
-    const allDemos = currentGetAllDemos ? currentGetAllDemos() : [];
-    generateAllBtn.disabled = (allDemos || []).length === 0;
   }
   if (currentOnSelectionChange) currentOnSelectionChange();
 }
@@ -200,7 +193,6 @@ function deselectAllStreaks() {
 window.addEventListener("DOMContentLoaded", () => {
   const inputMinKills = document.querySelector('#input-min-kills');
   const btnLaunchPreview = document.querySelector('#btn-launch-preview');
-  const btnGenerateAllPreviews = document.querySelector('#btn-generate-all-previews');
 
   if (inputMinKills) {
     inputMinKills.addEventListener('input', () => {
@@ -333,31 +325,6 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (btnGenerateAllPreviews) {
-    btnGenerateAllPreviews.addEventListener('click', async () => {
-      const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim();
-      const hlPath = document.querySelector('#hl-path-input')?.value?.trim();
-      if (!hlaePath || !hlPath) {
-        showToast(STRINGS.HIGHLIGHTS.HLAE_PATH_REQUIRED, 'error');
-        return;
-      }
-      const allDemos = currentGetAllDemos ? currentGetAllDemos() : [];
-      const allHighlights = (allDemos || []).flatMap(d => allPreviewableStreaks(d));
-
-      btnGenerateAllPreviews.disabled = true;
-      const originalLabel = btnGenerateAllPreviews.textContent;
-      btnGenerateAllPreviews.textContent = STRINGS.HIGHLIGHTS.GENERATING;
-      try {
-        const count = await generateAllPreviews(hlaePath, hlPath, allHighlights);
-        showToast(STRINGS.HIGHLIGHTS.generatedPreviews(count), 'success');
-      } catch (err) {
-        // Already toasted by ipc_bridge.js.
-      } finally {
-        btnGenerateAllPreviews.textContent = originalLabel;
-        updatePreviewButtonStates();
-      }
-    });
-  }
 });
 
 /**

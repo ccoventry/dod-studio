@@ -2462,12 +2462,9 @@ pub async fn scan_directory_impl(
 // UI. Each output file is marked with a hidden `.dodstudio_preview` sidecar so
 // it's never mistaken for a real recorded demo.
 //
-// Two entry points share this core:
-//   - `launch_demo_preview`   — single demo, launches HLAE via `+viewdemo`
-//     directly against the patched preview once it's on disk.
-//   - `generate_all_previews` — arbitrary demos in one flat streak list (the
-//     grouping above splits them back out), patched to disk only; the user
-//     loads them manually afterwards.
+// `launch_demo_preview` uses it for a single demo when the game can't play
+// the original in place (#434), then launches HLAE via `+viewdemo` against
+// the patched preview once it's on disk.
 
 fn write_hidden_sidecar(path: &Path) -> std::io::Result<()> {
     use std::fs::OpenOptions;
@@ -2486,8 +2483,8 @@ fn write_hidden_sidecar(path: &Path) -> std::io::Result<()> {
 /// builds a minimal `PatcherConfig` carrying just the fields
 /// `build_hlae_process` reads (hlae_path/game_path/resolution/
 /// goldsrc_hooks_dll_path). `goldsrc_hooks_dll_path` matters only to callers
-/// that actually launch HLAE (`launch_demo_preview`) — `generate_all_previews`
-/// never spawns a process, so it passes `None` here and it's simply unused.
+/// that launch HLAE (`launch_demo_preview`); one that never spawns a process
+/// passes `None`.
 fn resolve_preview_env(
     hlae_path: &str,
     game_path: &str,
@@ -2757,25 +2754,6 @@ pub async fn send_preview_to_running_game(
             }
         }
         Ok(None)
-    }))
-    .await
-}
-
-/// Patches every demo represented in `streaks` into its own bookmarked
-/// `<stem>_preview.dem` without launching HLAE, skipping any demo that
-/// already has one from an earlier run. Resolves to the number *freshly
-/// generated* this call so the frontend can report an accurate completion
-/// toast rather than re-counting demos that didn't need any work.
-#[tauri::command]
-pub async fn generate_all_previews(
-    hlae_path: String,
-    game_path: String,
-    streaks: Vec<SerializedStreak>,
-) -> Result<usize, String> {
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, None)?;
-        let (_jobs, generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        Ok(generated)
     }))
     .await
 }
