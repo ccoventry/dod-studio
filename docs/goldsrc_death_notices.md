@@ -671,7 +671,7 @@ what make it sharp. `SPR_DrawHoles` (`Draw_SpriteFrameHoles`, pre-Anniversary
 `hw+0x3d430`) enables the alpha test and, while `gl_spriteblend` is non-zero,
 `GL_BLEND` with `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`; the alpha function in force
 for the HUD is the engine's default `GL_NOTEQUAL 0` (read live on both builds,
-`dodstudio_debug_status`). So the draw blends whatever alpha the texture has:
+`ds_debug_status`). So the draw blends whatever alpha the texture has:
 an HD kill-feed sheet keeps its file's soft alpha and draws blended even at
 `gl_spriteblend 0` (`hud_sprite_edges.rs`, #841), and how smooth its edges
 are is down to the alpha the sheet carries.

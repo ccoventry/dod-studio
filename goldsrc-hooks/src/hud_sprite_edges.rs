@@ -199,12 +199,12 @@ fn trim_in(trims: &[Trim], sheet: u32, rect: &Wrect) -> Option<Wrect> {
         })
 }
 
-/// How many kill-feed icons lose shared rows, for `dodstudio_debug_status`.
+/// How many kill-feed icons lose shared rows, for `ds_debug_status`.
 pub fn trim_count() -> usize {
     TRIMS.get().map_or(0, Vec::len)
 }
 
-/// The soft sheets for `dodstudio_debug_status`: `weapons1 weapons2`, or
+/// The soft sheets for `ds_debug_status`: `weapons1 weapons2`, or
 /// empty.
 pub fn describe_soft() -> String {
     let soft = SOFT_SHEETS.load(Ordering::Relaxed);
@@ -314,7 +314,7 @@ struct Gl {
 }
 
 /// The alpha function the last blended draw found (and put back), and how
-/// many there were, for `dodstudio_debug_status`.
+/// many there were, for `ds_debug_status`.
 static SEEN_ALPHA_FUNC: AtomicU32 = AtomicU32::new(0);
 static SEEN_ALPHA_REF: AtomicU32 = AtomicU32::new(0);
 static SOFT_DRAWS: AtomicU32 = AtomicU32::new(0);
