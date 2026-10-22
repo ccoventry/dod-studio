@@ -100,6 +100,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
+//!   models around them, which the engine culled from the map's origin
+//!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
 //! - `demo_list_folders`: the `ds_ui_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
@@ -274,6 +277,7 @@ mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_buttons;
+mod spectator_chase_pvs;
 mod spectator_crosshair;
 mod spectator_deathcam;
 mod spectator_eye;
@@ -362,6 +366,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Only restores what a chase camera can see, so on unless asked not to.
+    spectator_chase_pvs::ENABLED
+        .store(env_flag("GOLDSRC_HOOKS_CHASE_PVS", true), Ordering::Relaxed);
     // Restores the pre-Anniversary behaviour on the Anniversary build and
     // does nothing on the pre-Anniversary one, so on unless asked not to.
     frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
