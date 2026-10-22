@@ -51,7 +51,8 @@
 //! through `msglog`'s thunk table, nothing is patched. While
 //! `ds_debug_msglog` watches one of these messages its record sits in
 //! front and asks [`filter`] instead, so the two don't take turns at the head
-//! of the engine's list.
+//! of the engine's list. `center_text` (#677) rides on the same `TextMsg`
+//! handler for the same reason: [`filter`] asks it too.
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -178,6 +179,16 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
             note_hidden(&format!("TextMsg \"{}\"", String::from_utf8_lossy(key)));
             return Some(1);
         }
+        // ds_hud_hide_center_text shares this handler rather than taking
+        // turns with it at the head of the engine's list (#677).
+        if crate::center_text::hide(payload) {
+            return Some(1);
+        }
+        // And ds_spec_hide_text, for the server's own copy of
+        // the camera mode name.
+        if crate::spectator_text::hide_text_msg(payload) {
+            return Some(1);
+        }
         return None;
     }
     if name.eq_ignore_ascii_case(CLAN_TIMER) {
@@ -213,10 +224,11 @@ fn remember(update: impl FnOnce(&mut Last)) {
     }
 }
 
-/// Ends the hold on the countdown's last line, so it goes the moment the
-/// countdown stops instead of 4 s later. Only called while the countdown is
-/// running, when that line is the one the object shows.
-fn end_countdown_line() -> Result<(), String> {
+/// Ends the hold on the centre-print object's line, so it goes now instead of
+/// 4 s after its post. Called here only while the countdown is running, when
+/// that line is the one the object shows; `center_text` calls it as its cvar
+/// turns on, when any centre line showing is one to end (#677).
+pub(crate) fn end_center_line() -> Result<(), String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
     // Safety: `client_module_base` only returns a base for a mapped module,
     // and it stays mapped for the session.
@@ -251,7 +263,7 @@ fn redeliver(hide: bool) {
                 let sent = if hide { 0 } else { left };
                 let result = deliver(CLAN_TIMER, &mut [sent]);
                 let line = if hide {
-                    match end_countdown_line() {
+                    match end_center_line() {
                         Ok(()) => ", its last line cleared".to_string(),
                         Err(why) => format!(", its last line stays up to 4 s: {why}"),
                     }
