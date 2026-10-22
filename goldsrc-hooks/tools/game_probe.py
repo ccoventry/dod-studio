@@ -754,7 +754,9 @@ def run(args):
                 # A console left open by a stray key would cover what the
                 # grab is for (#894); `--keep-console` or `keep` grabs it as it is.
                 keep = args.keep_console or keep.strip() == "keep"
-                if not keep and not send_commands(pid, CLOSE_CONSOLE):
+                # A short timeout: with no pipe (GOLDSRC_HOOKS_REMOTE=0) the
+                # grab goes ahead after 5 s instead of the default 30.
+                if not keep and not send_commands(pid, CLOSE_CONSOLE, timeout=5):
                     time.sleep(0.3)
                 result["note"] = screen_grab(pid, path)
                 result["ok"] = result["note"] is None
