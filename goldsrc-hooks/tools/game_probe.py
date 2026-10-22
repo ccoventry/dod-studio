@@ -31,13 +31,14 @@ always ends the game it started, and only that one.
     clip <name> [secs] [fps]    record HLAE frames for a few seconds into <run>/<name>/
                                 and a contact sheet <run>/<name>.png (default 2 s, 30 fps);
                                 demo seconds while a demo plays
-    grab <name>                 screen capture of the game window (VGUI panels included);
-                                needs focus first
+    grab <name> [keep]          screen capture of the game window (VGUI panels included);
+                                needs focus first. Closes the console window first
+                                (`hideconsole`), unless `keep` or --keep-console
     focus                       bring the game window to the front (25th Anniversary
                                 frames are black while it's behind other windows)
     key <name>                  press and release one key in the game window: esc,
                                 enter, tab, space, backquote, backspace, up, down,
-                                left, right, f1..f12, or a letter
+                                left, right, alt, f1..f12, or a letter
                                 or digit. Focuses the game first, and refuses unless
                                 the game's window really is in front
     click <x> <y> [2]           left-click at a point in the game window, in the same
@@ -389,6 +390,10 @@ def focus_window(pid):
     hwnd = game_hwnd(pid)
     if not hwnd:
         return "no visible window"
+    # Already in front: no Alt press, which the game would see. In a POV demo
+    # an Alt press opens the console without the hook's fix (#894).
+    if user32.GetForegroundWindow() == hwnd:
+        return "foreground"
     # Windows only hands the foreground to the process that has input; a
     # synthetic Alt press satisfies that rule (the usual workaround).
     user32.keybd_event(0x12, 0, 0, 0)
@@ -402,7 +407,14 @@ def focus_window(pid):
 # Virtual-key codes for the `key` step. Letters and digits map to themselves.
 KEYS = {"esc": 0x1B, "enter": 0x0D, "tab": 0x09, "space": 0x20, "backquote": 0xC0,
         "backspace": 0x08, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "alt": 0x12,
         **{f"f{n}": 0x6F + n for n in range(1, 13)}}
+
+
+# Closes the console window before a grab. A menu the console came up with
+# stays: no engine command closes only that, and `toggleconsole` closes
+# neither reliably when sent from here.
+CLOSE_CONSOLE = ["hideconsole"]
 
 
 def press_key(pid, name, focus=True):
@@ -833,7 +845,15 @@ def run(args):
                 if err is None:
                     report["shots"].append(str(out / f"{name}.png"))
             elif kind == "grab":
-                path = out / f"{rest}.png"
+                name, _, keep = rest.partition(" ")
+                path = out / f"{name}.png"
+                # A console left open by a stray key would cover what the
+                # grab is for (#894); `--keep-console` or `keep` grabs it as it is.
+                keep = args.keep_console or keep.strip() == "keep"
+                # A short timeout: with no pipe (GOLDSRC_HOOKS_REMOTE=0) the
+                # grab goes ahead after 5 s instead of the default 30.
+                if not keep and not send_commands(pid, CLOSE_CONSOLE, timeout=5):
+                    time.sleep(0.3)
                 result["note"] = screen_grab(pid, path)
                 result["ok"] = result["note"] is None
                 if result["note"] is None:
@@ -987,6 +1007,8 @@ def main():
                    help="the -game folder beside hl.exe (default dod; a copy such as dod_movies, #402)")
     p.add_argument("--addons", action="store_true",
                    help="add -addons, so dod_addon is read (as Studio does once #412 is merged)")
+    p.add_argument("--keep-console", action="store_true",
+                   help="leave the console as it is before each grab (default: hideconsole first, #894)")
     p.add_argument("--demoedit", action="store_true",
                    help="add -demoedit, as Studio's launch line does")
     p.add_argument("--fullscreen", action="store_true",
