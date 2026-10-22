@@ -14,7 +14,9 @@ use dod::UserMessage;
 use std::collections::{BTreeMap, HashMap};
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: capwindow_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: capwindow_probe <demo>");
     let Ok(bytes) = std::fs::read(&path) else {
         return;
     };

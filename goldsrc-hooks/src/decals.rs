@@ -1,4 +1,4 @@
-//! `dodstudio_clear_decals`: empty the engine's decal pool at runtime.
+//! `ds_map_clear_decals`: empty the engine's decal pool at runtime.
 //!
 //! ## What this replaces
 //!
@@ -42,14 +42,26 @@
 //! Nothing is invented: the loop below is byte-for-byte what `hw+0x4a000`
 //! does, with its `if (flags & mask)` dropped.
 //!
-//! ## Pre-Anniversary only, and loudly so
+//! ## Both engine builds
 //!
-//! The two signatures match the pre-Anniversary `hw.dll` exactly once each.
-//! `R_DecalInit`'s also matches the 25th-Anniversary engine (at a different
-//! address), but the remove-by-flag loop does **not** -- that build compiled it
-//! differently, so `R_DecalUnlink` cannot be recovered from it this way. Since
-//! dod-tools only ever launches the pre-Anniversary movies install
-//! (`docs/` and the two-installs rule), this refuses rather than guesses.
+//! `R_DecalInit`'s signature matches the pre-Anniversary and the 25th
+//! Anniversary `hw.dll` alike (+0x49da0 and +0x2484d0). `R_DecalUnlink` is
+//! found differently in each ([`Build`]):
+//!
+//! - **pre-Anniversary:** through the remove-by-flag loop (+0x4a000), whose
+//!   relative call is `R_DecalUnlink` (+0x49e80), and whose immediates are the
+//!   pool's base and end.
+//! - **25th Anniversary:** that build inlines the unlink into its remove
+//!   loops, so the loop no longer leads anywhere. It still keeps a standalone
+//!   `R_DecalUnlink` (+0x2492a0, called from `R_DecalCreate`), whose first
+//!   instructions work out the decal's index from the pool base
+//!   (`sub ecx, <pool>`) for the decal cache, so the pool base comes from
+//!   there. The end is the base plus the length `R_DecalInit` clears.
+//!
+//! The two agree where it matters: a 28-byte `decal_t`, `psurface` at +4,
+//! `msurface_t::pdecals` at +0x58, a 4096-decal pool, and an unlink that also
+//! invalidates the decal's cache entry. A build matching neither refuses
+//! rather than guesses.
 //!
 //! ## Everything is read out of the instruction stream
 //!
@@ -57,17 +69,18 @@
 //! `gDecalCount` and `R_DecalUnlink` are all immediates or relative calls
 //! inside the two matched functions, and they cross-check each other: both
 //! signatures must agree on the pool base, and the span between base and end
-//! must equal the `memset` length `R_DecalInit` passes.
+//! must equal the `memset` length `R_DecalInit` passes. (On the Anniversary
+//! build the end *is* that length, so there the check is the base alone.)
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("clear_decals");
+pub const NAME: &str = console_name!("map_clear_decals");
 
 /// `hw+0x4a000`, the engine's remove-every-decal-with-this-flag loop. The
 /// wildcards are the pool base, the two relative calls and the pool end.
@@ -79,6 +92,30 @@ const REMOVE_LOOP: &str = "55 8B EC 56 57 8B 7D 08 BE ?? ?? ?? ?? 0F BF 46 16 85
 const POOL_BASE_AT: usize = 9;
 const UNLINK_CALL_AT: usize = 22;
 const POOL_END_AT: usize = 45;
+
+/// The 25th Anniversary `R_DecalUnlink` (`hw+0x2492a0`): its prologue, then
+/// the decal's pool index, `(decal - pool) / 28` by the reciprocal multiply.
+/// The wildcard is the pool base.
+const ANNI_UNLINK: &str = "55 8B EC 56 8B 75 08 B8 93 24 49 92 8B CE 81 E9 ?? ?? ?? ?? F7 E9";
+
+/// Where the pool base (`sub ecx, imm32`) sits in an [`ANNI_UNLINK`] match.
+const ANNI_UNLINK_POOL_AT: usize = 16;
+
+/// Which engine build the pool and `R_DecalUnlink` were found in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Build {
+    PreAnniversary,
+    Anniversary,
+}
+
+impl Build {
+    pub fn name(self) -> &'static str {
+        match self {
+            Build::PreAnniversary => "pre-Anniversary",
+            Build::Anniversary => "25th Anniversary",
+        }
+    }
+}
 
 /// `hw+0x49da0`, `R_DecalInit`. Wildcards: the pool base, the `memset` call and
 /// `gDecalCount`.
@@ -120,8 +157,10 @@ static POOL_END: AtomicUsize = AtomicUsize::new(0);
 static DECAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static UNLINK: AtomicUsize = AtomicUsize::new(0);
 static RESOLVED_BASE: AtomicUsize = AtomicUsize::new(0);
+/// Whether the resolved build is the Anniversary one.
+static ANNIVERSARY: AtomicBool = AtomicBool::new(false);
 
-/// How many decals the last successful clear removed, for `dodstudio_status`.
+/// How many decals the last successful clear removed, for `ds_debug_status`.
 static LAST_CLEARED: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Reads a little-endian `u32` at `address`.
@@ -136,14 +175,17 @@ unsafe fn read_u32(address: usize) -> u32 {
 /// Safety: five mapped, readable bytes.
 unsafe fn call_target(call_site: usize) -> usize {
     let displacement = unsafe { read_u32(call_site + 1) } as i32;
-    call_site.wrapping_add(5).wrapping_add(displacement as usize)
+    call_site
+        .wrapping_add(5)
+        .wrapping_add(displacement as usize)
 }
 
 /// Finds the pool and `R_DecalUnlink` in the loaded engine.
 ///
-/// Every value comes out of the matched instructions, and the two signatures
-/// check each other: they must name the same pool base, and the span the remove
-/// loop walks must be the length `R_DecalInit` clears.
+/// Every value comes out of the matched instructions, and the signatures check
+/// each other: they must name the same pool base, and on the pre-Anniversary
+/// build the span the remove loop walks must be the length `R_DecalInit`
+/// clears.
 pub fn resolve() -> Result<Pool, String> {
     let Some(base) = engine::engine_module_base() else {
         return Err("hw.dll is not loaded yet".to_string());
@@ -159,28 +201,46 @@ pub fn resolve() -> Result<Pool, String> {
 
     // Safety: `engine_module_base` only returns a base for a mapped module,
     // and hw.dll stays mapped for the session.
-    let remove_loop = unsafe { scan::find_unique(base, REMOVE_LOOP) }.map_err(|why| {
-        format!(
-            "could not find the engine's decal remove loop -- {why}. This signature is the \
-             pre-Anniversary hw.dll's; the 25th-Anniversary engine compiles that function \
-             differently and is not supported here"
-        )
-    })?;
     let init = unsafe { scan::find_unique(base, DECAL_INIT) }
         .map_err(|why| format!("could not find R_DecalInit -- {why}"))?;
-
-    // Safety: both addresses are inside the matched spans, which the scan
-    // proved are mapped.
-    let (pool_base, pool_end, unlink, decal_count, cleared_bytes) = unsafe {
+    // Safety: inside the matched span, which the scan proved is mapped.
+    let (decal_count, cleared_bytes, init_pool_base) = unsafe {
         (
-            read_u32(remove_loop + POOL_BASE_AT) as usize,
-            read_u32(remove_loop + POOL_END_AT) as usize,
-            call_target(remove_loop + UNLINK_CALL_AT),
             read_u32(init + INIT_DECAL_COUNT_AT) as usize,
             read_u32(init + INIT_POOL_SIZE_AT) as usize,
+            read_u32(init + INIT_POOL_BASE_AT) as usize,
         )
     };
-    let init_pool_base = unsafe { read_u32(init + INIT_POOL_BASE_AT) } as usize;
+
+    // Safety (all reads below): inside the matched spans.
+    let (pool_base, pool_end, unlink, build) = match unsafe { scan::find_unique(base, REMOVE_LOOP) }
+    {
+        Ok(remove_loop) => unsafe {
+            (
+                read_u32(remove_loop + POOL_BASE_AT) as usize,
+                read_u32(remove_loop + POOL_END_AT) as usize,
+                call_target(remove_loop + UNLINK_CALL_AT),
+                Build::PreAnniversary,
+            )
+        },
+        Err(pre_why) => match unsafe { scan::find_unique(base, ANNI_UNLINK) } {
+            Ok(unlink) => {
+                let pool_base = unsafe { read_u32(unlink + ANNI_UNLINK_POOL_AT) } as usize;
+                (
+                    pool_base,
+                    pool_base.wrapping_add(cleared_bytes),
+                    unlink,
+                    Build::Anniversary,
+                )
+            }
+            Err(anni_why) => {
+                return Err(format!(
+                    "could not find R_DecalUnlink -- the pre-Anniversary remove loop: {pre_why}; \
+                     the 25th Anniversary R_DecalUnlink: {anni_why}"
+                ));
+            }
+        },
+    };
 
     if init_pool_base != pool_base {
         return Err(format!(
@@ -203,9 +263,15 @@ pub fn resolve() -> Result<Pool, String> {
     POOL_END.store(pool_end, Ordering::Release);
     DECAL_COUNT.store(decal_count, Ordering::Release);
     UNLINK.store(unlink, Ordering::Release);
+    ANNIVERSARY.store(build == Build::Anniversary, Ordering::Release);
     RESOLVED_BASE.store(base, Ordering::Release);
 
-    Ok(Pool { base: pool_base, end: pool_end, decal_count, unlink })
+    Ok(Pool {
+        base: pool_base,
+        end: pool_end,
+        decal_count,
+        unlink,
+    })
 }
 
 /// Unlinks and zeroes every decal in the pool, returning how many were in use.
@@ -247,12 +313,23 @@ pub fn clear() -> Result<usize, String> {
     Ok(in_use)
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
+    let build = if ANNIVERSARY.load(Ordering::Relaxed) {
+        Build::Anniversary
+    } else {
+        Build::PreAnniversary
+    };
     match LAST_CLEARED.load(Ordering::Relaxed) {
         usize::MAX => format!("no decal clear has run this session ({NAME} runs one)"),
-        0 => "the last decal clear found the walls already clean".to_string(),
-        n => format!("the last decal clear removed {n} decal(s)"),
+        0 => format!(
+            "the last decal clear found the walls already clean ({} hw.dll)",
+            build.name()
+        ),
+        n => format!(
+            "the last decal clear removed {n} decal(s) ({} hw.dll)",
+            build.name()
+        ),
     }
 }
 
@@ -269,7 +346,10 @@ mod tests {
     /// spelling and `scan::Pattern` is case-insensitive -- so a test that
     /// compared case-sensitively would be testing the spelling, not the bytes.
     fn tokens(pattern: &str) -> Vec<String> {
-        pattern.split_whitespace().map(str::to_ascii_lowercase).collect()
+        pattern
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect()
     }
 
     /// Both patterns have to parse, and neither may start with a wildcard --
@@ -277,10 +357,14 @@ mod tests {
     /// running game.
     #[test]
     fn both_patterns_are_well_formed() {
-        for pattern in [REMOVE_LOOP, DECAL_INIT] {
+        for pattern in [REMOVE_LOOP, DECAL_INIT, ANNI_UNLINK] {
             let tokens = tokens(pattern);
             assert!(tokens.len() > 16, "too short to be unique");
-            assert_ne!(tokens[0].as_str(), "??", "a leading wildcard is rejected by the scanner");
+            assert_ne!(
+                tokens[0].as_str(),
+                "??",
+                "a leading wildcard is rejected by the scanner"
+            );
             for token in &tokens {
                 assert!(
                     token == "??" || u8::from_str_radix(token, 16).is_ok(),
@@ -306,7 +390,27 @@ mod tests {
         assert_eq!(tokens(REMOVE_LOOP)[UNLINK_CALL_AT].as_str(), "e8");
         wildcards(REMOVE_LOOP, UNLINK_CALL_AT + 1, 4, "the unlink call");
         wildcards(DECAL_INIT, INIT_POOL_BASE_AT, 4, "R_DecalInit (pool base)");
-        wildcards(DECAL_INIT, INIT_DECAL_COUNT_AT, 4, "R_DecalInit (gDecalCount)");
+        wildcards(
+            ANNI_UNLINK,
+            ANNI_UNLINK_POOL_AT,
+            4,
+            "the Anniversary R_DecalUnlink (pool base)",
+        );
+        // `81 E9` -- sub ecx, imm32.
+        let anni = tokens(ANNI_UNLINK);
+        assert_eq!(
+            (
+                anni[ANNI_UNLINK_POOL_AT - 2].as_str(),
+                anni[ANNI_UNLINK_POOL_AT - 1].as_str()
+            ),
+            ("81", "e9")
+        );
+        wildcards(
+            DECAL_INIT,
+            INIT_DECAL_COUNT_AT,
+            4,
+            "R_DecalInit (gDecalCount)",
+        );
     }
 
     /// `R_DecalInit`'s `memset` length is a fixed immediate in the pattern, and
@@ -334,18 +438,29 @@ mod tests {
         let remove = tokens(REMOVE_LOOP);
         // `6A 1C` -- push sizeof(decal_t) to memset.
         let push = remove.iter().position(|t| t == "6a").expect("a push imm8");
-        assert_eq!(u8::from_str_radix(&remove[push + 1], 16).unwrap() as usize, DECAL_SIZE);
+        assert_eq!(
+            u8::from_str_radix(&remove[push + 1], 16).unwrap() as usize,
+            DECAL_SIZE
+        );
         // `83 C6 1C` -- add esi, sizeof(decal_t).
         let add = remove
             .windows(2)
             .position(|w| w[0] == "83" && w[1] == "c6")
             .expect("the stride");
-        assert_eq!(u8::from_str_radix(&remove[add + 2], 16).unwrap() as usize, DECAL_SIZE);
+        assert_eq!(
+            u8::from_str_radix(&remove[add + 2], 16).unwrap() as usize,
+            DECAL_SIZE
+        );
     }
 
     #[test]
     fn slots_are_counted_from_the_span() {
-        let pool = Pool { base: 0x1000, end: 0x1000 + 0x1c000, decal_count: 0, unlink: 0 };
+        let pool = Pool {
+            base: 0x1000,
+            end: 0x1000 + 0x1c000,
+            decal_count: 0,
+            unlink: 0,
+        };
         assert_eq!(pool.slots(), 4096);
     }
 

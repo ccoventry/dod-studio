@@ -20,14 +20,21 @@ fn main() {
     let mut seq: Vec<(f32, u32, bool)> = Vec::new(); // time, sequence, is_full
     for entry in demo.directory.entries.iter().skip(1) {
         for frame in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcPacketEntities(_) => seq.push((frame.time, 0, true)),
-                    EngineMessage::SvcDeltaPacketEntities(pe) =>
-                        seq.push((frame.time, pe.delta_sequence.to_u32(), false)),
+                    EngineMessage::SvcDeltaPacketEntities(pe) => {
+                        seq.push((frame.time, pe.delta_sequence.to_u32(), false))
+                    }
                     _ => {}
                 }
             }
@@ -35,7 +42,14 @@ fn main() {
     }
     println!("{} entity-snapshot messages", seq.len());
     let fulls: Vec<_> = seq.iter().filter(|s| s.2).map(|s| s.0).collect();
-    println!("full snapshots at: {:?}", fulls.iter().take(8).map(|t| format!("{t:.1}s")).collect::<Vec<_>>());
+    println!(
+        "full snapshots at: {:?}",
+        fulls
+            .iter()
+            .take(8)
+            .map(|t| format!("{t:.1}s"))
+            .collect::<Vec<_>>()
+    );
 
     let _ = around;
     // The biggest forward time jump is the join; show what the sequence
@@ -43,16 +57,29 @@ fn main() {
     let mut best = (0usize, 0.0f32);
     for (i, w) in seq.windows(2).enumerate() {
         let d = w[1].0 - w[0].0;
-        if d > best.1 { best = (i, d); }
+        if d > best.1 {
+            best = (i, d);
+        }
     }
-    println!("
-largest time jump: {:.2}s", best.1);
+    println!(
+        "
+largest time jump: {:.2}s",
+        best.1
+    );
     let lo = best.0.saturating_sub(4);
     let hi = (best.0 + 6).min(seq.len());
     for i in lo..hi {
         let (t, sq, f) = seq[i];
-        let mark = if i == best.0 { "   <-- last before join" }
-            else if i == best.0 + 1 { "   <-- first after join" } else { "" };
-        println!("   t={t:<9.2} seq={sq:<4} {}{mark}", if f { "FULL" } else { "delta" });
+        let mark = if i == best.0 {
+            "   <-- last before join"
+        } else if i == best.0 + 1 {
+            "   <-- first after join"
+        } else {
+            ""
+        };
+        println!(
+            "   t={t:<9.2} seq={sq:<4} {}{mark}",
+            if f { "FULL" } else { "delta" }
+        );
     }
 }

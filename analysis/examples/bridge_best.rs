@@ -58,7 +58,9 @@ impl Quality {
     /// than in the child saves an 82 MB re-read and a full parse per candidate,
     /// which is what the search actually spends its time on.
     fn plausible(&self) -> bool {
-        if self.frames < 5000 { return false }
+        if self.frames < 5000 {
+            return false;
+        }
         let per = self.bytes as f64 / self.frames as f64;
         (100.0..=400.0).contains(&per) && self.t4.abs_diff(self.t9) <= 2
     }
@@ -79,11 +81,17 @@ fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> Quality {
     while frames < cap && pos + FRAME_HEADER_SIZE <= end {
         let t = bytes[pos];
         let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
-        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { break }
+        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) {
+            break;
+        }
         let frame_start = pos;
         if t != 255 && t != 5 {
-            if first_time.is_nan() { first_time = time }
-            if time + 0.001 < prev_time { backwards += 1 }
+            if first_time.is_nan() {
+                first_time = time
+            }
+            if time + 0.001 < prev_time {
+                backwards += 1
+            }
             prev_time = time;
             last_time = time;
         }
@@ -91,26 +99,64 @@ fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> Quality {
         match t {
             5 | 2 | 255 => {}
             0 | 1 => {
-                if pos + NETWORK_HEADER_ALIGNMENT > end { break }
-                let l = i32::from_le_bytes(bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT].try_into().unwrap());
-                if l < 0 || l as usize > MAX_PAYLOAD { break }
+                if pos + NETWORK_HEADER_ALIGNMENT > end {
+                    break;
+                }
+                let l = i32::from_le_bytes(
+                    bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT]
+                        .try_into()
+                        .unwrap(),
+                );
+                if l < 0 || l as usize > MAX_PAYLOAD {
+                    break;
+                }
                 pos += NETWORK_HEADER_ALIGNMENT + l as usize;
             }
             3 => pos += 64,
             4 => pos += 32,
             6 => pos += 84,
             7 => pos += 8,
-            8 => { if pos + 8 > end { break } let l = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize; pos += 24 + l; }
-            9 => { if pos + 4 > end { break } let l = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize; pos += 4 + l; }
+            8 => {
+                if pos + 8 > end {
+                    break;
+                }
+                let l = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+                pos += 24 + l;
+            }
+            9 => {
+                if pos + 4 > end {
+                    break;
+                }
+                let l = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4 + l;
+            }
             _ => break,
         }
-        if pos > end { break }
+        if pos > end {
+            break;
+        }
         frames += 1;
-        if t == 4 { t4 += 1 }
-        if t == 9 { t9 += 1 }
-        if pos - frame_start > SWALLOW && t != 0 && t != 1 { swallows += 1 }
+        if t == 4 {
+            t4 += 1
+        }
+        if t == 9 {
+            t9 += 1
+        }
+        if pos - frame_start > SWALLOW && t != 0 && t != 1 {
+            swallows += 1
+        }
     }
-    Quality { frames, stop: pos, swallows, backwards, t4, t9, bytes: pos - start, first_time, last_time }
+    Quality {
+        frames,
+        stop: pos,
+        swallows,
+        backwards,
+        t4,
+        t9,
+        bytes: pos - start,
+        first_time,
+        last_time,
+    }
 }
 
 /// Where the intact prefix ends. The walk's break position sits *inside* the
@@ -122,8 +168,12 @@ fn prefix(bytes: &[u8], end: usize) -> (usize, usize, usize, f32) {
     let mut last_time = 0.0f32;
     loop {
         let step = walk(bytes, pos, end, 1);
-        if step.frames == 0 { return (pos, frames, cut, last_time) }
-        if step.last_time > 0.0 { last_time = step.last_time }
+        if step.frames == 0 {
+            return (pos, frames, cut, last_time);
+        }
+        if step.last_time > 0.0 {
+            last_time = step.last_time
+        }
         cut = step.stop;
         pos = step.stop;
         frames += 1;
@@ -133,22 +183,34 @@ fn prefix(bytes: &[u8], end: usize) -> (usize, usize, usize, f32) {
 fn entry0_end(bytes: &[u8], end: usize) -> Option<usize> {
     let mut pos = DEMO_HEADER_SIZE;
     loop {
-        if pos + FRAME_HEADER_SIZE > end { return None }
+        if pos + FRAME_HEADER_SIZE > end {
+            return None;
+        }
         let t = bytes[pos];
         let step = walk(bytes, pos, end, 1);
-        if step.frames == 0 { return None }
+        if step.frames == 0 {
+            return None;
+        }
         pos = step.stop;
-        if t == 5 { return Some(pos) }
+        if t == 5 {
+            return Some(pos);
+        }
     }
 }
 
-fn put_i32(v: &mut Vec<u8>, x: i32) { v.extend_from_slice(&x.to_le_bytes()) }
-fn put_f32(v: &mut Vec<u8>, x: f32) { v.extend_from_slice(&x.to_le_bytes()) }
+fn put_i32(v: &mut Vec<u8>, x: i32) {
+    v.extend_from_slice(&x.to_le_bytes())
+}
+fn put_f32(v: &mut Vec<u8>, x: f32) {
+    v.extend_from_slice(&x.to_le_bytes())
+}
 
 fn dir_entry(o: &mut Vec<u8>, t: i32, d: &str, tt: f32, fc: i32, fo: i32, fl: i32) {
     put_i32(o, t);
     let mut b = [0u8; 64];
-    for (i, c) in d.bytes().take(63).enumerate() { b[i] = c }
+    for (i, c) in d.bytes().take(63).enumerate() {
+        b[i] = c
+    }
     o.extend_from_slice(&b);
     put_i32(o, 0);
     put_i32(o, -1);
@@ -166,8 +228,24 @@ fn build(bytes: &[u8], e0: usize, cut: usize, from: usize, end: usize) -> Vec<u8
     put_i32(&mut out, 0);
     let dir = out.len();
     put_i32(&mut out, 2);
-    dir_entry(&mut out, 0, "LOADING", 0.0, 0, DEMO_HEADER_SIZE as i32, (e0 - DEMO_HEADER_SIZE) as i32);
-    dir_entry(&mut out, 1, "Playback", 0.0, 0, e0 as i32, (dir - e0) as i32);
+    dir_entry(
+        &mut out,
+        0,
+        "LOADING",
+        0.0,
+        0,
+        DEMO_HEADER_SIZE as i32,
+        (e0 - DEMO_HEADER_SIZE) as i32,
+    );
+    dir_entry(
+        &mut out,
+        1,
+        "Playback",
+        0.0,
+        0,
+        e0 as i32,
+        (dir - e0) as i32,
+    );
     out[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].copy_from_slice(&(dir as i32).to_le_bytes());
     out
 }
@@ -193,18 +271,37 @@ fn verify_child(args: &[String]) -> ! {
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
-    if argv.len() > 1 && argv[1] == "--verify" { verify_child(&argv[2..]) }
+    if argv.len() > 1 && argv[1] == "--verify" {
+        verify_child(&argv[2..])
+    }
 
-    let path = argv.get(1).expect("usage: bridge_best <demo> <out.dem> [from]").clone();
-    let out_path = argv.get(2).expect("usage: bridge_best <demo> <out.dem> [from]").clone();
+    let path = argv
+        .get(1)
+        .expect("usage: bridge_best <demo> <out.dem> [from]")
+        .clone();
+    let out_path = argv
+        .get(2)
+        .expect("usage: bridge_best <demo> <out.dem> [from]")
+        .clone();
     let bytes = std::fs::read(&path).expect("read");
-    let dir_off = i32::from_le_bytes(bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].try_into().unwrap()) as usize;
-    let end = if dir_off > 0 && dir_off <= bytes.len() { dir_off } else { bytes.len() };
+    let dir_off = i32::from_le_bytes(
+        bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let end = if dir_off > 0 && dir_off <= bytes.len() {
+        dir_off
+    } else {
+        bytes.len()
+    };
     let e0 = entry0_end(&bytes, end).expect("entry0");
 
     let (broke_at, prefix_frames, cut, prefix_time) = prefix(&bytes, end);
     println!("{path}");
-    println!("  frame area {DEMO_HEADER_SIZE}..{end} ({:.1} MB)", (end - DEMO_HEADER_SIZE) as f64 / 1e6);
+    println!(
+        "  frame area {DEMO_HEADER_SIZE}..{end} ({:.1} MB)",
+        (end - DEMO_HEADER_SIZE) as f64 / 1e6
+    );
     println!("  prefix: {prefix_frames} frames to {prefix_time:.2}s");
     println!("  walk broke at byte {broke_at}; damaged frame starts at {cut} -- cutting there");
 
@@ -232,8 +329,10 @@ fn main() {
     let mut scan = start_scan.max(cut + 1);
     while scan + FRAME_HEADER_SIZE < end && hit.is_none_or(|h| scan < h + WINDOW) {
         if scan >= next_report {
-            eprintln!("  ... at byte {scan} ({:.0}% of the way to the end), {considered} candidates seen so far",
-                100.0 * (scan - cut) as f64 / (end - cut) as f64);
+            eprintln!(
+                "  ... at byte {scan} ({:.0}% of the way to the end), {considered} candidates seen so far",
+                100.0 * (scan - cut) as f64 / (end - cut) as f64
+            );
             next_report = scan + (1 << 22);
         }
         // Cheap reject on the frame header alone: a byte that cannot be a frame
@@ -257,34 +356,58 @@ fn main() {
         considered += 1;
 
         let full = walk(&bytes, scan, end, usize::MAX);
-        if full.stop < end.saturating_sub(64) || full.swallows > 0 || full.backwards > BACKWARDS_OK
-            || full.frames <= best || !full.plausible()
+        if full.stop < end.saturating_sub(64)
+            || full.swallows > 0
+            || full.backwards > BACKWARDS_OK
+            || full.frames <= best
+            || !full.plausible()
         {
             scan += 1;
             continue;
         }
         deep += 1;
-        eprintln!("  verifying offset {scan}: {} frames, {:.0} bytes/frame, t4/t9 {}/{}",
-            full.frames, full.bytes as f64 / full.frames as f64, full.t4, full.t9);
+        eprintln!(
+            "  verifying offset {scan}: {} frames, {:.0} bytes/frame, t4/t9 {}/{}",
+            full.frames,
+            full.bytes as f64 / full.frames as f64,
+            full.t4,
+            full.t9
+        );
 
         let child = std::process::Command::new(&exe)
-            .args(["--verify", &path, &cut.to_string(), &scan.to_string(), &e0.to_string(), &end.to_string()])
+            .args([
+                "--verify",
+                &path,
+                &cut.to_string(),
+                &scan.to_string(),
+                &e0.to_string(),
+                &end.to_string(),
+            ])
             .output();
         match child {
             Ok(o) if o.status.success() => {
                 verified += 1;
-                let frames: usize = String::from_utf8_lossy(&o.stdout).trim().parse().unwrap_or(0);
+                let frames: usize = String::from_utf8_lossy(&o.stdout)
+                    .trim()
+                    .parse()
+                    .unwrap_or(0);
                 if frames > best {
                     if hit.is_some() {
-                        println!("  (this beats the earlier hit, so that one was a false alignment)");
+                        println!(
+                            "  (this beats the earlier hit, so that one was a false alignment)"
+                        );
                     }
                     best = frames;
                     best_from = scan;
                     hit = Some(scan);
                     let cand = build(&bytes, e0, cut, scan, end);
                     std::fs::write(&out_path, &cand).expect("write");
-                    println!("  BEST offset={scan} frames={frames} ({:.2}s -> {:.2}s), {} bytes",
-                        full.first_time, full.last_time, cand.len());
+                    println!(
+                        "  BEST offset={scan} frames={frames} ({:.2}s -> {:.2}s), {} bytes",
+                        full.first_time,
+                        full.last_time,
+                        cand.len()
+                    );
                 }
             }
             Ok(o) if o.status.code().is_none() => crashed += 1,
@@ -293,7 +416,9 @@ fn main() {
         scan += 1;
     }
 
-    println!("\n{considered} offsets passed the quick shape test, {deep} of those walked cleanly to the end, {verified} parsed, {crashed} crashed the parser");
+    println!(
+        "\n{considered} offsets passed the quick shape test, {deep} of those walked cleanly to the end, {verified} parsed, {crashed} crashed the parser"
+    );
     if best > 0 {
         println!("best: offset {best_from}, {best} frames -> {out_path}");
     } else {

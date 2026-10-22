@@ -3,58 +3,106 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(not(target_arch = "wasm32"))]
 use analysis::Analysis;
 #[cfg(not(target_arch = "wasm32"))]
-use filetime::FileTime;
-#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Duration;
-use web_time::SystemTime;
 
 pub mod patch;
+
+/// What a highlight's clip name can say beyond the streak itself (#441).
+pub mod clip_facts;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
+pub mod shared;
 pub mod sys;
 pub mod utils;
-pub mod shared;
 
 mod messages;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod game_handoff;
+
+/// Maps a session crashed on with a known cause, for the next batch's warning
+/// (#207).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash_maps;
+
+/// Caching many demos ahead of time (#569).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_cache;
+
+/// Which demos in a folder recorded more than one map (#624).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_maps_scan;
+/// Splitting a demo that recorded more than one map (#624).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_split;
+
+/// The Demo Auditor's renamer: facts, renames and the undo log (#469).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_rename;
+
+/// Linking a demo folder on another drive into the game folder, so
+/// `viewdemo` can play from it in place (#376).
+#[cfg(windows)]
+pub mod demo_links;
+/// Which match and half each demo of a list is (#685).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod match_groups;
+
+/// Launch Preview without patching (#434, step 2).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod preview_in_place;
+
+/// The HD texture files: what is built, and fetching the upscaler (#372).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hd;
+
+/// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod blender;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
+
+/// A map's overview image and its placement, for the Demo Analyzer (#448).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_overview;
+
+/// Map overviews made from the BSP, for the Overviews page (#371).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod overview;
+
+/// Players tab, "Add a crosshair file…": a made crosshair into the addon
+/// folder's sprites (#842).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crosshair_import;
+/// Who is in a demo, from a small index beside the analyzer cache (#437).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_index;
+/// Configuration > Players and the file the hook DLL reads it from (#428).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_overrides;
+/// The review mode's queue and answers (#623).
+pub mod review_queue;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
 #[cfg(test)]
 mod test_support;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct FileInfo {
-    pub created_at: SystemTime,
-    pub name: String,
-    pub path: String,
-    pub size_bytes: u64,
-}
-
-impl Default for FileInfo {
-    fn default() -> Self {
-        Self {
-            created_at: SystemTime::UNIX_EPOCH,
-            name: String::new(),
-            path: String::new(),
-            size_bytes: 0,
-        }
-    }
-}
+/// The demo file an analysis came from; defined beside the cache it is
+/// saved in, which the hook DLL reads too.
+#[cfg(not(target_arch = "wasm32"))]
+pub use analysis::cache::FileInfo;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer(demo_path: &PathBuf) -> Result<(FileInfo, Analysis), String> {
@@ -72,76 +120,30 @@ where
     let mut file = fs::OpenOptions::new()
         .read(true)
         .open(demo_path)
-        .map_err(|e| format!("Could not open the file: {}", e))?;
+        .map_err(|e| format!("Could not open {}: {}", demo_path.display(), e))?;
 
     let mut bytes: Vec<u8> = vec![];
 
     file.read_to_end(&mut bytes)
-        .map_err(|e| format!("Could not read the file: {}", e))?;
+        .map_err(|e| format!("Could not read {}: {}", demo_path.display(), e))?;
 
     let analysis = Analysis::try_from_bytes_with_progress(bytes.as_slice(), progress_cb)?;
-    let file_info = build_file_info(demo_path)?;
+    let file_info = FileInfo::of(demo_path)?;
 
     Ok((file_info, analysis))
 }
 
+/// Where the analyzer cache lives: `analysis::cache` holds the format.
 #[cfg(not(target_arch = "wasm32"))]
-fn build_file_info(demo_path: &PathBuf) -> Result<FileInfo, String> {
-    let metadata =
-        fs::metadata(demo_path).map_err(|e| format!("Could not read metadata: {}", e))?;
-    let size_bytes = metadata.len();
-    let created_at = FileTime::from_last_modification_time(&metadata);
-    let creation_offset = Duration::new(created_at.unix_seconds() as u64, created_at.nanoseconds());
-    let created_at_system = SystemTime::UNIX_EPOCH + creation_offset;
-
-    Ok(FileInfo {
-        created_at: created_at_system,
-        name: demo_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-            .unwrap_or_default(),
-
-        path: demo_path.to_str().map(String::from).unwrap_or_default(),
-        size_bytes,
-    })
+pub fn analyzer_cache_root() -> PathBuf {
+    crate::shared::paths::get_appdata_dir().join("analyzer_cache")
 }
 
-// Bump whenever `AnalyzerState`/`Player`/related computed fields change, so
-// caches written by an older schema are treated as a miss instead of
-// silently deserializing with new fields missing/defaulted.
+/// The file `demo_path`'s analyzer cache entry lives in, or `None` when the
+/// demo can't be found (the key is its canonical path).
 #[cfg(not(target_arch = "wasm32"))]
-const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 2;
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(serde::Deserialize)]
-struct AnalyzerCacheEntry {
-    size_bytes: u64,
-    modified_unix_secs: u64,
-    file_info: FileInfo,
-    analysis: Analysis,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(serde::Serialize)]
-struct AnalyzerCacheEntryRef<'a> {
-    size_bytes: u64,
-    modified_unix_secs: u64,
-    file_info: &'a FileInfo,
-    analysis: &'a Analysis,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
-    let canonical = fs::canonicalize(demo_path).ok()?;
-    let key = canonical.to_string_lossy();
-    let hash = crate::utils::demo_hasher::fnv1a_hash(key.as_bytes());
-    Some(
-        crate::shared::paths::get_appdata_dir()
-            .join("analyzer_cache")
-            .join(format!("v{}", ANALYZER_CACHE_SCHEMA_VERSION))
-            .join(format!("{:016x}.json", hash)),
-    )
+pub(crate) fn analyzer_cache_path(demo_path: &std::path::Path) -> Option<PathBuf> {
+    analysis::cache::entry_path(&analyzer_cache_root(), demo_path)
 }
 
 /// Same as `run_analyzer_with_progress`, but backed by an on-disk JSON cache
@@ -157,54 +159,128 @@ pub fn run_analyzer_cached<F>(
 where
     F: FnMut(usize, usize),
 {
-    let metadata =
-        fs::metadata(demo_path).map_err(|e| format!("Could not read metadata: {}", e))?;
-    let size_bytes = metadata.len();
-    let modified_unix_secs = metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let cache_path = analyzer_cache_path(demo_path);
-
-    if let Some(cache_path) = &cache_path
-        && let Ok(bytes) = fs::read(cache_path)
-            && let Ok(entry) = serde_json::from_slice::<AnalyzerCacheEntry>(&bytes)
-                && entry.size_bytes == size_bytes && entry.modified_unix_secs == modified_unix_secs {
-                    return Ok((entry.file_info, entry.analysis, true));
-                }
-
-    let (file_info, analysis) = run_analyzer_with_progress(demo_path, progress_cb)?;
-
-    if let Some(cache_path) = &cache_path {
-        write_analyzer_cache_entry(cache_path, size_bytes, modified_unix_secs, &file_info, &analysis);
+    let root = analyzer_cache_root();
+    if let Some((file_info, analysis)) = analysis::cache::load(&root, demo_path) {
+        return Ok((file_info, analysis, true));
     }
-
+    let (file_info, analysis) = run_analyzer_with_progress(demo_path, progress_cb)?;
+    store_in_analyzer_cache(&root, demo_path, &file_info, &analysis);
     Ok((file_info, analysis, false))
 }
 
+/// Deletes the `v<N>` folders under the analyzer cache that an older schema
+/// left: `N` below `current`, and nothing written there for a week. A schema
+/// bump makes every old entry a miss forever, so the folder is dead weight
+/// (359 MB of it on one machine, 2026-09). The week spares an older build
+/// still in use beside this one (an installed release next to a dev build),
+/// whose cache would otherwise be deleted under it every run. Leaves anything
+/// that isn't a `v<N>` folder alone, and a folder whose entries can still be
+/// upgraded to the current schema (`analysis::cache::migrations`): its
+/// demos would need a full parse again without it. Best-effort.
 #[cfg(not(target_arch = "wasm32"))]
-fn write_analyzer_cache_entry(
-    cache_path: &PathBuf,
-    size_bytes: u64,
-    modified_unix_secs: u64,
+fn sweep_stale_analyzer_caches(cache_root: &std::path::Path, current: u32) -> usize {
+    sweep_stale_analyzer_caches_older_than(
+        cache_root,
+        current,
+        STALE_CACHE_AGE,
+        analysis::cache::migrations::upgrades_from,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const STALE_CACHE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sweep_stale_analyzer_caches_older_than(
+    cache_root: &std::path::Path,
+    current: u32,
+    min_age: std::time::Duration,
+    upgradable: impl Fn(u32) -> bool,
+) -> usize {
+    let Ok(entries) = fs::read_dir(cache_root) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(version) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix('v'))
+            .and_then(|v| v.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let idle_long_enough = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age >= min_age);
+        if version < current
+            && !upgradable(version)
+            && idle_long_enough
+            && entry.file_type().is_ok_and(|t| t.is_dir())
+            && fs::remove_dir_all(entry.path()).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Saves an analysis to the cache, and once per run clears out the folders
+/// older schemas left: nothing reads them again, and they had grown to
+/// hundreds of MB.
+#[cfg(not(target_arch = "wasm32"))]
+fn store_in_analyzer_cache(
+    root: &std::path::Path,
+    demo_path: &std::path::Path,
     file_info: &FileInfo,
     analysis: &Analysis,
 ) {
-    if let Some(parent) = cache_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let entry_ref = AnalyzerCacheEntryRef {
-        size_bytes,
-        modified_unix_secs,
-        file_info,
-        analysis,
-    };
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    let sweep_root = root.to_path_buf();
+    SWEPT.call_once(|| {
+        std::thread::spawn(move || {
+            sweep_stale_analyzer_caches(&sweep_root, analysis::cache::SCHEMA_VERSION)
+        });
+    });
     // Best-effort: a cache write failure must never fail the caller.
-    if let Ok(json) = serde_json::to_vec(&entry_ref) {
-        let _ = fs::write(cache_path, json);
+    let _ = analysis::cache::store(root, demo_path, file_info, analysis);
+}
+
+/// Moves a renamed demo's analyzer cache entry from `old_cache` (the entry's
+/// path before the rename, since the key is the demo's canonical path) to
+/// the key of `new_demo`, and points its recorded file name and path at the
+/// new name. Without it the renamed demo is parsed again on its next open,
+/// and the old entry is never read again. Best-effort and silent: a miss
+/// only costs that parse.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn move_analyzer_cache_entry(old_cache: &std::path::Path, new_demo: &std::path::Path) {
+    let Some(new_cache) = analyzer_cache_path(new_demo) else {
+        return;
+    };
+    if new_cache == old_cache {
+        return;
+    }
+    let Ok(bytes) = fs::read(old_cache) else {
+        return;
+    };
+    let Ok(mut entry) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    if let Some(info) = entry.get_mut("file_info").and_then(|i| i.as_object_mut()) {
+        let name = new_demo
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        info.insert("name".into(), name.into());
+        info.insert("path".into(), new_demo.to_string_lossy().to_string().into());
+    }
+    if let Ok(json) = serde_json::to_vec(&entry)
+        && fs::write(&new_cache, json).is_ok()
+    {
+        let _ = fs::remove_file(old_cache);
     }
 }
 
@@ -214,24 +290,16 @@ fn write_analyzer_cache_entry(
 /// ~10-15ms cache path instead of re-parsing. Best-effort and silent on any
 /// failure — cache warming must never affect the caller's own result.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn warm_analyzer_cache(demo_path: &PathBuf, analysis: &Analysis) {
-    let Ok(metadata) = fs::metadata(demo_path) else { return };
-    let size_bytes = metadata.len();
-    let modified_unix_secs = metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let Some(cache_path) = analyzer_cache_path(demo_path) else { return };
-    let Ok(file_info) = build_file_info(demo_path) else { return };
-
-    write_analyzer_cache_entry(&cache_path, size_bytes, modified_unix_secs, &file_info, analysis);
+pub fn warm_analyzer_cache(demo_path: &std::path::Path, analysis: &Analysis) {
+    let Ok(file_info) = FileInfo::of(demo_path) else {
+        return;
+    };
+    store_in_analyzer_cache(&analyzer_cache_root(), demo_path, &file_info, analysis);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-static SESSION_HEADER_WRITTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SESSION_HEADER_WRITTEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Date string (`YYYYMMDD`) `log_markdown` last wrote to, so a session
 /// running past midnight can be detected and cross-referenced between the
@@ -294,7 +362,9 @@ pub fn activity_log_path() -> std::path::PathBuf {
 /// chronological order.
 #[cfg(not(target_arch = "wasm32"))]
 fn prune_old_activity_logs(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut files: Vec<std::path::PathBuf> = entries
         .flatten()
         .map(|e| e.path())
@@ -326,7 +396,8 @@ pub fn log_markdown(msg: &str) {
         let _ = std::fs::create_dir_all(&dir);
         let today = Local::now().format("%Y%m%d").to_string();
         let log_path_md = dir.join(format!("activity_{}.md", today));
-        let is_first_write = !SESSION_HEADER_WRITTEN.swap(true, std::sync::atomic::Ordering::SeqCst);
+        let is_first_write =
+            !SESSION_HEADER_WRITTEN.swap(true, std::sync::atomic::Ordering::SeqCst);
 
         let mut last_date = LAST_LOG_DATE.lock().unwrap_or_else(|e| e.into_inner());
         if is_first_write {
@@ -336,12 +407,28 @@ pub fn log_markdown(msg: &str) {
             // leave a pointer in both files so this doesn't just look like the
             // session stopped mid-file to someone reading yesterday's log.
             let prev_path = dir.join(format!("activity_{}.md", last_date.as_deref().unwrap()));
-            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(&prev_path) {
-                let _ = writeln!(f, "\n(session continues past midnight — see activity_{}.md)\n", today);
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&prev_path)
+            {
+                let _ = writeln!(
+                    f,
+                    "\n(session continues past midnight — see activity_{}.md)\n",
+                    today
+                );
                 let _ = f.sync_all();
             }
-            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(&log_path_md) {
-                let _ = writeln!(f, "(continued from activity_{}.md — same session, crossed midnight)\n", last_date.as_deref().unwrap());
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&log_path_md)
+            {
+                let _ = writeln!(
+                    f,
+                    "(continued from activity_{}.md — same session, crossed midnight)\n",
+                    last_date.as_deref().unwrap()
+                );
                 let _ = f.sync_all();
             }
         }
@@ -355,7 +442,11 @@ pub fn log_markdown(msg: &str) {
         {
             if is_first_write {
                 let time_str = Local::now().format("%Y-%m-%d @ %H:%M %Z").to_string();
-                let _ = writeln!(f, "\n\n========== New Session: {} ====================\n", time_str);
+                let _ = writeln!(
+                    f,
+                    "\n\n========== New Session: {} ====================\n",
+                    time_str
+                );
             }
             let time_str = Local::now().format("%H:%M:%S").to_string();
             let _ = writeln!(f, "* [{}] {}", time_str, msg);
@@ -430,5 +521,58 @@ mod activity_log_tests {
         assert!(path.exists(), "nothing was written to {}", path.display());
         let body = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(body.contains("activity log redirect probe"));
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod analyzer_cache_tests {
+    use super::*;
+    use crate::test_support::Scratch;
+
+    /// Old schema folders idle for the grace period go; the current one, a
+    /// newer one, a recently used one, one that can be upgraded, and anything
+    /// that isn't a `v<N>` folder stay.
+    #[test]
+    fn stale_cache_versions_are_swept() {
+        let root = Scratch::new("analyzer_cache_sweep");
+        for dir in ["v0", "v1", "v2", "v3", "v4", "other"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+            fs::write(root.join(dir).join("x.json"), b"{}").unwrap();
+        }
+        fs::write(root.join("v9"), b"a file, not a folder").unwrap();
+
+        // Just written, so a week's grace keeps everything.
+        assert_eq!(sweep_stale_analyzer_caches(&root, 3), 0);
+        assert!(root.join("v1").is_dir());
+
+        let swept =
+            sweep_stale_analyzer_caches_older_than(&root, 3, std::time::Duration::ZERO, |v| v == 0);
+        assert_eq!(swept, 2);
+        // Its entries upgrade to the current schema instead of a parse.
+        assert!(root.join("v0").is_dir());
+        assert!(!root.join("v1").exists());
+        assert!(!root.join("v2").exists());
+        assert!(root.join("v3").join("x.json").is_file());
+        // A newer build's cache is never this build's to delete.
+        assert!(root.join("v4").is_dir());
+        assert!(root.join("other").is_dir());
+        assert!(root.join("v9").is_file());
+    }
+
+    /// Entries written before the cache moved to `analysis::cache` were named
+    /// with `hl_demo_auditor`'s FNV-1a: the name must not change, or every
+    /// cached demo is analysed again.
+    #[test]
+    fn cache_entries_keep_their_names() {
+        let root = Scratch::new("analyzer_cache_names");
+        let demo = root.join("named.dem");
+        fs::write(&demo, b"demo").unwrap();
+        let canonical = fs::canonicalize(&demo).unwrap();
+        let hash = crate::utils::demo_hasher::fnv1a_hash(canonical.to_string_lossy().as_bytes());
+        assert_eq!(
+            analysis::cache::entry_path(&root, &demo).unwrap(),
+            root.join(format!("v{}", analysis::cache::SCHEMA_VERSION))
+                .join(format!("{hash:016x}.json"))
+        );
     }
 }

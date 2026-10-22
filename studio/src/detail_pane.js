@@ -1,15 +1,27 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses } from './ipc_bridge.js';
+import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
+import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
-import { isRangeModified as isKillRangeModified } from './take_index.js';
+import { ensureSteamReady } from './steam_guard.js';
+import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus, isSkipped, setCuration, CURATION } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { automaticClipName } from './clip_name.js';
+import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
+import { confirmOverLimit } from './packet_entity_limit.js';
+import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
+import { clockFloor, clockRound } from './time_format.js';
+import { refreshAfterTyping } from './input_refresh.js';
+import { statusColor as colorOfStatus } from './status_colors.js';
+import { escapeHtml } from './html.js';
+import { playersOf, matchesPlayer } from './detail_player_filter.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
-// Getter supplied by main.js so "Generate All Previews" can aggregate selected
-// streaks across every loaded demo, not just the one currently displayed.
-let currentGetAllDemos = null;
+// The Player filter's pick (a name, '' for everyone), for a demo with no
+// single recorder (#247). Kept across demos; a demo without that player
+// shows everyone (detail_player_filter.js).
+let detailPlayer = '';
 // Optional callback supplied by main.js — re-runs capture_pane.js's disk
 // space launch guard, since toggling a streak's selection changes the
 // required-bytes side of that comparison. Fired on every renderDetailView()
@@ -22,23 +34,16 @@ let currentOnSelectionChange = null;
 // status, notes), never from a plain re-render, so loading a session or
 // switching the selected demo doesn't falsely flag unsaved changes.
 let currentOnDirty = null;
+// The project's Teams list (#445), for the automatic clip name's
+// {team_name} and {opponent}.
+let currentGetProjectTeams = () => null;
 
-export function initDetailPane(getAllDemos, onSelectionChange, onDirty) {
-  currentGetAllDemos = getAllDemos;
+// The first argument (every demo) fed Generate All Previews, which a preview
+// that plays the demo in place made unnecessary; main.js still passes it.
+export function initDetailPane(_getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
-
-  // The timeline canvas now lives inside the collapsed-by-default Advanced
-  // Diagnostics <details> block, so it has 0 clientWidth/clientHeight (and
-  // therefore never actually draws) any time renderTimeline() runs while
-  // collapsed. Redraw on expand so it isn't stuck blank the first time the
-  // user opens it.
-  const advancedPanel = document.querySelector('#advanced-diagnostics-details');
-  if (advancedPanel) {
-    advancedPanel.addEventListener('toggle', () => {
-      if (advancedPanel.open) renderTimeline(currentDemo);
-    });
-  }
+  if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -50,7 +55,7 @@ export function initDetailPane(getAllDemos, onSelectionChange, onDirty) {
 //
 // `pendingLaunch.run` is a generic no-arg callback so this one shared modal
 // can park intents from other panes too (e.g. capture_pane.js's standalone
-// "Launch Game (HLAE)" button) without each caller needing its own
+// "Launch Game" button) without each caller needing its own
 // duplicate set of click listeners on the same modal buttons.
 let pendingLaunch = null;
 
@@ -103,9 +108,9 @@ function applyProcessModalCopy(forBatch) {
   if (copyBtn) copyBtn.style.display = forBatch ? 'none' : '';
 }
 
-/** Reflects current demo-load state onto the Launch Preview (per-demo) and
- *  Generate All Previews (global) buttons — disabled only when there is no
- *  demo to act on at all. Neither button is gated on highlight selection
+/** Reflects current demo-load state onto the Launch Preview button —
+ *  disabled only when there is no demo to act on at all. It is not gated on
+ *  highlight selection
  *  (see #128): clicking with nothing checked now reaches the backend and
  *  surfaces its own "No highlights selected to preview." error as a toast,
  *  rather than silently no-op'ing with zero feedback. */
@@ -113,11 +118,6 @@ function updatePreviewButtonStates() {
   const launchBtn = document.querySelector('#btn-launch-preview');
   if (launchBtn) {
     launchBtn.disabled = !currentDemo;
-  }
-  const generateAllBtn = document.querySelector('#btn-generate-all-previews');
-  if (generateAllBtn) {
-    const allDemos = currentGetAllDemos ? currentGetAllDemos() : [];
-    generateAllBtn.disabled = (allDemos || []).length === 0;
   }
   if (currentOnSelectionChange) currentOnSelectionChange();
 }
@@ -148,7 +148,7 @@ export function updateStreakVisuals(streak) {
   streak.kill_count = slice.length;
 
   const totalSecs = Math.round(Math.max(slice[slice.length - 1][1] - slice[0][1], 0));
-  streak.duration_string = `${Math.floor(totalSecs / 60)}:${String(totalSecs % 60).padStart(2, '0')}`;
+  streak.duration_string = clockRound(totalSecs);
 
   const parts = slice.map(([, absTime, weapon], i) => {
     // Falls back to a labelled placeholder rather than an empty string so an
@@ -158,23 +158,22 @@ export function updateStreakVisuals(streak) {
     const weaponClean = String(weapon || '').replace(/^Weapon::/, '').trim() || STRINGS.ANALYZER.WEAPON_UNKNOWN;
     if (i === 0) return weaponClean;
     const gapSec = Math.round(Math.max(absTime - slice[i - 1][1], 0));
-    return `(+${Math.floor(gapSec / 60)}:${String(gapSec % 60).padStart(2, '0')}) ${weaponClean}`;
+    return `(+${clockRound(gapSec)}) ${weaponClean}`;
   });
   streak.timeline_string = parts.join(', ');
 }
 
-/** Selects every currently-visible (POV + Min Kills filtered) streak in
+/** Selects every currently-visible (Player + Min Kills filtered) streak in
  *  `currentDemo` — the header checkbox's checked state. Only the rows on
- *  screen. `demo.streaks` holds every player's streaks, and the table shows
- *  the recording player's at or above Min Kills — so selecting the raw list
- *  checked highlights belonging to other players that were never rendered
- *  and could not be unchecked. The batch groups by (demo, target player), so
+ *  screen: selecting the raw list once checked highlights that were never
+ *  rendered and could not be unchecked. The batch groups by (demo, target player), so
  *  each of those became its own chained demo: one 15-row table produced five
  *  passes over the same file. */
 function selectAllVisibleStreaks() {
   if (!currentDemo || !currentDemo.streaks) return;
   currentDemo.streaks.forEach(s => {
-    if (isVisibleStreak(currentDemo, s)) s.selected = true;
+    // A Skip row stays unticked: it's locked out of every batch (#44).
+    if (isVisibleStreak(currentDemo, s) && !isSkipped(s)) s.selected = true;
   });
   renderDetailView(currentDemo, currentDemoIdx);
 }
@@ -194,7 +193,6 @@ function deselectAllStreaks() {
 window.addEventListener("DOMContentLoaded", () => {
   const inputMinKills = document.querySelector('#input-min-kills');
   const btnLaunchPreview = document.querySelector('#btn-launch-preview');
-  const btnGenerateAllPreviews = document.querySelector('#btn-generate-all-previews');
 
   if (inputMinKills) {
     inputMinKills.addEventListener('input', () => {
@@ -220,6 +218,30 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // The game is already open: if DoD Studio started it, its hook DLL takes
+  // console commands, so the preview goes straight to it (#413). Resolves true
+  // when it did; false leaves the caller to show the "already running" prompt.
+  async function sendPreviewToOpenGame(hlaePath, hlPath, highlights) {
+    btnLaunchPreview.disabled = true;
+    const originalLabel = btnLaunchPreview.textContent;
+    btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
+    const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    try {
+      const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
+      if (sent) {
+        showToast(STRINGS.HIGHLIGHTS.sentToRunningGame(sent), 'success');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      // Already toasted by ipc_bridge.js; the prompt still offers a way on.
+      return false;
+    } finally {
+      btnLaunchPreview.textContent = originalLabel;
+      updatePreviewButtonStates();
+    }
+  }
+
   if (btnLaunchPreview) {
     btnLaunchPreview.addEventListener('click', async () => {
       const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim();
@@ -230,6 +252,13 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       if (!currentDemo || !currentDemo.streaks) return;
       const highlights = allPreviewableStreaks(currentDemo);
+      // The game closes on a demo over its entity limit (#207).
+      if (!(await confirmOverLimit([currentDemo], hlPath, { preview: true }))) return;
+      // A game started with other launch settings is never sent the preview
+      // (#666): asked to close it, or stop here.
+      const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+      const launchRequest = { hlae_path: hlaePath, game_path: hlPath, goldsrc_hooks_dll_path: goldsrcHooksDllPath };
+      if (!(await closeGameWithOtherSettings(launchRequest, { button: btnLaunchPreview }))) return;
 
       let engineAlreadyRunning = false;
       try {
@@ -240,10 +269,12 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (engineAlreadyRunning) {
+        if (await sendPreviewToOpenGame(hlaePath, hlPath, highlights)) return;
         requestProcessGuardedLaunch(() => performLaunchPreview(hlaePath, hlPath, highlights));
         return;
       }
 
+      if (!(await ensureSteamReady())) return;
       await performLaunchPreview(hlaePath, hlPath, highlights);
     });
   }
@@ -294,63 +325,39 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (btnGenerateAllPreviews) {
-    btnGenerateAllPreviews.addEventListener('click', async () => {
-      const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim();
-      const hlPath = document.querySelector('#hl-path-input')?.value?.trim();
-      if (!hlaePath || !hlPath) {
-        showToast(STRINGS.HIGHLIGHTS.HLAE_PATH_REQUIRED, 'error');
-        return;
-      }
-      const allDemos = currentGetAllDemos ? currentGetAllDemos() : [];
-      const allHighlights = (allDemos || []).flatMap(d => allPreviewableStreaks(d));
-
-      btnGenerateAllPreviews.disabled = true;
-      const originalLabel = btnGenerateAllPreviews.textContent;
-      btnGenerateAllPreviews.textContent = STRINGS.HIGHLIGHTS.GENERATING;
-      try {
-        const count = await generateAllPreviews(hlaePath, hlPath, allHighlights);
-        showToast(STRINGS.HIGHLIGHTS.generatedPreviews(count), 'success');
-      } catch (err) {
-        // Already toasted by ipc_bridge.js.
-      } finally {
-        btnGenerateAllPreviews.textContent = originalLabel;
-        updatePreviewButtonStates();
-      }
-    });
-  }
 });
 
 /**
  * Whether a streak is one of the rows the Highlights table actually shows.
  *
- * Two filters, and both matter to anything that acts on "all" of them:
+ * Whose highlights `demo.streaks` holds is the scan's decision, the same one
+ * the in-game Highlights tab makes (`analysis::highlights`: a POV demo's
+ * recorder's, an HLTV demo's everyone's; #247 D18, #573). The table only
+ * narrows them, and both filters matter to anything that acts on "all" rows:
  *
- *  1. **The recording player only.** `demo.streaks` holds every player's
- *     streaks — everyone in the server. Gated on `local_player_index` rather
- *     than `demo.is_pov`, because is_pov fires on any demo containing
- *     SvcHltv/SvcDirector messages, which a normal player recording also picks
- *     up when an HLTV caster happens to be spectating. `scan_demo_for_highlights`
- *     already rejects true HLTV proxy files, so a missing index means "no
- *     resolvable owner", not "spectator demo".
+ *  1. **The Player filter,** shown when the rows are every player's.
  *  2. **Min Kills.**
  *
- * Select All uses this too. When it did not, it checked highlights belonging to
- * other players that were never rendered and could not be unchecked — and since
- * the batch builder groups by (demo, target player), each of those became its
- * own chained demo. One fifteen-row table turned into five passes over the same
- * file.
+ * Select All uses this too. When it did not, it checked highlights that were
+ * never rendered and could not be unchecked — and since the batch builder
+ * groups by (demo, target player), each of those became its own chained demo.
+ * One fifteen-row table turned into five passes over the same file.
  */
 function isVisibleStreak(demo, streak, minKills) {
   if (!demo || !streak) return false;
-  if (demo.local_player_index !== null && demo.local_player_index !== undefined) {
-    if (streak.player_index !== demo.local_player_index) return false;
-  }
+  if (listsEveryPlayer(demo) && !matchesPlayer(demo, streak, detailPlayer)) return false;
   const threshold = minKills ?? parseInt(document.querySelector('#input-min-kills')?.value || "1", 10);
   return streak.kill_count >= threshold;
 }
 
-/** Every one of `demo`'s highlights for the recording player, regardless of
+/** The rows are every player's, each naming whose it is: the demo has no
+ *  single recorder (an HLTV demo, or a POV demo whose recorder can't be
+ *  told), which the scan says by leaving `local_player_index` null. */
+function listsEveryPlayer(demo) {
+  return demo.local_player_index === null || demo.local_player_index === undefined;
+}
+
+/** Every one of `demo`'s highlights, regardless of
  *  Min Kills or checkbox selection (minKills 0 bypasses that half of
  *  isVisibleStreak's filter, keeping only the player filter). Previewing is
  *  how you decide what's worth checking in the first place, not a view of
@@ -407,6 +414,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
     return;
   }
 
+  // A demo with no single recorder (an HLTV demo) lists every player's
+  // highlights, so each row says whose it is (#247, D18).
+  const showPlayer = listsEveryPlayer(demo);
+
   const tableWrapper = document.createElement('div');
   tableWrapper.className = 'table-wrapper';
   const table = document.createElement('table');
@@ -418,10 +429,13 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_SEL} <input type="checkbox" id="detail-select-all-cb" title="${STRINGS.HIGHLIGHTS.SELECT_ALL_CB_TITLE}" /></th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILL_RANGE}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILLS}</th>
+        ${showPlayer ? `<th title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
+        <th>${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
+        <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
+        <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
       </tr>
     </thead>
@@ -457,30 +471,24 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
+    // #44: a Skip row is dimmed, unticked and locked.
+    const skipped = isSkipped(streak);
+    if (skipped) {
+      tr.style.opacity = '0.5';
+      streak.selected = false;
+    }
 
-    const durTicks = streak.end_tick - streak.start_tick;
-    const tickrate = demo.tickrate || 100;
-    const durSecs = (durTicks / tickrate).toFixed(1);
-
-    // Time logic
-    const total_seconds = Math.floor(streak.start_tick / (demo.tickrate || 100));
-    const mins = Math.floor(total_seconds / 60);
-    const secs = Math.floor(total_seconds % 60).toString().padStart(2, '0');
-    const timeStr = `${mins}:${secs}`;
+    // Time matches the demo player's clock; see highlight_time.js (#464).
+    const durSecs = highlightDurationSeconds(streak, demo.tickrate).toFixed(1);
+    const timeStr = clockFloor(highlightStartSeconds(streak, demo.tickrate));
 
     // Details: precomputed weapon/timing chain from the backend
     // (e.g. "Rifle (+0:03) Rifle" — first kill weapon + gap + weapon chain).
     const timelineText = streak.timeline_string || STRINGS.HIGHLIGHTS.fallbackKillCount(streak.kill_count);
 
-    // Status badge colours matching HighlightStatus enum
-    const statusColors = {
-      Pending: '#888',
-      Captured: '#4caf50',
-      Rendered: '#2196f3',
-      None: '#555',
-    };
+    // Shared with the Master Demo Queue's columns (status_colors.js, #527).
     const statusLabel = streak.status || STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT;
-    const statusColor = statusColors[statusLabel] || '#888';
+    const statusColor = colorOfStatus(statusLabel);
 
     const maxKillIdx = Math.max((streak.kills || []).length - 1, 0);
     const isRangeModified = isKillRangeModified(streak);
@@ -490,13 +498,17 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // (builder.rs's merge loop) — surfaced so it's obvious at a glance why
     // two rows flipped to Captured together instead of independently.
     const mergedBadge = streak.mergedTakeKey
-      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop())}</span>`
+      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
+      : '';
+
+    const byHandMark = streak.statusByHand
+      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:#aaa;cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
       : '';
 
     tr.innerHTML = `
       <td style="padding: 8px;">${rowNum}</td>
       <td style="padding: 8px;">
-        <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} />
+        <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} ${skipped ? `disabled title="${STRINGS.HIGHLIGHTS.SKIPPED_CB_TITLE}"` : ''} />
       </td>
       <td style="padding: 8px;">
         <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:#ff9800;' : ''}">
@@ -509,25 +521,37 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </div>
       </td>
       <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
+      ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
       <td style="padding: 8px;">${STRINGS.HIGHLIGHTS.secondsSuffix(durSecs)}</td>
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
-            `<option value="${s}" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
+            // Each option in its own colour, not the selected one's (#527).
+            `<option value="${s}" style="color: ${colorOfStatus(s)};" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
           ).join('')}
-        </select>${mergedBadge}
+        </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
-        <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
       </td>
-      <td class="details-cell" title="${timelineText}">${timelineText}</td>
+      <td style="padding: 8px;">
+        <select class="streak-curation-select" style="font-size: 0.85em;">
+          <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
+          <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
+          <option value="${CURATION.MAYBE}" ${streak.curation === CURATION.MAYBE ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_MAYBE}</option>
+          <option value="${CURATION.SKIP}" ${skipped ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_SKIP}</option>
+        </select>
+      </td>
+      <td style="padding: 8px;">
+        <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
+      </td>
+      <td class="details-cell" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>
     `;
 
     const cb = tr.querySelector('.streak-select-cb');
     cb.addEventListener('change', (e) => {
       streak.selected = e.target.checked;
-      renderTimeline(currentDemo);
       updatePreviewButtonStates();
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
@@ -564,10 +588,50 @@ export function renderDetailView(demo, selectedDemoIdx) {
       });
     }
 
+    tr.querySelector('.streak-curation-select').addEventListener('change', (e) => {
+      setCuration(streak, e.target.value);
+      renderDetailView(currentDemo, currentDemoIdx);
+      if (currentOnSelectionChange) currentOnSelectionChange();
+      if (currentOnDirty) currentOnDirty();
+    });
+
     const statusSelect = tr.querySelector('.streak-status-select');
+    // Free in both directions (#105, D9); the mark and the Undo toast are
+    // what keep a hand-set status honest.
+    const afterStatusChange = () => {
+      renderDetailView(currentDemo, currentDemoIdx);
+      if (currentOnSelectionChange) currentOnSelectionChange();
+      if (currentOnDirty) currentOnDirty();
+    };
     statusSelect.addEventListener('change', (e) => {
-      streak.status = e.target.value;
-      statusSelect.style.color = statusColors[e.target.value] || '#888';
+      const previous = setStatusByHand(streak, e.target.value);
+      afterStatusChange();
+      showToast(STRINGS.HIGHLIGHTS.statusSetToast(e.target.value), 'info', 6000, {
+        action: {
+          label: STRINGS.HIGHLIGHTS.UNDO,
+          onClick: () => {
+            restoreStatus(streak, previous);
+            afterStatusChange();
+          },
+        },
+      });
+    });
+
+    // #441: the automatic name shows greyed until a typed one replaces it.
+    const clipNameInput = tr.querySelector('.streak-clip-name-input');
+    clipNameInput.value = streak.clipName || '';
+    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate(), {
+      projectTeams: currentGetProjectTeams(),
+    }).name;
+    clipNameInput.addEventListener('input', (e) => {
+      streak.clipName = e.target.value;
+    });
+    clipNameInput.addEventListener('change', (e) => {
+      const typed = e.target.value.trim();
+      if (typed) streak.clipName = typed;
+      else delete streak.clipName;
+      e.target.value = typed;
+      refreshClipNamePreview();
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
     });
@@ -577,10 +641,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
       streak.notes = e.target.value;
     });
     // Master Queue's tracked badge (master_pane.js) depends on whether this
-    // streak has a note — 'change' (fires on blur/Enter, not per keystroke)
-    // rather than 'input' so typing a note doesn't rebuild the whole Master
-    // Queue table on every character, matching the Kill Range inputs above.
-    notesInput.addEventListener('change', () => {
+    // streak has a note. Refreshed shortly after typing stops, not per
+    // keystroke, so typing doesn't rebuild the whole Master Queue table on
+    // every character -- and not only on 'change', which an undo (Ctrl+Z)
+    // never fires until blur, leaving the badge stale (#535).
+    refreshAfterTyping(notesInput, () => {
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
     });
@@ -593,7 +658,8 @@ export function renderDetailView(demo, selectedDemoIdx) {
   // for the Master Queue's own header checkbox.
   const selectAllHeaderCb = table.querySelector('#detail-select-all-cb');
   if (selectAllHeaderCb) {
-    const visibleStreaks = demo.streaks.filter(s => isVisibleStreak(demo, s, minKills));
+    // Skip rows can't be ticked, so they don't count toward "all ticked".
+    const visibleStreaks = demo.streaks.filter(s => isVisibleStreak(demo, s, minKills) && !isSkipped(s));
     const selectedVisible = visibleStreaks.filter(s => s.selected).length;
     selectAllHeaderCb.checked = visibleStreaks.length > 0 && selectedVisible === visibleStreaks.length;
     selectAllHeaderCb.indeterminate = selectedVisible > 0 && selectedVisible < visibleStreaks.length;
@@ -603,128 +669,35 @@ export function renderDetailView(demo, selectedDemoIdx) {
     });
   }
 
+  if (showPlayer) container.appendChild(playerFilterRow(demo, minKills));
   tableWrapper.appendChild(table);
   container.appendChild(tableWrapper);
-
-  renderTimeline(demo);
 }
 
-function renderTimeline(demo) {
-  const canvas = document.querySelector('#streak-timeline-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const width = canvas.clientWidth || 600;
-  const height = canvas.clientHeight || 100;
-  if (canvas.width !== width) canvas.width = width;
-  if (canvas.height !== height) canvas.height = height;
-
-  ctx.fillStyle = '#1e1e1e';
-  ctx.fillRect(0, 0, width, height);
-
-  if (!demo || !demo.streaks || demo.streaks.length === 0) {
-    ctx.fillStyle = '#666666';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(STRINGS.HIGHLIGHTS.TIMELINE_NO_DATA, width / 2, height / 2);
-    return;
-  }
-
-  const preRollSecs = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-  const postRollSecs = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
-  const tickrate = demo.tickrate || 100;
-  const preRollTicks = preRollSecs * tickrate;
-  const postRollTicks = postRollSecs * tickrate;
-
-  let minTick = Infinity;
-  let maxTick = -Infinity;
-  demo.streaks.forEach(s => {
-    if (s.start_tick - preRollTicks < minTick) minTick = s.start_tick - preRollTicks;
-    if (s.end_tick + postRollTicks > maxTick) maxTick = s.end_tick + postRollTicks;
+/** The Player filter above an HLTV demo's table: everyone, or one player's
+ *  highlights, each with how many Min Kills keeps. */
+function playerFilterRow(demo, minKills) {
+  const players = playersOf(demo, minKills);
+  const row = document.createElement('div');
+  row.className = 'detail-player-filter-row';
+  // Sticky: an HLTV table runs to 150+ rows, and the filter is what shortens it.
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:#1e1e1e;';
+  const label = document.createElement('label');
+  label.htmlFor = 'detail-player-filter';
+  label.textContent = STRINGS.HIGHLIGHTS.PLAYER_FILTER_LABEL;
+  const select = document.createElement('select');
+  select.id = 'detail-player-filter';
+  select.title = STRINGS.HIGHLIGHTS.PLAYER_FILTER_TITLE;
+  select.style.cssText = 'padding:3px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:3px;max-width:260px;';
+  const total = players.reduce((n, p) => n + p.count, 0);
+  const all = new Option(STRINGS.HIGHLIGHTS.playerFilterAll(total), '');
+  select.append(all, ...players.map((p) => new Option(STRINGS.HIGHLIGHTS.playerFilterOption(p.name, p.count), p.name)));
+  select.value = players.some((p) => p.name === detailPlayer) ? detailPlayer : '';
+  select.addEventListener('change', (e) => {
+    detailPlayer = e.target.value || '';
+    renderDetailView(currentDemo, currentDemoIdx);
   });
-
-  if (minTick === Infinity || maxTick === -Infinity || maxTick <= minTick) {
-    minTick = 0;
-    maxTick = 1000;
-  }
-
-  const padding = 20;
-  const usableWidth = width - (padding * 2);
-  const tickSpan = (maxTick - minTick) || 1;
-
-  // Timeline axis
-  ctx.strokeStyle = '#444444';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padding, height - 20);
-  ctx.lineTo(width - padding, height - 20);
-  ctx.stroke();
-
-  ctx.fillStyle = '#888888';
-  ctx.font = '10px monospace';
-  ctx.textAlign = 'left';
-  ctx.fillText(STRINGS.HIGHLIGHTS.tickLabel(minTick), padding, height - 5);
-  ctx.textAlign = 'right';
-  ctx.fillText(STRINGS.HIGHLIGHTS.tickLabel(maxTick), width - padding, height - 5);
-
-  demo.streaks.forEach((streak) => {
-    // Opt-in model, matching the checkbox default and the row-build loop
-    // above — only an explicit `true` counts as selected. `undefined`
-    // covers demos never opened in this view yet (and every streak that
-    // never renders as a checkable row at all, e.g. other players'), and
-    // must render as unselected, not selected.
-    const isSelected = streak.selected === true;
-    const startX = padding + ((streak.start_tick - minTick) / tickSpan) * usableWidth;
-    const endX = padding + ((streak.end_tick - minTick) / tickSpan) * usableWidth;
-    const blockWidth = Math.max(endX - startX, 4);
-
-    const preX = padding + (((streak.start_tick - preRollTicks) - minTick) / tickSpan) * usableWidth;
-    const preWidth = Math.max(startX - preX, 0);
-
-    const postX = endX;
-    const postEndX = padding + (((streak.end_tick + postRollTicks) - minTick) / tickSpan) * usableWidth;
-    const postWidth = Math.max(postEndX - postX, 0);
-
-    // Pre-roll margin
-    ctx.fillStyle = isSelected ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.02)';
-    ctx.fillRect(preX, 15, preWidth, height - 40);
-
-    // Post-roll margin
-    ctx.fillRect(postX, 15, postWidth, height - 40);
-
-    // Core Span block
-    ctx.fillStyle = isSelected ? 'rgba(76, 175, 80, 0.35)' : 'rgba(255, 255, 255, 0.05)';
-    ctx.fillRect(startX, 15, blockWidth, height - 40);
-
-    ctx.strokeStyle = isSelected ? '#4caf50' : '#444444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(startX, 15, blockWidth, height - 40);
-    // Draw outer bounds for margins
-    ctx.strokeStyle = isSelected ? 'rgba(76, 175, 80, 0.4)' : '#333333';
-    ctx.strokeRect(preX, 15, preWidth + blockWidth + postWidth, height - 40);
-
-    // Kill timestamp markers — kills are (tick, abs_time_secs, weapon) tuples
-    if (streak.kills && Array.isArray(streak.kills) && streak.kills.length > 0) {
-      streak.kills.forEach(k => {
-        // k[0] = tick (integer), k[1] = abs_time_secs, k[2] = weapon name
-        const kTick = k[0] !== undefined ? k[0] : streak.start_tick;
-        const kX = padding + ((kTick - minTick) / tickSpan) * usableWidth;
-        ctx.strokeStyle = isSelected ? '#ff4444' : '#773333';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(kX, 15);
-        ctx.lineTo(kX, height - 25);
-        ctx.stroke();
-      });
-    } else {
-      ctx.strokeStyle = isSelected ? '#ff9800' : '#664411';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(startX, 15);
-      ctx.lineTo(startX, height - 25);
-      ctx.stroke();
-    }
-  });
+  row.append(label, select);
+  return row;
 }
 

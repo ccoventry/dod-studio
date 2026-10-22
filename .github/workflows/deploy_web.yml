@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -41,12 +41,14 @@ jobs:
 
       # Version must match the workspace's pinned wasm-bindgen dependency exactly
       # (`wasm-bindgen = "=0.2.126"` under [workspace.dependencies] in the root
-      # Cargo.toml; web-analyzer takes it from there).
-      - name: Install wasm-bindgen CLI
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      # Cargo.toml; web-analyzer takes it from there). Prebuilt, as in ci.yml,
+      # rather than `cargo install` (minutes).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.126
 
       - name: Build web-analyzer (wasm32, release)
-        run: cargo build -p web-analyzer --target wasm32-unknown-unknown --release
+        run: cargo build -p web-analyzer --target wasm32-unknown-unknown --release --locked
 
       - name: Generate JS bindings
         run: |
@@ -54,13 +56,13 @@ jobs:
             target/wasm32-unknown-unknown/release/web_analyzer.wasm
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
       - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: './web-analyzer/www'
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

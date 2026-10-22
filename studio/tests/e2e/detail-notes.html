@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!--
+  Harness for Highlight Details' Notes column (#605): the title and the
+  container renderDetailView fills, and one demo with two highlights, one of
+  them carrying a note with quotes and angle brackets.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>detail_pane.js notes harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <h3 id="detail-demo-title"></h3>
+  <div id="detail-streaks-container" style="width: 1200px"></div>
+
+  <script type="module">
+    import { initDetailPane, renderDetailView } from '/src/detail_pane.js';
+
+    const kill = (t) => ({ time: { real_offset: { secs: t, nanos: 0 }, viewdemo_offset: { secs: t, nanos: 0 }, frame_index: t * 100 }, weapon: 'K98', victim: 'v' });
+    const streak = (notes, t) => ({
+      kill_count: 2, start_index: 0, end_index: 1, selected: false, status: 'None', notes,
+      kills: [kill(t), kill(t + 3)],
+    });
+    const demo = {
+      name: 'test.dem', path: 'C:\demos\test.dem', is_pov: true,
+      streaks: [streak('nice "flick" <then> a 2k through the door, long enough to wrap over a second line', 60), streak('', 300)],
+    };
+    window.__demo = demo;
+    window.__dirty = 0;
+    initDetailPane(() => [demo], () => {}, () => { window.__dirty += 1; });
+    renderDetailView(demo, 0);
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

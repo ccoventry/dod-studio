@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for teams_pane.js (#445) — see tests/e2e/README.md for the
+  general shape. teams_pane.js has no Tauri dependency (it imports only
+  strings.js and project_teams.js), so this needs no IPC mocks: the modal
+  markup copied from index.html's #teams-modal block, the Master Queue's
+  Teams button, and stand-ins for the state main.js owns. `window.__changes`
+  counts onChange calls; `window.__readPaths` records what "Read Their
+  Teams" asked to scan, and that stand-in scan gives those demos teams.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>teams_pane.js test harness</title>
+</head>
+<body>
+  <button id="teams-btn">Teams</button>
+
+  <div id="teams-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 640px; padding: 20px;">
+      <h2>Teams</h2>
+      <div id="teams-unread-row" class="teams-unread-row" hidden>
+        <span id="teams-unread-note"></span>
+        <button id="teams-read-btn">Read Their Teams</button>
+      </div>
+      <table id="teams-table">
+        <tbody id="teams-table-body"></tbody>
+      </table>
+      <button id="teams-close-btn">Close</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initTeamsPane } from '/src/teams_pane.js';
+    import { emptyProjectTeams } from '/src/project_teams.js';
+
+    const demo = (name, allied, axis) => ({
+      name,
+      path: `C:\\demos\\${name}`,
+      teams: [{ side: 'Allies', tag: allied }, { side: 'Axis', tag: axis }],
+    });
+    const demos = [
+      demo('a.dem', 'dicE', 'TEK'),
+      demo('b.dem', 'jover', 'dicE'),
+      demo('c.dem', 'over', '<b>x</b>'),
+      { name: 'old.dem', path: 'C:\\demos\\old.dem', streaks: [] },
+    ];
+    const projectTeams = emptyProjectTeams();
+    window.__projectTeams = projectTeams;
+    window.__changes = 0;
+    window.__readPaths = [];
+
+    initTeamsPane({
+      getDemos: () => demos,
+      getProjectTeams: () => projectTeams,
+      onChange: () => { window.__changes += 1; },
+      onReadMissing: async (paths) => {
+        window.__readPaths.push(...paths);
+        for (const d of demos) {
+          if (paths.includes(d.path)) d.teams = [{ side: 'Allies', tag: 'krod' }, { side: 'Axis', tag: 'dicE' }];
+        }
+      },
+    });
+
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

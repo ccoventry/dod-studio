@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!--
+  Harness for command_suggest.js (#215): one Initial Commands input and one
+  Scheduled Commands input with type-ahead attached, nothing else.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>command_suggest.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="init-input" type="text" style="width: 300px;" />
+  <input id="scheduled-input" type="text" style="width: 300px; margin-top: 300px;" />
+  <script type="module">
+    import { attachCommandSuggest } from '/src/command_suggest.js';
+    attachCommandSuggest(document.querySelector('#init-input'), { scheduled: false });
+    attachCommandSuggest(document.querySelector('#scheduled-input'), { scheduled: true });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

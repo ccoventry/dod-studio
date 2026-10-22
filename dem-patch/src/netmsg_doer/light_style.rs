@@ -6,12 +6,11 @@ impl Doer for SvcLightStyle {
     }
 
     fn parse(i: &[u8], _: AuxRefCell) -> Result<Self> {
-        map((le_u8, null_string), |(index, light_info)| {
-            SvcLightStyle {
-                index,
-                light_info: light_info.to_vec(),
-            }
-        }).parse(i)
+        map((le_u8, null_string), |(index, light_info)| SvcLightStyle {
+            index,
+            light_info: light_info.to_vec(),
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

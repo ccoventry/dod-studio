@@ -14,6 +14,7 @@
 
 import { getRollFloors } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
 /// Supplies the Scheduled Commands, which capture_pane.js owns. Read at check
 /// time rather than captured, since the list is edited live.
@@ -22,6 +23,8 @@ let getCustomCommands = () => [];
 function bannerEl() {
   return document.querySelector('#roll-floor-banner');
 }
+
+let checkGeneration = 0;
 
 /** Re-check the rolls against what the current configuration needs. */
 export async function refreshRollFloors() {
@@ -39,8 +42,11 @@ export async function refreshRollFloors() {
       relation: c.relation === 'After' ? 'After' : 'Before',
     }));
 
+  // Only the latest check's answer is drawn: typing can start one before the
+  // last comes back (#535).
+  const generation = ++checkGeneration;
   const report = await getRollFloors(preRoll, postRoll, decalFlush, customCommands);
-  if (!report) return;
+  if (!report || generation !== checkGeneration) return;
 
   const problems = [];
   if (report.preRoll < report.preRollFloor) {
@@ -82,8 +88,8 @@ export function initRollFloors(customCommandSource) {
   if (typeof customCommandSource === 'function') getCustomCommands = customCommandSource;
   ['#config-pre-roll', '#config-post-roll', '#config-decal-flush',
    '#config-record-start-lead', '#config-record-stop-trail'].forEach((sel) => {
-    const input = document.querySelector(sel);
-    if (input) input.addEventListener('change', refreshRollFloors);
+    // Not only on 'change', which an undo (Ctrl+Z) never fires until blur (#535).
+    refreshAfterTyping(document.querySelector(sel), refreshRollFloors);
   });
   refreshRollFloors();
 }

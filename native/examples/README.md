@@ -8,13 +8,9 @@ These are `examples/`, so they are not part of any shipped binary and are not
 autodiscovered as extra targets. `cargo build` and `cargo test` ignore them;
 `cargo build --examples` compiles them.
 
-They were previously in `native/src/bin/`, where Cargo autodiscovered all 28
-files as binaries. That meant every one of them — plus a linked test harness
-each — was rebuilt on every `cargo build --workspace` and `cargo test
---workspace`, roughly doubling the incremental cost of a change to
-`native/src/lib.rs`, the crate everything else depends on. Moved 2026-09-10.
-`native/Cargo.toml` now sets `autobins = false` and lists the seven real
-binaries explicitly, so this cannot silently happen again.
+They used to live in `native/src/bin/`; `native/Cargo.toml` sets
+`autobins = false` and lists the real binaries explicitly (see
+[`../README.md`](../README.md)), so they are not built by every workspace build.
 
 ## Running one
 
@@ -28,11 +24,15 @@ binaries explicitly, so this cannot silently happen again.
 | --- | --- |
 | `frame_inspector` | What frames are in this demo, in what order, at what ordinal? |
 | `debug_cmds` | Which `ConsoleCommand` frames does a demo already carry? |
+| `stufftext_probe` | Which injected commands does the engine's demo command filter drop? Writes a demo for the in-game check (#679) |
+| `schedule_timing_probe` | How close `ds_capture_schedule` runs a command to an injected frame: writes a demo with marker frames and the matching schedule file (#434) |
 | `debug_scanner` | What does the highlight scanner see in this demo? |
+| `game_dir_patch_probe` | Writes one patched copy whose header and svc_serverinfo name a given game folder, for the in-game check that a copy of DoD plays it (#402) |
 | `check_ticks` | Do the batch queue's computed tick boundaries line up with the demo? |
 | `demo_tickrate` | What frame rate was this demo actually recorded at? |
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
+| `demo_integrity` | Which deltas in this demo decode against a frame the file doesn't have, and what if frames A..B were lost? Lists what `hl-demo-auditor --integrity` counts (#41) |
 
 ### HLTV and the director channel
 
@@ -125,6 +125,7 @@ handshake tests live — don't treat the copy here as authoritative.
 | Probe | Question it answers |
 | --- | --- |
 | `scan_mem_probe` | What does parsing demos N-at-a-time cost in peak memory? |
+| `flush_stage_timing` | How long does the decal flush spend parsing, cleaning and writing one demo (#193)? |
 
 `scan_mem_probe` is what set `SCAN_CONCURRENCY` in
 `capture_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,
@@ -133,6 +134,16 @@ set from the OS rather than sampling. Over a 45-demo corpus (3.2GB, 72MB mean):
 one worker peaks at 1529 MB, two at 2414 MB, four at 4574 MB, eight at 9157 MB
 -- and eight is *slower* than four, which is what says the ceiling is memory
 pressure rather than CPU.
+
+### Studio pipes
+
+| Probe | Question it answers |
+| --- | --- |
+| `analysis_server_probe` | Can the game's Highlights tab be tested against Studio's analysis pipe (#565) without the app? |
+
+Set `DOD_STUDIO_LOG_DIR` to a scratch folder first, then
+`cargo run -p native --release --example analysis_server_probe -- [seconds]`
+(default 300 s).
 
 ### Hashing
 

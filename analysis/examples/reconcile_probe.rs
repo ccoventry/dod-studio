@@ -15,7 +15,9 @@
 use analysis::Analysis;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: reconcile_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: reconcile_probe <demo>");
     let Ok(bytes) = std::fs::read(&path) else {
         println!("READFAIL\t{path}");
         return;

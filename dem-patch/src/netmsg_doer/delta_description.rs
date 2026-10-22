@@ -27,12 +27,7 @@ impl Doer for SvcDeltaDescription {
             None => default_table.get("delta_description_t\0").unwrap(),
         };
         let data: Vec<Delta> = (0..total_fields)
-            .map(|_| {
-                parse_delta(
-                    decoder,
-                    &mut br,
-                )
-            })
+            .map(|_| parse_delta(decoder, &mut br))
             .collect();
 
         // Some demos delta-compress each delta_description_t entry against the
@@ -57,7 +52,9 @@ impl Doer for SvcDeltaDescription {
                 divisor.as_slice().try_into().map(f32::from_le_bytes),
                 flags.as_slice().try_into().map(u32::from_le_bytes),
             ) else {
-                return nom_fail("delta_description_t entry had a malformed bits/divisor/flags field");
+                return nom_fail(
+                    "delta_description_t entry had a malformed bits/divisor/flags field",
+                );
             };
 
             decoder.push(DeltaDecoderS {

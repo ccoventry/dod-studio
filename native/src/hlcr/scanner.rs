@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use walkdir::WalkDir;
 
+mod media_probe;
+use media_probe::{avi_dimensions, avi_frame_count, read_bmp_dimensions, video_has_audio};
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ClipData {
     pub take_folder: String,
@@ -43,13 +46,18 @@ pub struct ClipData {
     /// which only works while HLAE spells the folder exactly that way. Carrying
     /// the name the scanner actually saw on disk means the renderer is told its
     /// partner rather than guessing it, and is the one piece of the standalone
-    /// HLCR's design (see `docs/render_studio_hlcr_parity.md`) that does not
+    /// HLCR's design (see `docs/archive/render_studio_hlcr_parity.md`) that does not
     /// depend on frame counts.
     ///
     /// `#[serde(default)]` for the same reason as `video_file`: autosaves
     /// written before this field existed must keep loading.
     #[serde(default)]
     pub alpha_folder: Option<String>,
+    /// The highlight's clip name (#441), which the finished file is named
+    /// after. Set by Render Studio's queue from the project; `None` for a take
+    /// no loaded project knows, which keeps the `<demo>_<take>` name.
+    #[serde(default)]
+    pub clip_name: Option<String>,
 }
 
 /// Whether a clip is eligible for "Skip (keep original)" — no FFmpeg pass at
@@ -76,14 +84,16 @@ fn collect_wav_files(take_folder: &Path) -> Vec<String> {
     if let Ok(read_dir) = std::fs::read_dir(take_folder) {
         for sub_entry in read_dir.flatten() {
             if let Ok(file_type) = sub_entry.file_type()
-                && file_type.is_file() {
-                    let path = sub_entry.path();
-                    if let Some(ext) = path.extension()
-                        && ext.to_string_lossy().to_lowercase() == "wav"
-                            && let Some(name) = path.file_name() {
-                                wav_files.push(name.to_string_lossy().into_owned());
-                            }
+                && file_type.is_file()
+            {
+                let path = sub_entry.path();
+                if let Some(ext) = path.extension()
+                    && ext.to_string_lossy().to_lowercase() == "wav"
+                    && let Some(name) = path.file_name()
+                {
+                    wav_files.push(name.to_string_lossy().into_owned());
                 }
+            }
         }
     }
     wav_files.sort_by_key(|a| a.to_lowercase());
@@ -151,169 +161,6 @@ fn on_disk_name(folder: &Path) -> String {
         .into_owned()
 }
 
-/// How much of an AVI to read looking for its header. The `hdrl` list sits at
-/// the very front of the file, so this never has to grow — and it must not, as
-/// the videos themselves run to gigabytes.
-const AVI_HEADER_SCAN_BYTES: usize = 64 * 1024;
-
-/// Frame count read out of an AVI's own header, without decoding it.
-///
-/// The take's frame count drives the render progress percentage, and it used to
-/// come from counting `.bmp` files — which returns 0 for a video take and left
-/// video renders showing no progress at all. The count is in the header, so
-/// this costs one bounded read rather than a decode pass or an ffprobe spawn
-/// per take.
-///
-/// **The video stream's `strh.dwLength` is the authority, not
-/// `avih.dwTotalFrames`.** AVI's legacy RIFF chunk tops out around 1 GiB, so
-/// FFmpeg's muxer continues past that into OpenDML `AVIX` segments — and
-/// `avih.dwTotalFrames` then counts only the frames in the *first* chunk, while
-/// `strh.dwLength` carries the true total.
-///
-/// Measured across one capture, which shows the split exactly: the ~1.2 GB and
-/// ~1.5 GB `all` streams read 1067/1218 and 859/1229 (avih/strh), and in both
-/// cases the first chunk works out to almost exactly 1 GiB of the file. The
-/// 135 MB HUD streams fit in a single chunk and agree with themselves. So the
-/// error only appears on long or high-fps takes — the ones where an accurate
-/// progress bar actually matters. `avih` is kept only as a fallback for a file
-/// with no video `strh` at all.
-///
-/// Zero from both means the file was never finalised — a capture killed
-/// mid-write — which is worth surfacing rather than papering over.
-fn avi_frame_count(path: &Path) -> Option<usize> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path).ok()?;
-    // Heap-allocated and explicitly bounded: these files are gigabytes.
-    let mut buf = vec![0u8; AVI_HEADER_SCAN_BYTES];
-    let read = file.read(&mut buf).ok()?;
-    buf.truncate(read);
-
-    if buf.len() < 12 || &buf[0..4] != b"RIFF" || &buf[8..12] != b"AVI " {
-        return None;
-    }
-
-    let u32_at = |b: &[u8], at: usize| -> Option<u32> {
-        b.get(at..at + 4)
-            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-    };
-
-    // Walk the chunks inside the RIFF body. `hdrl` is a LIST, so descend into
-    // it rather than skipping past; everything wanted lives inside it.
-    let mut pos = 12usize;
-    let mut total_frames = 0u32;
-    let mut stream_length = 0u32;
-    while pos + 8 <= buf.len() {
-        let id = &buf[pos..pos + 4];
-        let size = u32_at(&buf, pos + 4)? as usize;
-        let body = pos + 8;
-
-        match id {
-            b"LIST" => {
-                // Step inside: body starts with the list type, then chunks.
-                pos = body + 4;
-                continue;
-            }
-            b"avih" => {
-                total_frames = u32_at(&buf, body + 16).unwrap_or(0);
-            }
-            b"strh"
-                // Only the video stream's length is meaningful here; an audio
-                // stream's dwLength counts samples or blocks, not frames.
-                if buf.get(body..body + 4) == Some(b"vids") && stream_length == 0 => {
-                    stream_length = u32_at(&buf, body + 32).unwrap_or(0);
-                }
-            _ => {}
-        }
-
-        // Chunks are word-aligned: an odd size is followed by a pad byte.
-        pos = body + size + (size & 1);
-    }
-
-    let frames = if stream_length > 0 { stream_length } else { total_frames };
-    Some(frames as usize)
-}
-
-/// An AVI's frame resolution, read from the video stream's `strf`
-/// (`BITMAPINFOHEADER`) chunk — a separate chunk walk from `avi_frame_count`
-/// rather than folding into it, so that function's existing return shape and
-/// tests stay untouched. `biHeight` is signed and negative for a top-down
-/// bitmap, hence the `.abs()`.
-fn avi_dimensions(path: &Path) -> Option<(u32, u32)> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut buf = vec![0u8; AVI_HEADER_SCAN_BYTES];
-    let read = file.read(&mut buf).ok()?;
-    buf.truncate(read);
-
-    if buf.len() < 12 || &buf[0..4] != b"RIFF" || &buf[8..12] != b"AVI " {
-        return None;
-    }
-
-    let u32_at = |b: &[u8], at: usize| -> Option<u32> {
-        b.get(at..at + 4)
-            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-    };
-    let i32_at = |b: &[u8], at: usize| -> Option<i32> {
-        b.get(at..at + 4)
-            .map(|s| i32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-    };
-
-    let mut pos = 12usize;
-    // `strf` describes whatever `strl`/`strh` it follows — this is only ever
-    // set true right after a video `strh`, so the very next `strf` this
-    // walk sees is guaranteed to be the video stream's, not audio's.
-    let mut awaiting_video_strf = false;
-    while pos + 8 <= buf.len() {
-        let id = &buf[pos..pos + 4];
-        let size = u32_at(&buf, pos + 4)? as usize;
-        let body = pos + 8;
-
-        match id {
-            b"LIST" => {
-                pos = body + 4;
-                continue;
-            }
-            b"strh" => {
-                awaiting_video_strf = buf.get(body..body + 4) == Some(b"vids");
-            }
-            b"strf" if awaiting_video_strf => {
-                let width = u32_at(&buf, body + 4)?;
-                let height = i32_at(&buf, body + 8)?.unsigned_abs();
-                return Some((width, height));
-            }
-            _ => {}
-        }
-
-        pos = body + size + (size & 1);
-    }
-    None
-}
-
-/// A BMP frame sequence's resolution, read from the first frame's own
-/// 54-byte header (`BITMAPFILEHEADER` + `BITMAPINFOHEADER`) — width/height
-/// are little-endian `i32` at offsets 18/22. Same file `get_clip_date`
-/// already opens for its metadata, and the same bounded-read shape as
-/// `avi_frame_count` above.
-fn read_bmp_dimensions(folder: &Path) -> Option<(u32, u32)> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(folder.join("00000.bmp")).ok()?;
-    let mut buf = [0u8; 54];
-    file.read_exact(&mut buf).ok()?;
-
-    let i32_at = |at: usize| -> i32 {
-        i32::from_le_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]])
-    };
-    let width = i32_at(18);
-    let height = i32_at(22);
-    if width <= 0 || height == 0 {
-        return None;
-    }
-    Some((width as u32, height.unsigned_abs()))
-}
-
 /// A stream folder's frame resolution, whichever shape it was captured in —
 /// mirrors `stream_frame_count`'s own AVI-vs-BMP branch. `(0, 0)` means
 /// unknown (e.g. an OBS MP4/MKV take, whose container walk isn't worth doing
@@ -340,85 +187,7 @@ fn stream_frame_count(folder: &Path) -> usize {
 
 /// The video inside a stream folder, when that is what it holds.
 fn stream_video(folder: &Path) -> Option<String> {
-    stream_video_path(folder)
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-}
-
-/// How much of a container to read looking for an audio track.
-///
-/// Both ends, because the two formats disagree about where the index lives: an
-/// AVI's `hdrl` is at the front, while an MP4 written without `+faststart` —
-/// which is every OBS recording — puts `moov` at the end. A window at each end
-/// finds both without reading a multi-gigabyte file.
-const AUDIO_SCAN_BYTES: usize = 512 * 1024;
-
-/// Whether a video file carries an audio stream.
-///
-/// Deliberately a byte scan rather than an FFprobe call. This runs inside the
-/// scanner, which walks every folder the user has pointed Render Studio at, and
-/// spawning a process per candidate take would make a library scan unusable.
-///
-/// Signature per container:
-///
-/// - **AVI** — a stream header (`strh`) whose `fccType` is `auds`.
-/// - **MP4/MOV** — a handler box (`hdlr`) declaring the `soun` handler type.
-/// - **MKV** — the Matroska `TrackType` element (`0x83`) with value 2, audio.
-///
-/// A false negative means a take is reported unrenderable and the user is told
-/// why; a false positive means a silent clip renders as if fine. So when the
-/// scan cannot tell, the answer is no.
-fn video_has_audio(path: &Path) -> bool {
-    use std::io::{Read, Seek, SeekFrom};
-
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let Ok(len) = file.metadata().map(|m| m.len()) else {
-        return false;
-    };
-
-    let mut windows: Vec<Vec<u8>> = Vec::new();
-    let mut head = vec![0u8; AUDIO_SCAN_BYTES.min(len as usize)];
-    if file.read_exact(&mut head).is_ok() {
-        windows.push(head);
-    }
-    if len > AUDIO_SCAN_BYTES as u64 {
-        let tail_start = len.saturating_sub(AUDIO_SCAN_BYTES as u64);
-        if file.seek(SeekFrom::Start(tail_start)).is_ok() {
-            let mut tail = Vec::new();
-            if file.take(AUDIO_SCAN_BYTES as u64).read_to_end(&mut tail).is_ok() {
-                windows.push(tail);
-            }
-        }
-    }
-
-    windows.iter().any(|w| {
-        contains_pair(w, b"strh", b"auds")
-            || contains_pair(w, b"hdlr", b"soun")
-            || contains_mkv_audio_track(w)
-    })
-}
-
-/// `needle` followed by `tag` within a short distance.
-///
-/// Both AVI and MP4 place the type immediately after the box name — 4 bytes for
-/// `strh`, 8 for `hdlr` after its version/flags — so a small window is enough,
-/// and keeping it small is what stops an unrelated occurrence of `soun`
-/// elsewhere in the file reading as an audio track.
-fn contains_pair(haystack: &[u8], needle: &[u8; 4], tag: &[u8; 4]) -> bool {
-    haystack.windows(4).enumerate().any(|(i, w)| {
-        if w != needle {
-            return false;
-        }
-        let from = i + 4;
-        let to = (from + 16).min(haystack.len());
-        haystack[from..to].windows(4).any(|c| c == tag)
-    })
-}
-
-/// Matroska `TrackType` (element id `0x83`), size 1, value 2 (audio).
-fn contains_mkv_audio_track(haystack: &[u8]) -> bool {
-    haystack.windows(3).any(|w| w == [0x83, 0x81, 0x02])
+    stream_video_path(folder).and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
 }
 
 /// Whether Render Studio's scanner would admit this folder as a renderable take.
@@ -441,13 +210,26 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
     if let Ok(read_dir) = std::fs::read_dir(take_folder) {
         for entry in read_dir.flatten() {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                && entry.file_name().to_string_lossy().to_lowercase().starts_with("take")
-                && take_shape_is_renderable(&entry.path()) {
-                    return true;
-                }
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .starts_with("take")
+                && take_shape_is_renderable(&entry.path())
+            {
+                return true;
+            }
         }
     }
     false
+}
+
+/// Whether this exact folder is what the scan hands out as a clip's
+/// `take_folder`: it holds the streams itself, not through a nested `take*`.
+/// Delete Take (#644) asks this, so it can never act on a block or session
+/// folder that merely contains a take.
+pub fn is_take_folder(folder: &Path) -> bool {
+    take_shape_is_renderable(folder)
 }
 
 /// The two admissible shapes, checked against one specific folder.
@@ -466,17 +248,29 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
 /// pipeline keeps being bitten by. The check is cheap because the answer is in
 /// the container header.
 fn take_shape_is_renderable(folder: &Path) -> bool {
-    let streams = collect_image_folders(folder);
+    shape_is_renderable(&collect_image_folders(folder), &collect_wav_files(folder))
+}
+
+/// `take_shape_is_renderable` for a folder whose streams and wavs the caller
+/// already listed, so the folder isn't read again.
+fn shape_is_renderable(streams: &[PathBuf], wav_files: &[String]) -> bool {
     if streams.is_empty() {
         return false;
     }
-    if !collect_wav_files(folder).is_empty() {
+    if !wav_files.is_empty() {
         return true;
     }
     streams
         .iter()
         .filter_map(|s| stream_video_path(s))
         .any(|v| video_has_audio(&v))
+}
+
+/// A BMP stream folder: its first frame is there. Never a take itself, and
+/// the scan doesn't descend into it: listing its thousands of frames as
+/// candidate takes was two of the three times each one was read.
+fn is_bmp_stream_folder(entry: &walkdir::DirEntry) -> bool {
+    entry.file_type().is_dir() && entry.path().join("00000.bmp").exists()
 }
 
 pub fn scan_folder_background(
@@ -493,8 +287,18 @@ pub fn scan_folder_background(
             continue;
         }
 
+        // walkdir does not follow links by default; the depth cap is #376's.
+        // An output folder can be a drive root, whose Recycle Bin keeps
+        // deleted takes under their own names (#843).
         for entry in WalkDir::new(&source_folder)
+            .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
             .into_iter()
+            .filter_entry(|e| {
+                !is_bmp_stream_folder(e)
+                    && !(e.depth() > 0
+                        && e.file_type().is_dir()
+                        && crate::sys::folder_walk::is_system_folder(e.file_name()))
+            })
             .filter_map(|e| e.ok())
         {
             if !entry.file_type().is_dir() {
@@ -510,18 +314,24 @@ pub fn scan_folder_background(
             if image_folders.is_empty() {
                 continue;
             }
+            let wav_files = collect_wav_files(&take_folder);
             // Shared with the capture-side take-verification predicate so the
             // two can never silently disagree about what counts as a take —
             // admits both the wav-beside-a-stream shape and an OBS take
             // (a stream folder whose video already carries its own audio).
-            if !take_shape_is_renderable(&take_folder) {
+            if !shape_is_renderable(&image_folders, &wav_files) {
                 continue;
             }
-            let wav_files = collect_wav_files(&take_folder);
 
             // Valid take found!
             processed_folders.insert(take_folder.clone());
-            let _ = status_tx.send(format!("Found take: {}", take_folder.file_name().unwrap_or_default().to_string_lossy()));
+            let _ = status_tx.send(format!(
+                "Found take: {}",
+                take_folder
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ));
 
             // Prioritize sound.wav if it exists. `None` means an OBS take —
             // its audio is already muxed into the video, so there is no wav
@@ -533,8 +343,13 @@ pub fn scan_folder_background(
                 wav_files.first().cloned()
             };
 
-            let take_name = take_folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            let demo_name = take_folder.parent()
+            let take_name = take_folder
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let demo_name = take_folder
+                .parent()
                 .and_then(|p| p.file_name())
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -542,7 +357,11 @@ pub fn scan_folder_background(
 
             let base_name = match &wav_to_use {
                 Some(wav) => {
-                    let wav_stem = Path::new(wav).file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                    let wav_stem = Path::new(wav)
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     if wav_stem.to_lowercase() == "sound" {
                         format!("{}-{}-{}", demo_name, take_name, wav_stem)
                     } else {
@@ -562,19 +381,27 @@ pub fn scan_folder_background(
             // noticing. Windows resolves the paths case-insensitively either
             // way, so only this lookup was ever at risk.
             //
-            // `docs/render_studio_hlcr_parity.md` notes the standalone HLCR
+            // `docs/archive/render_studio_hlcr_parity.md` notes the standalone HLCR
             // pairs folders generically instead — any `alpha`/`mask` folder with
             // a same-frame-count `color`/`rgb` one — which is more robust than
             // literal names and remains the better long-term shape.
-            let folder_names: HashMap<String, PathBuf> = image_folders.iter()
+            let folder_names: HashMap<String, PathBuf> = image_folders
+                .iter()
                 .map(|p| {
-                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    let name = p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_lowercase();
                     (name, p.clone())
                 })
                 .collect();
 
             // Bundle HLAE split streams if "all", "hudcolor", and "hudalpha" exist
-            if folder_names.contains_key("all") && folder_names.contains_key("hudcolor") && folder_names.contains_key("hudalpha") {
+            if folder_names.contains_key("all")
+                && folder_names.contains_key("hudcolor")
+                && folder_names.contains_key("hudalpha")
+            {
                 let all_folder = folder_names.get("all").unwrap();
                 let hud_color_folder = folder_names.get("hudcolor").unwrap();
                 let hud_alpha_folder = folder_names.get("hudalpha").unwrap();
@@ -592,10 +419,13 @@ pub fn scan_folder_background(
                 // outright — bundling one without a wav would only queue a
                 // job that is guaranteed to fail at render time.
                 let all_has_audio = wav_to_use.is_some()
-                    || stream_video_path(all_folder).map(|v| video_has_audio(&v)).unwrap_or(false);
+                    || stream_video_path(all_folder)
+                        .map(|v| video_has_audio(&v))
+                        .unwrap_or(false);
 
                 if all_has_audio {
                     let clip_all = ClipData {
+                        clip_name: None,
                         take_folder: take_folder.to_string_lossy().into_owned(),
                         clip_type: "single".to_string(),
                         img_folder: on_disk_name(all_folder),
@@ -612,6 +442,7 @@ pub fn scan_folder_background(
 
                     if wav_to_use.is_some() {
                         let clip_hud = ClipData {
+                            clip_name: None,
                             take_folder: take_folder.to_string_lossy().into_owned(),
                             clip_type: "hud_only".to_string(),
                             // Both halves of the pair are named from what is actually on
@@ -636,7 +467,11 @@ pub fn scan_folder_background(
 
                 // Remove bundled folders from list to avoid double-processing
                 image_folders.retain(|p| {
-                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    let name = p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_lowercase();
                     name != "all" && name != "hudcolor" && name != "hudalpha"
                 });
             }
@@ -660,9 +495,14 @@ pub fn scan_folder_background(
                 }
                 let frame_count = stream_frame_count(&img_folder);
                 let (width, height) = stream_dimensions(&img_folder);
-                let folder_name = img_folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                let folder_name = img_folder
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
                 let date = get_clip_date(&img_folder);
                 let clip = ClipData {
+                    clip_name: None,
                     take_folder: take_folder.to_string_lossy().into_owned(),
                     clip_type: "single".to_string(),
                     img_folder: folder_name,
@@ -682,7 +522,8 @@ pub fn scan_folder_background(
 
     // Deterministic sorting
     accumulated_clips.sort_by(|a, b| {
-        a.take_folder.cmp(&b.take_folder)
+        a.take_folder
+            .cmp(&b.take_folder)
             .then_with(|| a.img_folder.cmp(&b.img_folder))
             .then_with(|| a.clip_type.cmp(&b.clip_type))
     });
@@ -700,13 +541,15 @@ fn count_bmps(folder: &Path) -> usize {
     if let Ok(read_dir) = std::fs::read_dir(folder) {
         for entry in read_dir.flatten() {
             if let Ok(file_type) = entry.file_type()
-                && file_type.is_file() {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension()
-                        && ext.to_string_lossy().to_lowercase() == "bmp" {
-                            count += 1;
-                        }
+                && file_type.is_file()
+            {
+                let path = entry.path();
+                if let Some(ext) = path.extension()
+                    && ext.to_string_lossy().to_lowercase() == "bmp"
+                {
+                    count += 1;
                 }
+            }
         }
     }
     count
@@ -714,12 +557,14 @@ fn count_bmps(folder: &Path) -> usize {
 
 fn get_clip_date(img_folder_path: &Path) -> String {
     let bmp_path = img_folder_path.join("00000.bmp");
-    if let Ok(metadata) = std::fs::metadata(&bmp_path).or_else(|_| std::fs::metadata(img_folder_path))
-        && let Ok(created) = metadata.created().or_else(|_| metadata.modified()) {
-            return chrono::DateTime::<chrono::Local>::from(created)
-                .format("%Y-%m-%d %I:%M %p")
-                .to_string();
-        }
+    if let Ok(metadata) =
+        std::fs::metadata(&bmp_path).or_else(|_| std::fs::metadata(img_folder_path))
+        && let Ok(created) = metadata.created().or_else(|_| metadata.modified())
+    {
+        return chrono::DateTime::<chrono::Local>::from(created)
+            .format("%Y-%m-%d %I:%M %p")
+            .to_string();
+    }
     "-".to_string()
 }
 
@@ -859,7 +704,10 @@ mod tests {
         let root = scratch("obs_take");
         let take = root.join("dodstudio_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
-        assert!(collect_wav_files(&take).is_empty(), "no wav, by construction");
+        assert!(
+            collect_wav_files(&take).is_empty(),
+            "no wav, by construction"
+        );
         assert!(is_renderable_take(&take));
         // And through the take* nesting, which is how the capture side asks.
         assert!(is_renderable_take(&root.join("dodstudio_chain_01_b0")));
@@ -892,7 +740,10 @@ mod tests {
                 !collect_image_folders(&take).is_empty(),
                 "a .{ext} video should mark its folder as a stream"
             );
-            assert!(is_renderable_take(&take), ".{ext} take should be renderable");
+            assert!(
+                is_renderable_take(&take),
+                ".{ext} take should be renderable"
+            );
             let _ = std::fs::remove_dir_all(&root);
         }
     }
@@ -1105,8 +956,15 @@ mod tests {
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
 
         let clips = scan(&take);
-        assert_eq!(clips.len(), 1, "an OBS-shaped take must be scanned into exactly one clip");
-        assert_eq!(clips[0].wav_file, None, "no wav exists for an OBS take to name");
+        assert_eq!(
+            clips.len(),
+            1,
+            "an OBS-shaped take must be scanned into exactly one clip"
+        );
+        assert_eq!(
+            clips[0].wav_file, None,
+            "no wav exists for an OBS take to name"
+        );
         assert_eq!(clips[0].video_file.as_deref(), Some("video.mp4"));
         assert_eq!(clips[0].img_folder, "all");
         let _ = std::fs::remove_dir_all(&root);
@@ -1118,13 +976,24 @@ mod tests {
     #[test]
     fn scan_names_an_obs_take_from_demo_and_take_not_a_wav() {
         let root = scratch("obs_naming");
-        let take = root.join("some_demo").join("dodstudio_chain_02_b1").join("take0000");
+        let take = root
+            .join("some_demo")
+            .join("dodstudio_chain_02_b1")
+            .join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
 
         let clips = scan(&take);
         assert_eq!(clips.len(), 1);
-        assert!(clips[0].base_name.contains("dodstudio_chain_02_b1"), "{}", clips[0].base_name);
-        assert!(clips[0].base_name.ends_with("-obs"), "{}", clips[0].base_name);
+        assert!(
+            clips[0].base_name.contains("dodstudio_chain_02_b1"),
+            "{}",
+            clips[0].base_name
+        );
+        assert!(
+            clips[0].base_name.ends_with("-obs"),
+            "{}",
+            clips[0].base_name
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1138,7 +1007,10 @@ mod tests {
         write_named_video(&take, "all", "mp4", &mp4_without_audio());
 
         let clips = scan(&take);
-        assert!(clips.is_empty(), "a silent video with no wav must not become a render job");
+        assert!(
+            clips.is_empty(),
+            "a silent video with no wav must not become a render job"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1168,7 +1040,12 @@ mod tests {
         write_named_video(&take, "second", "mp4", &mp4_without_audio());
 
         let clips = scan(&take);
-        assert_eq!(clips.len(), 1, "only the audible stream should be scanned: {:?}", clips.iter().map(|c| &c.img_folder).collect::<Vec<_>>());
+        assert_eq!(
+            clips.len(),
+            1,
+            "only the audible stream should be scanned: {:?}",
+            clips.iter().map(|c| &c.img_folder).collect::<Vec<_>>()
+        );
         assert_eq!(clips[0].img_folder, "all");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1189,7 +1066,11 @@ mod tests {
         write_named_video(&take, "hudalpha", "mp4", &mp4_without_audio());
 
         let clips = scan(&take);
-        assert!(clips.is_empty(), "a silent `all` stream must not be bundled just because the take passes overall: {:?}", clips.iter().map(|c| &c.img_folder).collect::<Vec<_>>());
+        assert!(
+            clips.is_empty(),
+            "a silent `all` stream must not be bundled just because the take passes overall: {:?}",
+            clips.iter().map(|c| &c.img_folder).collect::<Vec<_>>()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1206,7 +1087,15 @@ mod tests {
         write_named_video(&take, "hudalpha", "mp4", &mp4_without_audio());
 
         let clips = scan(&take);
-        assert_eq!(clips.len(), 1, "expected only the `all` single clip: {:?}", clips.iter().map(|c| (&c.img_folder, &c.clip_type)).collect::<Vec<_>>());
+        assert_eq!(
+            clips.len(),
+            1,
+            "expected only the `all` single clip: {:?}",
+            clips
+                .iter()
+                .map(|c| (&c.img_folder, &c.clip_type))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(clips[0].clip_type, "single");
         assert_eq!(clips[0].img_folder, "all");
         let _ = std::fs::remove_dir_all(&root);

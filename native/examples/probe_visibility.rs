@@ -14,7 +14,7 @@
 //! placed off the surface along the face normal, i.e. exactly where a camera
 //! looking at that decal would be — reaches it.
 
-use native::patch::bsp::{Bsp, CONTENTS_SOLID, CONTENTS_SKY};
+use native::patch::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -65,7 +65,11 @@ fn main() {
             no_face += 1;
             continue;
         };
-        let eye = [p[0] + n[0] * 158.0, p[1] + n[1] * 158.0, p[2] + n[2] * 158.0];
+        let eye = [
+            p[0] + n[0] * 158.0,
+            p[1] + n[1] * 158.0,
+            p[2] + n[2] * 158.0,
+        ];
 
         if bsp.line_blocked(&eye, p) {
             blocked_from_normal_eye += 1;
@@ -84,25 +88,44 @@ fn main() {
         let mut blocked = 0usize;
         let mut n_tested = 0usize;
         for p in &coords {
-            let Some((face, _)) = bsp.nearest_face(p, 4.0) else { continue };
-            let Some(n) = bsp.face_normal(face) else { continue };
-            let eye = [p[0] + n[0] * reach, p[1] + n[1] * reach, p[2] + n[2] * reach];
+            let Some((face, _)) = bsp.nearest_face(p, 4.0) else {
+                continue;
+            };
+            let Some(n) = bsp.face_normal(face) else {
+                continue;
+            };
+            let eye = [
+                p[0] + n[0] * reach,
+                p[1] + n[1] * reach,
+                p[2] + n[2] * reach,
+            ];
             // Only count eyes that are themselves in open space; one inside a
             // brush is a legitimately blocked view, not a failure.
             let c = bsp.leaf_contents(bsp.leaf_at(&eye));
-            if c == CONTENTS_SOLID || c == CONTENTS_SKY { continue }
+            if c == CONTENTS_SOLID || c == CONTENTS_SKY {
+                continue;
+            }
             n_tested += 1;
-            if bsp.line_blocked(&eye, p) { blocked += 1 }
+            if bsp.line_blocked(&eye, p) {
+                blocked += 1
+            }
         }
         println!(
             "eye {:>5.0}u straight out, in open space: BLOCKED {:>4} of {:>4} ({:.1}%)",
-            reach, blocked, n_tested, 100.0 * blocked as f32 / n_tested.max(1) as f32
+            reach,
+            blocked,
+            n_tested,
+            100.0 * blocked as f32 / n_tested.max(1) as f32
         );
     }
 
     let tested = coords.len() - no_face;
     println!("no nearest face within 4 units: {}", no_face);
-    println!("point lands in a solid/sky leaf: {} of {}", in_solid, coords.len());
+    println!(
+        "point lands in a solid/sky leaf: {} of {}",
+        in_solid,
+        coords.len()
+    );
     println!(
         "trace from an unobstructed eye 158u along the normal says BLOCKED: {} of {} ({:.1}%)",
         blocked_from_normal_eye,

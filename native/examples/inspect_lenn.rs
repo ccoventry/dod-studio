@@ -10,19 +10,23 @@ fn main() {
     }
     let file_bytes = fs::read(path).unwrap();
     let demo = open_demo_from_bytes(&file_bytes).unwrap();
-    
+
     let mut all_events = vec![];
     for (entry_idx, entry) in demo.directory.entries.iter().enumerate() {
         for (frame_idx, frame) in entry.frames.iter().enumerate() {
             if let FrameData::NetworkMessage(net_msg_box) = &frame.frame_data
-                && let MessageData::Parsed(msgs) = &net_msg_box.1.messages {
-                    for msg in msgs {
-                        all_events.push(format!("Entry {} Frame {} msg: {:?}", entry_idx, frame_idx, msg));
-                    }
+                && let MessageData::Parsed(msgs) = &net_msg_box.1.messages
+            {
+                for msg in msgs {
+                    all_events.push(format!(
+                        "Entry {} Frame {} msg: {:?}",
+                        entry_idx, frame_idx, msg
+                    ));
                 }
+            }
         }
     }
-    
+
     println!("Total events: {}", all_events.len());
     let print_count = 100;
     let start_idx = all_events.len().saturating_sub(print_count);

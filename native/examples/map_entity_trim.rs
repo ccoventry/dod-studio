@@ -52,8 +52,12 @@ use native::patch::bsp_entities::{
 ///
 /// `func_ladder` is deliberately *not* here: it clears `EF_NODRAW` again and
 /// goes on the wire invisible, which is why it shows up in the counts below.
-const NODRAW_BRUSH_CLASSES: &[&str] =
-    &["trigger_hurt", "trigger_multiple", "dod_capture_area", "dod_trigger_sandbag"];
+const NODRAW_BRUSH_CLASSES: &[&str] = &[
+    "trigger_hurt",
+    "trigger_multiple",
+    "dod_capture_area",
+    "dod_trigger_sandbag",
+];
 
 /// Point-entity classnames that hold a networked edict.
 ///
@@ -94,7 +98,9 @@ fn invisible(e: &MapEntity) -> bool {
 /// Total face area of a brush entity's submodel, as a stand-in for how much of
 /// the map disappears with it.
 fn submodel_area(bsp: &Bsp, submodel: u32) -> f32 {
-    let Some(model) = bsp.models.get(submodel as usize) else { return 0.0 };
+    let Some(model) = bsp.models.get(submodel as usize) else {
+        return 0.0;
+    };
     let first = model.first_face.max(0) as usize;
     let count = model.num_faces.max(0) as usize;
     (first..first + count).map(|f| bsp.face_area(f)).sum()
@@ -121,7 +127,9 @@ fn submodel_bounds(bsp: &Bsp, submodel: u32) -> Option<([f32; 3], [f32; 3])> {
 }
 
 fn dominant_texture(bsp: &Bsp, submodel: u32) -> String {
-    let Some(model) = bsp.models.get(submodel as usize) else { return "<none>".into() };
+    let Some(model) = bsp.models.get(submodel as usize) else {
+        return "<none>".into();
+    };
     let first = model.first_face.max(0) as usize;
     let count = model.num_faces.max(0) as usize;
     let mut tally: std::collections::HashMap<&str, usize> = Default::default();
@@ -171,7 +179,9 @@ fn main() {
     }
 
     let Some(map_path) = map_path else {
-        eprintln!("usage: map_entity_trim <map.bsp> [--propose --target N] [--strip list.txt --out trimmed.bsp]");
+        eprintln!(
+            "usage: map_entity_trim <map.bsp> [--propose --target N] [--strip list.txt --out trimmed.bsp]"
+        );
         std::process::exit(2);
     };
 
@@ -190,21 +200,36 @@ fn main() {
         .unwrap_or_else(|| fail("map path has no usable file name"))
         .to_string();
     let reach = demos_dir.as_deref().map(|dir| {
-        native::patch::reachability::harvest_directory(std::path::Path::new(dir), checksum, &map_name)
-            .unwrap_or_else(|e| fail(&e))
+        native::patch::reachability::harvest_directory(
+            std::path::Path::new(dir),
+            checksum,
+            &map_name,
+        )
+        .unwrap_or_else(|e| fail(&e))
     });
     if let Some(cloud) = &reach {
-        eprintln!("reachability: {} proven player positions harvested from {}",
-            cloud.len(), demos_dir.as_deref().unwrap_or(""));
+        eprintln!(
+            "reachability: {} proven player positions harvested from {}",
+            cloud.len(),
+            demos_dir.as_deref().unwrap_or("")
+        );
     }
 
     if let Some(strip_path) = strip_path {
-        apply(&map_path, &bytes, checksum, &entities, &strip_path, out_path.as_deref());
+        apply(
+            &map_path,
+            &bytes,
+            checksum,
+            &entities,
+            &strip_path,
+            out_path.as_deref(),
+        );
         return;
     }
 
-    let on_wire: Vec<usize> =
-        (0..entities.len()).filter(|i| networked(&entities[*i])).collect();
+    let on_wire: Vec<usize> = (0..entities.len())
+        .filter(|i| networked(&entities[*i]))
+        .collect();
 
     // In propose mode stdout is the strip list itself and has to stay
     // machine-readable, so the summary goes to stderr where a redirect leaves
@@ -219,14 +244,27 @@ fn main() {
 
     if propose {
         eprintln!("{summary}");
-        emit_proposal(&map_path, checksum, &bsp, &entities, &on_wire, target, reach.as_ref());
+        emit_proposal(
+            &map_path,
+            checksum,
+            &bsp,
+            &entities,
+            &on_wire,
+            target,
+            reach.as_ref(),
+        );
     } else {
         println!("{summary}");
         report(&bsp, &entities, &on_wire, reach.as_ref());
     }
 }
 
-fn report(bsp: &Bsp, entities: &[MapEntity], on_wire: &[usize], reach: Option<&std::collections::HashSet<(i32, i32, i32)>>) {
+fn report(
+    bsp: &Bsp,
+    entities: &[MapEntity],
+    on_wire: &[usize],
+    reach: Option<&std::collections::HashSet<(i32, i32, i32)>>,
+) {
     let mut by_class: std::collections::BTreeMap<&str, usize> = Default::default();
     for i in on_wire {
         *by_class.entry(entities[*i].classname()).or_default() += 1;
@@ -236,7 +274,9 @@ fn report(bsp: &Bsp, entities: &[MapEntity], on_wire: &[usize], reach: Option<&s
         println!("  {n:>4}  {class}");
     }
 
-    println!("\ninvisible (rendermode scales with renderamt, and renderamt <= {INVISIBLE_RENDERAMT}):");
+    println!(
+        "\ninvisible (rendermode scales with renderamt, and renderamt <= {INVISIBLE_RENDERAMT}):"
+    );
     for i in on_wire {
         let e = &entities[*i];
         if invisible(e) {
@@ -261,11 +301,16 @@ fn report(bsp: &Bsp, entities: &[MapEntity], on_wire: &[usize], reach: Option<&s
         match row.distance {
             Some(d) => println!(
                 "  lump#{:<4} *{:<4} area={:>10.0}  distance={d:>8.0}{}  {}",
-                row.lump_index, row.submodel, row.area,
+                row.lump_index,
+                row.submodel,
+                row.area,
                 if row.background { "  (background)" } else { "" },
                 row.texture,
             ),
-            None => println!("  lump#{:<4} *{:<4} area={:>10.0}  {}", row.lump_index, row.submodel, row.area, row.texture),
+            None => println!(
+                "  lump#{:<4} *{:<4} area={:>10.0}  {}",
+                row.lump_index, row.submodel, row.area, row.texture
+            ),
         }
     }
 }
@@ -295,11 +340,21 @@ fn illusionary_rows(
             let (distance, background) = match (reach, submodel_bounds(bsp, s)) {
                 (Some(cloud), Some((lo, hi))) => {
                     let d = native::patch::reachability::distance_to_nearest_player(cloud, lo, hi);
-                    (Some(d), native::patch::reachability::reads_as_background(d, lo, hi))
+                    (
+                        Some(d),
+                        native::patch::reachability::reads_as_background(d, lo, hi),
+                    )
                 }
                 _ => (None, false),
             };
-            Some(IllusionaryRow { lump_index: *i, submodel: s, area, texture, distance, background })
+            Some(IllusionaryRow {
+                lump_index: *i,
+                submodel: s,
+                area,
+                texture,
+                distance,
+                background,
+            })
         })
         .collect()
 }
@@ -309,7 +364,11 @@ fn illusionary_rows(
 /// first, unchanged from before this ranking existed.
 fn sort_illusionary_rows(rows: &mut [IllusionaryRow], have_reach: bool) {
     if have_reach {
-        rows.sort_by(|a, b| b.distance.unwrap_or(0.0).total_cmp(&a.distance.unwrap_or(0.0)));
+        rows.sort_by(|a, b| {
+            b.distance
+                .unwrap_or(0.0)
+                .total_cmp(&a.distance.unwrap_or(0.0))
+        });
     } else {
         rows.sort_by(|a, b| a.area.total_cmp(&b.area));
     }
@@ -368,8 +427,14 @@ fn emit_proposal(
     println!("# tier A -- on the wire, not on the screen. Removing these changes");
     println!("#           nothing visible; brush ones also stop blocking movement.");
     println!("# tier B -- atmosphere sprites. A visible change, no collision change.");
-    println!("# tier C -- func_illusionary, commented out below, ranked {}.",
-        if reach.is_some() { "farthest from any proven player position first" } else { "smallest first" });
+    println!(
+        "# tier C -- func_illusionary, commented out below, ranked {}.",
+        if reach.is_some() {
+            "farthest from any proven player position first"
+        } else {
+            "smallest first"
+        }
+    );
     println!("#           Non-solid, so removal cannot change collision -- but each one");
     println!("#           is real geometry a viewer would notice missing. Uncomment what");
     println!("#           you accept.");
@@ -381,7 +446,10 @@ fn emit_proposal(
     println!();
 
     for c in &candidates {
-        println!("{:<5} {:<22} # tier {} -- {}", c.lump_index, c.classname, c.tier, c.note);
+        println!(
+            "{:<5} {:<22} # tier {} -- {}",
+            c.lump_index, c.classname, c.tier, c.note
+        );
     }
 
     println!("\n# ---- tier C candidates ----");
@@ -401,7 +469,10 @@ fn emit_proposal(
         }
         floor = floor.saturating_sub(1);
         let reach_note = match row.distance {
-            Some(d) => format!(" reach={d:.0}{}", if row.background { " (background)" } else { "" }),
+            Some(d) => format!(
+                " reach={d:.0}{}",
+                if row.background { " (background)" } else { "" }
+            ),
             None => String::new(),
         };
         println!(
@@ -410,7 +481,10 @@ fn emit_proposal(
         );
     }
     if listed < rows.len() {
-        println!("# ...{} more func_illusionary not listed", rows.len() - listed);
+        println!(
+            "# ...{} more func_illusionary not listed",
+            rows.len() - listed
+        );
     }
 }
 
@@ -429,8 +503,8 @@ fn apply(
         fail("--out is the input map; refusing to overwrite it");
     }
 
-    let list = std::fs::read_to_string(strip_path)
-        .unwrap_or_else(|e| fail(&format!("{strip_path}: {e}")));
+    let list =
+        std::fs::read_to_string(strip_path).unwrap_or_else(|e| fail(&format!("{strip_path}: {e}")));
 
     // A strip list is written against one exact file. The checksum line the
     // proposal emits is what catches it being replayed against another build of
@@ -460,7 +534,10 @@ fn apply(
         };
         let expected = parts.next().unwrap_or("");
         let Some(entity) = entities.get(index) else {
-            fail(&format!("{strip_path}:{}: lump index {index} is past the end", n + 1));
+            fail(&format!(
+                "{strip_path}:{}: lump index {index} is past the end",
+                n + 1
+            ));
         };
         if !expected.is_empty() && entity.classname() != expected {
             fail(&format!(
@@ -470,7 +547,10 @@ fn apply(
             ));
         }
         if entity.classname() == "worldspawn" {
-            fail(&format!("{strip_path}:{}: refusing to remove worldspawn", n + 1));
+            fail(&format!(
+                "{strip_path}:{}: refusing to remove worldspawn",
+                n + 1
+            ));
         }
         remove.insert(index);
     }
@@ -482,7 +562,8 @@ fn apply(
         .map(|(_, e)| e.clone())
         .collect();
 
-    let trimmed = rewrite_entity_lump(bytes, &serialize_entities(&kept)).unwrap_or_else(|e| fail(&e));
+    let trimmed =
+        rewrite_entity_lump(bytes, &serialize_entities(&kept)).unwrap_or_else(|e| fail(&e));
     let after = map_checksum(&trimmed).unwrap_or_else(|e| fail(&e));
     if after != checksum {
         fail(&format!(
@@ -495,7 +576,12 @@ fn apply(
     let after_floor = kept.iter().filter(|e| networked(e)).count();
 
     std::fs::write(out_path, &trimmed).unwrap_or_else(|e| fail(&format!("{out_path}: {e}")));
-    println!("removed {} entities ({} -> {} in the lump)", remove.len(), entities.len(), kept.len());
+    println!(
+        "removed {} entities ({} -> {} in the lump)",
+        remove.len(),
+        entities.len(),
+        kept.len()
+    );
     println!("estimated networked floor: {before_floor} -> {after_floor}");
     println!("map checksum unchanged at 0x{checksum:08X}");
     println!("wrote {out_path}");
@@ -521,19 +607,26 @@ mod tests {
     #[test]
     fn nodraw_triggers_are_not_on_the_wire() {
         for class in NODRAW_BRUSH_CLASSES {
-            let e = one(&format!("{{\n\"model\" \"*3\"\n\"classname\" \"{class}\"\n}}\n"));
+            let e = one(&format!(
+                "{{\n\"model\" \"*3\"\n\"classname\" \"{class}\"\n}}\n"
+            ));
             assert!(!networked(&e), "{class} should not be networked");
         }
-        assert!(networked(&one("{\n\"model\" \"*3\"\n\"classname\" \"func_illusionary\"\n}\n")));
+        assert!(networked(&one(
+            "{\n\"model\" \"*3\"\n\"classname\" \"func_illusionary\"\n}\n"
+        )));
         // Invisible on the wire is still on the wire.
-        assert!(networked(&one("{\n\"model\" \"*3\"\n\"classname\" \"func_ladder\"\n}\n")));
+        assert!(networked(&one(
+            "{\n\"model\" \"*3\"\n\"classname\" \"func_ladder\"\n}\n"
+        )));
     }
 
     /// DoD makes decorative props static at spawn, so they cost nothing --
     /// unless something can trigger them.
     #[test]
     fn env_model_counts_only_when_it_has_a_targetname() {
-        let plain = one("{\n\"model\" \"models/mapmodels/tree32.mdl\"\n\"classname\" \"env_model\"\n}\n");
+        let plain =
+            one("{\n\"model\" \"models/mapmodels/tree32.mdl\"\n\"classname\" \"env_model\"\n}\n");
         assert!(!networked(&plain));
         let named = one(
             "{\n\"model\" \"models/mapmodels/sandbags.mdl\"\n\"targetname\" \"bridge\"\n\"classname\" \"env_model\"\n}\n",
@@ -548,7 +641,10 @@ mod tests {
     fn transalpha_is_never_treated_as_invisible() {
         let button =
             one("{\n\"model\" \"*3\"\n\"rendermode\" \"2\"\n\"classname\" \"func_button\"\n}\n");
-        assert!(invisible(&button), "rendermode 2 with no renderamt is invisible");
+        assert!(
+            invisible(&button),
+            "rendermode 2 with no renderamt is invisible"
+        );
 
         let fence = one(
             "{\n\"model\" \"*3\"\n\"rendermode\" \"4\"\n\"renderamt\" \"0\"\n\"classname\" \"func_illusionary\"\n}\n",

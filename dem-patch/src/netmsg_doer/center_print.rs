@@ -8,7 +8,8 @@ impl Doer for SvcCenterPrint {
     fn parse(i: &[u8], _: AuxRefCell) -> Result<Self> {
         map(null_string, |message| Self {
             message: message.to_vec(),
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

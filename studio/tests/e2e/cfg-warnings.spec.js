@@ -13,18 +13,21 @@ const GAME_PATH = 'C:/games/dod/hl.exe';
 
 /** The backend's CfgReport shape (serde camelCase), with everything empty. */
 const EMPTY_REPORT = {
-  settings: [],
-  unreferenced: [],
-  overrides: [],
+  unseen: [],
+  conflicts: [],
+  asymmetric: [],
+  custom: [],
   bannedInit: [],
   bannedScheduled: [],
-  unseen: [],
-  midDemoHazards: [],
-  selfOverrides: [],
+  tooLongInit: [],
+  tooLongScheduled: [],
+  decalDefaultRing: null,
   decalFlushIsNoop: false,
   noopInit: [],
-  noopScheduled: [],
+  filteredInit: [],
+  filteredScheduled: [],
   fatalCvars: [],
+  configCfgWritable: false,
 };
 
 async function loadHarness(page, report) {
@@ -95,5 +98,150 @@ test.describe('fatal cvar banner', () => {
     expect(fatalAt).toBeGreaterThanOrEqual(0);
     expect(bannedAt).toBeGreaterThanOrEqual(0);
     expect(fatalAt).toBeLessThan(bannedAt);
+  });
+});
+
+// #478: the engine saves over config.cfg on quit.
+test.describe('writable config.cfg note', () => {
+  test('shows when config.cfg is not read-only', async ({ page }) => {
+    await loadHarness(page, { ...EMPTY_REPORT, configCfgWritable: true });
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('saved over when the game closes');
+    await expect(banner).toContainText('Read-only');
+  });
+
+  test('stays hidden when config.cfg is read-only or missing', async ({ page }) => {
+    await loadHarness(page, EMPTY_REPORT);
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
+  });
+});
+
+// The two value rules from #216, which replaced the override / shadowed /
+// "Scheduled Commands override earlier values" sections.
+test.describe('value rules (#216)', () => {
+  const config = (value, line) => ({ value, kind: 'config', file: 'movie.cfg', line });
+
+  test('a conflict names every value and the one in effect, under Initial Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      conflicts: [
+        {
+          cvar: 'mirv_movie_fps',
+          values: [config('300', 2), { value: '500', kind: 'initial' }, { value: '120', kind: 'app' }],
+          effective: { value: '120', kind: 'app' },
+          scheduled: false,
+        },
+      ],
+    });
+
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toContainText('These settings are given different values:');
+    const row = banner.locator('li code');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('300 (movie.cfg, line 2)');
+    await expect(row).toContainText('500 (Initial Commands)');
+    await expect(row).toContainText('120 (DoD Studio, from Output Format → Capture FPS)');
+    await expect(row).toContainText('in effect: 120');
+    await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
+  });
+
+  test('a conflict involving a Before shows under Scheduled Commands only', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      conflicts: [
+        {
+          cvar: 'hud_deathnotice_time',
+          values: [config('10', 3), { value: '555', kind: 'before', offsetSeconds: 2 }],
+          effective: { value: '555', kind: 'before', offsetSeconds: 2 },
+          scheduled: true,
+        },
+      ],
+    });
+
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
+    const row = page.locator('#scheduled-commands-warning-banner li code');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('555 (Scheduled, 2s before)');
+  });
+
+  test('an unpaired After says what the first and later clips record at', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      asymmetric: [
+        {
+          cvar: 'hud_deathnotice_time',
+          after: { value: '1', kind: 'after', offsetSeconds: 0.5 },
+          baseline: config('10', 3),
+        },
+      ],
+    });
+
+    const banner = page.locator('#scheduled-commands-warning-banner');
+    await expect(banner).toContainText('change a value for the rest of the batch');
+    const row = banner.locator('li code');
+    await expect(row).toContainText('the first clip records at 10 (movie.cfg, line 3)');
+    await expect(row).toContainText('every later clip at 1 (Scheduled, 0.5s after)');
+  });
+});
+
+// #679: the engine drops some commands a demo carries without a word.
+test.describe('demo command filter', () => {
+  test('a dropped Scheduled Command is named with the reason, under Scheduled Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      filteredScheduled: [{ command: 'mirv_matte_setcolor 255 0 255', rule: 'nameContains', pattern: '_set' }],
+    });
+
+    const banner = page.locator('#scheduled-commands-warning-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('The game drops these commands without running them:');
+    const row = banner.locator('li code');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("mirv_matte_setcolor 255 0 255 — dropped: its name contains '_set'");
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
+  });
+
+  test('a dropped Initial Command shows under Initial Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      filteredInit: [{ command: 'exec movie.cfg', rule: 'lineContains', pattern: 'exec' }],
+    });
+
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toContainText("exec movie.cfg — dropped: it contains 'exec'");
+    await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
+  });
+});
+
+// #555: the hook's console names went from dodstudio_ to ds_, with no aliases.
+test.describe('renamed hook names', () => {
+  test('a config line and an Initial Command show under Initial Commands, with the new name', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      renamed: [
+        { old: 'dodstudio_hide_scoreboard', new: 'ds_hud_hide_scoreboard', source: 'movie.cfg, line 4' },
+        { old: 'dodstudio_spec_lock', new: 'ds_spec_lock', source: 'Initial Commands' },
+      ],
+    });
+
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toContainText('These DoD Studio commands have new names:');
+    const rows = banner.locator('li code');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toHaveText('dodstudio_hide_scoreboard → ds_hud_hide_scoreboard (movie.cfg, line 4)');
+    await expect(rows.nth(1)).toHaveText('dodstudio_spec_lock → ds_spec_lock');
+    await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
+  });
+
+  test('a Scheduled Command shows under Scheduled Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      renamed: [{ old: 'dodstudio_seek_by', new: 'ds_demo_seek_by', source: 'Scheduled Commands' }],
+    });
+
+    const banner = page.locator('#scheduled-commands-warning-banner');
+    await expect(banner).toContainText('dodstudio_seek_by → ds_demo_seek_by');
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
   });
 });

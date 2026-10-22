@@ -64,12 +64,24 @@ impl std::fmt::Display for Cancelled {
 pub const MAX_CONSOLE_CMD_LEN: usize = 64;
 /// The longest command that still leaves room for the field's NUL terminator.
 pub const MAX_CONSOLE_CMD_SAFE_LEN: usize = 63;
+
+/// The commands in `commands` that cannot fit one ConsoleCommand frame (64
+/// bytes or more, so no room for the NUL), in the order given. Initial and
+/// Scheduled Commands are each written into exactly one frame, as typed, so
+/// these have to be refused before a batch starts (#453) rather than reach
+/// `engine::write_console_cmd`.
+pub fn too_long_commands(commands: &[String]) -> Vec<String> {
+    commands
+        .iter()
+        .filter(|c| c.len() > MAX_CONSOLE_CMD_SAFE_LEN)
+        .cloned()
+        .collect()
+}
 pub const MAX_DIRECTOR_STUFFTEXT_LEN: usize = 253;
 pub const IO_BUFFER_CAPACITY: usize = 262_144;
 pub const MAX_PAYLOAD_LIMIT_BYTES: usize = 2_097_152;
 
 // Binary Frame & Header Sizes
-pub const HLTV_HEADER_SIZE: usize = 512;
 pub const DEMO_HEADER_SIZE: usize = 544;
 pub const DIRECTORY_OFFSET_POS: usize = 540;
 pub const FRAME_HEADER_SIZE: usize = 9;
@@ -85,7 +97,8 @@ pub const EVENT_FRAME_SIZE: usize = 84;
 
 // Command Injection Logic
 pub const MAX_ECHO_CHUNK_SIZE: usize = 55;
-pub const CUSTOM_CMD_WARN_LIMIT: usize = 60;
+/// How long the primer demo plays before `playdemo dodstudio_chain_01`. Only a
+/// batch launched without the hook DLL has a primer (#365).
 pub const PRIMER_DELAY_TICKS: i32 = 500;
 
 /// Upper bound on the size of a `NetworkMessage` frame the decal passes will
@@ -110,107 +123,106 @@ pub const BREADCRUMB_INTERVAL_TICKS: i32 = 5000;
 pub mod types;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod highlevel;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod decal_strip;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod decal_atlas;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp_entities;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod sound_mute;
+pub mod builder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cfg_scan;
+pub mod console_prefix;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decal_atlas;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decal_probe;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decal_strip;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod engine;
+pub mod game_dir;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod highlevel;
+pub mod launch_settings;
+pub mod map_check;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_fetch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod map_text;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod cfg_scan;
-pub mod map_check;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod map_fetch;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod decal_probe;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod engine;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod builder;
+pub mod runtime_batch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod scanner;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sound_mute;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod source_copies;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod viewdemo_refresh;
 
 // ── Re-export wall ────────────────────────────────────────────────────────────
 // All items below were previously at the top level of patch.rs.
 // Every existing `native::patch::*` call site resolves here unchanged.
 
 pub use types::{
-    MAX_PAYLOAD_SIZE,
-    CustomCommand,
-    CommandRelation,
-    CaptureCodec,
-    CaptureMode,
-    ObsConfig,
-    PatchOptions,
-    CaptureStreak,
-    CaptureBlock,
-    PatchJob,
-    DriveHeadroom,
-    PatcherConfig,
-    HighlightRules,
-    HighlightStatus,
-    default_goldsrc_hooks_dll_path,
+    CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
+    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig, PatchJob,
+    PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use types::{PatchEvent, CaptureWorker};
+pub use types::{CaptureWorker, PatchEvent};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use highlevel::patch_demo_highlights;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use decal_strip::{
-    capture_fov, clean_demo_decals, on_screen_half_angle, prepare_flushed_source,
-    DEFAULT_LEAD_SECONDS,
-    proven_world_coordinates, ring_limit, ring_limit_from_init, ring_limit_from_game_config,
-    strip_decals_outside_windows,
-    CleanedSource, DecalCleanError, DecalCleanOptions, DecalCleanStats, FlushSource,
-    VisibilityBasis,
-    DECALS_PER_POSITION, MAX_OVERLAP_DECALS,
+    CleanedSource, DECALS_PER_POSITION, DEFAULT_LEAD_SECONDS, DecalCleanError, DecalCleanOptions,
+    DecalCleanStats, FlushSource, MAX_OVERLAP_DECALS, VisibilityBasis, capture_fov,
+    clean_demo_decals, on_screen_half_angle, prepare_flushed_source, proven_world_coordinates,
+    ring_limit, ring_limit_from_game_config, ring_limit_from_init, strip_decals_outside_windows,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use decal_probe::{
-    best_view_for, camera_at_time, decal_texture_histogram, probe_decal_offsets, project,
-    CameraView, GridStats, Probe, ProbeOptions, ProbeRow,
-    ProbeStats, Sighting,
+    CameraView, GridStats, Probe, ProbeOptions, ProbeRow, ProbeStats, Sighting, best_view_for,
+    camera_at_time, decal_texture_histogram, probe_decal_offsets, project,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use cfg_scan::{scan as scan_game_cfgs, CfgScan, CvarSetting, WATCHED_CVARS};
+pub use cfg_scan::{CfgScan, CvarSetting, WATCHED_CVARS, scan as scan_game_cfgs};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use decal_strip::{capture_fov_from_init, capture_fov_resolved};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use map_check::{check_demo, map_reference, MapReference, MapStatus};
+pub use map_check::{MapReference, MapStatus, check_demo, map_reference};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use sound_mute::{map_sounds, mute_sounds, MapSounds, MuteSelection, MuteStats};
+pub use sound_mute::{MapSounds, MuteSelection, MuteStats, map_sounds, mute_sounds};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use map_text::{hide_map_text, map_text, MapText, TextSelection, TextStats};
+pub use map_text::{MapText, TextSelection, TextStats, hide_map_text, map_text};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use map_fetch::{fetch_map, map_url, FetchOutcome, DEFAULT_MIRROR};
+pub use map_fetch::{DEFAULT_MIRROR, FetchOutcome, fetch_map, map_url};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use engine::StreamPatcher;
+pub use engine::{PatchStage, StreamPatcher};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use builder::{build_batch_queue, final_init_commands, spawn_patch_batch, WorkspaceGuard, build_director_message, build_director_stufftext, build_preview_patch_jobs, playdemo_safe_stem};
+pub use builder::{
+    WorkspaceGuard, build_batch_queue, build_director_message, build_director_stufftext,
+    build_preview_patch_jobs, final_init_commands, playdemo_safe_stem, spawn_patch_batch,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use scanner::{is_hltv_demo, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis};
+pub use scanner::{
+    check_sources_unchanged, is_hltv_demo, is_hltv_head, scan_demo_for_highlights,
+    scan_demo_for_highlights_with_analysis,
+};
 
 /// Whether a frame can carry injected payload: it must be a `NetworkMessage`
 /// whose contents were actually parsed (an unparsed one is opaque bytes there

@@ -20,6 +20,18 @@ pub struct Aux {
     /// HLTV clients can receive different data from the game server for messages like
     /// [SvcClientData], which affects parsing.
     pub is_hltv: bool,
+
+    /// Length of the buffer [`crate::demo_parser::parse_demo`] is part-way
+    /// through, so each network message can note where its payload sat in it
+    /// (see [`NetworkMessage::source_span`]). `None` outside `parse_demo`: a
+    /// frame parser called on its own may be handed a slice that does not run
+    /// to the end of any buffer a writer will later be given.
+    pub parsing_source_len: Option<usize>,
+
+    /// The buffer the demo was parsed from, as `(address, length)`.
+    /// `Demo::write_to_bytes_reusing_source_cancellable` trusts the recorded
+    /// spans only against exactly this buffer.
+    pub parsed_from: Option<(usize, usize)>,
 }
 
 impl Aux {
@@ -29,6 +41,8 @@ impl Aux {
             max_client: 1,
             custom_messages: CustomMessage::new(),
             is_hltv: false,
+            parsing_source_len: None,
+            parsed_from: None,
         }
     }
 
@@ -194,6 +208,29 @@ pub struct NetworkMessage {
     // need this so the messages type can be [`Parsed`] or [`Unparsed`]
     pub message_length: u32,
     pub messages: MessageData,
+    /// Where `messages` sat in the buffer the demo was parsed from, as a byte
+    /// range into it. `None` for a frame that was built rather than parsed, and
+    /// for one whose messages have been handed out for editing.
+    ///
+    /// Lets `Demo::write_to_bytes_reusing_source_cancellable` copy an untouched
+    /// frame's payload back out verbatim instead of re-encoding every message
+    /// in it. That is only right while `messages` still holds what those bytes
+    /// say, so edit them through [`NetworkMessage::messages_mut`], which clears
+    /// this. An edit made through the field directly leaves the span standing,
+    /// and that writer silently ships the original bytes instead of the edit.
+    pub source_span: Option<std::ops::Range<usize>>,
+}
+
+impl NetworkMessage {
+    /// `messages`, for editing. Forgets [`NetworkMessage::source_span`], so the
+    /// frame is re-encoded from `messages` when it is written.
+    ///
+    /// Only call this for a frame that is actually being changed: every frame
+    /// it is called on costs a full re-encode at write time, edited or not.
+    pub fn messages_mut(&mut self) -> &mut MessageData {
+        self.source_span = None;
+        &mut self.messages
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1808,14 +1845,14 @@ pub struct SvcHltv {
 ///
 /// To interpret message, check
 ///
-/// https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682
+/// <https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682>
 #[derive(Debug, Clone)]
 pub struct SvcDirector {
     pub length: u8,
     pub command: u8,
     /// To interpret message, check
     ///
-    /// https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682
+    /// <https://github.com/ValveSoftware/halflife/blob/b1b5cf5892918535619b2937bb927e46cb097ba1/cl_dll/hud_spectator.cpp#L682>
     pub message: ByteVec,
 }
 

@@ -67,11 +67,14 @@ impl Channel {
 }
 
 fn clean(text: &str) -> String {
-    text.trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string()
+    text.trim_matches(|c: char| c == '\0' || c.is_whitespace())
+        .to_string()
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: map_text_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: map_text_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -98,10 +101,7 @@ fn main() {
                                 te_text.record(
                                     &String::from_utf8_lossy(&text.message.0),
                                     frame_no,
-                                    format!(
-                                        "channel {} at ({}, {})",
-                                        text.channel, text.x, text.y
-                                    ),
+                                    format!("channel {} at ({}, {})", text.channel, text.x, text.y),
                                 );
                             }
                         }
@@ -122,10 +122,11 @@ fn main() {
                                 format!("style {}", text.init_hud_style),
                             ),
                             Ok(UserMessage::TextMsg(text)) => {
-                                let args: Vec<&str> = [&text.arg1, &text.arg2, &text.arg3, &text.arg4]
-                                    .iter()
-                                    .filter_map(|a| a.as_deref())
-                                    .collect();
+                                let args: Vec<&str> =
+                                    [&text.arg1, &text.arg2, &text.arg3, &text.arg4]
+                                        .iter()
+                                        .filter_map(|a| a.as_deref())
+                                        .collect();
                                 text_msg.record(
                                     &text.text,
                                     frame_no,

@@ -68,7 +68,15 @@ fn parse_args() -> Option<Options> {
         }
     }
 
-    Some(Options { folder: folder?, pre_roll, post_roll, start_lead, stop_trail, all_players, show_all })
+    Some(Options {
+        folder: folder?,
+        pre_roll,
+        post_roll,
+        start_lead,
+        stop_trail,
+        all_players,
+        show_all,
+    })
 }
 
 /// One recording block, plus whether it runs straight on from the previous one
@@ -90,7 +98,11 @@ fn simulate_merge(sorted: &[&CaptureStreak], opts: &Options) -> Vec<Block> {
 
     // Same fps resolution builder.rs uses: the first streak in the group, with a
     // 30.0 fallback when it's missing or zero.
-    let demo_fps = sorted.first().map(|s| s.demo_fps).filter(|&f| f > 0.0).unwrap_or(30.0);
+    let demo_fps = sorted
+        .first()
+        .map(|s| s.demo_fps)
+        .filter(|&f| f > 0.0)
+        .unwrap_or(30.0);
     let pre_ticks = (opts.pre_roll * demo_fps) as i32;
     let post_ticks = (opts.post_roll * demo_fps) as i32;
     let lead_ticks = (opts.start_lead * demo_fps) as i32;
@@ -105,21 +117,35 @@ fn simulate_merge(sorted: &[&CaptureStreak], opts: &Options) -> Vec<Block> {
         let stop = last_kill_frame(streak);
 
         if blocks.is_empty() {
-            blocks.push(Block { streaks: vec![i], chained_to_previous: false });
+            blocks.push(Block {
+                streaks: vec![i],
+                chained_to_previous: false,
+            });
             block_stops.push(stop);
             continue;
         }
 
         let prev_stop = *block_stops.last().unwrap();
-        if native::patch::builder::blocks_merge(prev_stop, start, lead_ticks, trail_ticks + min_sep_ticks) {
+        if native::patch::builder::blocks_merge(
+            prev_stop,
+            start,
+            lead_ticks,
+            trail_ticks + min_sep_ticks,
+        ) {
             let end = block_stops.last_mut().unwrap();
             *end = (*end).max(stop);
             blocks.last_mut().unwrap().streaks.push(i);
         } else {
             let chained = native::patch::builder::blocks_merge(
-                prev_stop, start, lead_ticks + pre_ticks, trail_ticks + post_ticks,
+                prev_stop,
+                start,
+                lead_ticks + pre_ticks,
+                trail_ticks + post_ticks,
             );
-            blocks.push(Block { streaks: vec![i], chained_to_previous: chained });
+            blocks.push(Block {
+                streaks: vec![i],
+                chained_to_previous: chained,
+            });
             block_stops.push(stop);
         }
     }
@@ -129,7 +155,10 @@ fn simulate_merge(sorted: &[&CaptureStreak], opts: &Options) -> Vec<Block> {
 
 /// Frame of the first recorded kill, mirroring builder.rs's private helper.
 fn first_kill_frame(s: &CaptureStreak) -> i32 {
-    s.kills.get(s.start_index).map(|k| k.0).unwrap_or(s.start_tick)
+    s.kills
+        .get(s.start_index)
+        .map(|k| k.0)
+        .unwrap_or(s.start_tick)
 }
 
 /// Frame of the last recorded kill, mirroring builder.rs's private helper.
@@ -206,7 +235,11 @@ fn main() {
         opts.folder.display(),
         opts.pre_roll,
         opts.post_roll,
-        if opts.all_players { "all players" } else { "recording player only" }
+        if opts.all_players {
+            "all players"
+        } else {
+            "recording player only"
+        }
     );
 
     let mut reports: Vec<DemoReport> = Vec::new();
@@ -214,7 +247,11 @@ fn main() {
     let mut no_highlights: Vec<String> = Vec::new();
 
     for (idx, path) in demo_files.iter().enumerate() {
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         eprint!("\r[{}/{}] {:<60}", idx + 1, demo_files.len(), name);
 
         let (_tickrate, streaks, _is_pov, local_player_index, _frames, _match_start, _times) =
@@ -245,7 +282,12 @@ fn main() {
             std::collections::BTreeMap::new();
         for streak in &owned {
             by_player
-                .entry(streak.target_player.clone().unwrap_or_else(|| "<none>".to_string()))
+                .entry(
+                    streak
+                        .target_player
+                        .clone()
+                        .unwrap_or_else(|| "<none>".to_string()),
+                )
                 .or_default()
                 .push(streak);
         }
@@ -258,13 +300,20 @@ fn main() {
 
         for (player, mut group) in by_player {
             group.sort_by_key(|s| s.start_tick);
-            let fps = group.first().map(|s| s.demo_fps).filter(|&f| f > 0.0).unwrap_or(30.0);
+            let fps = group
+                .first()
+                .map(|s| s.demo_fps)
+                .filter(|&f| f > 0.0)
+                .unwrap_or(30.0);
 
             // Tightest consecutive gap, regardless of whether it merges — this
             // is what tells you how much roll padding it would take.
             for pair in group.windows(2) {
                 let gap = pair[1].start_tick - pair[0].end_tick;
-                let idx = group.iter().position(|s| std::ptr::eq(*s, pair[0])).unwrap_or(0);
+                let idx = group
+                    .iter()
+                    .position(|s| std::ptr::eq(*s, pair[0]))
+                    .unwrap_or(0);
                 if closest_gap.map(|(g, _, _, _)| gap < g).unwrap_or(true) {
                     closest_gap = Some((gap, fps, idx + 1, idx + 2));
                 }
@@ -272,15 +321,28 @@ fn main() {
 
             let blocks = simulate_merge(&group, &opts);
             blocks_total += blocks.len();
-            let label = if player == "<none>" { String::new() } else { format!("[{}] ", player) };
+            let label = if player == "<none>" {
+                String::new()
+            } else {
+                format!("[{}] ", player)
+            };
 
             for block in &blocks {
                 if block.streaks.len() >= 2 {
                     merged_groups.push(block.streaks.clone());
 
-                    let rows: Vec<String> = block.streaks.iter().map(|&i| format!("#{}", i + 1)).collect();
+                    let rows: Vec<String> = block
+                        .streaks
+                        .iter()
+                        .map(|&i| format!("#{}", i + 1))
+                        .collect();
                     let first = group[block.streaks[0]];
-                    let last_end = block.streaks.iter().map(|&i| last_kill_frame(group[i])).max().unwrap_or(0);
+                    let last_end = block
+                        .streaks
+                        .iter()
+                        .map(|&i| last_kill_frame(group[i]))
+                        .max()
+                        .unwrap_or(0);
                     let start = first_kill_frame(first);
                     detail.push(format!(
                         "      {}rows {} -> MERGED into one take  (ticks {}-{}, ~{:.1}s @ {:.0}fps)",
@@ -288,7 +350,8 @@ fn main() {
                     ));
 
                     for pair in block.streaks.windows(2) {
-                        let gap = first_kill_frame(group[pair[1]]) - last_kill_frame(group[pair[0]]);
+                        let gap =
+                            first_kill_frame(group[pair[1]]) - last_kill_frame(group[pair[0]]);
                         detail.push(format!(
                             "        gap #{}->#{}: {} ticks (~{:.2}s) — too close to be separate takes",
                             pair[0] + 1, pair[1] + 1, gap, secs(gap, fps)
@@ -333,7 +396,8 @@ fn main() {
 
     // What each tier needs to trigger, so the hints below are honest about
     // which threshold is being missed.
-    let merge_budget = opts.start_lead + opts.stop_trail + native::patch::builder::MIN_TAKE_SEPARATION_SECONDS;
+    let merge_budget =
+        opts.start_lead + opts.stop_trail + native::patch::builder::MIN_TAKE_SEPARATION_SECONDS;
     let chain_budget = opts.start_lead + opts.stop_trail + opts.pre_roll + opts.post_roll;
 
     if interesting.is_empty() {
@@ -349,25 +413,54 @@ fn main() {
 
         if let Some((demo, (gap, fps, row_a, row_b))) = nearest {
             let gap_secs = secs(gap, fps);
-            println!("Closest pair anywhere: {} rows #{} and #{}", demo.name, row_a, row_b);
-            println!("  {} ticks apart (~{:.2}s @ {:.0}fps)\n", gap, gap_secs, fps);
-            println!("  To merge into ONE take, start-lead + stop-trail + {:.1}s must exceed {:.2}s", native::patch::builder::MIN_TAKE_SEPARATION_SECONDS, gap_secs);
-            println!("    (currently {:.2}s) — e.g. --start-lead {:.1} --stop-trail {:.1}",
-                merge_budget, (gap_secs / 2.0 + 0.5).ceil(), (gap_secs / 2.0 + 0.5).ceil());
-            println!("\n  For SEPARATE takes with no fast-forward between, all four must exceed {:.2}s", gap_secs);
-            println!("    (currently {:.2}s) — e.g. --pre-roll {:.1} --post-roll {:.1}",
-                chain_budget, (gap_secs + 0.5).ceil(), opts.post_roll);
+            println!(
+                "Closest pair anywhere: {} rows #{} and #{}",
+                demo.name, row_a, row_b
+            );
+            println!(
+                "  {} ticks apart (~{:.2}s @ {:.0}fps)\n",
+                gap, gap_secs, fps
+            );
+            println!(
+                "  To merge into ONE take, start-lead + stop-trail + {:.1}s must exceed {:.2}s",
+                native::patch::builder::MIN_TAKE_SEPARATION_SECONDS,
+                gap_secs
+            );
+            println!(
+                "    (currently {:.2}s) — e.g. --start-lead {:.1} --stop-trail {:.1}",
+                merge_budget,
+                (gap_secs / 2.0 + 0.5).ceil(),
+                (gap_secs / 2.0 + 0.5).ceil()
+            );
+            println!(
+                "\n  For SEPARATE takes with no fast-forward between, all four must exceed {:.2}s",
+                gap_secs
+            );
+            println!(
+                "    (currently {:.2}s) — e.g. --pre-roll {:.1} --post-roll {:.1}",
+                chain_budget,
+                (gap_secs + 0.5).ceil(),
+                opts.post_roll
+            );
             println!("\n  Use the same values in Capture Studio's Timing Options.");
         } else {
             println!("No demo had two or more highlights to compare.");
         }
         println!("\nAlso worth trying: --all-players to include non-recording players' streaks.\n");
     } else {
-        println!("=== Demos with colliding highlights ({} of {}) ===\n", interesting.len(), reports.len());
+        println!(
+            "=== Demos with colliding highlights ({} of {}) ===\n",
+            interesting.len(),
+            reports.len()
+        );
         for r in &interesting {
             println!(
                 "  {}\n    {} highlight(s) -> {} recording block(s); {} merged, {} chained",
-                r.name, r.total_highlights, r.blocks, r.merged_groups.len(), r.chained_rows.len()
+                r.name,
+                r.total_highlights,
+                r.blocks,
+                r.merged_groups.len(),
+                r.chained_rows.len()
             );
             for line in &r.detail {
                 println!("{}", line);
@@ -379,7 +472,11 @@ fn main() {
             println!(
                 "Best MERGE test candidate: {}\n  Select rows {} — they should capture as one take covering both.\n",
                 best.name,
-                best.merged_groups[0].iter().map(|&i| format!("#{}", i + 1)).collect::<Vec<_>>().join(" and ")
+                best.merged_groups[0]
+                    .iter()
+                    .map(|&i| format!("#{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
             );
         }
         if let Some(best) = interesting.iter().find(|r| !r.chained_rows.is_empty()) {
@@ -401,7 +498,11 @@ fn main() {
                 r.name,
                 r.total_highlights,
                 r.blocks,
-                if r.merged_groups.is_empty() { "" } else { "  <-- has merges" }
+                if r.merged_groups.is_empty() {
+                    ""
+                } else {
+                    "  <-- has merges"
+                }
             );
         }
         println!();
@@ -409,7 +510,11 @@ fn main() {
 
     println!("Scanned {} demo(s) with highlights.", reports.len());
     if !no_highlights.is_empty() {
-        println!("  {} had no highlights: {}", no_highlights.len(), no_highlights.join(", "));
+        println!(
+            "  {} had no highlights: {}",
+            no_highlights.len(),
+            no_highlights.join(", ")
+        );
     }
     if !skipped.is_empty() {
         println!("  {} skipped (HLTV/unreadable):", skipped.len());

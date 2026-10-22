@@ -1,8 +1,8 @@
-//! `dodstudio_hide_hand_signals`: stop players miming their voice commands.
+//! `ds_player_hide_hand_signals`: stop players miming their voice commands.
 //!
 //! ## Why the voice mute does not cover this
 //!
-//! `dodstudio_mute_voice_commands` NOPs a client-side `EV_PlaySound` call, which
+//! `ds_sound_mute_voice_commands` NOPs a client-side `EV_PlaySound` call, which
 //! is where the *sound* comes from. The gesture is a different mechanism
 //! entirely: `client.dll` contains **no `hs_` string at all**, because the
 //! client never picks these animations by name. The server picks a sequence
@@ -16,8 +16,8 @@
 //!
 //! #283 measured the sequence indices: 54 `hs_*` sequences per player model,
 //! in two contiguous runs at 212-238 and 287-313, identical across all five
-//! stock models. It also flagged the risk in using them -- 17 of the user's 41
-//! viewmodels are custom, and a custom *player* model could reorder its
+//! stock models. It also flagged the risk in using them -- 17 of the 41
+//! viewmodels in the install it surveyed are custom, and a custom *player* model could reorder its
 //! sequence list.
 //!
 //! So this does not use the indices. It reads the model's own sequence labels
@@ -33,7 +33,7 @@
 //! of the signal, which is their stance/weapon idle or aim in every case that
 //! matters. A player first seen mid-signal has no remembered sequence, so they
 //! are left alone rather than given a guess -- counted, and reported by
-//! `dodstudio_status`.
+//! `ds_debug_status`.
 //!
 //! `gaitsequence` is deliberately untouched. It drives the legs independently,
 //! and the standing/prone split in the `hs_` names says the signal is an
@@ -65,7 +65,7 @@ use crate::engine::{self, ClEntityS};
 use crate::names::console_name;
 
 /// The cvar name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_hand_signals");
+pub const NAME: &str = console_name!("player_hide_hand_signals");
 
 /// Set from the cvar by `commands::poll`.
 pub static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -97,10 +97,7 @@ fn is_hand_signal(model: *mut engine::ModelSPartial, sequence: i32) -> Option<bo
     if sequence < 0 {
         return Some(false);
     }
-    let labels = crate::anim_fix::sequence_labels(model);
-    labels
-        .get(sequence as usize)
-        .map(|label| label.starts_with(PREFIX))
+    crate::anim_fix::sequence_label(model, sequence as usize).map(|label| label.starts_with(PREFIX))
 }
 
 /// Replaces every visible player's hand-signal animation with the last ordinary
@@ -112,8 +109,12 @@ pub fn apply() -> usize {
     if !ENABLED.load(Ordering::Relaxed) {
         return 0;
     }
-    let Some(engfuncs) = engine::engfuncs() else { return 0 };
-    let Some(studio) = engine::engine_studio() else { return 0 };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return 0;
+    };
+    let Some(studio) = engine::engine_studio() else {
+        return 0;
+    };
 
     let mut replaced = 0;
     // `skip(1)` because entity index 0 is the world, and iterating the slots
@@ -135,7 +136,7 @@ pub fn apply() -> usize {
 
         let sequence = entity.curstate.sequence;
         // Safety: `get_model_by_index` returns null for an index the engine has
-        // not precached, which `sequence_labels` handles.
+        // not precached, which `sequence_label` handles.
         let model = unsafe { (studio.get_model_by_index)(entity.curstate.modelindex) };
         match is_hand_signal(model, sequence) {
             Some(true) => {}
@@ -172,7 +173,7 @@ pub fn reset() {
     }
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     if !ENABLED.load(Ordering::Relaxed) {
         return "hand signals play normally".to_string();
@@ -209,7 +210,10 @@ mod tests {
     #[test]
     fn there_is_a_slot_for_every_player_index() {
         assert_eq!(LAST_NORMAL.len(), MAX_PLAYERS + 1);
-        assert!(LAST_NORMAL.len() > MAX_PLAYERS, "index {MAX_PLAYERS} must be addressable");
+        assert!(
+            LAST_NORMAL.len() > MAX_PLAYERS,
+            "index {MAX_PLAYERS} must be addressable"
+        );
     }
 
     /// The prefix is the whole detection rule, and it has to match DoD's own
@@ -256,7 +260,11 @@ mod tests {
         assert!(status().contains("normally"), "{}", status());
 
         ENABLED.store(true, Ordering::Relaxed);
-        assert!(status().contains("not just the spectated player"), "{}", status());
+        assert!(
+            status().contains("not just the spectated player"),
+            "{}",
+            status()
+        );
         assert!(!has_acted());
 
         REPLACED.store(5, Ordering::Relaxed);

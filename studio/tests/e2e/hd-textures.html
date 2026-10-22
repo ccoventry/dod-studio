@@ -1,0 +1,112 @@
+<!doctype html>
+<!--
+  Minimal harness for hd_pane.js (#372) -- see tests/e2e/README.md for the
+  general shape. Carries only the elements the pane reads and writes, plus the
+  Configuration page's hl.exe field it takes the game path from. A test
+  controls the backend by registering `hd_status` / `hd_setup_tools` /
+  `hd_build` / `hd_set_python` / `hd_misses` / `hd_save_style` / `hd_preview` /
+  `hd_save_map_list` handlers on window.__mockInvokeHandlers; the
+  file picker is `plugin:dialog|open`, which goes through the same mock.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>hd_pane.js test harness</title>
+</head>
+<body>
+  <input id="hl-path-input" value="C:/games/Half-Life/hl.exe" />
+  <button class="nav-tab-btn" data-nav="hd-textures">HD Textures</button>
+
+  <p id="hd-status-text"></p>
+  <button id="hd-refresh-btn">Refresh</button>
+  <table><thead id="hd-status-head"></thead><tbody id="hd-status-body"></tbody></table>
+  <select id="hd-style-select"></select>
+  <button id="hd-copy-cfg-btn">Copy</button>
+  <p id="hd-style-coverage" hidden></p>
+  <details id="hd-style-maps" hidden>
+    <summary><span id="hd-style-maps-summary"></span></summary>
+    <div id="hd-style-maps-groups"></div>
+  </details>
+  <progress id="hd-style-maps-progress" max="1" value="0" hidden></progress>
+  <p id="hd-style-map-warning" hidden></p>
+  <pre id="hd-cfg-lines"></pre>
+  <p id="hd-gl-max-size" hidden></p>
+  <p id="hd-tools-text"></p>
+  <button id="hd-setup-btn">Download</button>
+  <button id="hd-setup-cancel-btn" disabled>Cancel</button>
+  <button id="hd-upscaler-pick-btn">Choose upscaler folder...</button>
+  <button id="hd-upscaler-reset-btn">Find it automatically</button>
+  <p id="hd-python-text"></p>
+  <button id="hd-python-pick-btn">Choose python.exe...</button>
+  <button id="hd-python-reset-btn">Find it automatically</button>
+  <p id="hd-setup-progress"></p>
+  <div id="hd-build-styles"></div>
+  <div id="hd-build-types"></div>
+  <select id="hd-build-cap">
+    <option value="1024">1024 (the usual)</option>
+    <option value="2048">2048</option>
+    <option value="4096">4096</option>
+  </select>
+  <p id="hd-build-cap-hint"></p>
+  <button id="hd-build-btn">Build</button>
+  <button id="hd-build-cancel-btn" disabled>Cancel</button>
+  <p id="hd-build-progress"></p>
+  <p id="hd-build-line"></p>
+  <pre id="hd-realesrgan-line"></pre>
+  <select id="hd-preview-map"></select>
+  <div id="hd-preview-styles"></div>
+  <button id="hd-preview-btn">Show comparison</button>
+  <p id="hd-preview-text"></p>
+  <div id="hd-preview-wrap" hidden><img id="hd-preview-img" alt="" /></div>
+  <p id="hd-maps-file"></p>
+  <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every" />
+  <span id="hd-maps-every-label"></span>
+  <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some" />
+  <div id="hd-maps-editor">
+    <ul id="hd-maps-patterns"></ul>
+    <button id="hd-maps-add-btn">Add as a line</button>
+    <p id="hd-maps-pattern-hint"></p>
+  </div>
+  <input id="hd-maps-search" type="search" />
+  <input type="checkbox" id="hd-maps-picked-only" />
+  <span id="hd-maps-legend" hidden>its own line / a pattern</span>
+  <ul id="hd-maps-available"></ul>
+  <p id="hd-maps-summary"></p>
+  <button id="hd-maps-save-btn">Save</button>
+  <button id="hd-maps-undo-btn">Undo changes</button>
+  <p id="hd-maps-message"></p>
+  <p id="hd-my-styles-text"></p>
+  <ul id="hd-my-styles-list"></ul>
+  <input id="hd-style-name" />
+  <select id="hd-style-kind">
+    <option value="plain">plain</option>
+    <option value="ai">ai</option>
+    <option value="blend">blend</option>
+  </select>
+  <div data-style-kind="plain"><input id="hd-style-sharpening" type="number" value="60" /></div>
+  <div data-style-kind="ai" hidden><select id="hd-style-model"></select></div>
+  <p id="hd-style-model-hint" data-style-kind="ai" hidden></p>
+  <div data-style-kind="blend" hidden>
+    <input id="hd-style-percent" type="number" value="50" />
+    <select id="hd-style-a"></select>
+    <select id="hd-style-b"></select>
+  </div>
+  <pre id="hd-style-line"></pre>
+  <button id="hd-style-save-btn">Save style</button>
+  <p id="hd-style-message"></p>
+  <button id="hd-misses-btn">Read the game's log</button>
+  <pre id="hd-misses-command"></pre>
+  <button id="hd-misses-copy-btn">Copy</button>
+  <p id="hd-misses-text"></p>
+  <input type="checkbox" id="hd-misses-on-purpose" />
+  <div id="hd-misses-maps"></div>
+  <div id="footer-hd-summary"></div>
+  <div id="toast-container"></div>
+
+  <script type="module">
+    import { initHdPane } from '/src/hd_pane.js';
+    initHdPane();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

@@ -33,7 +33,9 @@ struct Slot {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: scoreboard_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: scoreboard_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -68,10 +70,16 @@ fn main() {
                     NetMessage::EngineMessage(em) => {
                         if let EngineMessage::SvcUpdateUserInfo(ui) = &**em {
                             let raw = String::from_utf8_lossy(ui.user_info.as_slice()).to_string();
-                            let parts: Vec<&str> =
-                                raw.trim_matches(|c| c == '\0' || c == '\\').split('\\').collect();
-                            let f: HashMap<&str, &str> =
-                                parts.as_chunks::<2>().0.iter().map(|&[k, v]| (k, v)).collect();
+                            let parts: Vec<&str> = raw
+                                .trim_matches(|c| c == '\0' || c == '\\')
+                                .split('\\')
+                                .collect();
+                            let f: HashMap<&str, &str> = parts
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|&[k, v]| (k, v))
+                                .collect();
                             if f.is_empty() || f.get("*hltv") == Some(&"1") {
                                 continue;
                             }
@@ -177,13 +185,12 @@ fn main() {
                                         .iter()
                                         .find(|(_, n)| n.eq_ignore_ascii_case(&c.point_name))
                                         .map(|(a, _)| *a);
-                                    let prev = area.and_then(|a| flag_owner.get(&a).cloned()).flatten();
-                                    let is_break =
-                                        prev.is_some() && prev.as_ref() != Some(&c.team);
-                                    if is_break
-                                        && let Some(s) = slots.get_mut(&idx) {
-                                            s.cap_breaks += 1;
-                                        }
+                                    let prev =
+                                        area.and_then(|a| flag_owner.get(&a).cloned()).flatten();
+                                    let is_break = prev.is_some() && prev.as_ref() != Some(&c.team);
+                                    if is_break && let Some(s) = slots.get_mut(&idx) {
+                                        s.cap_breaks += 1;
+                                    }
                                     cap_events.push((
                                         frame_no,
                                         c.point_name.clone(),
@@ -250,7 +257,10 @@ fn main() {
         println!(
             "{:<22} {:>8} {:>4} {:>4} {:>5.2} {:>3} {:>4} {:>4} {:>5} {:>4} {:>4} {:>4}",
             s.name.chars().take(22).collect::<String>(),
-            s.team.as_ref().map(|t| format!("{:?}", t)).unwrap_or_else(|| "-".into()),
+            s.team
+                .as_ref()
+                .map(|t| format!("{:?}", t))
+                .unwrap_or_else(|| "-".into()),
             s.kills,
             s.deaths,
             kd,

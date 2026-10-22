@@ -111,8 +111,6 @@ fn to_cell(p: &[f32; 3]) -> Option<Cell> {
     ))
 }
 
-
-
 /// What one merge did, for reporting.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AtlasStats {
@@ -131,29 +129,6 @@ pub const ATLAS_FORMAT: u32 = 1;
 
 pub fn atlas_path(dir: &Path, key: &MapKey) -> PathBuf {
     dir.join(key.file_name())
-}
-
-/// Unions one map's coordinates across several stores.
-///
-/// The intended shape is one writable store fed by this user's own captures
-/// plus any number of read-only ones — a store shipped with the app, or a
-/// pooled community store dropped in by the updater. Union is the whole merge
-/// rule: every entry is an independent claim that a surface exists at a
-/// coordinate, so two stores can never contradict each other, only cover
-/// different ground. Deduplication happens on the shared grid.
-pub fn load_all(dirs: &[PathBuf], key: &MapKey) -> Vec<[f32; 3]> {
-    let mut cells: BTreeMap<Cell, [f32; 3]> = BTreeMap::new();
-    for dir in dirs {
-        for p in load(dir, key) {
-            if cells.len() >= MAX_ATLAS_COORDS {
-                break;
-            }
-            if let Some(c) = to_cell(&p) {
-                cells.entry(c).or_insert(p);
-            }
-        }
-    }
-    cells.into_values().collect()
 }
 
 /// Reads one map's stored coordinates. A missing, unreadable or malformed file
@@ -353,8 +328,16 @@ mod tests {
         let (merged, stats) = merge_and_save(&user, &seeds, &key(), &[[0.0, 0.0, 0.0]]);
         assert_eq!(stats.added, 1, "only the user's own coordinate is recorded");
         assert_eq!(merged.len(), 2, "but both are available to the flush");
-        assert_eq!(load(&user, &key()).len(), 1, "the seed must not leak into the user store");
-        assert_eq!(load(&seed, &key()).len(), 1, "the seed must not be rewritten");
+        assert_eq!(
+            load(&user, &key()).len(),
+            1,
+            "the seed must not leak into the user store"
+        );
+        assert_eq!(
+            load(&seed, &key()).len(),
+            1,
+            "the seed must not be rewritten"
+        );
     }
 
     #[test]

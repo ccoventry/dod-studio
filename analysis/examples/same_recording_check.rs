@@ -12,7 +12,10 @@ use std::collections::BTreeMap;
 fn canon_delta(d: &Delta) -> String {
     let mut keys: Vec<&String> = d.keys().collect();
     keys.sort();
-    keys.iter().map(|k| format!("{k}={:?}", d[*k])).collect::<Vec<_>>().join(",")
+    keys.iter()
+        .map(|k| format!("{k}={:?}", d[*k]))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn canon_msg(m: &NetMessage) -> String {
@@ -20,12 +23,24 @@ fn canon_msg(m: &NetMessage) -> String {
         NetMessage::EngineMessage(em) => match &**em {
             EngineMessage::SvcTime(t) => format!("time({})", t.time),
             EngineMessage::SvcDeltaPacketEntities(pe) => {
-                let mut ents: Vec<String> = pe.entity_states.iter().map(|es| format!(
-                    "[{}:remove={}:{}]", es.entity_index, es.remove_entity,
-                    es.delta.as_ref().map(canon_delta).unwrap_or_default(),
-                )).collect();
+                let mut ents: Vec<String> = pe
+                    .entity_states
+                    .iter()
+                    .map(|es| {
+                        format!(
+                            "[{}:remove={}:{}]",
+                            es.entity_index,
+                            es.remove_entity,
+                            es.delta.as_ref().map(canon_delta).unwrap_or_default(),
+                        )
+                    })
+                    .collect();
                 ents.sort();
-                format!("deltapacketentities(count={},ents={:?})", pe.entity_count.to_u32(), ents)
+                format!(
+                    "deltapacketentities(count={},ents={:?})",
+                    pe.entity_count.to_u32(),
+                    ents
+                )
             }
             _ => format!("{m:?}"),
         },
@@ -39,7 +54,9 @@ fn strip_addrs(s: &str) -> String {
     while let Some(i) = rest.find("addr: 0x") {
         out.push_str(&rest[..i]);
         rest = &rest[i + 8..];
-        let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| !c.is_ascii_hexdigit())
+            .unwrap_or(rest.len());
         rest = &rest[end..];
         rest = rest.trim_start_matches(", ");
     }
@@ -53,9 +70,15 @@ fn collect(path: &str, t_lo: f32, t_hi: f32) -> BTreeMap<i64, (f32, Vec<String>)
     let mut out = BTreeMap::new();
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            if f.time < t_lo || f.time > t_hi { continue }
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            if f.time < t_lo || f.time > t_hi {
+                continue;
+            }
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             let canon: Vec<String> = msgs.iter()
                 .filter(|m| !matches!(m, NetMessage::EngineMessage(em) if matches!(**em, EngineMessage::SvcClientData(_))))
                 .map(|m| strip_addrs(&canon_msg(m))).collect();
@@ -69,7 +92,9 @@ fn collect(path: &str, t_lo: f32, t_hi: f32) -> BTreeMap<i64, (f32, Vec<String>)
 
 fn main() {
     let mut a = std::env::args().skip(1);
-    let path_a = a.next().expect("usage: same_recording_check <a.dem> <b.dem> <offset_b_to_a> <t_lo_a> <t_hi_a>");
+    let path_a = a
+        .next()
+        .expect("usage: same_recording_check <a.dem> <b.dem> <offset_b_to_a> <t_lo_a> <t_hi_a>");
     let path_b = a.next().expect("b.dem");
     let offset: f32 = a.next().expect("offset").parse().unwrap();
     let t_lo: f32 = a.next().expect("t_lo").parse().unwrap();
@@ -78,20 +103,30 @@ fn main() {
     let a_data = collect(&path_a, t_lo, t_hi);
     let b_data = collect(&path_b, t_lo - offset, t_hi - offset);
     // Re-key b onto a's time frame.
-    let b_shifted: BTreeMap<i64, (f32, Vec<String>)> = b_data.into_iter()
+    let b_shifted: BTreeMap<i64, (f32, Vec<String>)> = b_data
+        .into_iter()
         .map(|(_, (t, c))| (((t + offset) * 100.0).round() as i64, (t + offset, c)))
         .collect();
 
-    println!("{} frames in {path_a} window, {} frames in shifted {path_b} window", a_data.len(), b_shifted.len());
+    println!(
+        "{} frames in {path_a} window, {} frames in shifted {path_b} window",
+        a_data.len(),
+        b_shifted.len()
+    );
     let mut matched = 0usize;
     let mut identical = 0usize;
     let mut diffs = 0usize;
     for (key, (t, ca)) in &a_data {
         // Allow a +/-1 key (0.01s) tolerance for float rounding at the boundary.
-        let hit = b_shifted.get(key).or_else(|| b_shifted.get(&(key+1))).or_else(|| b_shifted.get(&(key-1)));
+        let hit = b_shifted
+            .get(key)
+            .or_else(|| b_shifted.get(&(key + 1)))
+            .or_else(|| b_shifted.get(&(key - 1)));
         let Some((_, cb)) = hit else { continue };
         matched += 1;
-        if ca == cb { identical += 1 } else {
+        if ca == cb {
+            identical += 1
+        } else {
             diffs += 1;
             if diffs <= 3 {
                 println!("\nDIFF at t={t:.2}s:\n  a: {ca:?}\n  b: {cb:?}");

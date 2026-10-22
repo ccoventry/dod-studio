@@ -96,17 +96,18 @@ fn main() {
         }
 
         if let Some((face, _)) = bsp.nearest_face(p, 2.0)
-            && let Some(n) = bsp.face_normal(face) {
-                normal_known += 1;
-                let out = [p[0] + n[0] * 4.0, p[1] + n[1] * 4.0, p[2] + n[2] * 4.0];
-                let inn = [p[0] - n[0] * 4.0, p[1] - n[1] * 4.0, p[2] - n[2] * 4.0];
-                if bsp.leaves.get(bsp.leaf_at(&out)).map(|l| l.contents) != Some(CONTENTS_SOLID) {
-                    open_side += 1;
-                }
-                if bsp.leaves.get(bsp.leaf_at(&inn)).map(|l| l.contents) == Some(CONTENTS_SOLID) {
-                    solid_side += 1;
-                }
+            && let Some(n) = bsp.face_normal(face)
+        {
+            normal_known += 1;
+            let out = [p[0] + n[0] * 4.0, p[1] + n[1] * 4.0, p[2] + n[2] * 4.0];
+            let inn = [p[0] - n[0] * 4.0, p[1] - n[1] * 4.0, p[2] - n[2] * 4.0];
+            if bsp.leaves.get(bsp.leaf_at(&out)).map(|l| l.contents) != Some(CONTENTS_SOLID) {
+                open_side += 1;
             }
+            if bsp.leaves.get(bsp.leaf_at(&inn)).map(|l| l.contents) == Some(CONTENTS_SOLID) {
+                solid_side += 1;
+            }
+        }
     }
 
     let pct = |n: usize| (n as f32 / pts.len() as f32) * 100.0;
@@ -123,8 +124,16 @@ fn main() {
         worst_miss,
         bsp.world_faces().len(),
         bsp.faces.len(),
-        if normal_known > 0 { open_side as f32 * 100.0 / normal_known as f32 } else { 0.0 },
-        if normal_known > 0 { solid_side as f32 * 100.0 / normal_known as f32 } else { 0.0 },
+        if normal_known > 0 {
+            open_side as f32 * 100.0 / normal_known as f32
+        } else {
+            0.0
+        },
+        if normal_known > 0 {
+            solid_side as f32 * 100.0 / normal_known as f32
+        } else {
+            0.0
+        },
         if bsp.has_vis() { "vis" } else { "NOVIS" },
     );
 }

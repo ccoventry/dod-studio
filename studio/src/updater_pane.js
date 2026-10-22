@@ -1,8 +1,9 @@
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild } from './ipc_bridge.js';
+import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild, localGitBranch } from './ipc_bridge.js';
 import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
+import { showUpdateChip, RECHECK_MS } from './update_chip.js';
 
 function currentChannel() {
   return document.querySelector('#config-update-channel')?.value || 'stable';
@@ -13,16 +14,19 @@ function setStatus(text) {
   if (el) el.textContent = text;
 }
 
+// The version a check found, and whether it has downloaded: shown on the menu
+// bar's update button (#868), and kept so a later check neither notifies
+// again for the same version nor undoes "Restart to update".
+const found = { version: null, ready: false };
+let notifiedVersion = null;
+
 // Reflected on the Help menu's Check for Updates item (#update-check-btn,
-// moved from the footer into #help-menu-panel by #122) plus a small dot on
-// the Help menu button itself (#help-menu-update-dot) — the menu item alone
-// isn't visible until Help is opened, and an update being ready is exactly
-// the kind of thing that should be noticeable without opening the menu, the
-// same ambient-signal role the old always-visible footer button served.
-function setFooterButtonState(updateAvailable) {
+// moved from the footer into #help-menu-panel by #122) and on the update
+// button beside Help (#868), which shows without opening the menu.
+function setFooterButtonState(updateAvailable, version = null) {
+  found.version = updateAvailable ? version : null;
+  showUpdateChip(found);
   const btn = document.querySelector('#update-check-btn');
-  const dot = document.querySelector('#help-menu-update-dot');
-  if (dot) dot.style.display = updateAvailable ? '' : 'none';
   if (!btn) return;
   if (updateAvailable) {
     btn.textContent = STRINGS.FOOTER.UPDATE_AVAILABLE_BUTTON;
@@ -72,7 +76,13 @@ async function displayCurrentVersion() {
   }
   // OS window title (taskbar/Alt-Tab), not an in-page element — used to be
   // a footer label (#122) before moving here.
-  getCurrentWindow().setTitle(STRINGS.NAV.appWindowTitle(baseVersion, buildKind)).catch((err) => {
+  // Only a build made on this PC can find its source tree, so installers
+  // never show a branch.
+  const branch = await localGitBranch();
+  // Under the Vite dev server the page is served from localhost:<port>;
+  // bundled builds use Tauri's own protocol and have no port to show.
+  const port = import.meta.env.DEV ? window.location.port : '';
+  getCurrentWindow().setTitle(STRINGS.NAV.appWindowTitle(baseVersion, buildKind, branch, port)).catch((err) => {
     console.error('Failed to set window title:', err);
   });
   const modalLabel = document.querySelector('#update-modal-current-version');
@@ -82,6 +92,10 @@ async function displayCurrentVersion() {
 }
 
 export async function checkForUpdatesNow(channel = currentChannel()) {
+  if (await isLocalOrDebugBuild()) {
+    await reportPublishedVersions();
+    return;
+  }
   setStatus(STRINGS.UPDATE_MODAL.STATUS_CHECKING);
   const downloadBtn = document.querySelector('#download-install-update-btn');
 
@@ -98,12 +112,16 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
   if (info) {
     setStatus(STRINGS.UPDATE_MODAL.STATUS_AVAILABLE(info.version));
     if (downloadBtn) downloadBtn.style.display = 'inline-block';
-    setFooterButtonState(true);
-    notify(
-      'updates',
-      STRINGS.FOOTER.UPDATE_AVAILABLE_BUTTON,
-      STRINGS.UPDATE_MODAL.STATUS_AVAILABLE(info.version),
-    );
+    setFooterButtonState(true, info.version);
+    // Once per version: the check runs again every few hours (#868).
+    if (notifiedVersion !== info.version) {
+      notifiedVersion = info.version;
+      notify(
+        'updates',
+        STRINGS.FOOTER.UPDATE_AVAILABLE_BUTTON,
+        STRINGS.UPDATE_MODAL.STATUS_AVAILABLE(info.version),
+      );
+    }
   } else {
     setStatus(STRINGS.UPDATE_MODAL.STATUS_UP_TO_DATE);
     if (downloadBtn) downloadBtn.style.display = 'none';
@@ -111,7 +129,25 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
   }
 }
 
+/** Local and debug builds: show the latest version on each channel as
+ *  information only. Every published version differs from a local build's,
+ *  so the usual "Update available" would always fire; and installing would
+ *  quit this dev copy and replace the *installed* app instead. */
+async function reportPublishedVersions() {
+  setStatus(STRINGS.UPDATE_MODAL.STATUS_CHECKING);
+  const downloadBtn = document.querySelector('#download-install-update-btn');
+  if (downloadBtn) downloadBtn.style.display = 'none';
+  setFooterButtonState(false);
+  const [stable, experimental] = await Promise.all(
+    ['stable', 'experimental'].map((channel) => checkForUpdate(channel).catch(() => null)),
+  );
+  setStatus(STRINGS.UPDATE_MODAL.statusLocalBuild(stable?.version, experimental?.version));
+}
+
 async function beginDownloadAndInstall() {
+  // Belt and braces: the button is never shown on a local or debug build,
+  // and the backend refuses too.
+  if (await isLocalOrDebugBuild()) return;
   const downloadBtn = document.querySelector('#download-install-update-btn');
   const progressContainer = document.querySelector('#update-progress-container');
   setStatus(STRINGS.UPDATE_MODAL.STATUS_DOWNLOADING);
@@ -142,9 +178,11 @@ export async function initUpdater(settings, persistSettings) {
   const modal = document.querySelector('#update-modal');
   displayCurrentVersion();
 
-  document.querySelector('#update-check-btn')?.addEventListener('click', () => {
-    if (modal) modal.style.display = 'flex';
-  });
+  for (const id of ['#update-check-btn', '#update-chip']) {
+    document.querySelector(id)?.addEventListener('click', () => {
+      if (modal) modal.style.display = 'flex';
+    });
+  }
 
   document.querySelector('#update-modal-close-btn')?.addEventListener('click', () => {
     if (modal) modal.style.display = 'none';
@@ -180,6 +218,8 @@ export async function initUpdater(settings, persistSettings) {
   });
 
   listen('update_ready', () => {
+    found.ready = true;
+    showUpdateChip(found);
     setStatus(STRINGS.UPDATE_MODAL.STATUS_READY);
     const downloadBtn = document.querySelector('#download-install-update-btn');
     if (downloadBtn) downloadBtn.style.display = 'none';
@@ -195,4 +235,12 @@ export async function initUpdater(settings, persistSettings) {
   if (settings?.auto_check_updates === false) return;
   if (await isLocalOrDebugBuild()) return;
   checkForUpdatesNow(settings?.update_channel || 'stable');
+  // A Studio left open all day still hears of a release (#868). The box and
+  // the channel are read each time, so unticking it stops these too; and
+  // nothing re-checks over a downloaded update waiting for its restart.
+  setInterval(() => {
+    if (found.ready) return;
+    if (document.querySelector('#config-auto-check-updates')?.checked === false) return;
+    checkForUpdatesNow();
+  }, RECHECK_MS);
 }

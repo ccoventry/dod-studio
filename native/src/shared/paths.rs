@@ -89,7 +89,10 @@ impl AppDataMigration {
 /// call repeatedly and never overwrites newer state with older.
 pub fn migrate_legacy_appdata_dir() -> AppDataMigration {
     let base = appdata_base();
-    migrate_appdata_dir_between(&base.join(LEGACY_APPDATA_DIR_NAME), &base.join(APPDATA_DIR_NAME))
+    migrate_appdata_dir_between(
+        &base.join(LEGACY_APPDATA_DIR_NAME),
+        &base.join(APPDATA_DIR_NAME),
+    )
 }
 
 fn migrate_appdata_dir_between(legacy: &Path, current: &Path) -> AppDataMigration {
@@ -122,14 +125,23 @@ fn migrate_appdata_dir_between(legacy: &Path, current: &Path) -> AppDataMigratio
 /// colliding with a file is still a plain skip; nothing here overwrites
 /// existing content, only merges past a directory that happens to already
 /// exist.
-fn merge_dir_entries(source: &Path, destination: &Path, prefix: &str, report: &mut AppDataMigration) {
+fn merge_dir_entries(
+    source: &Path,
+    destination: &Path,
+    prefix: &str,
+    report: &mut AppDataMigration,
+) {
     let Ok(entries) = std::fs::read_dir(source) else {
         return;
     };
 
     for entry in entries.flatten() {
         let entry_name = entry.file_name().to_string_lossy().into_owned();
-        let name = if prefix.is_empty() { entry_name.clone() } else { format!("{prefix}/{entry_name}") };
+        let name = if prefix.is_empty() {
+            entry_name.clone()
+        } else {
+            format!("{prefix}/{entry_name}")
+        };
         let source_path = entry.path();
         let destination_path = destination.join(&entry_name);
 
@@ -141,7 +153,9 @@ fn merge_dir_entries(source: &Path, destination: &Path, prefix: &str, report: &m
             continue;
         }
 
-        if source_path.is_dir() && destination_path.is_dir() {
+        // `file_type` never follows a junction, so a link in the old folder
+        // is skipped like a file collision, never merged through (#376).
+        if entry.file_type().is_ok_and(|t| t.is_dir()) && destination_path.is_dir() {
             merge_dir_entries(&source_path, &destination_path, &name, report);
             // Only succeeds once the merge above has moved everything out --
             // anything left behind (a skipped file-vs-file collision) keeps
@@ -183,15 +197,16 @@ pub fn preview_sidecar(demo: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Stem of the primer demo `build_batch_queue` writes into the game's `dod/`
-/// folder. The `dodstudio_` prefix matches every other file this app writes
+/// Stem of the primer demo `build_batch_queue` writes into the game folder
+/// ([`mod_dir`]) when the batch launches without the hook DLL (#365). The
+/// cleanup still removes one left by such a batch. The `dodstudio_` prefix matches every other file this app writes
 /// there (`dodstudio_helper.cfg`, `dodstudio_capture_done.cfg`) and keeps the
 /// name out of the space a player's own demo could plausibly occupy (#197).
 pub const PRIMER_DEMO_STEM: &str = "dodstudio_primer";
 
-/// Prefix of every patched chain demo `build_batch_queue` writes into `dod/`,
-/// followed by a zero-padded job number. See [`PRIMER_DEMO_STEM`] for why the
-/// `dodstudio_` part is there.
+/// Prefix of every patched chain demo `build_batch_queue` writes into the game
+/// folder, followed by a zero-padded job number. See [`PRIMER_DEMO_STEM`] for
+/// why the `dodstudio_` part is there.
 pub const CHAIN_DEMO_PREFIX: &str = "dodstudio_chain_";
 
 /// True for exactly the filenames `build_batch_queue` gives patched chain
@@ -241,8 +256,142 @@ pub fn take_key(take_folder: &Path) -> Option<String> {
         take_folder
     };
     let take_name = block_folder.file_name()?.to_string_lossy().to_lowercase();
-    let session = block_folder.parent()?.file_name()?.to_string_lossy().to_lowercase();
+    let session = block_folder
+        .parent()?
+        .file_name()?
+        .to_string_lossy()
+        .to_lowercase();
     Some(format!("{}/{}", session, take_name))
+}
+
+/// The game folder a launch names with `-game` when the user has set none
+/// (#402).
+pub const DEFAULT_GAME_FOLDER: &str = "dod";
+
+/// The user's game folder, empty for [`DEFAULT_GAME_FOLDER`] (#402).
+///
+/// Process-wide, not passed down, because most of the paths it decides are
+/// built from nothing but an `hl.exe` path, deep in code (map checks, HD
+/// builds, overviews, Blender's map list) that has no settings at hand.
+/// Studio sets it when settings load and on every save
+/// ([`set_game_folder`]); everything else (the CLIs, tests) gets `dod`.
+/// Read on every call rather than cached by callers, so a changed setting
+/// applies to the next launch, scan or build.
+static GAME_FOLDER: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+/// Why `name` cannot be a game folder, or `Ok` when it can: a single folder
+/// name beside `hl.exe`, the `<mod>` of `-game <mod>` (#402). Anything with a
+/// path separator, a drive colon, `..` or a character Windows refuses in a
+/// file name would build paths outside the install, or a launch line the
+/// engine reads differently from the folder we write to.
+pub fn validate_game_folder(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err(
+            "The game folder is empty: it is the folder beside hl.exe, such as dod".to_string(),
+        );
+    }
+    if name != name.trim() {
+        return Err(format!(
+            "The game folder \"{name}\" starts or ends with a space; the engine would not find it"
+        ));
+    }
+    if name == "." || name == ".." || name.contains("..") {
+        return Err(format!(
+            "The game folder \"{name}\" contains \"..\": give the name of a folder beside hl.exe"
+        ));
+    }
+    let bad = |c: char| {
+        matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            || c.is_control()
+            || c.is_whitespace()
+    };
+    if let Some(c) = name.chars().find(|&c| bad(c)) {
+        return Err(format!(
+            "The game folder \"{name}\" contains \"{c}\": give just the name of a folder beside hl.exe, such as dod"
+        ));
+    }
+    if name.starts_with(['-', '+']) {
+        return Err(format!(
+            "The game folder \"{name}\" starts with \"{}\", which the engine reads as another launch option",
+            &name[..1]
+        ));
+    }
+    Ok(())
+}
+
+/// Sets the game folder for the rest of this process (#402). A blank `name`
+/// restores [`DEFAULT_GAME_FOLDER`]; an invalid one is refused and the old
+/// value stays.
+pub fn set_game_folder(name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if !name.is_empty() {
+        validate_game_folder(name)?;
+    }
+    let mut guard = GAME_FOLDER.write().unwrap_or_else(|p| p.into_inner());
+    *guard = name.to_string();
+    Ok(())
+}
+
+/// The game folder's name: the `<mod>` in `-game <mod>`, `dod` by default
+/// (#402).
+pub fn game_folder() -> String {
+    let guard = GAME_FOLDER.read().unwrap_or_else(|p| p.into_inner());
+    if guard.is_empty() {
+        DEFAULT_GAME_FOLDER.to_string()
+    } else {
+        guard.clone()
+    }
+}
+
+/// `<game_root>\<game folder>`, where the game reads its configs, maps and
+/// demos, and where a batch writes its helper `.cfg` and chain demos (#402).
+/// `game_root` is the folder holding `hl.exe`.
+pub fn mod_dir(game_root: &Path) -> PathBuf {
+    game_root.join(game_folder())
+}
+
+/// [`mod_dir`] for the folder holding `hl_exe`, `None` when it has no parent.
+pub fn mod_dir_for_exe(hl_exe: &Path) -> Option<PathBuf> {
+    hl_exe.parent().map(mod_dir)
+}
+
+/// `<game_root>\<game folder>_addon`: the engine searches it ahead of the game
+/// folder with `-addons`, and DoD Studio's own UI, HD and overview files go
+/// there (#408, #415). The engine names it from the game folder, so a
+/// `dod_movies` install's is `dod_movies_addon` (#402).
+pub fn addon_dir(game_root: &Path) -> PathBuf {
+    game_root.join(format!("{}_addon", game_folder()))
+}
+
+/// `<game_root>\<game folder>_downloads`, where the engine saves what it
+/// downloads from servers (maps, sprays). Named from the game folder like
+/// [`addon_dir`] (#402).
+pub fn downloads_dir(game_root: &Path) -> PathBuf {
+    game_root.join(format!("{}_downloads", game_folder()))
+}
+
+/// The folders beside `hl.exe` (`game_root`) that hold a `liblist.gam` and a
+/// `cl_dlls/client.dll`, the files that make a folder a mod `-game` can
+/// start, sorted by name. The Game folder setting offers these (#402).
+/// `_addon`/`_downloads` siblings have no `liblist.gam`; the movie installs'
+/// `valve` has one but no `client.dll`, and starting it ends in the engine's
+/// "could not load library" error (#768).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn list_game_folders(game_root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(game_root) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| {
+            let dir = e.path();
+            dir.join("liblist.gam").is_file() && dir.join("cl_dlls").join("client.dll").is_file()
+        })
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|name| validate_game_folder(name).is_ok())
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
 }
 
 /// Deletes the engine's `qconsole.log`.
@@ -276,7 +425,7 @@ pub fn remove_console_log(game_root: &Path) {
 /// according to the four auto-clear settings.
 ///
 /// `game_root` is the folder holding `hl.exe`; the batch writes into it and
-/// into its `dod/` subfolder. Nothing here is fatal — a capture that finished
+/// into its game folder ([`mod_dir`], `dod/` by default). Nothing here is fatal — a capture that finished
 /// should not fail because a leftover could not be deleted — but nothing here
 /// is silent either: every removal goes through `remove_scratch_file`, which
 /// retries and then reports a file it could not delete against the checkbox
@@ -299,12 +448,15 @@ pub fn clear_capture_scratch(
     auto_clear_previews: bool,
     save_local_patched_copy: bool,
 ) {
-    let dod_dir = game_root.join("dod");
+    let dod_dir = mod_dir(game_root);
 
     if auto_clear_logs {
         remove_scratch_file(&console_log_path(game_root), "Auto-clear Logs");
         remove_scratch_file(&dod_dir.join("dodstudio_helper.cfg"), "Auto-clear Logs");
-        remove_scratch_file(&dod_dir.join("dodstudio_capture_done.cfg"), "Auto-clear Logs");
+        remove_scratch_file(
+            &dod_dir.join("dodstudio_capture_done.cfg"),
+            "Auto-clear Logs",
+        );
         remove_scratch_file(&dod_dir.join("dod_quit.cfg"), "Auto-clear Logs");
         // Legacy only: nothing has written a per-chain cfg since the helper cfg
         // absorbed those aliases. Kept so a user upgrading from a build that
@@ -417,8 +569,13 @@ mod tests {
 
     #[test]
     fn test_take_key_uses_last_two_components_lowercased() {
-        let key = take_key(Path::new(r"D:\Captures\Session_20260818_142233\Dodstudio_Chain_01_b0"));
-        assert_eq!(key, Some("session_20260818_142233/dodstudio_chain_01_b0".to_string()));
+        let key = take_key(Path::new(
+            r"D:\Captures\Session_20260818_142233\Dodstudio_Chain_01_b0",
+        ));
+        assert_eq!(
+            key,
+            Some("session_20260818_142233/dodstudio_chain_01_b0".to_string())
+        );
     }
 
     #[test]
@@ -426,7 +583,9 @@ mod tests {
         // The same take copied to a different drive must produce the same key —
         // this is the whole reason the absolute path isn't used.
         let a = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0"));
-        let b = take_key(Path::new(r"X:\somewhere\else\session_1\dodstudio_chain_01_b0"));
+        let b = take_key(Path::new(
+            r"X:\somewhere\else\session_1\dodstudio_chain_01_b0",
+        ));
         assert_eq!(a, b);
         assert!(a.is_some());
     }
@@ -453,14 +612,21 @@ mod tests {
         // subfolder. Both must resolve to the same key or auto-Rendered can
         // never correlate a finished render back to its highlights.
         let capture_side = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0"));
-        let render_side = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0\take0000"));
+        let render_side = take_key(Path::new(
+            r"D:\Captures\session_1\dodstudio_chain_01_b0\take0000",
+        ));
         assert_eq!(capture_side, render_side);
-        assert_eq!(capture_side, Some("session_1/dodstudio_chain_01_b0".to_string()));
+        assert_eq!(
+            capture_side,
+            Some("session_1/dodstudio_chain_01_b0".to_string())
+        );
     }
 
     #[test]
     fn test_take_key_handles_higher_numbered_takes() {
-        let key = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0\take0003"));
+        let key = take_key(Path::new(
+            r"D:\Captures\session_1\dodstudio_chain_01_b0\take0003",
+        ));
         assert_eq!(key, Some("session_1/dodstudio_chain_01_b0".to_string()));
     }
 
@@ -472,7 +638,10 @@ mod tests {
 
         remove_console_log(&root);
 
-        assert!(!log.exists(), "qconsole.log beside hl.exe should be removed");
+        assert!(
+            !log.exists(),
+            "qconsole.log beside hl.exe should be removed"
+        );
     }
 
     /// Cleanup runs whether or not the engine was launched with `-condebug`,
@@ -530,6 +699,86 @@ mod tests {
         for f in &keep {
             assert!(f.exists(), "{:?} is the user's file and must survive", f);
         }
+    }
+
+    #[test]
+    fn plain_folder_names_are_game_folders() {
+        for name in ["dod", "dod_movies", "dod_3_1_beta", "dod_1.2", "valve"] {
+            assert_eq!(validate_game_folder(name), Ok(()), "{name}");
+        }
+    }
+
+    /// Each of these would build a path outside the install, or a launch
+    /// line the engine reads differently from the folder Studio writes to.
+    #[test]
+    fn paths_and_launch_options_are_not_game_folders() {
+        for name in [
+            "",
+            "   ",
+            " dod",
+            "dod ",
+            "dod movies",
+            "..",
+            ".",
+            "../dod",
+            "dod/maps",
+            r"dod\maps",
+            r"C:\Games\dod",
+            "C:dod",
+            "dod?",
+            "-insecure",
+            "+map",
+            "dod\u{0}",
+        ] {
+            assert!(
+                validate_game_folder(name).is_err(),
+                "{name:?} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_game_folder_leaves_the_setting_alone() {
+        // Tests never set a valid folder (the setting is process-wide and
+        // tests run in parallel), so the default is what every one sees.
+        assert!(set_game_folder("../elsewhere").is_err());
+        assert_eq!(game_folder(), DEFAULT_GAME_FOLDER);
+        let root = Path::new(r"C:\Games\Half-Life");
+        assert_eq!(mod_dir(root), root.join("dod"));
+        assert_eq!(addon_dir(root), root.join("dod_addon"));
+        assert_eq!(downloads_dir(root), root.join("dod_downloads"));
+        assert_eq!(
+            mod_dir_for_exe(&root.join("hl.exe")),
+            Some(root.join("dod"))
+        );
+    }
+
+    #[test]
+    fn only_folders_with_a_liblist_and_a_client_dll_are_listed() {
+        let root = Scratch::new("game_folders");
+        for (folder, liblist, client) in [
+            ("dod", true, true),
+            ("dod_movies", true, true),
+            ("Dod_1_2", true, true),
+            ("dod_addon", false, false),
+            ("dod_downloads", false, false),
+            // The movie installs' valve: a liblist.gam, no client.dll (#768).
+            ("valve", true, false),
+            ("half_a_mod", false, true),
+        ] {
+            let dir = root.join(folder);
+            std::fs::create_dir_all(dir.join("cl_dlls")).unwrap();
+            if liblist {
+                std::fs::write(dir.join("liblist.gam"), b"game \"Day of Defeat\"").unwrap();
+            }
+            if client {
+                std::fs::write(dir.join("cl_dlls").join("client.dll"), b"MZ").unwrap();
+            }
+        }
+        // A file named like a folder is not one.
+        std::fs::write(root.join("liblist.gam"), b"").unwrap();
+        assert_eq!(list_game_folders(&root), ["dod", "Dod_1_2", "dod_movies"]);
+        assert!(list_game_folders(&root.join("missing")).is_empty());
     }
 }
 
@@ -621,7 +870,10 @@ mod auto_clear_previews_tests {
 
         clear_capture_scratch(&root, false, false, true, false);
 
-        assert!(demo.exists(), "a demo the user named this way is not ours to delete");
+        assert!(
+            demo.exists(),
+            "a demo the user named this way is not ours to delete"
+        );
     }
 
     /// The sidecar is the only thing marking a `_preview.dem` as ours. If it is
@@ -642,7 +894,11 @@ mod auto_clear_previews_tests {
         let root = scratch("orphan");
         let (demo, sidecar) = make_preview(&root.join("dod"), "locked");
 
-        let handle = std::fs::OpenOptions::new().read(true).share_mode(1).open(&demo).unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&demo)
+            .unwrap();
         assert!(
             std::fs::remove_file(&demo).is_err(),
             "the fixture itself is wrong if a plain remove_file succeeds here"
@@ -697,7 +953,11 @@ mod remove_file_retrying_tests {
         let file = dir.join("dodstudio_chain_02.dem");
         std::fs::write(&file, b"demo").unwrap();
 
-        let handle = std::fs::OpenOptions::new().read(true).share_mode(1).open(&file).unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&file)
+            .unwrap();
         assert!(
             std::fs::remove_file(&file).is_err(),
             "the fixture itself is wrong if a plain remove_file succeeds while this handle is open"
@@ -742,10 +1002,16 @@ mod appdata_migration_tests {
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), r#"{"hlae_path":"x"}"#);
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            r#"{"hlae_path":"x"}"#
+        );
         assert!(current.join("logs").join("activity_20260917.md").is_file());
         assert!(report.moved.contains(&"settings.json".to_string()));
-        assert!(report.legacy_removed, "an emptied legacy dir should be removed");
+        assert!(
+            report.legacy_removed,
+            "an emptied legacy dir should be removed"
+        );
         assert!(!legacy.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -759,11 +1025,17 @@ mod appdata_migration_tests {
         let legacy = root.join(LEGACY_APPDATA_DIR_NAME);
         let current = root.join(APPDATA_DIR_NAME);
         write(&legacy.join("settings.json"), "old-settings");
-        write(&current.join("logs").join("activity_20260917.md"), "# new log");
+        write(
+            &current.join("logs").join("activity_20260917.md"),
+            "# new log",
+        );
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "old-settings");
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            "old-settings"
+        );
         assert!(report.moved.contains(&"settings.json".to_string()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -777,9 +1049,15 @@ mod appdata_migration_tests {
         let root = scratch("logs_merge");
         let legacy = root.join(LEGACY_APPDATA_DIR_NAME);
         let current = root.join(APPDATA_DIR_NAME);
-        write(&legacy.join("logs").join("activity_20260822.md"), "# a month of history");
+        write(
+            &legacy.join("logs").join("activity_20260822.md"),
+            "# a month of history",
+        );
         write(&legacy.join("logs").join("crash_log.md"), "# crash");
-        write(&current.join("logs").join("dodstudio_goldsrc_hooks.log"), "the DLL's own log, written first");
+        write(
+            &current.join("logs").join("dodstudio_goldsrc_hooks.log"),
+            "the DLL's own log, written first",
+        );
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
@@ -788,15 +1066,26 @@ mod appdata_migration_tests {
             "# a month of history",
             "legacy history must not be stranded just because the new logs folder already existed"
         );
-        assert_eq!(std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(), "# crash");
         assert_eq!(
-            std::fs::read_to_string(current.join("logs").join("dodstudio_goldsrc_hooks.log")).unwrap(),
+            std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(),
+            "# crash"
+        );
+        assert_eq!(
+            std::fs::read_to_string(current.join("logs").join("dodstudio_goldsrc_hooks.log"))
+                .unwrap(),
             "the DLL's own log, written first",
             "the file already at the destination must not be overwritten"
         );
-        assert!(report.moved.contains(&"logs/activity_20260822.md".to_string()));
+        assert!(
+            report
+                .moved
+                .contains(&"logs/activity_20260822.md".to_string())
+        );
         assert!(report.moved.contains(&"logs/crash_log.md".to_string()));
-        assert!(report.legacy_removed, "the legacy dir should be fully drained and removed");
+        assert!(
+            report.legacy_removed,
+            "the legacy dir should be fully drained and removed"
+        );
         assert!(!legacy.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -814,9 +1103,15 @@ mod appdata_migration_tests {
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(), "live");
+        assert_eq!(
+            std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(),
+            "live"
+        );
         assert_eq!(report.skipped, vec!["logs/crash_log.md".to_string()]);
-        assert!(!report.legacy_removed, "the legacy dir still holds the skipped file");
+        assert!(
+            !report.legacy_removed,
+            "the legacy dir still holds the skipped file"
+        );
         assert!(legacy.join("logs").join("crash_log.md").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -831,9 +1126,15 @@ mod appdata_migration_tests {
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "live");
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            "live"
+        );
         assert_eq!(report.skipped, vec!["settings.json".to_string()]);
-        assert!(!report.legacy_removed, "the legacy dir still holds the skipped file");
+        assert!(
+            !report.legacy_removed,
+            "the legacy dir still holds the skipped file"
+        );
         assert!(legacy.join("settings.json").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -846,7 +1147,10 @@ mod appdata_migration_tests {
             &root.join(APPDATA_DIR_NAME),
         );
         assert!(!report.did_something());
-        assert!(!root.join(APPDATA_DIR_NAME).exists(), "must not create the new dir for nothing");
+        assert!(
+            !root.join(APPDATA_DIR_NAME).exists(),
+            "must not create the new dir for nothing"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -863,7 +1167,10 @@ mod appdata_migration_tests {
 
         assert!(first.did_something());
         assert!(!second.did_something());
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "s");
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            "s"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

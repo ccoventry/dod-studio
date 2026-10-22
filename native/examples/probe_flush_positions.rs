@@ -13,7 +13,7 @@ use native::patch::bsp::Bsp;
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
 use native::patch::{
-    build_batch_queue, clean_demo_decals, on_screen_half_angle, Cancel, DecalCleanOptions,
+    Cancel, DecalCleanOptions, build_batch_queue, clean_demo_decals, on_screen_half_angle,
 };
 
 fn main() {
@@ -28,7 +28,11 @@ fn main() {
     let mut config = PatcherConfig::default();
     config.capture_directories = Vec::new();
     config.primary_media_dir = Some(scratch.clone());
-    config.game_path = scratch.join("mock_game").join("hl.exe").to_string_lossy().to_string();
+    config.game_path = scratch
+        .join("mock_game")
+        .join("hl.exe")
+        .to_string_lossy()
+        .to_string();
     config.record_start_lead = 5.0;
     config.record_stop_trail = 5.0;
     config.pre_roll_seconds = 5.0;
@@ -38,8 +42,10 @@ fn main() {
     for j in jobs.iter().filter(|j| !j.blocks.is_empty()) {
         println!(
             "job player {:?}  blocks {}  first window {}..{}",
-            j.target_player, j.blocks.len(),
-            j.blocks[0].record_start_tick, j.blocks[0].record_stop_tick
+            j.target_player,
+            j.blocks.len(),
+            j.blocks[0].record_start_tick,
+            j.blocks[0].record_stop_tick
         );
     }
     // The capture that produced the artefact is one player's job, not simply
@@ -48,17 +54,26 @@ fn main() {
     let job = jobs
         .iter()
         .filter(|j| !j.blocks.is_empty())
-        .find(|j| want.as_deref().is_none_or(|w| j.target_player.as_deref() == Some(w)))
+        .find(|j| {
+            want.as_deref()
+                .is_none_or(|w| j.target_player.as_deref() == Some(w))
+        })
         .expect("blocks");
-    println!("
-using job for player {:?}", job.target_player);
+    println!(
+        "
+using job for player {:?}",
+        job.target_player
+    );
     let windows: Vec<(i32, i32)> = job
         .blocks
         .iter()
         .map(|b| (b.record_start_tick, b.record_stop_tick))
         .collect();
 
-    let fov: f32 = std::env::var("FLUSH_FOV").ok().and_then(|s| s.parse().ok()).unwrap_or(105.0);
+    let fov: f32 = std::env::var("FLUSH_FOV")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(105.0);
     let maps_dir = std::env::var("FLUSH_MAPS_DIR")
         .ok()
         .map(std::path::PathBuf::from)
@@ -68,7 +83,9 @@ using job for player {:?}", job.target_player);
     let max_distance = DecalCleanOptions::default().visibility_max_distance;
     let opts = DecalCleanOptions {
         inject_r_decals_command: false,
-        atlas_dir: std::env::var("FLUSH_ATLAS_DIR").ok().map(std::path::PathBuf::from),
+        atlas_dir: std::env::var("FLUSH_ATLAS_DIR")
+            .ok()
+            .map(std::path::PathBuf::from),
         maps_dir: maps_dir.clone(),
         ring_limit: ring,
         visibility_cone_degrees: cone_deg,
@@ -84,16 +101,29 @@ using job for player {:?}", job.target_player);
     let cameras = &stats.diagnostic_cameras;
     println!(
         "ring {}  positions {}  cameras {} (unsampled)  cone half-angle {:.1} deg  max_distance {}",
-        ring, positions.len(), cameras.len(), cone_deg, max_distance
+        ring,
+        positions.len(),
+        cameras.len(),
+        cone_deg,
+        max_distance
     );
 
     // Camera coverage per clip. A window with no samples is a clip the
     // selection never looked at, which no amount of correct testing can save.
     println!();
     for (i, (s, e)) in windows.iter().enumerate() {
-        println!("  block {:>2}: window {:>7}..{:>7}  ({:>6} records)", i, s, e, e - s);
+        println!(
+            "  block {:>2}: window {:>7}..{:>7}  ({:>6} records)",
+            i,
+            s,
+            e,
+            e - s
+        );
     }
-    println!("  total in-window records: {}", windows.iter().map(|(s, e)| (e - s) as i64).sum::<i64>());
+    println!(
+        "  total in-window records: {}",
+        windows.iter().map(|(s, e)| (e - s) as i64).sum::<i64>()
+    );
 
     let map_name = stats.atlas_map.clone().unwrap_or_default();
     let bsp = maps_dir.as_ref().and_then(|d| {
@@ -133,7 +163,10 @@ using job for player {:?}", job.target_player);
                 continue;
             }
             in_cone_any = true;
-            let clear = bsp.as_ref().map(|b| !b.line_blocked(eye, p)).unwrap_or(true);
+            let clear = bsp
+                .as_ref()
+                .map(|b| !b.line_blocked(eye, p))
+                .unwrap_or(true);
             if !clear {
                 continue;
             }
@@ -167,15 +200,34 @@ using job for player {:?}", job.target_player);
     }
 
     println!();
-    println!("hidden only because the cone never covered them : {}", only_cone);
-    println!("hidden only because a wall was in the way       : {}", only_trace);
-    println!("hidden ONLY because they were beyond {:>4}u      : {}  <-- rendered, but not tested", max_distance, only_distance);
+    println!(
+        "hidden only because the cone never covered them : {}",
+        only_cone
+    );
+    println!(
+        "hidden only because a wall was in the way       : {}",
+        only_trace
+    );
+    println!(
+        "hidden ONLY because they were beyond {:>4}u      : {}  <-- rendered, but not tested",
+        max_distance, only_distance
+    );
     println!();
-    println!("in shot with an unobstructed view, at any range  : {} of {}", visible_ignoring_distance, positions.len());
+    println!(
+        "in shot with an unobstructed view, at any range  : {} of {}",
+        visible_ignoring_distance,
+        positions.len()
+    );
     if nearest_of_far.is_finite() {
-        println!("nearest such position beyond the cutoff          : {:.0} units", nearest_of_far);
+        println!(
+            "nearest such position beyond the cutoff          : {:.0} units",
+            nearest_of_far
+        );
     }
-    println!("stat the pipeline reported (on-camera frames)    : {}", stats.flush_on_camera_frames);
+    println!(
+        "stat the pipeline reported (on-camera frames)    : {}",
+        stats.flush_on_camera_frames
+    );
 
     if let Some(b) = bsp.as_ref() {
         // The engine does not render a decal at the coordinate it is given: it
@@ -188,30 +240,62 @@ using job for player {:?}", job.target_player);
         for p in positions {
             // The engine projects onto the face; lifting the raw coordinate does
             // not, and would leave a buried point buried.
-            let Some(surf) = b.decal_draw_point(p, 64.0, 1.0) else { continue };
+            let Some(surf) = b.decal_draw_point(p, 64.0, 1.0) else {
+                continue;
+            };
             face_resolved += 1;
             let seen = cameras.iter().any(|(eye, fwd)| {
                 let v = [surf[0] - eye[0], surf[1] - eye[1], surf[2] - eye[2]];
-                let d = (v[0]*v[0] + v[1]*v[1] + v[2]*v[2]).sqrt();
-                if d < 1.0 || d > max_distance { return false }
-                let fl = (fwd[0]*fwd[0] + fwd[1]*fwd[1] + fwd[2]*fwd[2]).sqrt();
-                if fl < 0.5 { return false }
-                if (v[0]*fwd[0] + v[1]*fwd[1] + v[2]*fwd[2]) / (d * fl) < cos_cone { return false }
+                let d = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                if d < 1.0 || d > max_distance {
+                    return false;
+                }
+                let fl = (fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]).sqrt();
+                if fl < 0.5 {
+                    return false;
+                }
+                if (v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2]) / (d * fl) < cos_cone {
+                    return false;
+                }
                 !b.line_blocked(eye, &surf)
             });
-            if seen { face_visible += 1 }
+            if seen {
+                face_visible += 1
+            }
         }
         println!();
-        println!("nearest world face resolved for                 : {} of {}", face_resolved, positions.len());
-        println!("THE FACE THE ENGINE DRAWS ON is in shot for     : {} of {}  <-- what the camera actually sees", face_visible, positions.len());
+        println!(
+            "nearest world face resolved for                 : {} of {}",
+            face_resolved,
+            positions.len()
+        );
+        println!(
+            "THE FACE THE ENGINE DRAWS ON is in shot for     : {} of {}  <-- what the camera actually sees",
+            face_visible,
+            positions.len()
+        );
 
-        let solid = positions.iter().filter(|p| {
-            let c = b.leaf_contents(b.leaf_at(p));
-            c == native::patch::bsp::CONTENTS_SOLID || c == native::patch::bsp::CONTENTS_SKY
-        }).count();
+        let solid = positions
+            .iter()
+            .filter(|p| {
+                let c = b.leaf_contents(b.leaf_at(p));
+                c == native::patch::bsp::CONTENTS_SOLID || c == native::patch::bsp::CONTENTS_SKY
+            })
+            .count();
         println!();
-        println!("chosen positions whose own leaf is SOLID        : {} of {}", solid, positions.len());
-        let near_face = positions.iter().filter(|p| b.nearest_face(p, 4.0).is_some()).count();
-        println!("chosen positions within 4u of a world face      : {} of {}", near_face, positions.len());
+        println!(
+            "chosen positions whose own leaf is SOLID        : {} of {}",
+            solid,
+            positions.len()
+        );
+        let near_face = positions
+            .iter()
+            .filter(|p| b.nearest_face(p, 4.0).is_some())
+            .count();
+        println!(
+            "chosen positions within 4u of a world face      : {} of {}",
+            near_face,
+            positions.len()
+        );
     }
 }

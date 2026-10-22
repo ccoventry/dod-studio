@@ -27,8 +27,7 @@ pub const MAX_PAYLOAD_SIZE: usize = MAX_PAYLOAD_LIMIT_BYTES;
 /// free, not capture-time.** HLAE pipes frames live, so an encoder that cannot
 /// keep up slows the capture instead of failing, and the size ranking is
 /// probably close to the inverse of the real-time-viability ranking.
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 pub enum CaptureCodec {
     /// Built for real-time capture: fast, multithreaded, simple prediction.
     /// 486 MB (0.49x). The default, and the only one proven in a real capture.
@@ -85,14 +84,13 @@ impl CaptureCodec {
     }
 }
 
-
 // ── Command scheduling ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct CustomCommand {
     pub command: String,
     pub offset: f32,
-    pub relation: CommandRelation,  
+    pub relation: CommandRelation,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -154,6 +152,27 @@ pub struct CaptureStreak {
     pub status: HighlightStatus,
     #[serde(default)]
     pub match_start_tick: Option<i32>,
+    /// `source_demo`'s size and start hash when it was scanned
+    /// (`demo_hasher::demo_key_text`). Every tick above counts frames of that
+    /// file, so a different file saved under the same name since must stop a
+    /// batch before anything is patched (#196). `None` for streaks from
+    /// before this field existed, which are not checked.
+    #[serde(default)]
+    pub source_key: Option<String>,
+    /// An HLTV demo's highlight: the camera follows no one by itself, so a
+    /// capture puts it on this player (`ds_spec_target`, #247). False
+    /// for a POV demo, whose footage is its recorder's.
+    #[serde(default)]
+    pub spectated: bool,
+    /// The player's SteamID64, when the demo carries one, so the UI can
+    /// name them beyond this demo (#573).
+    #[serde(default)]
+    pub steam_id: Option<String>,
+    /// The player recorded this POV demo (`analysis::highlights::Highlight::
+    /// recorder`). Which rows exist is decided before this is set (D18, #573);
+    /// this only lets the UI badge the recorder's rows.
+    #[serde(default)]
+    pub recorded_this_demo: bool,
 }
 
 impl CaptureStreak {
@@ -182,7 +201,12 @@ impl CaptureStreak {
                 parts.push(weapon_clean);
             } else {
                 let gap_sec = (abs_time - slice[i - 1].1).max(0.0).round() as i32;
-                parts.push(format!("(+{}:{:02}) {}", gap_sec / 60, gap_sec % 60, weapon_clean));
+                parts.push(format!(
+                    "(+{}:{:02}) {}",
+                    gap_sec / 60,
+                    gap_sec % 60,
+                    weapon_clean
+                ));
             }
         }
         self.timeline_string = parts.join(", ");
@@ -232,7 +256,7 @@ pub struct PatchJob {
     pub init_commands: Vec<String>,
     pub scheduled_commands: Vec<(i32, String)>,
     /// (tick, label) pairs — each becomes a named `svc_director` STUFFTEXT event
-    /// in the `viewdemo` Event List labelled "<N> kills: <timeline_string>".
+    /// in the `viewdemo` Event List labelled `"<N> kills: <timeline_string>"`.
     pub director_events: Vec<(i32, String)>,
     pub block_routes: Vec<(i32, i32, usize)>,
     /// Where each block's frames will land, and which payload highlights it
@@ -277,6 +301,12 @@ pub enum CaptureMode {
     /// whatever the screen actually showed. In exchange the file is finished
     /// and playable the moment the clip ends, audio already muxed.
     Obs,
+    /// No video at all: HLAE's `mirv_agr` records every drawn model's bones
+    /// and the camera into one `.agr` file per block, for the Blender page
+    /// (#403, #450). `mirv_recordmovie` is never issued; the record aliases
+    /// start and stop `mirv_agr` instead, and `host_framerate` pins the
+    /// recorded rate to `PatcherConfig::agr_fps`.
+    Agr,
 }
 
 impl CaptureMode {
@@ -285,6 +315,7 @@ impl CaptureMode {
             Self::FrameSequence => "frame_sequence",
             Self::DirectToVideo => "direct_to_video",
             Self::Obs => "obs",
+            Self::Agr => "agr",
         }
     }
 
@@ -295,24 +326,25 @@ impl CaptureMode {
         match id {
             "direct_to_video" => Self::DirectToVideo,
             "obs" => Self::Obs,
+            "agr" => Self::Agr,
             _ => Self::FrameSequence,
         }
     }
 
-    /// Whether HLAE is doing the recording. False only for OBS, where
-    /// `mirv_recordmovie` is never issued and the engine simply plays back.
+    /// Whether HLAE records a movie (`mirv_recordmovie_*`). False for OBS,
+    /// where the engine simply plays back, and for AGR, where HLAE records
+    /// with `mirv_agr` instead and writes no frames.
     pub fn hlae_records(self) -> bool {
-        !matches!(self, Self::Obs)
+        matches!(self, Self::FrameSequence | Self::DirectToVideo)
     }
 }
 
 /// Minimum gap between one take's stop and the next one's start, for OBS.
 ///
-/// `builder::MIN_TAKE_SEPARATION_SECONDS` is 1.0 s and was derived for HLAE as
-/// a deliberately conservative guess, because the demo side cannot observe how
-/// long HLAE needs to finalise a take. The OBS figure is not a guess: OBS took
-/// **~1.065 s** to finalise a file after `StopRecord` returned, measured
-/// repeatedly — so the existing guard is already too tight for this path.
+/// `builder::MIN_TAKE_SEPARATION_SECONDS` is HLAE's, 0.5 s from HLAE's
+/// measured ~0.28 s finalise (#9). OBS took **~1.065 s** to finalise a file
+/// after `StopRecord` returned, measured repeatedly, so HLAE's guard is far
+/// too tight for this path.
 ///
 /// 2.0 s rather than 1.1 s because the measurement is one machine writing one
 /// container, the cost of being wrong is a lost take, and the cost of being
@@ -359,7 +391,11 @@ impl ObsConfig {
             "ws://{}:{} (password: {})",
             self.host,
             self.port,
-            if self.password.is_empty() { "none" } else { "set" },
+            if self.password.is_empty() {
+                "none"
+            } else {
+                "set"
+            },
         )
     }
 }
@@ -381,6 +417,12 @@ pub struct PatcherConfig {
     /// can actually sustain at the configured resolution or frames get
     /// dropped (confirmed live: 300fps @ 2560x1440 lost 98.5% of frames).
     pub obs_capture_fps: i32,
+    /// AGR mode's recorded rate, in frames per game second. `0` (the default)
+    /// means "the same as `capture_fps`" — see `effective_agr_fps`. Its own
+    /// setting because the cost is different: an AGR frame is a few KB, so a
+    /// preview can drop to 30 while a slow-motion take wants 300.
+    #[serde(default)]
+    pub agr_fps: i32,
     pub exit_on_finish: bool,
     pub init_commands: Vec<String>,
     pub custom_commands: Vec<CustomCommand>,
@@ -416,6 +458,24 @@ pub struct PatcherConfig {
     pub primary_media_dir: Option<std::path::PathBuf>,
     pub movie_config: String,
     pub save_local_patched_copy: bool,
+    /// Run the batch from the hook DLL on the original demos, seeking between
+    /// clips, instead of patching a copy of each demo (#434): the default
+    /// route. Falls back to patching when the batch can't run that way
+    /// (`patch::runtime_batch`); the patch route itself is kept until real
+    /// batches have vetted this one.
+    #[serde(default = "default_hook_runs_batch")]
+    pub hook_runs_batch: bool,
+    /// The hook DLL's `ds_capture_stay_behind` for the batch: the game stays
+    /// behind the user's windows. Off, it comes to the front while it records,
+    /// so the user can watch. Full speed either way
+    /// (`ds_capture_run_in_background`).
+    #[serde(default = "default_keep_game_behind")]
+    pub keep_game_behind: bool,
+    /// Configuration > Players' "Use in the game" box (#428), sent to the
+    /// game as `ds_player_overrides` when its pipe first answers.
+    /// `None` sends nothing: a config not built from the saved settings.
+    #[serde(default)]
+    pub player_overrides: Option<bool>,
     pub session_id: String,
     pub hlae_path: String,
     pub game_path: String,
@@ -459,6 +519,14 @@ fn default_decal_flush() -> bool {
     true
 }
 
+fn default_keep_game_behind() -> bool {
+    true
+}
+
+pub fn default_hook_runs_batch() -> bool {
+    true
+}
+
 fn default_decal_ring_limit() -> u32 {
     256
 }
@@ -479,10 +547,11 @@ fn default_capture_fov() -> f32 {
 /// as "not installed" and simply doesn't inject it, same as any other
 /// optional path.
 pub fn default_goldsrc_hooks_dll_path() -> Option<std::path::PathBuf> {
-    std::env::current_exe()
-        .ok()?
-        .parent()
-        .map(|dir| dir.join("resources").join("goldsrc-hooks").join("dodstudio_goldsrc_hooks.dll"))
+    std::env::current_exe().ok()?.parent().map(|dir| {
+        dir.join("resources")
+            .join("goldsrc-hooks")
+            .join("dodstudio_goldsrc_hooks.dll")
+    })
 }
 
 impl PatcherConfig {
@@ -506,15 +575,67 @@ impl PatcherConfig {
         self.ffmpeg_capture = self.capture_mode == CaptureMode::DirectToVideo;
     }
 
-    pub fn build_hlae_process(&self, extra_engine_args: &str) -> std::process::Command {
-        let hlae_exe = &self.hlae_path;
-        let hl_exe = &self.game_path;
-        let hlae_dir = std::path::Path::new(hlae_exe).parent();
+    /// The goldsrc-hooks DLL a launch injects, if one is found: the user's
+    /// configured override (Studio -> Configuration -> Paths), then the
+    /// bundled default beside this app's own install, then (for anyone who
+    /// manually dropped it beside hlae.exe before that setting existed) that
+    /// legacy spot.
+    pub fn goldsrc_hooks_dll(&self) -> Option<std::path::PathBuf> {
+        let hlae_dir = std::path::Path::new(&self.hlae_path).parent();
+        self.goldsrc_hooks_dll_path
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.exists())
+            .or_else(|| default_goldsrc_hooks_dll_path().filter(|p| p.exists()))
+            .or_else(|| {
+                hlae_dir
+                    .map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))
+                    .filter(|p| p.exists())
+            })
+    }
 
-        let dll_path = match hlae_dir {
+    /// The rate AGR mode records at: `agr_fps` when set, otherwise the
+    /// capture FPS, and never below 1 so `1 / fps` always has a meaning.
+    pub fn effective_agr_fps(&self) -> i32 {
+        if self.agr_fps > 0 {
+            self.agr_fps
+        } else {
+            self.capture_fps.max(1)
+        }
+    }
+
+    /// The settings a launch from this config gives the game, which it only
+    /// reads at start. `build_hlae_process` launches with exactly these, and
+    /// `launch_settings::compare` checks a running game against them (#666).
+    pub fn launch_settings(&self) -> super::launch_settings::LaunchSettings {
+        let afx_hook_dll = match std::path::Path::new(&self.hlae_path).parent() {
             Some(parent) => parent.join("AfxHookGoldSrc.dll"),
             None => std::path::PathBuf::from("AfxHookGoldSrc.dll"),
         };
+        super::launch_settings::LaunchSettings {
+            game_path: self.game_path.clone(),
+            game_folder: crate::shared::paths::game_folder(),
+            width: self.resolution_width,
+            height: self.resolution_height,
+            afx_hook_dll,
+            goldsrc_hooks_dll: self.goldsrc_hooks_dll(),
+        }
+    }
+
+    pub fn build_hlae_process(&self, extra_engine_args: &str) -> std::process::Command {
+        let hlae_exe = &self.hlae_path;
+        let hlae_dir = std::path::Path::new(hlae_exe).parent();
+        // Every launch-time value comes from here, destructured in full, so a
+        // new one can't skip the running-game check (#666).
+        let super::launch_settings::LaunchSettings {
+            game_path: hl_exe,
+            game_folder,
+            width,
+            height,
+            afx_hook_dll: dll_path,
+            goldsrc_hooks_dll,
+        } = self.launch_settings();
+
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
         // `-hookDllPath` is repeatable on HLAE's `-customLoader` command line
@@ -528,18 +649,9 @@ impl PatcherConfig {
         // env vars (GOLDSRC_HOOKS_*) are set, which nothing here sets yet --
         // see the crate's README for what it needs to do anything.
         //
-        // Resolution order: the user's configured override (Studio ->
-        // Configuration -> Paths), then the bundled default beside this
-        // app's own install, then (for anyone who manually dropped it beside
-        // hlae.exe before this setting existed) that legacy spot.
-        let goldsrc_hooks_dll = self
-            .goldsrc_hooks_dll_path
-            .as_ref()
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.exists())
-            .or_else(|| default_goldsrc_hooks_dll_path().filter(|p| p.exists()))
-            .or_else(|| hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll")).filter(|p| p.exists()));
-        let goldsrc_hooks_dll_str = goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
+        // Resolution order: see `goldsrc_hooks_dll`.
+        let goldsrc_hooks_dll_str =
+            goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
 
         let program_path_str = hl_exe.replace("/", "\\\\");
 
@@ -567,11 +679,16 @@ impl PatcherConfig {
         // the observed behaviour: the flag parses, and the captured hudAlpha
         // bitmaps come out byte-for-byte identical to a run without it.
         //
-        // `-afxRenderMode` takes one of standard|fBO|memoryDC the same way.
-        // `-32bpp` because a framebuffer that is not 32-bit has no alpha bits
-        // to force in the first place. `-afxOptimizeCaptureVis` is left out:
-        // it is a visibility optimisation unrelated to alpha, and would be one
-        // more variable over the capture itself.
+        // `-afxForceAlpha8 1` is the only alpha flag sent. A bisect on the
+        // pre-Anniversary build removed one flag per separate-HUD capture
+        // (#69): without `-gl`, `-32bpp` or `-afxRenderMode standard` the
+        // `hudalpha`, `hudcolor` and `all` streams measured the same, with the
+        // same frame count and capture time, and only dropping
+        // `-afxForceAlpha8 1` flattened `hudalpha` to 255. The engine already
+        // runs OpenGL with a 32-bit framebuffer, and `standard` is HLAE's
+        // default render mode. `-afxOptimizeCaptureVis` is left out: it is a
+        // visibility optimisation unrelated to alpha, and would be one more
+        // variable over the capture itself.
         //
         // NOT gated on a "Separate HUD" setting. One used to exist and gated
         // this from inside `capture_engine`, which meant the two hand-driven
@@ -596,17 +713,41 @@ impl PatcherConfig {
         // than in any one caller's `extra_engine_args` so that *every* way the
         // app starts the game gets it: a capture batch, a preview, and Launch
         // Game (which used to ignore the setting altogether, #226).
+        //
+        // `-game` names the Game folder setting, `dod` by default (#402); the
+        // hook DLL reads it back off this command line to find the same
+        // folder on disk.
+        //
+        // `-addons` makes the engine search `dod_addon` ahead of `dod`, which
+        // is where DoD Studio's own UI files go (`.res` layouts, menu
+        // entries) so the user's own `dod/resource` is never written (#408).
+        // Tested live: without it the engine ignores `dod_addon` entirely.
+        // The engine names the addon folder after `-game`'s, so another game
+        // folder gets its own `<folder>_addon`.
+        //
+        // `-demoedit` turns on the demo player's edit row (Master, Events,
+        // Save). Both hw.dll builds pass `COM_CheckParm("-demoedit")` to
+        // GameUI, which otherwise sizes the bar so that row is cut off. It
+        // was on the command line once and fell off when the launchers were
+        // unified in 02b43c1; an install with a custom
+        // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game dod -insecure -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
-            self.resolution_width, self.resolution_height, extra_engine_args
+            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {}",
+            game_folder, width, height, extra_engine_args
         );
 
         let mut cmd = std::process::Command::new(hlae_exe);
-        cmd.args(["-customLoader", "-noGui", "-autoStart", "-hookDllPath", &hook_dll_str]);
+        cmd.args([
+            "-customLoader",
+            "-noGui",
+            "-autoStart",
+            "-hookDllPath",
+            &hook_dll_str,
+        ]);
         // Say either way. "Optional" used to mean this resolved to nothing and
         // the launch proceeded in silence, which is indistinguishable from the
         // DLL loading and doing nothing -- the same log file stays empty and
-        // the dodstudio_* commands are equally absent. That cost a live-testing
+        // the ds_* commands are equally absent. That cost a live-testing
         // session to diagnose, so the absent case is now a warning naming every
         // path that was tried.
         match &goldsrc_hooks_dll_str {
@@ -616,7 +757,7 @@ impl PatcherConfig {
             }
             None => log::warn!(
                 "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                 dodstudio_* console commands will be absent this session. Tried: override={:?}, \
+                 ds_* console commands will be absent this session. Tried: override={:?}, \
                  bundled default={:?}, legacy spot beside hlae.exe={:?}. In a dev build only the \
                  override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
                 self.goldsrc_hooks_dll_path,
@@ -646,6 +787,7 @@ impl Default for PatcherConfig {
             post_roll_ticks: 60,
             capture_fps: 300,
             obs_capture_fps: 120,
+            agr_fps: 0,
             exit_on_finish: true,
             init_commands: Vec::new(),
             custom_commands: Vec::new(),
@@ -666,6 +808,9 @@ impl Default for PatcherConfig {
             primary_media_dir: None,
             movie_config: String::new(),
             save_local_patched_copy: false,
+            hook_runs_batch: default_hook_runs_batch(),
+            keep_game_behind: default_keep_game_behind(),
+            player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),
             game_path: String::new(),
@@ -811,17 +956,23 @@ mod launch_args_tests {
         // last two used to get no alpha flags at all, so a hand-driven session
         // that enabled separate HUD in the console wrote an all-white
         // `hudalpha` — an opaque matte, silently unusable. Pin all three.
-        for extra in ["-condebug +exec dodstudio_helper.cfg +playdemo dodstudio_primer", "+viewdemo stem", ""] {
+        for extra in [
+            "-condebug +exec dodstudio_helper.cfg +playdemo dodstudio_primer",
+            "+viewdemo stem",
+            "",
+        ] {
             let line = cmd_line_of(&PatcherConfig::default(), extra);
             assert!(
                 line.contains("-afxForceAlpha8 1"),
                 "alpha flag missing for extra={extra:?}: {line}"
             );
-            assert!(line.contains("-32bpp"), "missing -32bpp for extra={extra:?}: {line}");
-            assert!(
-                line.contains("-afxRenderMode standard"),
-                "missing render mode for extra={extra:?}: {line}"
-            );
+            // The flags #69's bisect showed change nothing stay off.
+            for unneeded in ["-gl", "-32bpp", "-afxRenderMode"] {
+                assert!(
+                    !line.split(' ').any(|token| token == unneeded),
+                    "{unneeded} is sent again for extra={extra:?}: {line}"
+                );
+            }
         }
     }
 
@@ -833,11 +984,44 @@ mod launch_args_tests {
         // used to be a checkbox; there is deliberately no longer any way to
         // launch without it. See #226.
         let cfg = PatcherConfig::default();
-        for extra in ["", "+viewdemo foo", "+exec dodstudio_helper.cfg +playdemo dodstudio_primer"] {
+        for extra in [
+            "",
+            "+viewdemo foo",
+            "+exec dodstudio_helper.cfg +playdemo dodstudio_primer",
+        ] {
             let line = cmd_line_of(&cfg, extra);
             assert!(
                 line.contains("-condebug"),
                 "launch args must carry -condebug, got: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_addons_is_passed_on_every_launch() {
+        // DoD Studio's UI files live in dod_addon, which the engine only
+        // searches with -addons; without it they silently don't load.
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let addons = line.find("-addons").expect("-addons present");
+            assert!(
+                line.find('+').is_none_or(|plus| addons < plus),
+                "-addons must precede any +command: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_demoedit_is_passed_on_every_launch() {
+        // Without it the demo player's Master/Events/Save row is hidden on any
+        // install lacking a custom DemoPlayerDialog.res, which is how it went
+        // missing unnoticed once before.
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let demoedit = line.find("-demoedit").expect("-demoedit present");
+            assert!(
+                line.find('+').is_none_or(|plus| demoedit < plus),
+                "-demoedit must precede any +command: {line}"
             );
         }
     }
@@ -849,8 +1033,13 @@ mod launch_args_tests {
         // an argument to that command instead of a switch.
         let line = cmd_line_of(&PatcherConfig::default(), "+playdemo dodstudio_primer");
         let first_plus = line.find('+').expect("the console command is present");
-        let alpha = line.find("-afxForceAlpha8").expect("the alpha flag is present");
-        assert!(alpha < first_plus, "alpha flag must precede any +command: {line}");
+        let alpha = line
+            .find("-afxForceAlpha8")
+            .expect("the alpha flag is present");
+        assert!(
+            alpha < first_plus,
+            "alpha flag must precede any +command: {line}"
+        );
     }
 
     #[test]

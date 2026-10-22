@@ -1,7 +1,7 @@
 //! Minimal manual DLL injector for testing goldsrc-hooks against a running
-//! hl.exe, independent of any future DoD Studio capture-pipeline wiring.
+//! hl.exe, independent of DoD Studio's own launch path.
 //!
-//! Usage: inject <pid> <path-to-dll>
+//! Usage: `inject <pid> <path-to-dll>`
 //!
 //! Standard technique: allocate a small buffer in the target process for the
 //! DLL path, write the path into it, then start a remote thread whose entry
@@ -15,13 +15,20 @@ use std::process::ExitCode;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::Diagnostics::Debug::WriteProcessMemory;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-use windows_sys::Win32::System::Memory::{VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE};
+use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx};
 use windows_sys::Win32::System::Threading::{
-    CreateRemoteThread, OpenProcess, WaitForSingleObject, INFINITE, PROCESS_CREATE_THREAD,
-    PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+    CreateRemoteThread, INFINITE, OpenProcess, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION,
+    PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE, WaitForSingleObject,
 };
 
+/// Printed on every run, before anything else: this route skips the connect
+/// warning HLAE shows in every DoD Studio launch (docs/vac_safety.md).
+const VAC_WARNING: &str = "WARNING: only inject into a separate movie copy of Half-Life, never the one \
+                           you play online with, and never join a server afterwards -- this DLL patches \
+                           the game in memory, which is what VAC detects. See docs/vac_safety.md.";
+
 fn main() -> ExitCode {
+    eprintln!("{VAC_WARNING}\n");
     let args: Vec<String> = env::args().collect();
     let [_, pid_arg, dll_path] = args.as_slice() else {
         eprintln!("usage: inject <pid> <path-to-dll>");
@@ -48,12 +55,18 @@ fn main() -> ExitCode {
 
     unsafe {
         let process: HANDLE = OpenProcess(
-            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
+            PROCESS_CREATE_THREAD
+                | PROCESS_QUERY_INFORMATION
+                | PROCESS_VM_OPERATION
+                | PROCESS_VM_WRITE
+                | PROCESS_VM_READ,
             0,
             pid,
         );
         if process.is_null() {
-            eprintln!("OpenProcess({pid}) failed -- is that PID correct, and are you running as the same user (or elevated)?");
+            eprintln!(
+                "OpenProcess({pid}) failed -- is that PID correct, and are you running as the same user (or elevated)?"
+            );
             return ExitCode::FAILURE;
         }
 
@@ -79,7 +92,10 @@ fn main() -> ExitCode {
             &mut written,
         );
         if ok == 0 || written != dll_path_c.len() {
-            eprintln!("WriteProcessMemory failed (wrote {written}/{} bytes)", dll_path_c.len());
+            eprintln!(
+                "WriteProcessMemory failed (wrote {written}/{} bytes)",
+                dll_path_c.len()
+            );
             CloseHandle(process);
             return ExitCode::FAILURE;
         }
@@ -125,6 +141,8 @@ fn main() -> ExitCode {
     }
 
     println!("Injected {dll_path_str} into process {pid}.");
-    println!("Check %APPDATA%\\dod-studio\\logs\\dodstudio_goldsrc_hooks.log for its own diagnostics.");
+    println!(
+        "Check %APPDATA%\\dod-studio\\logs\\dodstudio_goldsrc_hooks.log for its own diagnostics."
+    );
     ExitCode::SUCCESS
 }

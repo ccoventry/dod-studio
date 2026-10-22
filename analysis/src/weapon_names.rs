@@ -53,12 +53,29 @@ const WEAPON_KEYS: &[(Weapon, &str)] = &[
 /// weapon tables (via [`all_weapon_display_names`]) both go through this
 /// instead of independently deriving a name, which is what let the same
 /// weapon show different text in different panes (issue #34).
+///
+/// Where no loc file can be found (the in-game DLL runs from `hl.exe`'s
+/// folder, nowhere near `localizations/`), the English names built in here
+/// stand in, rather than an empty name (#573).
 pub fn weapon_display_name(weapon: &Weapon) -> String {
     WEAPON_KEYS
         .iter()
         .find(|(w, _)| w == weapon)
-        .and_then(|(_, key)| translate_key(key))
+        .and_then(|(_, key)| translate_key(key).or_else(|| built_in_english(key)))
         .unwrap_or_default()
+}
+
+/// Studio's own English names, built in.
+const ENGLISH: &str = include_str!("../../localizations/dod_studio_english.txt");
+
+/// `key`'s English name from the built-in copy: the line `"key"  "Name"`.
+fn built_in_english(key: &str) -> Option<String> {
+    let quoted = format!("\"{key}\"");
+    ENGLISH
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&quoted))
+        .map(|rest| rest.trim().trim_matches('"').to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// Every weapon's raw JSON tag (as serde serializes a bare `Weapon` value,
@@ -72,4 +89,23 @@ pub fn all_weapon_display_names() -> std::collections::HashMap<String, String> {
         .iter()
         .map(|(w, key)| (format!("{:?}", w), translate_key(key).unwrap_or_default()))
         .collect()
+}
+
+#[cfg(test)]
+mod built_in_tests {
+    use super::*;
+
+    #[test]
+    fn every_weapon_has_a_built_in_english_name() {
+        for (weapon, key) in WEAPON_KEYS {
+            assert!(built_in_english(key).is_some(), "{weapon:?} ({key})");
+        }
+        assert_eq!(
+            built_in_english("weapon.stickgrenade").as_deref(),
+            Some("Stick")
+        );
+        // A key that is a prefix of another must not match it.
+        assert_eq!(built_in_english("weapon.k98").as_deref(), Some("K98"));
+        assert_eq!(built_in_english("weapon.no_such"), None);
+    }
 }

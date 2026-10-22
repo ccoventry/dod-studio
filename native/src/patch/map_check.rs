@@ -56,11 +56,6 @@ pub enum MapStatus {
 }
 
 impl MapStatus {
-    /// Whether anything derived from this map's geometry can be trusted.
-    pub fn geometry_is_trustworthy(&self) -> bool {
-        matches!(self, MapStatus::Ok { .. })
-    }
-
     /// Whether the demo can be played at all.
     pub fn is_playable(&self) -> bool {
         !matches!(self, MapStatus::Missing)
@@ -101,13 +96,19 @@ pub fn map_reference(demo: &Path) -> Result<MapReference, String> {
 
     let raw = &head[MAP_NAME_AT..MAP_NAME_AT + MAP_NAME_LEN];
     let name: String = String::from_utf8_lossy(
-        &raw.iter().copied().take_while(|b| *b != 0).collect::<Vec<u8>>(),
+        &raw.iter()
+            .copied()
+            .take_while(|b| *b != 0)
+            .collect::<Vec<u8>>(),
     )
     .trim()
     .to_lowercase();
 
     if name.is_empty() || !is_safe_map_name(&name) {
-        return Err(format!("{}: header carries no usable map name", demo.display()));
+        return Err(format!(
+            "{}: header carries no usable map name",
+            demo.display()
+        ));
     }
 
     let checksum = u32::from_le_bytes([
@@ -143,15 +144,17 @@ pub fn map_path(maps_dir: &Path, map_name: &str) -> PathBuf {
 
 /// The map library belonging to a given `hl.exe`.
 ///
-/// DoD's content sits beside the executable, so maps are `<hl.exe dir>/dod/maps`
-/// — and note that demos live *inside* `dod/`, one level below the exe. Deriving
+/// DoD's content sits beside the executable, so maps are
+/// `<hl.exe dir>/<game folder>/maps` (`dod` unless the Game folder setting says
+/// otherwise, #402) — and note that demos live *inside* the game folder, one
+/// level below the exe. Deriving
 /// this from a demo's own folder instead gives `dod/dod/maps`, which exists
 /// nowhere and fails silently.
 ///
 /// `None` when that does not resolve to a real directory, rather than handing
 /// back a path that can only fail later.
 pub fn maps_dir_for_exe(exe: &Path) -> Option<PathBuf> {
-    let dir = exe.parent()?.join("dod").join("maps");
+    let dir = crate::shared::paths::mod_dir_for_exe(exe)?.join("maps");
     dir.is_dir().then_some(dir)
 }
 
@@ -237,10 +240,6 @@ mod tests {
             expected_checksum: None,
         };
         assert_eq!(status_of(&unstated, &maps), MapStatus::Unverifiable);
-        assert!(
-            !status_of(&unstated, &maps).geometry_is_trustworthy(),
-            "an unverified map must not be trusted for geometry"
-        );
     }
 
     #[test]
@@ -254,7 +253,10 @@ mod tests {
             map_name: "dod_anzio".to_string(),
             expected_checksum: Some(1),
         };
-        assert!(matches!(status_of(&wants, &maps), MapStatus::Unreadable { .. }));
+        assert!(matches!(
+            status_of(&wants, &maps),
+            MapStatus::Unreadable { .. }
+        ));
     }
 
     #[test]

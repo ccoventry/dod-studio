@@ -67,7 +67,8 @@ impl Doer for SvcNewMovevars {
                 sky_vec,
                 sky_name: sky_name.to_vec(),
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

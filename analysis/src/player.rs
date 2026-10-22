@@ -14,6 +14,13 @@ impl Display for PlayerGlobalId {
     }
 }
 
+/// The SteamID64 in a player's global id, when it is one: a 17-digit number.
+/// A demo with no SteamIDs (a bot's, a LAN server's) falls back to
+/// `PLAYER_<n>` or `CONNECTION_<n>` ids, which name nobody outside it.
+pub fn steam_id_of(id: &str) -> Option<String> {
+    (id.len() == 17 && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Player {
     pub id: PlayerGlobalId,
@@ -31,6 +38,32 @@ pub struct Player {
     pub kill_streaks: Vec<KillStreak>,
     pub weapon_breakdown: HashMap<Weapon, (u32, u32)>,
     pub mortality: Vec<MortalityChange>,
+
+    /// Objective points: the sum of this player's `ObjScore` *increments*
+    /// since the match went live. Unlike `stats.0`, which the same message
+    /// overwrites, a counter reset cannot lose any.
+    #[serde(default)]
+    pub obj_points: u32,
+
+    /// Flag captures credited to this player, co-cappers included
+    /// (`objective.rs`).
+    #[serde(default)]
+    pub cap_credits: u32,
+
+    /// Enemy capture attempts this player stopped by killing a capper just
+    /// before the `CancelProg` (`objective.rs`, #192).
+    #[serde(default)]
+    pub cap_breaks: u32,
+
+    /// Kills of a teammate, resolved against both teams at the moment of the
+    /// kill.
+    #[serde(default)]
+    pub teamkills: u32,
+
+    /// Deaths with no other player to credit: killed by the world, or by
+    /// themselves.
+    #[serde(default)]
+    pub suicides: u32,
 }
 
 impl Hash for Player {
@@ -65,6 +98,11 @@ impl Player {
             kill_streaks: vec![],
             weapon_breakdown: HashMap::new(),
             mortality: vec![],
+            obj_points: 0,
+            cap_credits: 0,
+            cap_breaks: 0,
+            teamkills: 0,
+            suicides: 0,
         }
     }
 
@@ -140,6 +178,11 @@ impl Player {
             kill_streaks: vec![],
             weapon_breakdown: HashMap::new(),
             mortality: vec![],
+            obj_points: 0,
+            cap_credits: 0,
+            cap_breaks: 0,
+            teamkills: 0,
+            suicides: 0,
         }
     }
 }

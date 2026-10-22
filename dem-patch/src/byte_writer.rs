@@ -13,6 +13,13 @@ impl ByteWriter {
         }
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(capacity),
+            offset: 0,
+        }
+    }
+
     fn offset(&mut self, offset: usize) {
         self.offset += offset;
     }

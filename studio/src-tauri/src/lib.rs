@@ -1,10 +1,28 @@
-mod capture_manager;
-mod render_manager;
-mod settings_manager;
 mod audit_manager;
+mod batch_eta;
+mod blender_manager;
+mod capture_manager;
+mod combine_manager;
+mod crash_maps_manager;
+mod demo_cache_cmd;
+mod demo_links_manager;
+mod demo_rename_manager;
+mod demo_split_manager;
 mod dir_browser;
+mod hd_manager;
+mod hook_batch;
+mod manifest_file;
 mod map_manager;
+mod match_group_cmd;
 mod messages;
+mod overview_manager;
+mod packet_limit_manager;
+mod players_tab;
+mod preview_in_place;
+mod render_manager;
+mod review_manager;
+mod settings_manager;
+mod take_delete_manager;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -12,17 +30,26 @@ mod updater_manager;
 #[cfg(test)]
 mod test_support;
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use capture_manager::{CaptureManager, CapturePayload, launch_demo_preview, generate_all_previews, launch_standalone_game, launch_obs, check_engine_processes, kill_engine_processes, scan_orphaned_previews, delete_orphaned_previews, read_cfg_commands};
+use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
+use capture_manager::{
+    CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
+    kill_engine_processes, launch_demo_preview, launch_obs, launch_standalone_game,
+    read_cfg_commands, scan_orphaned_previews, send_preview_to_running_game, start_steam,
+    steam_state,
+};
 use render_manager::{
-    RenderManager, queue_render_batch, start_queued_render, cancel_render_batch,
-    cancel_render_job, reset_render_job, reset_all_render_jobs, remove_render_job,
-    remove_non_rendering_render_jobs, set_render_job_codec, get_export_pool_free_gb,
-    get_render_required_estimate_gb,
-    check_render_autosave, discard_render_autosave, recover_render_batch,
+    RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
+    check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
+    get_render_jobs, get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
+    remove_non_rendering_render_jobs, remove_render_job, remove_render_jobs, reset_all_render_jobs,
+    reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
 };
 use settings_manager::{AppSettings, SettingsManager};
-use audit_manager::{AuditManager, SerializedDuplicateGroup};
+use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 // ── ScanManager ────────────────────────────────────────────────────────────────
 
@@ -59,8 +86,18 @@ async fn save_settings(
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        settings.save()?;
+        let mut settings = settings;
+        // Refused before anything is written: a game folder that is a path
+        // would put the launch and every file Studio writes somewhere other
+        // than beside hl.exe (#402).
+        native::shared::paths::validate_game_folder(&settings.game_folder)?;
         let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        // The frontend doesn't carry this field; the loaded value stands, or a
+        // migration would run again at every start.
+        settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
+        settings.save()?;
+        settings_manager::apply_game_folder(&settings);
+        players_tab::mirror_table(&settings);
         *guard = settings;
         Ok(())
     }))
@@ -68,16 +105,56 @@ async fn save_settings(
 }
 
 // ── Project Session IPC Commands ───────────────────────────────────────────────
-// `fs:default` (capabilities/default.json) only grants read access to the app's
-// own AppConfig/AppData dirs — it does NOT scope arbitrary user-picked paths, so
-// the JS `@tauri-apps/plugin-fs` read/writeTextFile calls fail for every path a
-// save/open dialog can return. Do the actual I/O in Rust (std::fs, unscoped)
-// instead, same as `save_settings`/`get_settings` above.
+// File I/O for paths the user picked happens here in Rust (std::fs), same as
+// `save_settings`/`get_settings` above. Tauri's fs plugin was dropped: its
+// default scope covers only the app's own config/data dirs, so it could never
+// reach a path a save/open dialog returns.
 
 #[tauri::command]
 async fn save_project_session(path: String, contents: String) -> Result<(), String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         std::fs::write(&path, contents).map_err(|e| messages::failed_to_write_file(&path, e))
+    }))
+    .await
+}
+
+/// `Documents\dod-studio\projects`, made if it's missing: where Save and
+/// Load Project start (#354), so project files don't land wherever the last
+/// file dialog happened to be.
+#[tauri::command]
+async fn default_projects_dir() -> Result<String, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        let dir = dirs::document_dir()
+            .ok_or_else(|| messages::NO_DOCUMENTS_FOLDER.to_string())?
+            .join("dod-studio")
+            .join("projects");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| messages::failed_to_write_file(&dir.to_string_lossy(), e))?;
+        Ok(dir.to_string_lossy().to_string())
+    }))
+    .await
+}
+
+/// Which of a loaded project's demos are missing, and where each one moved,
+/// if a file with the same key turns up in `search_dirs` (#21).
+#[tauri::command]
+async fn locate_missing_demos(
+    demos: Vec<capture_manager::KnownDemo>,
+    search_dirs: Vec<String>,
+) -> Result<Vec<capture_manager::MissingDemo>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let dirs: Vec<std::path::PathBuf> =
+            search_dirs.iter().map(std::path::PathBuf::from).collect();
+        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+    }))
+    .await
+}
+
+/// Which demos are no longer the file they were scanned from (#21).
+#[tauri::command]
+async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(capture_manager::changed_demos(&demos))
     }))
     .await
 }
@@ -92,23 +169,60 @@ async fn load_project_session(path: String) -> Result<String, String> {
 
 // ── Auditor IPC Commands ───────────────────────────────────────────────────────
 
+/// `paths` plus every fixed drive when `all_drives`, in one key pass (#844).
+/// `queued` is the project's queue: copies there, or in the install's game
+/// folder, are kept first.
 #[tauri::command]
 async fn run_demo_audit(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AuditManager>,
+    settings: tauri::State<'_, SettingsManager>,
     paths: Vec<String>,
-) -> Result<Vec<SerializedDuplicateGroup>, String> {
+    all_drives: bool,
+    queued: Vec<String>,
+) -> Result<AuditOutcome, String> {
+    let hl_path = settings
+        .inner
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .hl_path
+        .clone();
+    let game_folders: Vec<PathBuf> = native::shared::paths::mod_dir_for_exe(Path::new(&hl_path))
+        .filter(|_| !hl_path.trim().is_empty())
+        .into_iter()
+        .collect();
     audit_manager::run_demo_audit_impl(
         app_handle,
         Arc::clone(&state.is_running),
         Arc::clone(&state.cancel_token),
         paths,
-    ).await
+        all_drives,
+        (game_folders, queued),
+    )
+    .await
 }
 
+/// The roots "All drives" walks, for its label.
 #[tauri::command]
-fn delete_audit_files(paths: Vec<String>) -> Result<(), String> {
-    audit_manager::delete_audit_files_impl(paths)
+async fn list_fixed_drives() -> Result<Vec<String>, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(
+        audit_manager::fixed_drive_roots,
+    ))
+    .await
+}
+
+/// To the Recycle Bin, or for good when `permanent` (#844), each copy only
+/// once it matches its group's kept copy byte for byte.
+#[tauri::command]
+async fn delete_audit_files(
+    app_handle: tauri::AppHandle,
+    copies: Vec<audit_manager::DeleteCopy>,
+    permanent: bool,
+) -> Result<DeleteOutcome, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        audit_manager::delete_audit_files_impl(&app_handle, copies, permanent)
+    }))
+    .await
 }
 
 #[tauri::command]
@@ -172,13 +286,29 @@ async fn scan_directory(
     app_handle: tauri::AppHandle,
     scan_state: tauri::State<'_, ScanManager>,
     paths: Vec<String>,
-) -> Result<Vec<capture_manager::SerializedDemo>, String> {
+    known: Option<Vec<capture_manager::KnownDemo>>,
+    workers: Option<usize>,
+) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
-    ).await
+        known.unwrap_or_default(),
+        workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+    )
+    .await
+}
+
+/// Total physical RAM in bytes, for the scan worker box's hint line (#246).
+#[tauri::command]
+async fn system_memory_bytes() -> Result<u64, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        Ok(sys.total_memory())
+    }))
+    .await
 }
 
 #[tauri::command]
@@ -187,11 +317,39 @@ fn cancel_scan(scan_state: tauri::State<'_, ScanManager>) -> Result<(), String> 
     Ok(())
 }
 
+/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
+/// `None` for a path with no prefix.
+fn volume_key(path: &std::path::Path) -> Option<String> {
+    match path.components().next()? {
+        std::path::Component::Prefix(prefix) => {
+            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+        }
+        _ => None,
+    }
+}
+
+/// Free space across the capture folders, each drive counted once: two
+/// folders on one drive share its space. On the blocking pool (#853): a
+/// cache miss re-lists every volume, which can wait on a sleeping or network
+/// drive, and start-up asks for this alongside the other disk queries.
 #[tauri::command]
-fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
+async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        export_pool_space(paths)
+    }))
+    .await
+}
+
+fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
+    let mut seen = std::collections::HashSet::new();
     for path_str in paths {
         let p = std::path::PathBuf::from(path_str);
+        if let Some(key) = volume_key(&p)
+            && !seen.insert(key)
+        {
+            continue;
+        }
         let space = native::sys::disk::get_available_bytes(&p);
         if space != u64::MAX {
             total += space;
@@ -214,8 +372,18 @@ struct CaptureOutputDiagnostic {
     usable: bool,
 }
 
+/// On the blocking pool for the same reason as `calculate_export_pool_space`.
 #[tauri::command]
-fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
+async fn diagnose_capture_output_paths(
+    paths: Vec<String>,
+) -> Result<Vec<CaptureOutputDiagnostic>, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        capture_output_diagnostics(paths)
+    }))
+    .await
+}
+
+fn capture_output_diagnostics(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic> {
     paths
         .into_iter()
         .map(|path_str| {
@@ -228,7 +396,11 @@ fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnos
                 native::sys::disk::PathStatus::NotADirectory => "not_a_directory",
             };
             let usable = native::sys::disk::get_available_bytes(&p) != u64::MAX;
-            CaptureOutputDiagnostic { path: path_str, status, usable }
+            CaptureOutputDiagnostic {
+                path: path_str,
+                status,
+                usable,
+            }
         })
         .collect()
 }
@@ -254,8 +426,21 @@ async fn validate_paths(hlae_path: String, hl_path: String) -> Result<bool, Stri
 /// the app's resolution chain, so this has to be reported before a batch rather
 /// than discovered after one — the failure is a capture that runs to completion
 /// and produces no video. See `native::shared::hlae_ffmpeg`.
+///
+/// On the blocking pool (#853): it searches PATH and runs `ffmpeg -version`,
+/// polling for up to 5 s, and start-up calls it twice.
 #[tauri::command]
 async fn check_hlae_ffmpeg(
+    hlae_path: String,
+    ffmpeg_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        hlae_ffmpeg_report(hlae_path, ffmpeg_path)
+    }))
+    .await
+}
+
+fn hlae_ffmpeg_report(
     hlae_path: String,
     ffmpeg_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -286,9 +471,12 @@ async fn check_hlae_ffmpeg(
     // produces `None`, so the check never ran and a typo'd override said
     // nothing at all. Failing to resolve is itself the problem worth reporting.
     let configured = ffmpeg_path.as_deref().unwrap_or("").trim().to_string();
+    // The frontend sends the bare default `ffmpeg` when no override is set, so
+    // that is "no override" too, not a file called ffmpeg that went missing.
+    let no_override = configured.is_empty() || configured.eq_ignore_ascii_case("ffmpeg");
     let app_ffmpeg_problem = match &app_ffmpeg {
         Some(p) => hf::verify_is_ffmpeg(p).err(),
-        None if configured.is_empty() => {
+        None if no_override => {
             Some("no ffmpeg.exe was found on PATH, and no override is set".to_string())
         }
         None => Some(format!("there is no file at \"{}\"", configured)),
@@ -408,6 +596,62 @@ pub struct AnalyzerReportPayload {
     pub state: analysis::AnalyzerState,
 }
 
+/// Which request `index_demo_players` is serving, per lane; a newer one stops
+/// an older one between demos (the Demo Analyzer moved to another folder).
+/// One lane each, so the Master Queue's and Configuration > Players' lookups
+/// never cancel the Analyzer's or each other's.
+static PLAYER_INDEX_ANALYZER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PLAYER_INDEX_QUEUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PLAYER_INDEX_PLAYERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Who is in each demo (#437, #174), one `demo_players` event per demo as it
+/// is read: from the small player index when it is current (milliseconds), or
+/// from the analyzer cache or a full parse (about a second) when it is not.
+/// Resolves with how many demos were read.
+#[tauri::command]
+async fn index_demo_players(
+    app_handle: tauri::AppHandle,
+    paths: Vec<String>,
+    request_id: u64,
+    lane: String,
+) -> Result<usize, String> {
+    let current: &'static std::sync::atomic::AtomicU64 = match lane.as_str() {
+        "queue" => &PLAYER_INDEX_QUEUE,
+        "players" => &PLAYER_INDEX_PLAYERS,
+        _ => &PLAYER_INDEX_ANALYZER,
+    };
+    current.store(request_id, Ordering::SeqCst);
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        use tauri::Emitter;
+        let mut done = 0;
+        for path in paths {
+            if current.load(Ordering::SeqCst) != request_id {
+                break;
+            }
+            let result = native::player_index::demo_players(std::path::Path::new(&path));
+            let payload = match result {
+                Ok((demo, _)) => serde_json::json!({
+                    "lane": lane,
+                    "requestId": request_id,
+                    "path": path,
+                    "demoType": demo.demo_type,
+                    "players": demo.players,
+                }),
+                Err(e) => serde_json::json!({
+                    "lane": lane,
+                    "requestId": request_id,
+                    "path": path,
+                    "error": e,
+                }),
+            };
+            let _ = app_handle.emit("demo_players", payload);
+            done += 1;
+        }
+        Ok(done)
+    }))
+    .await
+}
+
 #[tauri::command]
 async fn analyze_demo_full(
     app_handle: tauri::AppHandle,
@@ -428,11 +672,15 @@ async fn analyze_demo_full(
         let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
         let progress_cb = |processed: usize, total: usize| {
             let now = std::time::Instant::now();
-            if now.duration_since(last_emit) >= std::time::Duration::from_millis(33) || processed == total {
+            if now.duration_since(last_emit) >= std::time::Duration::from_millis(33)
+                || processed == total
+            {
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
-                    serde_json::json!({ "processed": processed, "total": total }),
+                    // The path lets the page ignore an earlier click's
+                    // analysis still running beside this one.
+                    serde_json::json!({ "processed": processed, "total": total, "path": demo_path }),
                 );
             }
         };
@@ -474,9 +722,38 @@ async fn analyze_demo_full(
 /// `native::patch::scanner` bakes into a kill streak's timeline text, so the
 /// frontend's weapon tables (analyzer_pane.js) can show identical text
 /// instead of independently re-deriving a name from the raw enum tag.
+///
+/// On the blocking pool (#853): the first call at every boot loads the
+/// localization files from disk.
 #[tauri::command]
-fn get_weapon_display_names() -> std::collections::HashMap<String, String> {
-    analysis::all_weapon_display_names()
+async fn get_weapon_display_names() -> Result<std::collections::HashMap<String, String>, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(
+        analysis::all_weapon_display_names,
+    ))
+    .await
+}
+
+/// The overview image for `map_name` and how it lies over the world, for the
+/// Demo Analyzer's kill map (#448). `None` when no `overviews/` folder near
+/// the game or the demo has one the app can show -- not an error, since
+/// custom maps often ship without.
+#[tauri::command]
+async fn load_map_overview(
+    game_path: Option<String>,
+    demo_path: String,
+    map_name: String,
+) -> Result<Option<native::map_overview::MapOverview>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let game = game_path
+            .filter(|p| !p.trim().is_empty())
+            .map(std::path::PathBuf::from);
+        let dirs = native::map_overview::overview_search_dirs(
+            game.as_deref(),
+            std::path::Path::new(&demo_path),
+        );
+        Ok(native::map_overview::find_map_overview(&dirs, &map_name))
+    }))
+    .await
 }
 
 // ── App entry point ────────────────────────────────────────────────────────────
@@ -497,7 +774,10 @@ pub fn run() {
             if migration.skipped.is_empty() {
                 String::new()
             } else {
-                format!("; left {} already present at the destination", migration.skipped.len())
+                format!(
+                    "; left {} already present at the destination",
+                    migration.skipped.len()
+                )
             },
             if migration.failed.is_empty() {
                 String::new()
@@ -510,7 +790,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
@@ -518,6 +797,12 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(combine_manager::CombineManager::default())
+        .manage(demo_rename_manager::DemoRenameManager::default())
+        .manage(match_group_cmd::MatchGroupManager::default())
+        .manage(hd_manager::HdManager::default())
+        .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
@@ -530,20 +815,32 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
+            // The game's Highlights tab asks Studio to analyse a demo too big
+            // for the game's own memory (#565).
+            #[cfg(windows)]
+            native::sys::analysis_server::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            demo_cache_cmd::cache_demos,
+            demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
             validate_paths,
             check_hlae_ffmpeg,
             diagnose_executable_paths,
+            settings_manager::list_game_folders,
+            players_tab::list_logo_pngs,
+            players_tab::list_crosshair_sprites,
+            players_tab::crosshair_sprite_image,
+            players_tab::add_crosshair_file,
+            players_tab::set_player_overrides,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
+            load_map_overview,
             start_capture_batch,
             launch_demo_preview,
-            generate_all_previews,
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,
@@ -552,6 +849,13 @@ pub fn run() {
             read_cfg_commands,
             check_engine_processes,
             kill_engine_processes,
+            capture_manager::check_running_game,
+            capture_manager::close_running_game,
+            steam_state,
+            start_steam,
+            send_preview_to_running_game,
+            review_manager::start_highlight_review,
+            review_manager::stop_highlight_review,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,
@@ -567,19 +871,54 @@ pub fn run() {
             reset_all_render_jobs,
             remove_render_job,
             remove_non_rendering_render_jobs,
+            cancel_render_jobs,
+            reset_render_jobs,
+            remove_render_jobs,
+            clear_render_queue,
+            take_delete_manager::measure_take_folders,
+            take_delete_manager::delete_take_folders,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,
             check_render_autosave,
             discard_render_autosave,
             recover_render_batch,
+            get_render_jobs,
             get_settings,
             save_settings,
             save_project_session,
             load_project_session,
+            index_demo_players,
+            default_projects_dir,
+            locate_missing_demos,
+            changed_demos,
+            system_memory_bytes,
             run_demo_audit,
+            demo_split_manager::find_multi_map_demos_cmd,
+            demo_split_manager::cancel_multi_map_scan,
+            demo_split_manager::demo_map_segments,
+            demo_split_manager::split_demo_maps,
+            demo_split_manager::cancel_demo_split,
+            demo_split_manager::split_demo_auto,
             delete_audit_files,
+            list_fixed_drives,
             cancel_audit,
+            crash_maps_manager::crash_map_warnings,
+            crash_maps_manager::forget_crash_map,
+            demo_links_manager::list_demo_links,
+            demo_links_manager::add_demo_link,
+            demo_links_manager::remove_demo_link,
+            packet_limit_manager::engine_packet_entity_limit,
+            combine_manager::combine_plan,
+            combine_manager::combine_clips,
+            combine_manager::combine_cancel,
+            demo_rename_manager::demo_rename_list,
+            demo_rename_manager::demo_rename_cancel,
+            demo_rename_manager::demo_rename_apply,
+            demo_rename_manager::demo_rename_undo,
+            demo_rename_manager::demo_rename_undoable,
+            match_group_cmd::queue_match_groups,
+            match_group_cmd::queue_match_groups_cancel,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
@@ -589,11 +928,63 @@ pub fn run() {
             map_manager::download_map,
             map_manager::scan_game_configs,
             map_manager::roll_floors,
+            hd_manager::hd_status,
+            hd_manager::hd_setup_tools,
+            hd_manager::hd_cancel,
+            hd_manager::hd_build,
+            hd_manager::hd_set_python,
+            hd_manager::hd_set_upscaler,
+            overview_manager::overview_installs,
+            overview_manager::overview_maps,
+            overview_manager::overview_scene,
+            overview_manager::overview_load_edits,
+            overview_manager::overview_save_edits,
+            overview_manager::overview_reset_edits,
+            overview_manager::overview_export,
+            overview_manager::overview_export_hd,
+            overview_manager::overview_flag_icons,
+            overview_manager::overview_screen_height,
+            hd_manager::hd_misses,
+            hd_manager::hd_save_style,
+            hd_manager::hd_remove_style,
+            hd_manager::hd_save_map_list,
+            hd_manager::hd_world_coverage,
+            hd_manager::hd_preview,
+            blender_manager::blender_status,
+            blender_manager::blender_set_exe,
+            blender_manager::blender_run,
+            blender_manager::blender_cancel,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
             updater_manager::is_debug_build,
+            updater_manager::local_git_branch,
+            updater_manager::hook_dll_override_allowed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod pool_space_tests {
+    use super::volume_key;
+    use std::path::Path;
+
+    #[cfg(windows)]
+    #[test]
+    fn folders_on_one_drive_share_a_key() {
+        assert_eq!(
+            volume_key(Path::new(r"C:\captures")),
+            volume_key(Path::new(r"c:\Programs\HLAE"))
+        );
+        assert_ne!(
+            volume_key(Path::new(r"C:\captures")),
+            volume_key(Path::new(r"D:\captures"))
+        );
+        assert_eq!(
+            volume_key(Path::new(r"\\nas\movies\a")),
+            volume_key(Path::new(r"\\NAS\Movies\b"))
+        );
+        assert_eq!(volume_key(Path::new("relative")), None);
+    }
 }

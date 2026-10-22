@@ -3,10 +3,20 @@
 // selected-streak yield counts, and a functional delete action (M1-M4 parity).
 
 import { isDemoTracked, isRangeModified } from './take_index.js';
-import { logFrontendEvent } from './ipc_bridge.js';
+import { logFrontendEvent, indexDemoPlayers } from './ipc_bridge.js';
+import { listen } from '@tauri-apps/api/event';
+import { groupPlayers } from './player_filter.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { overLimitBadge } from './packet_entity_limit.js';
+import { multiMapSplitButton } from './queue_multimap.js';
+import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { matchesInQueue } from './queue_match_groups.js';
+import { groupDemos, currentGroupBy } from './queue_group_by.js';
+import { makeClearable } from './clearable_input.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { countsCell, statusCounts, reviewCounts, initCountLegends } from './queue_counts.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -18,15 +28,19 @@ const TRACKED_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="
  *  in sync with isHighlightTracked's own checks. */
 function describeTrackedReasons(demo) {
   const streaks = demo?.streaks || [];
-  let hasStatus = false, hasNotes = false, hasRange = false;
+  let hasStatus = false, hasNotes = false, hasClipName = false, hasReview = false, hasRange = false;
   streaks.forEach(s => {
-    if (s.status === 'Pending' || s.status === 'Captured' || s.status === 'Rendered') hasStatus = true;
+    if (s.status === HIGHLIGHT_STATUS.PENDING || s.status === HIGHLIGHT_STATUS.CAPTURED || s.status === HIGHLIGHT_STATUS.RENDERED) hasStatus = true;
     if (s.notes && s.notes.trim()) hasNotes = true;
+    if (s.clipName && s.clipName.trim()) hasClipName = true;
+    if (s.curation) hasReview = true;
     if (isRangeModified(s)) hasRange = true;
   });
   const reasons = [];
   if (hasStatus) reasons.push(STRINGS.WORKSPACE.REASON_STATUS);
   if (hasNotes) reasons.push(STRINGS.WORKSPACE.REASON_NOTE);
+  if (hasClipName) reasons.push(STRINGS.WORKSPACE.REASON_CLIP_NAME);
+  if (hasReview) reasons.push(STRINGS.WORKSPACE.REASON_REVIEW);
   if (hasRange) reasons.push(STRINGS.WORKSPACE.REASON_RANGE);
   return reasons;
 }
@@ -44,11 +58,106 @@ let wasEmptyQueue = false;
 // one row. Resolves true/false; undefined here only if main.js never wires
 // it, in which case the delete handler falls back to a plain confirm().
 let currentOnRequestTrackedDeleteConfirm = null;
+// main.js's handler for a missing demo's Locate button (#21).
+let currentOnLocateDemo = null;
+// main.js's handler for a missing demo's Use found copy button (#21).
+let currentOnUseFoundCopy = null;
+// main.js's handler for a multi-map demo's Split button (#217).
+let currentOnSplitDemo = null;
 let currentSearchTerm = '';
+// #174: the player picked in the header's player filter ('' = everyone), and
+// the recorders looked up for demos scanned before a scan stored one
+// (path -> { id, name } | null), filled in by `demo_players` events.
+let currentPlayerId = '';
+const lookedUpRecorders = new Map();
+let recorderLookupRequest = 0;
+let recorderLookupKey = '';
+let playerOptionsKey = '';
+// #54: the header's quick filters.
+const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false };
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
 const checkedPaths = new Set();
+
+/** Who recorded `demo` ({ id, name }), or null: HLTV, no resolvable owner,
+ *  or an older demo whose lookup hasn't come back yet. */
+function recorderOf(demo) {
+  if (demo.recorder_id) return { id: demo.recorder_id, name: demo.recorder_name || '' };
+  return lookedUpRecorders.get(demo.path) || null;
+}
+
+/** Demos from a project saved before scans stored the recorder, which the
+ *  player index can still answer for. A null recorder_id is a scan that
+ *  found none (HLTV), so it isn't asked again. */
+function needsRecorderLookup(demo) {
+  return demo.recorder_id === undefined
+    && demo.local_player_index !== null && demo.local_player_index !== undefined
+    && !lookedUpRecorders.has(demo.path);
+}
+
+/** Asks for every demo still missing its recorder. A newer request replaces
+ *  an older one in the queue's lane, so each one covers all of them. */
+function lookUpMissingRecorders() {
+  const paths = currentDemos.filter(needsRecorderLookup).map((d) => d.path);
+  const key = paths.join('\n');
+  if (!paths.length || key === recorderLookupKey) return;
+  recorderLookupKey = key;
+  recorderLookupRequest += 1;
+  indexDemoPlayers(paths, recorderLookupRequest, 'queue');
+}
+
+listen('demo_players', (event) => {
+  const p = event.payload || {};
+  if (p.lane !== 'queue') return;
+  const recorder = (p.players || []).find((pl) => pl.recorder);
+  lookedUpRecorders.set(p.path, recorder ? { id: recorder.id, name: recorder.name } : null);
+  if (recorder) renderMasterList(currentDemos, null, currentOnSelectDemo);
+}).catch((err) => console.error('Failed to register demo_players listener:', err));
+
+/** Every player who recorded a demo in the queue, one entry per id with
+ *  every name it was seen with (player_filter.js's groupPlayers). */
+export function getQueueRecorders() {
+  return groupPlayers(currentDemos.map(recorderOf).filter(Boolean));
+}
+
+/** Who recorded `demo` (`{ id, name }`), from the scan or a lookup; null for
+ *  an HLTV demo or one not looked up yet. */
+export function queueRecorderOf(demo) {
+  return recorderOf(demo);
+}
+
+/** Refills the player filter from the queue's recorders, keeping the pick
+ *  while that player still has a demo in the queue. */
+function renderPlayerFilterOptions() {
+  const select = document.querySelector('#master-player-filter');
+  if (!select) return;
+  const options = groupPlayers(currentDemos.map(recorderOf).filter(Boolean));
+  if (currentPlayerId && !options.some((o) => o.id === currentPlayerId)) currentPlayerId = '';
+  // Rebuilt only when the list changed, so a re-render doesn't close the
+  // dropdown under the user.
+  const key = options.map((o) => `${o.id}\t${o.label}`).join('\n');
+  if (key === playerOptionsKey && select.options.length) {
+    select.value = currentPlayerId;
+    return;
+  }
+  playerOptionsKey = key;
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = STRINGS.WORKSPACE.PLAYER_FILTER_ALL;
+  select.replaceChildren(all, ...options.map((o) => {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.label;
+    return opt;
+  }));
+  select.value = currentPlayerId;
+}
+
+function matchesPlayer(demo) {
+  if (!currentPlayerId) return true;
+  return recorderOf(demo)?.id === currentPlayerId;
+}
 
 /** Single source of truth for what the search box currently matches — used
  *  by rendering, the select-all header checkbox, and (via getVisibleDemos,
@@ -67,12 +176,22 @@ function matchesSearch(demo, term) {
  *  existing scoping — a search filter should narrow what a bulk action
  *  touches, not just what's on screen. */
 export function getVisibleDemos() {
-  return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm));
+  return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesPlayer(d) && matchesQuickFilters(d, quickFilters));
 }
 
-export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm) {
+export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy, onSplitDemo) {
+  initCountLegends();
   if (onDeleteDemo) {
     currentOnDeleteDemo = onDeleteDemo;
+  }
+  if (onSplitDemo) {
+    currentOnSplitDemo = onSplitDemo;
+  }
+  if (onLocateDemo) {
+    currentOnLocateDemo = onLocateDemo;
+  }
+  if (onUseFoundCopy) {
+    currentOnUseFoundCopy = onUseFoundCopy;
   }
   if (onRequestTrackedDeleteConfirm) {
     currentOnRequestTrackedDeleteConfirm = onRequestTrackedDeleteConfirm;
@@ -87,7 +206,21 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm) {
       currentSearchTerm = (e.target.value || '').toLowerCase().trim();
       renderMasterList(currentDemos, null, currentOnSelectDemo);
     });
+    makeClearable(searchInput, STRINGS.WORKSPACE.SEARCH_CLEAR_TITLE);
   }
+
+  document.querySelector('#master-player-filter')?.addEventListener('change', (e) => {
+    currentPlayerId = e.target.value || '';
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
+  document.querySelector('#master-kills-filter')?.addEventListener('change', (e) => {
+    quickFilters.kills = e.target.value || KILLS_FILTER.ALL;
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
+  document.querySelector('#master-owner-only-cb')?.addEventListener('change', (e) => {
+    quickFilters.ownerOnly = e.target.checked;
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
 
   const selectAllCb = document.querySelector('#master-select-all-cb');
   if (selectAllCb) {
@@ -110,7 +243,8 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm) {
     const activeTab = document.querySelector('.nav-tab-btn.active')?.dataset.nav;
     if (activeTab !== 'workspace') return;
 
-    const rows = Array.from(document.querySelectorAll('#master-demo-table-body tr'));
+    // Group header lines (#685, #823) are not demos, so the arrows step over them.
+    const rows = Array.from(document.querySelectorAll('#master-demo-table-body tr:not(.queue-match-header)'));
     if (!rows.length || rows[0].querySelector('.table-empty')) return;
 
     // Instant select, no separate cursor: selecting a row here just wires up
@@ -129,38 +263,9 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm) {
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-/**
- * Streaks belong to whichever player got the kills, not just the demo's
- * recording player — `demo.streaks` covers every player in the match. The
- * Highlight Details table (detail_pane.js) filters down to the recording
- * player's own streaks before displaying rows; mirror that same filter here
- * so the queue's counts agree with what the table actually shows instead of
- * summing every player in the match.
- *
- * Gate on whether local_player_index actually resolved, not on demo.is_pov
- * — is_pov reflects any SvcHltv/SvcDirector message anywhere in the file,
- * which also fires on an ordinary player-recorded demo whenever an HLTV
- * caster was merely spectating the live match (server-broadcast messages
- * every connected client picks up), so it's not a reliable "no single
- * owner" signal. True HLTV proxy files are already rejected earlier in the
- * pipeline (scan_demo_for_highlights), so None here means "no resolvable
- * owner", not "is_pov".
- */
-export function recordingPlayerStreaks(demo) {
-  const streaks = demo.streaks || [];
-  const recPlayer = demo.local_player_index;
-  if (recPlayer === null || recPlayer === undefined) return streaks;
-
-  return streaks.filter((s) => s.player_index === recPlayer);
-}
-
-/** Count streaks matching a given status string. An unset status (still
- *  `undefined` — see take_index.js's isHighlightTracked doc comment) counts
- *  as 'None', not 'Pending': Pending is now a deliberate flag the user sets
- *  to mark a highlight for later capture, not the implicit default. */
-function countByStatus(streaks, status) {
-  return (streaks || []).filter((s) => (s.status || STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT) === status).length;
-}
+// listedStreaks lives in queue_filters.js, beside the quick
+// filters that share it; re-exported for main.js and detail callers.
+export { listedStreaks };
 
 // ── Row selection (Clear Selected) ──────────────────────────────────────────
 
@@ -219,6 +324,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   const tableBody = document.querySelector('#master-demo-table-body');
   if (!tableBody) return;
   tableBody.innerHTML = '';
+  renderPlayerFilterOptions();
+  lookUpMissingRecorders();
 
   if (!currentDemos || currentDemos.length === 0) {
     tableBody.innerHTML =
@@ -248,7 +355,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
   if (filteredDemos.length === 0) {
     tableBody.innerHTML =
-      `<tr><td colspan="8" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_MATCH_SEARCH}</td></tr>`;
+      `<tr><td colspan="7" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_MATCH_SEARCH}</td></tr>`;
     syncClearSelectedButtonState();
     return;
   }
@@ -260,17 +367,32 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   Array.from(checkedPaths).forEach(p => { if (!allPaths.has(p)) checkedPaths.delete(p); });
   syncClearSelectedButtonState();
 
-  filteredDemos.forEach((demo) => {
+  // Group by (#685, #823): the visible demos in groups, a header line before
+  // each group; otherwise the queue's own order. Either way the same demos.
+  const groups = groupDemos(filteredDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
+  const rows = groups
+    ? groups.flatMap((g) => [{ header: g }, ...g.demos.map((demo) => ({ demo }))])
+    : filteredDemos.map((demo) => ({ demo }));
+
+  rows.forEach(({ header, demo }) => {
+    if (header) {
+      const tr = document.createElement('tr');
+      tr.className = 'queue-match-header';
+      const td = document.createElement('td');
+      td.colSpan = 7;
+      td.textContent = header.text;
+      if (header.title) td.title = header.title;
+      tr.appendChild(td);
+      tableBody.appendChild(tr);
+      return;
+    }
     const originalIdx = currentDemos.indexOf(demo);
-    // Highlights/Pending/Captured/Rendered all count only the recording
-    // player's own streaks, matching the Highlight Details table's rows.
-    const ownStreaks = recordingPlayerStreaks(demo);
+    // Every count column counts only the recording player's own streaks,
+    // matching the Highlight Details table's rows.
+    const ownStreaks = listedStreaks(demo);
 
     // ── Derive live column values ─────────────────────────────────────────
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
-    const pending     = countByStatus(ownStreaks, 'Pending');    // M4
-    const captured    = countByStatus(ownStreaks, 'Captured');   // M4
-    const rendered    = countByStatus(ownStreaks, 'Rendered');   // M4
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
@@ -325,6 +447,24 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     nameSpan.textContent = demo.name || STRINGS.WORKSPACE.EMPTY_DASH;
     tdName.appendChild(nameSpan);
 
+    // Set by main.js's missing-demo check on project load (#21).
+    if (demo.missing) {
+      nameSpan.style.color = '#ef5350';
+      const missingBadge = document.createElement('span');
+      missingBadge.textContent = STRINGS.WORKSPACE.MISSING_BADGE;
+      missingBadge.title = STRINGS.WORKSPACE.missingBadgeTitle(demo.path);
+      missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:#ef5350;border:1px solid #ef5350;border-radius:2px;padding:0 4px;cursor:help;';
+      tdName.appendChild(missingBadge);
+    }
+
+    // More entities in a snapshot than the game's engine takes (#207).
+    const limitBadge = overLimitBadge(demo);
+    if (limitBadge) tdName.appendChild(limitBadge);
+
+    // More than one map: the game stops at the first map change (#217).
+    const splitBtn = multiMapSplitButton(demo, currentOnSplitDemo);
+    if (splitBtn) tdName.appendChild(splitBtn);
+
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {
       const badge = document.createElement('span');
@@ -351,28 +491,12 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     tdSelected.style.color = selected > 0 ? '#64b5f6' : '#555';
     tdSelected.textContent = selected;
 
-    // Col 5: Pending count   [M4]
-    const tdPending = document.createElement('td');
-    tdPending.style.padding = '6px 8px';
-    tdPending.style.textAlign = 'center';
-    tdPending.style.color = pending > 0 ? '#ffa726' : '#555';
-    tdPending.textContent = pending;
+    // Col 5: Status, Pending / Captured / Rendered in one cell; col 6: Review,
+    // unmarked / Keep / Maybe / Skip (queue_counts.js).
+    const tdStatus = countsCell(statusCounts(ownStreaks));
+    const tdReview = countsCell(reviewCounts(ownStreaks));
 
-    // Col 6: Captured count  [M4]
-    const tdCaptured = document.createElement('td');
-    tdCaptured.style.padding = '6px 8px';
-    tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = captured > 0 ? '#4caf50' : '#555';
-    tdCaptured.textContent = captured;
-
-    // Col 7: Rendered count  [M4]
-    const tdRendered = document.createElement('td');
-    tdRendered.style.padding = '6px 8px';
-    tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = rendered > 0 ? '#2196f3' : '#555';
-    tdRendered.textContent = rendered;
-
-    // Col 8: Actions — remove-from-queue only, no status badge  [M3]
+    // Col 7: Actions — remove-from-queue only, no status badge  [M3]
     const tdActions = document.createElement('td');
     tdActions.style.padding = '6px 8px';
     tdActions.style.textAlign = 'center';
@@ -416,15 +540,42 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       logFrontendEvent(STRINGS.WORKSPACE.rowDeleteLog(demo.name || demo.path, demoIsTracked ? STRINGS.WORKSPACE.TRACKED_NOTE_SUFFIX : ''));
       renderMasterList(currentDemos, newSelectedIdx, currentOnSelectDemo);
     });
+    // A match the load-time search found but the user left as missing:
+    // one click to use it after all.
+    if (demo.missing && demo.foundAt && currentOnUseFoundCopy) {
+      const useBtn = document.createElement('button');
+      useBtn.type = 'button';
+      useBtn.className = 'use-found-copy-btn';
+      useBtn.textContent = STRINGS.WORKSPACE.USE_FOUND_COPY_BUTTON;
+      useBtn.title = STRINGS.WORKSPACE.useFoundCopyTitle(demo.foundAt);
+      useBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      useBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // do not select the row
+        currentOnUseFoundCopy(demo);
+      });
+      tdActions.appendChild(useBtn);
+    }
+    if (demo.missing && currentOnLocateDemo) {
+      const locateBtn = document.createElement('button');
+      locateBtn.type = 'button';
+      locateBtn.className = 'locate-demo-btn';
+      locateBtn.textContent = STRINGS.WORKSPACE.LOCATE_DEMO_BUTTON;
+      locateBtn.title = STRINGS.WORKSPACE.LOCATE_DEMO_TITLE;
+      locateBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      locateBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // do not select the row
+        currentOnLocateDemo(demo);
+      });
+      tdActions.appendChild(locateBtn);
+    }
     tdActions.appendChild(deleteBtn);
 
     tr.appendChild(tdCheck);
     tr.appendChild(tdName);
     tr.appendChild(tdYield);
     tr.appendChild(tdSelected);
-    tr.appendChild(tdPending);
-    tr.appendChild(tdCaptured);
-    tr.appendChild(tdRendered);
+    tr.appendChild(tdStatus);
+    tr.appendChild(tdReview);
     tr.appendChild(tdActions);
 
     // Row click selects the demo (but not when clicking the delete btn)

@@ -1,11 +1,28 @@
+/// The on-disk analysis cache Studio and the hook DLL share (#565).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cache;
 mod chat;
 mod clan_match;
+/// The clock offset between two recordings of one half (#708).
+mod clock_offset;
+pub mod entity_replay;
+/// What a highlight is, and whose, for every list of them (#573).
+pub mod highlights;
+/// Whether every delta decodes against a frame the file has (#41).
+pub mod integrity;
 mod kill;
 mod localization;
+/// Which match and which half a demo records, from its contents (#685).
+mod match_group;
 mod mortality;
+mod objective;
 mod player;
+mod position;
 mod round;
 mod scoreboard;
+mod team_tag;
+#[cfg(test)]
+mod tests_fixture;
 mod time;
 #[cfg(not(target_arch = "wasm32"))]
 mod utf16;
@@ -14,30 +31,45 @@ mod weapon_names;
 use crate::{
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
-    kill::{use_kill_streak_updates, use_weapon_breakdown_updates},
+    kill::{
+        use_kill_streak_updates, use_teamkill_and_suicide_updates, use_weapon_breakdown_updates,
+    },
     mortality::with_mortality_detection,
+    objective::use_objective_updates,
     player::use_player_updates,
+    position::use_position_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
 };
 use dem::{
-    open_demo_from_bytes,
+    bit::BitSliceCast,
     types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
 };
 use dod::UserMessage;
 use std::time::Duration;
 
-pub use crate::{
-    chat::{ChatMessage, ChatType, translate_system_message},
-    localization::{get_active_language, set_active_language, translate_key},
-    mortality::{MortalityState, Mortality, MortalityChange},
-    player::{Connection, Player, PlayerGlobalId, SteamId},
-    round::Round,
-};
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
+pub use crate::{
+    chat::{ChatMessage, ChatType, translate_system_message},
+    clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},
+    localization::{get_active_language, set_active_language, translate_key},
+    match_group::{
+        Half, HalfCall, HalfReason, MatchGroup, MatchHalf, MatchTeam, Side, find_demo,
+        group_matches, half_of, trim_for_grouping,
+    },
+    mortality::{Mortality, MortalityChange, MortalityState},
+    objective::{
+        AttemptOutcome, BREAK_WINDOW, CancelCause, CaptureAttempt, Flag, FlagCapture, Objectives,
+        cancel_cause,
+    },
+    player::{Connection, Player, PlayerGlobalId, SteamId},
+    position::{KillPosition, PlayerPose},
+    round::Round,
+    team_tag::{TeamTag, detect_team_tag, team_tags},
+};
 pub use dod::{Team, Weapon};
 
 #[derive(Debug)]
@@ -90,7 +122,16 @@ pub struct AnalyzerState {
     pub ended_early: bool,
     pub first_time_left: Option<std::time::Duration>,
     pub last_time_left: Option<std::time::Duration>,
+    /// The demo kept recording through a level change, to another map or
+    /// the same one; everything from there on is ignored, as the game's
+    /// `viewdemo` stops there too (`use_segment_boundary`).
     pub map_changed: bool,
+    /// The map of every signon in the demo, in order, including the ones the
+    /// analysis ignores: two or more is a demo that can be split into one per
+    /// map (#624). Defaulted so an older cache entry still loads; empty there
+    /// means "not recorded", not "no maps".
+    #[serde(default)]
+    pub signon_maps: Vec<String>,
     pub initial_map_name: Option<String>,
     pub current_time: GameTime,
 
@@ -105,6 +146,16 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Every kill, with where both players stood (#448). Defaulted so a
+    /// cache entry written before it existed still loads.
+    #[serde(default)]
+    pub kill_positions: Vec<KillPosition>,
+    /// Working state for `kill_positions`; never serialized.
+    #[serde(skip)]
+    positions: position::PositionTracker,
+    /// Flag layout, ownership, captures and capture attempts (#192).
+    #[serde(default)]
+    pub objectives: Objectives,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -132,10 +183,137 @@ pub struct DemoInfo {
 
     /// Map checksum / CRC.
     pub map_checksum: u32,
+
+    /// The most entities any one snapshot carries (`svc_packetentities` or
+    /// `svc_deltapacketentities`). The pre-Anniversary engine closes to the
+    /// desktop at the first snapshot over 256 (#207), so this says before a
+    /// capture whether a demo can play there. `None` in an analysis cached
+    /// before it was counted.
+    #[serde(default)]
+    pub peak_packet_entities: Option<u32>,
+
+    /// Where the demo stopped being read, when a frame partway through does
+    /// not parse (#811): the analysis covers everything before it. `None` for
+    /// a demo that reads to the end, and in an analysis cached before this
+    /// was noted (a damaged demo had no analysis then).
+    #[serde(default)]
+    pub damage: Option<DemoDamage>,
 }
 
-impl From<Demo> for DemoInfo {
-    fn from(value: Demo) -> Self {
+/// Where a damaged demo stopped being read, and why (#811).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DemoDamage {
+    /// The `viewdemo` clock (the last `SvcTime`) at the last frame read, in
+    /// seconds: the analysis covers the demo up to here.
+    pub read_up_to_secs: f32,
+    /// Index of the first frame that does not parse, counting every frame of
+    /// every directory entry from 0.
+    pub frame_index: usize,
+    /// Where that frame starts in the file.
+    pub byte_offset: u64,
+    /// What was not read, from there to the end of the frames.
+    pub bytes_unread: u64,
+    /// Why the frame does not parse, in words.
+    pub reason: String,
+}
+
+impl DemoDamage {
+    fn new(demo: &Demo, damage: dem::demo_parser::ParseDamage) -> Self {
+        Self {
+            read_up_to_secs: last_svc_time(demo)
+                .or(damage.last_frame_time)
+                .filter(|t| t.is_finite() && *t >= 0.0)
+                .unwrap_or(0.0),
+            frame_index: damage.frame_index,
+            byte_offset: damage.byte_offset as u64,
+            bytes_unread: damage.bytes_unread as u64,
+            reason: damage.reason,
+        }
+    }
+
+    /// "read up to 2:05", on the `viewdemo` clock.
+    pub fn read_up_to_text(&self) -> String {
+        format!("read up to {}", integrity::clock(self.read_up_to_secs))
+    }
+
+    /// One line for a person: "Damaged demo: read up to 2:05, the rest
+    /// (14.2 MB) does not parse."
+    pub fn summary(&self) -> String {
+        format!(
+            "Damaged demo: {}, the rest ({}) does not parse.",
+            self.read_up_to_text(),
+            size_text(self.bytes_unread)
+        )
+    }
+}
+
+/// A byte count as "14.2 MB" or "312 KB".
+fn size_text(bytes: u64) -> String {
+    if bytes >= 1 << 20 {
+        format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64)
+    } else {
+        format!("{} KB", bytes.div_ceil(1 << 10))
+    }
+}
+
+/// The last `SvcTime` in the demo: the `viewdemo` clock where it ends.
+fn last_svc_time(demo: &Demo) -> Option<f32> {
+    let frames = demo
+        .directory
+        .entries
+        .iter()
+        .rev()
+        .flat_map(|e| e.frames.iter().rev());
+    for frame in frames {
+        let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
+            continue;
+        };
+        let MessageData::Parsed(msgs) = &box_type.1.messages else {
+            continue;
+        };
+        let time = msgs.iter().rev().find_map(|m| match m {
+            NetMessage::EngineMessage(e) => match &**e {
+                EngineMessage::SvcTime(t) => Some(t.time),
+                _ => None,
+            },
+            _ => None,
+        });
+        if time.is_some() {
+            return time;
+        }
+    }
+    None
+}
+
+/// The most entities in any one snapshot of `demo` (#207).
+fn peak_packet_entities(demo: &Demo) -> u32 {
+    let mut peak = 0;
+    for entry in &demo.directory.entries {
+        for frame in &entry.frames {
+            let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &box_type.1.messages else {
+                continue;
+            };
+            for msg in msgs {
+                let NetMessage::EngineMessage(eng_msg) = msg else {
+                    continue;
+                };
+                let count = match &**eng_msg {
+                    EngineMessage::SvcPacketEntities(pe) => pe.entity_count.to_u32(),
+                    EngineMessage::SvcDeltaPacketEntities(pe) => pe.entity_count.to_u32(),
+                    _ => continue,
+                };
+                peak = peak.max(count);
+            }
+        }
+    }
+    peak
+}
+
+impl From<&Demo> for DemoInfo {
+    fn from(value: &Demo) -> Self {
         let map_name = value
             .header
             .map_name
@@ -170,18 +348,17 @@ impl From<Demo> for DemoInfo {
         'outer: for entry in &value.directory.entries {
             for frame in &entry.frames {
                 if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                        for msg in msgs {
-                            if let NetMessage::EngineMessage(eng_msg) = msg
-                                && matches!(
-                                    **eng_msg,
-                                    EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_)
-                                ) {
-                                    is_hltv = true;
-                                    break 'outer;
-                                }
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for msg in msgs {
+                        if let NetMessage::EngineMessage(eng_msg) = msg
+                            && is_hltv_message(eng_msg)
+                        {
+                            is_hltv = true;
+                            break 'outer;
                         }
                     }
+                }
             }
         }
         let demo_type = if is_hltv {
@@ -199,8 +376,45 @@ impl From<Demo> for DemoInfo {
             game_directory,
             demo_type,
             map_checksum: value.header.map_checksum,
+            peak_packet_entities: Some(peak_packet_entities(value)),
+            damage: None,
         }
     }
+}
+
+/// A message only an HLTV proxy's recording carries: `svc_hltv`, or a
+/// director command that drives the auto-director's camera.
+///
+/// Not *any* `svc_director` (#351): DoD Studio injects its own into every
+/// patched preview of a POV demo, and those read as HLTV. Its injections are
+/// only DRC_CMD_MESSAGE (0x06) and DRC_CMD_STUFFTEXT (0x0A) -- bookmarks and
+/// console commands -- and neither moves a camera, so they don't count. The
+/// same rule was worked out in `examples/hltv_shot_gap_probe.rs` (3f3663e).
+fn is_hltv_message(message: &EngineMessage) -> bool {
+    const DRC_CMD_MESSAGE: u8 = 0x06;
+    const DRC_CMD_STUFFTEXT: u8 = 0x0A;
+    match message {
+        EngineMessage::SvcHltv(_) => true,
+        EngineMessage::SvcDirector(d) => {
+            d.command != DRC_CMD_MESSAGE && d.command != DRC_CMD_STUFFTEXT
+        }
+        _ => false,
+    }
+}
+
+/// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
+pub const PROGRESS_SCALE: usize = 1000;
+/// The part of [`PROGRESS_SCALE`] reading the demo's structure takes.
+pub const PARSE_SHARE: usize = 850;
+
+/// `done` of `total`, placed between `from` and `to` on [`PROGRESS_SCALE`].
+/// In u128: a byte count times 850 passes 2^32 in the 32-bit game DLL.
+fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
+    if total == 0 {
+        return to;
+    }
+    let done = (done as u128).min(total as u128);
+    from + (done * (to - from) as u128 / total as u128) as usize
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -243,6 +457,7 @@ fn is_relevant_message(name_bytes: &[u8]) -> bool {
             | b"InitObj"
             | b"SetObj"
             | b"StartProg"
+            | b"StartProgF"
             | b"CancelProg"
     )
 }
@@ -292,7 +507,8 @@ fn extract_ip_port(s: &str) -> Option<String> {
                 }
                 let host_str = &s[k..i];
                 // Must contain at least one dot to be a valid domain or IP
-                if host_str.contains('.') && !host_str.starts_with('.') && !host_str.ends_with('.') {
+                if host_str.contains('.') && !host_str.starts_with('.') && !host_str.ends_with('.')
+                {
                     let port_str = &s[i + 1..j];
                     return Some(format!("{}:{}", host_str, port_str));
                 }
@@ -302,38 +518,63 @@ fn extract_ip_port(s: &str) -> Option<String> {
     None
 }
 
-pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+/// Records every signon's map in `signon_maps`, before the segment gate, so
+/// the ones after the match are listed too.
+pub fn use_signon_maps(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
-        let hostname = String::from_utf8_lossy(&msg.hostname).trim_end_matches('\0').to_string();
-        state.server_name = Some(hostname.clone());
-        if let Some(addr) = extract_ip_port(&hostname) {
-            state.server_address = Some(addr);
-        }
-
-        let map_name = String::from_utf8_lossy(&msg.map_file_name)
+        let file = String::from_utf8_lossy(&msg.map_file_name);
+        let map = file
             .trim_end_matches('\0')
-            .to_string();
-        let clean_map = map_name
             .trim_start_matches("maps/")
             .trim_end_matches(".bsp")
             .to_string();
-        if let Some(ref initial) = state.initial_map_name {
-            if initial != &clean_map {
-                let has_gameplay = state.rounds.iter().any(|r| matches!(r, Round::Completed { .. }))
-                    || state.players.iter().any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
-                if has_gameplay {
-                    state.map_changed = true;
-                } else {
-                    state.initial_map_name = Some(clean_map);
-                    state.players.clear();
-                    state.rounds.clear();
-                    state.team_scores.reset();
-                    state.clan_match_detected = false;
-                    state.clan_match_detection = ClanMatchDetection::WaitingForReset;
-                }
-            }
-        } else {
-            state.initial_map_name = Some(clean_map);
+        state.signon_maps.push(map);
+    }
+}
+
+/// Ends the analysed demo at a second signon (#217).
+///
+/// `SvcServerInfo` starts every signon. A second one means the server changed
+/// level and the demo kept recording: to another map, or to the *same* map,
+/// as when both halves of a match are played back to back. Everything after
+/// it re-sends teams, classes and the clock from scratch, so letting it
+/// through resets every player to Unassigned and restarts the demo clock.
+///
+/// The first map is the one analysed, gameplay or not, and nothing after the
+/// boundary is. The game's `viewdemo` stops at that same boundary, so the
+/// analysis (and every highlight built from it) covers exactly what the game
+/// can play. A demo with more than one map is split instead
+/// (`signon_maps`, the Demo Analyzer's and the Master Queue's Split).
+///
+/// Runs before every other hook, so none of them sees the new signon: the
+/// POV hook would otherwise take the new connection's player slot.
+pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event else {
+        return;
+    };
+    if state.initial_map_name.is_some() {
+        state.map_changed = true;
+        return;
+    }
+    let map_name = String::from_utf8_lossy(&msg.map_file_name)
+        .trim_end_matches('\0')
+        .to_string();
+    state.initial_map_name = Some(
+        map_name
+            .trim_start_matches("maps/")
+            .trim_end_matches(".bsp")
+            .to_string(),
+    );
+}
+
+pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
+        let hostname = String::from_utf8_lossy(&msg.hostname)
+            .trim_end_matches('\0')
+            .to_string();
+        state.server_name = Some(hostname.clone());
+        if let Some(addr) = extract_ip_port(&hostname) {
+            state.server_address = Some(addr);
         }
     }
 
@@ -345,12 +586,13 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
     }
 
     if let AnalyzerEvent::Frame(frame) = event
-        && let FrameData::ConsoleCommand(cmd) = &frame.frame_data {
-            let cmd_str = String::from_utf8_lossy(cmd.command.as_slice());
-            if let Some(addr) = extract_ip_port(&cmd_str) {
-                state.server_address = Some(addr);
-            }
+        && let FrameData::ConsoleCommand(cmd) = &frame.frame_data
+    {
+        let cmd_str = String::from_utf8_lossy(cmd.command.as_slice());
+        if let Some(addr) = extract_ip_port(&cmd_str) {
+            state.server_address = Some(addr);
         }
+    }
 
     use_time_left_updates(state, event);
 
@@ -372,7 +614,9 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
         };
 
         let is_natural_end = state.map_changed
-            || state.last_time_left.is_some_and(|tl| tl <= Duration::from_secs(10))
+            || state
+                .last_time_left
+                .is_some_and(|tl| tl <= Duration::from_secs(10))
             || is_close_to_match_end(match_duration);
 
         state.ended_early = if is_natural_end {
@@ -435,12 +679,10 @@ pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
             }
             UserMessage::Health(msg) => {
                 let health_val = msg.0 as u32;
-                if state.pov_stats.has_received_health
-                    && health_val < state.pov_stats.prev_health {
-                        state.pov_stats.hits_taken += 1;
-                        state.pov_stats.total_damage_taken +=
-                            state.pov_stats.prev_health - health_val;
-                    }
+                if state.pov_stats.has_received_health && health_val < state.pov_stats.prev_health {
+                    state.pov_stats.hits_taken += 1;
+                    state.pov_stats.total_damage_taken += state.pov_stats.prev_health - health_val;
+                }
                 state.pov_stats.prev_health = health_val;
                 state.pov_stats.has_received_health = true;
             }
@@ -523,9 +765,10 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
             }
         }
     } else {
-        let any_british = state.players.iter().any(|p| {
-            p.class.as_ref().map(|c| c.is_british()).unwrap_or(false)
-        });
+        let any_british = state
+            .players
+            .iter()
+            .any(|p| p.class.as_ref().map(|c| c.is_british()).unwrap_or(false));
         if any_british {
             state.allies_are_british = true;
             for player in &mut state.players {
@@ -534,19 +777,59 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                 }
             }
             state.team_scores.convert_allies_to_british();
+            state.objectives.convert_allies_to_british();
             for round in &mut state.rounds {
-                if let Round::Completed { winner_stats: Some((winner_team, _)), .. } = round
-                    && *winner_team == Team::Allies {
-                        *winner_team = Team::British;
-                    }
+                if let Round::Completed {
+                    winner_stats: Some((winner_team, _)),
+                    ..
+                } = round
+                    && *winner_team == Team::Allies
+                {
+                    *winner_team = Team::British;
+                }
             }
             for chat in &mut state.chat_messages {
                 if chat.sender_team == Some(Team::Allies) {
                     chat.sender_team = Some(Team::British);
                 }
             }
+            for kill in &mut state.kill_positions {
+                for team in [&mut kill.killer_team, &mut kill.victim_team] {
+                    if *team == Some(Team::Allies) {
+                        *team = Some(Team::British);
+                    }
+                }
+            }
         }
     }
+}
+
+/// Feeds one event through every analyzer, in order. Shared with the
+/// optimised-vs-unoptimised test so its reference pass can't drift from this.
+fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    use_signon_maps(state, event);
+    if !state.map_changed {
+        use_segment_boundary(state, event);
+    }
+    if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
+        return;
+    }
+    use_timing_updates(state, event);
+    use_player_updates(state, event);
+    use_position_updates(state, event);
+    with_mortality_detection(state, event);
+    use_scoreboard_updates(state, event);
+    use_kill_streak_updates(state, event);
+    use_weapon_breakdown_updates(state, event);
+    use_teamkill_and_suicide_updates(state, event);
+    use_team_score_updates(state, event);
+    use_rounds_updates(state, event);
+    use_objective_updates(state, event);
+    use_chat_updates(state, event);
+    use_clan_match_detection_updates(Duration::from_secs(30), state, event);
+    use_pov_stats_updates(state, event);
+    use_general_finalization(state, event);
+    check_and_promote_british(state);
 }
 
 impl Analysis {
@@ -558,6 +841,11 @@ impl Analysis {
         Self::try_from_bytes_with_progress(value, |_, _| {})
     }
 
+    /// Analyses a demo, calling `progress_cb(done, total)` as it goes. Only
+    /// the ratio means anything: reading the demo's structure is the first
+    /// [`PARSE_SHARE`] of [`PROGRESS_SCALE`] (it is ~85% of the time, measured
+    /// on a 72 MB demo), going through its frames the rest, and the last call
+    /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`.
     pub fn try_from_bytes_with_progress<F>(value: &[u8], mut progress_cb: F) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
@@ -571,34 +859,27 @@ impl Analysis {
         // `BitReader::is_bad_read` turns an overrun into a parse error. See
         // #225, and `dem-patch/examples/mangle_probe.rs` for the harness that
         // proves it.
-        let demo_res =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_demo_from_bytes(value)));
-        let demo = match demo_res {
+        //
+        // A demo damaged partway (#811) is read up to the frame that breaks,
+        // and the analysis says where that is (`DemoInfo::damage`).
+        let demo_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dem::open_demo_from_bytes_tolerant_with_progress(value, &mut |read, total| {
+                progress_cb(scaled(read, total, 0, PARSE_SHARE), PROGRESS_SCALE)
+            })
+        }));
+        let (demo, damage) = match demo_res {
             Ok(Ok(d)) => d,
-            Ok(Err(e)) => return Err(format!("Parse error: {}", e)),
+            Ok(Err(e)) => {
+                return Err(format!(
+                    "Parse error: {}",
+                    integrity::parse_error_reason(&e.to_string())
+                ));
+            }
             Err(_) => return Err("Parser panicked during demo structural decoding".to_string()),
         };
 
         let mut state = AnalyzerState::default();
-
-        let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-            if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                return;
-            }
-            use_timing_updates(state, event);
-            use_player_updates(state, event);
-            with_mortality_detection(state, event);
-            use_scoreboard_updates(state, event);
-            use_kill_streak_updates(state, event);
-            use_weapon_breakdown_updates(state, event);
-            use_team_score_updates(state, event);
-            use_rounds_updates(state, event);
-            use_chat_updates(state, event);
-            use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-            use_pov_stats_updates(state, event);
-            use_general_finalization(state, event);
-            check_and_promote_british(state);
-        };
+        let process_event = run_analyzers;
 
         process_event(&mut state, &AnalyzerEvent::Initialization);
 
@@ -614,41 +895,60 @@ impl Analysis {
             for frame in &entry.frames {
                 process_event(&mut state, &AnalyzerEvent::Frame(frame));
                 if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                        for net_msg in msgs {
-                            match net_msg {
-                                NetMessage::EngineMessage(engine_msg) => {
-                                    process_event(
-                                        &mut state,
-                                        &AnalyzerEvent::EngineMessage(engine_msg),
-                                    );
-                                }
-                                NetMessage::UserMessage(user_msg) => {
-                                    if is_relevant_message(user_msg.name.as_ref())
-                                        && let Ok(msg) =
-                                            UserMessage::new(&user_msg.name, &user_msg.data)
-                                        {
-                                            process_event(
-                                                &mut state,
-                                                &AnalyzerEvent::UserMessage(msg),
-                                            );
-                                        }
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            NetMessage::EngineMessage(engine_msg) => {
+                                process_event(
+                                    &mut state,
+                                    &AnalyzerEvent::EngineMessage(engine_msg),
+                                );
+                            }
+                            NetMessage::UserMessage(user_msg) => {
+                                if is_relevant_message(user_msg.name.as_ref())
+                                    && let Ok(msg) =
+                                        UserMessage::new(&user_msg.name, &user_msg.data)
+                                {
+                                    process_event(&mut state, &AnalyzerEvent::UserMessage(msg));
                                 }
                             }
                         }
                     }
+                }
 
                 processed_frames += 1;
                 if processed_frames % 500 == 0 || processed_frames == total_frames {
-                    progress_cb(processed_frames, total_frames);
+                    progress_cb(
+                        scaled(processed_frames, total_frames, PARSE_SHARE, PROGRESS_SCALE),
+                        PROGRESS_SCALE,
+                    );
                 }
             }
         }
 
         process_event(&mut state, &AnalyzerEvent::Finalization);
 
-        Ok(Analysis::new(demo.into(), state))
+        let mut info = DemoInfo::from(&demo);
+        info.damage = damage.map(|d| DemoDamage::new(&demo, d));
+        release_frames(demo);
+        Ok(Analysis::new(info, state))
     }
+}
+
+/// Frees the decoded frame tree. That's about a third of a cold parse (441 ms
+/// of ~1.3 s, `docs/demo_analyzer_load_performance.md`) and nothing needs the
+/// tree once the analysis is built, so where there are threads the caller
+/// doesn't wait for it. The browser build (wasm) frees it in place.
+fn release_frames(demo: Demo) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut demo = demo;
+        let entries = std::mem::take(&mut demo.directory.entries);
+        std::thread::spawn(move || drop(entries));
+    }
+    #[cfg(target_arch = "wasm32")]
+    drop(demo);
 }
 
 impl<'a> From<&'a [u8]> for Analysis {
@@ -687,15 +987,9 @@ impl AnalyzerState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DemoFingerprint {
-    pub map_name: String,
-    pub server_ip: String,
-    pub player_roster_hash: u64,
-    pub event_signature: Vec<String>,
-}
-
-pub fn parse_fingerprint(bytes: &[u8]) -> Result<(String, String, u64, Vec<String>, Option<String>), std::io::Error> {
+pub fn parse_fingerprint(
+    bytes: &[u8],
+) -> Result<(String, String, u64, Vec<String>, Option<String>), std::io::Error> {
     let (mut input, header) = dem::demo_parser::parse_header(bytes)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
@@ -715,122 +1009,165 @@ pub fn parse_fingerprint(bytes: &[u8]) -> Result<(String, String, u64, Vec<Strin
     let mut event_signature: Vec<String> = Vec::with_capacity(10);
     let mut server_ip: Option<String> = None;
 
-    let mut client_id_to_player_id: std::collections::HashMap<u8, String> = std::collections::HashMap::new();
+    let mut client_id_to_player_id: std::collections::HashMap<u8, String> =
+        std::collections::HashMap::new();
 
     let aux = dem::types::Aux::new2();
 
     while !input.is_empty() {
-        match dem::demo_parser::parse_frame(input, dem::types::MessageDataParseMode::Parse, aux.clone()) {
+        match dem::demo_parser::parse_frame(
+            input,
+            dem::types::MessageDataParseMode::Parse,
+            aux.clone(),
+        ) {
             Ok((next_input, frame)) => {
                 input = next_input;
                 frames_parsed += 1;
 
                 if let dem::types::FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let dem::types::MessageData::Parsed(msgs) = &box_type.1.messages {
-                        for net_msg in msgs {
-                            match net_msg {
-                                dem::types::NetMessage::EngineMessage(engine_msg) => {
-                                    match &**engine_msg {
-                                        dem::types::EngineMessage::SvcServerInfo(info) => {
-                                            let hostname = String::from_utf8_lossy(&info.hostname)
-                                                .trim_end_matches('\0')
-                                                .to_string();
-                                            if let Some(addr) = extract_ip_port(&hostname) {
-                                                server_ip = Some(addr);
-                                            }
-                                            client_slot = Some(info.player_index);
+                    && let dem::types::MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            dem::types::NetMessage::EngineMessage(engine_msg) => {
+                                match &**engine_msg {
+                                    dem::types::EngineMessage::SvcServerInfo(info) => {
+                                        let hostname = String::from_utf8_lossy(&info.hostname)
+                                            .trim_end_matches('\0')
+                                            .to_string();
+                                        if let Some(addr) = extract_ip_port(&hostname) {
+                                            server_ip = Some(addr);
                                         }
-                                        dem::types::EngineMessage::SvcUpdateUserInfo(user_info) => {
-                                            let fields = user_info
-                                                .user_info
-                                                .to_str()
-                                                .map(|s| s.trim_matches(['\0', '\\']).split('\\').collect::<Vec<_>>())
-                                                .unwrap_or_default()
-                                                .as_chunks::<2>()
-                                                .0
-                                                .iter()
-                                                .fold(std::collections::HashMap::new(), |mut map, [key, value]| {
+                                        client_slot = Some(info.player_index);
+                                    }
+                                    dem::types::EngineMessage::SvcUpdateUserInfo(user_info) => {
+                                        let fields = user_info
+                                            .user_info
+                                            .to_str()
+                                            .map(|s| {
+                                                s.trim_matches(['\0', '\\'])
+                                                    .split('\\')
+                                                    .collect::<Vec<_>>()
+                                            })
+                                            .unwrap_or_default()
+                                            .as_chunks::<2>()
+                                            .0
+                                            .iter()
+                                            .fold(
+                                                std::collections::HashMap::new(),
+                                                |mut map, [key, value]| {
                                                     map.insert(*key, *value);
                                                     map
-                                                });
+                                                },
+                                            );
 
-                                            if fields.is_empty() {
-                                                client_id_to_player_id.remove(&user_info.index);
-                                                continue;
+                                        if fields.is_empty() {
+                                            client_id_to_player_id.remove(&user_info.index);
+                                            continue;
+                                        }
+
+                                        // Skip HLTV slots from roster
+                                        if let Some(&"1") = fields.get("*hltv") {
+                                            continue;
+                                        }
+
+                                        let id_opt = fields
+                                            .get("*sid")
+                                            .map(|s| s.to_string())
+                                            .or_else(|| {
+                                                fields
+                                                    .get("*fid")
+                                                    .map(|fid| format!("PLAYER_{fid}"))
+                                            })
+                                            .or_else(|| fields.get("name").map(|n| n.to_string()));
+
+                                        if let Some(id) = id_opt {
+                                            if Some(user_info.index) == client_slot {
+                                                recorder_id = Some(id.clone());
                                             }
-
-                                            // Skip HLTV slots from roster
-                                            if let Some(&"1") = fields.get("*hltv") {
-                                                continue;
-                                            }
-
-                                            let id_opt = fields
-                                                .get("*sid")
-                                                .map(|s| s.to_string())
-                                                .or_else(|| fields.get("*fid").map(|fid| format!("PLAYER_{fid}")))
-                                                .or_else(|| fields.get("name").map(|n| n.to_string()));
-
-                                            if let Some(id) = id_opt {
-                                                if Some(user_info.index) == client_slot {
-                                                    recorder_id = Some(id.clone());
-                                                }
-                                                client_id_to_player_id.insert(user_info.index, id.clone());
-                                                if !roster_accumulator.contains(&id) {
-                                                    roster_accumulator.push(id);
-                                                }
+                                            client_id_to_player_id
+                                                .insert(user_info.index, id.clone());
+                                            if !roster_accumulator.contains(&id) {
+                                                roster_accumulator.push(id);
                                             }
                                         }
-                                        dem::types::EngineMessage::SvcStuffText(stuff) => {
-                                            let cmd = String::from_utf8_lossy(stuff.command.as_slice());
-                                            if let Some(addr) = extract_ip_port(&cmd) {
-                                                server_ip = Some(addr);
+                                    }
+                                    dem::types::EngineMessage::SvcStuffText(stuff) => {
+                                        let cmd = String::from_utf8_lossy(stuff.command.as_slice());
+                                        if let Some(addr) = extract_ip_port(&cmd) {
+                                            server_ip = Some(addr);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            dem::types::NetMessage::UserMessage(user_msg) => {
+                                if is_relevant_message(user_msg.name.as_ref())
+                                    && let Ok(msg) =
+                                        dod::UserMessage::new(&user_msg.name, &user_msg.data)
+                                {
+                                    match msg {
+                                        dod::UserMessage::TextMsg(text_msg) => {
+                                            let is_commencing =
+                                                text_msg.text.contains("#Game_Commencing")
+                                                    || text_msg.arg1.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    })
+                                                    || text_msg.arg2.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    })
+                                                    || text_msg.arg3.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    })
+                                                    || text_msg.arg4.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    });
+                                            if is_commencing {
+                                                match_started = true;
+                                                event_signature.clear();
                                             }
+                                        }
+                                        dod::UserMessage::RoundState(dod::RoundState::Reset) => {
+                                            match_started = true;
+                                            event_signature.clear();
+                                        }
+                                        dod::UserMessage::DeathMsg(death) if match_started => {
+                                            let killer_id = if death.killer_client_index == 0 {
+                                                "world".to_string()
+                                            } else {
+                                                client_id_to_player_id
+                                                    .get(&(death.killer_client_index - 1))
+                                                    .cloned()
+                                                    .unwrap_or_else(|| {
+                                                        format!(
+                                                            "slot_{}",
+                                                            death.killer_client_index - 1
+                                                        )
+                                                    })
+                                            };
+                                            let victim_id = client_id_to_player_id
+                                                .get(&(death.victim_client_index - 1))
+                                                .cloned()
+                                                .unwrap_or_else(|| {
+                                                    format!(
+                                                        "slot_{}",
+                                                        death.victim_client_index - 1
+                                                    )
+                                                });
+
+                                            let event_str = format!(
+                                                "{}>{}:{:?}",
+                                                killer_id, victim_id, death.weapon
+                                            );
+                                            event_signature.push(event_str);
                                         }
                                         _ => {}
                                     }
                                 }
-                                dem::types::NetMessage::UserMessage(user_msg) => {
-                                    if is_relevant_message(user_msg.name.as_ref())
-                                        && let Ok(msg) = dod::UserMessage::new(&user_msg.name, &user_msg.data) {
-                                            match msg {
-                                                dod::UserMessage::TextMsg(text_msg) => {
-                                                    let is_commencing = text_msg.text.contains("#Game_Commencing")
-                                                        || text_msg.arg1.as_ref().is_some_and(|s| s.contains("#Game_Commencing"))
-                                                        || text_msg.arg2.as_ref().is_some_and(|s| s.contains("#Game_Commencing"))
-                                                        || text_msg.arg3.as_ref().is_some_and(|s| s.contains("#Game_Commencing"))
-                                                        || text_msg.arg4.as_ref().is_some_and(|s| s.contains("#Game_Commencing"));
-                                                    if is_commencing {
-                                                        match_started = true;
-                                                        event_signature.clear();
-                                                    }
-                                                }
-                                                dod::UserMessage::RoundState(dod::RoundState::Reset) => {
-                                                    match_started = true;
-                                                    event_signature.clear();
-                                                }
-                                                dod::UserMessage::DeathMsg(death)
-                                                    if match_started => {
-                                                        let killer_id = if death.killer_client_index == 0 {
-                                                            "world".to_string()
-                                                        } else {
-                                                            client_id_to_player_id.get(&(death.killer_client_index - 1))
-                                                                .cloned()
-                                                                .unwrap_or_else(|| format!("slot_{}", death.killer_client_index - 1))
-                                                        };
-                                                        let victim_id = client_id_to_player_id.get(&(death.victim_client_index - 1))
-                                                            .cloned()
-                                                            .unwrap_or_else(|| format!("slot_{}", death.victim_client_index - 1));
-
-                                                        let event_str = format!("{}>{}:{:?}", killer_id, victim_id, death.weapon);
-                                                        event_signature.push(event_str);
-                                                    }
-                                                _ => {}
-                                            }
-                                        }
-                                }
                             }
                         }
                     }
+                }
 
                 // Check patience limit fail-safe
                 if frames_parsed > patience_limit && !match_started {
@@ -863,24 +1200,36 @@ pub fn parse_fingerprint(bytes: &[u8]) -> Result<(String, String, u64, Vec<Strin
     ))
 }
 
-pub fn extract_match_fingerprint(bytes: &[u8]) -> Result<DemoFingerprint, String> {
-    match parse_fingerprint(bytes) {
-        Ok((map_name, server_ip, player_roster_hash, event_signature, _recorder_id)) => {
-            Ok(DemoFingerprint {
-                map_name,
-                server_ip,
-                player_roster_hash,
-                event_signature,
-            })
-        }
-        Err(e) => Err(e.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    /// #351: DoD Studio's own injections into a POV demo's preview --
+    /// bookmarks (DRC_CMD_MESSAGE) and console commands (DRC_CMD_STUFFTEXT) --
+    /// don't make it HLTV; svc_hltv and a camera-moving director command do.
+    #[test]
+    fn only_a_camera_director_command_or_svc_hltv_means_hltv() {
+        let director = |command: u8| {
+            EngineMessage::SvcDirector(dem::types::SvcDirector {
+                length: 2,
+                command,
+                message: vec![0],
+            })
+        };
+        // Injected by the patcher (builder.rs's build_director_message and
+        // build_director_stufftext).
+        assert!(!is_hltv_message(&director(0x06)));
+        assert!(!is_hltv_message(&director(0x0A)));
+        // DRC_CMD_START, _EVENT, _MODE, _CAMERA: a real auto-director stream.
+        for command in [0x01, 0x02, 0x03, 0x04] {
+            assert!(is_hltv_message(&director(command)), "{command:#x}");
+        }
+        assert!(is_hltv_message(&EngineMessage::SvcHltv(
+            dem::types::SvcHltv { mode: 0 }
+        )));
+        assert!(!is_hltv_message(&EngineMessage::SvcNop));
+    }
 
     #[test]
     fn is_relevant_message_admits_objective_messages() {
@@ -889,6 +1238,7 @@ mod tests {
             b"InitObj",
             b"SetObj",
             b"StartProg",
+            b"StartProgF",
             b"CancelProg",
         ] {
             assert!(is_relevant_message(name), "{:?} should be relevant", name);
@@ -900,122 +1250,131 @@ mod tests {
         assert!(!is_relevant_message(b"NotARealMessage"));
     }
 
+    /// Demos for [`test_optimized_vs_unoptimized`]: every `.dem` in
+    /// `DOD_ANALYSIS_DEMOS` (a folder, or one file), else an even spread of up
+    /// to six from the PRE install's `dod` folder. Empty when neither exists.
+    pub(crate) fn comparison_demos() -> Vec<std::path::PathBuf> {
+        let from_env = std::env::var_os("DOD_ANALYSIS_DEMOS").map(std::path::PathBuf::from);
+        let source = from_env.clone().unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+            )
+        });
+        if source.is_file() {
+            return vec![source];
+        }
+        let Ok(entries) = fs::read_dir(&source) else {
+            return Vec::new();
+        };
+        let mut demos: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
+            .collect();
+        demos.sort();
+        if from_env.is_some() || demos.len() <= 6 {
+            return demos;
+        }
+        let step = demos.len() / 6;
+        demos.into_iter().step_by(step).take(6).collect()
+    }
+
+    /// Analyses each demo twice -- the way [`Analysis::try_from_bytes`] does,
+    /// skipping user messages `is_relevant_message` rejects, and again feeding
+    /// every message through -- and asserts the two states match. Catches a
+    /// speed-up that skips something an analyzer needed. Ignored because CI has
+    /// no demos: `cargo test -p analysis -- --ignored test_optimized_vs_unoptimized`.
     #[test]
     #[ignore]
     fn test_optimized_vs_unoptimized() {
-        let paths = [
-            "../local/demos/bb-scrim-harr-h1.dem",
-            "local/demos/bb-scrim-harr-h1.dem",
-            "../local/demos/bb-scrim-harr-h2.dem",
-            "local/demos/bb-scrim-harr-h2.dem",
-            "../local/demos/bb-scrim-railyard-h1.dem",
-            "local/demos/bb-scrim-railyard-h1.dem",
-            "../local/demos/bewton-playoffs-round1-armory-allied.dem",
-            "local/demos/bewton-playoffs-round1-armory-allied.dem",
-        ];
+        let paths = comparison_demos();
+        assert!(
+            !paths.is_empty(),
+            "no demos found: set DOD_ANALYSIS_DEMOS to a folder or a .dem file"
+        );
 
-        let mut tested_any = false;
-
-        for path in paths {
-            if !std::path::Path::new(path).exists() {
-                continue;
-            }
-
-            println!("Testing optimized vs unoptimized parsing on: {}", path);
+        for path in &paths {
+            println!(
+                "Testing optimized vs unoptimized parsing on: {}",
+                path.display()
+            );
             let file_bytes = fs::read(path).expect("failed to read demo");
+            assert_optimized_matches_unoptimized(&file_bytes);
+        }
 
-            // Unoptimized parse
-            let demo = open_demo_from_bytes(&file_bytes).unwrap();
-            let mut state_unopt = AnalyzerState::default();
-            let mut last_live_frame = None;
-            let mut processed_frames = 0;
-            let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-                if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                    return;
-                }
-                use_timing_updates(state, event);
-                use_player_updates(state, event);
-                with_mortality_detection(state, event);
-                use_scoreboard_updates(state, event);
-                use_kill_streak_updates(state, event);
-                use_weapon_breakdown_updates(state, event);
-                use_team_score_updates(state, event);
-                use_rounds_updates(state, event);
-                use_chat_updates(state, event);
-                use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-                use_pov_stats_updates(state, event);
-                use_general_finalization(state, event);
-            };
-            process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
-            for entry in &demo.directory.entries {
-                for frame in &entry.frames {
-                    let old_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
-                    if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                        && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                            for net_msg in msgs {
-                                match net_msg {
-                                    NetMessage::EngineMessage(engine_msg) => {
-                                        process_event(
-                                            &mut state_unopt,
-                                            &AnalyzerEvent::EngineMessage(engine_msg),
-                                        );
-                                    }
-                                    NetMessage::UserMessage(user_msg) => {
-                                        if let Ok(msg) =
-                                            UserMessage::new(&user_msg.name, &user_msg.data)
-                                        {
-                                            process_event(
-                                                &mut state_unopt,
-                                                &AnalyzerEvent::UserMessage(msg),
-                                            );
-                                        }
-                                    }
+        println!("All existing demos match perfectly!");
+    }
+
+    /// The comparison itself, also run on the checked-in fixture in CI
+    /// (`tests_fixture.rs`).
+    pub(crate) fn assert_optimized_matches_unoptimized(file_bytes: &[u8]) {
+        // Unoptimized parse
+        let demo = dem::open_demo_from_bytes(file_bytes).unwrap();
+        let mut state_unopt = AnalyzerState::default();
+        let mut last_live_frame = None;
+        let mut processed_frames = 0;
+        let process_event = run_analyzers;
+        process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
+        for entry in &demo.directory.entries {
+            for frame in &entry.frames {
+                let old_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
+                if let FrameData::NetworkMessage(box_type) = &frame.frame_data
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            NetMessage::EngineMessage(engine_msg) => {
+                                process_event(
+                                    &mut state_unopt,
+                                    &AnalyzerEvent::EngineMessage(engine_msg),
+                                );
+                            }
+                            NetMessage::UserMessage(user_msg) => {
+                                if let Ok(msg) = UserMessage::new(&user_msg.name, &user_msg.data) {
+                                    process_event(
+                                        &mut state_unopt,
+                                        &AnalyzerEvent::UserMessage(msg),
+                                    );
                                 }
                             }
                         }
-                    let new_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    if !old_live && new_live {
-                        last_live_frame = Some(processed_frames);
                     }
-                    processed_frames += 1;
                 }
+                let new_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                if !old_live && new_live {
+                    last_live_frame = Some(processed_frames);
+                }
+                processed_frames += 1;
             }
-            process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
-
-            // Optimized parse
-            let opt_analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
-            let state_opt = opt_analysis.state;
-
-            // Compare debug print representation
-            let total_frames: usize = demo
-                .directory
-                .entries
-                .iter()
-                .map(|entry| entry.frames.len())
-                .sum();
-            println!(
-                "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
-                total_frames,
-                last_live_frame,
-                last_live_frame.unwrap_or(0)
-            );
-
-            assert_states_eq(&state_unopt, &state_opt);
-            tested_any = true;
         }
+        process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
 
-        assert!(
-            tested_any,
-            "No demo files were found to run the comparison test!"
+        // Optimized parse
+        let opt_analysis = Analysis::try_from_bytes(file_bytes).unwrap();
+        let state_opt = opt_analysis.state;
+
+        // Compare debug print representation
+        let total_frames: usize = demo
+            .directory
+            .entries
+            .iter()
+            .map(|entry| entry.frames.len())
+            .sum();
+        println!(
+            "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
+            total_frames,
+            last_live_frame,
+            last_live_frame.unwrap_or(0)
         );
-        println!("All existing demos match perfectly!");
+
+        assert_states_eq(&state_unopt, &state_opt);
     }
 
     fn assert_states_eq(left: &AnalyzerState, right: &AnalyzerState) {
@@ -1084,9 +1443,21 @@ mod tests {
                 i
             );
             assert_eq!(p_l.stats, p_r.stats, "Player {} stats mismatched", i);
-            assert_eq!(p_l.stats_seeded, p_r.stats_seeded, "Player {} stats_seeded mismatched", i);
-            assert_eq!(p_l.has_pre_demo_activity, p_r.has_pre_demo_activity, "Player {} has_pre_demo_activity mismatched", i);
-            assert_eq!(p_l.has_reconnected, p_r.has_reconnected, "Player {} has_reconnected mismatched", i);
+            assert_eq!(
+                p_l.stats_seeded, p_r.stats_seeded,
+                "Player {} stats_seeded mismatched",
+                i
+            );
+            assert_eq!(
+                p_l.has_pre_demo_activity, p_r.has_pre_demo_activity,
+                "Player {} has_pre_demo_activity mismatched",
+                i
+            );
+            assert_eq!(
+                p_l.has_reconnected, p_r.has_reconnected,
+                "Player {} has_reconnected mismatched",
+                i
+            );
 
             // kill_streaks
             assert_eq!(
@@ -1107,6 +1478,11 @@ mod tests {
                     "Player {} kill_streak {} mismatched",
                     i,
                     j
+                );
+                assert_eq!(
+                    k_l.slot, k_r.slot,
+                    "Player {} kill_streak {} slot mismatched",
+                    i, j
                 );
             }
 
@@ -1282,6 +1658,93 @@ mod tests {
         assert!(state.players[0].has_pre_demo_activity);
     }
 
+    fn server_info(map: &str) -> EngineMessage {
+        EngineMessage::SvcServerInfo(dem::types::SvcServerInfo {
+            protocol: 48,
+            spawn_count: 1,
+            map_checksum: 0,
+            client_dll_hash: dem::types::ByteString(vec![0; 16]),
+            max_players: 32,
+            player_index: 3,
+            is_deathmatch: 0,
+            game_dir: b"dod\0".to_vec(),
+            hostname: b"server\0".to_vec(),
+            map_file_name: format!("maps/{}.bsp\0", map).into_bytes(),
+            map_cycle: Vec::new(),
+            unknown: 0,
+        })
+    }
+
+    fn state_with_a_kill() -> AnalyzerState {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_lennon2")),
+        );
+        let mut player = Player::new_mock(3, "Player");
+        player.update_session_stats(2, 1, 0);
+        state.players.push(player);
+        state
+    }
+
+    #[test]
+    fn a_same_map_signon_after_gameplay_ends_the_demo() {
+        // #217: both halves on dod_lennon2 in one recording.
+        let mut state = state_with_a_kill();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_lennon2")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.players.len(), 1);
+    }
+
+    #[test]
+    fn a_different_map_after_gameplay_ends_the_demo() {
+        let mut state = state_with_a_kill();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_lennon2"));
+    }
+
+    #[test]
+    fn a_different_map_before_gameplay_still_ends_the_demo() {
+        // viewdemo stops at the first level change, warm-up or not, so the
+        // analysis keeps the first map rather than skipping to the next.
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_warmup")),
+        );
+        state.players.push(Player::new_mock(3, "Player"));
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.players.len(), 1);
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_warmup"));
+    }
+
+    #[test]
+    fn a_same_map_signon_before_gameplay_ends_the_demo_too() {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        state.players.push(Player::new_mock(3, "Player"));
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.players.len(), 1);
+    }
+
     #[test]
     fn test_inspect_lenn_demo() {
         let mut path = "local/demos/ktps8w1-m00cat_soul_lenn_h2.dem";
@@ -1292,17 +1755,35 @@ mod tests {
             let file_bytes = fs::read(path).unwrap();
             let analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
             println!("CLAN MATCH: map_name: {}", analysis.demo_info.map_name);
-            println!("CLAN MATCH: clan_match_detected: {}", analysis.state.clan_match_detected);
-            println!("CLAN MATCH: match_start_witnessed: {}", analysis.state.match_start_witnessed);
+            println!(
+                "CLAN MATCH: clan_match_detected: {}",
+                analysis.state.clan_match_detected
+            );
+            println!(
+                "CLAN MATCH: match_start_witnessed: {}",
+                analysis.state.match_start_witnessed
+            );
             println!("CLAN MATCH: started_late: {}", analysis.state.started_late);
             println!("CLAN MATCH: ended_early: {}", analysis.state.ended_early);
-            println!("CLAN MATCH: first_time_left: {:?}", analysis.state.first_time_left);
-            println!("CLAN MATCH: last_time_left: {:?}", analysis.state.last_time_left);
+            println!(
+                "CLAN MATCH: first_time_left: {:?}",
+                analysis.state.first_time_left
+            );
+            println!(
+                "CLAN MATCH: last_time_left: {:?}",
+                analysis.state.last_time_left
+            );
             println!("CLAN MATCH: map_changed: {}", analysis.state.map_changed);
-            println!("CLAN MATCH: initial_map_name: {:?}", analysis.state.initial_map_name);
+            println!(
+                "CLAN MATCH: initial_map_name: {:?}",
+                analysis.state.initial_map_name
+            );
             for p in &analysis.state.players {
                 if p.has_pre_demo_activity {
-                    println!("CLAN MATCH: Player {} has pre-demo activity! Stats: {:?}", p.name, p.stats);
+                    println!(
+                        "CLAN MATCH: Player {} has pre-demo activity! Stats: {:?}",
+                        p.name, p.stats
+                    );
                 }
             }
         } else {
@@ -1326,8 +1807,14 @@ mod tests {
         let mut state = AnalyzerState::default();
         state.clan_match_detected = false;
         state.rounds.push(Round::Completed {
-            start_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
-            end_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
+            start_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
+            end_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
             winner_stats: None,
         });
         use_general_finalization(&mut state, &AnalyzerEvent::Finalization);
@@ -1337,8 +1824,14 @@ mod tests {
         let mut state = AnalyzerState::default();
         state.clan_match_detected = false;
         state.rounds.push(Round::Completed {
-            start_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
-            end_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
+            start_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
+            end_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
             winner_stats: None,
         });
         state.current_time.real_offset = Duration::from_secs(1195);
@@ -1374,7 +1867,29 @@ mod tests {
             assert!(res.is_ok());
             let (map_name, server_ip, roster_hash, event_signature, recorder_id) = res.unwrap();
             assert!(!map_name.is_empty());
-            println!("Map: {}, Server: {}, Roster Hash: {}, Events: {}, Recorder: {:?}", map_name, server_ip, roster_hash, event_signature.len(), recorder_id);
+            println!(
+                "Map: {}, Server: {}, Roster Hash: {}, Events: {}, Recorder: {:?}",
+                map_name,
+                server_ip,
+                roster_hash,
+                event_signature.len(),
+                recorder_id
+            );
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_placed_on_one_scale() {
+        assert_eq!(scaled(0, 100, 0, PARSE_SHARE), 0);
+        assert_eq!(scaled(100, 100, 0, PARSE_SHARE), PARSE_SHARE);
+        assert_eq!(scaled(50, 100, PARSE_SHARE, PROGRESS_SCALE), 925);
+        assert_eq!(scaled(5, 0, PARSE_SHARE, PROGRESS_SCALE), PROGRESS_SCALE);
+        // A 4 GB file's worth of bytes still scales without overflow.
+        assert_eq!(scaled(usize::MAX / 2, usize::MAX, 0, 1000), 499);
     }
 }

@@ -13,90 +13,282 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
-//! - `sound_fix`: force full-volume weapon-fire audio while spectating.
-//! - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
-//!   reload, draw, idle -- while spectating a player in-eye, which the engine
-//!   otherwise leaves static. Full design write-up in
-//!   `docs/goldsrc_hltv_animation_fix.md`.
-//! - `deathmsg`: the `dodstudio_deathmsg` command -- raise the four-line cap on
+//! - `ds_spec_match_pov`, one cvar over five modules, for making a
+//!   spectated first-person view look and sound like the player's own
+//!   recording:
+//!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
+//!     reload, draw, idle, grenades -- which the engine otherwise leaves
+//!     static. Full design write-up in `docs/goldsrc_hltv_animation_fix.md`.
+//!   - `missing_shots`: an HLTV demo carries the fire event for well under
+//!     half the rounds fired; the rest are found from the shooter's body
+//!     animation restarting and get the weapon's own event handler called for
+//!     them (sound, flash, impact).
+//!   - `spectator_crosshair`: draw the spectator crosshair from the same
+//!     sprite and tile a player's own `cl_xhair_style` picks, since the two
+//!     are drawn by different code paths and do not otherwise share a look.
+//!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
+//!     player, where the game leaves it at crouch height.
+//!   - `spectator_gun`: the gun drops off the bottom of the screen when the
+//!     player's own would (sprint, jump, prone, ladder).
+//! - `spectator_deathcam`: `ds_spec_deathcam`, the game's own death cam
+//!   when the watched player dies, as his recording shows it, instead of the
+//!   rolled view from his dead eyes. Its own switch: a movie wants it, a
+//!   shoutcast does not.
+//! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
+//!   gunshots through. It changes no sound.
+//! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
-//! - `msglog`: the `dodstudio_msglog` command -- dump chosen DoD user messages
+//! - `msglog`: the `ds_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
-//!   suppress specific map-placed `env_sprite` entities by model path, an
-//!   allow-list rather than a blanket toggle. Full design write-up in the
-//!   module doc itself (issue #315).
-//! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
+//! - `hide_asset`: the `ds_map_hide_asset list|add|del|clear` command
+//!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
+//!   by model path, an allow-list rather than a blanket toggle. Full design
+//!   write-up in the module doc itself (issue #315).
+//! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
+//!   player through his death in an HLTV demo, and `ds_spec_target`,
+//!   which puts it on a player by number (issue #206).
+//! - `overview_players`: `ds_hud_overview_players`, which players get an
+//!   icon on the overview map -- the game's own team, everyone, the other
+//!   team, only the player being watched, or nobody (issue #304).
+//! - `overview_marker`: `ds_hud_overview_team_marker`, which marks the
+//!   player being watched in HLTV with his team's camera icon (#304), or
+//!   leaves the camera icon off the map (`2`, #677).
+//! - `overview_speaker`: `ds_hud_overview_hide_speaker`, which leaves the
+//!   speaker icon off the players' overview map icons (#677).
+//! - `demo_scope`: `ds_hud_show_scope`, which draws the sniper scope
+//!   while a demo plays, in-eye with the watched player's rifle (#307).
+//! - `run_in_background`: `ds_capture_run_in_background`, full speed while
+//!   another window has the foreground (capture without the screen).
+//! - `hlae_window`: `ds_capture_stay_behind`, the game window stays behind
+//!   the user's windows while a batch records.
+//! - `scoreboard`: the `ds_hud_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
 //!   `docs/goldsrc_scoreboard.md`.
-//! - `voice`: the `dodstudio_mute_voice_commands` cvar -- silence "fire in the
+//! - `voice`: the `ds_sound_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
-//! - `crosshair`: the `dodstudio_hide_crosshair` cvar -- hide the crosshair and have
+//! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
+//!   numbered voice-command menus and the hand-signal command menu a POV
+//!   demo's player opened.
+//! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
-//! - `objicons`: the `dodstudio_objectives` command -- place the objective
+//! - `objicons`: the `ds_hud_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
-//!   different y while spectating than it does in a POV demo. Full design
-//!   write-up in `docs/goldsrc_objective_icons.md`.
-//! - `spectator_crosshair`: the `dodstudio_match_pov_crosshair` cvar -- draw the
-//!   spectator crosshair from the same sprite and tile a player's own
-//!   `cl_xhair_style` picks, since the two are drawn by different code paths
-//!   and do not otherwise share a look.
+//!   different y while spectating than it does in a POV demo, and scale
+//!   both up for high resolutions. Full design write-up in
+//!   `docs/goldsrc_objective_icons.md`.
+//!
+//! - `lightmap_gamma`: the first demo of a session no longer renders with its
+//!   lighting far too dark (issue #365): the gamma tables are refreshed from the
+//!   current cvars before a map's lightmaps are built. On by default;
+//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
+//!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
+//! - `hud_sprites`: `ds_map_hide_asset` for the HUD's own 2D sprites, by
+//!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
+//!   function pointers (#808). Installed when client.dll initialises.
+//! - `particle_hide`: `ds_map_hide_asset` for DoD's own particles (impact
+//!   debris, the grenade dirt cloud, smoke trails), which never reach
+//!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
+//! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
+//!   effect entity to give it (issue #374). On by default, since it only acts
+//!   where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns
+//!   it off.
+//! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
+//!   walks a previous map's collision data (issue #384). On by default for the
+//!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_list_folders`: the `ds_ui_demo_list_folders` cvar -- the Load
+//!   Demo window lists folders (and `../`) as well as demos, and opens them,
+//!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `demo_other_drives`: the `ds_demo_other_drives` cvar -- `viewdemo`
+//!   and `playdemo` open a demo on another drive by its full path, through a
+//!   swap of the file system's `Open` slot (issue #776).
+//! - `engine_buttons`: a button inside a GameUI window whose command is
+//!   `engine <console command>` runs it, as the ESC menu's entries do
+//!   (issue #408). On by default, since it only acts on commands the window
+//!   would drop; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it off.
+//! - `demo_seek`: the `ds_demo_seek_to` / `ds_demo_seek_by` commands --
+//!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
+//!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
+//!   yet; they are there for a live test.
+//! - `frame_esc`: keep GameUI's windows -- the VCR bar, the events list, the
+//!   Load Demo window, the console -- open when ESC is pressed on the 25th
+//!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
+//!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
+//! - `window_layout`: the `ds_ui_resizable_windows` and
+//!   `ds_ui_remember_layout` cvars -- every GameUI window can be
+//!   resized, and each comes back where it was left after a restart (#408).
+//! - `studio_panel`: `ds_ui_panel` -- DoD Studio's own window in the game,
+//!   a GameUI `Frame` with real tabs (a `PropertySheet` of `PropertyPage`s)
+//!   and VCR buttons, each tab laid out by its own `.res` (#408, plan item 4).
+//! - `events`: the game tells DoD Studio what a capture batch is doing over a
+//!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
+//!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
+//!   turns it off.
+//! - `batch_end`: when a batch's `BATCH_COMPLETE` goes by and no Studio is on
+//!   the events pipe, the game quits itself after a few seconds instead of
+//!   sitting there (issue #545). On with the events pipe.
+//! - `pmove_guard`: stop the session's first demo crashing when it sends
+//!   `InitHUD` before the engine has pointed `pmove` anywhere (issue #546).
+//!   One pointer write at start-up, both builds. On by default;
+//!   `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
+//! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
+//!   longer darkens sprites until the game restarts (issue #467). Two bytes in
+//!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
+//!   turns it off.
+//! - `game_dir_check`: demos recorded in `dod` play in a copy of the game
+//!   folder (`-game dod_movies`), which the engine otherwise refuses with
+//!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
+//!   check, both builds; only when the game folder is not `dod`.
+//! - `remote`: DoD Studio can send console commands to the running game over
+//!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
+//!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
+//!   off.
+//! - `connect_guard`: refuse `connect`, `retry`, `reconnect` and `listen`
+//!   while the DLL is loaded, since joining a VAC-secured server with it
+//!   loaded is a ban risk (issue #451). `connect local` (`map`) still works;
+//!   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off.
+//! - `world_shaders`: the `ds_map_allow_shaders` cvar -- let the 25th
+//!   Anniversary engine draw the world through `platform/gl_shaders` during
+//!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
+//!   puts on screen itself (the anzio mortar warning, the round result), and
+//!   pass DoD's own `HudText` prompts through (issue #287).
+//! - `clan_text`: the `ds_hud_hide_clan_text` cvar -- hide all of DoD's
+//!   clan-match text: the warm-up and ready rules, "Warmup Mode", the
+//!   countdown and "MATCH IS LIVE!" (issue #608).
+//! - `center_text`: the `ds_hud_hide_center_text` cvar -- drop every
+//!   `TextMsg` the server sends to the middle of the screen (#677).
+//! - `spectator_text`: the `ds_spec_hide_text` cvar -- hide the
+//!   camera mode's name and the green "Press DUCK for Spectator Menu" when
+//!   the view becomes a spectator camera (#677).
+//! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
+//!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
+//!   instead of patching it out of the demo (issue #30).
+//! - `spectator_bars`: the `ds_spec_hide_bars` cvar -- hide the
+//!   two dark bands a spectator sees and everything on them, on screen and
+//!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
+//!   see `docs/goldsrc_spectator_bars.md`.
+//! - `spectator_hud`: no command of its own -- while spectating, keeps the
+//!   objectives, the objective timer, the kill feed and the minimap just below
+//!   the spectator bar, or at the top as in a POV demo while the bar is hidden.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
 //!
-//! `spectator_bars.rs` is R&D, not wired in here: two live-tested attempts
-//! at a `dodstudio_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
-//! then tracing what it itself calls) both turned out to be dead ends --
-//! see `docs/goldsrc_spectator_bars.md` for what's been ruled out and what
-//! the real next step is (a live memory watch, not more static analysis).
-//!
 //! See each module's docs for the full R&D reasoning.
 //!
-//! Both are `dodstudio_*` **cvars**, so they behave like any other engine
-//! setting: `dodstudio_hltv_show_viewmodel_animations 1` from the console, `+dodstudio_hltv_show_viewmodel_animations 1`
-//! on the launch line, or a line in any `.cfg` the user execs. `commands.rs`
-//! copies them into the runtime flags once per frame, and `dodstudio_debug_status`
-//! reports what each fix is actually doing rather than only what it is set to.
+//! The settings are `ds_*` **cvars**, so they behave like any other
+//! engine setting: `ds_spec_match_pov 1` from the console,
+//! `+ds_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
+//! user execs. `commands.rs` copies them into the runtime flags once per
+//! frame, and `ds_debug_status` reports what each part is actually
+//! doing rather than only what it is set to.
 //!
-//! The `GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME` / `GOLDSRC_HOOKS_ANIM_FIX`
-//! environment variables still set the starting value and are still the only
-//! route if cvar registration ever falls back to plain commands, but the launch
-//! line is now the better one: it is visible in the command that started the
-//! session.
+//! The `GOLDSRC_HOOKS_SPEC_MATCH_POV` environment variable sets that cvar's
+//! starting value, but the launch line is the better route: it is visible in
+//! the command that started the session.
 
 mod anim_fix;
+mod batch;
+mod batch_end;
+mod behind_imports;
+mod center_text;
+mod clan_text;
+mod cmd_list;
 mod commands;
+mod connect_guard;
 mod crash;
 mod crosshair;
-mod decals;
 mod deathmsg;
-mod detour;
 mod debug;
+mod decals;
+mod demo_file;
+mod demo_list_folders;
+mod demo_other_drives;
+mod demo_reload;
+mod demo_rosters;
+mod demo_scope;
+mod demo_seek;
+mod detail_cache;
+mod detour;
 mod engine;
+mod engine_buttons;
+mod events;
 mod ex_interp;
+mod fast_load;
+mod filtered_commands;
+mod fire_sounds;
+mod folder_counts;
+mod frame_esc;
+mod game_dir_check;
+mod game_folder;
+mod gl_zoom;
 mod hand_signals;
-mod hide_sprite;
+mod hide_asset;
+mod hlae_window;
+mod hltv_messages;
+mod hud_sprites;
 mod hudelement;
+mod hull_trace_guard;
+mod lightmap_gamma;
+mod list_panel;
+mod map_text;
+mod missing_shots;
 mod msglog;
 mod names;
 mod objicons;
+mod old_names;
+mod overview_hd;
 mod overview_map;
+mod overview_marker;
+mod overview_players;
+mod overview_speaker;
+mod panic_log;
+mod particle_hide;
 mod patch;
 mod pe;
+mod player_crosshair;
+mod player_overrides;
+mod player_table;
+mod pmove_guard;
+mod position;
+mod pov_live_bob;
+mod remote;
+mod review;
+mod review_lock;
+mod run_in_background;
 mod scan;
+mod schedule;
 mod scoreboard;
-mod sound_fix;
+mod screen_effects;
+mod server_query;
+mod spectator_bars;
+mod spectator_buttons;
 mod spectator_crosshair;
+mod spectator_deathcam;
+mod spectator_eye;
+mod spectator_follow;
+mod spectator_gun;
+mod spectator_hud;
 mod spectator_target;
+mod spectator_text;
+mod spray;
+mod spray_hltv;
+mod sprite_blend;
+mod streaks;
+mod studio_panel;
+mod tempent_fix;
+mod texture_hires;
 mod voice;
+mod voice_menus;
+mod window_layout;
+mod world_shaders;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
 use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
@@ -114,9 +306,9 @@ fn env_flag(name: &str, default: bool) -> bool {
 
 /// Reads a `GOLDSRC_HOOKS_*` iteration number, falling back to `default`.
 ///
-/// Out of range is clamped rather than refused: `GOLDSRC_HOOKS_ANIM_FIX=99`
-/// is a usable way to say "newest" without having to know what the newest is.
-/// Unparseable reads as off, which is the safe way to land.
+/// Out of range is clamped rather than refused, so a value left over from an
+/// older setting with more steps still means on. Unparseable reads as off,
+/// which is the safe way to land.
 fn env_level(name: &str, default: i32) -> i32 {
     match std::env::var(name) {
         Ok(value) => value.trim().parse::<i32>().unwrap_or(0),
@@ -125,37 +317,95 @@ fn env_level(name: &str, default: i32) -> i32 {
     .clamp(anim_fix::LEVEL_OFF, anim_fix::LEVEL_MAX)
 }
 
-/// The animation fix starts **off**, like the sound fix: a capture pipeline
-/// should not silently alter viewmodel animations for anyone who happens to
-/// have the DLL loaded. Pick an iteration per session with
-/// `dodstudio_hltv_show_viewmodel_animations <0-4>`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
-/// have it start on one -- see `anim_fix::LEVEL` for what each is.
-///
-/// It was on through live testing, because a session that begins by
-/// forgetting to type the command produces a log with nothing in it and looks
-/// like a broken hook.
-const ANIM_FIX_DEFAULT: i32 = anim_fix::LEVEL_OFF;
+/// Matching POV starts **on**: an HLTV in-eye view that plays like the
+/// player's own recording is a clear win
+/// for everyone. `ds_spec_match_pov 0` turns it off, and
+/// `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts it off. The value lands in
+/// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
+/// default, and the cvar then drives every part.
+const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_MAX;
+
+/// Whether to install `texture_hires` at startup: see
+/// `texture_hires::starts_on`. Off, `ds_hd_enabled 1` can still install it
+/// later in the session.
+static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
-    // The sound fix stays default-off: what it currently does (extending how
-    // far gunshots carry) is not the thing that turned out to be wanted, and
-    // having it on would colour an animation test for no reason. The firing
-    // animation does not depend on it -- anim_fix::on_weapon_fired is called
-    // from the EV_PlaySound hook regardless of this flag.
-    sound_fix::ENABLED.store(env_flag("GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME", false), Ordering::Relaxed);
-    anim_fix::LEVEL.store(env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT), Ordering::Relaxed);
+    // Before the game opens its window.
+    hlae_window::start_behind_if_asked();
+    // First, so the file is there before GameUI reads the main menu.
+    if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
+        studio_panel::write_game_menu();
+    }
+    anim_fix::LEVEL.store(
+        env_level("GOLDSRC_HOOKS_SPEC_MATCH_POV", SPEC_MATCH_POV_DEFAULT),
+        Ordering::Relaxed,
+    );
+    // Only makes the first map's lighting match every later map's, so on
+    // unless asked not to.
+    lightmap_gamma::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_LIGHTMAP_GAMMA", true),
+        Ordering::Relaxed,
+    );
+    // A crash fix rather than a capture setting, so on unless asked not to.
+    tempent_fix::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_TEMPENT_FIX", true),
+        Ordering::Relaxed,
+    );
+    hull_trace_guard::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Restores the pre-Anniversary behaviour on the Anniversary build and
+    // does nothing on the pre-Anniversary one, so on unless asked not to.
+    frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
+    // Only acts on commands a window would otherwise drop, so on unless asked
+    // not to.
+    engine_buttons::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
+        Ordering::Relaxed,
+    );
+    // A crash fix, so on unless asked not to.
+    pmove_guard::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_PMOVE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Restores the engine's own default upload behaviour, so on unless asked
+    // not to.
+    sprite_blend::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Only this user's own processes can reach the pipe, and only a game
+    // Studio launched has it, so on unless asked not to.
+    remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
+    // VAC safety (#451), so on unless asked not to.
+    connect_guard::ENABLED.store(
+        !connect_guard::allowed_by_env(std::env::var(connect_guard::ALLOW_ENV).ok().as_deref()),
+        Ordering::Relaxed,
+    );
+    // Studio falls back to qconsole.log without it, so on unless asked not to.
+    events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
+    // HD textures: on when there's a dodstudio_hd folder to load from (in
+    // dod_addon, or dod for an install from before #415),
+    // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
+    // texture_hires::starts_on for why startup decides). `ds_hd_enabled` turns
+    // it on and off in game.
+    let hd = texture_hires::starts_on();
+    TEXTURE_HIRES_ENABLED.store(hd, Ordering::Relaxed);
+    texture_hires::set_enabled(hd);
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
 
-    // Both fixes default to OFF, so a session where the hooks all install
+    // Matching POV defaults to OFF, so a session where the hooks all install
     // correctly but nothing visibly changes is the expected outcome of simply
-    // not having turned them on. Log the starting state so that case is
-    // obvious from the log rather than mistaken for a broken hook.
+    // not having turned it on. Log the starting state so that case is obvious
+    // from the log rather than mistaken for a broken hook.
     unsafe {
         debug::report(&format!(
-            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations toggle live)",
-            if sound_fix::ENABLED.load(Ordering::Relaxed) { "ON" } else { "off" },
+            "goldsrc-hooks: starting state -- {}: {} ({}) (GOLDSRC_HOOKS_SPEC_MATCH_POV sets the default; the cvar toggles it live)",
+            names::SPEC_MATCH_POV,
             anim_fix::level(),
             anim_fix::level_description(anim_fix::level()),
         ))
@@ -165,6 +415,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // unhandled exceptions and exits without a dump or an event-log entry,
     // so without this a crash in an engine-thread callback is untraceable.
     crash::install();
+    // The abort that follows a panic skips that handler: log the panic itself.
+    panic_log::install();
 
     // Registered before install() so there's no window in which Initialize
     // could fire before the callback exists.
@@ -182,7 +434,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     let mut waited = 0u32;
     while engine::engfuncs().is_none() {
         if waited >= 30_000 {
-            unsafe { debug::report("goldsrc-hooks: timed out waiting for client.dll's Initialize to run; fixes not installed this session") };
+            unsafe {
+                debug::report(
+                    "goldsrc-hooks: timed out waiting for client.dll's Initialize to run; fixes not installed this session",
+                )
+            };
             return 0;
         }
         unsafe { Sleep(50) };
@@ -197,7 +453,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
 /// why this must not run from the worker thread.
 fn install_fixes() {
     unsafe { debug::report("goldsrc-hooks: engfuncs captured, installing fixes") };
-    sound_fix::install();
+    fire_sounds::install();
 
     // anim_fix additionally needs engine_studio, captured when the engine
     // calls HUD_GetStudioModelInterface; install() itself only registers the
@@ -205,10 +461,44 @@ fn install_fixes() {
     // it's safe to install even if that capture hasn't landed yet.
     anim_fix::install();
 
-    // In-game dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations
-    // console commands -- toggle the same ENABLED flags the env vars above
-    // set as the initial default, so either mechanism works.
+    // The ds_* console surface. ds_spec_match_pov drives the same
+    // flag the env var above set as its starting value.
     commands::install();
+
+    // hw.dll, once; before the first map loads, which is the one it's for.
+    lightmap_gamma::install();
+
+    // Studio's console commands can only run once the engine's function
+    // table is live, which is now.
+    remote::start();
+
+    // Also re-runs if client.dll is ever loaded again: install() compares the
+    // module base and patches the new copy.
+    tempent_fix::install();
+    // Only once ds_map_hide_asset has been used this session; then a
+    // reloaded client.dll is patched again.
+    particle_hide::reinstall_if_used();
+    // hw.dll is loaded for the whole session, so once is enough.
+    hull_trace_guard::install();
+    // Before any map loads, so before the first demo's InitHUD.
+    pmove_guard::install();
+    // Before any map loads, so before the first HUD sprite is uploaded.
+    sprite_blend::install();
+    // Before the first demo's svc_serverinfo; does nothing in `dod`.
+    game_dir_check::install();
+
+    if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
+        match texture_hires::install() {
+            Ok(()) => unsafe {
+                debug::report("goldsrc-hooks: texture_hires hook installed (HD textures on)")
+            },
+            Err(why) => unsafe {
+                debug::report(&format!(
+                    "goldsrc-hooks: texture_hires hook not installed -- {why}"
+                ))
+            },
+        }
+    }
 }
 
 /// # Safety
@@ -216,13 +506,24 @@ fn install_fixes() {
 /// Only ever called by the Windows loader itself, per the standard `DllMain`
 /// contract -- never call this directly.
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllMain(_hinst: HINSTANCE, reason: u32, _reserved: *mut std::ffi::c_void) -> BOOL {
+pub unsafe extern "system" fn DllMain(
+    _hinst: HINSTANCE,
+    reason: u32,
+    _reserved: *mut std::ffi::c_void,
+) -> BOOL {
     if reason == DLL_PROCESS_ATTACH {
         // Do as little as possible directly in DllMain (loader-lock rules --
         // no LoadLibrary, no waiting, ideally no allocation). Hand off to a
         // worker thread immediately instead.
         unsafe {
-            CreateThread(std::ptr::null(), 0, Some(worker_thread), std::ptr::null(), 0, std::ptr::null_mut());
+            CreateThread(
+                std::ptr::null(),
+                0,
+                Some(worker_thread),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+            );
         }
     }
     TRUE

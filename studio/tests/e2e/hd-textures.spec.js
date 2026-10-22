@@ -1,0 +1,974 @@
+// hd_pane.js — the HD Textures page (#372).
+//
+// Pins what the page shows for a status report (the style-by-type table, the style
+// picker and the movie.cfg lines built from the backend's cvar names), that a
+// missing game path reads as a message rather than a broken page, that the
+// download's progress and cancel land in the progress line, which Python the
+// page says it will use, the build's choices, progress and cancel, and the
+// style comparison, the map list (hd_maps.txt), the custom-style form
+// (my_styles.txt), and the misses view read from the hook log.
+import { test, expect } from '@playwright/test';
+
+/** native::hd::HdStatus, as serde sends it (snake_case). */
+const STATUS = {
+  hd_root: 'C:/games/Half-Life/dod/dodstudio_hd',
+  hd_root_exists: true,
+  types: [
+    {
+      asset_type: 'world',
+      folders: [
+        { name: 'overrides', files: 0, bytes: 0 },
+        { name: 'plain', files: 4708, bytes: 3 * 1024 ** 3 },
+      ],
+    },
+    { asset_type: 'models', folders: [] },
+    { asset_type: 'sprites', folders: [] },
+    { asset_type: 'detail', folders: [{ name: 'plain', files: 493, bytes: 50 * 1024 ** 2 }] },
+    { asset_type: 'sky', folders: [] },
+  ],
+  built_styles: ['plain'],
+  known_styles: ['ultrasharp', 'remacri', 'siax', 'generalv3', 'x4plus', 'plain', 'blend'],
+  default_style: 'ultrasharp',
+  enabled_cvar: 'ds_hd_enabled',
+  style_cvar: 'ds_hd_style',
+  tools: {
+    dir: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan',
+    upscaler: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan/realesrgan-ncnn-vulkan.exe',
+    upscaler_present: false,
+    source: null,
+    chosen: null,
+    models: [
+      { style: 'ultrasharp', model: 'ultrasharp-4x', present: false },
+      { style: 'remacri', model: 'remacri-4x', present: false },
+      { style: 'siax', model: '4x_NMKD-Siax_200k', present: false },
+      { style: 'generalv3', model: 'RealESRGAN_General_x4_v3', present: false },
+      { style: 'x4plus', model: 'realesrgan-x4plus', present: false },
+    ],
+    available_models: [],
+  },
+  python: {
+    using: { source: 'found', exe: 'C:/Python314/python.exe', version: '3.14.7', missing: [] },
+    chosen: null,
+    chosen_problem: null,
+    found_unusable: null,
+    app_copy_present: false,
+  },
+  scripts: 'C:/dod-studio/goldsrc-hooks/tools/hd',
+  my_styles: {
+    path: 'C:/games/Half-Life/dod/dodstudio_hd/my_styles.txt',
+    exists: false,
+    old_place: null,
+    styles: [],
+    error: null,
+  },
+  maps: ['dod_anzio', 'dod_caen'],
+};
+
+async function loadHarness(page, handlers) {
+  await page.addInitScript((h) => {
+    window.__mockInvokeHandlers = window.__mockInvokeHandlers || {};
+    // Functions can't cross addInitScript, so handlers are described by data.
+    if (h.status) window.__mockInvokeHandlers.hd_status = () => h.status;
+    if (h.statusError) window.__mockInvokeHandlers.hd_status = () => Promise.reject(h.statusError);
+    window.__mockInvokeHandlers.hd_setup_tools = () =>
+      new Promise((resolve, reject) => { window.__finishSetup = { resolve, reject }; });
+    window.__mockInvokeHandlers.hd_build = () =>
+      new Promise((resolve, reject) => { window.__finishBuild = { resolve, reject }; });
+    if (h.picked !== undefined) window.__mockInvokeHandlers['plugin:dialog|open'] = () => h.picked;
+    if (h.misses !== undefined) window.__mockInvokeHandlers.hd_misses = () => h.misses;
+    if (h.saveError) window.__mockInvokeHandlers.hd_save_style = () => Promise.reject(h.saveError);
+    window.__mockInvokeHandlers.hd_preview = () =>
+      new Promise((resolve, reject) => { window.__finishPreview = { resolve, reject }; });
+    if (h.mapSaveError) window.__mockInvokeHandlers.hd_save_map_list = () => Promise.reject(h.mapSaveError);
+    if (h.coverage) {
+      window.__mockInvokeHandlers.hd_world_coverage = () =>
+        new Promise((resolve, reject) => { window.__finishCoverage = { resolve, reject }; });
+    }
+  }, handlers);
+  await page.goto('/tests/e2e/hd-textures.html');
+  await page.waitForFunction(() => window.__harnessReady === true);
+}
+
+test('a status report fills the table, picks the built style and writes the cfg lines', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+
+  // Styles are rows, asset types are columns.
+  await expect(page.locator('#hd-status-head th')).toHaveText(
+    ['Style', 'Map textures', 'Model skins', 'Sprites', 'Detail textures', 'Skies']);
+  const rows = page.locator('#hd-status-body tr');
+  // Only plain has files; an empty overrides folder is not a row.
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0).locator('td')).toHaveText(
+    ['plain', '4,708 files, 3.0 GB', '–', '–', '493 files, 50.0 MB', '–']);
+
+  // The default isn't built, so the built one is picked.
+  await expect(page.locator('#hd-style-select')).toHaveValue('plain');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style plain\ngl_max_size 1024');
+  await expect(page.locator('#hd-style-select option[value="ultrasharp"]')).toContainText('(default) (not built yet)');
+
+  await page.selectOption('#hd-style-select', 'remacri');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style remacri\ngl_max_size 1024');
+
+  await expect(page.locator('#hd-tools-text')).toContainText('Upscaler: none found');
+  await expect(page.locator('#hd-realesrgan-line')).toHaveText(`set REALESRGAN=${STATUS.tools.upscaler}`);
+});
+
+test('opening the page refreshes it', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('.nav-tab-btn[data-nav="hd-textures"]');
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
+});
+
+test('no game path shows the backend message instead of a table', async ({ page }) => {
+  const message = 'Set the Half-Life Executable in Configuration → Paths first.';
+  await loadHarness(page, { statusError: message });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-text')).toHaveText(message);
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(0);
+});
+
+test('download progress, then cancel', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-setup-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+  await expect(page.locator('#hd-setup-cancel-btn')).toBeEnabled();
+
+  await page.evaluate(() => window.__mockEmit('hd_setup_progress', {
+    item: 'realesrgan-ncnn-vulkan.zip', step: 1, steps: 9,
+    bytes_done: 10 * 1024 ** 2, bytes_total: 45 * 1024 ** 2, unpacking: false,
+  }));
+  await expect(page.locator('#hd-setup-progress')).toHaveText('1 of 9: realesrgan-ncnn-vulkan.zip (10.0 MB of 45.0 MB)');
+
+  await page.click('#hd-setup-cancel-btn');
+  const cancelled = await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'hd_cancel'));
+  expect(cancelled).toBe(true);
+  await page.evaluate(() => window.__finishSetup.reject('cancelled'));
+  await expect(page.locator('#hd-setup-progress')).toContainText('Cancelled');
+  await expect(page.locator('#hd-setup-btn')).toBeEnabled();
+});
+
+test('the Python line says which Python the build uses, and why another is not', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-python-text')).toHaveText('Python: 3.14.7, found on this PC (C:/Python314/python.exe).');
+  // Nothing chosen: nothing to reset.
+  await expect(page.locator('#hd-python-reset-btn')).toBeHidden();
+
+  const noneUsable = {
+    ...STATUS,
+    python: {
+      using: null,
+      chosen: 'D:/py/python.exe',
+      chosen_problem: { exe: 'D:/py/python.exe', version: '3.13.1', missing: ['scipy'] },
+      // PIL is reported as Pillow, the name pip knows.
+      found_unusable: { exe: 'C:/Python39/python.exe', version: '3.9.18', missing: [] },
+      app_copy_present: false,
+    },
+  };
+  await page.evaluate((s) => { window.__mockInvokeHandlers.hd_status = () => s; }, noneUsable);
+  await page.click('#hd-refresh-btn');
+  const text = page.locator('#hd-python-text');
+  await expect(text).toContainText('The Python you chose (D:/py/python.exe, 3.13.1) has no SciPy');
+  await expect(text).toContainText('Python 3.9.18 is installed (C:/Python39/python.exe) but is older than 3.10');
+  await expect(page.locator('#hd-python-reset-btn')).toBeVisible();
+  // No Python: no building.
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+test('choosing a python.exe sends it to the backend, and reset forgets it', async ({ page }) => {
+  await loadHarness(page, { status: STATUS, picked: 'D:/py/python.exe' });
+  await page.click('#hd-refresh-btn');
+  await page.click('#hd-python-pick-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.find((c) => c.cmd === 'hd_set_python')?.args)).toEqual({ path: 'D:/py/python.exe' });
+
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, python: { ...s.python, chosen: 'D:/py/python.exe' } });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await page.click('#hd-python-reset-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.filter((c) => c.cmd === 'hd_set_python').at(-1)?.args)).toEqual({ path: null });
+});
+
+test('build choices: AI styles wait for the upscaler, and the request carries what is ticked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+
+  const styles = page.locator('#hd-build-styles input');
+  await expect(styles).toHaveCount(7);
+  // No upscaler yet: every AI style is off and says why; plain and blend are free.
+  await expect(page.locator('#hd-build-styles input[value="ultrasharp"]')).toBeDisabled();
+  await expect(page.locator('#hd-build-styles label', { hasText: 'x4plus' })).toContainText('(needs Download)');
+  await expect(page.locator('#hd-build-styles input[value="plain"]')).toBeEnabled();
+  // Every file type starts ticked.
+  await expect(page.locator('#hd-build-types input:checked')).toHaveCount(6);
+
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.uncheck('#hd-build-types input[value="world"]');
+  await page.click('#hd-build-btn');
+  const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args);
+  expect(request).toEqual({
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    request: { styles: ['plain'], types: ['sky', 'decals', 'sprites', 'models', 'detail'], cap: 1024 },
+  });
+});
+
+test('the largest size goes into the build and the cfg lines, and says what it costs', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-build-cap')).toHaveValue('1024');
+  await expect(page.locator('#hd-build-cap-hint')).toContainText('4x its original, up to 1024');
+
+  await page.selectOption('#hd-build-cap', '2048');
+  await expect(page.locator('#hd-build-cap-hint')).toContainText('detail textures');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style plain\ngl_max_size 2048');
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.click('#hd-build-btn');
+  const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args.request);
+  expect(request.cap).toBe(2048);
+
+  // Remembered for the next visit.
+  await page.reload();
+  await page.waitForFunction(() => window.__harnessReady === true);
+  await expect(page.locator('#hd-build-cap')).toHaveValue('2048');
+});
+
+test('no gl_max_size in the status report (an older backend) shows no line (#680)', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-cfg-lines')).toContainText('gl_max_size 1024');
+  await expect(page.locator('#hd-gl-max-size')).toHaveJSProperty('hidden', true);
+});
+
+test('the install\'s gl_max_size names where it comes from, and warns below the build size picked (#680)', async ({ page }) => {
+  const status = { ...STATUS, gl_max_size: { value: '1024', shows_at: 1024, source: { kind: 'config', file: 'movie.cfg', line: 4 } } };
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+  const line = page.locator('#hd-gl-max-size');
+  await expect(line).toHaveJSProperty('hidden', false);
+  await expect(line).toContainText('gl_max_size 1024 (movie.cfg line 4)');
+  await expect(line).not.toHaveClass(/hd-gl-max-size-low/);
+
+  // Building at 2048 while the game shows 1024 at most.
+  await page.selectOption('#hd-build-cap', '2048');
+  await expect(line).toHaveClass(/hd-gl-max-size-low/);
+  await expect(line).toContainText('1024 px at most');
+  await expect(line).toContainText('Copy the gl_max_size line above into movie.cfg');
+});
+
+test('build progress, the finished line, and cancel', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.click('#hd-build-btn');
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+  await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+
+  await page.evaluate(() => window.__mockEmit('hd_build_progress', {
+    step: 5, steps: 10, style: 'plain', asset_type: 'world', line: null, elapsed_secs: 75,
+  }));
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 5 of 10: plain, Map textures (1m 15s so far)');
+  await page.evaluate(() => window.__mockEmit('hd_build_progress', {
+    step: 5, steps: 10, style: 'plain', asset_type: 'world', line: 'plain      world   exit 0, 12 new', elapsed_secs: 80,
+  }));
+  await expect(page.locator('#hd-build-line')).toHaveText('plain      world   exit 0, 12 new');
+
+  await page.click('#hd-build-cancel-btn');
+  await expect.poll(() => page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'hd_cancel'))).toBe(true);
+  await page.evaluate(() => window.__finishBuild.reject('cancelled'));
+  await expect(page.locator('#hd-build-progress')).toContainText('Stopped. Files already built are kept');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  await page.click('#hd-build-btn');
+  await page.evaluate(() => window.__finishBuild.resolve({ steps: 10, elapsed_secs: 200, log_path: 'C:/x/build_all.log' }));
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 10 steps in 3m 20s. Every step's counts are in C:/x/build_all.log.");
+});
+
+test('the build clock counts on between reports, and stops with the build', async ({ page }) => {
+  await page.clock.install();
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.click('#hd-build-btn');
+  await page.evaluate(() => window.__mockEmit('hd_build_progress', {
+    step: 1, steps: 5, style: 'plain', asset_type: 'sky', line: null, elapsed_secs: 0,
+  }));
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (0s so far)');
+  await page.clock.runFor(52_000);
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (52s so far)');
+
+  await page.evaluate(() => window.__finishBuild.resolve({ steps: 5, elapsed_secs: 53, log_path: 'C:/x/build_all.log' }));
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53s. Every step's counts are in C:/x/build_all.log.");
+  await page.clock.runFor(5_000);
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53s. Every step's counts are in C:/x/build_all.log.");
+});
+
+test('rows follow the style order, custom styles after, overrides last; nothing built is one row', async ({ page }) => {
+  const types = ['world', 'models', 'sprites', 'detail', 'sky'];
+  const withFolders = {
+    ...STATUS,
+    built_styles: ['crisp', 'plain', 'ultrasharp'],
+    types: types.map((asset_type) => ({
+      asset_type,
+      folders: asset_type === 'world'
+        ? ['crisp', 'overrides', 'plain', 'ultrasharp'].map((name) => ({ name, files: 1, bytes: 1024 }))
+        : [],
+    })),
+  };
+  await loadHarness(page, { status: withFolders });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-body tr td:first-child')).toHaveText(['ultrasharp', 'plain', 'crisp', 'overrides']);
+
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, built_styles: [], types: s.types.map((t) => ({ ...t, folders: [] })) });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
+  await expect(page.locator('#hd-status-body td')).toHaveText('Nothing yet');
+  await expect(page.locator('#hd-status-body td')).toHaveAttribute('colspan', '6');
+});
+
+test('an upscaler found elsewhere is named and its styles can build; a chosen folder can be reset', async ({ page }) => {
+  const dir = 'C:/dod-studio/local/texture-upscale-rnd/tools/realesrgan';
+  const found = {
+    ...STATUS,
+    tools: {
+      ...STATUS.tools,
+      dir,
+      upscaler: `${dir}/realesrgan-ncnn-vulkan.exe`,
+      upscaler_present: true,
+      source: 'chosen',
+      chosen: dir,
+      models: STATUS.tools.models.map((m) => ({ ...m, present: m.style !== 'siax' })),
+    },
+  };
+  await loadHarness(page, { status: found, picked: dir });
+  await page.click('#hd-refresh-btn');
+  const text = page.locator('#hd-tools-text');
+  await expect(text).toContainText(`Upscaler: the folder you chose (${dir}).`);
+  await expect(text).toContainText('Missing models for: siax.');
+  await expect(page.locator('#hd-build-styles input[value="ultrasharp"]')).toBeEnabled();
+  await expect(page.locator('#hd-build-styles input[value="siax"]')).toBeDisabled();
+  await expect(page.locator('#hd-upscaler-reset-btn')).toBeVisible();
+
+  await page.click('#hd-upscaler-pick-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.find((c) => c.cmd === 'hd_set_upscaler')?.args)).toEqual({ path: dir });
+  const picker = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'plugin:dialog|open')?.args);
+  expect(picker.options.directory).toBe(true);
+
+  await page.click('#hd-upscaler-reset-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.filter((c) => c.cmd === 'hd_set_upscaler').at(-1)?.args)).toEqual({ path: null });
+
+  // A chosen folder another one beats is said so.
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, tools: { ...s.tools, source: 'app' } });
+  }, found);
+  await page.click('#hd-refresh-btn');
+  await expect(text).toContainText("isn't used: another one has more of the style models");
+});
+
+test('refresh shows it is working, and the status line says when it last finished', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => new Promise((resolve) => { window.__finishStatus = () => resolve(s); });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-refresh-btn')).toBeDisabled();
+  await expect(page.locator('#hd-refresh-btn')).toHaveText('Checking...');
+  await page.evaluate(() => window.__finishStatus());
+  await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
+  await expect(page.locator('#hd-refresh-btn')).toHaveText('Refresh');
+  await expect(page.locator('#hd-status-text')).toContainText(/Checked at .+\./);
+});
+
+test('missing packages are named as pip knows them', async ({ page }) => {
+  const status = {
+    ...STATUS,
+    python: {
+      using: null, chosen: null, chosen_problem: null, app_copy_present: false,
+      found_unusable: { exe: 'C:/Py/python.exe', version: '3.12.1', missing: ['numpy', 'PIL'] },
+    },
+  };
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-python-text')).toContainText('has no NumPy, Pillow.');
+});
+
+test('Download is off, and says so, when there is nothing to download', async ({ page }) => {
+  const complete = {
+    ...STATUS,
+    tools: { ...STATUS.tools, upscaler_present: true, source: 'app',
+      models: STATUS.tools.models.map((m) => ({ ...m, present: true })) },
+  };
+  await loadHarness(page, { status: complete });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+  await expect(page.locator('#hd-setup-btn')).toHaveText('Nothing to download');
+
+  // One model short: back on.
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({
+      ...s, tools: { ...s.tools, models: s.tools.models.map((m, i) => ({ ...m, present: i > 0 })) },
+    });
+  }, complete);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeEnabled();
+  await expect(page.locator('#hd-setup-btn')).toHaveText("Download what's missing");
+});
+
+test('Build is off until at least one style and one kind of file are ticked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  // The default style (ultrasharp) needs the upscaler, so no style starts ticked.
+  await expect(page.locator('#hd-build-styles input:checked')).toHaveCount(0);
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+
+  await page.check('#hd-build-styles input[value="plain"]');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  for (const type of ['sky', 'decals', 'sprites', 'models', 'detail', 'world']) {
+    await page.uncheck(`#hd-build-types input[value="${type}"]`);
+  }
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+  await page.check('#hd-build-types input[value="sky"]');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  await page.uncheck('#hd-build-styles input[value="plain"]');
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+test('a partial style says what it is missing, in the table, beside the style and in the cfg lines (#426)', async ({ page }) => {
+  const status = structuredClone(STATUS);
+  status.types[0].folders.push({ name: 'remacri', files: 124, bytes: 80 * 1024 ** 2, largest_px: [1024, 1024] });
+  status.types[0].folders[1].largest_px = [2048, 2048];
+  status.built_styles = ['plain', 'remacri'];
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+
+  const plain = page.locator('#hd-status-body tr').nth(1);
+  const remacri = page.locator('#hd-status-body tr').nth(0);
+  await expect(plain.locator('td').nth(1)).toHaveText('4,708 files, 3.0 GBup to 2048×2048');
+  await expect(remacri.locator('td').nth(1)).toHaveText('124 of 4,708 files, 80.0 MBup to 1024×1024');
+  await expect(remacri.locator('td').nth(1)).toHaveClass(/hd-cell-partial/);
+
+  // plain is picked first and is complete: nothing to warn about.
+  await expect(page.locator('#hd-style-select')).toHaveValue('plain');
+  await expect(page.locator('#hd-style-coverage')).toBeHidden();
+
+  await page.selectOption('#hd-style-select', 'remacri');
+  const sentence = 'remacri covers only part of the game: it has no detail textures, and only 124 of 4,708 map textures.'
+    + ' Wherever it has none, the game shows the stock texture.';
+  await expect(page.locator('#hd-style-coverage')).toHaveText(sentence);
+  await expect(page.locator('#hd-cfg-lines')).toHaveText(
+    `ds_hd_enabled 1\nds_hd_style remacri\ngl_max_size 1024\n// ${sentence}`);
+});
+
+/** native::hd::misses::MissesView, as serde sends it. */
+const MISSES = {
+  command: 'ds_debug_hd_misses',
+  report: {
+    log_file: 'C:/Users/me/AppData/Roaming/dod-studio/logs/dodstudio_goldsrc_hooks_20260924.log',
+    date: '2026-09-24',
+    time: '22:05:57',
+    summary: '4 miss(es) this session, 3 different texture(s) (style "plain"). A texture several maps use is listed under each of them.',
+    style: 'plain',
+    textures: 3,
+    maps: [
+      {
+        map: 'dod_anzio', total: 3, on_purpose: 1,
+        groups: [
+          {
+            reason: 'no_file', heading: 'no HD file',
+            entries: [{ asset_type: 'model', name: 'models/v_garand.mdl garand.bmp', detail: '256x128, not built yet', loads: 2, also_on: [] }],
+          },
+          {
+            reason: 'wrong_version', heading: 'HD file is for a different version of the texture',
+            entries: [{ asset_type: 'world', name: 'bido_wall1', detail: '128x128', loads: 1, also_on: ['dod_caen', 'dod_flash'] }],
+          },
+          {
+            reason: 'on_purpose', heading: 'left alone on purpose',
+            entries: [{ asset_type: 'sprite', name: 'sprites/puff.spr', detail: 'blank', loads: 4, also_on: ['dod_caen'] }],
+          },
+        ],
+      },
+      {
+        map: 'dod_caen', total: 1, on_purpose: 1,
+        groups: [{
+          reason: 'on_purpose', heading: 'left alone on purpose',
+          entries: [{ asset_type: 'sprite', name: 'sprites/puff.spr', detail: 'blank', loads: 4, also_on: ['dod_anzio'] }],
+        }],
+      },
+    ],
+  },
+};
+
+test('misses: nothing in the log says how to get a list, and names the command', async ({ page }) => {
+  await loadHarness(page, { status: STATUS, misses: { command: 'ds_debug_hd_misses', report: null } });
+  await page.click('.nav-tab-btn[data-nav="hd-textures"]');
+  await expect(page.locator('#hd-misses-command')).toHaveText('ds_debug_hd_misses');
+  await expect(page.locator('#hd-misses-text')).toContainText('No list in the game');
+  await expect(page.locator('#hd-misses-maps details')).toHaveCount(0);
+});
+
+test('misses: a list is shown map by map, on-purpose ones only when asked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS, misses: MISSES });
+  await page.click('#hd-misses-btn');
+  await expect(page.locator('#hd-misses-text')).toHaveText(
+    'From 2026-09-24 at 22:05:57, style plain: 3 textures kept their original. One used on several maps is listed under each.');
+
+  const maps = page.locator('#hd-misses-maps details');
+  await expect(maps).toHaveCount(2);
+  await expect(maps.nth(0).locator('summary')).toHaveText('dod_anzio: 3 kept their original, 1 of them on purpose');
+  // On-purpose groups are hidden by default; a map with nothing else says so.
+  await expect(maps.nth(0).locator('.hd-miss-heading')).toHaveText(
+    ['No HD file (1)', 'HD file is for a different version of the texture (1)']);
+  await expect(maps.nth(1)).toContainText('Only textures left alone on purpose.');
+
+  const skin = maps.nth(0).locator('li').nth(0);
+  await expect(skin.locator('.hd-miss-type')).toHaveText('Model skin');
+  await expect(skin).toContainText('models/v_garand.mdl garand.bmp');
+  await expect(skin).toContainText('256x128, not built yet, 2 loads');
+  const shared = maps.nth(0).locator('li').nth(1).locator('.hd-miss-detail').nth(1);
+  await expect(shared).toHaveText('also on 2 other maps');
+  await expect(shared).toHaveAttribute('title', 'dod_caen, dod_flash');
+
+  await page.check('#hd-misses-on-purpose');
+  await expect(maps.nth(0).locator('.hd-miss-heading')).toHaveCount(3);
+  await expect(maps.nth(1).locator('li')).toContainText(['Sprite']);
+  await expect(maps.nth(1).locator('li')).toContainText(['4 frames']);
+});
+
+/** STATUS with a my_styles.txt holding one style of each kind, and an
+ *  upscaler folder that has the x4plus model and nothing else. */
+const WITH_MY_STYLES = {
+  ...STATUS,
+  tools: {
+    ...STATUS.tools,
+    upscaler_present: true,
+    source: 'app',
+    models: STATUS.tools.models.map((m) => ({ ...m, present: m.style === 'x4plus' })),
+    available_models: ['realesrgan-x4plus', 'realesrgan-x4plus-anime'],
+  },
+  my_styles: {
+    ...STATUS.my_styles,
+    exists: true,
+    styles: [
+      { name: 'crisp', kind: 'plain', sharpening: 150 },
+      { name: 'anime', kind: 'ai', model: 'realesrgan-x4plus-anime' },
+      { name: 'odd', kind: 'ai', model: 'not-downloaded' },
+      { name: 'sharp70', kind: 'blend', a: 'ultrasharp', b: 'plain', percent: 70 },
+    ],
+  },
+};
+
+test('my styles: listed, offered to Build, and an AI one waits for its model', async ({ page }) => {
+  await loadHarness(page, { status: WITH_MY_STYLES });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-my-styles-text')).toHaveText(`Saved in ${STATUS.my_styles.path}.`);
+  const items = page.locator('#hd-my-styles-list li');
+  await expect(items).toHaveCount(4);
+  await expect(items.nth(0)).toContainText('crisp');
+  await expect(items.nth(0)).toContainText('plain enlargement, sharpening 150');
+  await expect(items.nth(3)).toContainText('70% ultrasharp, 30% plain');
+
+  // Each is a Build choice, after the built-in ones.
+  const choice = (name) => page.locator(`#hd-build-styles input[value="${name}"]`);
+  await expect(choice('crisp')).toBeEnabled();
+  await expect(choice('anime')).toBeEnabled();
+  await expect(choice('sharp70')).toBeEnabled();
+  await expect(choice('odd')).toBeDisabled();
+  await expect(page.locator('#hd-build-styles label').filter({ hasText: 'odd' })).toHaveText('odd (needs its model)');
+  // The blend form offers every style, the user's own included.
+  await expect(page.locator('#hd-style-a option')).toHaveCount(11);
+});
+
+test('my styles: the form shows its line, refuses bad names, and saves', async ({ page }) => {
+  await loadHarness(page, { status: WITH_MY_STYLES });
+  await page.click('#hd-refresh-btn');
+  const save = page.locator('#hd-style-save-btn');
+  await expect(save).toBeDisabled();
+
+  await page.fill('#hd-style-name', 'Crisp2!');
+  await expect(page.locator('#hd-style-message')).toContainText('lowercase letters');
+  await expect(save).toBeDisabled();
+  await page.fill('#hd-style-name', 'plain');
+  await expect(page.locator('#hd-style-message')).toHaveText('plain is a built-in style; pick another name.');
+
+  await page.fill('#hd-style-name', 'Soft');
+  await expect(page.locator('#hd-style-message')).toHaveText('');
+  await page.fill('#hd-style-sharpening', '20');
+  await expect(page.locator('#hd-style-line')).toHaveText('soft = plain 20');
+
+  await page.selectOption('#hd-style-kind', 'ai');
+  await expect(page.locator('#hd-style-model')).toBeVisible();
+  await expect(page.locator('#hd-style-sharpening')).toBeHidden();
+  await expect(page.locator('#hd-style-percent')).toBeHidden();
+  await page.selectOption('#hd-style-model', 'realesrgan-x4plus-anime');
+  await expect(page.locator('#hd-style-line')).toHaveText('soft = realesrgan-x4plus-anime');
+
+  await page.selectOption('#hd-style-kind', 'blend');
+  await expect(page.locator('#hd-style-model')).toBeHidden();
+  await page.fill('#hd-style-percent', '30');
+  await page.selectOption('#hd-style-a', 'crisp');
+  await page.selectOption('#hd-style-b', 'x4plus');
+  await expect(page.locator('#hd-style-line')).toHaveText('soft = blend crisp x4plus 30');
+
+  await save.click();
+  const call = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_save_style'));
+  expect(call.args).toEqual({
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    name: 'soft',
+    def: { kind: 'blend', a: 'crisp', b: 'x4plus', percent: 30 },
+  });
+  await expect(page.locator('#hd-style-message')).toContainText('Saved soft.');
+});
+
+test("my styles: a blend of itself is refused, and the backend's refusal is shown", async ({ page }) => {
+  await loadHarness(page, { status: WITH_MY_STYLES, saveError: 'my_styles.txt: soft blends "nope", which isn\'t a style' });
+  await page.click('#hd-refresh-btn');
+  await page.fill('#hd-style-name', 'crisp');
+  await page.selectOption('#hd-style-kind', 'blend');
+  await page.selectOption('#hd-style-a', 'crisp');
+  await expect(page.locator('#hd-style-message')).toHaveText("A style can't mix itself.");
+  await expect(page.locator('#hd-style-save-btn')).toBeDisabled();
+
+  await page.fill('#hd-style-name', 'soft');
+  await page.click('#hd-style-save-btn');
+  await expect(page.locator('#hd-style-message')).toContainText("which isn't a style");
+});
+
+test('my styles: Edit fills the form, Remove asks the backend', async ({ page }) => {
+  await loadHarness(page, { status: WITH_MY_STYLES });
+  await page.click('#hd-refresh-btn');
+  const sharp70 = page.locator('#hd-my-styles-list li').nth(3);
+  await sharp70.getByRole('button', { name: 'Edit' }).click();
+  await expect(page.locator('#hd-style-name')).toHaveValue('sharp70');
+  await expect(page.locator('#hd-style-kind')).toHaveValue('blend');
+  await expect(page.locator('#hd-style-line')).toHaveText('sharp70 = blend ultrasharp plain 70');
+
+  await page.locator('#hd-my-styles-list li').nth(0).getByRole('button', { name: 'Remove' }).click();
+  const call = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_remove_style'));
+  expect(call.args).toEqual({ gamePath: 'C:/games/Half-Life/hl.exe', name: 'crisp' });
+  await expect(page.locator('#hd-style-message')).toContainText('Removed crisp');
+});
+
+test('my styles: a file the scripts would refuse is reported, and Build waits for a fix', async ({ page }) => {
+  const broken = { ...STATUS, my_styles: { ...STATUS.my_styles, exists: true, error: 'my_styles.txt line 3: expected `name = ...`, got "crisp plain"' } };
+  await loadHarness(page, { status: broken });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-my-styles-text')).toContainText("can't be read, so builds won't start");
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+test('preview: picks maps and built styles, shows the sheet, and fits it on a click', async ({ page }) => {
+  const built = { ...STATUS, built_styles: ['plain', 'ultrasharp'] };
+  await loadHarness(page, { status: built });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-preview-map option')).toHaveText(
+    ['A few of your maps, picked for you', 'dod_anzio', 'dod_caen']);
+  // Only built styles can be compared; all are ticked to start with.
+  await expect(page.locator('#hd-preview-styles input:checked')).toHaveCount(2);
+
+  await page.selectOption('#hd-preview-map', 'dod_caen');
+  await page.uncheck('#hd-preview-styles input[value="ultrasharp"]');
+  await page.click('#hd-preview-btn');
+  await expect(page.locator('#hd-preview-btn')).toBeDisabled();
+  const call = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_preview'));
+  expect(call.args).toEqual({
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    request: { maps: ['dod_caen'], styles: ['plain'] },
+  });
+
+  // A 1x1 PNG stands in for the sheet.
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  await page.evaluate((image) => window.__finishPreview.resolve({
+    image, samples: 3, maps: [], skipped: ['model:v_bar.mdl: not found'],
+  }), png);
+  await expect(page.locator('#hd-preview-wrap')).toBeVisible();
+  await expect(page.locator('#hd-preview-img')).toHaveAttribute('src', png);
+  await expect(page.locator('#hd-preview-text')).toHaveText('3 samples. Left out: model:v_bar.mdl: not found.');
+  await expect(page.locator('#hd-preview-btn')).toBeEnabled();
+
+  await page.click('#hd-preview-img');
+  await expect(page.locator('#hd-preview-wrap')).toHaveClass(/hd-preview-fit/);
+});
+
+test('preview: auto-picked maps are named; nothing built means nothing to compare', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await page.click('#hd-preview-btn');
+  const call = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_preview'));
+  expect(call.args.request).toEqual({ maps: [], styles: ['plain'] });
+  await page.evaluate(() => window.__finishPreview.resolve({
+    image: 'data:image/png;base64,', samples: 9, maps: ['dod_anzio', 'dod_caen'], skipped: [],
+  }));
+  await expect(page.locator('#hd-preview-text')).toHaveText('9 samples, from dod_anzio, dod_caen.');
+
+  await loadHarness(page, { status: { ...STATUS, built_styles: [] } });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-preview-btn')).toBeDisabled();
+  await expect(page.locator('#hd-preview-text')).toContainText('Build a style first');
+});
+
+/** native::hd::map_list::MapList: a list in effect that picks every railroad map. */
+const MAP_LIST = {
+  path: 'C:/games/Half-Life/dod/dodstudio_hd/hd_maps.txt',
+  active: true,
+  old_place: null,
+  text: '# my maps\ndod_railroad*   # every railroad\ndod_anzio\ndod_nowhere\n',
+  maps: [
+    { name: 'dod_anzio', bytes: 4 * 1024 ** 2 },
+    { name: 'dod_caen', bytes: 3 * 1024 ** 2 },
+    { name: 'dod_railroad', bytes: 5 * 1024 ** 2 },
+    { name: 'dod_railroad2_s9a', bytes: 6 * 1024 ** 2 },
+  ],
+};
+
+const mapSaves = (page) => page.evaluate(() =>
+  window.__mockInvocations.filter((c) => c.cmd === 'hd_save_map_list').map((c) => c.args));
+
+const mapRow = (page, name) => page.locator('#hd-maps-available li', { hasText: name });
+
+test('map list: shows every map, what picks it, and what each line matches', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST } });
+  await page.click('#hd-refresh-btn');
+
+  await expect(page.locator('#hd-maps-every-label')).toHaveText('Every map (4)');
+  await expect(page.locator('#hd-maps-some')).toBeChecked();
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
+  await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
+  await expect(page.locator('#hd-maps-patterns li').nth(0)).toContainText('dod_railroad*2 maps');
+  await expect(page.locator('#hd-maps-patterns li').nth(2)).toContainText('dod_nowherematches no map');
+
+  // Picked by a wildcard: ticked, marked, and a click points at the chip
+  // instead of unticking.
+  const railroad = mapRow(page, 'dod_railroad2_s9a').locator('input');
+  await expect(railroad).toBeChecked();
+  await expect(railroad).toBeEnabled();
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('.hd-map-via')).toHaveText('\u2217');
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('label')).toHaveAttribute('title', /^dod_railroad2_s9a - Matched by the pattern dod_railroad\*/);
+  await expect(mapRow(page, 'dod_caen').locator('label')).toHaveAttribute('title', 'dod_caen');
+  await railroad.click();
+  await expect(railroad).toBeChecked();
+  await expect(page.locator('#hd-maps-message')).toHaveText('');
+  await expect(page.locator('#hd-maps-patterns li').nth(0)).toHaveClass(/hd-chip-flash/);
+  // Two tick colours, explained by two ticks, once a pattern picks something.
+  await expect(page.locator('#hd-maps-legend')).toBeVisible();
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('input')).toHaveClass(/hd-box-pattern/);
+  await expect(mapRow(page, 'dod_anzio').locator('input')).not.toHaveClass(/hd-box-pattern/);
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
+  await expect(mapRow(page, 'dod_anzio').locator('input')).toBeEnabled();
+  await expect(mapRow(page, 'dod_caen').locator('input')).not.toBeChecked();
+  await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
+
+  // The search is read as a list line: a bare name is one map, anzio*
+  // finds nothing, *anzio* everything with anzio in it.
+  await page.fill('#hd-maps-search', 'rail');
+  await expect(page.locator('#hd-maps-available li')).toHaveText(['No map matches the search.']);
+  await page.fill('#hd-maps-search', 'dod_caen');
+  await expect(page.locator('#hd-maps-available li')).toHaveText([/dod_caen/]);
+  await page.fill('#hd-maps-search', 'dod_r*');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
+  await page.fill('#hd-maps-search', 'dod_ca?n');
+  await expect(page.locator('#hd-maps-available li')).toHaveText([/dod_caen/]);
+  await page.fill('#hd-maps-search', 'rail*');
+  await expect(page.locator('#hd-maps-available li')).toHaveText(['No map matches the search.']);
+  await page.fill('#hd-maps-search', '*rail*');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
+  await page.fill('#hd-maps-search', '');
+  await page.check('#hd-maps-picked-only');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(3);
+});
+
+test('map list: ticking and adding change the text, and Save sends it whole', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST } });
+  await page.click('#hd-refresh-btn');
+
+  await mapRow(page, 'dod_caen').locator('input').check();
+  await mapRow(page, 'dod_anzio').locator('input').uncheck();
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps');
+  await expect(page.locator('#hd-maps-summary')).toContainText('Not saved yet');
+
+  // The search box is the Add box: the filtered list is the preview.
+  await page.fill('#hd-maps-search', 'DOD_C*.bsp');
+  await expect(page.locator('#hd-maps-available li')).toHaveText([/dod_caen/]);
+  await expect(page.locator('#hd-maps-add-btn')).toBeEnabled();
+  await page.fill('#hd-maps-search', 'dod_saints*');
+  await expect(page.locator('#hd-maps-available li')).toHaveText(['No map matches the search.']);
+  await expect(page.locator('#hd-maps-add-btn')).toBeEnabled(); // a line for maps added later
+  await page.fill('#hd-maps-search', 'dod_railroad*');
+  await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Already in the list.');
+  await expect(page.locator('#hd-maps-add-btn')).toBeDisabled();
+  await page.fill('#hd-maps-search', 'dod_rail?oad');
+  await page.press('#hd-maps-search', 'Enter');
+  // The text stays; the message says what happened.
+  await expect(page.locator('#hd-maps-search')).toHaveValue('dod_rail?oad');
+  await expect(page.locator('#hd-maps-message')).toHaveText('Added dod_rail?oad as a line. Save to keep it.');
+  await expect(page.locator('#hd-maps-patterns li')).toHaveCount(4);
+  await page.fill('#hd-maps-search', '');
+
+  await page.click('#hd-maps-save-btn');
+  // Comments and the user's own lines stay; only the changed lines move.
+  expect(await mapSaves(page)).toEqual([{
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    text: '# my maps\ndod_railroad*   # every railroad\ndod_nowhere\ndod_caen\ndod_rail?oad\n',
+  }]);
+  await expect(page.locator('#hd-maps-message')).toHaveText('Saved: 3 maps picked.');
+});
+
+test('map list: Every map sends no list, and Undo puts the saved one back', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST } });
+  await page.click('#hd-refresh-btn');
+
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-maps-editor')).toBeHidden();
+  await expect(mapRow(page, 'dod_caen').locator('input')).toBeChecked();
+  await expect(page.locator('#hd-maps-summary')).toContainText('All 4 maps get map textures and skies.');
+
+  await page.click('#hd-maps-undo-btn');
+  await expect(page.locator('#hd-maps-some')).toBeChecked();
+  await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
+
+  await page.check('#hd-maps-every');
+  await page.click('#hd-maps-save-btn');
+  expect((await mapSaves(page))[0].text).toBeNull();
+  await expect(page.locator('#hd-maps-message')).toContainText('every map is built');
+});
+
+test('map list: a list that picks nothing is not saved, and a refusal is shown', async ({ page }) => {
+  const none = { ...MAP_LIST, active: false, text: '# Which maps\n' };
+  await loadHarness(page, { status: { ...STATUS, map_list: none }, mapSaveError: 'disk full' });
+  await page.click('#hd-refresh-btn');
+
+  await expect(page.locator('#hd-maps-every')).toBeChecked();
+  await page.check('#hd-maps-some');
+  await expect(page.locator('#hd-maps-patterns li')).toHaveText(['Nothing yet: tick maps below, or add a pattern.']);
+  await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
+
+  await mapRow(page, 'dod_anzio').locator('input').check();
+  await page.click('#hd-maps-save-btn');
+  await expect(page.locator('#hd-maps-message')).toHaveText('disk full');
+  expect((await mapSaves(page))[0].text).toBe('# Which maps\ndod_anzio\n');
+});
+
+test('map list: switching to another install drops unsaved edits, the same install keeps them', async ({ page }) => {
+  const none = { ...MAP_LIST, active: false, text: '# Which maps\n', path: 'C:/games/POST/dod/dodstudio_hd/hd_maps.txt' };
+  await loadHarness(page, { status: { ...STATUS, map_list: none } });
+  await page.click('#hd-refresh-btn');
+  await page.check('#hd-maps-some');
+  await mapRow(page, 'dod_caen').locator('input').check();
+  await expect(page.locator('#hd-maps-summary')).toContainText('Not saved yet');
+
+  // The same file again: the edit survives the refresh.
+  await page.click('#hd-refresh-btn');
+  await expect(mapRow(page, 'dod_caen').locator('input')).toBeChecked();
+
+  // Another install's file: what it says is shown, not the old edit.
+  await page.evaluate((s) => { window.__mockInvokeHandlers.hd_status = () => s; }, { ...STATUS, map_list: MAP_LIST });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-maps-some')).toBeChecked();
+  await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
+});
+
+test('map list: a map two patterns pick points at both; its own line plus a pattern is still green', async ({ page }) => {
+  const twice = { ...MAP_LIST, text: 'dod_railroad*\ndod_rail*\ndod_anzio\ndod_a*\n' };
+  await loadHarness(page, { status: { ...STATUS, map_list: twice } });
+  await page.click('#hd-refresh-btn');
+
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('.hd-map-via')).toHaveText('\u22172');
+  await expect(mapRow(page, 'dod_anzio').locator('.hd-map-via')).toHaveText('\u2217');
+  const s9a = mapRow(page, 'dod_railroad2_s9a').locator('input');
+  await s9a.click();
+  await expect(s9a).toBeChecked();
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('label')).toHaveAttribute('title',
+    'dod_railroad2_s9a - Matched by the patterns dod_railroad* and dod_rail*. To leave this map out, change or remove those lines.');
+  await expect(page.locator('#hd-maps-patterns li.hd-chip-flash')).toHaveCount(2);
+
+  // Its own line and a pattern: green, and unticking would not drop it.
+  const anzio = mapRow(page, 'dod_anzio').locator('input');
+  await expect(anzio).toHaveClass(/hd-box-pattern/);
+  await anzio.click();
+  await expect(anzio).toBeChecked();
+  await expect(mapRow(page, 'dod_anzio').locator('label')).toHaveAttribute('title', /its own line and by the pattern dod_a\*.*unticking alone would not/);
+
+  // Every map: no Add button, nothing to point at.
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-maps-add-btn')).toBeHidden();
+});
+
+/** native::hd::map_textures::WorldCoverage: ultrasharp built for every map,
+ *  remacri for anzio, part of railroad, and nothing else. */
+const WORLD_COVERAGE = {
+  styles: ['remacri', 'ultrasharp'],
+  maps: [
+    { map: 'dod_anzio', total: 12, built: { remacri: 12, ultrasharp: 12 } },
+    { map: 'dod_caen', total: 8, built: { remacri: 0, ultrasharp: 8 } },
+    { map: 'dod_railroad', total: 10, built: { remacri: 3, ultrasharp: 10 } },
+    { map: 'dod_railroad2_s9a', total: 9, built: { remacri: 0, ultrasharp: 9 } },
+  ],
+  unreadable: [],
+  millis: 5,
+};
+
+test('map coverage (#426): checks off the page thread, then says which maps a style covers and warns about the map list', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
+  await page.click('#hd-refresh-btn');
+
+  // While the scan runs: a checking line, and a bar once it reports.
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Checking which maps each style has map textures for…');
+  await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
+  await page.evaluate(() => window.__mockEmit('hd_coverage_progress', { done: 2, total: 4 }));
+  await expect(page.locator('#hd-style-maps-summary')).toContainText('(2 of 4 maps)');
+  await expect(page.locator('#hd-style-maps-progress')).toBeVisible();
+  await expect(page.locator('#hd-style-maps-progress')).toHaveAttribute('max', '4');
+
+  await page.evaluate((c) => window.__finishCoverage.resolve(c), WORLD_COVERAGE);
+  await expect(page.locator('#hd-style-maps-progress')).toBeHidden();
+  await page.selectOption('#hd-style-select', 'ultrasharp');
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('ultrasharp has every map texture for all 3 maps in your map list.');
+  await expect(page.locator('#hd-style-map-warning')).toBeHidden();
+  await expect(page.locator('#hd-cfg-lines')).not.toContainText('//');
+
+  // The list picks railroad* and anzio: remacri has part of one, none of the other.
+  await page.selectOption('#hd-style-select', 'remacri');
+  await expect(page.locator('#hd-style-maps-summary'))
+    .toHaveText('remacri, in your map list: every map texture for 1 map, some for 1 map and none for 1 map.');
+  const warning = 'remacri is missing map textures for dod_railroad and 1 more map in your map list; those maps will show stock textures wherever it has none.';
+  await expect(page.locator('#hd-style-map-warning')).toHaveText(warning);
+  await expect(page.locator('#hd-cfg-lines')).toContainText(`// ${warning}`);
+  await page.click('#hd-style-maps summary');
+  await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
+    'Every map texture (1)dod_anzio',
+    'Some of the map textures (1)dod_railroad (3 of 10)',
+    'No map textures (1)dod_railroad2_s9a',
+  ]);
+
+  // Show every map: the lists and the line cover the whole game folder.
+  await page.check('.hd-style-maps-every input');
+  await expect(page.locator('#hd-style-maps-summary'))
+    .toHaveText('remacri: every map texture for 1 map, some for 1 map and none for 2 maps.');
+  await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
+    'Every map texture (1)dod_anzio',
+    'Some of the map textures (1)dod_railroad (3 of 10)',
+    'No map textures (2)dod_caen, dod_railroad2_s9a',
+  ]);
+  await page.uncheck('.hd-style-maps-every input');
+
+  // Every map, as edited (not saved yet): the warning follows.
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-style-map-warning')).toHaveText(
+    'remacri is missing map textures for dod_caen and 2 more maps; those maps will show stock textures wherever it has none.');
+});
+
+test('map coverage (#426): a failed check says so and warns about nothing', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
+  await page.click('#hd-refresh-btn');
+  await page.evaluate(() => window.__finishCoverage.reject('disk gone'));
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Could not check which maps are covered: disk gone');
+  await expect(page.locator('#hd-style-map-warning')).toBeHidden();
+});

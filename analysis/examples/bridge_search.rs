@@ -22,27 +22,58 @@ const NETWORK_HEADER_ALIGNMENT: usize = 468;
 const MAX_PAYLOAD: usize = 2_097_152;
 
 fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> (usize, usize) {
-    let mut pos = start; let mut n = 0usize;
+    let mut pos = start;
+    let mut n = 0usize;
     while n < cap {
-        if pos + FRAME_HEADER_SIZE > end { break }
+        if pos + FRAME_HEADER_SIZE > end {
+            break;
+        }
         let t = bytes[pos];
-        let time = f32::from_le_bytes(bytes[pos+1..pos+5].try_into().unwrap());
-        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { break }
-        pos += FRAME_HEADER_SIZE; n += 1;
+        let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
+        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) {
+            break;
+        }
+        pos += FRAME_HEADER_SIZE;
+        n += 1;
         match t {
             5 | 2 | 255 => {}
             0 | 1 => {
-                if pos + NETWORK_HEADER_ALIGNMENT > end { break }
-                let l = i32::from_le_bytes(bytes[pos+NETMSG_INFO_SIZE..pos+NETWORK_HEADER_ALIGNMENT].try_into().unwrap());
-                if l < 0 || l as usize > MAX_PAYLOAD { break }
+                if pos + NETWORK_HEADER_ALIGNMENT > end {
+                    break;
+                }
+                let l = i32::from_le_bytes(
+                    bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT]
+                        .try_into()
+                        .unwrap(),
+                );
+                if l < 0 || l as usize > MAX_PAYLOAD {
+                    break;
+                }
                 pos += NETWORK_HEADER_ALIGNMENT + l as usize;
             }
-            3 => pos += 64, 4 => pos += 32, 6 => pos += 84, 7 => pos += 8,
-            8 => { if pos+8 > end { break } let l = u32::from_le_bytes(bytes[pos+4..pos+8].try_into().unwrap()) as usize; pos += 24+l; }
-            9 => { if pos+4 > end { break } let l = u32::from_le_bytes(bytes[pos..pos+4].try_into().unwrap()) as usize; pos += 4+l; }
+            3 => pos += 64,
+            4 => pos += 32,
+            6 => pos += 84,
+            7 => pos += 8,
+            8 => {
+                if pos + 8 > end {
+                    break;
+                }
+                let l = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+                pos += 24 + l;
+            }
+            9 => {
+                if pos + 4 > end {
+                    break;
+                }
+                let l = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4 + l;
+            }
             _ => break,
         }
-        if pos > end { break }
+        if pos > end {
+            break;
+        }
     }
     (n, pos)
 }
@@ -50,38 +81,89 @@ fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> (usize, usize) {
 fn entry0_end(bytes: &[u8], end: usize) -> Option<usize> {
     let mut pos = DEMO_HEADER_SIZE;
     loop {
-        if pos + FRAME_HEADER_SIZE > end { return None }
+        if pos + FRAME_HEADER_SIZE > end {
+            return None;
+        }
         let t = bytes[pos];
         pos += FRAME_HEADER_SIZE;
         match t {
             5 => return Some(pos),
-            0 | 1 => { let l = i32::from_le_bytes(bytes[pos+NETMSG_INFO_SIZE..pos+NETWORK_HEADER_ALIGNMENT].try_into().unwrap()) as usize; pos += NETWORK_HEADER_ALIGNMENT + l; }
+            0 | 1 => {
+                let l = i32::from_le_bytes(
+                    bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT]
+                        .try_into()
+                        .unwrap(),
+                ) as usize;
+                pos += NETWORK_HEADER_ALIGNMENT + l;
+            }
             2 | 255 => {}
-            3 => pos += 64, 4 => pos += 32, 6 => pos += 84, 7 => pos += 8,
-            8 => { let l = u32::from_le_bytes(bytes[pos+4..pos+8].try_into().unwrap()) as usize; pos += 24+l; }
-            9 => { let l = u32::from_le_bytes(bytes[pos..pos+4].try_into().unwrap()) as usize; pos += 4+l; }
+            3 => pos += 64,
+            4 => pos += 32,
+            6 => pos += 84,
+            7 => pos += 8,
+            8 => {
+                let l = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+                pos += 24 + l;
+            }
+            9 => {
+                let l = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4 + l;
+            }
             _ => return None,
         }
-        if pos > end { return None }
+        if pos > end {
+            return None;
+        }
     }
 }
 
-fn put_i32(v: &mut Vec<u8>, x: i32) { v.extend_from_slice(&x.to_le_bytes()); }
-fn put_f32(v: &mut Vec<u8>, x: f32) { v.extend_from_slice(&x.to_le_bytes()); }
+fn put_i32(v: &mut Vec<u8>, x: i32) {
+    v.extend_from_slice(&x.to_le_bytes());
+}
+fn put_f32(v: &mut Vec<u8>, x: f32) {
+    v.extend_from_slice(&x.to_le_bytes());
+}
 fn dir_entry(o: &mut Vec<u8>, t: i32, d: &str, tt: f32, fc: i32, fo: i32, fl: i32) {
-    put_i32(o, t); let mut b=[0u8;64];
-    for (i,c) in d.bytes().take(63).enumerate() { b[i]=c }
-    o.extend_from_slice(&b); put_i32(o,0); put_i32(o,-1); put_f32(o,tt); put_i32(o,fc); put_i32(o,fo); put_i32(o,fl);
+    put_i32(o, t);
+    let mut b = [0u8; 64];
+    for (i, c) in d.bytes().take(63).enumerate() {
+        b[i] = c
+    }
+    o.extend_from_slice(&b);
+    put_i32(o, 0);
+    put_i32(o, -1);
+    put_f32(o, tt);
+    put_i32(o, fc);
+    put_i32(o, fo);
+    put_i32(o, fl);
 }
 
 fn build(bytes: &[u8], e0: usize, damage: usize, from: usize, end: usize) -> Vec<u8> {
     let mut out = bytes[..damage].to_vec();
     out.extend_from_slice(&bytes[from..end]);
-    out.push(5); put_f32(&mut out, 0.0); put_i32(&mut out, 0);
+    out.push(5);
+    put_f32(&mut out, 0.0);
+    put_i32(&mut out, 0);
     let dir = out.len();
     put_i32(&mut out, 2);
-    dir_entry(&mut out, 0, "LOADING", 0.0, 0, DEMO_HEADER_SIZE as i32, (e0-DEMO_HEADER_SIZE) as i32);
-    dir_entry(&mut out, 1, "Playback", 0.0, 0, e0 as i32, (dir-e0) as i32);
+    dir_entry(
+        &mut out,
+        0,
+        "LOADING",
+        0.0,
+        0,
+        DEMO_HEADER_SIZE as i32,
+        (e0 - DEMO_HEADER_SIZE) as i32,
+    );
+    dir_entry(
+        &mut out,
+        1,
+        "Playback",
+        0.0,
+        0,
+        e0 as i32,
+        (dir - e0) as i32,
+    );
     out[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].copy_from_slice(&(dir as i32).to_le_bytes());
     out
 }
@@ -94,8 +176,16 @@ fn main() {
     let from: usize = a.next().expect("from").parse().unwrap();
     let out_path = a.next().expect("out.dem");
     let bytes = std::fs::read(&path).expect("read");
-    let dir_off = i32::from_le_bytes(bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].try_into().unwrap()) as usize;
-    let end = if dir_off>0 && dir_off<=bytes.len() { dir_off } else { bytes.len() };
+    let dir_off = i32::from_le_bytes(
+        bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let end = if dir_off > 0 && dir_off <= bytes.len() {
+        dir_off
+    } else {
+        bytes.len()
+    };
     let e0 = entry0_end(&bytes, end).expect("entry0");
 
     // Parsing alone is too weak a test: an offset can parse and contribute
@@ -103,7 +193,8 @@ fn main() {
     // tail happens to contain. Demand that the result actually carries the tail.
     let (prefix_frames, _) = walk(&bytes, DEMO_HEADER_SIZE, damage, usize::MAX);
     let sidecar = format!("{out_path}.best");
-    let mut best: usize = std::fs::read_to_string(&sidecar).ok()
+    let mut best: usize = std::fs::read_to_string(&sidecar)
+        .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(prefix_frames + 10_000);
     let required = best;
@@ -116,7 +207,10 @@ fn main() {
         // Cheap reject first: almost every offset dies within a few frames, and
         // walking each one to the end of an 80 MB file would dominate runtime.
         let (quick, _) = walk(&bytes, scan, end, 200);
-        if quick < 200 { scan += 1; continue }
+        if quick < 200 {
+            scan += 1;
+            continue;
+        }
         let (n, stop) = walk(&bytes, scan, end, usize::MAX);
         if n > 5000 && stop >= end.saturating_sub(64) {
             eprintln!("TRYING {scan}");
@@ -125,7 +219,9 @@ fn main() {
             if let Ok(d) = dem::open_demo_from_bytes(&cand) {
                 let frames: usize = d.directory.entries.iter().map(|e| e.frames.len()).sum();
                 if frames <= best {
-                    eprintln!("  offset {scan} parses but yields only {frames} frames -- keeping best {best}");
+                    eprintln!(
+                        "  offset {scan} parses but yields only {frames} frames -- keeping best {best}"
+                    );
                     scan += 1;
                     continue;
                 }

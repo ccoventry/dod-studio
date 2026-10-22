@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!--
+  Harness for combine_clips.js (#107): the Combine Clips button and window
+  copied from index.html. `window.__finished` stands in for the Render
+  table's finished outputs; the backend (combine_plan, combine_clips,
+  combine_cancel) and the dialog plugin are window.__mockInvokeHandlers.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>combine_clips.js test harness</title>
+</head>
+<body>
+  <button id="combine-open-btn">Combine Clips…</button>
+  <div id="combine-modal" class="modal" style="display: none;">
+    <div class="modal-content combine-content">
+      <div class="combine-toolbar">
+        <button id="combine-add-finished-btn" data-combine-edit>Add finished renders</button>
+        <button id="combine-add-files-btn" data-combine-edit>Add files…</button>
+        <button id="combine-clear-btn" data-combine-edit>Clear</button>
+      </div>
+      <ol id="combine-list" class="combine-list"></ol>
+      <p id="combine-plan" class="combine-plan"></p>
+      <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+      <button id="combine-start-btn" disabled>Combine…</button>
+      <button id="combine-cancel-btn" disabled>Cancel</button>
+      <button id="combine-close-btn">Close</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initCombineClips } from '/src/combine_clips.js';
+
+    window.__finished = window.__finished || [];
+    initCombineClips({
+      finishedRenders: () => window.__finished,
+      ffmpegPath: () => 'C:/ffmpeg/ffmpeg.exe',
+    });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

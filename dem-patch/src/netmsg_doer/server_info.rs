@@ -55,7 +55,8 @@ impl Doer for SvcServerInfo {
                     unknown,
                 }
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

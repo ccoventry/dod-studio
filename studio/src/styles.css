@@ -185,11 +185,28 @@ body {
   color: #ffffff;
 }
 
-.menu-update-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #5fb85f;
+/* The menu bar's update button (#868), beside Help: seen without opening a
+   menu, quiet enough to leave while you work. */
+.update-chip {
+  align-self: center;
+  margin-left: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: #5fb85f;
+  background: rgba(95, 184, 95, 0.12);
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.update-chip:hover {
+  background: rgba(95, 184, 95, 0.25);
+  color: #ffffff;
+}
+
+.update-chip[hidden] {
+  display: none;
 }
 
 .menu-dropdown-panel {
@@ -453,6 +470,17 @@ body {
   color: #ffffff;
 }
 
+/* The Demo Analyzer's Cache all, beside the Demos title (#569). */
+.analyzer-cache-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analyzer-cache-bar {
+  width: 120px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;
@@ -494,13 +522,18 @@ body {
   margin-bottom: 8px;
 }
 
+/* display: flex above would otherwise beat the hidden attribute. */
+.row-inputs[hidden], .input-row[hidden] {
+  display: none;
+}
+
 .input-row label {
   min-width: 150px;
   font-weight: 500;
   color: #cccccc;
 }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
   color: #ffffff;
   border: 1px solid var(--border-color);
@@ -510,8 +543,13 @@ input[type="text"], input[type="number"], select {
   outline: none;
 }
 
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, select:focus {
   border-color: var(--primary-accent);
+}
+
+/* The map search: wide enough for a pattern, placeholder included. */
+#hd-maps-search {
+  min-width: 18em;
 }
 
 /* The bare `appearance: none` reset above doesn't reliably suppress the
@@ -573,6 +611,36 @@ button.primary-btn:hover:not(:disabled) {
   background: var(--primary-hover);
 }
 
+/* A text box's clear button (clearable_input.js, #529): an × at its
+   right-hand end, shown only while the box has text. */
+.clearable-input {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.clearable-x {
+  position: absolute;
+  right: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.clearable-x[hidden] {
+  display: none;
+}
+
+/* Outranks the global button:hover:not(:disabled) background. */
+.clearable-x:hover:not(:disabled) {
+  background: transparent;
+  color: #fff;
+}
+
 /* Master Demo Queue Table */
 .table-wrapper {
   overflow-x: auto;
@@ -595,8 +663,8 @@ button.primary-btn:hover:not(:disabled) {
   font-weight: 600;
 }
 
-/* Every centered <td> column in this table (checkbox, Highlights, Pending,
-   Captured, Rendered, Actions — master_pane.js) needs its <th> centered too,
+/* Every centered <td> column in this table (checkbox, Highlights, Selected,
+   Status, Review, Actions — master_pane.js) needs its <th> centered too,
    or a header/body mismatch that's invisible while the column is barely
    wider than its content visibly drifts apart once the table stretches
    wider than that content (e.g. a maximized window) and the extra slack
@@ -613,6 +681,25 @@ button.primary-btn:hover:not(:disabled) {
 
 #master-demo-table tr:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+/* Status and Review: coloured counts joined by slashes (queue_counts.js);
+   the header's legend shows the same letters in the same colours. */
+#master-demo-table td.queue-counts-cell {
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+#master-demo-table .count-legend {
+  font-size: 10px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+#master-demo-table .count-slash {
+  color: #555;
 }
 
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of
@@ -633,6 +720,41 @@ button.primary-btn:hover:not(:disabled) {
   text-align: center;
   color: var(--text-muted);
   padding: 16px !important;
+}
+
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 /* Configuration Tabs */
@@ -859,6 +981,19 @@ button.primary-btn:hover:not(:disabled) {
   gap: 16px;
 }
 
+/* Capture footer (#534): the status line sits on its own line under the
+   buttons, the row's full width, and shows at most two lines;
+   status_line.js puts the whole message in its tooltip. */
+#batch-status {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 #export-pool-free-indicator,
 #render-footer-pool-free,
 #footer-audit-summary {
@@ -957,6 +1092,44 @@ button.primary-btn:hover:not(:disabled) {
   gap: 8px;
 }
 
+/* Demo folders linked into the game folder (demo_links.js, #376) */
+.demo-links {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.demo-links summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.demo-links-hint {
+  color: var(--text-muted);
+  margin: 4px 0 6px;
+}
+.demo-links-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.demo-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-color);
+}
+.demo-link-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.demo-link-target,
+.demo-link-empty {
+  color: var(--text-muted);
+}
+.demo-link-console {
+  user-select: text;
+}
+
 /* Small inline scan/audit-in-progress indicator */
 .spinner {
   display: inline-block;
@@ -985,6 +1158,13 @@ button.primary-btn:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* A confirmation opens on top of whichever modal asked for it (#356). With
+   every .modal at 1000, DOM order decided, and a modal declared after this
+   one (Clear Previews) covered the confirm it opened. */
+#themed-confirm-modal {
+  z-index: 1100;
 }
 
 .modal-content {
@@ -1203,6 +1383,39 @@ button.primary-btn:hover:not(:disabled) {
   margin-bottom: 10px;
 }
 
+/* #217: a demo that recorded more than one map, above every analyzer tab. */
+.analyzer-multimap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.analyzer-multimap-banner[hidden] {
+  display: none;
+}
+
+.analyzer-multimap-text {
+  flex: 1 1 320px;
+}
+
+/* split_progress.js: a split's bar and its line (Analyzer, Auditor, Queue). */
+.split-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.split-progress .progress-bar-container {
+  margin-top: 0;
+}
+
+.split-progress-text {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
 .analyzer-toolbar {
   display: flex;
   gap: 10px;
@@ -1244,6 +1457,228 @@ button.primary-btn:hover:not(:disabled) {
   border-top: 1px solid var(--border-color);
   font-size: 11px;
   color: #ccc;
+}
+
+/* #207: a demo this install's game can't play. */
+.entity-limit-badge {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: #ffb74d;
+  border: 1px solid #ffb74d;
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: help;
+}
+
+/* #217: a queued demo with more than one map; the badge is the Split button. */
+.multimap-split-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: #fbbf24;
+  background: transparent;
+  border: 1px solid #fbbf24;
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.multimap-split-progress {
+  min-width: 160px;
+  flex-shrink: 0;
+  font-weight: normal;
+}
+
+.multimap-split-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* Combine Clips (#107). */
+.combine-content {
+  max-width: 680px;
+  padding: 20px;
+}
+
+.combine-hint,
+.combine-plan {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.combine-toolbar,
+.combine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.combine-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.combine-list {
+  margin: 10px 0;
+  padding-left: 24px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.combine-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.combine-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combine-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Last Batch (#172). */
+.batch-results {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.batch-results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-results-close {
+  padding: 0 6px;
+}
+
+.batch-results-summary {
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.batch-results-error {
+  color: #ef5350;
+}
+
+.batch-results-wrap {
+  max-height: 220px;
+}
+
+.batch-results-row-missing td:first-child {
+  color: #ef5350;
+}
+
+.batch-results-row-unrenderable td:first-child {
+  color: #ffb74d;
+}
+
+.batch-results-row-ok td:first-child {
+  color: #66bb6a;
+}
+
+/* The Commands tab's type-ahead (#215). */
+.command-suggest {
+  position: absolute;
+  z-index: 1200;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+
+.command-suggest-item {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.command-suggest-item.active,
+.command-suggest-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.command-suggest-name {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.command-suggest-meta {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.command-suggest-refused .command-suggest-name {
+  color: #ef5350;
+  text-decoration: line-through;
+}
+
+.command-suggest-refused .command-suggest-meta,
+.command-suggest-warned .command-suggest-meta {
+  color: #ffb74d;
+}
+
+.command-suggest-noop .command-suggest-name {
+  opacity: 0.6;
+}
+
+/* #192: the Flags tab. */
+.analyzer-team-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: baseline;
+}
+
+.analyzer-flag-cards {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.analyzer-steam-ids {
+  display: flex;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #ccc;
+}
+
+.analyzer-copy-btn {
+  padding: 1px 6px;
+  font-size: 10px;
+  margin-left: 4px;
 }
 
 .analyzer-stat-cards {
@@ -1342,6 +1777,46 @@ button.primary-btn:hover:not(:disabled) {
   font-size: 11px;
   white-space: nowrap;
   z-index: 5;
+}
+
+/* Kill Map tab (#448): the overview image with an SVG of death markers laid
+   exactly over it, both scaled together. */
+.analyzer-killmap {
+  position: relative;
+  max-width: 1024px;
+  margin-bottom: 8px;
+}
+
+.analyzer-killmap img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+}
+
+.analyzer-killmap svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.analyzer-killmap circle {
+  stroke: #000;
+  stroke-width: 1.5;
+  cursor: default;
+}
+
+.analyzer-killmap circle:hover {
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.analyzer-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 8px;
 }
 
 .analyzer-weapon-filters {
@@ -1719,4 +2194,1551 @@ tr.keyboard-selected {
   padding-left: 2px;
   font-size: 0.85em;
   color: #ffa726;
+}
+
+/* HD Textures page (#372). */
+.hd-pane-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hd-hint {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Style rows × type columns; each cell is "N files, size". */
+#hd-status-table {
+  border-collapse: collapse;
+}
+
+#hd-status-table th,
+#hd-status-table td {
+  padding: 5px 12px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid #282828;
+}
+
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: #ffb74d;
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: #888888;
+}
+
+.hd-style-coverage,
+.hd-gl-max-size-low {
+  color: #ffb74d;
+}
+
+.hd-style-maps summary {
+  cursor: pointer;
+}
+
+.hd-style-maps-groups p {
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-every {
+  display: block;
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-progress {
+  width: 100%;
+}
+
+#hd-status-table th {
+  color: #aaaaaa;
+  font-weight: 600;
+  border-bottom-color: var(--border-color);
+}
+
+.hd-mono {
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.hd-choice-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.hd-choice-label {
+  min-width: 52px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.hd-choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.hd-details {
+  margin-top: 8px;
+}
+
+.hd-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-code {
+  font-family: monospace;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  padding: 6px 8px;
+  margin: 6px 0 0;
+  user-select: text;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Demo Auditor tabs (#624): one per tool, under the shared folder picker. */
+.auditor-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--border-color, #444);
+}
+
+.auditor-tab-btn {
+  border: 1px solid var(--border-color, #444);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--text-muted, #aaa);
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.auditor-tab-btn.active {
+  background: var(--panel-bg-light, #2a2a2a);
+  color: var(--text-color, #fff);
+  font-weight: 600;
+}
+
+/* Split Maps (#624). */
+.split-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted, #aaa);
+  max-width: 80ch;
+}
+
+.split-recursive-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.split-demo {
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.split-demo-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.split-demo-name {
+  overflow-wrap: anywhere;
+}
+
+.split-demo-meta {
+  color: var(--text-muted, #aaa);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+/* The app's table style (analyzer-table), sized to its content. */
+.split-maps.analyzer-table {
+  width: auto;
+  min-width: 420px;
+  margin: 8px 0;
+}
+
+.split-maps th {
+  position: static;
+}
+
+.split-map-num,
+.split-map-when {
+  color: var(--text-muted, #aaa);
+  font-variant-numeric: tabular-nums;
+}
+
+.split-done td {
+  opacity: 0.75;
+}
+
+.split-map-done {
+  color: var(--text-muted, #aaa);
+  font-size: 0.9em;
+}
+
+.split-done-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  color: #5fb85f;
+}
+
+.split-short td {
+  opacity: 0.6;
+}
+
+/* The result goes under the button, not beside it. */
+.split-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.split-result {
+  font-size: 0.9em;
+}
+
+.split-written {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.split-reveal {
+  margin-left: 6px;
+  font-size: 0.85em;
+}
+
+/* ── Overviews page (#371) ─────────────────────────────────────────────── */
+#pane-overviews {
+  flex: 1;
+  min-height: 0;
+}
+
+.ov-layout {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.ov-side {
+  width: 250px;
+  flex: 0 0 250px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ov-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ov-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ov-canvas-wrap {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#ov-canvas {
+  image-rendering: auto;
+  cursor: crosshair; /* overviews_pane.js sets it by what a click would do */
+  box-shadow: 0 0 0 1px var(--border-color);
+}
+
+.ov-sp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-sp-colours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-sp-colours label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ov-sp-colours input[type='color'] {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+}
+
+#ov-sp-reset {
+  align-self: flex-start;
+}
+
+.ov-zoom {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.ov-zoom button {
+  min-width: 28px;
+}
+
+#ov-zoom-fit {
+  min-width: 52px;
+}
+
+.ov-tools-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ov-mode.active,
+#ov-clear-colour-btn.active {
+  outline: 2px solid var(--primary-accent);
+}
+
+.ov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-field.ov-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-subtitle {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.ov-map-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.ov-map-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #282828;
+}
+
+.ov-map-row span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-map-row.active {
+  background: var(--bg-input);
+}
+
+.ov-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.ov-badge-ours {
+  color: #8ade75;
+  border-color: #8ade75;
+}
+
+.ov-badge-edited {
+  color: #d5e34f;
+  border-color: #d5e34f;
+}
+
+.ov-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.ov-swatch {
+  height: 24px;
+  padding: 0;
+  border: 1px solid #000;
+  border-radius: 3px;
+}
+
+.ov-recent-row,
+.ov-colour-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-colour-row {
+  justify-content: space-between;
+}
+
+.ov-recent {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  min-height: 20px;
+  align-items: center;
+}
+
+#ov-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+}
+
+.ov-recent .ov-swatch {
+  width: 20px;
+  height: 20px;
+}
+
+.ov-swatch.active {
+  outline: 2px solid #fff;
+}
+
+.ov-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.ov-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-label-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ov-label-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-flag-row {
+  display: flex;
+  gap: 4px;
+}
+
+/* A Show checkbox with a reset beside it (the map title). */
+.ov-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-credit-row {
+  margin-left: 20px;
+}
+
+.ov-check-row .ov-flag-reset {
+  padding: 0 6px;
+  line-height: 1.3;
+}
+
+.ov-flag-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-label-row.active input {
+  outline: 1px dashed #ffdd00;
+}
+
+.ov-add-label {
+  align-self: flex-start;
+}
+
+/* A map's scene being built: what and how far, where the map will be. */
+.ov-building {
+  width: min(360px, 80%);
+  text-align: center;
+}
+
+/* The side panel scrolls, which clips an outline drawn outside the button. */
+.ov-add-label.active {
+  outline-offset: -2px;
+}
+
+/* One line of code beside its Copy button. */
+.hd-code-inline {
+  margin: 0;
+  min-width: 16em;
+}
+
+.hd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* The style comparison sheet: 1:1 pixels in a scrolling box, or fitted. */
+.hd-preview-wrap {
+  margin-top: 8px;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  background: #000;
+}
+
+.hd-preview-wrap img {
+  display: block;
+  cursor: zoom-out;
+  image-rendering: pixelated;
+}
+
+.hd-preview-fit img {
+  width: 100%;
+  cursor: zoom-in;
+  image-rendering: auto;
+}
+
+/* The user's own styles: name, what it is, Edit and Remove. */
+.hd-my-styles {
+  margin: 4px 0 10px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-my-styles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+
+.hd-my-style-name {
+  min-width: 90px;
+  font-family: monospace;
+}
+
+/* The map list: every map in dod\maps, ticked when the list picks it. */
+.hd-maps-mode {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 6px;
+}
+
+/* The list's lines as chips, across and down. */
+.hd-map-patterns {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.hd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+
+.hd-chip-name {
+  font-family: monospace;
+}
+
+.hd-chip-count {
+  color: var(--text-muted);
+}
+
+.hd-pattern-unused {
+  border-color: #d9a441;
+}
+
+.hd-pattern-unused .hd-chip-count {
+  color: #d9a441;
+}
+
+.hd-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.hd-chip-x:hover {
+  color: #fff;
+}
+
+/* Clicking a map's box that a pattern picked points at the pattern's chip. */
+.hd-chip-flash {
+  animation: hd-chip-flash 1.2s ease-out;
+}
+
+@keyframes hd-chip-flash {
+  0%, 60% { background: #2f6b47; border-color: var(--hd-tick-pattern); }
+  100% { background: var(--bg-input); border-color: var(--border-color); }
+}
+
+/* A map a pattern picked: its tick and its mark in the pattern colour,
+   against the browser's blue for a map with its own line. The legend beside
+   "Picked only" is two drawn ticks in the same two colours. */
+:root {
+  --hd-tick-own: var(--primary-accent);
+  --hd-tick-pattern: #3ea86b;
+}
+
+/* Outranks the global input[type="checkbox"] accent rule at the top. */
+input[type="checkbox"].hd-box-pattern {
+  accent-color: var(--hd-tick-pattern);
+}
+
+.hd-map-via {
+  color: var(--hd-tick-pattern);
+  margin-left: -3px;
+  flex-shrink: 0;
+}
+
+.hd-map-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-map-legend .hd-tick + span {
+  margin-right: 8px;
+}
+
+.hd-tick {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  text-align: center;
+  line-height: 13px;
+  font-size: 11px;
+  color: #fff;
+}
+
+.hd-tick::after {
+  content: "\2713";
+}
+
+.hd-tick-own {
+  background: var(--hd-tick-own);
+}
+
+.hd-tick-pattern {
+  background: var(--hd-tick-pattern);
+}
+
+.hd-map-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+  column-gap: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.hd-map-list li {
+  min-width: 0;
+}
+
+.hd-map-list label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+  min-width: 0;
+}
+
+.hd-map-name {
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hd-map-list .hd-miss-detail {
+  margin-left: auto;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.hd-map-list.hd-map-list-off label {
+  opacity: 0.75;
+}
+
+/* Misses view: one collapsible block per map. */
+.hd-miss-map {
+  border-top: 1px solid #282828;
+  padding: 6px 0;
+}
+
+.hd-miss-map summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.hd-miss-heading {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.hd-miss-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-miss-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 1px 0;
+}
+
+.hd-miss-type {
+  min-width: 90px;
+  color: var(--text-muted);
+}
+
+.hd-miss-detail {
+  color: var(--text-muted);
+}
+
+/* Highlight Details' Notes (#605): notes are clip descriptions of a sentence
+   or two, so the column takes the room and the box wraps; drag its corner
+   to make it bigger. A class, not a column position, so a new column doesn't
+   move the width onto the wrong one. */
+#detail-streaks-table th.col-notes {
+  width: 45%;
+}
+
+.streak-notes-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 260px;
+  min-height: 3.2em;
+  resize: both;
+  padding: 2px 4px;
+  background: #1a1a1a;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* Demo Auditor: Rename Demos (#469). */
+.rename-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rename-label {
+  min-width: 90px;
+}
+
+.rename-template {
+  flex: 1;
+  font-family: monospace;
+}
+
+.rename-errors {
+  margin: 2px 0 4px;
+  color: #ef5350;
+}
+
+/* One row per placeholder group: its label, then its chips (#469), under
+   both name templates (#751, placeholder_chips.js). */
+.placeholder-chips {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 4px 0 8px;
+  font-size: 0.85em;
+}
+
+.placeholder-chip-group-label {
+  color: var(--text-muted);
+  font-size: 0.95em;
+  text-align: right;
+}
+
+.placeholder-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.placeholder-chip {
+  padding: 1px 6px;
+  font-family: monospace;
+  font-size: 1em;
+}
+
+/* A placeholder the focused template's demo type doesn't have. */
+.placeholder-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* The Master Queue grouped by match (#685): one header line per match. */
+#master-demo-table .queue-match-header td {
+  padding: 6px 8px 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: default;
+}
+
+/* The list: the shared .analyzer-table look, with fixed columns so the two
+   names share the width evenly and a long one ends in … (full on hover). */
+.rename-table {
+  table-layout: fixed;
+}
+
+.rename-table .rename-col-check {
+  width: 34px;
+}
+
+.rename-table .rename-col-type {
+  width: 64px;
+}
+
+.rename-table th.rename-center,
+.rename-table td.rename-center {
+  text-align: center;
+}
+
+.rename-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rename-table tr.rename-unticked td {
+  opacity: 0.45;
+}
+
+#rename-table td.rename-new {
+  color: #81c784;
+}
+
+#rename-table td.rename-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+#rename-table td.rename-numbered {
+  color: #ffb74d;
+}
+
+.rename-type {
+  display: inline-block;
+  min-width: 36px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.rename-type-pov {
+  color: #64b5f6;
+  background: rgba(100, 181, 246, 0.12);
+}
+
+.rename-type-hltv {
+  color: #ce93d8;
+  background: rgba(206, 147, 216, 0.12);
+}
+
+/* ── Setup window and checklist card (#599) ─────────────────────────────── */
+.setup-modal-content {
+  max-width: 600px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+}
+
+.setup-header {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* One bar per step: grey to come, blue now, green done. */
+.setup-steps {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.setup-steps li {
+  flex: 1 1 70px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup-steps li::before {
+  content: "";
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-accent);
+}
+
+.setup-steps li.done::before { background: #4caf7a; }
+.setup-steps li.now::before { background: #4a86c5; }
+.setup-steps li.now { color: #ffffff; }
+
+.setup-content {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 280px;
+}
+
+.setup-content p {
+  margin: 0;
+}
+
+.setup-footer {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.setup-footer-spacer {
+  flex: 1;
+}
+
+/* "Skip setup for now": a link, not a button, so Next stays the obvious one. */
+button.setup-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  padding: 4px 0;
+}
+
+button.setup-skip:hover:not(:disabled) {
+  background: none;
+  color: #ffffff;
+}
+
+.setup-note {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+}
+
+.setup-note.info { border-color: #2f4a68; }
+.setup-note.warn { border-color: #6b5226; color: #ffb74d; }
+.setup-note.ok { border-color: #2e5a42; }
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setup-path-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.setup-path {
+  flex: 1;
+  min-width: 0;
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 5px 8px;
+  /* A long path wraps at its folder separators (setup_window.js adds a
+     <wbr> after each), never behind a scrollbar. */
+  overflow-wrap: anywhere;
+}
+
+.setup-path-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-path.empty {
+  color: var(--text-muted);
+  font-family: inherit;
+  font-style: italic;
+}
+
+.setup-path .setup-free {
+  color: var(--text-muted);
+  font-family: inherit;
+  margin-left: 8px;
+}
+
+.setup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.setup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.setup-dot.ok { background: #4caf7a; }
+.setup-dot.warn { background: #ffb74d; }
+.setup-dot.bad { background: #f44336; }
+
+.setup-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-accent);
+  white-space: nowrap;
+}
+
+.setup-chip.info { border-color: #4a86c5; color: #4a86c5; }
+.setup-chip.ok { border-color: #4caf7a; color: #4caf7a; }
+.setup-chip.warn { border-color: #ffb74d; color: #ffb74d; }
+
+.setup-btn-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.setup-muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* The Capture page's card. */
+.setup-card {
+  margin: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--primary-accent);
+  border-radius: 3px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-card[hidden] {
+  display: none;
+}
+
+.setup-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+}
+
+.setup-card-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.setup-meter {
+  flex: 1 1 100px;
+  height: 6px;
+  background: #2b2c30;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.setup-meter i {
+  display: block;
+  height: 100%;
+  background: #4a86c5;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.setup-row.done {
+  opacity: 0.7;
+}
+
+.setup-row small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.setup-tick {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #111;
+  box-sizing: border-box;
+}
+
+.setup-tick.ok { background: #4caf7a; }
+.setup-tick.todo { border: 1.5px solid #ffb74d; }
+.setup-tick.opt { border: 1.5px dashed var(--border-accent); }
+
+
+.setup-row-text {
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* Configuration > Players (#428): one row per player -- name, spray,
+   crosshair, remove x -- and the crosshair tile picker under it. */
+.players-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 6px;
+}
+
+.players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.players-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(200px, 1.4fr) 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.players-head {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.players-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.players-crosshair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.players-crosshair select {
+  min-width: 0;
+  max-width: 160px;
+}
+
+.players-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.players-tile-preview {
+  width: 24px;
+  height: 24px;
+  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 8px 8px;
+  border-radius: 3px;
+}
+
+.players-picker {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 4px 12px;
+}
+
+.players-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 48px);
+  grid-template-rows: repeat(4, 48px);
+  width: 192px;
+  height: 192px;
+  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 16px 16px;
+}
+
+.players-grid-image {
+  position: absolute;
+  inset: 0;
+  width: 192px;
+  height: 192px;
+  pointer-events: none;
+}
+
+.players-cell {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
+  text-align: left;
+  vertical-align: top;
+  padding: 2px 3px;
+  cursor: pointer;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.players-grid-numbers .players-cell {
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+}
+
+.players-cell:hover {
+  border-color: var(--accent-color, #4a90d9);
+}
+
+.players-cell.selected {
+  border: 2px solid var(--accent-color, #4a90d9);
+  color: #fff;
+}
+
+.players-picker-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+}
+
+.players-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.players-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.players-x:hover {
+  color: #fff;
+}
+
+/* The HLTV box's "Players I pick" (#828): the lists that add a player or a
+   team stay together; the picked players, as chips with an x, take a line
+   of their own at the end of the toolbar, so more chips never move the
+   lists (#845). */
+.review-hltv-pick {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+/* Fixed widths: a list sized to its longest name narrows as players are
+   picked out of it, and the lists after it shift. */
+#review-hltv-add-player {
+  width: 200px;
+}
+
+#review-hltv-add-team {
+  width: 160px;
+}
+
+.review-hltv-pick[hidden],
+.review-hltv-chips[hidden] {
+  display: none;
+}
+
+.review-hltv-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.review-hltv-chips-row {
+  flex-basis: 100%;
+}
+
+.review-hltv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-input);
+}
+
+/* Picked, but no highlight in the queue's HLTV demos right now. */
+.review-hltv-chip-away {
+  opacity: 0.5;
+}
+
+.review-hltv-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.review-hltv-chip-x:hover {
+  color: #fff;
+}
+
+.review-hltv-none {
+  color: var(--text-muted);
+}
+
+/* Demo Auditor › Duplicates: Folders to check (audit_folders.js, #844). */
+.audit-folder-list {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.audit-folder-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.audit-folder-path {
+  word-break: break-all;
+}
+
+/* All drives walks every fixed drive, so the list doesn't apply: dimmed, not hidden. */
+.audit-folder-list.dimmed {
+  opacity: 0.45;
+}
+
+.audit-all-drives {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 12px;
+}
+
+/* Duplicates (#844): a group's header row stands out from its files, and the
+   row buttons are the compact kind the render list uses. */
+.audit-table .audit-group-row td {
+  background: #1c1c1c;
+  border-top: 1px solid var(--border-color);
+}
+
+.audit-table .group-toggle-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.audit-table .audit-file-path {
+  word-break: break-all;
+}
+
+.audit-table th:nth-child(1) { width: 32px; }
+.audit-table th:nth-child(2) { width: 210px; }
+.audit-table th:nth-child(3) { width: 90px; }
+.audit-table th:nth-child(5) { width: 200px; }
+
+.audit-table .audit-keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(3),
+.audit-table td:last-child {
+  white-space: nowrap;
+}
+
+.audit-table td:last-child button {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.audit-status-current {
+  font-size: 0.9em;
+  word-break: break-all;
 }

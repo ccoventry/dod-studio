@@ -48,13 +48,21 @@ struct Totals {
 
 fn main() {
     let target = PathBuf::from(
-        std::env::args().nth(1).expect("usage: hltv_scan_probe <demo-or-directory>"),
+        std::env::args()
+            .nth(1)
+            .expect("usage: hltv_scan_probe <demo-or-directory>"),
     );
     let mut demos: Vec<PathBuf> = Vec::new();
     if target.is_dir() {
-        for entry in std::fs::read_dir(&target).expect("read directory").flatten() {
+        for entry in std::fs::read_dir(&target)
+            .expect("read directory")
+            .flatten()
+        {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")) {
+            if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dem"))
+            {
                 demos.push(path);
             }
         }
@@ -70,9 +78,18 @@ fn main() {
     }
 
     println!("\n== summary ==");
-    println!("  {} demo(s), {} of them HLTV by the guard's own header test", totals.demos, totals.hltv);
-    println!("  {} of them HLTV by the analysis crate's SvcHltv test", totals.not_pov);
-    println!("  scanner refused {}, scanned {}, failed for other reasons {}", totals.refused, totals.scanned, totals.failed);
+    println!(
+        "  {} demo(s), {} of them HLTV by the guard's own header test",
+        totals.demos, totals.hltv
+    );
+    println!(
+        "  {} of them HLTV by the analysis crate's SvcHltv test",
+        totals.not_pov
+    );
+    println!(
+        "  scanner refused {}, scanned {}, failed for other reasons {}",
+        totals.refused, totals.scanned, totals.failed
+    );
     println!(
         "  of the refused: {} parsed cleanly, yielding {} streak(s) across {} player(s)",
         totals.hltv_parsed, totals.hltv_streaks, totals.hltv_players_with_streaks
@@ -80,7 +97,10 @@ fn main() {
 }
 
 fn report(path: &Path, totals: &mut Totals) {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let hltv = match is_hltv_demo(path) {
         Ok(v) => v,
         Err(e) => {
@@ -104,7 +124,11 @@ fn report(path: &Path, totals: &mut Totals) {
             println!(
                 "{name}: scanner OK -- {} streak(s), demo_type {}, pov_player_index {:?}, {frames} frames",
                 streaks.len(),
-                if is_pov { "POV" } else { "NOT POV (analysis says HLTV)" },
+                if is_pov {
+                    "POV"
+                } else {
+                    "NOT POV (analysis says HLTV)"
+                },
                 local
             );
             return;
@@ -145,12 +169,21 @@ fn report(path: &Path, totals: &mut Totals) {
         if !matches!(player.connection, analysis::Connection::Connected { .. }) {
             continue;
         }
-        let with_kills = player.kill_streaks.iter().filter(|s| !s.kills.is_empty()).count();
+        let with_kills = player
+            .kill_streaks
+            .iter()
+            .filter(|s| !s.kills.is_empty())
+            .count();
         if with_kills > 0 {
             players += 1;
             streaks += with_kills;
             biggest = biggest.max(
-                player.kill_streaks.iter().map(|s| s.kills.len()).max().unwrap_or(0),
+                player
+                    .kill_streaks
+                    .iter()
+                    .map(|s| s.kills.len())
+                    .max()
+                    .unwrap_or(0),
             );
         }
     }

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!--
+  Harness for auditor_pane.js and audit_folders.js: the Demo Auditor's
+  Duplicates tab (#844). The Target Folder field, the Folders to check list,
+  the progress bar and results table copied from index.html, and the themed
+  confirm modal. The backend's run_demo_audit / delete_audit_files /
+  list_fixed_drives and the folder picker are window.__mockInvokeHandlers,
+  set by each test; `window.__queue` stands in for main.js's queue.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>auditor_pane.js test harness</title>
+</head>
+<body>
+  <input type="text" id="audit-target-folder-input" />
+  <button id="audit-browse-folder-btn">Browse</button>
+
+  <ul id="audit-folder-list"></ul>
+  <button id="audit-add-folder-btn" type="button">Add Folder…</button>
+  <label><input type="checkbox" id="audit-all-drives" /><span id="audit-all-drives-label">All drives</span></label>
+  <button id="run-audit-btn" disabled>Start Audit</button>
+  <button id="cancel-audit-btn" disabled>Cancel Scan</button>
+  <div id="audit-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+  <p><span id="audit-status-text">Status: Ready to audit</span><br><span id="audit-status-current"></span></p>
+
+  <button id="audit-prefer-folder-btn" disabled>Keep copies already in a folder…</button>
+  <button id="delete-selected-audits-btn" disabled>Move to Recycle Bin</button>
+  <button id="delete-permanent-audits-btn" hidden disabled>Delete Permanently…</button>
+  <table id="audit-results-table" class="analyzer-table audit-table">
+    <thead><tr><th><input type="checkbox" id="audit-select-all" /></th><th>Status</th><th>Size</th><th>File Path</th><th>Action</th></tr></thead>
+    <tbody id="audit-results-body"></tbody>
+  </table>
+  <div id="audit-list-footer"></div>
+
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { initAuditorPane } from '/src/auditor_pane.js';
+
+    window.__queue = [];
+    initThemedConfirm();
+    initAuditorPane({ getDemos: () => window.__queue });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

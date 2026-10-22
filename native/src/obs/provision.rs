@@ -85,7 +85,10 @@ pub fn ensure_dod_studio_setup(
     // provisioning over — see set_input_mute's own doc comment.
     let _ = client.set_input_mute("Desktop Audio", true);
     let _ = client.set_input_mute("Mic/Aux", true);
-    Ok(ProvisionResult { previous_profile, previous_scene })
+    Ok(ProvisionResult {
+        previous_profile,
+        previous_scene,
+    })
 }
 
 fn ensure_profile(client: &mut ObsClient) -> Result<Option<String>, ObsError> {
@@ -144,7 +147,10 @@ fn ensure_game_capture_source(
         "priority": 0,
         "anti_cheat_hook": false,
     });
-    let existed = client.input_names()?.iter().any(|i| i == GAME_CAPTURE_SOURCE);
+    let existed = client
+        .input_names()?
+        .iter()
+        .any(|i| i == GAME_CAPTURE_SOURCE);
     if existed {
         client.set_input_settings(GAME_CAPTURE_SOURCE, settings)?;
     } else {
@@ -170,7 +176,12 @@ fn ensure_game_audio_source(client: &mut ObsClient) -> Result<(), ObsError> {
     if existed {
         client.set_input_settings(GAME_AUDIO_SOURCE, settings)?;
     } else {
-        client.create_input(SCENE_NAME, GAME_AUDIO_SOURCE, "wasapi_process_output_capture", settings)?;
+        client.create_input(
+            SCENE_NAME,
+            GAME_AUDIO_SOURCE,
+            "wasapi_process_output_capture",
+            settings,
+        )?;
     }
     ensure_scene_item(client, GAME_AUDIO_SOURCE, existed)
 }

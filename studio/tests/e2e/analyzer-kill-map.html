@@ -1,0 +1,34 @@
+<!doctype html>
+<!--
+  Minimal harness for the Demo Analyzer's Kill Map tab (#448) -- see
+  tests/e2e/README.md for the general shape. Carries the report panel the tab
+  draws into, its sub-tab buttons, and the Configuration page's hl.exe field
+  the overview lookup takes the game path from. The Explorer sidebar is left
+  out: analyzer_pane.js guards every one of its elements. A test controls the
+  backend with `analyze_demo_full` / `load_map_overview` / `browse_directory`
+  handlers on window.__mockInvokeHandlers, then calls window.__openDemo(path).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>analyzer_pane.js Kill Map test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="hl-path-input" value="C:/games/Half-Life/hl.exe" />
+  <span id="analyzer-current-file"></span>
+  <div class="analyzer-subtabs">
+    <button class="analyzer-subtab-btn active" data-subtab="summary">Summary</button>
+    <button class="analyzer-subtab-btn" data-subtab="kill-map">Kill Map</button>
+  </div>
+  <div id="analyzer-tab-content" class="analyzer-tab-content" style="width: 900px;"></div>
+
+  <script type="module">
+    import { initAnalyzerPane, openAnalyzerDemo } from '/src/analyzer_pane.js';
+
+    initAnalyzerPane();
+    window.__openDemo = openAnalyzerDemo;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

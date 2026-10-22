@@ -1,4 +1,4 @@
-//! `dodstudio_objectives` — where DoD 1.3 draws the objective (territory flag)
+//! `ds_hud_objectives` — where DoD 1.3 draws the objective (territory flag)
 //! icons and the objective timer beside them.
 //!
 //! Both sit in the top-left corner, and both move down the screen while the DoD
@@ -57,12 +57,16 @@
 //! background sprite is drawn at a literal 0 and its four digits at literal
 //! 10, 24, 44 and 58, which is five sites rather than one value.
 //!
+//! `scale <S>` (#891) draws both S times bigger about their top-left corners;
+//! see `objicons/scale.rs`. The row stub records the row's corner for it.
+//!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
 
-use std::ffi::CStr;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicI32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
+
+mod scale;
 
 use crate::detour;
 use crate::engine;
@@ -73,7 +77,7 @@ use crate::scan;
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
 
 /// The name used in usage and error text, which is the first one registered.
-const COMMAND: &str = console_name!("objectives");
+const COMMAND: &str = console_name!("hud_objectives");
 
 // ── The icon row's detour ────────────────────────────────────────────────────
 
@@ -114,6 +118,10 @@ const ROW_STOLEN: &[u8] = &[0x8b, 0x47, 0x18, 0x8b, 0x4f, 0x14];
 /// `jmp`, not a `call`, so the stub sees the same `esp` the function does.
 const X_SLOT: u8 = 0x14;
 const Y_SLOT: u8 = 0x18;
+/// Whether the row's x came from `spec_pip`'s picture-in-picture layout
+/// (`+0x30067`/`+0x3007f` set it, `+0x301f7` reads it). Read by the stub for
+/// `scale`, which keeps that x where the game put it.
+const PIP_SLOT: u8 = 0x24;
 
 // ── The timer's detour ───────────────────────────────────────────────────────
 
@@ -170,6 +178,12 @@ static Y_VALUE: AtomicI32 = AtomicI32::new(0);
 static TIMER_ACTIVE: AtomicU8 = AtomicU8::new(0);
 static TIMER_VALUE: AtomicI32 = AtomicI32::new(0);
 
+/// The icon row's corner as this frame draws it (after any override) and its
+/// pip flag, stored by the row stub every frame for `scale`'s zoom anchor.
+static ROW_X_DRAWN: AtomicI32 = AtomicI32::new(0);
+static ROW_Y_DRAWN: AtomicI32 = AtomicI32::new(0);
+static ROW_PIP: AtomicI32 = AtomicI32::new(0);
+
 /// Where each stub jumps back to: the instruction after its stolen bytes.
 static ROW_RESUME: AtomicUsize = AtomicUsize::new(0);
 static TIMER_RESUME: AtomicUsize = AtomicUsize::new(0);
@@ -184,6 +198,15 @@ static TIMER_DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
 static WANTED_X: AtomicI32 = AtomicI32::new(UNSET);
 static WANTED_Y: AtomicI32 = AtomicI32::new(UNSET);
 static WANTED_TIMER: AtomicI32 = AtomicI32::new(UNSET);
+
+/// Where `spectator_hud` puts the icon row and the timer while nothing has
+/// been typed, or [`UNSET`] while it has no opinion (not spectating). The
+/// row's x has none: only the y collides with the spectator bar.
+static AUTO_Y: AtomicI32 = AtomicI32::new(UNSET);
+static AUTO_TIMER: AtomicI32 = AtomicI32::new(UNSET);
+/// Set once the automatic layout has failed to install a detour, so the
+/// failure is logged once rather than every time the layout changes.
+static AUTO_FAILED: AtomicBool = AtomicBool::new(false);
 
 // ── Stubs ────────────────────────────────────────────────────────────────────
 
@@ -224,6 +247,25 @@ fn resume_jump(resume: usize) -> Vec<u8> {
     code
 }
 
+/// Where the row stub records the row's corner and pip flag: three dword
+/// addresses.
+#[derive(Clone, Copy)]
+struct RowCapture {
+    x: usize,
+    y: usize,
+    pip: usize,
+}
+
+impl RowCapture {
+    fn ours() -> Self {
+        RowCapture {
+            x: ROW_X_DRAWN.as_ptr() as usize,
+            y: ROW_Y_DRAWN.as_ptr() as usize,
+            pip: ROW_PIP.as_ptr() as usize,
+        }
+    }
+}
+
 /// The icon row's stub, hand-assembled.
 ///
 /// ```asm
@@ -237,6 +279,12 @@ fn resume_jump(resume: usize) -> Vec<u8> {
 /// mov eax, [Y_VALUE]
 /// mov dword ptr [esp + 0x18], eax     ; y = ours
 /// .game:
+/// mov eax, [esp + 0x14]               ; record the corner the row is drawn
+/// mov [ROW_X_DRAWN], eax              ;   from, and the pip flag, for scale
+/// mov eax, [esp + 0x18]
+/// mov [ROW_Y_DRAWN], eax
+/// mov eax, [esp + 0x24]
+/// mov [ROW_PIP], eax
 /// mov eax, [edi + 0x18]               ; the stolen instructions
 /// mov ecx, [edi + 0x14]
 /// jmp dword ptr [ROW_RESUME]
@@ -245,10 +293,27 @@ fn resume_jump(resume: usize) -> Vec<u8> {
 /// Hand-written rather than copied, because copying the span would mean
 /// relocating any relative branch inside it. The two overrides are independent
 /// flags rather than one, so `offset` alone leaves the game's x alone and
-/// `xoffset` alone leaves the game's y alone.
-fn row_stub(x_active: usize, x_value: usize, y_active: usize, y_value: usize, resume: usize) -> Vec<u8> {
+/// `xoffset` alone leaves the game's y alone. The records only read the stack
+/// and write our statics; `eax` is loaded again by the stolen bytes.
+fn row_stub(
+    x_active: usize,
+    x_value: usize,
+    y_active: usize,
+    y_value: usize,
+    capture: RowCapture,
+    resume: usize,
+) -> Vec<u8> {
     let mut code = substitute_stack_slot(x_active, x_value, X_SLOT);
     code.extend_from_slice(&substitute_stack_slot(y_active, y_value, Y_SLOT));
+    for (slot, into) in [
+        (X_SLOT, capture.x),
+        (Y_SLOT, capture.y),
+        (PIP_SLOT, capture.pip),
+    ] {
+        code.extend_from_slice(&[0x8b, 0x44, 0x24, slot]); // mov eax, [esp+slot]
+        code.push(0xa3); // mov [abs32], eax
+        code.extend_from_slice(&(into as u32).to_le_bytes());
+    }
     code.extend_from_slice(ROW_STOLEN);
     code.extend_from_slice(&resume_jump(resume));
     code
@@ -316,8 +381,15 @@ const TIMER_SITE: Site = Site {
 /// lands where it did, so a build that moved the convergence point fails here
 /// rather than having a jump written over the middle of something else. It also
 /// catches someone else's detour, since an `E9` is not what we expect to find.
-fn install_once(site: &Site, base: usize, build_stub: impl FnOnce(usize) -> Vec<u8>) -> Result<(), String> {
-    let mut slot = site.installed.lock().map_err(|_| "the detour lock is poisoned".to_string())?;
+fn install_once(
+    site: &Site,
+    base: usize,
+    build_stub: impl FnOnce(usize) -> Vec<u8>,
+) -> Result<(), String> {
+    let mut slot = site
+        .installed
+        .lock()
+        .map_err(|_| "the detour lock is poisoned".to_string())?;
     if slot.is_some() {
         return Ok(());
     }
@@ -370,6 +442,15 @@ impl Setting {
         }
     }
 
+    /// The automatic layout's value for this setting, if it has one.
+    fn auto(self) -> Option<&'static AtomicI32> {
+        match self {
+            Setting::IconX => None,
+            Setting::IconY => Some(&AUTO_Y),
+            Setting::TimerY => Some(&AUTO_TIMER),
+        }
+    }
+
     /// The detour that has to be in place before this setting does anything.
     fn ensure_detour(self, base: usize) -> Result<(), String> {
         match self {
@@ -379,11 +460,16 @@ impl Setting {
                     X_VALUE.as_ptr() as usize,
                     Y_ACTIVE.as_ptr() as usize,
                     Y_VALUE.as_ptr() as usize,
+                    RowCapture::ours(),
                     resume,
                 )
             }),
             Setting::TimerY => install_once(&TIMER_SITE, base, |resume| {
-                timer_stub(TIMER_ACTIVE.as_ptr() as usize, TIMER_VALUE.as_ptr() as usize, resume)
+                timer_stub(
+                    TIMER_ACTIVE.as_ptr() as usize,
+                    TIMER_VALUE.as_ptr() as usize,
+                    resume,
+                )
             }),
         }
     }
@@ -398,22 +484,74 @@ fn apply(setting: Setting, value: i32) -> Result<(), String> {
         return Err(format!("expected {MIN_COORD}..={MAX_COORD}, got {value}"));
     }
     setting.ensure_detour(base)?;
-    let (active, current, wanted) = setting.state();
-    current.store(value, Ordering::Release);
-    active.store(1, Ordering::Release);
+    let (_, _, wanted) = setting.state();
     wanted.store(value, Ordering::Release);
-    Ok(())
+    refresh(setting)
 }
 
-/// Hands one coordinate back to the game.
+/// Hands one coordinate back: to the automatic layout while it has a value,
+/// otherwise to the game.
 ///
 /// Nothing is unpatched: the detour stays and simply stops substituting, which
 /// is strictly safer than restoring bytes under a thread that might be
 /// executing them.
 fn clear(setting: Setting) {
     let (active, _, wanted) = setting.state();
-    active.store(0, Ordering::Release);
     wanted.store(UNSET, Ordering::Release);
+    if refresh(setting).is_err() {
+        active.store(0, Ordering::Release);
+    }
+}
+
+/// The value one setting should have now: what was typed, else the automatic
+/// layout's, else [`UNSET`] (the game's own).
+fn effective(setting: Setting) -> i32 {
+    let (_, _, wanted) = setting.state();
+    match wanted.load(Ordering::Acquire) {
+        UNSET => setting
+            .auto()
+            .map_or(UNSET, |auto| auto.load(Ordering::Acquire)),
+        typed => typed,
+    }
+}
+
+/// Points the stub at [`effective`]'s value, installing its detour if needed.
+fn refresh(setting: Setting) -> Result<(), String> {
+    let (active, current, _) = setting.state();
+    let value = effective(setting);
+    if value == UNSET {
+        active.store(0, Ordering::Release);
+        return Ok(());
+    }
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    setting.ensure_detour(base)?;
+    current.store(value, Ordering::Release);
+    active.store(1, Ordering::Release);
+    Ok(())
+}
+
+/// Sets the automatic layout's icon-row and timer y (`None`: no opinion, the
+/// game's own). A value typed with this command still wins over it. Called by
+/// `spectator_hud` every frame; does nothing unless a value changed.
+pub fn set_auto(icon_y: Option<i32>, timer_y: Option<i32>) {
+    for (setting, value) in [(Setting::IconY, icon_y), (Setting::TimerY, timer_y)] {
+        let Some(auto) = setting.auto() else { continue };
+        let value = value.unwrap_or(UNSET);
+        if auto.swap(value, Ordering::AcqRel) == value {
+            continue;
+        }
+        if let Err(why) = refresh(setting)
+            && !AUTO_FAILED.swap(true, Ordering::Relaxed)
+        {
+            unsafe {
+                crate::debug::report(&format!(
+                    "objicons: the spectator layout could not move the objectives -- {why}"
+                ))
+            };
+        }
+    }
 }
 
 // ── Console surface ──────────────────────────────────────────────────────────
@@ -431,10 +569,15 @@ fn usage() -> String {
          \x20 {COMMAND} offset <y>         y the objective icons are drawn at\n\
          \x20 {COMMAND} xoffset <x>        x the icon row starts at\n\
          \x20 {COMMAND} timer <y>          y the objective timer beside them is drawn at\n\
-         \x20 {COMMAND} <any> default      hand that one back to the game\n\
+         \x20 {COMMAND} scale <1..8>       draw the icons and the timer that many times bigger\n\
+         \x20 {COMMAND} <any> default      hand that one back to the default layout\n\
          \x20 All are absolute screen positions, and mean the same thing in a POV\n\
          \x20 demo and while spectating -- which the game's own values do not. The\n\
-         \x20 timer has no x: the game draws it at a fixed one.\n"
+         \x20 timer has no x: the game draws it at a fixed one. While spectating,\n\
+         \x20 the default layout puts the icons and timer just below the spectator\n\
+         \x20 bar, or at the top as in a POV demo while the bar is hidden. A scale\n\
+         \x20 grows each from its top-left corner, so offset, xoffset and timer\n\
+         \x20 still say where that corner goes.\n"
     )
 }
 
@@ -442,29 +585,15 @@ fn status() -> String {
     let mut text = format!("{COMMAND}:");
     for (_, setting, label) in SUBCOMMANDS {
         let (_, _, wanted) = setting.state();
-        let value = match wanted.load(Ordering::Acquire) {
-            UNSET => "the game's".to_string(),
-            value => value.to_string(),
+        let value = match (wanted.load(Ordering::Acquire), effective(*setting)) {
+            (UNSET, UNSET) => "the game's".to_string(),
+            (UNSET, auto) => format!("{auto} (spectator layout)"),
+            (typed, _) => typed.to_string(),
         };
         text.push_str(&format!(" {label} = {value},"));
     }
-    text.pop();
-    text.push('\n');
+    text.push_str(&format!(" {}\n", scale::describe()));
     text
-}
-
-fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else { return Vec::new() };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
-        })
-        .collect()
 }
 
 /// Runs one subcommand, returning what to print.
@@ -474,6 +603,12 @@ fn dispatch(argv: &[String]) -> String {
         return format!("{}{}", status(), usage());
     };
     let sub = sub.to_ascii_lowercase();
+    if sub == scale::SUBCOMMAND {
+        return match scale::parse_args(&argv[2..]).and_then(scale::apply) {
+            Ok(reply) => format!("{COMMAND}: {reply}\n"),
+            Err(why) => format!("{COMMAND} {sub}: {why}\n"),
+        };
+    }
 
     let Some(&(_, setting, label)) = SUBCOMMANDS.iter().find(|(name, _, _)| *name == sub) else {
         return format!("{COMMAND}: no subcommand {sub:?}\n{}", usage());
@@ -483,7 +618,7 @@ fn dispatch(argv: &[String]) -> String {
     };
     if value.eq_ignore_ascii_case("default") {
         clear(setting);
-        return format!("{COMMAND}: {label} back to whatever the game computes\n");
+        return format!("{COMMAND}: {label} back to the default layout\n");
     }
     match value.parse::<i32>() {
         Ok(n) => match apply(setting, n) {
@@ -495,7 +630,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe { crate::debug::report(&format!("objicons: {} -> {}", argv.join(" "), reply.trim())) };
@@ -504,6 +639,12 @@ pub unsafe extern "C" fn command() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TEST_CAPTURE: RowCapture = RowCapture {
+        x: 0x6666_6666,
+        y: 0x7777_7777,
+        pip: 0x8888_8888,
+    };
 
     /// Every `je` in a stub, as `(index of the 0x74, index it lands on)`.
     ///
@@ -520,7 +661,14 @@ mod tests {
 
     #[test]
     fn the_row_stub_assembles_to_what_the_comment_claims() {
-        let code = row_stub(0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444, 0x5555_5555);
+        let code = row_stub(
+            0x1111_1111,
+            0x2222_2222,
+            0x3333_3333,
+            0x4444_4444,
+            TEST_CAPTURE,
+            0x5555_5555,
+        );
         #[rustfmt::skip]
         assert_eq!(
             code,
@@ -533,6 +681,12 @@ mod tests {
                 0x74, 0x09,                               // je  over the y assignment
                 0xa1, 0x44, 0x44, 0x44, 0x44,             // mov eax, [Y_VALUE]
                 0x89, 0x44, 0x24, 0x18,                   // mov [esp+0x18], eax
+                0x8b, 0x44, 0x24, 0x14,                   // mov eax, [esp+0x14]
+                0xa3, 0x66, 0x66, 0x66, 0x66,             // mov [ROW_X_DRAWN], eax
+                0x8b, 0x44, 0x24, 0x18,                   // mov eax, [esp+0x18]
+                0xa3, 0x77, 0x77, 0x77, 0x77,             // mov [ROW_Y_DRAWN], eax
+                0x8b, 0x44, 0x24, 0x24,                   // mov eax, [esp+0x24]
+                0xa3, 0x88, 0x88, 0x88, 0x88,             // mov [ROW_PIP], eax
                 0x8b, 0x47, 0x18, 0x8b, 0x4f, 0x14,       // the stolen instructions
                 0xff, 0x25, 0x55, 0x55, 0x55, 0x55,       // jmp dword [ROW_RESUME]
             ]
@@ -560,17 +714,33 @@ mod tests {
         // Hand-assembled, so the one thing a typo would silently break is a
         // `je` displacement: too small lands mid-instruction, too large skips
         // an instruction the game needs. Derive both from the bytes themselves.
-        let row = row_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0xdddd_dddd, 0xeeee_eeee);
+        let row = row_stub(
+            0xaaaa_aaaa,
+            0xbbbb_bbbb,
+            0xcccc_cccc,
+            0xdddd_dddd,
+            TEST_CAPTURE,
+            0xeeee_eeee,
+        );
         let row_guards = guards(&row);
         assert_eq!(row_guards.len(), 2, "one guarded assignment per axis");
-        // The first lands on the second guard; the second on the stolen bytes.
+        // The first lands on the second guard; the second on the records,
+        // which run on every frame, then the stolen bytes.
         assert_eq!(row_guards[0].1, row_guards[1].0 - 7);
-        assert_eq!(&row[row_guards[1].1..row_guards[1].1 + ROW_STOLEN.len()], ROW_STOLEN);
+        assert_eq!(
+            &row[row_guards[1].1..row_guards[1].1 + 4],
+            &[0x8b, 0x44, 0x24, X_SLOT]
+        );
+        let stolen_at = row_guards[1].1 + 3 * 9;
+        assert_eq!(&row[stolen_at..stolen_at + ROW_STOLEN.len()], ROW_STOLEN);
 
         let timer = timer_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc);
         let timer_guards = guards(&timer);
         assert_eq!(timer_guards.len(), 1);
-        assert_eq!(&timer[timer_guards[0].1..timer_guards[0].1 + TIMER_STOLEN.len()], TIMER_STOLEN);
+        assert_eq!(
+            &timer[timer_guards[0].1..timer_guards[0].1 + TIMER_STOLEN.len()],
+            TIMER_STOLEN
+        );
     }
 
     #[test]
@@ -578,19 +748,36 @@ mod tests {
         // Writing the x into the y's slot would place the row correctly along
         // one axis and nowhere sensible along the other, and every other test
         // here would still pass.
-        let code = row_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0xdddd_dddd, 0xeeee_eeee);
+        let code = row_stub(
+            0xaaaa_aaaa,
+            0xbbbb_bbbb,
+            0xcccc_cccc,
+            0xdddd_dddd,
+            TEST_CAPTURE,
+            0xeeee_eeee,
+        );
         for ((_, landing), slot) in guards(&code).iter().zip([X_SLOT, Y_SLOT]) {
             // The guarded block is `mov eax,[abs32]` + `mov [esp+slot],eax`.
             let assign = landing - 9;
-            assert_eq!(code[assign], 0xa1, "the guarded block must start with the load");
-            assert_eq!(code[assign + 8], slot, "the assignment writes the wrong slot");
+            assert_eq!(
+                code[assign], 0xa1,
+                "the guarded block must start with the load"
+            );
+            assert_eq!(
+                code[assign + 8],
+                slot,
+                "the assignment writes the wrong slot"
+            );
         }
     }
 
     #[test]
     fn each_stolen_span_is_long_enough_to_hold_the_jump_that_replaces_it() {
         for stolen in [ROW_STOLEN, TIMER_STOLEN] {
-            assert!(stolen.len() >= 5, "a near jump needs five bytes: {stolen:02x?}");
+            assert!(
+                stolen.len() >= 5,
+                "a near jump needs five bytes: {stolen:02x?}"
+            );
         }
     }
 
@@ -620,14 +807,18 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), SUBCOMMANDS.len());
-        assert_eq!(SUBCOMMANDS.len(), settings.len(), "every setting needs a way to reach it");
+        assert_eq!(
+            SUBCOMMANDS.len(),
+            settings.len(),
+            "every setting needs a way to reach it"
+        );
     }
 
     #[test]
     fn the_status_line_distinguishes_a_set_coordinate_from_the_game_s() {
         // The one test in this module touching WANTED_X/Y/TIMER directly --
         // cargo test's default parallel runner would race two tests that both
-        // did this, the same shared-static hazard msglog.rs/hide_sprite.rs
+        // did this, the same shared-static hazard msglog.rs/hide_asset.rs
         // document for their own equivalent statics. Restoring all three to
         // UNSET (not just the one this test sets to a real value) keeps that
         // true if a second such test is ever added here.
@@ -647,7 +838,10 @@ mod tests {
     fn every_subcommand_is_in_the_usage_text() {
         let text = usage();
         for (name, _, _) in SUBCOMMANDS {
-            assert!(text.contains(name), "{name} missing from the usage text:\n{text}");
+            assert!(
+                text.contains(name),
+                "{name} missing from the usage text:\n{text}"
+            );
         }
     }
 
@@ -655,6 +849,9 @@ mod tests {
     fn an_unknown_subcommand_is_named_rather_than_guessed_at() {
         let reply = dispatch(&[COMMAND.to_string(), "y".to_string(), "10".to_string()]);
         assert!(reply.contains("no subcommand"), "{reply}");
-        assert!(reply.contains("xoffset"), "the reply should show what is available");
+        assert!(
+            reply.contains("xoffset"),
+            "the reply should show what is available"
+        );
     }
 }

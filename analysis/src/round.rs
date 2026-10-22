@@ -52,29 +52,33 @@ pub fn use_rounds_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 RoundState::AlliesWin | RoundState::AxisWin | RoundState::Draw => {
                     if let Some(last_round) = state.rounds.last()
                         && matches!(last_round, Round::Active { .. })
-                            && let Some(Round::Active {
-                                start_time,
-                                allies_kills,
-                                axis_kills,
-                            }) = state.rounds.pop()
-                            {
-                                let winner_stats = match round_state {
-                                    RoundState::AlliesWin => {
-                                        let team = if state.allies_are_british { Team::British } else { Team::Allies };
-                                        Some((team, allies_kills))
-                                    }
-                                    RoundState::AxisWin => Some((Team::Axis, axis_kills)),
-                                    _ => None,
+                        && let Some(Round::Active {
+                            start_time,
+                            allies_kills,
+                            axis_kills,
+                        }) = state.rounds.pop()
+                    {
+                        let winner_stats = match round_state {
+                            RoundState::AlliesWin => {
+                                let team = if state.allies_are_british {
+                                    Team::British
+                                } else {
+                                    Team::Allies
                                 };
-
-                                let completed_round = Round::Completed {
-                                    start_time,
-                                    end_time: state.current_time.clone(),
-                                    winner_stats,
-                                };
-
-                                state.rounds.push(completed_round);
+                                Some((team, allies_kills))
                             }
+                            RoundState::AxisWin => Some((Team::Axis, axis_kills)),
+                            _ => None,
+                        };
+
+                        let completed_round = Round::Completed {
+                            start_time,
+                            end_time: state.current_time.clone(),
+                            winner_stats,
+                        };
+
+                        state.rounds.push(completed_round);
+                    }
                 }
 
                 _ => {}

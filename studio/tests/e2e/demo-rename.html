@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for demo_rename_ui.js (#469) — see tests/e2e/README.md for
+  the general shape. The Rename Demos panel copied from index.html, the
+  Demo Auditor's Target Folder field it reads, and the themed confirm modal.
+  The backend's demo_rename_* commands are window.__mockInvokeHandlers, set
+  by each test; `window.__projectTeams` stands in for main.js's Teams list
+  and `window.__changes` counts onChange (save) calls.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>demo_rename_ui.js test harness</title>
+</head>
+<body>
+  <input type="text" id="audit-target-folder-input" value="C:\demos" />
+
+  <div id="rename-pane">
+    <input type="text" id="rename-pov-template" />
+    <button id="rename-pov-reset">Default</button>
+    <div id="rename-pov-errors" style="display: none;"></div>
+    <input type="text" id="rename-hltv-template" />
+    <button id="rename-hltv-reset">Default</button>
+    <div id="rename-hltv-errors" style="display: none;"></div>
+    <div id="rename-chips"></div>
+    <input type="checkbox" id="rename-lowercase" />
+    <button id="rename-list-btn">List Demos</button>
+    <button id="rename-cancel-btn" disabled>Cancel</button>
+    <button id="rename-apply-btn" disabled>Rename</button>
+    <button id="rename-undo-btn" disabled>Undo Last Rename</button>
+    <div id="rename-progress" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+    <span id="rename-status"></span>
+    <table id="rename-table">
+      <thead>
+        <tr><th><input type="checkbox" id="rename-select-all" checked /></th><th>Current</th><th>New</th><th>Type</th></tr>
+      </thead>
+      <tbody id="rename-body"></tbody>
+    </table>
+  </div>
+
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { initDemoRenamePane } from '/src/demo_rename_ui.js';
+
+    window.__projectTeams = { names: {}, merged: {} };
+    window.__changes = 0;
+    initThemedConfirm();
+    initDemoRenamePane({
+      projectTeams: () => window.__projectTeams,
+      onChange: () => { window.__changes += 1; },
+    });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

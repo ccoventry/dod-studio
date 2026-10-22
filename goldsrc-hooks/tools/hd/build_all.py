@@ -1,0 +1,250 @@
+"""Build every HD asset type in the chosen styles into
+<game>/dod_addon/dodstudio_hd/<type>/<style> (dod/ for an install built before #415).
+
+Resumable: each step skips files that already exist, so re-running after an
+interruption (or after adding maps and models) only builds what's missing.
+Progress goes to dodstudio_hd/build_all.log and the console.
+
+  world    every map in dod/maps (embedded and wad textures)
+  models   every .mdl under dod/models, the Half-Life models DoD falls back
+           to (valve_models.txt), and the models folders of --also installs
+           and --extra-models folders
+  sprites  every world sprite of the game and of --also installs
+  decals   every decal in dod/decals.wad and valve/decals.wad
+  detail   every gfx/detail/*.tga
+  sky      every sky in dod/gfx/env, plus the Half-Life ones maps name
+
+Blend styles (`blend`, and any in my_styles.txt) aren't upscaled at all:
+they're two built styles mixed file by file, so they're built after every
+other style in the run, and need their two source styles built already.
+
+Plain styles (`plain`, and my_styles.txt's `plain <n>` ones) use only the
+CPU, so when the run also has an AI style they're built alongside it, while
+the upscaler has the GPU (#383): the same files, sooner.
+
+usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
+                           [--types world,models,...] [style ...]
+  --game          the Half-Life folder DoD Studio launches (else HD_GAME, else
+                  the only Steam install with a dod/ folder)
+  --also          another Half-Life install whose models and sprites differ
+                  (e.g. a stock one next to a movie one): its versions get
+                  HD copies too, ready if you ever copy them over
+  --extra-models  any other folder of .mdl files to include
+  --types         which asset types (default: all, quickest first)
+  style ...       which styles (default: the 7 built-in ones and any in
+                  my_styles.txt)
+"""
+import argparse, atexit, datetime, glob, os, subprocess, sys, threading, time
+from PIL import Image
+
+import hdcommon as C
+import styles as S
+
+STYLE_ORDER = ["ultrasharp", "plain", "x4plus", "blend", "generalv3", "remacri", "siax"]
+TYPES = ["sky", "decals", "sprites", "models", "detail", "world"]  # quickest first
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--game")
+    ap.add_argument("--also", action="append", default=[])
+    ap.add_argument("--extra-models", action="append", default=[])
+    ap.add_argument("--types", default=",".join(TYPES))
+    ap.add_argument("--cap", type=int, choices=C.CAPS, help="largest side to build (default 1024; see README)")
+    ap.add_argument("styles", nargs="*")
+    args = ap.parse_args()
+
+    if args.game:
+        os.environ["HD_GAME"] = args.game
+    if args.cap:
+        os.environ["HD_CAP"] = str(args.cap)
+        C.CAP = args.cap
+    if args.also:
+        os.environ["HD_ALSO"] = os.pathsep.join(args.also)
+    game = C.game_root()
+    hd = C.hd_dir()
+    os.makedirs(hd, exist_ok=True)
+    log_path = os.path.join(hd, "build_all.log")
+
+    log_lock = threading.Lock()
+
+    def log(msg):
+        line = f"[{datetime.datetime.now():%H:%M:%S}] {msg}"
+        # Two steps can run at once (see run_steps): one line at a time.
+        with log_lock:
+            print(line, flush=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+
+    # A list still in this folder from before #385: said once, in the log.
+    for name, env in ((C.MAP_LIST, "HD_MAPS"), (C.MY_STYLES, "HD_MY_STYLES")):
+        C.old_place_noted.add(name)
+        path = C.user_file(name, env)
+        if os.path.dirname(os.path.abspath(path)) == C.HERE and not os.environ.get(env):
+            log(f"=== note: {name} is still in {C.HERE}; move it to {hd}, where it belongs now")
+
+    patterns = C.map_patterns()
+    if patterns is not None and ({"world", "sky"} & set(args.types.split(","))):
+        names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, C.game_folder(), "maps", "*.bsp")))
+        chosen, unused = C.select_maps(names, patterns)
+        log(f"=== {C.map_list()}: map textures and skies for {len(chosen)} of {len(names)} map(s)"
+            + (f"; matching nothing: {', '.join(unused)}" if unused else ""))
+
+    styles = args.styles or STYLE_ORDER + [s for s in S.STYLES if s not in STYLE_ORDER]
+    for s in styles:
+        if s not in S.DEFS:
+            sys.exit(f"unknown style {s!r}; one of {S.STYLES}")
+    # Blends last: they mix files the other styles make.
+    styles = [s for s in styles if S.DEFS[s][0] != "blend"] + [s for s in styles if S.DEFS[s][0] == "blend"]
+    types = [t for t in args.types.split(",") if t]
+    for t in types:
+        if t not in TYPES:
+            sys.exit(f"unknown type {t!r}; one of {TYPES}")
+
+    def step(style, kind, alongside=False):
+        """Builds one style's one type with its script. Returns the script's
+        exit code. `alongside`: another step is running at the same time."""
+        out = os.path.join(hd, kind, style)
+        os.makedirs(out, exist_ok=True)
+        C.clear_partial(out)
+        env = dict(os.environ, HD_STYLE=style)
+        if alongside:
+            # Both steps hash the same textures; one writing the hash cache
+            # is enough, and two appending at once could interleave.
+            env[C.FNV_CACHE_READONLY] = "1"
+        if kind == "world":
+            cmd = ["world_hd.py", out, "--all"]
+        elif kind == "models":
+            cmd = ["models_hd.py", out, os.path.join(game, C.game_folder(), "models"),
+                   os.path.join(C.HERE, "valve_models.txt")]
+            cmd += [os.path.join(a, C.game_folder(), "models") for a in args.also] + args.extra_models
+        elif kind == "sprites":
+            cmd = ["sprites_hd.py", out]
+        elif kind == "decals":
+            cmd = ["decals_hd.py", out]
+        elif kind == "detail":
+            cmd = ["detail_hd.py", out]
+        else:
+            cmd = ["sky_hd.py", out, "--all"]
+        before = len(os.listdir(out))
+        t = time.time()
+        # Read as it comes, so a long step's `@@progress` lines reach the
+        # console (and DoD Studio's progress line) while it runs. They're
+        # not written to build_all.log: the step's own line has the totals.
+        p = subprocess.Popen([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env, text=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        running.add(p)
+        stderr = []
+        drain = threading.Thread(target=lambda: stderr.extend(p.stderr), daemon=True)
+        drain.start()
+        stdout = []
+        for line in p.stdout:
+            if line.startswith("@@progress "):
+                print(f"[{datetime.datetime.now():%H:%M:%S}] {style:10s} {kind:7s} "
+                      f"{line[len('@@progress '):].strip()}", flush=True)
+            else:
+                stdout.append(line)
+        returncode = p.wait()
+        drain.join()
+        running.discard(p)
+        stdout, stderr = "".join(stdout), "".join(stderr)
+        tail = [l for l in stdout.splitlines() if "not found in any wad" not in l][-3:]
+        log(f"{style:10s} {kind:7s} exit {returncode}, {len(os.listdir(out)) - before} new, "
+            f"{len(os.listdir(out))} total, {time.time() - t:.0f}s :: {' | '.join(tail)}")
+        if returncode != 0:
+            log(f"  {(stderr or stdout)[-1500:]}")
+        return returncode
+
+    def blend(style, kind):
+        """<style>/<file> = <a>/<file> and <b>/<file> mixed, pct% of a."""
+        _, a, b, pct = S.DEFS[style]
+        a_dir, b_dir = os.path.join(hd, kind, a), os.path.join(hd, kind, b)
+        if not (os.path.isdir(a_dir) and os.path.isdir(b_dir)):
+            log(f"{style:10s} {kind:7s} skipped: build {a} and {b} first")
+            return
+        out = os.path.join(hd, kind, style)
+        os.makedirs(out, exist_ok=True)
+        C.clear_partial(out)
+        t, made = time.time(), 0
+        for name in sorted(os.listdir(a_dir)):
+            dst, src_b = os.path.join(out, name), os.path.join(b_dir, name)
+            if os.path.exists(dst) or not os.path.exists(src_b):
+                continue
+            ia, ib = Image.open(os.path.join(a_dir, name)), Image.open(src_b)
+            if ia.size != ib.size:
+                ib = ib.resize(ia.size, Image.LANCZOS)
+            weight = 1 - pct / 100  # Image.blend's weight is the second image's
+            mixed = Image.blend(ia.convert("RGB"), ib.convert("RGB"), weight)
+            if ia.mode == "RGBA":
+                # Masked textures have the same alpha in both; index-alpha
+                # sprites' alpha is the upscaled image itself, so it's mixed too.
+                alpha = ia.getchannel("A")
+                if ib.mode == "RGBA":
+                    alpha = Image.blend(alpha, ib.getchannel("A"), weight)
+                mixed = mixed.convert("RGBA")
+                mixed.putalpha(alpha)
+            C.save_output(mixed, dst)
+            made += 1
+        log(f"{style:10s} {kind:7s} {made} new, {len(os.listdir(out))} total, {time.time() - t:.0f}s")
+
+    # Scripts still running if this exits early (a failed step), so they
+    # don't carry on without it.
+    running = set()
+    failed = threading.Event()
+    atexit.register(lambda: [p.kill() for p in list(running)])
+
+    def run_steps(numbered, alongside=False):
+        """Runs `numbered` [(number, style, kind)] in order; the first
+        failing script's exit code, or 0."""
+        for number, style, kind in numbered:
+            if failed.is_set():
+                return 0  # the other thread's step failed: stop here too
+            # For DoD Studio's progress line; not written to build_all.log.
+            print(f"@@step {number} {len(steps)} {style} {kind}", flush=True)
+            if S.DEFS[style][0] == "blend":
+                blend(style, kind)
+            else:
+                code = step(style, kind, alongside)
+                if code:
+                    failed.set()
+                    return code
+        return 0
+
+    keep_awake(log)
+    log(f"=== build_all: {game}; styles {styles}; types {types}")
+    steps = [(style, kind) for style in styles for kind in types]
+    numbered = [(n, style, kind) for n, (style, kind) in enumerate(steps, 1)]
+    kinds = {S.DEFS[style][0] for style in styles}
+    # Plain steps run on a second thread while the AI ones have the GPU;
+    # blends wait for both, since they mix what the others made.
+    side = [s for s in numbered if S.DEFS[s[1]][0] == "plain"] if {"ai", "plain"} <= kinds else []
+    main_steps = [s for s in numbered if s not in side and S.DEFS[s[1]][0] != "blend"]
+    blends = [s for s in numbered if S.DEFS[s[1]][0] == "blend"]
+    side_code = []
+    worker = threading.Thread(target=lambda: side_code.append(run_steps(side, alongside=True)), daemon=True)
+    if side:
+        log(f"=== {', '.join(sorted({s[1] for s in side}))} built alongside the AI styles")
+        worker.start()
+    code = run_steps(main_steps)
+    if side:
+        worker.join()
+    code = code or (side_code[0] if side_code else 0)
+    if code:
+        sys.exit(code)
+    run_steps(blends)
+    log("=== build_all done")
+
+
+def keep_awake(log):
+    """Ask Windows not to sleep while this runs (ends with the process;
+    power settings are untouched)."""
+    try:
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    except Exception as e:  # not fatal: at worst the machine sleeps and resumes later
+        log(f"keep-awake request failed: {e}")
+
+
+if __name__ == "__main__":
+    main()

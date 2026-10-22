@@ -13,7 +13,7 @@
 // just a silently-abandoned action. This makes that class of failure
 // visible three ways at once: a tagged console.error (on top of the
 // browser's own default uncaught-error logging, not replacing it), a line
-// in crash_log.md, and a capped toast so a rapid-fire bug (like a
+// in the activity log, and a capped toast so a rapid-fire bug (like a
 // recursion loop throwing repeatedly right up to the stack limit) doesn't
 // spam the screen.
 

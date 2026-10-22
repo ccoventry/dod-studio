@@ -45,12 +45,17 @@ fn collect(root: &Path, out: &mut Vec<PathBuf>) {
         out.push(root.to_path_buf());
         return;
     }
-    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             collect(&path, out);
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dem"))
+        {
             out.push(path);
         }
     }
@@ -75,7 +80,12 @@ fn main() {
             Ok(demo) => {
                 let bytes = demo.write_to_bytes();
                 ok += 1;
-                println!("{:016x} {:>10} {}", fnv1a(&bytes), bytes.len(), path.display());
+                println!(
+                    "{:016x} {:>10} {}",
+                    fnv1a(&bytes),
+                    bytes.len(),
+                    path.display()
+                );
             }
             Err(e) => {
                 failed += 1;

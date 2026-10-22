@@ -1,0 +1,305 @@
+// auditor_pane.js + audit_folders.js — Demo Auditor › Duplicates (#844).
+//
+// Pins the Folders to check list (the Target Folder to start, picked folders, All
+// drives), what Start Audit sends, the progress bar and step line while it
+// runs, the kept copy and the in-use copies left unticked, and the two
+// deletes: the Recycle Bin by default, permanent as its own choice.
+import { test, expect } from '@playwright/test';
+
+const GROUPS = [
+  {
+    size: 2 * 1024 * 1024,
+    header_hash: 0xabc,
+    files: [
+      { path: '\\\\?\\C:\\Half-Life\\dod\\match.dem', in_use: 'game_folder' },
+      { path: '\\\\?\\F:\\downloads\\match.dem', in_use: null },
+      { path: '\\\\?\\G:\\project\\match.dem', in_use: 'queue' },
+    ],
+  },
+  {
+    size: 1024 * 1024,
+    header_hash: 0xdef,
+    files: [
+      { path: '\\\\?\\D:\\a.dem', in_use: null },
+      { path: '\\\\?\\E:\\old\\a.dem', in_use: null },
+    ],
+  },
+];
+
+async function loadHarness(page, { picked = null, drives = ['C:\\', 'F:\\'] } = {}) {
+  await page.addInitScript(({ picked, drives, groups }) => {
+    window.__mockInvokeHandlers = window.__mockInvokeHandlers || {};
+    window.__mockInvokeHandlers['plugin:dialog|open'] = () => picked;
+    window.__mockInvokeHandlers.list_fixed_drives = () => drives;
+    window.__mockInvokeHandlers.run_demo_audit = () => new Promise((resolve) => {
+      window.__finishAudit = (outcome) => resolve(outcome ?? { groups, demos: 5, cancelled: false });
+    });
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({ deleted: copies.map((c) => c.path), failed: [] });
+  }, { picked, drives, groups: GROUPS });
+  await page.goto('/tests/e2e/duplicates.html');
+  await page.waitForFunction(() => window.__harnessReady === true);
+}
+
+const calls = (page, cmd) => page.evaluate((c) => window.__mockInvocations.filter((i) => i.cmd === c).map((i) => i.args), cmd);
+const confirm = (page) => page.click('#themed-confirm-ok-btn');
+
+async function runAudit(page) {
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate(() => window.__finishAudit());
+  await expect(page.locator('#audit-status-text')).toHaveText('Done: 5 demos checked, 2 with copies.');
+}
+
+test('the folder list holds the Target Folder and picked folders, once each', async ({ page }) => {
+  await loadHarness(page, { picked: ['F:\\Downloads', 'c:\\demos\\', 'G:\\'] });
+  await expect(page.locator('#run-audit-btn')).toBeDisabled();
+  await expect(page.locator('#audit-all-drives-label')).toHaveText('All drives (C:, F:)');
+
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#audit-add-folder-btn');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['C:\\Demos', 'F:\\Downloads', 'G:\\']);
+  // Every folder can be removed, the Target Folder's too.
+  await expect(page.locator('#audit-folder-list li button')).toHaveCount(3);
+  await expect(page.locator('#run-audit-btn')).toBeEnabled();
+
+  await page.locator('#audit-folder-list li', { hasText: 'G:\\' }).locator('button').click();
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['C:\\Demos', 'F:\\Downloads']);
+  const picker = await calls(page, 'plugin:dialog|open');
+  expect(picker[0].options.directory).toBe(true);
+  expect(picker[0].options.multiple).toBe(true);
+});
+
+test('the list follows the Target Folder until it is edited here', async ({ page }) => {
+  await loadHarness(page, { picked: ['F:\\Downloads'] });
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.fill('#audit-target-folder-input', 'D:\\Other');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['D:\\Other']);
+  await page.click('#audit-add-folder-btn');
+  // Edited: the other tabs' folder no longer changes this list.
+  await page.fill('#audit-target-folder-input', 'E:\\Elsewhere');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['D:\\Other', 'F:\\Downloads']);
+  // Emptied: it follows the Target Folder again.
+  await page.locator('#audit-folder-list li button').first().click();
+  await page.locator('#audit-folder-list li button').first().click();
+  await page.fill('#audit-target-folder-input', 'G:\\Again');
+  await expect(page.locator('#audit-folder-list .audit-folder-path')).toHaveText(['G:\\Again']);
+});
+
+test('All drives alone can start an audit and dims the list', async ({ page }) => {
+  await loadHarness(page);
+  await page.check('#audit-all-drives');
+  await expect(page.locator('#audit-folder-list')).toHaveClass(/dimmed/);
+  await expect(page.locator('#audit-add-folder-btn')).toBeDisabled();
+  await expect(page.locator('#run-audit-btn')).toBeEnabled();
+  await page.click('#run-audit-btn');
+  const [args] = await calls(page, 'run_demo_audit');
+  expect(args).toEqual({ paths: [], allDrives: true, queued: [] });
+});
+
+test('a running audit shows its step and a bar, and locks its controls', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => { window.__queue = [{ path: 'G:\\project\\match.dem' }, {}]; });
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+
+  const [args] = await calls(page, 'run_demo_audit');
+  expect(args).toEqual({ paths: ['C:\\Demos'], allDrives: false, queued: ['G:\\project\\match.dem'] });
+  await expect(page.locator('#run-audit-btn')).toBeDisabled();
+  await expect(page.locator('#cancel-audit-btn')).toBeEnabled();
+  await expect(page.locator('#audit-all-drives')).toBeDisabled();
+  // The harness has no CSS, so the empty bar has no size to be "visible".
+  await expect(page.locator('#audit-progress')).not.toHaveAttribute('hidden');
+
+  await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 12, total: 0, done: 0, current: '\\\\?\\C:\\Demos\\x' }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Looking for demos: 12 folders read');
+  await expect(page.locator('#audit-status-current')).toHaveText('C:\\Demos\\x');
+  await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 12, total: 4, done: 1, current: 'C:\\Demos\\a.dem' }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Comparing demos: 1 / 4');
+  await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+
+  await page.click('#cancel-audit-btn');
+  expect(await calls(page, 'cancel_audit')).toHaveLength(1);
+  await page.evaluate(() => window.__finishAudit({ groups: [], demos: 1, cancelled: true }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Cancelled. Nothing was listed.');
+  await expect(page.locator('#audit-results-body')).toContainText('cancelled before it finished');
+  await expect(page.locator('#audit-progress')).toHaveAttribute('hidden');
+  await expect(page.locator('#run-audit-btn')).toBeEnabled();
+});
+
+test('the kept copy comes first and copies in use start unticked', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.locator('.audit-file-path')).toHaveText([
+    'C:\\Half-Life\\dod\\match.dem', 'F:\\downloads\\match.dem', 'G:\\project\\match.dem',
+    'D:\\a.dem', 'E:\\old\\a.dem',
+  ]);
+  await expect(rows.locator('.audit-file-status')).toHaveText([
+    'Kept (in the game folder)', '↳ Copy', "↳ Copy, in this project's queue", 'Kept', '↳ Copy',
+  ]);
+  const boxes = rows.locator('input.audit-row-cb');
+  await expect(boxes.nth(0)).toBeDisabled();
+  await expect(boxes.nth(1)).toBeChecked();
+  await expect(boxes.nth(2)).not.toBeChecked();
+  await expect(boxes.nth(4)).toBeChecked();
+  await expect(page.locator('#delete-selected-audits-btn')).toHaveText('Move 2 to Recycle Bin');
+  await expect(page.locator('#delete-permanent-audits-btn')).toHaveText('Delete 2 Permanently…');
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 3 | Wasted Space: 5.0 MB');
+});
+
+test('another copy can be kept: rows stay put, the old pick becomes a ticked copy, Reset undoes it', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  const order = [
+    'C:\\Half-Life\\dod\\match.dem', 'F:\\downloads\\match.dem', 'G:\\project\\match.dem',
+    'D:\\a.dem', 'E:\\old\\a.dem',
+  ];
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(0);
+  // Keep E:\old\a.dem instead of D:\a.dem.
+  // A click, not check(): the list redraws at once, so check() can't see it stay ticked.
+  await rows.nth(4).locator('input[type=radio]').click();
+  await expect(rows.locator('.audit-file-path')).toHaveText(order);
+  await expect(rows.nth(4).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(4)).toHaveClass(/audit-kept/);
+  await expect(rows.nth(4).locator('input.audit-row-cb')).toBeDisabled();
+  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('↳ Copy');
+  await expect(rows.nth(3).locator('input.audit-row-cb')).toBeChecked();
+  // Only that group says its kept copy was changed.
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(1);
+  await expect(page.locator('.audit-keep-changed')).toContainText('Kept copy changed by you');
+
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  const [args] = await calls(page, 'delete_audit_files');
+  // The kept copy is never sent to be deleted, only as what each copy must match.
+  expect(args.copies).toEqual([
+    { path: '\\\\?\\F:\\downloads\\match.dem', keep: '\\\\?\\C:\\Half-Life\\dod\\match.dem' },
+    { path: '\\\\?\\D:\\a.dem', keep: '\\\\?\\E:\\old\\a.dem' },
+  ]);
+});
+
+test('Reset keeps the audit\'s pick again', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await rows.nth(4).locator('input[type=radio]').click();
+  await page.click('.audit-keep-reset-btn');
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(0);
+  await expect(rows.nth(3).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(4).locator('input.audit-row-cb')).toBeChecked();
+  await expect(page.locator('#delete-selected-audits-btn')).toHaveText('Move 2 to Recycle Bin');
+});
+
+test('Keep copies already in a folder picks the copy in that folder in every group', async ({ page }) => {
+  await loadHarness(page, { picked: 'E:\\old' });
+  await expect(page.locator('#audit-prefer-folder-btn')).toBeDisabled();
+  await runAudit(page);
+  await page.click('#audit-prefer-folder-btn');
+  await expect(page.locator('.toast').last()).toContainText('in 1 group (1 changed)');
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.nth(4).locator('.audit-file-path')).toHaveText('E:\\old\\a.dem');
+  await expect(rows.nth(4).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(page.locator('.audit-keep-changed')).toHaveCount(1);
+});
+
+test('Move to Recycle Bin is the default delete, and the list follows it', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await page.click('#delete-selected-audits-btn');
+  await expect(page.locator('#themed-confirm-message')).toContainText('Recycle Bin');
+  await confirm(page);
+
+  const [args] = await calls(page, 'delete_audit_files');
+  expect(args).toEqual({
+    copies: [
+      { path: '\\\\?\\F:\\downloads\\match.dem', keep: '\\\\?\\C:\\Half-Life\\dod\\match.dem' },
+      { path: '\\\\?\\E:\\old\\a.dem', keep: '\\\\?\\D:\\a.dem' },
+    ],
+    permanent: false,
+  });
+  await expect(page.locator('#audit-status-text')).toHaveText('Moved to the Recycle Bin: 2.');
+  // The D:/E: group has no copies left; the queue copy stays listed.
+  await expect(page.locator('#audit-results-body .audit-file-path')).toHaveText([
+    'C:\\Half-Life\\dod\\match.dem', 'G:\\project\\match.dem',
+  ]);
+  await expect(page.locator('#delete-selected-audits-btn')).toBeDisabled();
+});
+
+test('the delete line says copies are being checked before any is deleted', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.delete_audit_files = () => new Promise((resolve) => { window.__finishDelete = resolve; });
+  });
+  await runAudit(page);
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  await expect(page.locator('#audit-status-text')).toHaveText('Checking each copy matches the kept one byte for byte: 0 / 2');
+  await page.evaluate(() => window.__mockEmit('audit_delete_progress', { step: 'checking', done: 1, total: 2 }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Checking each copy matches the kept one byte for byte: 1 / 2');
+  await page.evaluate(() => window.__mockEmit('audit_delete_progress', { step: 'deleting', done: 1, total: 2 }));
+  await expect(page.locator('#audit-status-text')).toHaveText('Moving to the Recycle Bin: 1 / 2');
+  await page.evaluate(() => window.__finishDelete({ deleted: [], failed: [] }));
+});
+
+test('Delete Permanently is hidden for 0.2.0', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await expect(page.locator('#delete-permanent-audits-btn')).toBeHidden();
+});
+
+test('Delete Permanently, when offered, asks on its own and sends permanent', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await page.evaluate(() => document.querySelector('#delete-permanent-audits-btn').removeAttribute('hidden'));
+  await page.click('#delete-permanent-audits-btn');
+  await expect(page.locator('#themed-confirm-message')).toContainText("can't be put back");
+  await page.click('#themed-confirm-cancel-btn');
+  expect(await calls(page, 'delete_audit_files')).toHaveLength(0);
+
+  await page.click('#delete-permanent-audits-btn');
+  await confirm(page);
+  const [args] = await calls(page, 'delete_audit_files');
+  expect(args.permanent).toBe(true);
+  await expect(page.locator('#audit-status-text')).toHaveText('Deleted: 2.');
+});
+
+test('a copy the delete finds different is marked, unticked and counted out', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({
+      deleted: [copies[0].path],
+      failed: [{ path: copies[1].path, error: 'Not deleted: E:\\old\\a.dem is not an exact copy of D:\\a.dem', not_a_copy: true }],
+    });
+  });
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  const row = page.locator('#audit-results-body tr.audit-file-row', { hasText: 'E:\\old\\a.dem' });
+  await expect(row.locator('.audit-file-status')).toHaveText('≠ Not an exact copy');
+  await expect(row.locator('input.audit-row-cb')).toBeDisabled();
+  await expect(row.locator('input.audit-row-cb')).not.toBeChecked();
+  // Select all skips it; the footer no longer counts it as wasted space.
+  await page.check('#audit-select-all');
+  await expect(row.locator('input.audit-row-cb')).not.toBeChecked();
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 1 | Wasted Space: 2.0 MB');
+  // Keeping another copy clears the mark: it was measured against the old pick.
+  await row.locator('input[type=radio]').click();
+  await expect(page.locator('#audit-results-body')).not.toContainText('Not an exact copy');
+});
+
+test('a file that fails to delete stays listed and is reported', async ({ page }) => {
+  await loadHarness(page);
+  await runAudit(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.delete_audit_files = ({ copies }) => ({
+      deleted: [copies[0].path],
+      failed: [{ path: copies[1].path, error: 'Failed to delete E:\\old\\a.dem: in use' }],
+    });
+  });
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  await expect(page.locator('#audit-status-text')).toHaveText('Moved to the Recycle Bin: 1, 1 not deleted.');
+  await expect(page.locator('#audit-results-body .audit-file-path')).toContainText(['E:\\old\\a.dem']);
+});

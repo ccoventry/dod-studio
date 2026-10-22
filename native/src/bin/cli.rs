@@ -1,15 +1,15 @@
 //! Demo analyzer that runs in a terminal and produces text output.
 
 #[cfg(not(target_arch = "wasm32"))]
-use analysis::{Analysis, MortalityState, Round, SteamId, Team, Mortality};
+use analysis::{Analysis, Mortality, MortalityState, Round, SteamId, Team};
 #[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand, ValueEnum};
 #[cfg(not(target_arch = "wasm32"))]
 use humantime::{format_duration, format_rfc3339_seconds};
 #[cfg(not(target_arch = "wasm32"))]
-use native::{FileInfo, run_analyzer};
+use native::patch::{PatchOptions, patch_demo_highlights};
 #[cfg(not(target_arch = "wasm32"))]
-use native::patch::{patch_demo_highlights, PatchOptions};
+use native::{FileInfo, run_analyzer};
 #[cfg(not(target_arch = "wasm32"))]
 use serde_json::{Value, json};
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,9 +27,13 @@ fn main() {
 
     if let Some(command) = args.command {
         match command {
-            Commands::Analyze { demo_paths, output_format } => {
+            Commands::Analyze {
+                demo_paths,
+                output_format,
+            } => {
                 run_analyze_subcommand(demo_paths, output_format);
             }
+            Commands::Stats { demo_paths } => run_stats_subcommand(demo_paths),
             Commands::PatchStreak {
                 input,
                 output,
@@ -65,7 +69,9 @@ fn main() {
         }
     } else {
         if args.demo_paths.is_empty() {
-            eprintln!("Error: Please specify at least one demo file to analyze, or use a subcommand.");
+            eprintln!(
+                "Error: Please specify at least one demo file to analyze, or use a subcommand."
+            );
             std::process::exit(1);
         }
         run_analyze_subcommand(args.demo_paths, args.output_format);
@@ -91,6 +97,109 @@ fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat)
             println!("{output}");
         }),
     };
+}
+
+/// One read-only stats document per demo, as JSON (#192): the columns a
+/// league scoreboard can take from a demo, keyed by the player's global id
+/// (a SteamID64 when the demo carries one).
+#[cfg(not(target_arch = "wasm32"))]
+fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
+    let mut rows = vec![];
+    for p in &demo_paths {
+        match run_analyzer(p) {
+            Ok((file, analysis)) => rows.push(stats_json(&file, &analysis)),
+            Err(e) => eprintln!("Error analyzing {}: {}", p.display(), e),
+        }
+    }
+    println!("{}", Json(json!(rows)));
+}
+
+/// `1` or `2` from a `_h1`/`_h2` part of a demo's file name, the league's
+/// naming convention. Nothing in the recording itself is checked.
+#[cfg(not(target_arch = "wasm32"))]
+fn half_from_file_name(name: &str) -> Option<u8> {
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    stem.to_lowercase()
+        .split(['_', '-', ' '])
+        .find_map(|part| match part {
+            "h1" => Some(1),
+            "h2" => Some(2),
+            _ => None,
+        })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
+    let state = &analysis.state;
+    let team_name = |team: &Team| format!("{team:?}").to_lowercase();
+
+    let players = state
+        .players
+        .iter()
+        .map(|player| {
+            json!({
+                "id": player.id.to_string(),
+                "steam_id": SteamId::try_from(&player.id).ok().map(|s| s.to_string()),
+                "name": player.name,
+                "team": player.team.as_ref().map(team_name),
+                "score": player.stats.0,
+                "kills": player.stats.1,
+                "deaths": player.stats.2,
+                "teamkills": player.teamkills,
+                "suicides": player.suicides,
+                "obj_points": player.obj_points,
+                "cap_credits": player.cap_credits,
+                "cap_breaks": player.cap_breaks,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let captures = state
+        .objectives
+        .captures
+        .iter()
+        .map(|capture| {
+            json!({
+                "time": capture.time.real_offset.as_secs_f32(),
+                "flag": capture.flag_name,
+                "team": team_name(&capture.team),
+                "cappers": capture.cappers().map(|id| id.to_string()).collect::<Vec<_>>(),
+                "previous_owner": capture.previous_owner.as_ref().map(team_name),
+                // Not a break: the league's breaks are stopped captures,
+                // `cap_breaks` above (#192).
+                "taken_from_enemy": capture.taken_from_enemy(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "file": file.name,
+        "path": file.path,
+        "map": analysis.demo_info.map_name,
+        "demo_type": analysis.demo_info.demo_type,
+        "half": half_from_file_name(&file.name),
+        "match_start_witnessed": state.match_start_witnessed,
+        "started_late": state.started_late,
+        "ended_early": state.ended_early,
+        "teams": {
+            "allies": if state.allies_are_british {
+                state.team_scores.get_team_score(Team::British)
+            } else {
+                state.team_scores.get_team_score(Team::Allies)
+            },
+            "axis": state.team_scores.get_team_score(Team::Axis),
+        },
+        // A block is credited to the team that stopped the capture.
+        "cap_blocks": {
+            "allies": state.objectives.blocked_attempts(&Team::Axis),
+            "axis": state.objectives.blocked_attempts(&Team::Allies),
+        },
+        // Blocks no player is credited with as a break (#192).
+        "blocks_unattributed": state.objectives.blocks_unattributed,
+        "attempts_abandoned": state.objectives.attempts_abandoned,
+        "players": players,
+        "captures": captures,
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -127,7 +236,13 @@ fn run_patch_streak_subcommand(
             return Err(format!(
                 "Could not find player matching query '{}'. Available players: {}",
                 player_query,
-                analysis.state.players.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+                analysis
+                    .state
+                    .players
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
     };
@@ -144,7 +259,9 @@ fn run_patch_streak_subcommand(
         // If weapon query is provided, check if any kill in the streak matches
         if let Some(ref w_query) = weapon_query {
             let matched = streak.kills.iter().any(|(_, weapon, _)| {
-                format!("{:?}", weapon).to_lowercase().contains(&w_query.to_lowercase())
+                format!("{:?}", weapon)
+                    .to_lowercase()
+                    .contains(&w_query.to_lowercase())
             });
             if !matched {
                 continue;
@@ -169,8 +286,8 @@ fn run_patch_streak_subcommand(
     }
 
     println!("Reading raw demo bytes...");
-    let demo_bytes = std::fs::read(&input)
-        .map_err(|e| format!("Failed to read input demo file: {}", e))?;
+    let demo_bytes =
+        std::fs::read(&input).map_err(|e| format!("Failed to read {}: {}", input.display(), e))?;
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
         Some(player.name.clone())
@@ -178,7 +295,9 @@ fn run_patch_streak_subcommand(
         None
     };
 
-    let player_deaths = player.mortality.iter()
+    let player_deaths = player
+        .mortality
+        .iter()
         .filter(|change| matches!(change.mortality(), Mortality::Dead))
         .map(|change| change.time().real_offset.as_secs_f32())
         .collect::<Vec<_>>();
@@ -198,11 +317,12 @@ fn run_patch_streak_subcommand(
     };
 
     println!("Patching demo highlights...");
-    let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)?;
+    let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)
+        .map_err(|e| format!("{}: {}", input.display(), e))?;
 
     println!("Writing patched demo to: {}", output.display());
     std::fs::write(&output, patched_bytes)
-        .map_err(|e| format!("Failed to write patched demo file: {}", e))?;
+        .map_err(|e| format!("Failed to write {}: {}", output.display(), e))?;
 
     println!("Successfully exported patched demo!");
     Ok(())
@@ -235,6 +355,13 @@ enum Commands {
         /// The kind of string output to produce from an analysis
         #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
         output_format: OutputFormat,
+    },
+    /// Print league stats per demo as JSON: kills, deaths, teamkills,
+    /// suicides, objective points, cap credits, captures and cap blocks.
+    /// Reads the demos only.
+    Stats {
+        /// List of paths to demo files
+        demo_paths: Vec<PathBuf>,
     },
     /// Export patched demo capturing player killstreaks
     PatchStreak {
@@ -471,7 +598,11 @@ impl Display for Markdown {
                 self.1.state.team_scores.get_team_score(Team::Axis),
             );
 
-            let allies_name = if self.1.state.allies_are_british { "British" } else { "Allies" };
+            let allies_name = if self.1.state.allies_are_british {
+                "British"
+            } else {
+                "Allies"
+            };
 
             let match_result_fragment = format!(
                 ": {} ({}) {} Axis ({})",
@@ -651,10 +782,11 @@ impl Display for Markdown {
                         for (_, weapon, _) in &kill_streak.kills {
                             let name = format!("{weapon:?}");
                             if let Some((last_name, count)) = grouped.last_mut()
-                                && *last_name == name {
-                                    *count += 1;
-                                    continue;
-                                }
+                                && *last_name == name
+                            {
+                                *count += 1;
+                                continue;
+                            }
                             grouped.push((name, 1));
                         }
                         let weapons_used = grouped
@@ -687,6 +819,29 @@ impl Display for Markdown {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::half_from_file_name;
+
+    #[test]
+    fn half_comes_from_the_file_name() {
+        assert_eq!(
+            half_from_file_name("ktps8w1-dyelife_soul_lenn_h1.dem"),
+            Some(1)
+        );
+        assert_eq!(
+            half_from_file_name("ktps9qf-dice_clinic_m1_armory_h2_hltv.dem"),
+            Some(2)
+        );
+        assert_eq!(
+            half_from_file_name("ktps8w8-stealth_ih_saints_h1_p2.dem"),
+            Some(1)
+        );
+        assert_eq!(half_from_file_name("k4-ktps9w3-ih-anzio-axis.dem"), None);
+        assert_eq!(half_from_file_name("solifotw-greetz1.dem"), None);
     }
 }
 

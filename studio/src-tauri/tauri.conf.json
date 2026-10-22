@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DoD Tools Studio",
+  "productName": "DoD Studio",
+  "mainBinaryName": "dod-studio",
   "version": "0.1.0",
-  "identifier": "com.dodtools.studio",
+  "identifier": "com.dodstudio.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -13,7 +14,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "DoD Tools Studio",
+        "title": "DoD Studio",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -28,6 +29,11 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/installer_hooks.nsh"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,14 +43,21 @@
     ],
     "resources": {
       "../../localizations": "localizations",
-      "../../target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll": "goldsrc-hooks/dodstudio_goldsrc_hooks.dll"
+      "../../target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll": "goldsrc-hooks/dodstudio_goldsrc_hooks.dll",
+      "../../goldsrc-hooks/tools/hd/*.py": "hd-scripts/",
+      "../../goldsrc-hooks/tools/hd/valve_models.txt": "hd-scripts/valve_models.txt",
+      "../../goldsrc-hooks/tools/hd/hd_maps.example.txt": "hd-scripts/hd_maps.example.txt",
+      "../../goldsrc-hooks/tools/hd/my_styles.example.txt": "hd-scripts/my_styles.example.txt",
+      "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md",
+      "../../blender/*.py": "blender-scripts/",
+      "../../blender/README.md": "blender-scripts/README.md"
     }
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGQUQ4NDYwMDAwRDZBQjQKUldTMGFnMEFZSVN0bjZXQ0ZmVW5QQk1aZHdXYkRaY2ZCNFhPcUxEclozakw5bmZUc2ZBREhkaSsK",
       "endpoints": [
-        "https://github.com/ccoventry/dod-tools/releases/latest/download/latest.json"
+        "https://github.com/ccoventry/dod-studio/releases/latest/download/latest.json"
       ]
     }
   }

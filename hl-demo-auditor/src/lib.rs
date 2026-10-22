@@ -5,11 +5,40 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
+/// A demo file's identity: its size plus an FNV-1a hash of its first 64 KB.
+///
+/// The one definition in the workspace. The Demo Auditor groups duplicates
+/// by it; Studio's scan (`capture_manager::demo_file_key`) uses its text form
+/// to skip demos already queued and unchanged, and saves that text in project
+/// files, so [`FileKey::to_text`] must never change shape. Reads 64 KB, not
+/// the whole demo, so keying a folder of hundreds costs milliseconds.
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct FileKey {
     pub size: u64,
     pub header_hash: u64,
 }
+
+impl FileKey {
+    /// `<size>-<hash as 16 hex digits>`, e.g. `5242880-00c0ffee00c0ffee`.
+    pub fn to_text(&self) -> String {
+        format!("{}-{:016x}", self.size, self.header_hash)
+    }
+
+    /// The inverse of [`FileKey::to_text`]; `None` for anything else.
+    pub fn from_text(text: &str) -> Option<Self> {
+        let (size, hash) = text.split_once('-')?;
+        if hash.len() != 16 {
+            return None;
+        }
+        Some(Self {
+            size: size.parse().ok()?,
+            header_hash: u64::from_str_radix(hash, 16).ok()?,
+        })
+    }
+}
+
+/// How much of a file [`get_file_key`] hashes.
+pub const KEY_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct DuplicateGroup {
@@ -20,6 +49,10 @@ pub struct DuplicateGroup {
 #[derive(Debug, Clone)]
 pub enum AuditProgress {
     Scanning(String),
+    /// How many files [`find_duplicates`] will key, once paths named twice
+    /// are merged; sent before the first `Hashing`, so a bar can show
+    /// how far the key pass has got.
+    Keying(usize),
     Hashing(String),
     Found(usize),
     Failed(String),
@@ -43,6 +76,34 @@ pub fn scan_dir(
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
 ) {
+    scan_dir_to_depth(dir, files, cancel, progress, 0);
+}
+
+/// Folder levels [`scan_dir`] reads below the folder it is given.
+const SCAN_MAX_DEPTH: usize = 32;
+
+/// Folders [`scan_dir`] never enters: a demo in the Recycle Bin is a deleted
+/// copy, not a duplicate to clean up (#843). The same list as
+/// `native::sys::folder_walk::SYSTEM_FOLDERS`, which can't be used here
+/// (`native` depends on this crate); a test there checks they agree.
+pub const SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+
+fn is_system_folder(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        let name = name.to_string_lossy();
+        SYSTEM_FOLDERS.iter().any(|s| name.eq_ignore_ascii_case(s))
+    })
+}
+
+/// `file_type` never follows a junction or symlink, so a link is never
+/// entered; with the depth cap, no folder layout can make this loop (#376).
+fn scan_dir_to_depth(
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+    cancel: &AtomicBool,
+    progress: &Option<Sender<AuditProgress>>,
+    depth: usize,
+) {
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
@@ -55,8 +116,10 @@ pub fn scan_dir(
                 break;
             }
             let path = entry.path();
-            if path.is_dir() {
-                scan_dir(&path, files, cancel, progress);
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if depth < SCAN_MAX_DEPTH && !is_system_folder(&path) {
+                    scan_dir_to_depth(&path, files, cancel, progress, depth + 1);
+                }
             } else if path
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
@@ -67,6 +130,41 @@ pub fn scan_dir(
     }
 }
 
+/// The demos named on a command line: each file as given, each folder walked
+/// with [`scan_dir`]. Sorted, so a run over the same folder prints in the same
+/// order. Paths that are neither come back in the second list.
+pub fn collect_demos(paths: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let cancel = AtomicBool::new(false);
+    let mut demos = vec![];
+    let mut missing = vec![];
+    for path in paths {
+        if path.is_file() {
+            demos.push(path.clone());
+        } else if path.is_dir() {
+            scan_dir(path, &mut demos, &cancel, &None);
+        } else {
+            missing.push(path.clone());
+        }
+    }
+    demos.sort();
+    demos.dedup();
+    (demos, missing)
+}
+
+/// One demo's delta-continuity verdict (#41) as `--integrity` prints it:
+/// whether it is OK, and `<path>: <verdict>`. A file that cannot be read or
+/// parsed is not OK either.
+pub fn integrity_line(path: &Path) -> (bool, String) {
+    let (ok, verdict) = match fs::read(path) {
+        Ok(bytes) => match analysis::integrity::check_demo_bytes(&bytes) {
+            Ok(report) => (report.is_ok(), report.verdict()),
+            Err(e) => (false, e),
+        },
+        Err(e) => (false, format!("cannot read the file: {e}")),
+    };
+    (ok, format!("{}: {verdict}", path.display()))
+}
+
 /// Generates a `FileKey` for a file based on its size and an FNV-1a hash of its first 64KB.
 pub fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
     let metadata = fs::metadata(path)?;
@@ -74,13 +172,27 @@ pub fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
 
     // Hash the first 64KB (or less if the file is smaller)
     let mut file = fs::File::open(path)?;
-    let read_size = std::cmp::min(size, 65536) as usize;
+    let read_size = std::cmp::min(size, KEY_BYTES) as usize;
     let mut buffer = vec![0; read_size];
     file.read_exact(&mut buffer)?;
 
     let header_hash = fnv1a_hash(&buffer);
 
     Ok(FileKey { size, header_hash })
+}
+
+/// An FNV-1a hash of a file's last [`KEY_BYTES`], or 0 when the file is no
+/// longer than that (its key already covers all of it).
+pub fn tail_hash(path: &Path, size: u64) -> Result<u64, std::io::Error> {
+    use std::io::{Seek, SeekFrom};
+    if size <= KEY_BYTES {
+        return Ok(0);
+    }
+    let mut file = fs::File::open(path)?;
+    file.seek(SeekFrom::Start(size - KEY_BYTES))?;
+    let mut buffer = vec![0; KEY_BYTES as usize];
+    file.read_exact(&mut buffer)?;
+    Ok(fnv1a_hash(&buffer))
 }
 
 /// Identifies duplicates within a list of file paths.
@@ -103,6 +215,9 @@ pub fn find_duplicates(
         }
     }
     let files: Vec<PathBuf> = unique_paths.into_iter().collect();
+    if let Some(tx) = progress {
+        let _ = tx.send(AuditProgress::Keying(files.len()));
+    }
 
     let mut groups: HashMap<FileKey, Vec<PathBuf>> = HashMap::new();
     for path in files {
@@ -125,8 +240,29 @@ pub fn find_duplicates(
         }
     }
 
+    // The key reads only the start, so two cuts of one recording can share
+    // it. Files that end differently are different demos: split each group
+    // by its last bytes too. Only grouped files pay the extra read. The key
+    // itself stays as it is, since project files save its text.
+    let mut split: HashMap<(FileKey, u64), Vec<PathBuf>> = HashMap::new();
+    for (key, paths) in groups {
+        if paths.len() < 2 {
+            split.insert((key, 0), paths);
+            continue;
+        }
+        for path in paths {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            // Unreadable here: a group of its own, as when keying fails.
+            let tail = tail_hash(&path, key.size)
+                .unwrap_or_else(|_| fnv1a_hash(path.to_string_lossy().as_bytes()));
+            split.entry((key.clone(), tail)).or_default().push(path);
+        }
+    }
+
     // Sort paths alphabetically within each group so original vs duplicate selection is stable
-    for paths in groups.values_mut() {
+    for paths in split.values_mut() {
         paths.sort();
     }
 
@@ -135,7 +271,7 @@ pub fn find_duplicates(
     let mut duplicate_count = 0;
     let mut space_wasted_bytes: u64 = 0;
 
-    for (key, paths) in groups {
+    for ((key, _), paths) in split {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
@@ -173,6 +309,93 @@ pub fn find_duplicates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_text_form_round_trips_and_keeps_its_shape() {
+        let key = FileKey {
+            size: 5_242_880,
+            header_hash: 0x00c0_ffee_00c0_ffee,
+        };
+        // Saved in project files: this exact shape must never change.
+        assert_eq!(key.to_text(), "5242880-00c0ffee00c0ffee");
+        assert_eq!(FileKey::from_text(&key.to_text()), Some(key));
+        assert_eq!(FileKey::from_text("12-abc"), None);
+        assert_eq!(FileKey::from_text("x-00c0ffee00c0ffee"), None);
+        assert_eq!(FileKey::from_text(""), None);
+    }
+
+    #[test]
+    fn a_file_that_ends_differently_is_not_grouped_with_copies() {
+        let dir = std::env::temp_dir().join(format!("auditor_tail_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = vec![7u8; 3 * KEY_BYTES as usize];
+        let mut other = bytes.clone();
+        *other.last_mut().unwrap() = 8;
+        let paths: Vec<PathBuf> = [("a.dem", &bytes), ("b.dem", &bytes), ("c.dem", &other)]
+            .iter()
+            .map(|(name, data)| {
+                let p = dir.join(name);
+                fs::write(&p, data).unwrap();
+                p
+            })
+            .collect();
+        // Same size and first 64 KB: one key for all three.
+        assert_eq!(
+            get_file_key(&paths[0]).unwrap(),
+            get_file_key(&paths[2]).unwrap()
+        );
+        let (_, groups, count, _) = find_duplicates(paths.clone(), &AtomicBool::new(false), &None);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(count, 1);
+        let names: Vec<_> = groups[0]
+            .files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["a.dem", "b.dem"]);
+    }
+
+    #[test]
+    fn fnv_matches_the_reference_vectors() {
+        assert_eq!(fnv1a_hash(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a_hash(b"a"), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    fn fixture_path() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn the_ci_fixture_passes_the_integrity_check() {
+        let path = fixture_path();
+        let (ok, line) = integrity_line(&path);
+        assert!(ok, "{line}");
+        assert_eq!(line, format!("{}: OK", path.display()));
+    }
+
+    #[test]
+    fn an_unreadable_demo_fails_the_integrity_check_and_names_itself() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("no-such-demo.dem");
+        let (ok, line) = integrity_line(&path);
+        assert!(!ok);
+        assert!(
+            line.starts_with(&format!("{}: cannot read the file: ", path.display())),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn collect_demos_takes_files_and_folders_and_reports_the_rest() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures");
+        let nowhere = fixtures.join("no-such-folder");
+        let (demos, missing) = collect_demos(&[fixture_path(), fixtures, nowhere.clone()]);
+        // The fixture named directly and found in its folder is listed once.
+        assert_eq!(demos.len(), 1, "{demos:?}");
+        assert!(demos[0].ends_with("ci_fixture.dem"));
+        assert_eq!(missing, [nowhere]);
+    }
 
     #[test]
     fn test_demos_are_unique() {
@@ -218,5 +441,76 @@ mod tests {
             duplicates
         );
         assert_eq!(wasted, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_back_up_the_tree_is_not_followed() {
+        let root = std::env::temp_dir().join(format!("auditor_loop_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("a.dem"), b"").unwrap();
+        fs::write(root.join("sub/b.dem"), b"").unwrap();
+        let link = root.join("sub").join("loop");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink /J failed");
+
+        let mut files = vec![];
+        scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
+        assert_eq!(files.len(), 2, "{files:?}");
+
+        // A junction is a directory to `remove_dir`, which unlinks it only.
+        fs::remove_dir(&link).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_recycle_bin_and_system_volume_information_are_not_entered() {
+        let root = std::env::temp_dir().join(format!("auditor_system_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("d/$Recycle.Bin/S-1-5")).unwrap();
+        fs::create_dir_all(root.join("SYSTEM VOLUME INFORMATION")).unwrap();
+        fs::write(root.join("a.dem"), b"").unwrap();
+        fs::write(root.join("d/$Recycle.Bin/S-1-5/$R1A2B3C.dem"), b"").unwrap();
+        fs::write(root.join("SYSTEM VOLUME INFORMATION/x.dem"), b"").unwrap();
+
+        let mut files = vec![];
+        scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
+        assert_eq!(files, [root.join("a.dem")]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Several roots walked into one list and keyed in one pass pair a copy
+    /// in one with its original in the other (#844), and the key pass says
+    /// how many files it will read first.
+    #[test]
+    fn one_key_pass_over_several_roots_groups_across_them() {
+        let root = std::env::temp_dir().join(format!("auditor_roots_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("c/dod")).unwrap();
+        fs::create_dir_all(root.join("f/downloads")).unwrap();
+        fs::write(root.join("c/dod/match.dem"), b"same bytes").unwrap();
+        fs::write(root.join("f/downloads/match (1).dem"), b"same bytes").unwrap();
+        fs::write(root.join("f/downloads/other.dem"), b"other").unwrap();
+
+        let cancel = AtomicBool::new(false);
+        let mut files = vec![];
+        for dir in [root.join("c"), root.join("f"), root.join("c/dod")] {
+            scan_dir(&dir, &mut files, &cancel, &None);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (_, groups, copies, wasted) = find_duplicates(files, &cancel, &Some(tx));
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].files.len(), 2);
+        assert_eq!((copies, wasted), (1, 10));
+        // c/dod was named twice; its demo is keyed once.
+        let first = rx.try_iter().next();
+        assert!(matches!(first, Some(AuditProgress::Keying(3))), "{first:?}");
+        let _ = fs::remove_dir_all(&root);
     }
 }

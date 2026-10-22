@@ -38,9 +38,7 @@ pub fn parse_delta(dd: &DeltaDecoder, br: &mut BitReader) -> Delta {
 }
 
 macro_rules! flag {
-    ($lhs:expr, $rhs:expr) => {{
-        $lhs as u32 & $rhs as u32 != 0
-    }};
+    ($lhs:expr, $rhs:expr) => {{ $lhs as u32 & $rhs as u32 != 0 }};
 }
 
 /// `bits` and `divisor` both come off disk. `bits` of 0 makes the signed paths

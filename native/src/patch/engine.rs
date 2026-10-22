@@ -3,36 +3,41 @@
 // Reads/writes to disk — native-only.
 // Strict 468-byte NetworkMessage alignment must be preserved; see ai_project_context.md.
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::patch::types::{PatchJob, PatcherConfig};
 use crate::patch::{MAX_PAYLOAD_LIMIT_BYTES, NETWORK_HEADER_ALIGNMENT, SCANNER_SECTION_BOUNDARY};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 // ── Internal helper ───────────────────────────────────────────────────────────
 
-fn write_console_cmd(writer: &mut std::io::BufWriter<std::fs::File>, time: f32, tick: i32, cmd: &str) -> std::io::Result<i32> {
+/// An error, not a panic, for a command too long for one ConsoleCommand frame.
+/// Release builds abort on panic (#225), so this used to take the whole app
+/// down mid-batch (#453). User commands are refused before a batch starts
+/// (`patch::too_long_commands`); this is the backstop for any other path.
+fn check_console_cmd_len(cmd: &str) -> std::io::Result<()> {
+    if cmd.len() <= crate::patch::MAX_CONSOLE_CMD_SAFE_LEN {
+        return Ok(());
+    }
+    let msg = format!(
+        "Command too long for a ConsoleCommand frame (the demo format's 64-byte command field): '{}', {} bytes",
+        cmd,
+        cmd.len()
+    );
+    log::error!("{}", msg);
+    Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg))
+}
+
+fn write_console_cmd(
+    writer: &mut std::io::BufWriter<std::fs::File>,
+    time: f32,
+    tick: i32,
+    cmd: &str,
+) -> std::io::Result<i32> {
     use std::io::Write;
     log::debug!("Injecting Command: {} at tick: {}", cmd, tick);
-    let command_string = cmd;
-    if command_string.len() >= crate::patch::MAX_CONSOLE_CMD_LEN {
-        let msg = format!(
-            "FATAL: Command too long for a ConsoleCommand frame (the demo format's 64-byte command field). Command: '{}', Length: {}",
-            command_string,
-            command_string.len()
-        );
-        log::error!("{}", msg);
-        use std::io::Write as _;
-        let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let exe_path = std::env::current_exe()?;
-            let exe_dir = exe_path.parent().ok_or("Failed to get exe parent")?;
-            let local_dir = exe_dir.join("local");
-            std::fs::create_dir_all(&local_dir)?;
-            let log_path = local_dir.join("crash_log.md");
-            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
-            writeln!(file, "{}", msg)?;
-            Ok(())
-        })();
-        panic!("{}", msg);
-    }
+    check_console_cmd_len(cmd)?;
     writer.write_all(&[3_u8])?;
     writer.write_all(&time.to_le_bytes())?;
     writer.write_all(&tick.to_le_bytes())?;
@@ -52,34 +57,39 @@ fn write_director_event_payload(
     command: &str,
 ) -> std::io::Result<i32> {
     use std::io::Write;
-    
+
     // svc_director STUFFTEXT payload_len is a u8; silently clamp to 253 bytes.
     // (The 64-byte panic is the ConsoleCommand frame's field width, not a limit
     // on director payloads -- those travel inside a NetworkMessage instead.)
-    let command = if command.len() > crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN { &command[..crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN] } else { command };
+    let command = if command.len() > crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN {
+        &command[..crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN]
+    } else {
+        command
+    };
 
     let cmd_bytes = command.as_bytes();
     let cmd_len = cmd_bytes.len();
     let payload_len = (1 + cmd_len + 1) as u8;
-    
+
     let mut payload = Vec::with_capacity(3 + cmd_len + 1);
-    payload.push(0x33);         // svc_director
+    payload.push(0x33); // svc_director
     payload.push(payload_len);
-    payload.push(0x0A);         // DRC_CMD_STUFFTEXT
+    payload.push(0x0A); // DRC_CMD_STUFFTEXT
     payload.extend_from_slice(cmd_bytes);
-    payload.push(0x00);         // null terminator
+    payload.push(0x00); // null terminator
 
     writer.write_all(&[1_u8])?; // type (NetworkMessage)
     writer.write_all(&time.to_le_bytes())?;
     writer.write_all(&tick.to_le_bytes())?;
     writer.write_all(info_block)?;
-    
+
     let msg_len = (payload.len() + 1) as u32;
     writer.write_all(&msg_len.to_le_bytes())?;
     writer.write_all(&payload)?;
     writer.write_all(&[1_u8])?; // svc_nop
-    
-    let total_bytes = crate::patch::FRAME_HEADER_SIZE + NETWORK_HEADER_ALIGNMENT + payload.len() + 1;
+
+    let total_bytes =
+        crate::patch::FRAME_HEADER_SIZE + NETWORK_HEADER_ALIGNMENT + payload.len() + 1;
     Ok(total_bytes as i32)
 }
 
@@ -124,16 +134,57 @@ pub struct StreamPatcher {
     pub output_path: std::path::PathBuf,
 }
 
+/// What a patch job is doing, for the batch status line (#75). A job used to
+/// show one "Patching n / m" for its whole run, which can be most of a minute
+/// and looks like a hang.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchStage {
+    /// The decal-flush pass: reading, parsing, cleaning and rewriting the
+    /// whole demo before the copy below starts. No finer progress than this.
+    ClearingDecals,
+    /// The copy loop, by how far through the source demo it has read.
+    Writing { percent: u8 },
+}
+
 impl StreamPatcher {
-    pub fn new(input_path: impl AsRef<std::path::Path>, output_path: impl AsRef<std::path::Path>) -> Self {
+    pub fn new(
+        input_path: impl AsRef<std::path::Path>,
+        output_path: impl AsRef<std::path::Path>,
+    ) -> Self {
         Self {
             input_path: input_path.as_ref().to_path_buf(),
             output_path: output_path.as_ref().to_path_buf(),
         }
     }
 
-    pub fn patch(&self, job: &PatchJob, config: &PatcherConfig, cancel_token: &Arc<AtomicBool>) -> Result<(), std::io::Error> {
-        use std::io::{BufReader, BufWriter, Read, Write, Seek, SeekFrom};
+    pub fn patch(
+        &self,
+        job: &PatchJob,
+        config: &PatcherConfig,
+        cancel_token: &Arc<AtomicBool>,
+    ) -> Result<(), std::io::Error> {
+        self.patch_with_stages(job, config, cancel_token, &mut |_| {})
+    }
+
+    /// `patch`, reporting each stage change and every whole percent written.
+    /// That is at most ~100 calls per job, so the callback needs no throttle
+    /// of its own for one job; a caller folding several jobs into one status
+    /// line still does.
+    pub fn patch_with_stages(
+        &self,
+        job: &PatchJob,
+        config: &PatcherConfig,
+        cancel_token: &Arc<AtomicBool>,
+        on_stage: &mut dyn FnMut(PatchStage),
+    ) -> Result<(), std::io::Error> {
+        use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+
+        // The same two conditions `prepare_flushed_source` starts with; its
+        // rarer skips (r_decals 0, a block with no bounds) return in
+        // milliseconds, so the label is at worst shown for a moment.
+        if config.decal_flush && !job.blocks.is_empty() {
+            on_stage(PatchStage::ClearingDecals);
+        }
 
         // Decal hygiene runs first, as a whole-file rewrite the stream below
         // then reads from. Held for the whole patch: the scratch demo is
@@ -148,9 +199,7 @@ impl StreamPatcher {
             config,
             crate::patch::Cancel::new(cancel_token),
         )
-        .map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user")
-        })?;
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user"))?;
         let source_demo: &std::path::Path = match &cleaned_source {
             Some(c) => c.path(),
             None => std::path::Path::new(&job.source_demo),
@@ -162,7 +211,10 @@ impl StreamPatcher {
         let mut reader = BufReader::with_capacity(crate::patch::IO_BUFFER_CAPACITY, input_file);
         let mut writer = BufWriter::with_capacity(crate::patch::IO_BUFFER_CAPACITY, output_file);
 
-        let read_exact = |reader: &mut BufReader<std::fs::File>, buf: &mut [u8], label: &str| -> Result<(), std::io::Error> {
+        let read_exact = |reader: &mut BufReader<std::fs::File>,
+                          buf: &mut [u8],
+                          label: &str|
+         -> Result<(), std::io::Error> {
             let expected_size = buf.len();
             let file_cursor_position = reader.stream_position().unwrap_or(0);
             match reader.read_exact(buf) {
@@ -184,8 +236,18 @@ impl StreamPatcher {
         read_exact(&mut reader, &mut header, "Header")?;
 
         // Extract directory offset (i32 is at offset 540..544)
-        let original_offset = i32::from_le_bytes(header[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE].try_into().unwrap());
+        let original_offset = i32::from_le_bytes(
+            header[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE]
+                .try_into()
+                .unwrap(),
+        );
 
+        // The copy says it was recorded in the running game folder, in the
+        // header here and in each svc_serverinfo below, or a copy of DoD
+        // refuses to play it (#402; see game_dir.rs).
+        let game_folder = crate::shared::paths::game_folder();
+        let network_protocol = crate::patch::game_dir::header_network_protocol(&header);
+        crate::patch::game_dir::set_header_game_dir(&mut header, &game_folder);
         writer.write_all(&header)?;
 
         let mut bytes_injected: i32 = 0;
@@ -196,8 +258,8 @@ impl StreamPatcher {
             b.sort_unstable_by_key(|(tick, _)| *tick);
             b.into()
         };
-        let mut scheduled_queue: std::collections::VecDeque<(i32, String)> = job.scheduled_commands.iter().cloned().collect();
-
+        let mut scheduled_queue: std::collections::VecDeque<(i32, String)> =
+            job.scheduled_commands.iter().cloned().collect();
 
         // Step 2.5: Pre-read the directory to map entry boundaries
         let mut dir_entries: Vec<(i32, i32)> = Vec::new();
@@ -245,14 +307,32 @@ impl StreamPatcher {
         let mut scratch_buf = Vec::new();
         let mut frame_counter = 0i32;
 
+        // Frames end at the directory; with none, at the end of the file.
+        let frames_end = if original_offset > 0 {
+            original_offset as u64
+        } else {
+            reader.get_ref().metadata().map(|m| m.len()).unwrap_or(0)
+        }
+        .max(1);
+        let mut percent_written = 0u8;
+        on_stage(PatchStage::Writing { percent: 0 });
+
         loop {
             if cancel_token.load(Ordering::Relaxed) {
-                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Cancelled by user",
+                ));
             }
 
             let pos = reader.stream_position().unwrap_or(0);
             if original_offset > 0 && pos >= original_offset as u64 {
                 break;
+            }
+            let percent = (pos.saturating_mul(100) / frames_end).min(100) as u8;
+            if percent != percent_written {
+                percent_written = percent;
+                on_stage(PatchStage::Writing { percent });
             }
 
             let mut frame_hdr = [0u8; crate::patch::FRAME_HEADER_SIZE];
@@ -277,7 +357,7 @@ impl StreamPatcher {
                     update_injection(pos, b, 1);
                     bytes_injected += b;
                 }
-                
+
                 while let Some((target_tick, _cmd)) = scheduled_queue.front() {
                     let actual_target = *target_tick;
                     if playback_started && frame_counter >= actual_target {
@@ -348,7 +428,8 @@ impl StreamPatcher {
                     let mut prefix = [0u8; 8];
                     read_exact(&mut reader, &mut prefix, "Sound Prefix")?;
                     writer.write_all(&prefix)?;
-                    let sample_length = u32::from_le_bytes(prefix[4..8].try_into().unwrap()) as usize;
+                    let sample_length =
+                        u32::from_le_bytes(prefix[4..8].try_into().unwrap()) as usize;
 
                     if sample_length > MAX_PAYLOAD_LIMIT_BYTES {
                         crate::log_markdown(&format!(
@@ -356,10 +437,16 @@ impl StreamPatcher {
                             sample_length,
                             reader.stream_position().unwrap_or(0)
                         ));
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Parser alignment lost"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Parser alignment lost",
+                        ));
                     }
 
-                    std::io::copy(&mut reader.by_ref().take((sample_length + 16) as u64), &mut writer)?;
+                    std::io::copy(
+                        &mut reader.by_ref().take((sample_length + 16) as u64),
+                        &mut writer,
+                    )?;
                 }
                 9 => {
                     // DemoBuffer (4 bytes + buffer_length)
@@ -375,7 +462,10 @@ impl StreamPatcher {
                             buffer_length,
                             reader.stream_position().unwrap_or(0)
                         ));
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Parser alignment lost"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Parser alignment lost",
+                        ));
                     }
 
                     std::io::copy(&mut reader.by_ref().take(buffer_length as u64), &mut writer)?;
@@ -389,7 +479,13 @@ impl StreamPatcher {
                     while let Some((target_tick, _)) = director_queue.front() {
                         if playback_started && frame_counter >= *target_tick {
                             let (_, label) = director_queue.pop_front().unwrap();
-                            let b = write_director_event_payload(&mut writer, time, file_tick, &scratch_buf, &label)?;
+                            let b = write_director_event_payload(
+                                &mut writer,
+                                time,
+                                file_tick,
+                                &scratch_buf,
+                                &label,
+                            )?;
                             update_injection(pos, b, 1);
                             bytes_injected += b;
                         } else {
@@ -411,11 +507,27 @@ impl StreamPatcher {
                             msg_len,
                             reader.stream_position().unwrap_or(0)
                         ));
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Parser alignment lost"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Parser alignment lost",
+                        ));
                     }
 
                     let mut net_buf = vec![0u8; msg_len];
                     read_exact(&mut reader, &mut net_buf, "NetworkMessage Body")?;
+
+                    if let Some(renamed) = network_protocol.and_then(|p| {
+                        crate::patch::game_dir::rewrite_server_info_game_dir(
+                            &net_buf,
+                            p,
+                            &game_folder,
+                        )
+                    }) {
+                        let delta = renamed.len() as i32 - net_buf.len() as i32;
+                        update_injection(pos, delta, 0);
+                        bytes_injected += delta;
+                        net_buf = renamed;
+                    }
 
                     let final_len_buf = (net_buf.len() as u32).to_le_bytes();
                     writer.write_all(&final_len_buf)?;
@@ -424,6 +536,29 @@ impl StreamPatcher {
             }
         }
 
+        // Commands are written as their frame comes up, so one scheduled past
+        // the last frame is never written, silently. That happens when the
+        // highlights are from a different, longer file than this one (#21),
+        // and it drops the command that moves on to the next demo too, so the
+        // game sits at the end of this one. The batch checks file keys before
+        // it gets here; this is the record if anything slips past.
+        // Breadcrumbs are left out: they're spread to the header's frame
+        // count, which can run a little past the frames actually walked.
+        let unwritten: Vec<&(i32, String)> = scheduled_queue
+            .iter()
+            .filter(|(_, cmd)| !cmd.contains("BREADCRUMB"))
+            .collect();
+        if let Some((first_tick, first_cmd)) = unwritten.first() {
+            crate::log_markdown(&format!(
+                "⚠️ **{} scheduled command(s) fell past the end of** `{}` ({} frames) **and were not written.** \
+                 The highlights don't match this file. First: frame {} `{}`.",
+                unwritten.len(),
+                source_demo.display(),
+                frame_counter,
+                first_tick,
+                first_cmd
+            ));
+        }
 
         // [STEP 4] Directory Offset Rewrite (EOF Handling)
         // 4b: Copy the remaining directory entries from the input to the output.
@@ -478,6 +613,9 @@ impl StreamPatcher {
         drop(out_file);
         drop(reader);
 
+        if percent_written != 100 {
+            on_stage(PatchStage::Writing { percent: 100 });
+        }
         Ok(())
     }
 }
@@ -487,9 +625,9 @@ impl StreamPatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::types::{CaptureStreak, PatcherConfig, PatchJob};
     use crate::patch::builder::spawn_patch_batch;
     use crate::patch::types::PatchEvent;
+    use crate::patch::types::{CaptureStreak, PatchJob, PatcherConfig};
 
     #[test]
     fn test_stream_patcher_end_to_end() {
@@ -553,27 +691,29 @@ mod tests {
         let job = PatchJob {
             source_demo: input_path.to_string_lossy().to_string(),
             output_demo: output_path.clone(),
-            streaks: vec![
-                CaptureStreak {
-                    start_tick: 50,
-                    end_tick: 100,
-                    source_demo: input_path.to_string_lossy().to_string(),
-                    target_player: None,
-                    kill_count: 0,
-                    timeline_string: String::new(),
-                    duration_string: String::new(),
-                    player_index: 0,
-                    kills: Vec::new(),
-                    start_index: 0,
-                    end_index: 0,
-                    total_demo_frames: 3000,
-                    demo_fps: 100.0,
-                    viewdemo_times: Vec::new(),
-                    frame_times: std::sync::Arc::new(Vec::new()),
-                    match_start_tick: None,
-                    status: Default::default(),
-                }
-            ],
+            streaks: vec![CaptureStreak {
+                start_tick: 50,
+                end_tick: 100,
+                source_demo: input_path.to_string_lossy().to_string(),
+                target_player: None,
+                kill_count: 0,
+                timeline_string: String::new(),
+                duration_string: String::new(),
+                player_index: 0,
+                kills: Vec::new(),
+                start_index: 0,
+                end_index: 0,
+                total_demo_frames: 3000,
+                demo_fps: 100.0,
+                viewdemo_times: Vec::new(),
+                frame_times: std::sync::Arc::new(Vec::new()),
+                match_start_tick: None,
+                source_key: None,
+                spectated: false,
+                steam_id: None,
+                recorded_this_demo: false,
+                status: Default::default(),
+            }],
             target_player: None,
             init_commands: vec!["host_framerate 0".to_string()],
             scheduled_commands: vec![(10, "some_command".to_string())],
@@ -599,7 +739,23 @@ mod tests {
 
         let patcher = StreamPatcher::new(&input_path, &output_path);
         let cancel_token = Arc::new(AtomicBool::new(false));
-        patcher.patch(&job, &config, &cancel_token).unwrap();
+        let mut stages = Vec::new();
+        patcher
+            .patch_with_stages(&job, &config, &cancel_token, &mut |s| stages.push(s))
+            .unwrap();
+
+        // No blocks, so no decal pass; the percentages climb to exactly 100.
+        assert_eq!(stages.first(), Some(&PatchStage::Writing { percent: 0 }));
+        assert_eq!(stages.last(), Some(&PatchStage::Writing { percent: 100 }));
+        assert!(!stages.contains(&PatchStage::ClearingDecals));
+        let percents: Vec<u8> = stages
+            .iter()
+            .map(|s| match s {
+                PatchStage::Writing { percent } => *percent,
+                PatchStage::ClearingDecals => unreachable!(),
+            })
+            .collect();
+        assert!(percents.windows(2).all(|w| w[0] < w[1]), "{:?}", percents);
 
         assert!(output_path.exists());
         let output_data = std::fs::read(&output_path).unwrap();
@@ -652,27 +808,29 @@ mod tests {
         let job = PatchJob {
             source_demo: input_path.to_string_lossy().to_string(),
             output_demo: output_path.clone(),
-            streaks: vec![
-                CaptureStreak {
-                    start_tick: 50,
-                    end_tick: 100,
-                    source_demo: input_path.to_string_lossy().to_string(),
-                    target_player: None,
-                    kill_count: 0,
-                    timeline_string: String::new(),
-                    duration_string: String::new(),
-                    player_index: 0,
-                    kills: Vec::new(),
-                    start_index: 0,
-                    end_index: 0,
-                    total_demo_frames: 3000,
-                    demo_fps: 100.0,
-                    viewdemo_times: Vec::new(),
-                    frame_times: std::sync::Arc::new(Vec::new()),
-                    match_start_tick: None,
-                    status: Default::default(),
-                }
-            ],
+            streaks: vec![CaptureStreak {
+                start_tick: 50,
+                end_tick: 100,
+                source_demo: input_path.to_string_lossy().to_string(),
+                target_player: None,
+                kill_count: 0,
+                timeline_string: String::new(),
+                duration_string: String::new(),
+                player_index: 0,
+                kills: Vec::new(),
+                start_index: 0,
+                end_index: 0,
+                total_demo_frames: 3000,
+                demo_fps: 100.0,
+                viewdemo_times: Vec::new(),
+                frame_times: std::sync::Arc::new(Vec::new()),
+                match_start_tick: None,
+                source_key: None,
+                spectated: false,
+                steam_id: None,
+                recorded_this_demo: false,
+                status: Default::default(),
+            }],
             target_player: None,
             init_commands: vec!["host_framerate 0".to_string()],
             scheduled_commands: vec![(10, "some_command".to_string())],
@@ -767,17 +925,189 @@ mod director_event_tests {
         expected.extend_from_slice(&info_block);
 
         let mut payload = Vec::new();
-        payload.push(0x33);         // svc_director
+        payload.push(0x33); // svc_director
         payload.push(payload_len);
-        payload.push(0x0A);         // DRC_CMD_STUFFTEXT
+        payload.push(0x0A); // DRC_CMD_STUFFTEXT
         payload.extend_from_slice(cmd_bytes);
-        payload.push(0x00);         // null terminator
+        payload.push(0x00); // null terminator
 
         let msg_len = (payload.len() + 1) as u32;
         expected.extend_from_slice(&msg_len.to_le_bytes());
         expected.extend_from_slice(&payload);
-        expected.push(0x01);        // svc_nop
+        expected.push(0x01); // svc_nop
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn a_console_command_too_long_for_its_frame_is_an_error_not_a_panic() {
+        assert!(check_console_cmd_len(&"a".repeat(63)).is_ok());
+        let err = check_console_cmd_len(&"a".repeat(64)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn too_long_commands_names_only_the_ones_that_do_not_fit() {
+        let fits = "a".repeat(63);
+        let too_long = "b".repeat(64);
+        assert_eq!(
+            crate::patch::too_long_commands(&[fits, too_long.clone()]),
+            vec![too_long]
+        );
+    }
+}
+
+/// `viewdemo` follows the trailing directory where `playdemo` streams past it:
+/// `Core.dll`'s `DemoFile` starts at the first entry's offset and jumps to the
+/// next entry's offset at each `NextSection` frame. So every byte the patcher
+/// injects has to be accounted for in the entries -- see
+/// `docs/goldsrc_viewdemo.md` §2 (issue #405).
+#[cfg(test)]
+mod directory_tests {
+    use super::*;
+    use crate::patch::types::{CaptureStreak, PatchJob, PatcherConfig};
+    use crate::patch::{DEMO_HEADER_SIZE, DIR_ENTRY_SIZE, DIRECTORY_OFFSET_POS, NETMSG_INFO_SIZE};
+    use crate::test_support::Scratch;
+
+    fn frame(out: &mut Vec<u8>, kind: u8, tick: i32) {
+        out.push(kind);
+        out.extend_from_slice(&(tick as f32 * 0.01).to_le_bytes());
+        out.extend_from_slice(&tick.to_le_bytes());
+    }
+
+    fn network(out: &mut Vec<u8>, tick: i32) {
+        frame(out, 1, tick);
+        out.extend_from_slice(&[0u8; NETMSG_INFO_SIZE]);
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.push(0x01); // svc_nop
+    }
+
+    fn entry(out: &mut Vec<u8>, kind: i32, description: &[u8], offset: usize, length: usize) {
+        let mut e = [0u8; DIR_ENTRY_SIZE];
+        e[0..4].copy_from_slice(&kind.to_le_bytes());
+        e[4..4 + description.len()].copy_from_slice(description);
+        e[84..88].copy_from_slice(&(offset as i32).to_le_bytes());
+        e[88..92].copy_from_slice(&(length as i32).to_le_bytes());
+        out.extend_from_slice(&e);
+    }
+
+    /// Two segments, as every real demo has: a LOADING one, then playback
+    /// opening with `DemoStart`, each closed by `NextSection`.
+    fn two_segment_demo() -> Vec<u8> {
+        let mut d = vec![0u8; DEMO_HEADER_SIZE];
+        d[0..6].copy_from_slice(b"HLDEMO");
+        let loading = d.len();
+        network(&mut d, 0);
+        frame(&mut d, 5, 0);
+        let playback = d.len();
+        frame(&mut d, 2, 0);
+        for tick in 1..=10 {
+            network(&mut d, tick);
+        }
+        frame(&mut d, 5, 10);
+        let directory = d.len();
+        d.extend_from_slice(&2i32.to_le_bytes());
+        entry(&mut d, 0, b"LOADING", loading, playback - loading);
+        entry(&mut d, 1, b"Playback", playback, directory - playback);
+        d[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE]
+            .copy_from_slice(&(directory as i32).to_le_bytes());
+        d
+    }
+
+    /// Where each segment really starts, found by walking the frames up to
+    /// the directory, plus where the last one ends.
+    fn segment_starts(data: &[u8], directory: usize) -> Vec<usize> {
+        let mut starts = vec![DEMO_HEADER_SIZE];
+        let mut pos = DEMO_HEADER_SIZE;
+        while pos < directory {
+            let kind = data[pos];
+            let body = match kind {
+                0 | 1 => {
+                    let at = pos + 9 + NETMSG_INFO_SIZE;
+                    NETMSG_INFO_SIZE
+                        + 4
+                        + u32::from_le_bytes(data[at..at + 4].try_into().unwrap()) as usize
+                }
+                2 | 5 => 0,
+                3 => crate::patch::CMD_FRAME_SIZE,
+                other => panic!("unexpected frame type {other} at {pos}"),
+            };
+            pos += 9 + body;
+            if kind == 5 {
+                starts.push(pos);
+            }
+        }
+        assert_eq!(pos, directory, "the frames run exactly up to the directory");
+        starts
+    }
+
+    #[test]
+    fn every_directory_entry_still_points_at_its_segment_after_injection() {
+        let scratch = Scratch::new("patch_directory");
+        let input = scratch.path().join("in.dem");
+        let output = scratch.path().join("out.dem");
+        let original = two_segment_demo();
+        std::fs::write(&input, &original).unwrap();
+
+        let job = PatchJob {
+            source_demo: input.to_string_lossy().to_string(),
+            output_demo: output.clone(),
+            // Built from JSON rather than a struct literal, so the test keeps
+            // compiling when `CaptureStreak` gains an optional field (#417
+            // adds `source_key`). Missing optional fields deserialize to their
+            // defaults, and `frame_times` is `serde(skip)`.
+            streaks: vec![
+                serde_json::from_value::<CaptureStreak>(serde_json::json!({
+                    "start_tick": 3,
+                    "end_tick": 8,
+                    "source_demo": input.to_string_lossy(),
+                    "target_player": null,
+                    "kill_count": 0,
+                    "timeline_string": "",
+                    "duration_string": "",
+                    "player_index": 0,
+                    "kills": [],
+                    "start_index": 0,
+                    "end_index": 0,
+                    "total_demo_frames": 14,
+                    "demo_fps": 100.0,
+                }))
+                .unwrap(),
+            ],
+            target_player: None,
+            // Every kind the patcher writes: ConsoleCommand frames at
+            // DemoStart and mid-playback, and a director event, which is a
+            // whole injected network frame.
+            init_commands: vec!["sys_autodir".to_string(), "mirv_movie_fps 60".to_string()],
+            scheduled_commands: vec![(6, "echo six".to_string()), (9, "echo nine".to_string())],
+            director_events: vec![(7, "echo [dod-studio] CLIP".to_string())],
+            block_routes: Vec::new(),
+            blocks: Vec::new(),
+        };
+        let config = PatcherConfig {
+            decal_flush: false,
+            ..PatcherConfig::default()
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        StreamPatcher::new(&input, &output)
+            .patch(&job, &config, &cancel)
+            .unwrap();
+
+        let patched = std::fs::read(&output).unwrap();
+        assert!(patched.len() > original.len(), "nothing was injected");
+        let read_i32 = |at: usize| i32::from_le_bytes(patched[at..at + 4].try_into().unwrap());
+        let directory = read_i32(DIRECTORY_OFFSET_POS) as usize;
+        let starts = segment_starts(&patched, directory);
+        assert_eq!(read_i32(directory), 2);
+        for (k, window) in starts.windows(2).enumerate() {
+            let e = directory + 4 + k * DIR_ENTRY_SIZE;
+            assert_eq!(read_i32(e + 84) as usize, window[0], "entry {k}'s offset");
+            assert_eq!(
+                read_i32(e + 88) as usize,
+                window[1] - window[0],
+                "entry {k}'s length"
+            );
+        }
+        assert_eq!(directory + 4 + 2 * DIR_ENTRY_SIZE, patched.len());
     }
 }

@@ -1,4 +1,4 @@
-//! `dodstudio_crosshair`: hide DoD's crosshair, and make it stay hidden.
+//! `ds_hud_hide_crosshair`: hide DoD's crosshair, and make it stay hidden.
 //!
 //! ## Why the stock cvar is not enough
 //!
@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hide_crosshair");
+pub const NAME: &str = console_name!("hud_hide_crosshair");
 
 /// `CHudDoDCrossHair::Draw`'s prologue. The wildcards cover the relative call
 /// and the one absolute address that follows it, both of which move with the
@@ -177,7 +177,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "the crosshair draws normally (the stock `crosshair` cvar cannot turn it off -- CHud::Redraw forces the value back every frame)".into();
@@ -186,8 +186,21 @@ pub fn status() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Serialises the tests that store into [`HIDDEN_NOW`].
+    ///
+    /// `spectator_crosshair`'s tests read it through their own `status()`,
+    /// and cargo runs tests in parallel, so one test flipping it could decide
+    /// what another one sees. `pub(crate)` so they take this same lock, not a
+    /// second one that would serialise neither against the other.
+    static HIDDEN_NOW_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn lock_hidden_now() -> std::sync::MutexGuard<'static, ()> {
+        // A poisoned lock means another test already failed; take it anyway.
+        HIDDEN_NOW_TESTS.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     /// The two states must be the same width: this overwrites a prologue in
     /// place, so a shorter or longer replacement would leave a partial
@@ -250,6 +263,7 @@ mod tests {
 
     #[test]
     fn status_explains_why_the_stock_cvar_does_not_work() {
+        let _statics = lock_hidden_now();
         HIDDEN_NOW.store(false, Ordering::Release);
         assert!(status().contains("forces the value back"));
         HIDDEN_NOW.store(true, Ordering::Release);

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for master_pane.js's missing-demo row (#21): just the queue
+  table and search box it queries. See tests/e2e/README.md for the general
+  shape. Three demos: one present (which recorded two maps, #217), one missing
+  with a found copy, one missing with nothing found. here.dem's highlights fill
+  the Status and Review counts.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>master_pane.js test harness</title>
+</head>
+<body>
+  <input id="demo-search-input" />
+  <table>
+    <thead><tr><th><div id="status-count-legend"></div></th><th><div id="review-count-legend"></div></th></tr></thead>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+  <div id="result"></div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+
+    const runtime = { writable: true, configurable: true, enumerable: false };
+    const missing = (demo, foundAt) => {
+      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
+      Object.defineProperty(demo, 'foundAt', { ...runtime, value: foundAt });
+      return demo;
+    };
+    const demos = [
+      { name: 'here.dem', path: 'C:\\demos\\here.dem', streaks: [{ status: 'Pending' }, { status: 'Captured', curation: 'Keep' }, { curation: 'Skip' }, {}], signon_maps: ['dod_lennon2', 'dod_lennon2'] },
+      missing({ name: 'moved.dem', path: 'C:\\demos\\moved.dem', streaks: [], signon_maps: ['dod_anzio'] }, 'C:\\demos\\sub\\moved.dem'),
+      missing({ name: 'gone.dem', path: 'C:\\demos\\gone.dem', streaks: [] }, null),
+    ];
+
+    const result = document.querySelector('#result');
+    initMasterPane(
+      null,
+      null,
+      (demo) => { result.textContent = `locate ${demo.name}`; },
+      (demo) => { result.textContent = `use ${demo.name}`; },
+      // A split reports 30% and then waits for window.__finishRowSplit().
+      async (demo, update) => {
+        result.textContent = `split ${demo.name}`;
+        update({ fraction: 0.3, stage: 'reading', map: '', part: 0, parts: 0 });
+        await new Promise((resolve) => { window.__finishRowSplit = resolve; });
+      }
+    );
+    renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

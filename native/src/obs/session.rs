@@ -124,8 +124,16 @@ impl ObsSession {
         // active before the switch, captured at the one moment that's
         // knowable — after this call, "current" already reads back as
         // dod-studio' own profile/scene.
-        let provision::ProvisionResult { previous_profile, previous_scene } =
-            provision::ensure_dod_studio_setup(&mut client, game_width, game_height, capture_fps, 1)?;
+        let provision::ProvisionResult {
+            previous_profile,
+            previous_scene,
+        } = provision::ensure_dod_studio_setup(
+            &mut client,
+            game_width,
+            game_height,
+            capture_fps,
+            1,
+        )?;
 
         let preflight = client.preflight(game_width, game_height)?;
 
@@ -199,8 +207,10 @@ impl ObsSession {
             self.end_block();
         }
         let Some(take_folder) = self.take_folders.get(self.next_block).cloned() else {
-            self.skipped
-                .push(format!("block {} has no planned take folder", self.next_block));
+            self.skipped.push(format!(
+                "block {} has no planned take folder",
+                self.next_block
+            ));
             return;
         };
         self.next_block += 1;
@@ -419,13 +429,15 @@ impl ObsSession {
         let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(client) = guard.as_mut() {
             if let Some(scene) = self.previous_scene.take()
-                && !scene.is_empty() {
-                    let _ = client.set_scene(&scene);
-                }
+                && !scene.is_empty()
+            {
+                let _ = client.set_scene(&scene);
+            }
             if let Some(profile) = self.previous_profile.take()
-                && !profile.is_empty() {
-                    let _ = client.set_profile(&profile);
-                }
+                && !profile.is_empty()
+            {
+                let _ = client.set_profile(&profile);
+            }
         }
         *guard = None;
     }
@@ -493,7 +505,9 @@ fn salvage_orphan(dest: &Path) -> Option<PathBuf> {
 /// about itself to every tool downstream.
 pub(super) fn fold_into_take(recorded: &Path, dest: &Path) -> Result<PathBuf, String> {
     if !recorded.is_file() {
-        return Err(crate::messages::obs_reported_file_missing(recorded.display()));
+        return Err(crate::messages::obs_reported_file_missing(
+            recorded.display(),
+        ));
     }
     let ext = recorded
         .extension()
@@ -546,7 +560,10 @@ mod tests {
     #[test]
     fn folds_a_recording_into_the_stream_folder() {
         let root = scratch("fold");
-        let dest = root.join("dodstudio_chain_01_b0").join(TAKE_FOLDER).join(STREAM_FOLDER);
+        let dest = root
+            .join("dodstudio_chain_01_b0")
+            .join(TAKE_FOLDER)
+            .join(STREAM_FOLDER);
         std::fs::create_dir_all(&dest).unwrap();
         let recorded = dest.join("2026-08-28 03-26-01.mp4");
         std::fs::write(&recorded, b"x").unwrap();

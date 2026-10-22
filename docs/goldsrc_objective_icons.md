@@ -19,11 +19,12 @@ Implemented in `goldsrc-hooks/src/objicons.rs`; re-checked against a real
 ## 1. The console surface
 
 ```
-dodstudio_objectives offset <y>       y the objective icons are drawn at
-dodstudio_objectives xoffset <x>      x the icon row starts at
-dodstudio_objectives timer <y>        y the objective timer beside them is drawn at
-dodstudio_objectives <any> default    hand that one back to the game
-dodstudio_objectives                  what each is set to, and the usage above
+ds_hud_objectives offset <y>       y the objective icons are drawn at
+ds_hud_objectives xoffset <x>      x the icon row starts at
+ds_hud_objectives timer <y>        y the objective timer beside them is drawn at
+ds_hud_objectives scale <1..8>     draw the icons and the timer that many times bigger (§7)
+ds_hud_objectives <any> default    hand that one back to the game
+ds_hud_objectives                  what each is set to, and the usage above
 ```
 
 All three are **absolute screen positions**, and each means the same thing in a
@@ -235,22 +236,74 @@ client.dll+0x228e0
   xor  eax, eax
 ```
 
-`1` (the small map) makes the loop overwrite both icon slots per objective from
-the objective's own record; `2` (the full map) draws each icon at its world
-position instead. Both are inside the loop and downstream of the row detour, so
+`1` (the full map, centred) makes the loop overwrite both icon slots per
+objective from the objective's own record; `2` (the minimap, top right) draws
+each icon at its world position instead. An earlier version of this section had
+the two sizes the wrong way round; `goldsrc-hooks/src/overview_map.rs` reads
+them off `CHud::ComputeOverviewMapRects`' arithmetic. Both are inside the loop and downstream of the row detour, so
 they keep winning — and they should: the icons are being drawn *on the map*, at
 map coordinates, and that is not a placement anyone would want overridden.
 
 This also **corrects a characterisation in `docs/goldsrc_death_notices.md` §3**.
 That document calls the same `+0x228e0` call "spectator mode" and its `cmp eax, 2`
 the "spectator-mode-2 path". It is the overview map's size, not a spectator mode:
-the kill feed takes its y from the map layout while the *full* overview map is up.
+the kill feed takes its y from the map layout while the minimap is up: it starts
+`round(2 * ScreenHeight / 480)` below the minimap's bottom edge.
 The behaviour recorded there is unaffected — the detour there sets the result on
 every path regardless — but the name was wrong.
 
 `gHUD+0x234` is the FOV field: it is compared against and assigned `0x5a` (90) in
 the `SetFOV` user-message path (`__MsgFunc_SetFOV` at `+0x20c30` → `+0x22160`,
 and the per-frame update at `+0x36d1c`).
+
+## 6. The spectator layout
+
+The game's spectating y, `round(54 * ScreenHeight / 480)`, is not the spectator
+bar's height. The bar is `GetProportionalScaledValue(64)` tall (`client+0x82dae`),
+so the icons and timer overlap its bottom ~10 pixels. With
+`ds_spec_hide_bars 1` the bar is gone and the gap remains.
+
+`goldsrc-hooks/src/spectator_hud.rs` fixes both. While spectating, and while no
+value has been typed, it sets the icon row's y and the timer's y through the two
+detours above:
+
+- the bar shown: just below it, as far down as a POV demo has them from the top;
+- the bar hidden: at a POV demo's positions.
+
+The kill feed and the minimap get the same treatment. `<any> default` hands a
+value back to that layout. When not spectating, everything goes back to the game.
+
+## 7. Scale (#891)
+
+`ds_hud_objectives scale <S>` draws both elements S times bigger, for captures
+at 1440p and above, the way `ds_hud_deathmsg scale` does the kill feed.
+`goldsrc-hooks/src/objicons/scale.rs`' header has the addresses; in short:
+
+- The timer is five draws: its background with `SPR_DrawHoles(0, 0, y, …)`
+  (`+0x30168`) and four digits through a helper at `+0x30620`, called at
+  `+0x301ab`..`+0x301d8` with the literal x 10, 24, 44 and 58 and `y + 6`.
+- Each icon is up to three: the capture-progress fill (`+0x3044c`), the flag
+  (`+0x30491`), both at `y - 1`, and while players stand in the area a
+  `"%d/%d"` count through `CHud::DrawHudString` (`+0x30517`, calling
+  `+0x37160`) at `(x + 4, y + icon height + 4)`. The row then steps by a fixed
+  `[this+0x18] - [this+0x14] + 2`.
+
+Every size is a rect or a literal, so rather than rewrite each, every one of
+those draw calls goes through a modelview zoom about its element's top-left
+corner (`goldsrc-hooks/src/gl_zoom.rs`, shared with the kill feed): the
+game's layout is multiplied as a whole. The timer's corner is its background
+draw's `(0, y)`. The row's is recorded by the row detour above every frame:
+its y always, its x when `xoffset` or `spec_pip` placed it; the game's own 82
+(or 10) scales from the screen's left edge, so the row stays clear of the
+timer scaled beside it. With `_cl_minimap 1` the icons are drawn at map
+positions; the `CHud::OverviewMapMode` call at `+0x3029a` goes through the
+hook so those draws stay the game's.
+
+The bottom-of-screen reinforcement timer uses the same digit helper from its
+own four calls (`+0x305d2`..), which stay the game's. `[+0x17dd2c]`, the
+row's bottom edge that the `spec_pip` layout reads, stays unscaled.
+
+Re-check the sites with `goldsrc-hooks/tools/verify_objicons_scale_offsets.py`.
 
 ## What is not proven
 

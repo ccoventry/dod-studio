@@ -19,7 +19,8 @@ impl Doer for SvcSpawnStaticSound {
                     flags,
                 }
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

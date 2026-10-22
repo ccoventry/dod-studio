@@ -4,8 +4,8 @@
 //! cargo run --release -p native --bin check_cfgs -- <dod-folder> ["init command"...]
 //! ```
 //!
-//! Any init commands passed after the folder are checked for overriding a value
-//! a config already sets.
+//! Any init commands passed after the folder are checked for conflicting with a
+//! value a config, or another of them, sets.
 //!
 //! Read-only. This never writes, edits or removes a config file.
 
@@ -20,7 +20,11 @@ fn main() {
     let init_commands: Vec<String> = args.collect();
 
     let scan = cfg_scan::scan(&dir);
-    println!("{}\n{} config file(s) executed\n", dir.display(), scan.files_read);
+    println!(
+        "{}\n{} config file(s) executed\n",
+        dir.display(),
+        scan.files_read
+    );
 
     let effective = scan.effective_settings();
     if effective.is_empty() {
@@ -28,7 +32,13 @@ fn main() {
     } else {
         println!("Set by configs the engine runs on its own:");
         for s in &effective {
-            println!("  {:<12} {:<8} {}:{}", s.cvar, s.value, s.file_name(), s.line);
+            println!(
+                "  {:<12} {:<8} {}:{}",
+                s.cvar,
+                s.value,
+                s.file_name(),
+                s.line
+            );
         }
     }
 
@@ -48,46 +58,44 @@ fn main() {
     if !shadowed.is_empty() {
         println!("\nAlso set, but overridden later in the chain:");
         for s in shadowed {
-            println!("  {:<12} {:<8} {}:{}", s.cvar, s.value, s.file_name(), s.line);
+            println!(
+                "  {:<12} {:<8} {}:{}",
+                s.cvar,
+                s.value,
+                s.file_name(),
+                s.line
+            );
         }
     }
 
-    println!("\n{} assignment(s) seen across those configs.", scan.settings.len());
+    println!(
+        "\n{} assignment(s) seen across those configs.",
+        scan.settings.len()
+    );
 
     if !init_commands.is_empty() {
-        let shadows = cfg_scan::self_overrides(&init_commands);
-        let dead: std::collections::HashSet<&str> =
-            shadows.iter().map(|s| s.shadowed.as_str()).collect();
-        if !shadows.is_empty() {
-            println!("\nInit commands beaten by a later one in the same list:");
-            for s in &shadows {
-                println!(
-                    "  {:<20} never applies — {} sets {} (position {})",
-                    s.shadowed, s.cvar, s.winner_value, s.winner_index
-                );
-            }
-        }
-
-        // A command that never applies overrides nothing.
-        let overrides: Vec<_> = scan
-            .overrides_in(&init_commands)
-            .into_iter()
-            .filter(|o| !dead.contains(o.command.as_str()))
-            .collect();
+        // The same rule the app's Initial Commands warning uses (#216).
+        let warnings = cfg_scan::value_warnings(&scan, &init_commands, init_commands.len(), &[]);
         println!();
-        if overrides.is_empty() {
-            println!("None of those init commands override a config value.");
+        if warnings.conflicts.is_empty() {
+            println!("No value those init commands set conflicts with another.");
         } else {
-            println!("Init commands that will override a config value:");
-            for o in overrides {
-                println!(
-                    "  {:<20} overrides {} {} ({}:{})",
-                    o.command,
-                    o.cvar,
-                    o.cfg_value,
-                    o.file_name(),
-                    o.line
-                );
+            println!("Values that conflict (the last one is in effect):");
+            for c in warnings.conflicts {
+                let values: Vec<String> = c
+                    .values
+                    .iter()
+                    .map(|v| match &v.source {
+                        cfg_scan::ValueSource::Config { file, line } => format!(
+                            "{} ({}:{})",
+                            v.value,
+                            file.file_name().unwrap_or_default().to_string_lossy(),
+                            line
+                        ),
+                        _ => format!("{} (init)", v.value),
+                    })
+                    .collect();
+                println!("  {:<20} {}", c.cvar, values.join(", "));
             }
         }
     }

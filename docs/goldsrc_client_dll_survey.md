@@ -1,15 +1,30 @@
 # DoD 1.3 `client.dll`: a survey of what can be controlled
 
-A catalogue, not an implementation. Four features have been built against this
-binary — the HLTV animation fix, the gunshot fix, `dodstudio_deathmsg` and
-`dodstudio_objectives` — and each time the analysis went exactly as deep as the
+A catalogue, not an implementation. When this pass was written, four features
+had been built against this binary — the HLTV animation fix, the gunshot fix,
+`ds_hud_deathmsg` and `ds_hud_objectives` — and each time the analysis went exactly as deep as the
 feature needed and no wider. This is the wide pass: what else is in here, what
 controlling it would let a movie-maker do, and how much work each would be.
 
-Opened as [issue #255](https://github.com/ccoventry/dod-tools/issues/255).
+Opened as [issue #255](https://github.com/ccoventry/dod-studio/issues/255).
 Companion to `docs/goldsrc_client_dll_internals.md` (how the client library is
 entered at all), `docs/goldsrc_death_notices.md` (the kill feed) and
 `docs/goldsrc_objective_icons.md` (the objective HUD).
+
+**Status of the candidates below** (as of 2026-10; the sections keep their
+original "suggested task" wording):
+
+| Candidate | Built? | Command / module | Issue / PR |
+| --- | --- | --- | --- |
+| Hide or wrap any HUD element (§1) | yes | `ds_hud_hide_element`, `hudelement.rs` | #265, PR #296 |
+| Chat line cap, `SayText` (§3) | no | — | — |
+| Dump chosen user messages (§4) | yes | `ds_debug_msglog`, `msglog.rs` | #267 |
+| Move and size the overview map (§5) | yes | `ds_hud_overview_layout`, `overview_map.rs` | PR #303 |
+| Objective icons / timer position (§6) | yes | `ds_hud_objectives`, `objicons.rs` | #254, PR #263 |
+| The `+0x175c6c` VGUI panel (§6) | no | — | — |
+| `r_drawentities` / `cl_lw` quit check (§8) | handled by refusal, not hooked | `native/src/patch/cfg_scan.rs` | #205 |
+| Spectator bar (§10) | yes | `ds_spec_hide_bars`, `spectator_bars.rs`, `spectator_hud.rs` | #269, #328 |
+| Keep the spectator camera on one player (§10) | yes | `ds_spec_lock` / `ds_spec_target`, `spectator_follow.rs` | #206 |
 
 **Subject:** `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical across the
 stock, pre-Anniversary and post-Anniversary installs. Every RVA below is for
@@ -136,7 +151,8 @@ sound: walk the list from `gHUD+0`, and for each node compare `*(void**)element`
 against `module + <vftable RVA>` from the table above. That is an exact match on
 a value the compiler emitted, not a heuristic.
 
-> **Suggested task:** a `dodstudio_hudelement <name> <0|1>` command backed by the
+> **Suggested task (built as `ds_hud_hide_element`, #265, PR #296):** a
+> `dodstudio_hudelement <name> <0|1>` command backed by the
 > table above. It subsumes several separate feature requests (hide the ammo
 > counter, hide the status bar, hide the crosshair) into one mechanism, and it
 > is the cheapest thing in this document by a wide margin.
@@ -199,7 +215,7 @@ shipped code uses rather than one read off a header.
 | `CHudSayText`'s chat lines | `+0x45905` → `+0x190348` | 3072 bytes | **6 × 512** — six slots (see the two arrays below), 512 chars each |
 | …its per-line name colours | `+0x458ed` → `+0x190f48` | 6 dwords | one per line |
 | …its per-line name lengths | `+0x458f9` → `+0x190330` | 6 dwords | one per line |
-| `CHudDeathNotice`'s feed | `+0x2ae5d` → `+0x1765d8` | 780 bytes | 5 × 156 — **already raised to 127 by `dodstudio_deathmsg max`** |
+| `CHudDeathNotice`'s feed | `+0x2ae5d` → `+0x1765d8` | 780 bytes | 5 × 156 — **already raised to 127 by `ds_hud_deathmsg max`** |
 | `CHudMessage`'s slots | `+0x246bd` → *(this+0x14)* | 128 bytes | 16 × 8 — `maxHUDMessages` |
 | `CHudStatusIcons` | `+0x471ad` → *(this+0x14)* | 192 bytes | the icon slots |
 | `CHudAmmo`'s weapon list | `+0x274b3` → `+0x102108` | 21504 bytes | the `WEAPON` array |
@@ -217,8 +233,8 @@ second `deathmsg.rs`, and it needs its own verifier. *Risk:* medium; the
 failure mode is 40-ish writes into unrelated instructions, which is why
 `verify_deathmsg_offsets.py` exists and why a chat version would need the same.
 
-> **Suggested task:** `dodstudio_saytext max <5..N>` / `offset`, modelled on
-> `dodstudio_deathmsg`.
+> **Suggested task:** `ds_saytext max <5..N>` / `offset`, modelled on
+> `ds_hud_deathmsg`.
 
 ---
 
@@ -228,7 +244,7 @@ The complete table is `survey_client_dll.py messages`. The mechanism is already
 proven and needs no patching at all: `pfnHookUserMsg` **prepends** a fresh
 record and the engine's dispatcher stops at the first name match, so the newest
 hook wins and the game's own handler stays reachable by calling its thunk
-directly. That is how `dodstudio_deathmsg block` and `fake` work.
+directly. That is how `ds_hud_deathmsg block` and `fake` work.
 
 `CHud::Init` (`+0x21100`) registers 32 of them centrally; the rest belong to
 individual elements (see §1's table). The ones a movie-maker is most likely to
@@ -248,7 +264,7 @@ want:
 *Technique:* message hook. *Effort:* low per message. *Risk:* low — nothing is
 patched, and an unhandled message is forwarded untouched.
 
-**Built** as `dodstudio_msglog <name>... | all | clear` (issue #267), covering
+**Built** as `ds_debug_msglog <name>... | all | clear` (issue #267), covering
 all 71, not just the eight above — the full name/thunk table this section's
 own tool derives. See `src/msglog.rs`.
 
@@ -291,17 +307,18 @@ list — ten sites, found by their `fmul [1/480]`:
 | `+0x22a42` | `CHud::ComputeOverviewMapRects` | 2 | full map y |
 | `+0x22ac7` | `CHud::GetOverviewMapBounds` | 54 | the spectator-bar offset added to it |
 | `+0x2aeca` | `CHudDeathNotice::Draw` | 2 | kill feed y, overview-map path |
-| `+0x2af02` | `CHudDeathNotice::Draw` | 42 | kill feed y, spectating — **handled by `dodstudio_deathmsg offset`** |
+| `+0x2af02` | `CHudDeathNotice::Draw` | 42 | kill feed y, spectating — **handled by `ds_hud_deathmsg offset`** |
 | `+0x300a6` | `CObjectiveIcons::Draw` | 32 | the `clan_warmup_mode` VGUI panel at `+0x175c6c` |
-| `+0x3012d` | `CObjectiveIcons::Draw` | 54 | objective timer y — **`dodstudio_objectives timer`** |
-| `+0x3024e` | `CObjectiveIcons::Draw` | 2 / 54 | icon row y — **`dodstudio_objectives offset`** |
+| `+0x3012d` | `CObjectiveIcons::Draw` | 54 | objective timer y — **`ds_hud_objectives timer`** |
+| `+0x3024e` | `CObjectiveIcons::Draw` | 2 / 54 | icon row y — **`ds_hud_objectives offset`** |
 | `+0x308af` | `sub_0x306a0` | 54 | a second objective-icon path — it queries section 5 and reads `spec_pip`, like `Draw` does |
 | `+0x308e0` | `sub_0x306a0` | 2 | as above |
 | `+0x4c3a3` | `sub_0x4c250` | 20 | positions the same `+0x175c6c` VGUI panel as the `clan_warmup_mode` row |
 
-Two things worth taking from this. The `54` — DoD's spectator bar height in
-480-space — appears in **exactly four places**, and three of them are now
-controllable (`dodstudio_deathmsg offset`, and `dodstudio_objectives`'s two). The
+Two things worth taking from this. The `54` — the push DoD applies to the
+elements below the spectator bar, in 480-space (the bar itself is `64`; see
+`goldsrc-hooks/src/spectator_hud.rs`) — appears in **exactly four places**, and three of them are now
+controllable (`ds_hud_deathmsg offset`, and `ds_hud_objectives`'s two). The
 fourth, `+0x308af`, is the objective icons' overview-map path, which #254
 deliberately does not reach.
 
@@ -358,7 +375,7 @@ in issue #205; the complete order of operations is:
 1. Advance `m_flTime`/`m_flTimeDelta` (`gHUD+0x1c`..`+0x2c`), clamping a
    negative delta to zero. **This is the clock the kill feed's expiry compares
    against, and it does not advance while the console is down** — the finding
-   that made `dodstudio_deathmsg fake` need a re-stamp.
+   that made `ds_hud_deathmsg fake` need a re-stamp.
 2. If `spec_scoreboard`'s value changed since the cached copy at `+0x18a854`,
    toggle the VGUI scoreboard.
 3. Enforce five cvars, two of which end by **quitting the game**
@@ -442,7 +459,7 @@ interface pointer `Draw`'s 45 bytes and several other functions below all go
 through) whether to show, and if so tells the panel to draw itself. **The bar
 is a VGUI2 panel, not a `CHudBase`-drawn sprite** — confirms, from the
 disassembly rather than only from live testing, why #296 found hiding
-`spectator` via the `CHudBase::Draw`-slot mechanism (`dodstudio_hide_hudelement
+`spectator` via the `CHudBase::Draw`-slot mechanism (`ds_hud_hide_element
 spectator`) changed nothing: that mechanism can only stub this 45-byte
 gatekeeper, and the gatekeeper was never drawing anything to begin with.
 
@@ -549,15 +566,15 @@ input, not confirmed which physical bind maps to which bit.
    **Update:** `docs/goldsrc_spectator_bars.md` picks this back up and gets
    further — `CDoDSpectatorGUI` *is* real, RTTI-confirmed, and constructed at
    runtime; `+0x1a9d564` turns out to be a much bigger shared interface
-   (141 xrefs, offsets past `+0x368`) and not the panel itself. Still not
-   finished — the container object's own address isn't resolved yet — but the
-   open questions are narrower than "out of scope."
+   (141 xrefs, offsets past `+0x368`) and not the panel itself. **Resolved:**
+   `ds_spec_hide_bars` (#328, `spectator_bars.rs`) hides the panel
+   by filtering `PaintTraverse`, not through this interface.
 3. **Whether the `54` is reachable at its source.** Yes, more directly than
    §6 states: all four `54 * ScreenHeight / 480` sites read the *same* single
    `.rdata` float, `+0xab7a8` (confirmed by byte search — one address, four
    `fmul` xrefs, matching §6's site count exactly). One 4-byte `.rdata` write
    would rescale the spectator-bar compensation everywhere at once, instead of
-   `dodstudio_deathmsg`/`dodstudio_objectives` each patching their own call
+   `ds_hud_deathmsg`/`ds_hud_objectives` each patching their own call
    site. Not implemented — changing a shared constant changes DoD's own
    spectator-bar height assumption too, which is a real behaviour change, not
    a pure offset control like the existing per-element ones.

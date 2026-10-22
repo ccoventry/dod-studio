@@ -38,20 +38,26 @@
             </div>
             <div class="menu-dropdown" data-menu="help">
               <button class="menu-dropdown-btn" id="help-menu-btn" data-str="NAV.HELP_MENU">
-                Help<span id="help-menu-update-dot" class="menu-update-dot" style="display: none;" title="An update is available"></span>
+                Help
               </button>
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
                 <button class="menu-dropdown-item" id="view-logs-btn" data-str="FOOTER.VIEW_LOGS_BUTTON" data-str-title="FOOTER.VIEW_LOGS_TITLE" title="Open today's activity log in Explorer">View Logs</button>
+                <button class="menu-dropdown-item" id="setup-menu-btn" data-str="SETUP.MENU_ITEM" data-str-title="SETUP.MENU_ITEM_TITLE">Setup…</button>
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
               </div>
             </div>
+            <!-- #868: an update is out, or downloaded; update_chip.js. -->
+            <button id="update-chip" class="update-chip" type="button" hidden></button>
           </nav>
         </div>
         <div class="nav-tabs">
           <button class="nav-tab-btn active" data-nav="workspace" data-str="NAV.STUDIO_TAB">Studio</button>
           <button class="nav-tab-btn" data-nav="demo-auditor" data-str="NAV.DEMO_AUDITOR_TAB">Demo Auditor</button>
           <button class="nav-tab-btn" data-nav="demo-analyzer" data-str="NAV.DEMO_ANALYZER_TAB">Demo Analyzer</button>
+          <button class="nav-tab-btn" data-nav="hd-textures" data-str="NAV.HD_TEXTURES_TAB">HD Textures</button>
+          <button class="nav-tab-btn" data-nav="overviews" data-str="NAV.OVERVIEWS_TAB">Overviews</button>
+          <button class="nav-tab-btn" data-nav="blender" data-str="NAV.BLENDER_TAB">Blender</button>
         </div>
         <div class="nav-actions">
           <span id="session-file-indicator" class="session-file-indicator" title="" data-str="NAV.NO_SESSION_LOADED">No session loaded</span>
@@ -94,6 +100,15 @@
                 <span id="scan-spinner" class="spinner" style="display: none;"></span>
                 <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Status: Ready</p>
               </div>
+              <!-- queue_scan.js: demos done of the scan's total -->
+              <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <!-- demo_links.js (#376) -->
+              <details id="demo-links-section" class="demo-links">
+                <summary data-str="DEMO_LINKS.TITLE">Demo folders the game can play</summary>
+                <p class="demo-links-hint" data-str="DEMO_LINKS.HINT">The game only plays demos inside its own folder. Link a demo folder from any drive and the game plays its demos where they are, with nothing copied.</p>
+                <button id="link-folder-btn" data-str="DEMO_LINKS.LINK_BUTTON" data-str-title="DEMO_LINKS.LINK_BUTTON_TITLE">+ Link Folder to Game</button>
+                <ul id="demo-links-list" class="demo-links-list"></ul>
+              </details>
             </div>
           </div>
 
@@ -103,15 +118,83 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+                  <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
+                </select>
+                <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
+                <!-- #54: quick filters. -->
+                <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
+                  <option value="with_kills" data-str="WORKSPACE.KILLS_FILTER_WITH_KILLS">With kills</option>
+                  <option value="multi_kill" data-str="WORKSPACE.KILLS_FILTER_MULTI_KILL">With a multi-kill</option>
+                </select>
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.OWNER_ONLY_TITLE">
+                  <input type="checkbox" id="master-owner-only-cb" />
+                  <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
+                </label>
+                <!-- #685, #823: the queue in groups, a header line per group; queue_group_by.js. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_TITLE">
+                  <span data-str="WORKSPACE.GROUP_BY_LABEL">Group by:</span>
+                  <select id="master-group-by-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                    <option value="none" data-str="WORKSPACE.GROUP_BY_NONE">None</option>
+                    <option value="match" data-str="WORKSPACE.GROUP_BY_MATCH">Match</option>
+                    <option value="player" data-str="WORKSPACE.GROUP_BY_PLAYER">Player</option>
+                    <option value="map" data-str="WORKSPACE.GROUP_BY_MAP">Map</option>
+                    <option value="folder" data-str="WORKSPACE.GROUP_BY_FOLDER">Folder</option>
+                    <option value="date" data-str="WORKSPACE.GROUP_BY_DATE">Date</option>
+                    <option value="type" data-str="WORKSPACE.GROUP_BY_TYPE">Demo type</option>
+                  </select>
+                </label>
+                <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
+                <!-- #661: which Review marks a review plays. -->
+                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="all" data-str="REVIEW.COVERS_ALL">All</option>
+                  <option value="unmarked" data-str="REVIEW.COVERS_UNMARKED">Unmarked</option>
+                  <option value="keep" data-str="REVIEW.COVERS_KEEP">Keep</option>
+                  <option value="maybe" data-str="REVIEW.COVERS_MAYBE">Maybe</option>
+                  <option value="skip" data-str="REVIEW.COVERS_SKIP">Skip</option>
+                </select>
+                <!-- #822: whose highlights an HLTV demo's review plays; review_mode.js fills it. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.HLTV_TITLE">
+                  <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
+                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
+                </label>
+                <!-- #828: the players "Players I pick" reviews; review_hltv_picker.js fills it. -->
+                <span id="review-hltv-pick" class="review-hltv-pick" hidden>
+                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;"></select>
+                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 180px;"></select>
+                </span>
+                <!-- The order an HLTV demo's players' highlights play in. -->
+                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>
+                  <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
+                </select>
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
+                  <input type="checkbox" id="review-tick-yes-cb" checked />
+                  <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
+                </label>
+                <!-- #665: gaps between kills play fast. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
+                  <input type="checkbox" id="review-fast-forward-cb" checked />
+                  <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
+                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
+                </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
+                <!-- #845: the picked players get a line of their own under the
+                     toolbar, so adding one never moves the lists. -->
+                <span id="review-hltv-chips" class="review-hltv-chips review-hltv-chips-row" hidden></span>
               </div>
             </div>
             <!-- Populated by map_warnings.js when a scanned demo needs a map
                  that is missing or is a different build than it was recorded
                  on. Stays hidden when the library is complete. -->
             <div id="map-warning-banner" hidden></div>
+            <!-- Setup checklist (#599), setup_card.js: shown while something
+                 Start needs is missing; it stands in for the empty queue. -->
+            <div id="setup-card" class="setup-card" hidden></div>
             <div class="table-wrapper">
               <table id="master-demo-table">
                 <thead>
@@ -120,15 +203,15 @@
                     <th data-str="WORKSPACE.TABLE_HEADER_DEMO_FILE">Demo File</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_HIGHLIGHTS">Highlights</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_SELECTED">Selected</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_PENDING">Pending</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_CAPTURED">Captured</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_RENDERED">Rendered</th>
+                    <!-- Counts in one cell each, a legend of coloured letters under the name (queue_counts.js). -->
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_STATUS_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_STATUS">Status</span><div class="count-legend" id="status-count-legend"></div></th>
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_REVIEW_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_REVIEW">Review</span><div class="count-legend" id="review-count-legend"></div></th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="master-demo-table-body">
                   <tr>
-                    <td colspan="8" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
+                    <td colspan="7" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
                   </tr>
                 </tbody>
               </table>
@@ -146,11 +229,10 @@
               <div class="header-title-group" style="display: flex; gap: 8px; align-items: center;">
                 <h3 id="detail-demo-title" data-str="HIGHLIGHTS.DEFAULT_TITLE">Highlight Details</h3>
                 <button id="btn-launch-preview" disabled data-str="HIGHLIGHTS.LAUNCH_PREVIEW_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_PREVIEW_TITLE">Launch Preview</button>
+                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game</button>
               </div>
               <div class="header-controls" style="display: flex; gap: 8px; align-items: center;">
                 <button id="view-telemetry-btn" disabled data-str="HIGHLIGHTS.VIEW_TELEMETRY_BUTTON">View Match Telemetry</button>
-                <button id="btn-generate-all-previews" disabled data-str="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_BUTTON" data-str-title="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_TITLE">Generate All Previews</button>
-                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game (HLAE)</button>
                 <div class="control-group">
                   <label for="input-min-kills" data-str="HIGHLIGHTS.MIN_KILLS_LABEL">Min Kills:</label>
                   <input type="number" id="input-min-kills" value="1" min="1" style="width: 50px;" />
@@ -160,17 +242,9 @@
             <div id="detail-streaks-container">
               <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
+            <!-- Last Batch (#172): batch_results.js, shown once a batch ends. -->
+            <div id="batch-results" class="batch-results" hidden></div>
           </div>
-
-          <!-- Advanced Diagnostics Collapsible Block -->
-          <details id="advanced-diagnostics-details" class="egui-panel">
-            <summary style="cursor: pointer; font-weight: bold; color: #ccc;" data-str="HIGHLIGHTS.ADVANCED_DIAGNOSTICS_SUMMARY">Advanced Diagnostics (Canvas Timeline & Telemetry)</summary>
-            <div class="diagnostics-content" style="margin-top: 10px;">
-              <div style="padding: 10px; border-bottom: 1px solid #333; background: #1a1a1a;">
-                <canvas id="streak-timeline-canvas" height="60" style="width: 100%; border-radius: 2px; background: #121212; border: 1px solid #333;"></canvas>
-              </div>
-            </div>
-          </details>
 
           <!-- Export Configuration & Batch Capture -->
           <div id="export-config-panel" class="egui-panel" style="display: none;">
@@ -186,6 +260,7 @@
               <button class="config-tab-btn" data-tab="tab-custom-commands" data-str="CAPTURE_CONFIG.TAB_CUSTOM_COMMANDS">Commands</button>
               <button class="config-tab-btn" data-tab="tab-drive-overrides" data-str="CAPTURE_CONFIG.TAB_CAPTURE_OUTPUT">Destinations</button>
               <button class="config-tab-btn" data-tab="tab-render-output" data-str="CAPTURE_CONFIG.TAB_RENDER_OUTPUT">Render Output</button>
+              <button class="config-tab-btn" data-tab="tab-players" data-str="CAPTURE_CONFIG.TAB_PLAYERS">Players</button>
               <button class="config-tab-btn" data-tab="tab-notifications" data-str="CAPTURE_CONFIG.TAB_NOTIFICATIONS">Notifications</button>
             </div>
 
@@ -202,6 +277,13 @@
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
+              <!-- The <mod> of -game <mod> (#402): game_folder_ui.js lists the
+                   folders beside hl.exe, or disables the list when it can't. -->
+              <div class="input-row" data-str-title="CAPTURE_CONFIG.GAME_FOLDER_TIP" title="The folder beside hl.exe that DoD Studio starts with -game">
+                <label data-str="CAPTURE_CONFIG.GAME_FOLDER_LABEL">Game Folder:</label>
+                <select id="config-game-folder" style="flex: 1;"></select>
+              </div>
+              <div id="config-game-folder-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_EXEC_LABEL">HLAE Executable:</label>
                 <input type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" style="flex: 1;" />
@@ -214,7 +296,9 @@
                 <button id="ffmpeg-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="ffmpeg-path-warning" class="path-warning" style="display: none;"></div>
-              <div class="input-row">
+              <!-- Shown in local and debug builds, or while a path is set
+                   (hook_dll_row.js). -->
+              <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
                 <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
@@ -237,6 +321,8 @@
               <div class="inline-controls">
                 <div class="control-group">
                   <label for="config-res-width" data-str="CAPTURE_CONFIG.WIDTH_LABEL">Width:</label>
+                  <!-- Before the settings load only: a new install gets 1920x1080 when the
+                       primary screen holds it (settings_manager.rs default_resolution). -->
                   <input type="number" id="config-res-width" value="1280" style="width: 80px;" />
                 </div>
                 <div class="control-group">
@@ -245,7 +331,7 @@
                 </div>
                 <div class="control-group" id="capture-fps-group">
                   <label for="config-capture-fps" data-str="CAPTURE_CONFIG.CAPTURE_FPS_LABEL" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE">Capture FPS:</label>
-                  <input type="number" id="config-capture-fps" value="300" style="width: 80px;" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE" />
+                  <input type="number" id="config-capture-fps" value="120" style="width: 80px;" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE" />
                 </div>
                 <!-- A two-state choice rather than an option you switch on:
                      the alternative to video is not "no capture", it is a BMP
@@ -271,6 +357,8 @@
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_VIDEO_TITLE">Video</option>
                     <option value="obs" data-str="CAPTURE_CONFIG.CAPTURE_MODE_OBS"
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_OBS_TITLE">OBS (real time)</option>
+                    <option value="agr" data-str="CAPTURE_CONFIG.CAPTURE_MODE_AGR"
+                            data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_AGR_TITLE">AGR for Blender (no video)</option>
                   </select>
                   <input type="checkbox" id="config-ffmpeg-capture" hidden />
                 </div>
@@ -281,6 +369,13 @@
                      Every entry is also RGB/4:4:4 because hudAlpha carries the
                      HUD matte in its red channel. Disabled unless Video is on;
                      it has no meaning for a frame sequence. -->
+                <!-- Shown only in AGR mode (#450). Empty means "the same as
+                     Capture FPS", which is hidden in this mode, so the
+                     placeholder names the number it will use. -->
+                <div class="control-group" id="agr-fps-group" style="display: none;">
+                  <label for="config-agr-fps" data-str="CAPTURE_CONFIG.AGR_FPS_LABEL" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE">AGR FPS:</label>
+                  <input type="number" id="config-agr-fps" min="1" style="width: 80px;" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
+                </div>
                 <div class="control-group" id="capture-codec-group">
                   <label for="config-capture-codec" data-str="CAPTURE_CONFIG.CAPTURE_CODEC_LABEL"
                          data-str-title="CAPTURE_CONFIG.CAPTURE_CODEC_TITLE">Capture Codec:</label>
@@ -361,47 +456,42 @@
                    Lead, Stop Trail, Post-roll follow in the order they occur
                    around a single clip. -->
               <div class="grid-controls">
-                <div class="control-group control-group-stacked">
+                <!-- Hidden while Seek Between Clips is on: the hook waits for
+                     the demo itself (renderTimingDiagram). -->
+                <div class="control-group control-group-stacked" id="config-initial-delay-group">
                   <div class="control-group">
                     <label for="config-initial-delay" data-str="CAPTURE_CONFIG.INITIAL_DELAY_LABEL">Initial Delay (s):</label>
                     <input type="number" step="0.1" id="config-initial-delay" value="3.0" style="width: 80px;" />
                   </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.INITIAL_DELAY_HINT">Time between the demo loading and fast-forward starting.</p>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.INITIAL_DELAY_HINT">Time between the demo loading and the game moving to the first clip.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-pre-roll" data-str="CAPTURE_CONFIG.PRE_ROLL_LABEL">Pre-roll (s):</label>
-                    <input type="number" step="0.1" id="config-pre-roll" value="2.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-pre-roll" value="5.0" style="width: 80px;" />
                   </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between fast-forward stopping and capture starting.</p>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between the game reaching the clip and capture starting.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-record-start-lead" data-str="CAPTURE_CONFIG.START_LEAD_LABEL">Start Lead (s):</label>
-                    <input type="number" step="0.1" id="config-record-start-lead" value="0.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-record-start-lead" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.START_LEAD_HINT">Time between capture starting and the first kill.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-record-stop-trail" data-str="CAPTURE_CONFIG.STOP_TRAIL_LABEL">Stop Trail (s):</label>
-                    <input type="number" step="0.1" id="config-record-stop-trail" value="0.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-record-stop-trail" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.STOP_TRAIL_HINT">Time between the last kill and capture stopping.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-post-roll" data-str="CAPTURE_CONFIG.POST_ROLL_LABEL">Post-roll (s):</label>
-                    <input type="number" step="0.1" id="config-post-roll" value="0.6" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-post-roll" value="1.0" style="width: 80px;" />
                   </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and fast-forward resuming.</p>
-                </div>
-                <div class="control-group control-group-stacked">
-                  <div class="control-group">
-                    <label for="config-fast-forward-speed" data-str="CAPTURE_CONFIG.FF_SPEED_LABEL">FF Speed (x):</label>
-                    <input type="number" step="0.01" id="config-fast-forward-speed" value="0.05" style="width: 80px;" disabled data-str-title="CAPTURE_CONFIG.FF_SPEED_TITLE" title="Locked, matching dev — not currently user-editable." />
-                  </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.FF_SPEED_HINT">How fast playback races toward each clip between kills, as a multiple of real time. Locked at 0.05x, matching dev — not currently user-editable.</p>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>
               </div>
 
@@ -439,6 +529,15 @@
                   <label for="config-decal-flush" data-str="CAPTURE_CONFIG.DECAL_FLUSH_LABEL" data-str-title="CAPTURE_CONFIG.DECAL_FLUSH_TITLE">Flush Decals Between Clips</label>
                 </div>
                 <div class="control-group">
+                  <!-- #434: the hook DLL runs the batch on the original demos. -->
+                  <input type="checkbox" id="config-hook-runs-batch" checked />
+                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips</label>
+                </div>
+                <div class="control-group">
+                  <input type="checkbox" id="config-keep-game-behind" checked />
+                  <label for="config-keep-game-behind" data-str="CAPTURE_CONFIG.KEEP_GAME_BEHIND_LABEL" data-str-title="CAPTURE_CONFIG.KEEP_GAME_BEHIND_TITLE">Keep the Game Behind Your Windows While Capturing</label>
+                </div>
+                <div class="control-group">
                   <input type="checkbox" id="config-save-local-patched" />
                   <label for="config-save-local-patched" data-str="CAPTURE_CONFIG.SAVE_LOCAL_PATCHED_LABEL">Save Local Patched Copy</label>
                 </div>
@@ -451,17 +550,32 @@
                   <label for="config-auto-clear-previews" data-str="CAPTURE_CONFIG.AUTO_CLEAR_PREVIEWS_LABEL">Auto-clear Previews</label>
                 </div>
                 <div class="control-group">
-                  <input type="checkbox" id="config-auto-clear-temp-demos" />
+                  <input type="checkbox" id="config-auto-clear-temp-demos" checked />
                   <label for="config-auto-clear-temp-demos" data-str="CAPTURE_CONFIG.AUTO_CLEAR_TEMP_DEMOS_LABEL">Auto-clear Temp Demos</label>
                 </div>
                 <div class="control-group">
                   <button id="open-clear-previews-btn" data-str="CAPTURE_CONFIG.CLEAR_PREVIEWS_BUTTON">Clear Previews...</button>
                 </div>
               </div>
+              <div class="input-row">
+                <label for="config-scan-workers" data-str="CAPTURE_CONFIG.SCAN_WORKERS_LABEL" data-str-title="CAPTURE_CONFIG.SCAN_WORKERS_TITLE">Demo Scan Workers:</label>
+                <input type="number" id="config-scan-workers" value="2" min="1" max="8" style="width: 60px;" />
+                <span id="config-scan-workers-hint" class="text-muted"></span>
+              </div>
             </div>
 
             <!-- Tab Content: Initial + Scheduled Commands -->
             <div id="tab-custom-commands" class="config-tab-content" style="display: none;">
+              <!-- #442: named sets of both lists below. -->
+              <div class="input-row" style="margin-bottom: 12px;">
+                <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
+                <select id="command-profile-select"><option value="">—</option></select>
+                <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
+                <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
+                <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
+                <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
+                <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
+              </div>
               <div class="input-row">
                 <strong data-str="CAPTURE_CONFIG.INIT_COMMANDS_LABEL">Initial Commands (run once at demo load):</strong>
                 <span class="info-icon" data-str-title="CAPTURE_CONFIG.INIT_COMMANDS_INFO_TITLE" title=""><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span>
@@ -494,6 +608,7 @@
                 <button id="browse-drive-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="target-drive-list" class="list-editor-list"></div>
+              <div id="target-drive-same-warning" class="path-warning" style="display: none;"></div>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency
@@ -521,13 +636,22 @@
                   <input type="text" id="render-custom-codec-input" data-str-placeholder="RENDER.CUSTOM_CODEC_PLACEHOLDER" placeholder="-c:v mpeg4 -q:v 3" style="width: 260px;" />
                 </div>
                 <div class="control-group">
-                  <label for="render-fps-input" data-str="RENDER.SOURCE_FPS_LABEL">Source FPS:</label>
-                  <input type="number" id="render-fps-input" value="300" min="1" max="1000" style="width: 70px;" />
+                  <label for="render-fps-input" data-str="RENDER.SOURCE_FPS_LABEL" data-str-title="RENDER.SOURCE_FPS_TITLE">Source FPS:</label>
+                  <input type="number" id="render-fps-input" value="300" min="1" max="1000" style="width: 70px;" data-str-title="RENDER.SOURCE_FPS_TITLE" />
                 </div>
                 <div class="control-group">
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
                   <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" style="width: 60px;" />
                 </div>
+              </div>
+
+              <!-- #108: named render setups. -->
+              <div class="input-row" style="margin-top: 6px;">
+                <label for="render-preset-select" data-str="RENDER.PRESET_LABEL" data-str-title="RENDER.PRESET_TITLE">Preset:</label>
+                <select id="render-preset-select"><option value="">—</option></select>
+                <input type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" style="width: 180px;" />
+                <button id="render-preset-save" data-str="RENDER.PRESET_SAVE_BUTTON" data-str-title="RENDER.PRESET_SAVE_TITLE">Save Preset</button>
+                <button id="render-preset-delete" disabled data-str="RENDER.PRESET_DELETE_BUTTON" data-str-title="RENDER.PRESET_DELETE_TITLE">Delete</button>
               </div>
 
               <!-- JIT multi-drive export pool — first drive with 20GB+ free wins per job. -->
@@ -537,34 +661,162 @@
                 <button id="browse-render-export-btn" data-str="RENDER.BROWSE_DRIVE_BUTTON">Browse Drive</button>
               </div>
               <div id="render-export-dir-list" class="list-editor-list"></div>
+              <div id="render-export-dir-same-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 4px; align-items: center;">
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
+
+              <!-- "When a batch finishes" (#440) — finish_clips.js. Queues the
+                   batch's own takes through the same queue this tab's Scan
+                   uses, so the codec per capture mode is all it adds. There is
+                   no "keep as captured" for Video or Frame sequence: only an
+                   OBS take already carries its own sound. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-finish-clips" data-str="FINISH.WHEN_LABEL" data-str-title="FINISH.WHEN_TITLE">When a batch finishes:</label>
+                  <select id="config-finish-clips" data-str-title="FINISH.WHEN_TITLE">
+                    <option value="off" data-str="FINISH.WHEN_LEAVE">Leave the takes for the Render tab</option>
+                    <option value="finish" data-str="FINISH.WHEN_FINISH">Finish clips automatically</option>
+                  </select>
+                </div>
+              </div>
+              <div class="inline-controls">
+                <div class="control-group">
+                  <label for="config-finish-codec-obs" data-str="FINISH.CODEC_OBS_LABEL" data-str-title="FINISH.CODEC_TITLE">OBS clips:</label>
+                  <select id="config-finish-codec-obs" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="source_copy" data-str="FINISH.CODEC_KEEP">Keep as captured (copy, seconds)</option>
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-video" data-str="FINISH.CODEC_VIDEO_LABEL" data-str-title="FINISH.CODEC_TITLE">Video clips:</label>
+                  <select id="config-finish-codec-video" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-frames" data-str="FINISH.CODEC_FRAMES_LABEL" data-str-title="FINISH.CODEC_TITLE">Frame sequence clips:</label>
+                  <select id="config-finish-codec-frames" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+              </div>
+              <!-- Clip names (#441): the finished file of each highlight is
+                   named from this template, unless its row has a typed name. -->
+              <div class="input-row" style="margin-top: 10px;">
+                <label for="config-clip-name-template" data-str="CLIP_NAME.TEMPLATE_LABEL" data-str-title="CLIP_NAME.TEMPLATE_TITLE">Clip Name Template:</label>
+                <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
+                <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="config-clip-name-chips" class="placeholder-chips"></div>
+              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
+              <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
+              <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
             </div>
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
                  by default, each stage independently switchable. -->
+            <!-- Tab Content: Players (#428) -- each player's spray and
+                 crosshair in a demo. players_ui.js fills it; the hook DLL
+                 applies it while ds_player_overrides is 1. -->
+            <div id="tab-players" class="config-tab-content" style="display: none;">
+              <div class="setting-toggle">
+                <span class="setting-label"><span data-str="PLAYERS.USE_IN_GAME_LABEL">Use in the game</span><span class="info-icon" data-str-title="PLAYERS.USE_IN_GAME_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
+                <label class="setting-switch">
+                  <input type="checkbox" id="players-use-in-game" checked />
+                  <span class="setting-switch-slider"></span>
+                </label>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0;" data-str="PLAYERS.HELP">Pick the spray and the crosshair each player shows in your demos.</p>
+              <div class="input-row">
+                <input type="text" id="players-player-input" list="players-player-options" style="flex: 1;" data-str-placeholder="PLAYERS.PLAYER_PLACEHOLDER" placeholder="A player from the queue, a SteamID or a name" />
+                <datalist id="players-player-options"></datalist>
+                <button id="players-add-btn" disabled data-str="PLAYERS.ADD_BUTTON">Add Player</button>
+                <button id="players-refresh-btn" data-str="PLAYERS.REFRESH_BUTTON" data-str-title="PLAYERS.REFRESH_TITLE">Refresh</button>
+              </div>
+              <div id="players-players-status" class="players-status"></div>
+              <div id="players-list" class="players-list"></div>
+              <div id="players-warning" class="path-warning" style="display: none;"></div>
+              <div class="input-row" style="margin-top: 12px;">
+                <label for="players-pov-fallback" data-str="PLAYERS.POV_FALLBACK_LABEL" data-str-title="PLAYERS.POV_FALLBACK_TITLE">Spray, players not listed, POV demos:</label>
+                <select id="players-pov-fallback">
+                  <option value="own" data-str="PLAYERS.FALLBACK_OWN">Their own spray</option>
+                  <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
+                </select>
+                <span id="players-pov-fallback-png"></span>
+              </div>
+              <div class="input-row">
+                <label for="players-hltv-fallback" data-str="PLAYERS.HLTV_FALLBACK_LABEL" data-str-title="PLAYERS.HLTV_FALLBACK_TITLE">Spray, players not listed, HLTV demos:</label>
+                <select id="players-hltv-fallback">
+                  <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
+                </select>
+                <span id="players-hltv-fallback-png"></span>
+              </div>
+              <div class="input-row">
+                <label for="players-crosshair-fallback" data-str="PLAYERS.CROSSHAIR_FALLBACK_LABEL" data-str-title="PLAYERS.CROSSHAIR_FALLBACK_TITLE">Crosshair, players not listed:</label>
+                <select id="players-crosshair-fallback">
+                  <option value="game" data-str="PLAYERS.CROSSHAIR_GAME">Game's own</option>
+                  <option value="sprite" data-str="PLAYERS.CROSSHAIR_ONE">One fallback crosshair</option>
+                </select>
+                <span id="players-crosshair-fallback-pick"></span>
+              </div>
+              <div id="players-crosshair-fallback-picker"></div>
+              <!-- Make / add a crosshair (#842): crosshair_import_ui.js. -->
+              <div class="input-row">
+                <button id="players-make-crosshair-btn" data-str="PLAYERS.MAKE_CROSSHAIR_BUTTON" data-str-title="PLAYERS.MAKE_CROSSHAIR_TITLE">Make your own crosshair…</button>
+                <button id="players-add-crosshair-btn" data-str="PLAYERS.ADD_CROSSHAIR_BUTTON" data-str-title="PLAYERS.ADD_CROSSHAIR_TITLE">Add a crosshair file…</button>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 8px;" data-str="PLAYERS.MAKE_CROSSHAIR_HELP">The crosshair maker gives you a file called customxhair.spr, or a ZIP with it inside.</p>
+              <div id="players-add-crosshair-form" class="input-row" style="display: none;">
+                <label for="players-add-crosshair-name" data-str="PLAYERS.CROSSHAIR_NAME_LABEL" data-str-title="PLAYERS.CROSSHAIR_NAME_TITLE">Name:</label>
+                <input type="text" id="players-add-crosshair-name" maxlength="60" data-str-title="PLAYERS.CROSSHAIR_NAME_TITLE" />
+                <span id="players-add-crosshair-file" style="font-size: 12px;"></span>
+                <button id="players-add-crosshair-save" data-str="PLAYERS.CROSSHAIR_SAVE_BUTTON">Add</button>
+                <button id="players-add-crosshair-cancel" data-str="PLAYERS.CROSSHAIR_CANCEL_BUTTON">Cancel</button>
+              </div>
+              <div id="players-add-crosshair-status" class="players-status" style="display: none;"></div>
+              <div class="input-row">
+                <label for="players-spray-size" data-str="PLAYERS.SPRAY_SIZE_LABEL" data-str-title="PLAYERS.SPRAY_SIZE_TITLE">Spray size:</label>
+                <select id="players-spray-size" data-str-title="PLAYERS.SPRAY_SIZE_TITLE"></select>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0 0;" data-str="PLAYERS.HD_NOTE">Every spray from a PNG is drawn at the spray size in every demo.</p>
+            </div>
+
             <div id="tab-notifications" class="config-tab-content" style="display: none;">
               <div class="notification-settings-grid">
                 <div class="setting-toggle">
                   <span class="setting-label"><span data-str="CAPTURE_CONFIG.NOTIFY_PATCHING_LABEL">Patching Started/Complete</span><span class="info-icon" data-str-title="CAPTURE_CONFIG.NOTIFY_PATCHING_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
                   <label class="setting-switch">
-                    <input type="checkbox" id="config-notify-patching" checked />
+                    <input type="checkbox" id="config-notify-patching" />
                     <span class="setting-switch-slider"></span>
                   </label>
                 </div>
                 <div class="setting-toggle">
                   <span class="setting-label"><span data-str="CAPTURE_CONFIG.NOTIFY_DEMO_LOADING_LABEL">Demo Loading</span><span class="info-icon" data-str-title="CAPTURE_CONFIG.NOTIFY_DEMO_LOADING_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
                   <label class="setting-switch">
-                    <input type="checkbox" id="config-notify-demo-loading" checked />
+                    <input type="checkbox" id="config-notify-demo-loading" />
                     <span class="setting-switch-slider"></span>
                   </label>
                 </div>
                 <div class="setting-toggle">
                   <span class="setting-label"><span data-str="CAPTURE_CONFIG.NOTIFY_BETWEEN_CLIPS_LABEL">Fast-Forward to Clip</span><span class="info-icon" data-str-title="CAPTURE_CONFIG.NOTIFY_BETWEEN_CLIPS_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
                   <label class="setting-switch">
-                    <input type="checkbox" id="config-notify-between-clips" checked />
+                    <input type="checkbox" id="config-notify-between-clips" />
                     <span class="setting-switch-slider"></span>
                   </label>
                 </div>
@@ -593,7 +845,7 @@
             </div>
 
             <!-- Start/Cancel Batch and everything read alongside them (status,
-                 progress, the focus reminder, the disk-space warning, the
+                 progress, the disk-space warning, the
                  Capture Output Free/Required figures) live in
                  #footer-capture-studio now, not here — batch control used to
                  only be reachable from this Configuration subtab, so starting
@@ -614,39 +866,60 @@
 
             <div class="action-row" style="margin-top: 8px;">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
+              <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
+              <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
             </div>
             <div id="render-job-container"></div>
 
+            <!-- #70: the ticked rows are what the footer buttons act on. -->
+            <div id="render-selection-row" class="action-row" style="margin-top: 8px; align-items: center; gap: 6px; font-size: 0.9em;">
+              <button id="render-select-unrendered-btn" disabled data-str="RENDER.SELECT_UNRENDERED_BUTTON" data-str-title="RENDER.SELECT_UNRENDERED_TITLE" title="Tick only the takes with no finished render in their history.">Select unrendered</button>
+              <span id="render-selection-count" class="status-text" style="margin: 0 0 0 6px;">0 of 0 selected</span>
+            </div>
+
             <!-- Per-job render queue table — replaces the old single global
-                 status line + progress bar with real per-clip rows. -->
-            <div class="table-wrapper" style="margin-top: 8px; max-height: 280px;">
+                 status line + progress bar with real per-clip rows. It grows
+                 with the window down to just above the footer buttons and the
+                 status bar (#818), never shorter than the old 280px. -->
+            <div class="table-wrapper" style="margin-top: 8px; max-height: max(280px, calc(100vh - 360px));">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
-                    <th data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
-                    <th data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
-                    <th data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
-                    <th data-str="RENDER.TABLE_HEADER_DATE">Date</th>
+                    <th class="col-center"><input type="checkbox" id="render-select-all-cb" disabled data-str-title="RENDER.SELECT_ALL_CB_TITLE" title="Tick or untick every row" /></th>
+                    <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
+                    <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
+                    <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
+                    <th data-sort="date" data-str="RENDER.TABLE_HEADER_DATE">Date</th>
                     <th data-str-title="RENDER.TABLE_HEADER_SETTINGS_TITLE" data-str="RENDER.TABLE_HEADER_SETTINGS" title="Codec/FPS this job is queued to render with — its own setting, not necessarily what Configuration currently shows">Settings</th>
-                    <th data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
+                    <th data-sort="status" data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
                     <th data-str="RENDER.TABLE_HEADER_SPEED">Speed</th>
                     <th style="width: 140px;" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
-                    <th data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
+                    <th data-sort="size" data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
+                    <th data-str="RENDER.TABLE_HEADER_HISTORY" data-str-title="RENDER.TABLE_HEADER_HISTORY_TITLE">History</th>
                     <th data-str="RENDER.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="10" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="12" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
+            </div>
+            <!-- #644: Delete Take's steps, measuring then moving to the Recycle Bin. -->
+            <div id="render-take-delete-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
+              <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <span id="render-take-delete-progress-label"></span>
             </div>
 
             <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
               <div class="action-buttons">
-                <button id="start-render-btn" class="primary-btn" data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
-                <button id="cancel-render-btn" disabled data-str="RENDER.CANCEL_ALL_BUTTON">Cancel All</button>
-                <button id="reset-all-render-btn" disabled data-str="RENDER.RESET_ALL_BUTTON">Reset All</button>
-                <button id="remove-all-render-btn" disabled data-str="RENDER.REMOVE_ALL_BUTTON">Remove All (Not Rendering)</button>
+                <!-- #70: each acts on the ticked rows; render_pane.js sets the
+                     label's count and the tooltip. -->
+                <button id="start-render-btn" class="primary-btn" disabled data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
+                <button id="cancel-render-btn" disabled>Cancel (0)</button>
+                <button id="retry-render-btn" disabled>Retry (0)</button>
+                <button id="remove-render-btn" disabled>Remove (0)</button>
+                <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
+                <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
             </div>
@@ -658,32 +931,67 @@
         <section id="pane-demo-auditor" class="content-pane" style="display: none;">
           <div class="egui-panel">
             <div class="panel-header">
-              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor (Deduplication)</h3>
+              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
-              <div class="input-row">
+              <!-- Split Maps and Rename Demos use this folder; Duplicates has its
+                   own list, so auditor_tabs.js hides this row there (#844). -->
+              <div class="input-row" id="audit-target-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
-                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder to scan for duplicate demos..." style="flex: 1;" />
+                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <div class="row-inputs">
-                <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
-                <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+              <!-- One tab per tool (#624). -->
+              <div class="auditor-tabs" role="tablist">
+                <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
+                <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
+            <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="rename" data-str="AUDITOR.TAB_RENAME">Rename Demos</button>
               </div>
-              <p id="audit-status" class="status-indicator">
-                <span id="audit-spinner" class="spinner" style="display: none;"></span>
-                <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
-              </p>
             </div>
           </div>
+
+          <div class="auditor-tab-panel" data-auditor-panel="duplicates">
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-body">
+                <!-- Folders to check (#844): audit_folders.js. Folders added
+                     with the picker (starting from the Target Folder the other
+                     tabs use), or every fixed drive, in one pass. -->
+                <label data-str="AUDITOR.FOLDERS_TO_CHECK_LABEL">Folders to check:</label>
+                <ul id="audit-folder-list" class="audit-folder-list"></ul>
+                <div class="row-inputs">
+                  <button id="audit-add-folder-btn" type="button" data-str="AUDITOR.ADD_FOLDER_BUTTON">Add Folder…</button>
+                  <label class="audit-all-drives" data-str-title="AUDITOR.ALL_DRIVES_TITLE" title="Check every fixed drive in one pass">
+                    <input type="checkbox" id="audit-all-drives" />
+                    <span id="audit-all-drives-label" data-str="AUDITOR.ALL_DRIVES_LABEL">All drives</span>
+                  </label>
+                </div>
+                <div class="row-inputs">
+                  <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
+                  <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+                </div>
+                <div id="audit-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+                <p id="audit-status" class="status-indicator">
+                  <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
+                  <br><span id="audit-status-current" class="text-muted audit-status-current"></span>
+                </p>
+              </div>
+            </div>
 
           <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
-              <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Delete Selected Files</button>
+              <div class="row-inputs">
+                <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
+                <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
+                <!-- Hidden for 0.2.0, so every delete can be put back from the
+                     Recycle Bin; remove `hidden` to offer it again. -->
+                <button id="delete-permanent-audits-btn" hidden style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+              </div>
             </div>
-            <div class="table-wrapper" style="max-height: 400px;">
-              <table id="audit-results-table">
+            <!-- The app's table style; the list grows with the window, like the
+                 render list (#818), never shorter than 280px. -->
+            <div class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
+              <table id="audit-results-table" class="analyzer-table audit-table">
                 <thead>
                   <tr>
                     <th><input type="checkbox" id="audit-select-all" /></th>
@@ -700,7 +1008,570 @@
                 </tbody>
               </table>
             </div>
-            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
+          </div>
+          </div>
+
+          <!-- Split Maps (#624): split_pane.js. Demos that recorded more than
+               one map, split into one demo per map. -->
+          <div class="auditor-tab-panel" data-auditor-panel="split" hidden>
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h3 data-str="SPLIT.TITLE">Demos With More Than One Map</h3>
+              </div>
+              <div class="panel-body">
+                <p class="split-hint" data-str="SPLIT.HINT">A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.</p>
+                <div class="row-inputs">
+                  <label class="split-recursive-label"><input type="checkbox" id="split-recursive" checked /> <span data-str="SPLIT.RECURSIVE">Include subfolders</span></label>
+                  <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
+                  <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <!-- Find's two steps: finding the demos, then reading each one's map lengths. -->
+                <div id="split-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+                <p id="split-status" class="status-indicator"></p>
+                <div id="split-list" class="split-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rename Demos (#469): demo_rename_ui.js. Uses the Target Folder above. -->
+          <div class="auditor-tab-panel" data-auditor-panel="rename" hidden>
+          <div id="rename-pane" class="egui-panel" style="margin-top: 10px;">
+            <div class="panel-header flex-between">
+              <h3 data-str="DEMO_RENAME.PANEL_TITLE">Rename Demos</h3>
+            </div>
+            <div class="panel-body">
+              <p class="rename-hint" data-str="DEMO_RENAME.HINT"></p>
+              <div class="input-row">
+                <label for="rename-pov-template" class="rename-label" data-str="DEMO_RENAME.POV_LABEL">POV demos:</label>
+                <input type="text" id="rename-pov-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-pov-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-pov-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div class="input-row">
+                <label for="rename-hltv-template" class="rename-label" data-str="DEMO_RENAME.HLTV_LABEL">HLTV demos:</label>
+                <input type="text" id="rename-hltv-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div id="rename-chips" class="placeholder-chips"></div>
+              <label class="rename-lowercase-label" data-str-title="DEMO_RENAME.LOWERCASE_TITLE"><input type="checkbox" id="rename-lowercase" /> <span data-str="DEMO_RENAME.LOWERCASE_LABEL">Lowercase the whole name</span></label>
+              <div class="row-inputs">
+                <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
+                <button id="rename-cancel-btn" disabled data-str="DEMO_RENAME.CANCEL_BUTTON">Cancel</button>
+                <button id="rename-apply-btn" class="primary-btn" disabled data-str="DEMO_RENAME.APPLY_BUTTON">Rename</button>
+                <button id="rename-undo-btn" disabled data-str="DEMO_RENAME.UNDO_BUTTON">Undo Last Rename</button>
+              </div>
+              <div id="rename-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <p class="status-indicator"><span id="rename-status"></span></p>
+            </div>
+            <div class="table-wrapper" style="max-height: 400px;">
+              <table id="rename-table" class="analyzer-table rename-table">
+                <colgroup>
+                  <col class="rename-col-check" />
+                  <col />
+                  <col />
+                  <col class="rename-col-type" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th class="rename-center"><input type="checkbox" id="rename-select-all" checked /></th>
+                    <th data-str="DEMO_RENAME.COL_CURRENT">Current Name</th>
+                    <th data-str="DEMO_RENAME.COL_NEW">New Name</th>
+                    <th class="rename-center" data-str="DEMO_RENAME.COL_TYPE">Type</th>
+                  </tr>
+                </thead>
+                <tbody id="rename-body">
+                  <tr><td colspan="4" class="table-empty" data-str="DEMO_RENAME.TABLE_EMPTY">Choose a Target Folder above and click List Demos.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </div>
+        </section>
+
+        <!-- HD Textures (#372): what is built, the movie.cfg lines to use it,
+             fetching the upscaler (and a Python when the PC has none), and
+             running the goldsrc-hooks/tools/hd build scripts. -->
+        <section id="pane-hd-textures" class="content-pane" style="display: none;">
+          <div class="hd-pane-column">
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="HD.STATUS_TITLE">What's built</h3>
+                <button id="hd-refresh-btn" data-str="HD.REFRESH_BUTTON">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <p id="hd-status-text" class="hd-hint"></p>
+                <div class="table-wrapper">
+                  <table id="hd-status-table">
+                    <!-- One row per style, one column per asset type: hd_pane.js
+                         writes both, since the types come from the backend. -->
+                    <thead id="hd-status-head"></thead>
+                    <tbody id="hd-status-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.USE_TITLE">Use it in the game</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map. The gl_max_size line is the size the game shows textures at: the game's own default is 256, which would shrink every HD file back down.</p>
+                <div class="input-row">
+                  <label for="hd-style-select" data-str="HD.STYLE_LABEL">Style:</label>
+                  <select id="hd-style-select"></select>
+                  <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
+                </div>
+                <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
+                <!-- #426: which maps the selected style has map textures for, and the
+                     warning when the maps being built include one it hasn't. -->
+                <details id="hd-style-maps" class="hd-style-maps" hidden>
+                  <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
+                  <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
+                </details>
+                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
+                <pre id="hd-cfg-lines" class="hd-code"></pre>
+                <p id="hd-gl-max-size" class="hd-hint" hidden></p>
+              </div>
+            </div>
+
+            <!-- The style comparison: compare.py's sheet, from the user's own maps. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.PREVIEW_TITLE">Compare styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.PREVIEW_HINT">The original and each built style side by side, at 1:1 pixels so nothing is averaged away: the most detailed textures of your maps, and a few model skins, sprites and detail textures. Click the sheet to fit it to the page.</p>
+                <div class="input-row">
+                  <label for="hd-preview-map" data-str="HD.PREVIEW_MAP_LABEL">Map:</label>
+                  <select id="hd-preview-map"></select>
+                </div>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_STYLES_LABEL">Styles:</span>
+                  <div id="hd-preview-styles" class="hd-choices"></div>
+                </div>
+                <div class="row-inputs">
+                  <button id="hd-preview-btn" class="primary-btn" data-str="HD.PREVIEW_BUTTON">Show comparison</button>
+                </div>
+                <p id="hd-preview-text" class="hd-hint"></p>
+                <div id="hd-preview-wrap" class="hd-preview-wrap" hidden>
+                  <img id="hd-preview-img" alt="">
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.SETUP_TITLE">Upscaler</h3>
+              </div>
+              <div class="panel-body">
+                <p id="hd-tools-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-upscaler-pick-btn" data-str="HD.UPSCALER_PICK_BUTTON">Choose upscaler folder...</button>
+                  <button id="hd-upscaler-reset-btn" data-str="HD.PYTHON_RESET_BUTTON">Find it automatically</button>
+                </div>
+                <p id="hd-python-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-python-pick-btn" data-str="HD.PYTHON_PICK_BUTTON">Choose python.exe...</button>
+                  <button id="hd-python-reset-btn" data-str="HD.PYTHON_RESET_BUTTON">Find it automatically</button>
+                </div>
+                <p class="hd-hint" data-str="HD.LICENCE_NOTE">This downloads Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.</p>
+                <div class="row-inputs">
+                  <button id="hd-setup-btn" class="primary-btn" data-str="HD.SETUP_BUTTON">Download upscaler and models</button>
+                  <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="hd-setup-progress" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- Which maps get HD map textures and skies: the install's hd_maps.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MAPS_TITLE">Maps to build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MAPS_HINT">Map textures and skies are built only for the maps you pick here, which saves hours on a big map collection. Model skins, sprites and detail textures aren't tied to a map, so they're always built. The command-line scripts read the same list.</p>
+                <p id="hd-maps-file" class="hd-hint"></p>
+                <div class="hd-maps-mode">
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every">
+                    <span id="hd-maps-every-label" data-str="HD.MAPS_EVERY">Every map</span>
+                  </label>
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some">
+                    <span data-str="HD.MAPS_SOME">Only the maps I pick</span>
+                  </label>
+                </div>
+                <div id="hd-maps-editor">
+                  <div class="hd-choice-group">
+                    <span class="hd-choice-label" data-str="HD.MAPS_LIST_LABEL">Picked by:</span>
+                    <ul id="hd-maps-patterns" class="hd-map-patterns"></ul>
+                  </div>
+                </div>
+                <div class="input-row">
+                  <label for="hd-maps-search" data-str="HD.MAPS_SEARCH_LABEL">Your maps:</label>
+                  <input id="hd-maps-search" type="search" spellcheck="false" data-str-placeholder="HD.MAPS_SEARCH_PLACEHOLDER" placeholder="Search as a line: *anzio*">
+                  <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add as a line</button>
+                  <label class="hd-check">
+                    <input type="checkbox" id="hd-maps-picked-only">
+                    <span data-str="HD.MAPS_PICKED_ONLY">Picked only</span>
+                  </label>
+                  <span id="hd-maps-legend" class="hd-map-legend" hidden>
+                    <span class="hd-tick hd-tick-own"></span><span data-str="HD.MAPS_TICK_OWN">its own line</span>
+                    <span class="hd-tick hd-tick-pattern"></span><span data-str="HD.MAPS_TICK_PATTERN">a pattern</span>
+                  </span>
+                </div>
+                <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed. A green tick is a map a pattern picked: click it to see which chip, and change or remove that line to leave the map out.</p>
+                <ul id="hd-maps-available" class="hd-map-list"></ul>
+                <p id="hd-maps-summary" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-maps-save-btn" class="primary-btn" data-str="HD.MAPS_SAVE_BUTTON">Save</button>
+                  <button id="hd-maps-undo-btn" data-str="HD.MAPS_UNDO_BUTTON">Undo changes</button>
+                </div>
+                <p id="hd-maps-message" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.BUILD_TITLE">Build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.BUILD_HINT">Pick the styles and kinds of files to build. Files already built are skipped, so a stopped build carries on where it left off. Map textures take the longest: a few minutes per style for a few dozen maps, and an hour or more for every map in a large collection.</p>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_STYLES_LABEL">Styles:</span>
+                  <div id="hd-build-styles" class="hd-choices"></div>
+                </div>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_TYPES_LABEL">Files:</span>
+                  <div id="hd-build-types" class="hd-choices"></div>
+                </div>
+                <div class="input-row">
+                  <label for="hd-build-cap" data-str="HD.BUILD_CAP_LABEL">Largest size:</label>
+                  <select id="hd-build-cap">
+                    <option value="1024" data-str="HD.CAP_NAMES.1024">1024 (the usual)</option>
+                    <option value="2048" data-str="HD.CAP_NAMES.2048">2048</option>
+                    <option value="4096" data-str="HD.CAP_NAMES.4096">4096</option>
+                  </select>
+                </div>
+                <p id="hd-build-cap-hint" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-build-btn" class="primary-btn" data-str="HD.BUILD_BUTTON">Build</button>
+                  <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="hd-build-progress" class="hd-hint"></p>
+                <p id="hd-build-line" class="hd-hint hd-mono"></p>
+                <details class="hd-details">
+                  <summary data-str="HD.SCRIPTS_SUMMARY">Build from a Command Prompt instead</summary>
+                  <p class="hd-hint" data-str="HD.SCRIPTS_HINT">The same scripts run from goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
+                  <pre id="hd-realesrgan-line" class="hd-code"></pre>
+                </details>
+              </div>
+            </div>
+
+            <!-- The custom-style form: lines in the install's my_styles.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MY_STYLES_TITLE">Your own styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MY_STYLES_HINT">Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.</p>
+                <p id="hd-my-styles-text" class="hd-hint"></p>
+                <ul id="hd-my-styles-list" class="hd-my-styles"></ul>
+                <div class="input-row">
+                  <label for="hd-style-name" data-str="HD.STYLE_NAME_LABEL">Name:</label>
+                  <input id="hd-style-name" type="text" maxlength="32" spellcheck="false" data-str-placeholder="HD.STYLE_NAME_PLACEHOLDER">
+                  <label for="hd-style-kind" data-str="HD.STYLE_KIND_LABEL">Made by:</label>
+                  <select id="hd-style-kind">
+                    <option value="plain" data-str="HD.STYLE_KINDS.plain">A plain enlargement, sharpened</option>
+                    <option value="ai" data-str="HD.STYLE_KINDS.ai">An AI model</option>
+                    <option value="blend" data-str="HD.STYLE_KINDS.blend">Mixing two styles</option>
+                  </select>
+                </div>
+                <div class="input-row" data-style-kind="plain">
+                  <label for="hd-style-sharpening" data-str="HD.STYLE_SHARPENING_LABEL">Sharpening (0 to 500; plain is 60):</label>
+                  <input id="hd-style-sharpening" type="number" min="0" max="500" step="10" value="60">
+                </div>
+                <div class="input-row" data-style-kind="ai" hidden>
+                  <label for="hd-style-model" data-str="HD.STYLE_MODEL_LABEL">Model:</label>
+                  <select id="hd-style-model"></select>
+                </div>
+                <p id="hd-style-model-hint" class="hd-hint" data-style-kind="ai" hidden></p>
+                <div class="input-row" data-style-kind="blend" hidden>
+                  <label for="hd-style-percent" data-str="HD.STYLE_MIX_LABEL">Mix:</label>
+                  <input id="hd-style-percent" type="number" min="0" max="100" step="5" value="50">
+                  <span data-str="HD.STYLE_MIX_OF">% of</span>
+                  <select id="hd-style-a"></select>
+                  <span data-str="HD.STYLE_MIX_REST">and the rest</span>
+                  <select id="hd-style-b"></select>
+                </div>
+                <pre id="hd-style-line" class="hd-code"></pre>
+                <div class="row-inputs">
+                  <button id="hd-style-save-btn" class="primary-btn" data-str="HD.STYLE_SAVE_BUTTON">Save style</button>
+                </div>
+                <p id="hd-style-message" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- What ds_debug_hd_misses last wrote to the hook log, by map. -->
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="HD.MISSES_TITLE">Textures that kept their original</h3>
+                <button id="hd-misses-btn" data-str="HD.MISSES_BUTTON">Read the game's log</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MISSES_HINT">After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.</p>
+                <div class="input-row">
+                  <pre id="hd-misses-command" class="hd-code hd-code-inline"></pre>
+                  <button id="hd-misses-copy-btn" data-str="HD.COPY_BUTTON">Copy</button>
+                </div>
+                <p id="hd-misses-text" class="hd-hint"></p>
+                <label class="hd-check">
+                  <input type="checkbox" id="hd-misses-on-purpose">
+                  <span data-str="HD.MISSES_SHOW_ON_PURPOSE">Show textures left alone on purpose</span>
+                </label>
+                <div id="hd-misses-maps"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Blender (#403): rebuild a highlight recorded with mirv_agr in Blender -->
+        <section id="pane-blender" class="content-pane" style="display: none;">
+          <div class="hd-pane-column">
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="BLENDER.BLENDER_TITLE">Blender</h3>
+                <button id="blender-refresh-btn" data-str="BLENDER.REFRESH_BUTTON">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.INTRO">Rebuild a highlight you recorded with HLAE's mirv_agr in Blender, with the real map, HD textures, lighting and the recorded camera, and render it. Needs Blender 4.4 with Blender Source Tools 3.4.3 and afx-blender-scripts 1.14.6 installed, and the game's models decompiled with Crowbar (blender\README.md in the DoD Studio repo has the steps).</p>
+                <p id="blender-status-text" class="hd-hint"></p>
+                <p id="blender-addons-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="blender-pick-exe-btn" data-str="BLENDER.PICK_EXE_BUTTON">Choose blender.exe...</button>
+                  <button id="blender-reset-exe-btn" data-str="BLENDER.RESET_EXE_BUTTON">Find it automatically</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.TAKE_TITLE">Take</h3>
+              </div>
+              <div class="panel-body">
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.AGR_LABEL">Recording (.agr):</span>
+                  <span id="blender-agr-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-agr-btn" data-str="BLENDER.PICK_AGR_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.ASSETS_LABEL">Crowbar models folder:</span>
+                  <span id="blender-assets-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-assets-btn" data-str="BLENDER.PICK_ASSETS_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <label for="blender-map-select" data-str="BLENDER.MAP_LABEL">Map:</label>
+                  <select id="blender-map-select"></select>
+                  <label for="blender-style-select" data-str="BLENDER.STYLE_LABEL">Textures:</label>
+                  <select id="blender-style-select"></select>
+                </div>
+                <div class="input-row">
+                  <span id="blender-work-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-open-work-btn" data-str="BLENDER.OPEN_WORK_BUTTON">Open folder</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.STEPS_TITLE">Steps</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.STEPS_HINT">Run them in order; each one picks up the last one's files. Import opens Blender minimized in the taskbar while it works.</p>
+                <div class="row-inputs">
+                  <button id="blender-import-btn" class="primary-btn" data-str="BLENDER.IMPORT_BUTTON">1. Import</button>
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-scene-btn" class="primary-btn" data-str="BLENDER.SCENE_BUTTON">2. Build scene</button>
+                  <select id="blender-engine-select">
+                    <option value="eevee" data-str="BLENDER.ENGINE_EEVEE">EEVEE previews</option>
+                    <option value="cycles" data-str="BLENDER.ENGINE_CYCLES">One Cycles frame</option>
+                  </select>
+                  <input id="blender-frames-input" type="text" data-str-placeholder="BLENDER.FRAMES_PLACEHOLDER" placeholder="frames, e.g. 180 510 (optional)" />
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-render-btn" class="primary-btn" data-str="BLENDER.RENDER_BUTTON">3. Render</button>
+                  <button id="blender-encode-btn" class="primary-btn" data-str="BLENDER.ENCODE_BUTTON">4. Encode MP4</button>
+                  <select id="blender-quality-select">
+                    <option value="quick" data-str="BLENDER.QUALITY_QUICK">Quick: 720p, 32 samples</option>
+                    <option value="final" data-str="BLENDER.QUALITY_FINAL">Final: 1080p, 64 samples</option>
+                  </select>
+                  <button id="blender-cancel-btn" disabled data-str="BLENDER.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="blender-progress" class="hd-hint"></p>
+                <p id="blender-line" class="hd-hint hd-mono"></p>
+                <ul id="blender-results" class="hd-hint hd-mono"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- The Overviews page (#371): map overviews made from the map, edited
+             here and written for the game. overviews_pane.js drives it. -->
+        <section id="pane-overviews" class="content-pane" style="display: none;">
+          <div class="ov-layout">
+            <div class="egui-panel ov-side">
+              <div class="panel-header">
+                <h3 data-str="OVERVIEWS.MAPS_TITLE">Maps</h3>
+              </div>
+              <div class="panel-body ov-side-body">
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.INSTALL_LABEL">Half-Life install</span>
+                  <select id="ov-install-select"></select>
+                </label>
+                <input id="ov-map-filter" type="search" data-str-placeholder="OVERVIEWS.FILTER_PLACEHOLDER" placeholder="Filter maps">
+                <div id="ov-map-list" class="ov-map-list"></div>
+              </div>
+            </div>
+
+            <div class="egui-panel ov-main">
+              <div class="panel-header flex-between">
+                <h3 id="ov-map-title" data-str="OVERVIEWS.NO_MAP_TITLE">Pick a map</h3>
+                <div class="ov-tools-row" id="ov-mode-buttons">
+                  <button class="ov-mode active" data-mode="area" data-str="OVERVIEWS.MODE_AREA" data-str-title="OVERVIEWS.MODE_AREA_TIP" title="Click an area to give it the chosen colour. Pieces you coloured on their own keep theirs; hold Shift to paint over them too">Colour area</button>
+                  <button class="ov-mode" data-mode="face" data-str="OVERVIEWS.MODE_FACE" data-str-title="OVERVIEWS.MODE_FACE_TIP" title="Click to colour one piece of floor only">Colour piece</button>
+                  <button class="ov-mode" data-mode="hide" data-str="OVERVIEWS.MODE_HIDE" data-str-title="OVERVIEWS.MODE_HIDE_TIP" title="Click an area to hide it or show it again">Hide area</button>
+                  <button id="ov-undo-btn" data-str="OVERVIEWS.UNDO_BUTTON" data-str-title="OVERVIEWS.UNDO_TIP" title="Undo (Ctrl+Z)">Undo</button>
+                  <span class="ov-zoom">
+                    <button id="ov-zoom-out" data-str-title="OVERVIEWS.ZOOM_OUT_TIP" title="Zoom out (or scroll)">−</button>
+                    <button id="ov-zoom-fit" data-str-title="OVERVIEWS.ZOOM_FIT_TIP" title="Show the whole map. Scroll to zoom; drag with the right or middle button, or hold Space, to move about">100%</button>
+                    <button id="ov-zoom-in" data-str-title="OVERVIEWS.ZOOM_IN_TIP" title="Zoom in (or scroll)">+</button>
+                  </span>
+                </div>
+              </div>
+              <div class="panel-body ov-canvas-wrap" id="ov-canvas-wrap">
+                <canvas id="ov-canvas"></canvas>
+                <p id="ov-empty" class="hd-hint" data-str="OVERVIEWS.EMPTY_HINT">Pick a map on the left. Its overview is made from the map itself: every floor a player can reach from the spawns.</p>
+                <div id="ov-building" class="ov-building" hidden>
+                  <p id="ov-building-text" class="hd-hint"></p>
+                  <div class="progress-bar-container"><div id="ov-building-fill" class="progress-bar-fill" style="width: 0%"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel ov-side">
+              <div class="panel-header">
+                <h3 data-str="OVERVIEWS.EDIT_TITLE">Edit</h3>
+              </div>
+              <div class="panel-body ov-side-body">
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.THEME_LABEL">Theme</span>
+                  <select id="ov-theme"></select>
+                </label>
+                <div class="ov-subtitle" data-str="OVERVIEWS.COLOUR_TITLE">Colour</div>
+                <div id="ov-palette" class="ov-palette"></div>
+                <div class="ov-recent-row">
+                  <span data-str="OVERVIEWS.RECENT_LABEL">Recent</span>
+                  <div id="ov-recent" class="ov-recent"></div>
+                </div>
+                <div class="ov-colour-row">
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.CUSTOM_COLOUR_LABEL">Other colour</span>
+                    <input id="ov-custom-colour" type="color" value="#929bf7">
+                  </label>
+                  <button class="ov-mode" data-mode="pick" id="ov-pick-btn" data-str-title="OVERVIEWS.PICK_TIP" title="Pick a colour from the map: click a floor to take its colour (then back to the tool you had). Or hold Ctrl and click" aria-label="Pick a colour from the map"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5l5 5-9.5 9.5H5v-5z" fill="#cfe8ff" stroke="currentColor" stroke-width="1.8"/><path d="M16 2.5a2.1 2.1 0 0 1 3 0l2.5 2.5a2.1 2.1 0 0 1 0 3L19.5 10 14 4.5z" fill="currentColor"/><path d="M5 19l-2.5 2.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+                </div>
+                <button id="ov-clear-colour-btn" data-str="OVERVIEWS.CLEAR_COLOUR_BUTTON" data-str-title="OVERVIEWS.CLEAR_COLOUR_TIP" title="Pick this, then click an area to put its own colour back">Original colour</button>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SHOW_TITLE">Show</div>
+                <div class="ov-checks" id="ov-show">
+                  <label><input type="checkbox" data-show="flags"> <span data-str="OVERVIEWS.SHOW_FLAGS">Flags</span></label>
+                  <label><input type="checkbox" data-show="flagLabels"> <span data-str="OVERVIEWS.SHOW_FLAG_NAMES">Flag names</span></label>
+                  <label><input type="checkbox" data-show="capZones"> <span data-str="OVERVIEWS.SHOW_CAP_ZONES">Capture zones</span></label>
+                  <label title="Floors you can shoot or blow away get a dotted outline"><input type="checkbox" data-show="breakables"> <span data-str="OVERVIEWS.SHOW_BREAKABLES">Breakable floors</span></label>
+                  <label title="Slopes too steep to stand on, that you can still get onto and slide off, get an outline"><input type="checkbox" data-show="slopes"> <span data-str="OVERVIEWS.SHOW_SLOPES">Slopes you slide on</span></label>
+                  <label><input type="checkbox" data-show="spawns"> <span data-str="OVERVIEWS.SHOW_SPAWNS">Spawn points</span></label>
+                  <label><input type="checkbox" data-show="spawnLabels"> <span data-str="OVERVIEWS.SHOW_SPAWN_NAMES">Spawn names</span></label>
+                  <label title="The area round each spawn that hurts the other team: its floor filled, and the line where you walk into it"><input type="checkbox" data-show="spawnProtection"> <span data-str="OVERVIEWS.SHOW_SPAWN_PROTECTION">Spawn protection</span></label>
+                  <label><input type="checkbox" data-show="stairs"> <span data-str="OVERVIEWS.SHOW_STAIRS">Stairs in white</span></label>
+                  <label><input type="checkbox" data-show="water"> <span data-str="OVERVIEWS.SHOW_WATER">Water</span></label>
+                  <div class="ov-check-row">
+                    <label data-str-title="OVERVIEWS.SHOW_TITLE_TIP" title="The map's name on a card, top right. Drag it on the map to move it"><input type="checkbox" data-show="title"> <span data-str="OVERVIEWS.SHOW_TITLE">Map title</span></label>
+                    <button id="ov-title-reset" class="ov-flag-reset" data-str-title="OVERVIEWS.TITLE_RESET_TIP" title="Put the title back in the top right">↺</button>
+                  </div>
+                  <div class="ov-flag-row ov-credit-row">
+                    <input id="ov-credit" type="text" data-str-title="OVERVIEWS.CREDIT_TIP" title="Who made the map, on the title card's second line. Found in the map's .txt or the map itself: type over it, or clear it for none">
+                    <button id="ov-credit-reset" class="ov-flag-reset" data-str-title="OVERVIEWS.CREDIT_RESET_TIP" title="Back to the credit found with the map">↺</button>
+                  </div>
+                </div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.PREVIEW_TITLE">While editing (not saved)</div>
+                <div class="ov-checks" id="ov-preview">
+                  <label data-str-title="OVERVIEWS.HOVER_TIP" title="Light up what a click would change before you click"><input type="checkbox" id="ov-hover-preview"> <span data-str="OVERVIEWS.HOVER_PREVIEW">Highlight what a click changes</span></label>
+                  <label data-str-title="OVERVIEWS.SHOW_AREAS_TIP" title="Outline every area. Hold Alt to outline every floor piece instead"><input type="checkbox" id="ov-show-areas"> <span data-str="OVERVIEWS.SHOW_AREAS">Show areas</span></label>
+                  <label title="The game's flag icons over the map, as big as they come out in game"><input type="checkbox" id="ov-flag-icons"> <span data-str="OVERVIEWS.SHOW_FLAG_ICONS">Flag icons</span></label>
+                </div>
+                <label class="ov-field" title="The game draws flag icons at a fixed size on screen, so they cover more of the map the smaller the screen">
+                  <span data-str="OVERVIEWS.FLAG_SCREEN_LABEL">Flag icons as seen at</span>
+                  <select id="ov-flag-screen"></select>
+                </label>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SP_TITLE">Spawn protection</div>
+                <div class="ov-sp" id="ov-sp">
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.SP_FILL">Fill</span>
+                    <select id="ov-sp-fill">
+                      <option value="tint" data-str="OVERVIEWS.SP_FILL_TINT">Tint</option>
+                      <option value="hatch" data-str="OVERVIEWS.SP_FILL_HATCH">Hatching</option>
+                      <option value="none" data-str="OVERVIEWS.SP_NONE">None</option>
+                    </select>
+                  </label>
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.SP_LINE">Line</span>
+                    <select id="ov-sp-line">
+                      <option value="team" data-str="OVERVIEWS.SP_LINE_TEAM">Team colour</option>
+                      <option value="hazard" data-str="OVERVIEWS.SP_LINE_HAZARD">Hazard stripes</option>
+                      <option value="none" data-str="OVERVIEWS.SP_NONE">None</option>
+                    </select>
+                  </label>
+                  <div class="ov-sp-colours">
+                    <label title="Allies' spawn"><span data-str="OVERVIEWS.SP_ALLIES">Allies</span> <input type="color" id="ov-sp-allies"></label>
+                    <label title="Axis' spawn"><span data-str="OVERVIEWS.SP_AXIS">Axis</span> <input type="color" id="ov-sp-axis"></label>
+                    <label title="Hazard stripes"><span data-str="OVERVIEWS.SP_STRIPES">Stripes</span> <input type="color" id="ov-sp-stripe1"><input type="color" id="ov-sp-stripe2"></label>
+                  </div>
+                  <button id="ov-sp-reset" data-str="OVERVIEWS.SP_RESET">Default look</button>
+                </div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.FLAGS_TITLE">Flag names</div>
+                <div id="ov-flag-names" class="ov-list"></div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SPAWN_NAMES_TITLE">Spawn names</div>
+                <div id="ov-spawn-names" class="ov-list"></div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.LABELS_TITLE">Labels</div>
+                <button class="ov-mode ov-add-label" data-mode="label" data-str="OVERVIEWS.MODE_LABEL" data-str-title="OVERVIEWS.MODE_LABEL_TIP" title="Click to put a text label there">Add label</button>
+                <div id="ov-labels" class="ov-list"></div>
+                <p id="ov-labels-hint" class="hd-hint" data-str="OVERVIEWS.LABELS_HINT">Click Add label, then click the map where it goes. Drag a label to move it.</p>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SAVE_TITLE">Save for the game</div>
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.FORMAT_LABEL">Image</span>
+                  <select id="ov-format">
+                    <option value="tga" data-str="OVERVIEWS.FORMAT_TGA">TGA: full colour, smooth edges</option>
+                    <option value="bmp" data-str="OVERVIEWS.FORMAT_BMP">BMP: 256 colours, like the game's own</option>
+                  </select>
+                </label>
+                <label class="ov-checks"><span><input id="ov-hd" type="checkbox" checked> <span data-str="OVERVIEWS.HD_LABEL">Also save a high-quality copy</span></span></label>
+                <p class="hd-hint" data-str="OVERVIEWS.HD_HINT">The high-quality copy is &lt;map&gt;_hd.tga at 4096x3072, saved in dod_addon/overviews. The game alone shows at most 1024x768; with DoD Studio's in-game hook it uses this copy instead.</p>
+                <button id="ov-save-btn" class="primary" data-str="OVERVIEWS.SAVE_BUTTON">Save overview</button>
+                <button id="ov-reset-btn" data-str="OVERVIEWS.RESET_BUTTON">Start over</button>
+                <p id="ov-save-status" class="hd-hint"></p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -733,8 +1604,13 @@
                docked above the report tabs. -->
           <div class="analyzer-main-column">
             <div class="egui-panel analyzer-demos-panel">
-              <div class="panel-header">
+              <div class="panel-header flex-between">
                 <h3 data-str="ANALYZER.DEMOS_TITLE">Demos</h3>
+                <div class="analyzer-cache-controls">
+                  <span id="analyzer-cache-status" class="status-text"></span>
+                  <progress id="analyzer-cache-bar" class="analyzer-cache-bar" max="1" value="0" hidden></progress>
+                  <button id="analyzer-cache-all-btn" data-str="ANALYZER.CACHE_ALL_BUTTON" data-str-title="ANALYZER.CACHE_ALL_TITLE" title="Analyse every demo in this folder now">Cache all</button>
+                </div>
               </div>
               <div class="analyzer-filter-bar">
                 <input type="text" id="analyzer-filter-search" data-str-placeholder="ANALYZER.SEARCH_NAME_MAP_PLACEHOLDER" placeholder="Search name/map..." />
@@ -744,9 +1620,12 @@
                   <option value="HLTV" data-str="ANALYZER.TYPE_HLTV">HLTV</option>
                 </select>
                 <input type="text" id="analyzer-filter-map" data-str-placeholder="ANALYZER.MAP_PLACEHOLDER" placeholder="Map" />
+                <input type="text" id="analyzer-filter-player" list="analyzer-player-options" data-str-placeholder="ANALYZER.PLAYER_PLACEHOLDER" data-str-title="ANALYZER.PLAYER_FILTER_TITLE" placeholder="Player" />
+                <datalist id="analyzer-player-options"></datalist>
                 <input type="text" id="analyzer-filter-date-start" data-str-placeholder="ANALYZER.MIN_DATE_PLACEHOLDER" placeholder="Min Date (YYYY-MM-DD)" />
                 <input type="text" id="analyzer-filter-date-end" data-str-placeholder="ANALYZER.MAX_DATE_PLACEHOLDER" placeholder="Max Date (YYYY-MM-DD)" />
                 <button id="analyzer-filter-reset" data-str="ANALYZER.RESET_BUTTON">Reset</button>
+                <span id="analyzer-player-status" class="text-muted" style="font-size: 0.85em;"></span>
               </div>
               <div class="table-wrapper analyzer-demos-table-wrap">
                 <table class="analyzer-table" id="analyzer-demo-table">
@@ -778,8 +1657,12 @@
                 <button class="analyzer-subtab-btn" data-subtab="team-details" data-str="ANALYZER.SUBTAB_TEAM_DETAILS">Team Details</button>
                 <button class="analyzer-subtab-btn" data-subtab="timeline" data-str="ANALYZER.SUBTAB_TIMELINE">Timeline</button>
                 <button class="analyzer-subtab-btn" data-subtab="rounds" data-str="ANALYZER.SUBTAB_ROUNDS">Rounds</button>
+                <button class="analyzer-subtab-btn" data-subtab="kill-map" data-str="ANALYZER.SUBTAB_KILL_MAP">Kill Map</button>
+                <button class="analyzer-subtab-btn" data-subtab="flags" data-str="ANALYZER.SUBTAB_FLAGS">Flags</button>
                 <button class="analyzer-subtab-btn" data-subtab="chat" data-str="ANALYZER.SUBTAB_CHAT">Chat Log</button>
               </div>
+              <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
+              <div id="analyzer-damage-banner" class="analyzer-warning-banner" hidden></div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
                 <p class="analyzer-empty" data-str="ANALYZER.EMPTY_PICK_DEMO">Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".</p>
               </div>
@@ -792,6 +1675,8 @@
            switchNavTab() (nav.js) the same way the tab panes themselves are. -->
       <footer id="pinned-action-bar">
         <div id="footer-capture-studio" class="pinned-footer-content capture-studio-footer">
+          <!-- #443: how the batch is about to run; each part opens its setting. -->
+          <div id="capture-summary-strip" class="status-text" style="font-size: 0.85em;"></div>
           <!-- Grid, not flex: puts export-pool-free-indicator in a true
                center column regardless of how wide the left/right groups
                are, rather than just being the next item in a packed flex
@@ -802,26 +1687,20 @@
                 <button id="start-capture-btn" class="primary-btn" data-str="CAPTURE_CONFIG.START_CAPTURE_BUTTON">Start Capture Batch</button>
                 <button id="cancel-batch-btn" disabled data-str="CAPTURE_CONFIG.CANCEL_BATCH_BUTTON">Cancel Batch</button>
               </div>
-              <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
             </div>
             <div class="footer-row-center">
               <div id="export-pool-free-indicator" data-str="MAIN.EXPORT_POOL_FREE_DEFAULT">Capture Output Free: 0.0 GB</div>
               <div id="footer-required-space" data-str="CAPTURE_CONFIG.REQUIRED_SPACE_DEFAULT">Required: 0.00 GB</div>
             </div>
           </div>
+          <!-- Its own line under the buttons (#534): every status and error
+               lands in one place, with the whole row's width, and the space
+               readouts above stay centred like the Render footer's. -->
+          <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
           <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
-          <!-- Shown only while a batch is running. Not a setting — there is
-               nothing here to configure, and no capture mode it does not
-               apply to. It is a reminder, and the moment it is worth reading
-               is the moment the user is about to go and do something else. -->
-          <p id="batch-focus-reminder" class="status-text" style="display: none;"
-             data-str="CAPTURE_CONFIG.FOCUS_REMINDER">
-            Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses
-            focus, and the batch takes far longer.
-          </p>
         </div>
         <!-- footer-row-grid-centered lives on this inner div, not
              #footer-render-studio itself — nav.js sets that element's
@@ -833,7 +1712,14 @@
              above already uses for the same reason. -->
         <div id="footer-render-studio" class="pinned-footer-content" style="display: none;">
           <div class="footer-row-grid-centered" style="flex: 1;">
-            <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
+              <!-- #40: the whole batch at a glance. -->
+              <div id="render-batch-progress" style="display: none; align-items: center; gap: 6px;">
+                <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+                <span id="render-batch-progress-label"></span>
+              </div>
+            </div>
             <div class="footer-row-center">
               <div id="render-footer-pool-free" data-str="RENDER.RENDER_POOL_FREE_DEFAULT">Export Pool Free: 0.0 GB</div>
               <div id="render-footer-required-space" data-str="RENDER.REQUIRED_ESTIMATED_DEFAULT">Required (Estimated): 0.00 GB</div>
@@ -848,10 +1734,16 @@
              Configuration-specific later if a need comes up. -->
         <div id="footer-configuration" class="pinned-footer-content" style="display: none;"></div>
         <div id="footer-demo-auditor" class="pinned-footer-content" style="display: none;">
-          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
         </div>
         <div id="footer-demo-analyzer" class="pinned-footer-content" style="display: none;">
           <div id="footer-analyzer-current-file" data-str="ANALYZER.NO_DEMO_LOADED">No demo loaded</div>
+        </div>
+        <div id="footer-hd-textures" class="pinned-footer-content" style="display: none;">
+          <div id="footer-hd-summary"></div>
+        </div>
+        <div id="footer-overviews" class="pinned-footer-content" style="display: none;">
+          <div id="footer-overviews-summary"></div>
         </div>
       </footer>
 
@@ -898,7 +1790,7 @@
     <div id="unsaved-changes-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 480px; padding: 20px;">
         <h2 id="unsaved-changes-title" data-str="UNSAVED_CHANGES_MODAL.TITLE">Unsaved Changes</h2>
-        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">Capture Studio has unsaved changes. Save your session before closing?</p>
+        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
           <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
@@ -914,7 +1806,7 @@
     <div id="themed-confirm-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 420px; padding: 20px;">
         <h2 id="themed-confirm-title" data-str="THEMED_CONFIRM_MODAL.TITLE_DEFAULT">Confirm</h2>
-        <p id="themed-confirm-message"></p>
+        <p id="themed-confirm-message" style="white-space: pre-line;"></p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button id="themed-confirm-ok-btn" style="color: #ff5555; border-color: #ff5555;" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
           <button id="themed-confirm-cancel-btn" data-str="THEMED_CONFIRM_MODAL.CANCEL_BUTTON">Cancel</button>
@@ -923,6 +1815,27 @@
     </div>
 
     <!-- FFmpeg Error Log — shown via a render job row's "View Log" action. -->
+    <!-- Combine Clips (#107): combine_clips.js. -->
+    <div id="combine-modal" class="modal" style="display: none;">
+      <div class="modal-content combine-content">
+        <h2 data-str="COMBINE.TITLE">Combine Clips</h2>
+        <p class="combine-hint" data-str="COMBINE.HINT">Join rendered clips into one video, in the order listed.</p>
+        <div class="combine-toolbar">
+          <button id="combine-add-finished-btn" data-combine-edit data-str="COMBINE.ADD_FINISHED_BUTTON">Add finished renders</button>
+          <button id="combine-add-files-btn" data-combine-edit data-str="COMBINE.ADD_FILES_BUTTON">Add files…</button>
+          <button id="combine-clear-btn" data-combine-edit data-str="COMBINE.CLEAR_BUTTON">Clear</button>
+        </div>
+        <ol id="combine-list" class="combine-list"></ol>
+        <p id="combine-plan" class="combine-plan"></p>
+        <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <div class="combine-actions">
+          <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
+          <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>
+          <button id="combine-close-btn" data-str="COMBINE.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div id="render-error-log-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 640px; padding: 20px;">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>
@@ -984,6 +1897,37 @@
       </div>
     </div>
 
+    <!-- Teams list (#445) — the clan tags found in the project's demos, each
+         with the name clip names use for it. Filled by teams_pane.js; the
+         names and merges are saved in the project file. -->
+    <div id="teams-modal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+        <h2 data-str="TEAMS.TITLE">Teams</h2>
+        <p class="status-text" data-str="TEAMS.INTRO"></p>
+        <div id="teams-unread-row" class="teams-unread-row" hidden>
+          <span id="teams-unread-note"></span>
+          <button id="teams-read-btn" data-str="TEAMS.READ_BUTTON" data-str-title="TEAMS.READ_BUTTON_TITLE">Read Their Teams</button>
+        </div>
+        <div class="table-wrapper" style="max-height: 360px;">
+          <table id="teams-table">
+            <thead>
+              <tr>
+                <th data-str="TEAMS.HEADER_TAG">Tag</th>
+                <th class="col-center" data-str="TEAMS.HEADER_DEMOS">Demos</th>
+                <th class="col-center" data-str="TEAMS.HEADER_SIDES">Played as</th>
+                <th data-str="TEAMS.HEADER_NAME">Name</th>
+                <th data-str="TEAMS.HEADER_SAME_AS">Same team as</th>
+              </tr>
+            </thead>
+            <tbody id="teams-table-body"></tbody>
+          </table>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button id="teams-close-btn" data-str="TEAMS.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Update check/install (issue #133) — reachable from the footer's
          Check for Updates button on every tab, not nested in Configuration
          (which only exists under Capture Studio). The two channels are
@@ -1040,10 +1984,29 @@
         <p data-str="ABOUT_MODAL.BLURB">A capture, patching, and analytics pipeline for Day of Defeat 1.3 demos — batch-records highlight clips through HLAE and parses matches for scoreboards, kills, chat, and rounds.</p>
         <p style="margin-top: 12px; color: var(--text-muted);" data-str="ABOUT_MODAL.CREDIT">Built by ccoventry</p>
         <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
-          <a href="https://github.com/ccoventry/dod-tools" target="_blank" rel="noopener" data-str="ABOUT_MODAL.GITHUB_LINK">github.com/ccoventry/dod-tools</a>
+          <a href="https://github.com/ccoventry/dod-studio" target="_blank" rel="noopener" data-str="ABOUT_MODAL.GITHUB_LINK">github.com/ccoventry/dod-studio</a>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup window (#599), setup_window.js: opens by itself on a first
+         launch or when a required path is missing, and from Help > Setup….
+         The step's content is drawn by the module; only the frame is here. -->
+    <div id="setup-modal" class="modal" style="display: none;">
+      <div class="modal-content setup-modal-content" role="dialog" aria-labelledby="setup-step-title">
+        <div class="setup-header">
+          <ol id="setup-steps" class="setup-steps"></ol>
+          <h2 id="setup-step-title"></h2>
+        </div>
+        <div id="setup-step-content" class="setup-content"></div>
+        <div class="setup-footer">
+          <button id="setup-skip-btn" class="setup-skip" data-str="SETUP.SKIP_SETUP" data-str-title="SETUP.SKIP_SETUP_TITLE">Skip setup for now</button>
+          <span class="setup-footer-spacer"></span>
+          <button id="setup-back-btn" data-str="SETUP.BACK">Back</button>
+          <button id="setup-next-btn" class="primary-btn" data-str="SETUP.NEXT">Next</button>
         </div>
       </div>
     </div>

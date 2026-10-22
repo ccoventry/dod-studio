@@ -6,7 +6,11 @@ engine's own data. Both are recovered from two signatures rather than written
 down, which means the thing worth checking is not "is this address right" but
 "is the function at the end of that relative call really `R_DecalUnlink`".
 
-Every constant below is read out of the Rust rather than restated.
+Every constant below is read out of the Rust rather than restated. The
+script works out which build a `hw.dll` is (which of the two `R_DecalUnlink`
+routes matches) and checks that build.
+
+Pre-Anniversary:
 
   1. Both signatures match exactly once in `.text`.
   2. Each value `decals.rs` reads out of a match lands on an instruction
@@ -21,16 +25,27 @@ Every constant below is read out of the Rust rather than restated.
   6. The engine's own remove loop reads `psurface` from the offset `decals.rs`
      reads it from -- that is, the field `R_DecalUnlink` itself dereferences.
 
-Run it against the other installed engine to see the supported-build claim hold:
+25th Anniversary (`--anniversary`), where the remove loops inline the unlink
+and `R_DecalUnlink` is found by its own signature (`ANNI_UNLINK`):
 
-    python goldsrc-hooks/tools/verify_decal_offsets.py "<...POST-Anniversary...>/hw.dll"
-
-which is expected to fail check 1 on the remove loop, and say so.
+  1. `R_DecalInit` and `ANNI_UNLINK` match exactly once, and the
+     pre-Anniversary remove loop not at all.
+  2. `ANNI_UNLINK_POOL_AT` is the `imm32` of `sub ecx, imm32`, by
+     disassembly, and names the pool `R_DecalInit` clears.
+  3. The function is `R_DecalUnlink`: it takes one argument (`[ebp+8]`), its
+     callers pop exactly that (cdecl), it reads `psurface` (`[esi+4]`) and the
+     surface's decal list (`[ecx+0x58]`), and it contains one of the image's
+     pushes of "Bad decal list".
+  4. It invalidates the decal-cache entry `R_DecalInit` resets (the same
+     table), as the pre-Anniversary unlink does.
+  5. `R_DecalInit` clears a whole number of decals, 4096 of them.
 
 Usage:
     python goldsrc-hooks/tools/verify_decal_offsets.py [path-to-hw.dll]
+    python goldsrc-hooks/tools/verify_decal_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install. Requires `pefile` and
+Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
+25th Anniversary one. Requires `pefile` and
 `capstone` (`pip install pefile capstone`); both are analysis-only and are not
 build dependencies of anything in the workspace.
 """
@@ -50,6 +65,7 @@ DEFAULT_DLL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
+ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
 SRC = Path(__file__).resolve().parent.parent / "src" / "decals.rs"
 
 # What R_DecalUnlink prints when a decal is not in its surface's list. Used to
@@ -88,7 +104,8 @@ def find_all(code, pattern):
 
 
 def main() -> int:
-    dll = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DLL
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    dll = ANNIVERSARY_DLL if arg == "--anniversary" else Path(arg) if arg else DEFAULT_DLL
     if not dll.is_file():
         sys.exit(f"no hw.dll at {dll}")
 
@@ -122,8 +139,16 @@ def main() -> int:
     print(f"hw.dll at {dll}")
     print(f"image base {base:#x}\n")
 
-    # 1. one match each
+    # Which build: the pre-Anniversary remove loop, or the Anniversary unlink.
     remove_hits = find_all(code, remove_pat)
+    anni_pat = parse_pattern(rust_string(src, r"const ANNI_UNLINK:\s*&str"))
+    anni_hits = find_all(code, anni_pat)
+    if not remove_hits and anni_hits:
+        print("the pre-Anniversary remove loop is absent and ANNI_UNLINK matches: the 25th Anniversary build\n")
+        return anniversary(src, img, base, code, tlo, thi, md, init_pat, anni_pat, anni_hits,
+                           init_size_at, init_base_at, init_count_at, decal_size, psurface_at)
+
+    # 1. one match each
     check(
         len(remove_hits) == 1,
         f"the remove loop matches exactly once ({len(remove_hits)} hit(s))"
@@ -227,6 +252,83 @@ def main() -> int:
     check(cleared % decal_size == 0, f"{cleared:#x} is a whole number of {decal_size}-byte decals")
     check(cleared // decal_size == 4096, f"that is {cleared // decal_size} decals (MAX_RENDER_DECALS)")
     print(f"\n  gDecalCount at {decal_count:#x}, R_DecalUnlink at hw+{unlink:#x}")
+
+    print()
+    if failures:
+        print(f"{len(failures)} check(s) FAILED")
+        return 1
+    print("all checks passed")
+    return 0
+
+
+def anniversary(src, img, base, code, tlo, thi, md, init_pat, anni_pat, anni_hits,
+                init_size_at, init_base_at, init_count_at, decal_size, psurface_at):
+    """The 25th Anniversary build's checks (see the module doc)."""
+    pool_at = rust_const(src, "ANNI_UNLINK_POOL_AT")
+    failures = []
+
+    def check(ok, message):
+        print(("  ok   " if ok else "  FAIL ") + message)
+        if not ok:
+            failures.append(message)
+
+    def u32(rva):
+        return struct.unpack_from("<I", img, rva)[0]
+
+    # 1
+    init_hits = find_all(code, init_pat)
+    check(len(init_hits) == 1, f"R_DecalInit matches exactly once ({len(init_hits)} hit(s))")
+    check(len(anni_hits) == 1, f"ANNI_UNLINK matches exactly once ({len(anni_hits)} hit(s))")
+    if len(init_hits) != 1 or len(anni_hits) != 1:
+        print("\n1 or more check(s) FAILED")
+        return 1
+    init, unlink = tlo + init_hits[0], tlo + anni_hits[0]
+    print(f"\nR_DecalInit at hw+{init:#x}, R_DecalUnlink at hw+{unlink:#x}\n")
+
+    # 2
+    decoded = {i.address - base - unlink: i for i in md.disasm(bytes(img[unlink:unlink + len(anni_pat)]), base + unlink)}
+    ins = decoded.get(pool_at - 2)
+    check(ins is not None and ins.mnemonic == "sub" and ins.op_str.startswith("ecx,"),
+          f"ANNI_UNLINK_POOL_AT is the imm32 of `{ins.mnemonic + ' ' + ins.op_str if ins else '?'}`")
+    pool_base = u32(unlink + pool_at)
+    init_base, cleared, decal_count = u32(init + init_base_at), u32(init + init_size_at), u32(init + init_count_at)
+    check(pool_base == init_base, f"it names the pool R_DecalInit clears ({pool_base:#x} vs {init_base:#x})")
+
+    # 3
+    body = []
+    for i in md.disasm(bytes(img[unlink:unlink + 0x100]), base + unlink):
+        body.append(i)
+        if i.mnemonic == "int3":
+            break
+    text = [f"{i.mnemonic} {i.op_str}" for i in body]
+    check("mov esi, dword ptr [ebp + 8]" in text, "it takes its one argument from [ebp+8]")
+    check(f"mov ecx, dword ptr [esi + {psurface_at}]" in text, f"it reads decal_t::psurface ([esi+{psurface_at}])")
+    check("mov edi, dword ptr [ecx + 0x58]" in text, "and the surface's decal list ([psurface+0x58])")
+    rets = [t.strip() for t in text if t.startswith("ret")]
+    check(rets and all(t == "ret" for t in rets), f"its returns are plain `ret`s (cdecl): {len(rets)}")
+    string_rva = img.find(UNLINK_STRING)
+    push = struct.pack("<BI", 0x68, base + string_rva)
+    end = body[-1].address - base
+    check(string_rva > 0 and push in img[unlink:end], 'it pushes "Bad decal list" itself')
+    callers = [i + tlo for i in range(len(code) - 5)
+               if code[i] == 0xE8 and i + 5 + struct.unpack_from("<i", code, i + 1)[0] + tlo == unlink]
+    check(callers, f"{len(callers)} direct caller(s)")
+    for c in callers:
+        after = list(md.disasm(bytes(img[c + 5:c + 0x20]), base + c + 5))[:3]
+        pop = next((a for a in after if a.mnemonic == "add" and a.op_str.startswith("esp, ")), None)
+        check(pop is not None and pop.op_str == "esp, 4", f"hw+{c:#x} pops its one argument (`{pop.mnemonic + ' ' + pop.op_str if pop else 'nothing'}`)")
+
+    # 4
+    table_in_unlink = next((int(t.split(", ")[1], 16) for t in text if re.match(r"add eax, 0x[0-9a-f]+$", t)), None)
+    init_text = [f"{i.mnemonic} {i.op_str}" for i in md.disasm(bytes(img[init:init + 0x50]), base + init)]
+    table_in_init = next((int(t.split(", ")[1], 16) for t in init_text if re.match(r"mov eax, 0x[0-9a-f]+$", t)), None)
+    check(table_in_unlink is not None and table_in_unlink == table_in_init,
+          f"it invalidates the decal-cache table R_DecalInit resets ({table_in_unlink and hex(table_in_unlink)} vs {table_in_init and hex(table_in_init)})")
+
+    # 5
+    check(cleared % decal_size == 0, f"{cleared:#x} is a whole number of {decal_size}-byte decals")
+    check(cleared // decal_size == 4096, f"that is {cleared // decal_size} decals (MAX_RENDER_DECALS)")
+    print(f"\n  gDecalCount at {decal_count:#x}, pool {pool_base:#x}..{pool_base + cleared:#x}")
 
     print()
     if failures:

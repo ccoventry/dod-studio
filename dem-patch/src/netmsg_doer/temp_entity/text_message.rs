@@ -29,7 +29,8 @@ impl Doer for TeTextMessage {
             le_i16,
             le_i16,
             le_i16,
-        ).parse(i)?;
+        )
+            .parse(i)?;
 
         let (i, effect_time) = if effect != 0 {
             map(le_i16, Some).parse(i)?

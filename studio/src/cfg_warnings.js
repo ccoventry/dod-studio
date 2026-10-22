@@ -7,45 +7,58 @@
 //   1. A config sets something the pipeline reads and the app never hears about
 //      it. That is how a capture ran at `mirv_fov 105` from movie.cfg while the
 //      flush sized its on-screen test for the default 90.
-//   2. An init command sets the same cvar a config does. The init command runs
-//      later, so it wins — which is the point of typing it, but it also means a
-//      line the user set deliberately, possibly years ago, quietly stops
-//      applying. Including the commands the app adds for itself: the capture
-//      fps overrides a `mirv_movie_fps` in movie.cfg, and the decal pin
-//      overrides an `r_decals` there.
+//   2. The same cvar is given different values across the configs, Initial
+//      Commands (the app's own additions included) and Scheduled Commands
+//      before a clip. The last one wins, so the rest quietly stop applying
+//      (#216's Rule 1). And a Scheduled After with no Before for that cvar
+//      leaves its value in place for every later clip (Rule 2).
 //
 // ADVISORY ONLY. Nothing here, or anywhere in this app, writes to a config file.
 
 import { scanGameConfigs } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { escapeHtml } from './html.js';
 
 const EMPTY = {
   unseen: [],
-  overrides: [],
-  shadowed: [],
+  conflicts: [],
+  asymmetric: [],
   custom: [],
   bannedInit: [],
   bannedScheduled: [],
+  tooLongInit: [],
+  tooLongScheduled: [],
   decalDefaultRing: null,
   decalFlushIsNoop: false,
   noopInit: [],
-  noopScheduled: [],
+  filteredInit: [],
+  filteredScheduled: [],
   fatalCvars: [],
+  renamed: [],
+  configCfgWritable: false,
 };
 
 let report = EMPTY;
 
 /**
- * How many banned commands (see `cfg_scan::BANNED_COMMANDS`) the most
- * recently fetched report found, across Initial and Scheduled Commands
- * combined. `refreshLaunchGuard` (capture_pane.js) reads this to block Start
+ * How many banned commands (see `cfg_scan::BANNED_COMMANDS`) and commands
+ * too long to fit a demo frame (#453) the most recently fetched report
+ * found, across Initial and Scheduled Commands combined. `refreshLaunchGuard` (capture_pane.js) reads this to block Start
  * Capture Batch — reflects whatever `refreshCfgWarnings` last resolved, so
  * it can go briefly stale between an edit and the next scan finishing, same
  * as every other advisory here.
  */
 export function bannedCommandCount() {
-  return (report?.bannedInit?.length ?? 0) + (report?.bannedScheduled?.length ?? 0);
+  return (
+    (report?.bannedInit?.length ?? 0) +
+    (report?.bannedScheduled?.length ?? 0) +
+    (report?.tooLongInit?.length ?? 0) +
+    (report?.tooLongScheduled?.length ?? 0)
+  );
 }
+
+/** Bumped per scan, so only the latest one's answer is drawn. */
+let scanGeneration = 0;
 
 /**
  * Re-scan and redraw. Safe to call repeatedly — on start-up, when the hl.exe
@@ -64,21 +77,66 @@ export async function refreshCfgWarnings(
   customCommands = [],
   context = {}
 ) {
-  report = gamePath
+  // Scans can overlap now that typing triggers them (#535): only the latest
+  // one's answer is shown, whichever order they come back in.
+  const generation = ++scanGeneration;
+  const next = gamePath
     ? await scanGameConfigs(gamePath, initCommands, customCommands, context)
     : EMPTY;
+  if (generation !== scanGeneration) return;
+  report = next;
   render();
-}
-
-/** The value half of `cvar value`, for rows that name the cvar separately. */
-function valueOf(command) {
-  return String(command).trim().split(/\s+/)[1] ?? '';
 }
 
 /** The cvar half of `cvar value` — `b.command` is the full typed line
  *  (arguments and all), but BANNED_REASONS is keyed by the bare cvar. */
 function cvarOf(command) {
   return String(command).trim().split(/\s+/)[0] ?? '';
+}
+
+/** Where a stated value came from (map_manager.rs's ValueSourceRow). */
+function describeSource(v, cvar) {
+  switch (v.kind) {
+    case 'config':
+      return STRINGS.CFG.sourceConfig(v.file, v.line);
+    case 'initial':
+      return STRINGS.CFG.SOURCE_INITIAL;
+    case 'app':
+      return STRINGS.CFG.sourceApp(STRINGS.CFG.SETTING_FOR_CVAR[cvar.toLowerCase()] || STRINGS.CFG.UNKNOWN_SETTING);
+    case 'before':
+      return STRINGS.CFG.sourceBefore(v.offsetSeconds);
+    case 'after':
+      return STRINGS.CFG.sourceAfter(v.offsetSeconds);
+    default:
+      return v.kind;
+  }
+}
+
+/** Rule 1 rows (#216): every value, where it came from, and which applies. */
+function conflictSection(rows) {
+  const items = rows
+    .map((c) => {
+      const values = c.values.map((v) => STRINGS.CFG.stated(v.value, describeSource(v, c.cvar))).join(', ');
+      return `<li><code>${STRINGS.CFG.conflictRow(c.cvar, values, c.effective.value)}</code></li>`;
+    })
+    .join('');
+  return section(STRINGS.CFG.CONFLICT_TITLE, STRINGS.CFG.CONFLICT_ADVICE, items, '#ff8a5c');
+}
+
+/** Commands too long for one demo ConsoleCommand frame (#453) — blocking. */
+function tooLongSection(commands) {
+  const rows = commands
+    .map((c) => `<li><code>${STRINGS.CFG.tooLongRow(c, new TextEncoder().encode(c).length)}</code></li>`)
+    .join('');
+  return section(STRINGS.CFG.TOO_LONG_TITLE, STRINGS.CFG.TOO_LONG_ADVICE, rows, '#f44336');
+}
+
+/** Commands the game's demo filter drops (#679), as one section. */
+function filteredSection(rows) {
+  const items = rows
+    .map((f) => `<li><code>${escapeHtml(STRINGS.CFG.filteredRow(f.command, f.rule, f.pattern))}</code></li>`)
+    .join('');
+  return section(STRINGS.CFG.FILTERED_TITLE, STRINGS.CFG.FILTERED_ADVICE, items, '#ff8a5c');
 }
 
 function section(title, advice, rows, accent) {
@@ -135,16 +193,25 @@ function renderInto(elId, sectionsHtml) {
 
 function render() {
   const unseen = report?.unseen ?? [];
-  const overrides = report?.overrides ?? [];
-  const shadowed = report?.shadowed ?? [];
+  const conflicts = report?.conflicts ?? [];
+  const asymmetric = report?.asymmetric ?? [];
   const custom = report?.custom ?? [];
   const bannedInit = report?.bannedInit ?? [];
   const bannedScheduled = report?.bannedScheduled ?? [];
+  const tooLongInit = report?.tooLongInit ?? [];
+  const tooLongScheduled = report?.tooLongScheduled ?? [];
   const decalDefaultRing = report?.decalDefaultRing ?? null;
   const decalFlushIsNoop = report?.decalFlushIsNoop ?? false;
   const noopInit = report?.noopInit ?? [];
-  const noopScheduled = report?.noopScheduled ?? [];
+  const filteredInit = report?.filteredInit ?? [];
+  const filteredScheduled = report?.filteredScheduled ?? [];
   const fatalCvars = report?.fatalCvars ?? [];
+  const configCfgWritable = report?.configCfgWritable ?? false;
+  const renamed = report?.renamed ?? [];
+  // A renamed name shows under the list it was typed in; config lines go
+  // with Initial Commands, like the other config findings.
+  const renamedScheduled = renamed.filter((r) => r.source === 'Scheduled Commands');
+  const renamedInit = renamed.filter((r) => r.source !== 'Scheduled Commands');
   // Banned commands are already flagged, more specifically, in the banned
   // section above — MID_DEMO_HAZARDS is a superset of BANNED_COMMANDS on the
   // Rust side, so without this a banned command would otherwise also show up
@@ -152,7 +219,10 @@ function render() {
   // that's actually going to block Start Capture Batch outright.
   const bannedScheduledCvars = new Set(bannedScheduled.map((b) => cvarOf(b.command)));
   const hazards = custom.filter((c) => c.kind === 'hazard' && !bannedScheduledCvars.has(cvarOf(c.command)));
-  const customOverrides = custom.filter((c) => c.kind !== 'hazard');
+  // Each conflict shows once: under Scheduled Commands when a Before is part
+  // of it (that one is the last word), otherwise under Initial Commands.
+  const initConflicts = conflicts.filter((c) => !c.scheduled);
+  const scheduledConflicts = conflicts.filter((c) => c.scheduled);
 
   // ── Initial Commands ─────────────────────────────────────────────────────
   // Game Config (unseen) belongs here, not its own block: the fix it advises
@@ -177,23 +247,20 @@ function render() {
       .join('');
     initParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, '#f44336'));
   }
-  // Next, because something the user typed is being thrown away rather than
-  // winning.
-  if (shadowed.length > 0) {
-    const rows = shadowed
-      .map((s) => {
-        const text = s.winnerFromApp
-          ? STRINGS.CFG.shadowedByApp(
-              s.cvar,
-              s.shadowedValue,
-              s.winnerValue,
-              STRINGS.CFG.SETTING_FOR_CVAR[s.cvar.toLowerCase()] || STRINGS.CFG.UNKNOWN_SETTING
-            )
-          : STRINGS.CFG.shadowedByYou(s.cvar, s.shadowedValue, s.winnerValue);
-        return `<li><code>${text}</code></li>`;
-      })
-      .join('');
-    initParts.push(section(STRINGS.CFG.SHADOWED_TITLE, STRINGS.CFG.SHADOWED_ADVICE, rows, '#ff8a5c'));
+  if (tooLongInit.length > 0) {
+    initParts.push(tooLongSection(tooLongInit));
+  }
+  // Next, because a value somebody stated is being thrown away.
+  if (initConflicts.length > 0) {
+    initParts.push(conflictSection(initConflicts));
+  }
+  // A command the user typed never runs, and nothing in the game says so.
+  if (filteredInit.length > 0) {
+    initParts.push(filteredSection(filteredInit));
+  }
+  // Same: the game no longer knows an old dodstudio_ name (#555).
+  if (renamedInit.length > 0) {
+    initParts.push(renamedSection(renamedInit));
   }
   if (unseen.length > 0) {
     const rows = unseen
@@ -203,17 +270,6 @@ function render() {
       )
       .join('');
     initParts.push(section(STRINGS.CFG.BANNER_TITLE, STRINGS.CFG.ADVICE, rows));
-  }
-  if (overrides.length > 0) {
-    const rows = overrides
-      .map((o) => {
-        const note = o.fromApp
-          ? ` <span style="opacity:.7">(${STRINGS.CFG.FROM_APP_NOTE})</span>`
-          : '';
-        return `<li><code>${STRINGS.CFG.override(o.cvar, o.initValue, o.cfgValue, o.file, o.line)}</code>${note}</li>`;
-      })
-      .join('');
-    initParts.push(section(STRINGS.CFG.OVERRIDE_TITLE, STRINGS.CFG.OVERRIDE_ADVICE, rows, '#ff8a5c'));
   }
   // Real, active problem — not a neutral FYI like decalDefaultRing below —
   // so it gets a warning accent even though there is only ever one row.
@@ -236,6 +292,12 @@ function render() {
       .join('');
     initParts.push(section(STRINGS.CFG.NOOP_TITLE, STRINGS.CFG.NOOP_ADVICE, rows));
   }
+  // Advisory, like the no-op list: nothing is wrong with this capture, but
+  // its values leak into the user's own config the next time the game quits.
+  if (configCfgWritable) {
+    const rows = `<li>${STRINGS.CFG.CONFIG_WRITABLE_ROW}</li>`;
+    initParts.push(section(STRINGS.CFG.CONFIG_WRITABLE_TITLE, STRINGS.CFG.CONFIG_WRITABLE_ADVICE, rows));
+  }
   renderInto('#init-commands-warning-banner', joinSections(initParts));
 
   // ── Scheduled Commands ───────────────────────────────────────────────────
@@ -247,6 +309,9 @@ function render() {
       .join('');
     schedParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, '#f44336'));
   }
+  if (tooLongScheduled.length > 0) {
+    schedParts.push(tooLongSection(tooLongScheduled));
+  }
   // Next, because this one does not merely surprise: it breaks the
   // flush and leaves a capture that completes and looks plausible.
   if (hazards.length > 0) {
@@ -255,28 +320,38 @@ function render() {
       .join('');
     schedParts.push(section(STRINGS.CFG.HAZARD_TITLE, STRINGS.CFG.HAZARD_ADVICE, rows, '#ff6b6b'));
   }
-  if (customOverrides.length > 0) {
-    const rows = customOverrides
-      .map((c) => {
-        const text =
-          c.kind === 'overridesInit'
-            ? STRINGS.CFG.customOverridesInit(c.cvar, valueOf(c.command), c.replacedValue)
-            : STRINGS.CFG.customOverridesConfig(
-                c.cvar,
-                valueOf(c.command),
-                c.replacedValue,
-                c.source
-              );
+  // Next: a value that silently differs from the first clip on.
+  if (asymmetric.length > 0) {
+    const rows = asymmetric
+      .map((a) => {
+        const text = STRINGS.CFG.asymmetricRow(
+          a.cvar,
+          a.baseline.value,
+          describeSource(a.baseline, a.cvar),
+          a.after.value,
+          describeSource(a.after, a.cvar)
+        );
         return `<li><code>${text}</code></li>`;
       })
       .join('');
-    schedParts.push(section(STRINGS.CFG.CUSTOM_TITLE, STRINGS.CFG.CUSTOM_ADVICE, rows, '#ff8a5c'));
+    schedParts.push(section(STRINGS.CFG.ASYMMETRIC_TITLE, STRINGS.CFG.ASYMMETRIC_ADVICE, rows, '#ff8a5c'));
   }
-  if (noopScheduled.length > 0) {
-    const rows = noopScheduled
-      .map((n) => `<li><code>${STRINGS.CFG.noopRow(n.command, STRINGS.CFG.NOOP_REASONS[n.cvar], n.source)}</code></li>`)
-      .join('');
-    schedParts.push(section(STRINGS.CFG.NOOP_TITLE, STRINGS.CFG.NOOP_ADVICE, rows));
+  if (scheduledConflicts.length > 0) {
+    schedParts.push(conflictSection(scheduledConflicts));
+  }
+  if (filteredScheduled.length > 0) {
+    schedParts.push(filteredSection(filteredScheduled));
+  }
+  if (renamedScheduled.length > 0) {
+    schedParts.push(renamedSection(renamedScheduled));
   }
   renderInto('#scheduled-commands-warning-banner', joinSections(schedParts));
+}
+
+/** Old `dodstudio_` hook names, each with the name that replaced it. */
+function renamedSection(rows) {
+  const items = rows
+    .map((r) => `<li><code>${escapeHtml(STRINGS.CFG.renamedRow(r.old, r.new, r.source))}</code></li>`)
+    .join('');
+  return section(STRINGS.CFG.RENAMED_TITLE, STRINGS.CFG.RENAMED_ADVICE, items, '#ff8a5c');
 }

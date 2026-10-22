@@ -52,11 +52,13 @@ fn scan_dir_recursive(dir: &Path, base_dir: &Path, entries: &mut Vec<(String, St
             let path = entry.path();
             if path.is_dir() {
                 scan_dir_recursive(&path, base_dir, entries);
-            } else if path.is_file() && path.extension().is_some_and(|ext| ext == "txt")
+            } else if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "txt")
                 && let Ok(content) = read_to_string_lossy_utf16_or_utf8(&path)
-                    && let Ok(rel_path) = path.strip_prefix(base_dir) {
-                        entries.push((rel_path.to_string_lossy().into_owned(), content));
-                    }
+                && let Ok(rel_path) = path.strip_prefix(base_dir)
+            {
+                entries.push((rel_path.to_string_lossy().into_owned(), content));
+            }
         }
     }
 }

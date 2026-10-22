@@ -1,4 +1,4 @@
-//! `dodstudio_deathmsg` — control over DoD 1.3's death notices (the kill feed).
+//! `ds_hud_deathmsg` — control over DoD 1.3's death notices (the kill feed).
 //!
 //! HLAE ships `mirv_deathmsg` with the same four subcommands, but only for
 //! `cstrike` and `tfc`: its pattern database names them explicitly
@@ -40,7 +40,7 @@
 //! `client.dll`'s own handler stays reachable by calling it directly. See
 //! [`crate::engine::HookUserMsgFn`].
 //!
-//! `max` and `offset` do need patching, and `max` needs the array **moved**:
+//! `max`, `offset` and `font` do need patching, and `max` needs the array **moved**:
 //! it is five slots and there is no slack after it — live data is referenced at
 //! array-end + 0. Every one of the 34 absolute references to it lives in
 //! `.text`, inside four functions, and nothing in `.data` or any vtable points
@@ -57,6 +57,10 @@
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
+//!
+//! `font` -- the names in a font of our own -- lives in [`font`] (#562), and
+//! `scale` -- the icons S times bigger, lines spaced to match -- in [`scale`]
+//! (#728).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -65,8 +69,11 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 use crate::detour;
 use crate::engine;
-use crate::scan;
 use crate::names::console_name;
+use crate::scan;
+
+mod font;
+mod scale;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -76,7 +83,7 @@ use crate::names::console_name;
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
 
 /// The name used in usage and error text, which is the first one registered.
-const COMMAND: &str = console_name!("deathmsg");
+const COMMAND: &str = console_name!("hud_deathmsg");
 
 // ── Addresses, as RVAs into the analysed client.dll ──────────────────────────
 
@@ -209,27 +216,410 @@ const OFFSET_UNSET: i32 = i32::MIN;
 /// Whether our `DeathMsg` handler is installed and should be kept installed.
 static HOOK_WANTED: AtomicBool = AtomicBool::new(false);
 
-/// The block list. `Vec<i32>` of player indices; `allow_list` inverts the sense
-/// so the listed players are the only ones that get through.
-static BLOCK: Mutex<BlockList> = Mutex::new(BlockList { ids: Vec::new(), allow_list: false });
+/// The block list; `allow_list` inverts the sense so the listed players are
+/// the only ones that get through.
+static BLOCK: Mutex<BlockList> = Mutex::new(BlockList {
+    players: Vec::new(),
+    allow_list: false,
+});
 
-#[derive(Default)]
+/// Whether `self` has already said it matches nobody in this HLTV demo. Reset
+/// by every `block`, so each new list says it once.
+static SELF_IN_HLTV_REPORTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Default)]
 struct BlockList {
-    ids: Vec<i32>,
+    players: Vec<Player>,
     allow_list: bool,
+}
+
+/// One entry in the block list.
+///
+/// A slot number is only good for one demo: the same player gets a different
+/// slot in every demo. A SteamID or `self` is resolved at each `DeathMsg`
+/// instead, so one command works across a whole batch and survives
+/// reconnects and slot reuse mid-demo (#468).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Player {
+    Slot(i32),
+    /// SteamID64, matched against the slot's userinfo `*sid`.
+    SteamId(u64),
+    /// The recording player in a POV demo. Nobody in an HLTV demo, which has
+    /// no recording player.
+    OwnPov,
+}
+
+/// What a `DeathMsg` slot resolves to, at the moment it arrives.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Who {
+    slot: i32,
+    /// 0 when unknown: no player there, or no `*sid`.
+    steam_id: u64,
+    /// The recording player of a POV demo.
+    is_own_pov: bool,
+}
+
+impl Player {
+    fn matches(self, who: &Who) -> bool {
+        match self {
+            Player::Slot(slot) => slot == who.slot,
+            Player::SteamId(id) => id != 0 && id == who.steam_id,
+            Player::OwnPov => who.is_own_pov,
+        }
+    }
+
+    /// Whether matching needs anything beyond the slot number.
+    fn needs_player_info(self) -> bool {
+        !matches!(self, Player::Slot(_))
+    }
+}
+
+impl std::fmt::Display for Player {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Player::Slot(slot) => write!(f, "{slot}"),
+            Player::SteamId(id) => match classic_steam_id(*id) {
+                Some(classic) => f.write_str(&classic),
+                None => write!(f, "{id}"),
+            },
+            Player::OwnPov => f.write_str("self"),
+        }
+    }
+}
+
+/// A SteamID64 in the `STEAM_0:Y:Z` form GoldSrc's own `status` prints, the
+/// one players and server admins recognise (#537). `None` for an id that
+/// isn't a player's own account, such as the HLTV proxy's: that form only
+/// exists for individual accounts, base + a 32-bit account number.
+fn classic_steam_id(id: u64) -> Option<String> {
+    let account = id
+        .checked_sub(STEAM_ID64_BASE)
+        .filter(|&a| a <= u64::from(u32::MAX))?;
+    Some(format!("STEAM_0:{}:{}", account % 2, account / 2))
+}
+
+/// One block-list entry for `status`: slots as `slot N`, SteamIDs in the
+/// classic form, either with the player's current name when they're in the
+/// loaded demo; `self` as itself (#537).
+fn describe(player: Player, name: Option<&str>) -> String {
+    let id = match player {
+        Player::Slot(slot) => format!("slot {slot}"),
+        Player::SteamId(_) => player.to_string(),
+        Player::OwnPov => return player.to_string(),
+    };
+    match name {
+        Some(name) => format!("{id} ({name})"),
+        None => id,
+    }
+}
+
+/// What `status` says the block list hides. `name_of` looks a player up in
+/// the loaded demo; it's a parameter so the wording is testable without one.
+fn blocking_text(list: &BlockList, name_of: impl Fn(Player) -> Option<String>) -> String {
+    if list.players.is_empty() {
+        return "nothing".to_string();
+    }
+    let who: Vec<String> = list
+        .players
+        .iter()
+        .map(|&p| describe(p, name_of(p).as_deref()))
+        .collect();
+    if list.allow_list {
+        format!("everything except {}", who.join(", "))
+    } else {
+        format!("frags involving {}", who.join(", "))
+    }
+}
+
+/// A block-list entry's current name: the slot's occupant, or whoever in the
+/// loaded demo has that SteamID. Looked up live, since names change between
+/// demos. `None` for `self`, which needs no name.
+fn current_name(player: Player) -> Option<String> {
+    let hltv = is_hltv();
+    match player {
+        Player::Slot(slot) => lookup(slot, hltv).map(|(name, _)| name),
+        Player::SteamId(id) => (1..=32).find_map(|slot| {
+            lookup(slot, hltv)
+                .filter(|(_, who)| who.steam_id == id)
+                .map(|(name, _)| name)
+        }),
+        Player::OwnPov => None,
+    }
+}
+
+/// SteamID64 of account number 0 in the public universe; an individual
+/// account's SteamID64 is this plus its account number.
+const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
+
+/// A SteamID in any form a user is likely to paste: the 17-digit SteamID64,
+/// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
+/// the engine that printed it and does not change the account), or the newer
+/// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
+fn parse_steam_id(text: &str) -> Option<u64> {
+    let bare = text
+        .strip_prefix('[')
+        .and_then(|t| t.strip_suffix(']'))
+        .unwrap_or(text);
+    if bare.len() > 4 && bare[..4].eq_ignore_ascii_case("U:1:") {
+        let n: u64 = bare[4..].parse().ok()?;
+        return n.checked_add(STEAM_ID64_BASE);
+    }
+    if text.len() >= 6 && text[..6].eq_ignore_ascii_case("STEAM_") {
+        let mut parts = text[6..].split(':');
+        let (Some(universe), Some(y), Some(z), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        universe.parse::<u8>().ok()?;
+        let y: u64 = y.parse().ok().filter(|y| *y <= 1)?;
+        let z: u64 = z.parse().ok()?;
+        return z
+            .checked_mul(2)
+            .and_then(|z2| z2.checked_add(y))
+            .and_then(|n| n.checked_add(STEAM_ID64_BASE));
+    }
+    if text.len() == 17 && text.bytes().all(|b| b.is_ascii_digit()) {
+        return text.parse().ok();
+    }
+    None
+}
+
+/// One `block` argument, without its `!`: `self`, a SteamID, or a slot.
+fn parse_player(text: &str) -> Option<Player> {
+    if text.eq_ignore_ascii_case("self") {
+        return Some(Player::OwnPov);
+    }
+    if let Some(id) = parse_steam_id(text) {
+        return Some(Player::SteamId(id));
+    }
+    // Slots are 1..=32; a longer number is a mistyped SteamID, not a slot.
+    if text.len() <= 3 {
+        return text.parse().ok().map(Player::Slot);
+    }
+    None
 }
 
 impl BlockList {
     /// True when a frag between these two should not be shown.
-    fn blocks(&self, killer: i32, victim: i32) -> bool {
-        if self.ids.is_empty() {
+    fn blocks(&self, killer: &Who, victim: &Who) -> bool {
+        if self.players.is_empty() {
             return false;
         }
-        let involved = self.ids.contains(&killer) || self.ids.contains(&victim);
+        let involved = self
+            .players
+            .iter()
+            .any(|p| p.matches(killer) || p.matches(victim));
         // An allow-list blocks everything the listed players were *not* part of;
         // a block-list blocks exactly what they were.
         if self.allow_list { !involved } else { involved }
     }
+
+    fn needs_player_info(&self) -> bool {
+        self.players.iter().any(|p| p.needs_player_info())
+    }
+
+    /// Whether the frag `killer -> victim` is hidden, asking the engine for
+    /// whatever the list needs at the moment it is called.
+    fn blocks_slots(&self, killer: i32, victim: i32) -> bool {
+        if self.players.is_empty() {
+            return false;
+        }
+        if !self.needs_player_info() {
+            return self.blocks(&Who::slot(killer), &Who::slot(victim));
+        }
+        let hltv = is_hltv();
+        if hltv
+            && self.players.contains(&Player::OwnPov)
+            && !SELF_IN_HLTV_REPORTED.swap(true, Ordering::Relaxed)
+        {
+            let note = format!(
+                "{COMMAND}: `self` matches nobody here -- an HLTV demo has no recording player\n"
+            );
+            crate::commands::console_print(&note);
+            unsafe { crate::debug::report(note.trim()) };
+        }
+        self.blocks(&resolve(killer, hltv), &resolve(victim, hltv))
+    }
+}
+
+impl Who {
+    fn slot(slot: i32) -> Self {
+        Who {
+            slot,
+            ..Who::default()
+        }
+    }
+}
+
+/// Whether the demo playing is an HLTV one: the client is a spectator-only
+/// view with no player of its own. The same test `anim_fix` uses.
+fn is_hltv() -> bool {
+    engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
+}
+
+/// Bytes of a player's userinfo string (`MAX_INFO_STRING`).
+const USERINFO_LEN: usize = 256;
+
+/// The SteamID in the userinfo stored just before a player's name.
+///
+/// The engine's player record (0x250 bytes, the same on both `hw.dll`
+/// builds) is `userid`, then `userinfo[256]`, then `name[32]`, and
+/// `pfnGetPlayerInfo` hands out a pointer to `name`. So the userinfo is the
+/// 256 bytes before it. It's only trusted when it really is this player's:
+/// its `name` key must equal the name. Otherwise 0.
+///
+/// Safety: `name` is the pointer `pfnGetPlayerInfo` returned, into the
+/// engine's static player array, whose earlier bytes are always mapped.
+pub(crate) unsafe fn steam_id_from_record(name: *const c_char) -> u64 {
+    if name.is_null() {
+        return 0;
+    }
+    let userinfo =
+        unsafe { std::slice::from_raw_parts((name as *const u8).sub(USERINFO_LEN), USERINFO_LEN) };
+    let name = unsafe { CStr::from_ptr(name) }.to_bytes();
+    sid_from_userinfo(userinfo, name).unwrap_or(0)
+}
+
+/// `*sid` from a `\key\value\...` userinfo buffer, if its `name` is `name`.
+fn sid_from_userinfo(buffer: &[u8], name: &[u8]) -> Option<u64> {
+    let end = buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len());
+    let text = buffer[..end].strip_prefix(b"\\")?;
+    let mut fields = text.split(|&b| b == b'\\');
+    let mut sid = None;
+    let mut name_ok = false;
+    while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
+        match key {
+            b"name" => name_ok = value == name,
+            b"*sid" => sid = std::str::from_utf8(value).ok()?.parse::<u64>().ok(),
+            _ => {}
+        }
+    }
+    sid.filter(|&id| name_ok && id != 0)
+}
+
+/// A `block` argument list: the players, and whether it's `!` (hide everyone
+/// else). The console's pieces are rejoined first, so every check below sees
+/// whole ids: counting `!` on the raw pieces once read `!STEAM_0 : 1 :
+/// 1234567` as a mix of one `!` id and four plain ones (seen live).
+fn parse_block_args(rest: &[String]) -> Result<(Vec<Player>, bool), String> {
+    let tokens = rejoin_colons(rest);
+    let mut players = Vec::new();
+    let mut negations = 0;
+    for token in &tokens {
+        let (negated, text) = match token.strip_prefix('!') {
+            Some(d) => (true, d),
+            None => (false, token.as_str()),
+        };
+        let Some(player) = parse_player(text) else {
+            return Err(format!(
+                "{COMMAND} block: {token:?} is not a slot number, a SteamID or self\n"
+            ));
+        };
+        negations += usize::from(negated);
+        players.push(player);
+    }
+    // A mixed list has no coherent reading -- "block everyone except 3, and
+    // also block 5" is two different questions -- so say so rather than pick
+    // one.
+    if negations != 0 && negations != tokens.len() {
+        return Err(format!(
+            "{COMMAND} block: mix of plain and !-prefixed ids. Use all-plain to hide those \
+             players, or all-! to hide everyone else.\n"
+        ));
+    }
+    Ok((players, negations != 0))
+}
+
+/// Puts `STEAM_0:1:1234567` back together. GoldSrc's console tokenizer makes
+/// `:` a token of its own, so typed unquoted it arrives as `STEAM_0`, `:`,
+/// `1`, `:`, `1234567` (seen live 2026-09-30). Any token that is `:`, or
+/// follows one, is glued onto the one before it.
+fn rejoin_colons(tokens: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
+    let mut glue_next = false;
+    for token in tokens {
+        match out.last_mut() {
+            Some(last) if token == ":" => {
+                last.push(':');
+                glue_next = true;
+                continue;
+            }
+            Some(last) if glue_next => last.push_str(token),
+            _ => out.push(token.clone()),
+        }
+        glue_next = false;
+    }
+    out
+}
+
+/// `players`: every occupied slot with the name and SteamID `block` would
+/// match against right now. For finding the id to block, and for checking
+/// that the engine hands SteamIDs over at all (0 means it didn't).
+fn players() -> String {
+    if engine::engfuncs().is_none() {
+        return format!("{COMMAND} players: the game's functions aren't captured yet\n");
+    }
+    let hltv = is_hltv();
+    let mut out = format!(
+        "{COMMAND} players ({} demo):\n",
+        if hltv { "HLTV" } else { "POV" }
+    );
+    let mut any = false;
+    for slot in 1..=32 {
+        let Some((name, who)) = lookup(slot, hltv) else {
+            continue;
+        };
+        any = true;
+        let id = if who.steam_id == 0 {
+            "SteamID unknown (0)".to_string()
+        } else {
+            match classic_steam_id(who.steam_id) {
+                Some(classic) => format!("{} ({classic})", who.steam_id),
+                None => format!("{} (not a player account)", who.steam_id),
+            }
+        };
+        let own = if who.is_own_pov { "  <- self" } else { "" };
+        out.push_str(&format!("  {slot:>2}  {name}  {id}{own}\n"));
+    }
+    if !any {
+        out.push_str("  nobody: no demo or game loaded\n");
+    }
+    out
+}
+
+/// Looks up a `DeathMsg` slot through `pfnGetPlayerInfo`. Slot 0 (the world)
+/// and anything past `MAX_CLIENTS` resolve to the slot number alone.
+fn resolve(slot: i32, hltv: bool) -> Who {
+    lookup(slot, hltv).map_or(Who::slot(slot), |(_, who)| who)
+}
+
+/// `resolve`, plus the player's name; `None` for an empty or invalid slot.
+fn lookup(slot: i32, hltv: bool) -> Option<(String, Who)> {
+    let mut who = Who::slot(slot);
+    let engfuncs = engine::engfuncs()?;
+    if !(1..=32).contains(&slot) {
+        return None;
+    }
+    // Zeroed first: the engine leaves `steam_id` alone unless a demo is
+    // playing, and leaves everything but `name` alone for an empty slot.
+    let mut info = engine::HudPlayerInfo::empty();
+    unsafe { (engfuncs.pfn_get_player_info)(slot, &mut info) };
+    if info.name.is_null() {
+        return None;
+    }
+    // Always 0 in DoD (see `engine::HudPlayerInfo`), so the SteamID comes
+    // from the player's own userinfo.
+    who.steam_id = if info.steam_id != 0 {
+        info.steam_id
+    } else {
+        unsafe { steam_id_from_record(info.name) }
+    };
+    who.is_own_pov = !hltv && info.thisplayer != 0;
+    let name = unsafe { CStr::from_ptr(info.name) }
+        .to_string_lossy()
+        .into_owned();
+    Some((name, who))
 }
 
 // ── Patching ─────────────────────────────────────────────────────────────────
@@ -280,7 +670,9 @@ unsafe fn verify_stock(base: usize) -> Result<(), String> {
             u32::from(unsafe { read_u8(base, rva) })
         };
         if got != want {
-            return Err(format!("count at +{rva:#x} reads {got:#x}, expected {want:#x}"));
+            return Err(format!(
+                "count at +{rva:#x} reads {got:#x}, expected {want:#x}"
+            ));
         }
     }
     for &(rva, width) in OFFSET_SITES {
@@ -290,7 +682,9 @@ unsafe fn verify_stock(base: usize) -> Result<(), String> {
             u32::from(unsafe { read_u8(base, rva) })
         };
         if got != STOCK_OFFSET as u32 {
-            return Err(format!("y offset at +{rva:#x} reads {got:#x}, expected {STOCK_OFFSET:#x}"));
+            return Err(format!(
+                "y offset at +{rva:#x} reads {got:#x}, expected {STOCK_OFFSET:#x}"
+            ));
         }
     }
     Ok(())
@@ -369,7 +763,11 @@ fn apply_max(max: i32) -> Result<(), String> {
     ensure_verified(base)?;
 
     let reverting = max == STOCK_MAX;
-    let array = if reverting { base + ARRAY_RVA } else { buffer() };
+    let array = if reverting {
+        base + ARRAY_RVA
+    } else {
+        buffer()
+    };
 
     for &(rva, field) in ARRAY_REFS {
         let value = (array + field) as u32;
@@ -400,9 +798,9 @@ fn apply_max(max: i32) -> Result<(), String> {
 // ── The y detour ─────────────────────────────────────────────────────────────
 //
 // `Draw` picks the feed's y down three paths -- a plain 20, a screen-scaled
-// term plus 20 when the spectator-HUD flag is set, and the overview map's own
-// layout numbers while it's up at full size ("mode 2" -- not a spectator
-// mode, see docs/goldsrc_death_notices.md's corrigendum) -- and all three
+// term plus 20 when the spectator-HUD flag is set, and just under the minimap
+// while it's up ("mode 2", `_cl_minimap 2` -- not a spectator mode, see
+// docs/goldsrc_death_notices.md's corrigendum) -- and all three
 // converge with y in `[esp+4]` just before the function saves its registers.
 // Detouring that convergence sets the *result*, so one value means the same
 // thing on every path, including mode 2, which holds no immediate to patch
@@ -435,6 +833,13 @@ static OFFSET_VALUE: AtomicI32 = AtomicI32::new(STOCK_OFFSET);
 static OFFSET_RESUME: AtomicUsize = AtomicUsize::new(0);
 /// Installed once per process; see [`detour::Detour`] on why it is never undone.
 static OFFSET_DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
+/// Where `spectator_hud` puts the feed while no `offset` has been typed, or
+/// [`OFFSET_UNSET`] while it has no opinion: not spectating, or the minimap is
+/// up and the game already places the feed under it.
+static AUTO_OFFSET: AtomicI32 = AtomicI32::new(OFFSET_UNSET);
+/// Set once the automatic layout has failed to install the detour, so it is
+/// logged once.
+static AUTO_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// The stub, hand-assembled.
 ///
@@ -452,26 +857,28 @@ static OFFSET_DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
 /// computed has already been stored, and the next read of `eax` is a fresh load
 /// -- so the stub may use both freely.
 fn offset_stub(active: usize, value: usize, resume: usize) -> Vec<u8> {
-    let substitute: Vec<u8> = [0xa1u8]                                  // mov eax, [abs32]
+    let substitute: Vec<u8> = [0xa1u8] // mov eax, [abs32]
         .into_iter()
         .chain((value as u32).to_le_bytes())
-        .chain([0x89, 0x44, 0x24, 0x04])                                // mov [esp+4], eax
+        .chain([0x89, 0x44, 0x24, 0x04]) // mov [esp+4], eax
         .collect();
 
-    let mut code = vec![0x80, 0x3d];                                    // cmp byte ptr [abs32],
+    let mut code = vec![0x80, 0x3d]; // cmp byte ptr [abs32],
     code.extend_from_slice(&(active as u32).to_le_bytes());
-    code.push(0x00);                                                    //   0
-    code.extend_from_slice(&[0x74, substitute.len() as u8]);            // je over the substitution
+    code.push(0x00); //   0
+    code.extend_from_slice(&[0x74, substitute.len() as u8]); // je over the substitution
     code.extend_from_slice(&substitute);
     code.extend_from_slice(Y_STOLEN);
-    code.extend_from_slice(&[0xff, 0x25]);                              // jmp dword ptr [abs32]
+    code.extend_from_slice(&[0xff, 0x25]); // jmp dword ptr [abs32]
     code.extend_from_slice(&(resume as u32).to_le_bytes());
     code
 }
 
 /// Installs the y detour, once.
 fn ensure_offset_detour(base: usize) -> Result<(), String> {
-    let mut slot = OFFSET_DETOUR.lock().map_err(|_| "the detour lock is poisoned".to_string())?;
+    let mut slot = OFFSET_DETOUR
+        .lock()
+        .map_err(|_| "the detour lock is poisoned".to_string())?;
     if slot.is_some() {
         return Ok(());
     }
@@ -522,21 +929,63 @@ fn apply_offset(y: i32) -> Result<(), String> {
         return Err(format!("expected {MIN_OFFSET}..={MAX_OFFSET}, got {y}"));
     }
     ensure_offset_detour(base)?;
-    OFFSET_VALUE.store(y, Ordering::Release);
-    OFFSET_ACTIVE.store(1, Ordering::Release);
     PATCHED_OFFSET.store(y, Ordering::Release);
-    Ok(())
+    refresh_offset()
 }
 
-/// Hands the y back to the game, the way `offset default` always meant.
+/// Hands the y back: to the spectator layout while it has one, otherwise to
+/// the game.
 ///
 /// Nothing is unpatched: the detour stays, and simply stops substituting. That
 /// is strictly safer than restoring bytes under a thread that might be
 /// executing them, and it is what HLAE does too.
 fn clear_offset() -> Result<(), String> {
-    OFFSET_ACTIVE.store(0, Ordering::Release);
     PATCHED_OFFSET.store(OFFSET_UNSET, Ordering::Release);
+    refresh_offset().inspect_err(|_| OFFSET_ACTIVE.store(0, Ordering::Release))
+}
+
+/// The y in force now: the typed `offset`, else the spectator layout's, else
+/// [`OFFSET_UNSET`] (the game's own).
+fn effective_offset() -> i32 {
+    match PATCHED_OFFSET.load(Ordering::Acquire) {
+        OFFSET_UNSET => AUTO_OFFSET.load(Ordering::Acquire),
+        typed => typed,
+    }
+}
+
+/// Points the stub at [`effective_offset`], installing the detour if needed.
+fn refresh_offset() -> Result<(), String> {
+    let y = effective_offset();
+    if y == OFFSET_UNSET {
+        OFFSET_ACTIVE.store(0, Ordering::Release);
+        return Ok(());
+    }
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_offset_detour(base)?;
+    OFFSET_VALUE.store(y, Ordering::Release);
+    OFFSET_ACTIVE.store(1, Ordering::Release);
     Ok(())
+}
+
+/// Sets the spectator layout's feed y (`None`: the game's own). A typed
+/// `offset` still wins over it. Called by `spectator_hud` every frame; does
+/// nothing unless the value changed.
+pub fn set_auto_offset(y: Option<i32>) {
+    let y = y.unwrap_or(OFFSET_UNSET);
+    if AUTO_OFFSET.swap(y, Ordering::AcqRel) == y {
+        return;
+    }
+    if let Err(why) = refresh_offset()
+        && !AUTO_FAILED.swap(true, Ordering::Relaxed)
+    {
+        unsafe {
+            crate::debug::report(&format!(
+                "deathmsg: the spectator layout could not move the kill feed -- {why}"
+            ))
+        };
+    }
 }
 
 // ── The DeathMsg hook ────────────────────────────────────────────────────────
@@ -559,7 +1008,12 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
         let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
-        let blocked = BLOCK.lock().map(|list| list.blocks(killer, victim)).unwrap_or(false);
+        // The death happened whether or not the feed shows it.
+        crate::spectator_deathcam::note_death(killer, victim);
+        let blocked = BLOCK
+            .lock()
+            .map(|list| list.blocks_slots(killer, victim))
+            .unwrap_or(false);
         if blocked {
             // 1 is what the engine's own dispatcher treats as handled.
             return 1;
@@ -580,16 +1034,24 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
 /// handler on the next connect, which is precisely when we need to prepend
 /// ourselves again — so the repetition is the mechanism, not waste.
 fn install_hook() {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(name) = CString::new("DeathMsg") else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(name) = CString::new("DeathMsg") else {
+        return;
+    };
     unsafe { (engfuncs.pfn_hook_user_msg)(name.as_ptr(), hooked_death_msg) };
 }
 
 /// Called once per frame from [`crate::commands::poll`].
 pub fn poll() {
-    if HOOK_WANTED.load(Ordering::Relaxed) {
+    // `spec_deathcam` needs every kill noted, so the handler is kept
+    // installed while that switch is on too, with an empty block list.
+    if HOOK_WANTED.load(Ordering::Relaxed) || crate::spectator_deathcam::enabled() {
         install_hook();
     }
+    font::poll();
+    scale::poll();
 }
 
 /// Field offsets inside a `DeathNoticeItem` that [`restamp_display_time`] needs.
@@ -605,7 +1067,11 @@ const _: () = assert!(
 /// grown it, otherwise `client.dll`'s own.
 fn current_array(base: usize) -> (usize, i32) {
     let max = PATCHED_MAX.load(Ordering::Acquire);
-    if max == 0 { (base + ARRAY_RVA, STOCK_MAX) } else { (buffer(), max) }
+    if max == 0 {
+        (base + ARRAY_RVA, STOCK_MAX)
+    } else {
+        (buffer(), max)
+    }
 }
 
 /// Re-dates the notice `fake` just added, so it lives from *now*.
@@ -636,8 +1102,12 @@ fn current_array(base: usize) -> (usize, i32) {
 /// A real notice never hits this: it arrives while the game is drawing. So the
 /// fix belongs here rather than in the hook.
 fn restamp_display_time(base: usize) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(cvar) = CString::new("hud_deathnotice_time") else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(cvar) = CString::new("hud_deathnotice_time") else {
+        return;
+    };
     // Truncated, because that is what the game does to it.
     let lifetime = unsafe { (engfuncs.pfn_get_cvar_float)(cvar.as_ptr()) }.trunc();
     let expires = engine::client_time() as f32 + lifetime;
@@ -706,7 +1176,11 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     //
     // Blocked means *reported*, never silently dropped: a command that prints
     // success and shows nothing is the worst of the three possible behaviours.
-    if BLOCK.lock().map(|list| list.blocks(killer, victim)).unwrap_or(false) {
+    if BLOCK
+        .lock()
+        .map(|list| list.blocks_slots(killer, victim))
+        .unwrap_or(false)
+    {
         return Err(format!(
             "the block list hides frags involving {killer} -> {victim}, so nothing was shown. `{COMMAND} block clear` stops hiding."
         ));
@@ -715,7 +1189,13 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     // Straight to client.dll's own handler rather than through our own hook:
     // the hook's only job is the block check, which has already happened here,
     // and the engine is not involved in dispatching it either way.
-    unsafe { original(name.as_ptr(), payload.len() as i32, payload.as_mut_ptr() as *mut c_void) };
+    unsafe {
+        original(
+            name.as_ptr(),
+            payload.len() as i32,
+            payload.as_mut_ptr() as *mut c_void,
+        )
+    };
     if let Some(base) = engine::client_module_base() {
         restamp_display_time(base);
     }
@@ -728,37 +1208,52 @@ fn usage() -> String {
     format!(
         "usage:\n\
          \x20 {COMMAND} max <{STOCK_MAX}..{MAX_LINES}>      lines of kill feed shown at once (default {STOCK_MAX})\n\
-         \x20 {COMMAND} offset <0..{MAX_OFFSET}>     y the feed starts at (default {STOCK_OFFSET})\n\
-         \x20 {COMMAND} offset default      hand y back to the game\n\
+         \x20 {COMMAND} offset <{MIN_OFFSET}..{MAX_OFFSET}> y the feed starts at (default {STOCK_OFFSET})\n\
+         \x20 {COMMAND} offset default      hand y back to the default layout: while\n\
+         \x20                               spectating, just below the spectator bar (at the\n\
+         \x20                               top while it is hidden; under the minimap\n\
+         \x20                               while _cl_minimap 2 shows it)\n\
          \x20 {COMMAND} block <id>...       hide frags involving these players\n\
          \x20 {COMMAND} block !<id>...      hide everything EXCEPT these players\n\
+         \x20                               id: a slot, a SteamID (7656119..., STEAM_0:x:y, [U:1:n]),\n\
+         \x20                               or self (the recording player; nobody in HLTV)\n\
          \x20 {COMMAND} block clear         stop hiding anything\n\
+         \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
-         \x20                               weapon is a name (d_garand, garand) or 1..43\n"
+         \x20                               weapon is a name (d_garand, garand) or 1..43\n\
+         \x20 {COMMAND} font <face> <size> [bold] [shadow]\n\
+         \x20                               draw the names in that font (size {}..{} px), live;\n\
+         \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
+         \x20 {COMMAND} font default       the game's own font again\n\
+         \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
+         \x20                               lines spaced and right-aligned to match (default 1)\n\
+         \x20 {COMMAND} scale default      the game's own size again\n",
+        font::MIN_TALL,
+        font::MAX_TALL,
+        scale::MIN_SCALE,
+        scale::MAX_SCALE
     )
 }
 
-/// `pub(crate)`: also folded into `dodstudio_debug_status`'s combined report.
+/// `pub(crate)`: also folded into `ds_debug_status`'s combined report.
 pub(crate) fn status() -> String {
     let max = PATCHED_MAX.load(Ordering::Acquire);
-    let offset = PATCHED_OFFSET.load(Ordering::Acquire);
-    let list = BLOCK.lock();
+    let offset = match (PATCHED_OFFSET.load(Ordering::Acquire), effective_offset()) {
+        (OFFSET_UNSET, OFFSET_UNSET) => "the game's".to_string(),
+        (OFFSET_UNSET, auto) => format!("y {auto} (spectator layout)"),
+        (typed, _) => format!("y {typed}"),
+    };
+    // Copied out, so the lock isn't held across the engine lookups.
+    let list = BLOCK.lock().map(|l| l.clone());
     let block = match list {
-        Ok(ref l) if l.ids.is_empty() => "nothing".to_string(),
-        Ok(ref l) => {
-            let ids: Vec<String> = l.ids.iter().map(|i| i.to_string()).collect();
-            if l.allow_list {
-                format!("everything except players {}", ids.join(", "))
-            } else {
-                format!("frags involving players {}", ids.join(", "))
-            }
-        }
+        Ok(ref l) => blocking_text(l, current_name),
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = y {}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}\n",
         if max == 0 { STOCK_MAX } else { max },
-        if offset == OFFSET_UNSET { STOCK_OFFSET } else { offset },
+        font::describe(),
+        scale::describe(),
     )
 }
 
@@ -769,30 +1264,26 @@ fn parse_weapon(arg: &str) -> Result<i32, String> {
         if (1..WEAPON_SPRITES.len() as i32).contains(&index) {
             return Ok(index);
         }
-        return Err(format!("weapon index {index} is out of range (1..={})", WEAPON_SPRITES.len() - 1));
+        return Err(format!(
+            "weapon index {index} is out of range (1..={})",
+            WEAPON_SPRITES.len() - 1
+        ));
     }
     let wanted = arg.trim().to_ascii_lowercase();
-    let with_prefix = if wanted.starts_with("d_") { wanted.clone() } else { format!("d_{wanted}") };
+    let with_prefix = if wanted.starts_with("d_") {
+        wanted.clone()
+    } else {
+        format!("d_{wanted}")
+    };
     for (index, name) in WEAPON_SPRITES.iter().enumerate().skip(1) {
         if *name == with_prefix {
             return Ok(index as i32);
         }
     }
-    Err(format!("no weapon called {arg:?} -- try a name like d_garand, or an index 1..={}", WEAPON_SPRITES.len() - 1))
-}
-
-fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else { return Vec::new() };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
-        })
-        .collect()
+    Err(format!(
+        "no weapon called {arg:?} -- try a name like d_garand, or an index 1..={}",
+        WEAPON_SPRITES.len() - 1
+    ))
 }
 
 /// Runs one subcommand, returning what to print.
@@ -821,7 +1312,7 @@ fn dispatch(argv: &[String]) -> String {
             };
             if value.eq_ignore_ascii_case("default") {
                 return match clear_offset() {
-                    Ok(()) => format!("{COMMAND}: offset back to whatever the game computes\n"),
+                    Ok(()) => format!("{COMMAND}: offset back to the default layout\n"),
                     Err(why) => format!("{COMMAND} offset: {why}\n"),
                 };
             }
@@ -830,7 +1321,9 @@ fn dispatch(argv: &[String]) -> String {
                     Ok(()) => format!("{COMMAND}: offset = y {y}\n"),
                     Err(why) => format!("{COMMAND} offset: {why}\n"),
                 },
-                Err(_) => format!("{COMMAND} offset: expected a number or \"default\", got {value:?}\n"),
+                Err(_) => {
+                    format!("{COMMAND} offset: expected a number or \"default\", got {value:?}\n")
+                }
             }
         }
         "block" => {
@@ -840,47 +1333,57 @@ fn dispatch(argv: &[String]) -> String {
             }
             if rest.len() == 1 && rest[0].eq_ignore_ascii_case("clear") {
                 if let Ok(mut list) = BLOCK.lock() {
-                    list.ids.clear();
+                    list.players.clear();
                     list.allow_list = false;
                 }
                 return format!("{COMMAND}: blocking nothing\n");
             }
-            let mut ids = Vec::new();
-            let mut allow_list = false;
-            for token in rest {
-                let (negated, digits) = match token.strip_prefix('!') {
-                    Some(d) => (true, d),
-                    None => (false, token.as_str()),
-                };
-                match digits.parse::<i32>() {
-                    Ok(id) => {
-                        allow_list |= negated;
-                        ids.push(id);
-                    }
-                    Err(_) => return format!("{COMMAND} block: {token:?} is not a player index\n"),
-                }
-            }
-            // A mixed list has no coherent reading -- "block everyone except 3,
-            // and also block 5" is two different questions -- so say so rather
-            // than pick one.
-            let negations = rest.iter().filter(|t| t.starts_with('!')).count();
-            if negations != 0 && negations != rest.len() {
-                return format!(
-                    "{COMMAND} block: mix of plain and !-prefixed ids. Use all-plain to hide those \
-                     players, or all-! to hide everyone else.\n"
-                );
-            }
+            let (players, allow_list) = match parse_block_args(rest) {
+                Ok(parsed) => parsed,
+                Err(why) => return why,
+            };
             if let Ok(mut list) = BLOCK.lock() {
-                list.ids = ids;
+                list.players = players;
                 list.allow_list = allow_list;
             }
+            SELF_IN_HLTV_REPORTED.store(false, Ordering::Relaxed);
             HOOK_WANTED.store(true, Ordering::Relaxed);
             install_hook();
             status()
         }
+        "players" => players(),
+        "font" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", font::describe(), usage());
+            }
+            match font::parse_args(rest) {
+                Ok(spec) => match font::apply(spec) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} font: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} font: {why}\n"),
+            }
+        }
+        "scale" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", scale::describe(), usage());
+            }
+            match scale::parse_args(rest) {
+                Ok(s) => match scale::apply(s) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} scale: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} scale: {why}\n"),
+            }
+        }
         "fake" => {
             let (Some(k), Some(v), Some(w)) = (argv.get(2), argv.get(3), argv.get(4)) else {
-                return format!("{COMMAND} fake: need <killer> <victim> <weapon>\n{}", usage());
+                return format!(
+                    "{COMMAND} fake: need <killer> <victim> <weapon>\n{}",
+                    usage()
+                );
             };
             let (Ok(killer), Ok(victim)) = (k.parse::<i32>(), v.parse::<i32>()) else {
                 return format!("{COMMAND} fake: killer and victim must be player indices\n");
@@ -901,7 +1404,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe { crate::debug::report(&format!("deathmsg: {} -> {}", argv.join(" "), reply.trim())) };
@@ -918,11 +1421,11 @@ mod tests {
             code,
             vec![
                 0x80, 0x3d, 0x11, 0x11, 0x11, 0x11, 0x00, // cmp byte [active], 0
-                0x74, 0x09,                               // je  over the substitution
-                0xa1, 0x22, 0x22, 0x22, 0x22,             // mov eax, [value]
-                0x89, 0x44, 0x24, 0x04,                   // mov [esp+4], eax
-                0x53, 0x55, 0x56, 0x57, 0x33, 0xff,       // the stolen instructions
-                0xff, 0x25, 0x33, 0x33, 0x33, 0x33,       // jmp dword [resume]
+                0x74, 0x09, // je  over the substitution
+                0xa1, 0x22, 0x22, 0x22, 0x22, // mov eax, [value]
+                0x89, 0x44, 0x24, 0x04, // mov [esp+4], eax
+                0x53, 0x55, 0x56, 0x57, 0x33, 0xff, // the stolen instructions
+                0xff, 0x25, 0x33, 0x33, 0x33, 0x33, // jmp dword [resume]
             ]
         );
     }
@@ -933,7 +1436,10 @@ mod tests {
         // `je` displacement: too small lands mid-instruction, too large skips
         // an instruction the game needs. Derive it from the bytes themselves.
         let code = offset_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc);
-        let je_at = code.iter().position(|&b| b == 0x74).expect("a je in the stub");
+        let je_at = code
+            .iter()
+            .position(|&b| b == 0x74)
+            .expect("a je in the stub");
         let landing = je_at + 2 + code[je_at + 1] as usize;
         assert_eq!(
             &code[landing..landing + Y_STOLEN.len()],
@@ -1000,7 +1506,10 @@ mod tests {
         for &(_, width, kind) in COUNT_SITES {
             let value = kind.value_for(MAX_LINES);
             if width == 1 {
-                assert!(value <= 0x7f, "{value} will not fit the imm8 it is written into");
+                assert!(
+                    value <= 0x7f,
+                    "{value} will not fit the imm8 it is written into"
+                );
             }
         }
     }
@@ -1011,7 +1520,10 @@ mod tests {
         // slot 0, except the two that deliberately point at slot 1 (the
         // memmove source). Anything else means a transcription slip.
         for &(rva, field) in ARRAY_REFS {
-            assert!(field < 2 * ITEM, "reference at {rva:#x} has field offset {field:#x}");
+            assert!(
+                field < 2 * ITEM,
+                "reference at {rva:#x} has field offset {field:#x}"
+            );
         }
     }
 
@@ -1035,26 +1547,304 @@ mod tests {
         assert!(parse_weapon("no_such_gun").is_err());
     }
 
+    fn slot(slot: i32) -> Who {
+        Who::slot(slot)
+    }
+
+    /// The example from #468: STEAM_0:0:7654321.
+    const ME: u64 = 76_561_197_975_574_370;
+
     #[test]
     fn a_block_list_hides_only_the_listed_players() {
-        let list = BlockList { ids: vec![3, 7], allow_list: false };
-        assert!(list.blocks(3, 9));
-        assert!(list.blocks(9, 7));
-        assert!(!list.blocks(1, 2));
+        let list = BlockList {
+            players: vec![Player::Slot(3), Player::Slot(7)],
+            allow_list: false,
+        };
+        assert!(list.blocks(&slot(3), &slot(9)));
+        assert!(list.blocks(&slot(9), &slot(7)));
+        assert!(!list.blocks(&slot(1), &slot(2)));
     }
 
     #[test]
     fn an_allow_list_hides_everything_else() {
-        let list = BlockList { ids: vec![3], allow_list: true };
-        assert!(!list.blocks(3, 9), "a frag involving 3 must still show");
-        assert!(list.blocks(1, 2), "a frag with nobody listed must be hidden");
+        let list = BlockList {
+            players: vec![Player::Slot(3)],
+            allow_list: true,
+        };
+        assert!(
+            !list.blocks(&slot(3), &slot(9)),
+            "a frag involving 3 must still show"
+        );
+        assert!(
+            list.blocks(&slot(1), &slot(2)),
+            "a frag with nobody listed must be hidden"
+        );
     }
 
     #[test]
     fn an_empty_list_blocks_nothing_in_either_mode() {
         for allow_list in [false, true] {
-            let list = BlockList { ids: Vec::new(), allow_list };
-            assert!(!list.blocks(1, 2));
+            let list = BlockList {
+                players: Vec::new(),
+                allow_list,
+            };
+            assert!(!list.blocks(&slot(1), &slot(2)));
+        }
+    }
+
+    #[test]
+    fn the_steam_id_comes_from_the_matching_userinfo_only() {
+        // As recorded in wsod25_grp5_h1_hltv.dem.
+        let mut record = [0u8; USERINFO_LEN];
+        let info = b"\\model\\us-inf\\name\\dicE[: :]m00cat :D\\*sid\\76561197962734863\\*hltv\\0";
+        record[..info.len()].copy_from_slice(info);
+        assert_eq!(
+            sid_from_userinfo(&record, b"dicE[: :]m00cat :D"),
+            Some(76_561_197_962_734_863)
+        );
+        assert_eq!(
+            sid_from_userinfo(&record, b"someone else"),
+            None,
+            "not this player's"
+        );
+        assert_eq!(sid_from_userinfo(&[0u8; 16], b"x"), None, "empty");
+        assert_eq!(
+            sid_from_userinfo(b"\\name\\bot\\*sid\\0", b"bot"),
+            None,
+            "a bot's 0"
+        );
+        assert_eq!(
+            sid_from_userinfo(b"name\\bot", b"bot"),
+            None,
+            "not userinfo"
+        );
+    }
+
+    #[test]
+    fn a_pasted_classic_steam_id_is_one_negated_player_not_a_mix() {
+        let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let me = 76_561_197_962_734_863;
+        assert_eq!(
+            parse_block_args(&argv(&["!STEAM_0", ":", "1", ":", "1234567"])),
+            Ok((vec![Player::SteamId(me)], true))
+        );
+        assert_eq!(
+            parse_block_args(&argv(&[
+                "!self", "!STEAM_0", ":", "1", ":", "1234567", "!13"
+            ])),
+            Ok((
+                vec![Player::OwnPov, Player::SteamId(me), Player::Slot(13)],
+                true
+            ))
+        );
+        assert_eq!(
+            parse_block_args(&argv(&["STEAM_0", ":", "1", ":", "1234567"])),
+            Ok((vec![Player::SteamId(me)], false))
+        );
+        // All three SteamID forms on one line, as the console splits them.
+        assert_eq!(
+            parse_block_args(&argv(&[
+                "!STEAM_0",
+                ":",
+                "1",
+                ":",
+                "1234567",
+                "!76561197975574370",
+                "![U",
+                ":",
+                "1",
+                ":",
+                "15308642]",
+            ])),
+            Ok((
+                vec![
+                    Player::SteamId(me),
+                    Player::SteamId(76_561_197_975_574_370),
+                    Player::SteamId(76_561_197_975_574_370),
+                ],
+                true
+            ))
+        );
+        assert!(
+            parse_block_args(&argv(&["!3", "5"]))
+                .unwrap_err()
+                .contains("mix"),
+            "a real mix is still refused"
+        );
+    }
+
+    #[test]
+    fn a_classic_steam_id_split_at_its_colons_is_put_back_together() {
+        let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            rejoin_colons(&argv(&["!STEAM_0", ":", "1", ":", "1234567", "13"])),
+            argv(&["!STEAM_0:1:1234567", "13"])
+        );
+        assert_eq!(
+            rejoin_colons(&argv(&["!self", "!STEAM_0:1:1234567"])),
+            argv(&["!self", "!STEAM_0:1:1234567"]),
+            "quoted: already whole"
+        );
+        assert_eq!(
+            rejoin_colons(&argv(&[":", "3"])),
+            argv(&[":", "3"]),
+            "nothing to glue onto"
+        );
+    }
+
+    #[test]
+    fn steam_ids_parse_in_both_forms() {
+        assert_eq!(parse_steam_id("76561197975574370"), Some(ME));
+        assert_eq!(parse_steam_id("STEAM_0:0:7654321"), Some(ME));
+        assert_eq!(parse_steam_id("steam_1:0:7654321"), Some(ME));
+        assert_eq!(parse_steam_id("STEAM_0:1:7654321"), Some(ME + 1));
+        assert_eq!(parse_steam_id("STEAM_0:2:7654321"), None);
+        assert_eq!(parse_steam_id("STEAM_0:0"), None);
+        // SteamID3: account number 15308642 = 2 * 7654321.
+        assert_eq!(parse_steam_id("[U:1:15308642]"), Some(ME));
+        assert_eq!(parse_steam_id("U:1:15308642"), Some(ME));
+        assert_eq!(parse_steam_id("[u:1:15308642]"), Some(ME));
+        assert_eq!(parse_steam_id("[U:1:]"), None);
+        assert_eq!(
+            parse_steam_id("[G:1:15308642]"),
+            None,
+            "a group, not a user"
+        );
+        assert_eq!(parse_steam_id("STEAM_0:0:1:2"), None);
+        assert_eq!(parse_steam_id("7656119797793012"), None, "16 digits");
+        assert_eq!(parse_steam_id("12"), None);
+    }
+
+    #[test]
+    fn block_arguments_are_a_slot_a_steam_id_or_self() {
+        assert_eq!(parse_player("3"), Some(Player::Slot(3)));
+        assert_eq!(parse_player("self"), Some(Player::OwnPov));
+        assert_eq!(parse_player("SELF"), Some(Player::OwnPov));
+        assert_eq!(parse_player("76561197975574370"), Some(Player::SteamId(ME)));
+        assert_eq!(parse_player("STEAM_0:0:7654321"), Some(Player::SteamId(ME)));
+        assert_eq!(parse_player("pov"), None);
+        assert_eq!(parse_player("12345"), None, "neither a slot nor a SteamID");
+        assert_eq!(parse_player(""), None);
+    }
+
+    #[test]
+    fn only_player_accounts_get_the_classic_form() {
+        assert_eq!(
+            classic_steam_id(76_561_197_962_734_863).as_deref(),
+            Some("STEAM_0:1:1234567")
+        );
+        // The HLTV proxy's id from a real demo's `players` list: not an
+        // individual account, so no STEAM_0 form (#539 live test).
+        assert_eq!(classic_steam_id(90_071_996_842_377_220), None);
+        assert_eq!(classic_steam_id(12), None);
+        assert_eq!(
+            Player::SteamId(90_071_996_842_377_220).to_string(),
+            "90071996842377220"
+        );
+    }
+
+    #[test]
+    fn status_shows_classic_steam_ids_and_current_names() {
+        // #537's example: typed as `block !STEAM_0:1:1234567`.
+        let m00cat = 76_561_197_962_734_863;
+        let list = BlockList {
+            players: vec![Player::SteamId(m00cat), Player::Slot(13), Player::OwnPov],
+            allow_list: true,
+        };
+        let names = |p: Player| match p {
+            Player::SteamId(id) if id == m00cat => Some("dicE[: :]m00cat :D".to_string()),
+            Player::Slot(13) => Some("Brain".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            blocking_text(&list, names),
+            "everything except STEAM_0:1:1234567 (dicE[: :]m00cat :D), slot 13 (Brain), self"
+        );
+        // Nobody by those ids in the loaded demo: no names.
+        let block = BlockList {
+            allow_list: false,
+            ..list
+        };
+        assert_eq!(
+            blocking_text(&block, |_| None),
+            "frags involving STEAM_0:1:1234567, slot 13, self"
+        );
+        assert_eq!(blocking_text(&BlockList::default(), |_| None), "nothing");
+        // Round trip: what status prints parses back to the same player.
+        assert_eq!(
+            parse_player(&Player::SteamId(ME).to_string()),
+            Some(Player::SteamId(ME))
+        );
+    }
+
+    #[test]
+    fn a_steam_id_matches_whatever_slot_the_player_has() {
+        let list = BlockList {
+            players: vec![Player::SteamId(ME)],
+            allow_list: true,
+        };
+        let me_in_slot_5 = Who {
+            slot: 5,
+            steam_id: ME,
+            is_own_pov: false,
+        };
+        let me_in_slot_12 = Who {
+            slot: 12,
+            ..me_in_slot_5
+        };
+        let other = Who {
+            slot: 7,
+            steam_id: ME + 2,
+            is_own_pov: false,
+        };
+        assert!(!list.blocks(&me_in_slot_5, &other));
+        assert!(!list.blocks(&other, &me_in_slot_12));
+        assert!(list.blocks(&other, &slot(9)));
+    }
+
+    #[test]
+    fn an_unknown_steam_id_never_matches() {
+        // A slot whose SteamID the engine did not report resolves to 0.
+        assert!(!Player::SteamId(0).matches(&slot(4)));
+    }
+
+    #[test]
+    fn self_and_a_steam_id_cover_both_demo_types() {
+        // `block !self !<steamid>`, the one line #468 says must work in both.
+        let list = BlockList {
+            players: vec![Player::OwnPov, Player::SteamId(ME)],
+            allow_list: true,
+        };
+        // POV demo: the recording player is flagged.
+        let pov_me = Who {
+            slot: 2,
+            steam_id: ME,
+            is_own_pov: true,
+        };
+        assert!(!list.blocks(&pov_me, &slot(8)));
+        // HLTV demo: `self` resolves for nobody, and the SteamID finds me.
+        let hltv_me = Who {
+            slot: 14,
+            steam_id: ME,
+            is_own_pov: false,
+        };
+        assert!(!list.blocks(&slot(3), &hltv_me));
+        assert!(list.blocks(&slot(3), &slot(8)));
+    }
+
+    #[test]
+    fn only_slot_lists_skip_the_engine_lookup() {
+        let slots = BlockList {
+            players: vec![Player::Slot(1)],
+            allow_list: false,
+        };
+        assert!(!slots.needs_player_info());
+        for player in [Player::OwnPov, Player::SteamId(ME)] {
+            let list = BlockList {
+                players: vec![Player::Slot(1), player],
+                allow_list: false,
+            };
+            assert!(list.needs_player_info());
         }
     }
 }

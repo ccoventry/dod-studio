@@ -18,16 +18,16 @@ pub fn use_clan_match_detection_updates(
     state: &mut AnalyzerState,
     event: &AnalyzerEvent,
 ) {
-
     // WaveTime carries mp_clan_respawntime, a CVAR that is only set to a
     // non-zero value in clan-match server configs. Seeing it with duration > 0
     // at any point — including mid-demo after joining a live match — is a
     // definitive clan-match signal that doesn't depend on the Reset→Start
     // sequence being present in the recording.
     if let AnalyzerEvent::UserMessage(UserMessage::WaveTime(wave_time)) = event
-        && wave_time.0 > Duration::ZERO {
-            state.clan_match_detected = true;
-        }
+        && wave_time.0 > Duration::ZERO
+    {
+        state.clan_match_detected = true;
+    }
 
     match (&state.clan_match_detection, event) {
         // ClanTimer fires when the countdown to a clan match begins. Observing
@@ -70,6 +70,9 @@ pub fn use_clan_match_detection_updates(
             });
 
             state.team_scores.reset();
+            // Warm-up kills go with the warm-up, like the weapon breakdown.
+            state.kill_positions.clear();
+            state.objectives.clear_match_totals();
 
             for player in state.players.iter_mut() {
                 player.kill_streaks.clear();
@@ -81,6 +84,11 @@ pub fn use_clan_match_detection_updates(
                 player.stats_seeded = true;
                 player.has_pre_demo_activity = false;
                 player.has_reconnected = false;
+                player.obj_points = 0;
+                player.cap_credits = 0;
+                player.cap_breaks = 0;
+                player.teamkills = 0;
+                player.suicides = 0;
 
                 player.mortality.clear();
                 player.mortality.push(MortalityChange::new(

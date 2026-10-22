@@ -38,7 +38,9 @@ use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 const FLUSH_LIMIT: i64 = 63;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: flush_predict <demo.dem>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: flush_predict <demo.dem>");
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
 
@@ -48,16 +50,26 @@ fn main() {
 
     for entry in demo.directory.entries.iter() {
         for f in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
             let incoming = bt.1.sequence_info.incoming_sequence;
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
-                let EngineMessage::SvcDeltaPacketEntities(pe) = &**em else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
+                let EngineMessage::SvcDeltaPacketEntities(pe) = &**em else {
+                    continue;
+                };
                 packets += 1;
                 let delta = pe.delta_sequence.to_u32();
                 let gap = (incoming as i64 - delta as i64) & 0xff;
-                if gap > worst { worst = gap }
+                if gap > worst {
+                    worst = gap
+                }
                 if gap >= FLUSH_LIMIT {
                     flushes.push((f.time, incoming, delta, gap));
                 }
@@ -66,7 +78,9 @@ fn main() {
     }
 
     println!("{path}");
-    println!("  {packets} delta entity packets, worst sequence gap {worst} (flush at {FLUSH_LIMIT})");
+    println!(
+        "  {packets} delta entity packets, worst sequence gap {worst} (flush at {FLUSH_LIMIT})"
+    );
     if flushes.is_empty() {
         println!("  no packet is discarded -- the engine will not print the flush warning");
         return;
@@ -75,7 +89,9 @@ fn main() {
     for (time, incoming, delta, gap) in flushes.iter().take(20) {
         println!("    t={time:.2}s incoming={incoming} delta_sequence={delta} gap={gap}");
     }
-    if flushes.len() > 20 { println!("    ... and {} more", flushes.len() - 20) }
+    if flushes.len() > 20 {
+        println!("    ... and {} more", flushes.len() - 20)
+    }
     let first = flushes.first().unwrap().0;
     let last = flushes.last().unwrap().0;
     println!("  discards run from t={first:.2}s to t={last:.2}s");

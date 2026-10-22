@@ -11,7 +11,8 @@ impl Doer for SvcSendCvarValue2 {
                 request_id,
                 name: name.into(),
             }
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

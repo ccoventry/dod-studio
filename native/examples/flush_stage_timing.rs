@@ -20,6 +20,11 @@
 //! interrupted from this crate (it is one call into `dem-patch`); the serialise
 //! now can be, via `Demo::write_to_bytes_cancellable`.
 //!
+//! The serialise has since stopped re-encoding frames the clean did not edit
+//! (`Demo::write_to_bytes_reusing_source_cancellable`). Same demo, maps dir
+//! set, ring 256, best of three: `clean_ms` 4973 -> 2172, the write inside it
+//! ~3000ms -> ~80ms, and the output byte-identical to before.
+//!
 //! ```text
 //! cargo run --release -p native --example flush_stage_timing -- <demo>
 //! ```
@@ -29,7 +34,7 @@
 use dem::open_demo_from_bytes;
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
-use native::patch::{build_batch_queue, clean_demo_decals, Cancel, DecalCleanOptions};
+use native::patch::{Cancel, DecalCleanOptions, build_batch_queue, clean_demo_decals};
 
 fn main() {
     let demo = std::env::args().nth(1).expect("usage: <demo>");
@@ -43,7 +48,12 @@ fn main() {
     let t = std::time::Instant::now();
     let parsed = open_demo_from_bytes(&bytes).expect("parse");
     let parse_ms = t.elapsed().as_millis();
-    let frames: usize = parsed.directory.entries.iter().map(|e| e.frames.len()).sum();
+    let frames: usize = parsed
+        .directory
+        .entries
+        .iter()
+        .map(|e| e.frames.len())
+        .sum();
     drop(parsed);
 
     // The pipeline's own window derivation, so the clean below does the same

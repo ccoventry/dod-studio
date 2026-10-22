@@ -4,20 +4,19 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
-use tokio::process::Command;
+use std::sync::{Arc, Mutex, mpsc};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::process::Command;
 
-
-use super::config::RenderConfig;
+use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
 
 #[derive(Clone, Debug)]
 pub enum RenderUpdate {
-    Progress(String, u32),     // (job_id, percentage)
-    Speed(String, String),     // (job_id, speed_text)
-    Status(String, String),    // (job_id, status_text)
-    OutputPath(String, String), // (job_id, absolute path to the encoded file)
+    Progress(String, u32),                  // (job_id, percentage)
+    Speed(String, String),                  // (job_id, speed_text)
+    Status(String, String),                 // (job_id, status_text)
+    OutputPath(String, String),             // (job_id, absolute path to the encoded file)
     Finished(String, bool, Option<String>), // (job_id, success, error_log)
 }
 
@@ -41,21 +40,91 @@ fn estimate_reservation_bytes(clip: &ClipData) -> u64 {
 
 /// Best-effort required-bytes estimate for one job, whatever its status —
 /// exact for a SourceCopy job (the source file already exists on disk, so
-/// this just measures it), the same conservative raw-frame estimate as
-/// `estimate_reservation_bytes` above for everything else. Shared by
-/// `run_render_job`'s own JIT drive routing (only ever called there for a
-/// job about to start) and the Render footer's whole-queue "Required
-/// (Estimated)" figure (called for every Queued/Rendering job, not just the
-/// one about to run).
-pub fn job_reservation_estimate(clip: &ClipData, is_source_copy: bool) -> u64 {
-    if is_source_copy {
+/// this just measures it). For every other codec: what finished renders of
+/// the same codec and frame size actually wrote per frame, plus a margin,
+/// once there is one to learn from (#120); until then the same conservative
+/// raw-frame estimate as `estimate_reservation_bytes` above, which also caps
+/// the learned figure. Shared by `run_render_job`'s own JIT drive routing
+/// (only ever called there for a job about to start) and the Render footer's
+/// whole-queue "Required (Estimated)" figure (called for every
+/// Queued/Rendering job, not just the one about to run).
+pub fn job_reservation_estimate(clip: &ClipData, codec: RenderCodec, custom_args: &str) -> u64 {
+    if codec == RenderCodec::SourceCopy {
         let take_folder = PathBuf::from(&clip.take_folder);
         let video_name = clip.video_file.as_deref().unwrap_or_default();
-        std::fs::metadata(take_folder.join(&clip.img_folder).join(video_name))
+        return std::fs::metadata(take_folder.join(&clip.img_folder).join(video_name))
             .map(|m| m.len())
-            .unwrap_or_else(|_| estimate_reservation_bytes(clip))
-    } else {
-        estimate_reservation_bytes(clip)
+            .unwrap_or_else(|_| estimate_reservation_bytes(clip));
+    }
+    let raw = estimate_reservation_bytes(clip);
+    rate_key(clip, codec, custom_args)
+        .and_then(|key| learned_rates().lock().ok()?.get(&key).copied())
+        .map(|bytes_per_frame| {
+            let learned = bytes_per_frame * LEARNED_RATE_MARGIN * clip.frame_count as f64;
+            (learned.ceil() as u64).min(raw)
+        })
+        .unwrap_or(raw)
+}
+
+// ── Learned output sizes (#120) ──────────────────────────────────────────────
+//
+// No per-codec table of guessed
+// ratios. Each codec's real bytes per frame are measured from renders that
+// finished, per frame size (a 4K ProRes frame is not a 720p one), and later
+// jobs reserve that plus a margin. The first clip of a kind keeps the
+// uncompressed estimate. Kept for the whole app session: a codec's rate at a
+// frame size doesn't change between batches.
+
+/// Head-room over the largest rate seen, since footage varies from clip to
+/// clip (smoke and fast motion compress worse).
+const LEARNED_RATE_MARGIN: f64 = 1.5;
+
+/// What a rate is learned per: codec (with its custom args, which can be
+/// anything), the HUD stream (always ProRes 4444 with alpha), frame size.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RateKey {
+    codec: String,
+    hud: bool,
+    width: u32,
+    height: u32,
+}
+
+fn rate_key(clip: &ClipData, codec: RenderCodec, custom_args: &str) -> Option<RateKey> {
+    if clip.width == 0 || clip.height == 0 || clip.frame_count == 0 {
+        return None;
+    }
+    let hud = clip.clip_type == "hud_only";
+    Some(RateKey {
+        codec: if hud {
+            String::new()
+        } else if codec == RenderCodec::Custom {
+            format!("custom:{}", custom_args.trim())
+        } else {
+            codec.to_str_id().to_string()
+        },
+        hud,
+        width: clip.width,
+        height: clip.height,
+    })
+}
+
+/// Largest bytes per frame seen for each key this session.
+fn learned_rates() -> &'static Mutex<HashMap<RateKey, f64>> {
+    static RATES: std::sync::OnceLock<Mutex<HashMap<RateKey, f64>>> = std::sync::OnceLock::new();
+    RATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Records what a finished render of `clip` actually wrote, for later jobs'
+/// reservations. Keeps the largest rate per key, so one small clip can't
+/// talk the estimate down for a bigger one.
+fn record_output_size(clip: &ClipData, codec: RenderCodec, custom_args: &str, bytes: u64) {
+    let Some(key) = rate_key(clip, codec, custom_args) else {
+        return;
+    };
+    let rate = bytes as f64 / clip.frame_count as f64;
+    if let Ok(mut rates) = learned_rates().lock() {
+        let entry = rates.entry(key).or_insert(rate);
+        *entry = entry.max(rate);
     }
 }
 
@@ -92,6 +161,11 @@ impl Drop for ReservationGuard {
     }
 }
 
+/// Why a render with no export folder is refused. Studio's Render button
+/// says the same before it gets this far.
+pub const NO_EXPORT_FOLDER: &str =
+    "Not rendered: there is no export folder. Add one in Configuration → Render Settings.";
+
 pub async fn run_render_job(
     job_id: String,
     clip: ClipData,
@@ -104,9 +178,12 @@ pub async fn run_render_job(
     // just a copy into the export pool with the pipeline's naming applied.
     let is_source_copy = config.target_codec == super::config::RenderCodec::SourceCopy;
     let ffmpeg_path = PathBuf::from(&config.ffmpeg_path);
-    let fps = config.fps.to_string();
 
     let take_folder = PathBuf::from(&clip.take_folder);
+    // The take's own capture rate when its `dodstudio_take.json` says, else
+    // Render Settings' Source FPS (`take_meta::render_fps`).
+    let (fps_used, fps_from_take) = super::take_meta::render_fps(&take_folder, config.fps);
+    let fps = fps_used.to_string();
     // `None` is an OBS take: its audio is already muxed into `video_file`,
     // so there is nothing to join against a wav.
     let wav_file: Option<PathBuf> = clip.wav_file.as_ref().map(|w| take_folder.join(w));
@@ -133,21 +210,25 @@ pub async fn run_render_job(
         return;
     }
     if let Some(wav) = &wav_file
-        && !wav.exists() {
-            let _ = tx.send(RenderUpdate::Finished(
-                job_id.clone(),
-                false,
-                Some(format!("Audio file not found: {}", wav.display())),
-            ));
-            return;
-        }
+        && !wav.exists()
+    {
+        let _ = tx.send(RenderUpdate::Finished(
+            job_id.clone(),
+            false,
+            Some(format!("Audio file not found: {}", wav.display())),
+        ));
+        return;
+    }
     // The alpha stream carries no sound of its own, so a HUD/alpha composite
     // always needs a separate wav — an OBS take's muxed-in audio can't cover it.
     if is_hud && wav_file.is_none() {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
-            Some("HUD/alpha clips need a separate audio track (sound.wav), but this take has none.".to_string()),
+            Some(
+                "HUD/alpha clips need a separate audio track (sound.wav), but this take has none."
+                    .to_string(),
+            ),
         ));
         return;
     }
@@ -155,7 +236,10 @@ pub async fn run_render_job(
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
-            Some("No audio source for this take: no sound.wav and no audio-bearing video.".to_string()),
+            Some(
+                "No audio source for this take: no sound.wav and no audio-bearing video."
+                    .to_string(),
+            ),
         ));
         return;
     }
@@ -171,26 +255,39 @@ pub async fn run_render_job(
         } else {
             "Skip (keep original) requires a captured video file, but this take has none."
         };
-        let _ = tx.send(RenderUpdate::Finished(job_id.clone(), false, Some(reason.to_string())));
+        let _ = tx.send(RenderUpdate::Finished(
+            job_id.clone(),
+            false,
+            Some(reason.to_string()),
+        ));
         return;
     }
 
-    // The FPS below is fed to `-framerate` *before* the BMP input, so it is not
-    // an output preference — it is how FFmpeg is told to interpret the frame
+    // The FPS is fed to `-framerate` *before* the BMP input, so it is not an
+    // output preference — it is how FFmpeg is told to interpret the frame
     // sequence's timing. A value that disagrees with the capture produces a
     // wrong computed duration and `-shortest` then trims the audio to match, so
-    // the render succeeds and the clip is simply the wrong speed. This is
-    // advisory only: the take may have been moved or hand-assembled, and
-    // silently substituting a number found in a neighbouring file would be a
-    // worse surprise than the one it fixes. See `hlcr::take_meta`.
+    // the render would succeed and the clip simply be the wrong speed. Hence the
+    // take's own recorded rate wins over the setting (#14, `hlcr::take_meta`).
     //
     // Logged, not sent as a `Status` update: `job.status` is a state field with
     // a fixed vocabulary ("Queued" | "Rendering" | "Finished" | "Error" |
-    // "Cancelled") that the scheduler's own transitions test against, so putting
-    // a sentence in it would show a paragraph where a status chip belongs and
-    // strand the job if anything returned before "Rendering" overwrote it.
-    if let Some(warning) = super::take_meta::fps_mismatch_warning(&take_folder, config.fps) {
-        crate::log_markdown(&format!("[render-fps-mismatch] job {} — {}", job_id, warning));
+    // "Cancelled") that the scheduler's own transitions test against. The row
+    // itself shows the rate through the job's settings summary.
+    if !is_source_copy && clip.video_file.is_none() {
+        crate::log_markdown(&format!(
+            "[render-fps] job {} — reading the frames at {} fps, {}",
+            job_id,
+            fps_used,
+            if fps_from_take {
+                "the rate the take was captured at".to_string()
+            } else {
+                format!(
+                    "Render Settings' Source FPS (the take doesn't say what it was captured at; {})",
+                    take_folder.display()
+                )
+            }
+        ));
     }
 
     let clip_type = clip.clip_type.as_str();
@@ -204,17 +301,30 @@ pub async fn run_render_job(
     // scheduler tick can all see the same live free-space number and all
     // pick the same drive before any of them has written a byte — the flat
     // 20 GiB threshold this replaced was only ever sized to be safe for one
-    // job at a time. See docs/capture-render-studio-merge-scope.md §4.
+    // job at a time.
     const SAFETY_MARGIN_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
-    let reservation_estimate = job_reservation_estimate(&clip, is_source_copy);
+    let reservation_estimate =
+        job_reservation_estimate(&clip, config.target_codec, &config.custom_codec_args);
 
+    // No export folder: refused, never written into the working directory
+    // (for an installed app, its install folder), where nobody would look.
+    if config.export_directories.is_empty() {
+        let _ = tx.send(RenderUpdate::Finished(
+            job_id.clone(),
+            false,
+            Some(NO_EXPORT_FOLDER.to_string()),
+        ));
+        return;
+    }
     let mut selected_export_dir: Option<PathBuf> = None;
     {
         let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
         for dir in &config.export_directories {
             let live_free = crate::sys::disk::get_available_bytes(dir);
             let already_reserved = *ledger.get(dir).unwrap_or(&0);
-            if live_free.saturating_sub(already_reserved) > reservation_estimate + SAFETY_MARGIN_BYTES {
+            if live_free.saturating_sub(already_reserved)
+                > reservation_estimate + SAFETY_MARGIN_BYTES
+            {
                 *ledger.entry(dir.clone()).or_insert(0) += reservation_estimate;
                 selected_export_dir = Some(dir.clone());
                 // Shows this job's own estimate against what else was already
@@ -236,18 +346,18 @@ pub async fn run_render_job(
             }
         }
     }
-    if selected_export_dir.is_none() && !config.export_directories.is_empty() {
+    let Some(output_folder) = selected_export_dir.clone() else {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
             Some(format!(
-                "JIT routing failed: all {} export drive(s) have less than {:.1} GiB free once other in-flight renders' reservations are accounted for. Render halted.",
+                "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
                 config.export_directories.len(),
                 (reservation_estimate + SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
             )),
         ));
         return;
-    }
+    };
     // Releases this job's reservation on every remaining exit path below —
     // see `ReservationGuard`'s own doc comment.
     let _reservation_guard = selected_export_dir.as_ref().map(|dir| ReservationGuard {
@@ -257,7 +367,6 @@ pub async fn run_render_job(
         job_id: job_id.clone(),
     });
 
-    let output_folder = selected_export_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     if let Err(e) = std::fs::create_dir_all(&output_folder) {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
@@ -274,19 +383,37 @@ pub async fn run_render_job(
     let stream_type = if is_hud { "hud" } else { "all" };
     let wav_part = match &clip.wav_file {
         Some(wav) => {
-            let wav_stem = std::path::Path::new(wav).file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            if wav_stem.to_lowercase() == "sound" { String::new() } else { format!("_{}", wav_stem) }
+            let wav_stem = std::path::Path::new(wav)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if wav_stem.to_lowercase() == "sound" {
+                String::new()
+            } else {
+                format!("_{}", wav_stem)
+            }
         }
         // An OBS take has no wav to derive a suffix from — base_name already
         // carries the distinguishing "-obs" suffix the scanner gave it.
         None => String::new(),
     };
-    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
     let hash_str = format!("{:04x}", timestamp % 0x10000);
     // Reuses `take_folder` (already parsed from this same `clip.take_folder`
     // string above) rather than re-parsing a second `PathBuf` from it.
-    let take_name = take_folder.file_name().unwrap_or_default().to_string_lossy();
-    let demo_name = take_folder.parent().and_then(|p| p.file_name()).unwrap_or_default().to_string_lossy();
+    let take_name = take_folder
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let demo_name = take_folder
+        .parent()
+        .and_then(|p| p.file_name())
+        .unwrap_or_default()
+        .to_string_lossy();
 
     if is_source_copy {
         // Validated above: video_file and a non-hud clip_type are guaranteed here.
@@ -296,31 +423,60 @@ pub async fn run_render_job(
             let _ = tx.send(RenderUpdate::Finished(
                 job_id.clone(),
                 false,
-                Some(format!("Source video not found: {}", source_video.display())),
+                Some(format!(
+                    "Source video not found: {}",
+                    source_video.display()
+                )),
             ));
             return;
         }
         // Kept from whatever OBS wrote — renaming would make the file lie
         // about its own container to every tool that reads it afterwards.
-        let ext = source_video.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mp4".to_string());
-        let final_name = format!("{}_{}{}_{}_{}.{}", demo_name, take_name, wav_part, stream_type, hash_str, ext);
+        let ext = source_video
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "mp4".to_string());
+        let final_name = match clip_file_stem(&clip, &wav_part, is_hud) {
+            Some(stem) => get_unique_filename(&output_folder, &stem, &format!(".{ext}")),
+            None => format!(
+                "{}_{}{}_{}_{}.{}",
+                demo_name, take_name, wav_part, stream_type, hash_str, ext
+            ),
+        };
         let out_file = output_folder.join(&final_name);
         let out_file_str = out_file.to_string_lossy().into_owned();
 
         if cancel_rx.load(Ordering::Relaxed) {
-            let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
-            let _ = tx.send(RenderUpdate::Finished(job_id, false, Some("Cancelled by user".to_string())));
+            let _ = tx.send(RenderUpdate::Status(
+                job_id.clone(),
+                "Cancelled".to_string(),
+            ));
+            let _ = tx.send(RenderUpdate::Finished(
+                job_id,
+                false,
+                Some("Cancelled by user".to_string()),
+            ));
             return;
         }
-        let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Rendering".to_string()));
+        let _ = tx.send(RenderUpdate::Status(
+            job_id.clone(),
+            "Rendering".to_string(),
+        ));
         // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
         // during a large copy (Custom Output/lossless OBS captures — see
-        // docs/obs_alternate_capture.md — can run tens of GB) instead of
+        // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
         // being silently ignored until the whole file has already moved.
         match copy_cancellable(&source_video, &out_file, &cancel_rx).await {
             Ok(true) => {
-                let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
-                let _ = tx.send(RenderUpdate::Finished(job_id, false, Some("Cancelled by user".to_string())));
+                let _ = tx.send(RenderUpdate::Status(
+                    job_id.clone(),
+                    "Cancelled".to_string(),
+                ));
+                let _ = tx.send(RenderUpdate::Finished(
+                    job_id,
+                    false,
+                    Some("Cancelled by user".to_string()),
+                ));
             }
             Ok(false) => {
                 let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
@@ -353,24 +509,58 @@ pub async fn run_render_job(
     // an owned `String` that lives only as long as this function call.
     let mut codec_args: Vec<&str> = Vec::new();
     let file_ext = if is_hud {
-        codec_args.extend_from_slice(&["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"]);
+        codec_args.extend_from_slice(&[
+            "-c:v",
+            "prores_ks",
+            "-profile:v",
+            "4444",
+            "-pix_fmt",
+            "yuva444p10le",
+        ]);
         ".mov"
     } else {
         match config.target_codec {
             super::config::RenderCodec::NvencH264 => {
-                codec_args.extend_from_slice(&["-c:v", "h264_nvenc", "-preset", "p6", "-tune", "hq", "-cq", "15", "-pix_fmt", "yuv420p"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v",
+                    "h264_nvenc",
+                    "-preset",
+                    "p6",
+                    "-tune",
+                    "hq",
+                    "-cq",
+                    "15",
+                    "-pix_fmt",
+                    "yuv420p",
+                ]);
                 ".mp4"
             }
             super::config::RenderCodec::H264Software => {
-                codec_args.extend_from_slice(&["-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p",
+                ]);
                 ".mp4"
             }
             super::config::RenderCodec::ProRes => {
-                codec_args.extend_from_slice(&["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v",
+                    "prores_ks",
+                    "-profile:v",
+                    "3",
+                    "-pix_fmt",
+                    "yuv422p10le",
+                ]);
                 ".mov"
             }
             super::config::RenderCodec::DnxHr => {
-                codec_args.extend_from_slice(&["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v",
+                    "dnxhd",
+                    "-profile:v",
+                    "dnxhr_hq",
+                    "-pix_fmt",
+                    "yuv422p",
+                ]);
                 ".mov"
             }
             super::config::RenderCodec::HuffYuv => {
@@ -392,7 +582,10 @@ pub async fn run_render_job(
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
                         false,
-                        Some("Custom codec selected but no FFmpeg arguments were entered.".to_string()),
+                        Some(
+                            "Custom codec selected but no FFmpeg arguments were entered."
+                                .to_string(),
+                        ),
                     ));
                     return;
                 }
@@ -433,7 +626,13 @@ pub async fn run_render_job(
         &["-c:a", "pcm_s16le"]
     };
 
-    let final_name = format!("{}_{}{}_{}_{}{}", demo_name, take_name, wav_part, stream_type, hash_str, file_ext);
+    let final_name = match clip_file_stem(&clip, &wav_part, is_hud) {
+        Some(stem) => get_unique_filename(&output_folder, &stem, file_ext),
+        None => format!(
+            "{}_{}{}_{}_{}{}",
+            demo_name, take_name, wav_part, stream_type, hash_str, file_ext
+        ),
+    };
     let out_file = output_folder.join(&final_name);
 
     // Calculate thread scaling
@@ -465,23 +664,37 @@ pub async fn run_render_job(
     // second number to disagree with.
     if let Some(video) = clip.video_file.as_deref() {
         if clip_type == "hud_only" {
-            let wav = clip.wav_file.as_deref().expect("validated above: HUD clips require a wav");
+            let wav = clip
+                .wav_file
+                .as_deref()
+                .expect("validated above: HUD clips require a wav");
             hud_color_input = format!("{}/{}", clip.img_folder, video);
             hud_alpha_input = format!("{}/{}", alpha_folder, video);
             cmd_args.extend(vec![
-                "-i", &hud_color_input,
-                "-i", &hud_alpha_input,
-                "-thread_queue_size", "512",
-                "-i", wav,
-                "-filter_complex", "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
-                "-map", "[hud]", "-map", "2:a",
+                "-i",
+                &hud_color_input,
+                "-i",
+                &hud_alpha_input,
+                "-thread_queue_size",
+                "512",
+                "-i",
+                wav,
+                "-filter_complex",
+                "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
+                "-map",
+                "[hud]",
+                "-map",
+                "2:a",
             ]);
         } else if let Some(wav) = clip.wav_file.as_deref() {
             video_input = format!("{}/{}", clip.img_folder, video);
             cmd_args.extend(vec![
-                "-i", &video_input,
-                "-thread_queue_size", "512",
-                "-i", wav,
+                "-i",
+                &video_input,
+                "-thread_queue_size",
+                "512",
+                "-i",
+                wav,
             ]);
         } else {
             // An OBS take: the video already carries its own audio stream, so
@@ -492,31 +705,68 @@ pub async fn run_render_job(
             cmd_args.extend(vec!["-i", &video_input]);
         }
     } else if clip_type == "hud_only" {
-        let wav = clip.wav_file.as_deref().expect("validated above: HUD clips require a wav");
+        let wav = clip
+            .wav_file
+            .as_deref()
+            .expect("validated above: HUD clips require a wav");
         hud_color_input = format!("{}/%05d.bmp", clip.img_folder);
         hud_alpha_input = format!("{}/%05d.bmp", alpha_folder);
         cmd_args.extend(vec![
             // Skip probe/analyze on known BMP sequences; add read-ahead buffering.
-            "-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512",
-            "-framerate", &fps, "-i", &hud_color_input,
-            "-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512",
-            "-framerate", &fps, "-i", &hud_alpha_input,
-            "-thread_queue_size", "512",
-            "-i", wav,
-            "-filter_complex", "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
-            "-map", "[hud]", "-map", "2:a",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-thread_queue_size",
+            "512",
+            "-framerate",
+            &fps,
+            "-i",
+            &hud_color_input,
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-thread_queue_size",
+            "512",
+            "-framerate",
+            &fps,
+            "-i",
+            &hud_alpha_input,
+            "-thread_queue_size",
+            "512",
+            "-i",
+            wav,
+            "-filter_complex",
+            "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
+            "-map",
+            "[hud]",
+            "-map",
+            "2:a",
         ]);
     } else {
         // BMP shape is never admitted without a wav — see `take_shape_is_renderable`.
-        let wav = clip.wav_file.as_deref().expect("validated above: BMP takes require a wav");
+        let wav = clip
+            .wav_file
+            .as_deref()
+            .expect("validated above: BMP takes require a wav");
         img_input = format!("{}/%05d.bmp", clip.img_folder);
         cmd_args.extend(vec![
             // Skip probe/analyze on known BMP sequences; add read-ahead buffering.
-            "-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512",
-            "-framerate", &fps,
-            "-i", &img_input,
-            "-thread_queue_size", "512",
-            "-i", wav,
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-thread_queue_size",
+            "512",
+            "-framerate",
+            &fps,
+            "-i",
+            &img_input,
+            "-thread_queue_size",
+            "512",
+            "-i",
+            wav,
         ]);
     }
 
@@ -530,7 +780,10 @@ pub async fn run_render_job(
         "-shortest",
         // +faststart is only needed for HTTP streaming; omitting it avoids the
         // post-render moov-atom rewrite pass on what can be multi-GB files.
-        "-progress", "pipe:1", "-loglevel", "error",
+        "-progress",
+        "pipe:1",
+        "-loglevel",
+        "error",
         &out_file_str,
     ]);
 
@@ -543,13 +796,18 @@ pub async fn run_render_job(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Rendering".to_string()));
+    let _ = tx.send(RenderUpdate::Status(
+        job_id.clone(),
+        "Rendering".to_string(),
+    ));
 
+    let existed_before = out_file.exists();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
-                "FFmpeg not found. Please install FFmpeg or set a custom path in Settings.".to_string()
+                "FFmpeg not found. Please install FFmpeg or set a custom path in Settings."
+                    .to_string()
             } else {
                 format!("Failed to spawn FFmpeg process: {}", e)
             };
@@ -574,9 +832,10 @@ pub async fn run_render_job(
                 break;
             }
             if let Ok(s) = std::str::from_utf8(&buf[..n])
-                && let Ok(mut log) = stderr_log_clone.lock() {
-                    log.push_str(s);
-                }
+                && let Ok(mut log) = stderr_log_clone.lock()
+            {
+                log.push_str(s);
+            }
         }
     });
 
@@ -597,6 +856,7 @@ pub async fn run_render_job(
                 if cancel_rx.load(Ordering::Relaxed) {
                     let _ = child.kill().await;
                     let _ = child.wait().await;
+                    remove_partial_output(&out_file, existed_before).await;
                     let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
@@ -661,6 +921,8 @@ pub async fn run_render_job(
             _ = interval.tick() => {
                 if cancel_rx.load(Ordering::Relaxed) {
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    remove_partial_output(&out_file, existed_before).await;
                     let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
@@ -685,14 +947,33 @@ pub async fn run_render_job(
 
     match exit_status {
         Ok(status) if status.success() => {
+            if let Ok(meta) = std::fs::metadata(&out_file_str) {
+                record_output_size(
+                    &clip,
+                    config.target_codec,
+                    &config.custom_codec_args,
+                    meta.len(),
+                );
+            }
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
             let _ = tx.send(RenderUpdate::Progress(job_id.clone(), 100));
-            let _ = tx.send(RenderUpdate::OutputPath(job_id.clone(), out_file_str.clone()));
+            let _ = tx.send(RenderUpdate::OutputPath(
+                job_id.clone(),
+                out_file_str.clone(),
+            ));
             let _ = tx.send(RenderUpdate::Finished(job_id, true, None));
         }
         Ok(status) => {
-            let exit_code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "Unknown".to_string());
-            let error_msg = format!("FFmpeg failed with exit code: {}. Log: {}", exit_code, err_log.as_deref().unwrap_or(""));
+            let exit_code = status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let error_msg = format!(
+                "FFmpeg failed with exit code: {}. Log: {}",
+                exit_code,
+                err_log.as_deref().unwrap_or("")
+            );
+            remove_partial_output(&out_file, existed_before).await;
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
             let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
         }
@@ -757,7 +1038,48 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     Ok(false)
 }
 
-#[allow(dead_code)]
+/// Removes what FFmpeg wrote of `out_file` before it was stopped or failed:
+/// a truncated file under the pipeline's naming looks like a finished export,
+/// the same reason `copy_cancellable` removes its partial copy. A file that was
+/// there before the job started is never touched.
+async fn remove_partial_output(out_file: &Path, existed_before: bool) {
+    if !existed_before {
+        let _ = tokio::fs::remove_file(out_file).await;
+    }
+}
+
+/// The finished file's name, without its extension, when the take has a clip
+/// name (#441): the name, the wav suffix, and `_hud` for the HUD stream. The
+/// caller makes it unique, so a re-render never overwrites an earlier file.
+/// `None` without a usable clip name.
+fn clip_file_stem(clip: &ClipData, wav_part: &str, is_hud: bool) -> Option<String> {
+    let name = sanitize_file_stem(clip.clip_name.as_deref()?);
+    if name.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}{}{}",
+        name,
+        wav_part,
+        if is_hud { "_hud" } else { "" }
+    ))
+}
+
+/// Replaces what Windows refuses in a file name, and trims the trailing dots
+/// and spaces it drops silently. The frontend cleans names already; this is
+/// the last line, since a name can come from a hand-edited project file.
+fn sanitize_file_stem(name: &str) -> String {
+    let replaced: String = name
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    replaced.trim().trim_end_matches(['.', ' ']).to_string()
+}
+
 fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String {
     let mut counter = 1;
     let mut final_name = format!("{}{}", base_name, ext);
@@ -771,11 +1093,77 @@ fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::Scratch;
     use crate::hlcr::config::RenderCodec;
+    use crate::test_support::Scratch;
 
     fn scratch(name: &str) -> Scratch {
         Scratch::new(format_args!("renderer_test_{name}"))
+    }
+
+    fn sized_clip(width: u32, height: u32, frame_count: usize, clip_type: &str) -> ClipData {
+        ClipData {
+            take_folder: String::new(),
+            clip_type: clip_type.to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "t".to_string(),
+            frame_count,
+            width,
+            height,
+            date: String::new(),
+            video_file: None,
+            alpha_folder: None,
+            clip_name: None,
+        }
+    }
+
+    /// #120: the first clip of a kind reserves the raw estimate; once one
+    /// has finished, later ones reserve its real rate plus the margin,
+    /// never more than raw, and only for the same codec and frame size.
+    #[test]
+    fn reservations_learn_from_finished_renders() {
+        // Frame sizes no other test uses, since the rates are session-wide.
+        let first = sized_clip(1234, 567, 100, "single");
+        let raw = 1234 * 567 * 3 * 100;
+        assert_eq!(
+            job_reservation_estimate(&first, RenderCodec::H264Software, ""),
+            raw
+        );
+
+        record_output_size(&first, RenderCodec::H264Software, "", 1_000_000);
+        let later = sized_clip(1234, 567, 200, "single");
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::H264Software, ""),
+            (1_000_000.0 / 100.0 * LEARNED_RATE_MARGIN * 200.0) as u64
+        );
+        // A smaller clip never lowers the rate that's kept.
+        record_output_size(&first, RenderCodec::H264Software, "", 10);
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::H264Software, ""),
+            (1_000_000.0 / 100.0 * LEARNED_RATE_MARGIN * 200.0) as u64
+        );
+        // Another codec, frame size, custom args or the HUD stream: raw.
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::ProRes, ""),
+            raw * 2
+        );
+        let hud = sized_clip(1234, 567, 200, "hud_only");
+        assert_eq!(
+            job_reservation_estimate(&hud, RenderCodec::H264Software, ""),
+            raw * 2
+        );
+        record_output_size(&first, RenderCodec::Custom, "-c:v mpeg4", 1_000);
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::Custom, "-c:v ffv1"),
+            raw * 2
+        );
+        // Never above raw, however much a render wrote.
+        let big = sized_clip(1234, 568, 10, "single");
+        record_output_size(&big, RenderCodec::DnxHr, "", u64::MAX / 4);
+        assert_eq!(
+            job_reservation_estimate(&big, RenderCodec::DnxHr, ""),
+            1234 * 568 * 3 * 10
+        );
     }
 
     fn source_copy_config(export_dir: &Path) -> RenderConfig {
@@ -819,6 +1207,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -833,19 +1222,136 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         assert_eq!(last_finished(&updates), Some((true, None)), "{:?}", updates);
-        let output_path = updates.iter().find_map(|u| match u {
-            RenderUpdate::OutputPath(_, p) => Some(p.clone()),
-            _ => None,
-        }).expect("OutputPath was not sent");
+        let output_path = updates
+            .iter()
+            .find_map(|u| match u {
+                RenderUpdate::OutputPath(_, p) => Some(p.clone()),
+                _ => None,
+            })
+            .expect("OutputPath was not sent");
         assert!(output_path.ends_with(".mp4"), "{}", output_path);
-        assert_eq!(std::fs::read(&output_path).unwrap(), b"fake obs video bytes");
+        assert_eq!(
+            std::fs::read(&output_path).unwrap(),
+            b"fake obs video bytes"
+        );
         // A copy, not a move — the original take is untouched.
         assert!(stream.join("video.mp4").exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// No export folder: refused, with nothing written anywhere (it used to
+    /// land in the working directory).
+    #[tokio::test]
+    async fn a_render_with_no_export_folder_is_refused() {
+        let root = scratch("no_export");
+        let take_folder = root.join("take");
+        let stream = take_folder.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        std::fs::write(stream.join("video.mp4"), b"fake obs video bytes").unwrap();
+        let clip = ClipData {
+            clip_name: None,
+            take_folder: take_folder.to_string_lossy().into_owned(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "no-export-take".to_string(),
+            frame_count: 0,
+            width: 0,
+            height: 0,
+            date: "-".to_string(),
+            video_file: Some("video.mp4".to_string()),
+            alpha_folder: None,
+        };
+        let mut config = source_copy_config(&root);
+        config.export_directories.clear();
+
+        let (tx, rx) = mpsc::channel();
+        run_render_job(
+            "0".to_string(),
+            clip,
+            config,
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
+
+        let updates = drain(&rx);
+        assert_eq!(
+            last_finished(&updates),
+            Some((false, Some(NO_EXPORT_FOLDER.to_string()))),
+            "{:?}",
+            updates
+        );
+        assert!(
+            !updates
+                .iter()
+                .any(|u| matches!(u, RenderUpdate::OutputPath(..)))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A clip name (#441) names the finished file, and a second render of the
+    /// same clip gets a suffix instead of overwriting the first.
+    #[tokio::test]
+    async fn a_clip_name_names_the_file_and_never_overwrites() {
+        let root = scratch("clip_name");
+        let take_folder = root.join("take");
+        let stream = take_folder.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        std::fs::write(stream.join("video.mp4"), b"v").unwrap();
+        let export_dir = root.join("export");
+        std::fs::create_dir_all(&export_dir).unwrap();
+
+        let clip = ClipData {
+            clip_name: Some("anzio_krod_4k".to_string()),
+            take_folder: take_folder.to_string_lossy().into_owned(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "demo-take-obs".to_string(),
+            frame_count: 0,
+            width: 0,
+            height: 0,
+            date: "-".to_string(),
+            video_file: Some("video.mp4".to_string()),
+            alpha_folder: None,
+        };
+
+        for _ in 0..2 {
+            let (tx, rx) = mpsc::channel();
+            run_render_job(
+                "0".to_string(),
+                clip.clone(),
+                source_copy_config(&export_dir),
+                tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Mutex::new(HashMap::new())),
+            )
+            .await;
+            assert_eq!(last_finished(&drain(&rx)), Some((true, None)));
+        }
+        assert!(export_dir.join("anzio_krod_4k.mp4").is_file());
+        assert!(export_dir.join("anzio_krod_4k_1.mp4").is_file());
+    }
+
+    #[test]
+    fn a_clip_name_is_cleaned_for_windows() {
+        assert_eq!(sanitize_file_stem("anzio: krod?  "), "anzio_ krod_");
+        assert_eq!(sanitize_file_stem("a/b\\c|d."), "a_b_c_d");
+        assert_eq!(sanitize_file_stem(" . "), "");
     }
 
     /// HUD/alpha compositing always needs the FFmpeg alpha-merge pass, so
@@ -861,6 +1367,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "hud_only".to_string(),
             img_folder: "hudcolor".to_string(),
@@ -875,7 +1382,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -896,6 +1411,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -910,7 +1426,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -932,6 +1456,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -947,7 +1472,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -973,6 +1506,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -987,7 +1521,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -1011,7 +1553,10 @@ mod tests {
 
         let cancelled = copy_cancellable(&src, &dst, &cancel).await.unwrap();
         assert!(cancelled);
-        assert!(!dst.exists(), "a cancelled copy must not leave a partial file behind");
+        assert!(
+            !dst.exists(),
+            "a cancelled copy must not leave a partial file behind"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1026,6 +1571,23 @@ mod tests {
         let cancelled = copy_cancellable(&src, &dst, &cancel).await.unwrap();
         assert!(!cancelled);
         assert_eq!(std::fs::read(&dst).unwrap(), b"hello world");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A cancelled or failed FFmpeg render removes the file it was writing,
+    /// but never one that was there before the job started.
+    #[tokio::test]
+    async fn remove_partial_output_only_removes_the_jobs_own_file() {
+        let root = scratch("partial_output");
+        let written = root.join("clip.mp4");
+        std::fs::write(&written, b"48 bytes of a header").unwrap();
+        remove_partial_output(&written, false).await;
+        assert!(!written.exists(), "the job's partial file must go");
+
+        let earlier = root.join("earlier.mp4");
+        std::fs::write(&earlier, b"someone's finished clip").unwrap();
+        remove_partial_output(&earlier, true).await;
+        assert!(earlier.exists(), "a file from before the job must stay");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

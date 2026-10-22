@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<!--
+  Harness for the Demo Analyzer's Explorer tree (#572): the sidebar and demo
+  table analyzer_pane.js queries, with browse_directory answered from a small
+  fake drive (window.__mockInvokeHandlers, tests/e2e/mocks/tauri-core.js).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>analyzer_pane.js Explorer tree harness</title>
+</head>
+<body>
+  <div id="analyzer-quick-links"></div>
+  <button id="analyzer-tree-refresh-btn">Refresh</button>
+  <div id="analyzer-tree"></div>
+  <table id="analyzer-demo-table"><tbody id="analyzer-demo-tbody"></tbody></table>
+  <div id="analyzer-tab-content"></div>
+
+  <script type="module">
+    const folders = {
+      'D:\\': ['D:\\Program Files (x86)', 'D:\\Users'],
+      'D:\\Program Files (x86)': ['D:\\Program Files (x86)\\Steam'],
+      'D:\\Program Files (x86)\\Steam': [],
+      'D:\\Users': ['D:\\Users\\chris'],
+      'D:\\Users\\chris': [],
+    };
+    const entry = (path) => ({ name: path.split('\\').filter(Boolean).pop() || path, path, demo_count: 0 });
+    window.__unreadable = new Set();
+    window.__mockInvokeHandlers = {
+      browse_directory: ({ path }) => {
+        if (path === null) return { path: null, parent: null, subdirs: [entry('D:\\')], demos: [] };
+        if (!(path in folders) || window.__unreadable.has(path)) {
+          return Promise.reject(new Error(`cannot read ${path}`));
+        }
+        return { path, parent: null, subdirs: folders[path].map(entry), demos: [] };
+      },
+      default_browse_dir: () => null,
+      scan_demo_folders: () => [],
+    };
+    const { initAnalyzerPane } = await import('/src/analyzer_pane.js');
+    initAnalyzerPane({ getPinnedFolders: () => [], getDemoFolderHistory: () => [] });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

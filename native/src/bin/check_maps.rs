@@ -9,8 +9,8 @@
 //! or is the wrong build, verifying each one against the demo that wants it
 //! before it is installed.
 
-use native::patch::map_check::{check_demo, MapStatus};
-use native::patch::map_fetch::{fetch_map, map_url, DEFAULT_MIRROR};
+use native::patch::map_check::{MapStatus, check_demo};
+use native::patch::map_fetch::{DEFAULT_MIRROR, fetch_map, map_url};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -33,14 +33,17 @@ fn main() {
         vec![target.clone()]
     };
 
-    let maps_dir = args.next().map(std::path::PathBuf::from).unwrap_or_else(|| {
-        let base = if target.is_dir() {
-            target.clone()
-        } else {
-            target.parent().map(|p| p.to_path_buf()).unwrap_or_default()
-        };
-        base.join("maps")
-    });
+    let maps_dir = args
+        .next()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let base = if target.is_dir() {
+                target.clone()
+            } else {
+                target.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+            };
+            base.join("maps")
+        });
 
     println!("maps: {}", maps_dir.display());
     println!("demos: {}\n", demos.len());
@@ -97,7 +100,10 @@ fn main() {
     for (map, (count, want)) in &needed {
         let url = map_url(DEFAULT_MIRROR, map).unwrap_or_else(|e| e);
         match want {
-            Some(sum) => println!("  {:<24} build {:08x}, {} demo(s)  {}", map, sum, count, url),
+            Some(sum) => println!(
+                "  {:<24} build {:08x}, {} demo(s)  {}",
+                map, sum, count, url
+            ),
             None => println!("  {:<24} build unstated, {} demo(s)  {}", map, count, url),
         }
     }

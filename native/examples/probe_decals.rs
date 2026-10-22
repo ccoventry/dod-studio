@@ -21,8 +21,8 @@
 
 use clap::Parser;
 use native::patch::{
-    best_view_for, camera_at_time, decal_texture_histogram, probe_decal_offsets, project,
-    CameraView, GridStats, ProbeOptions, ProbeRow, ProbeStats,
+    CameraView, GridStats, ProbeOptions, ProbeRow, ProbeStats, best_view_for, camera_at_time,
+    decal_texture_histogram, probe_decal_offsets, project,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -206,7 +206,10 @@ fn parse_row_textures(s: &str) -> Result<[u8; 3], String> {
 fn parse_clock(s: &str) -> Result<f32, String> {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 3 {
-        return Err(format!("expected mm:ss:ff as the demo player shows it — got '{}'", s));
+        return Err(format!(
+            "expected mm:ss:ff as the demo player shows it — got '{}'",
+            s
+        ));
     }
     let num = |p: &str| -> Result<f32, String> {
         p.trim()
@@ -327,7 +330,10 @@ fn which_row_is_which(v: &[f32; 3]) -> String {
     } else {
         ("bottom", "top")
     };
-    format!("the {} line is OUT, the middle is CTL, the {} line is IN", out, inn)
+    format!(
+        "the {} line is OUT, the middle is CTL, the {} line is IN",
+        out, inn
+    )
 }
 
 /// Prints one grid: where it is, how well the demo backs it, and when it is on
@@ -398,8 +404,14 @@ fn print_grid(index: usize, g: &GridStats) {
             clock(t)
         );
         if let Some((yaw, pitch, d)) = g.witness_view {
-            println!("   At that moment it sits {}.", where_to_look(yaw, pitch, d));
-            println!("   (view: yaw {:+.1} deg, pitch {:+.1} deg, {:.0} units)", yaw, pitch, d);
+            println!(
+                "   At that moment it sits {}.",
+                where_to_look(yaw, pitch, d)
+            );
+            println!(
+                "   (view: yaw {:+.1} deg, pitch {:+.1} deg, {:.0} units)",
+                yaw, pitch, d
+            );
         }
         if let Some(v) = g.out_row_in_view {
             println!("   From the best view, {}.", which_row_is_which(&v));
@@ -591,13 +603,10 @@ fn main() {
         }
     }
 
-
     let offsets = grid_offsets(&stats.grids[0]);
 
     println!("HOW TO READ IT");
-    println!(
-        "  Every grid is the same measurement — whichever one you spot first is a"
-    );
+    println!("  Every grid is the same measurement — whichever one you spot first is a");
     println!("  complete result, and two that agree are worth more than one you cannot find.");
     println!("  Play, don't seek.");
     println!();
@@ -621,7 +630,10 @@ fn main() {
     println!("    up to that column's offset and rejected the next:");
     for (i, o) in offsets.iter().enumerate() {
         if *o == 0.0 {
-            println!("      {} hole  -> on the wall only; no offset worked", i + 1);
+            println!(
+                "      {} hole  -> on the wall only; no offset worked",
+                i + 1
+            );
         } else {
             println!("      {} holes -> accepted up to {:.0} units", i + 1, o);
         }
@@ -661,7 +673,10 @@ fn project_grids(stats: &ProbeStats, view: &CameraView, fov: f32, w: f32, h: f32
         for p in &g.probes {
             match project(view, &p.position, fov, w, h) {
                 Some((x, y)) if x >= 0.0 && x <= w && y >= 0.0 && y <= h => {
-                    println!("    offset {:>3.0}  ->  x {:>5.0}, y {:>5.0}", p.offset, x, y)
+                    println!(
+                        "    offset {:>3.0}  ->  x {:>5.0}, y {:>5.0}",
+                        p.offset, x, y
+                    )
                 }
                 Some((x, y)) => println!(
                     "    offset {:>3.0}  ->  off screen (x {:.0}, y {:.0})",
@@ -672,12 +687,9 @@ fn project_grids(stats: &ProbeStats, view: &CameraView, fov: f32, w: f32, h: f32
         }
         for (k, b) in g.beacon.iter().enumerate() {
             match project(view, b, fov, w, h) {
-                Some((x, y)) if x >= 0.0 && x <= w && y >= 0.0 && y <= h => println!(
-                    "    beacon {}  ->  x {:>5.0}, y {:>5.0}",
-                    k + 1,
-                    x,
-                    y
-                ),
+                Some((x, y)) if x >= 0.0 && x <= w && y >= 0.0 && y <= h => {
+                    println!("    beacon {}  ->  x {:>5.0}, y {:>5.0}", k + 1, x, y)
+                }
                 _ => println!("    beacon {}  ->  not in frame", k + 1),
             }
         }

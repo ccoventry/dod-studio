@@ -32,8 +32,8 @@
 //! Usage:
 //!
 //!     cargo run --release -p native --example scan_mem_probe -- <folder> <workers>
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Peak working set for this process, straight from the OS.
 ///
@@ -100,13 +100,16 @@ fn main() {
     std::thread::scope(|scope| {
         for _ in 0..workers.min(total).max(1) {
             let (list, slots, next_index) = (&list, &slots, &next_index);
-            scope.spawn(move || loop {
-                let idx = next_index.fetch_add(1, Ordering::Relaxed);
-                if idx >= total {
-                    break;
+            scope.spawn(move || {
+                loop {
+                    let idx = next_index.fetch_add(1, Ordering::Relaxed);
+                    if idx >= total {
+                        break;
+                    }
+                    let parsed =
+                        native::patch::scan_demo_for_highlights_with_analysis(&list[idx]).ok();
+                    slots.lock().unwrap()[idx] = parsed.map(|((_, streaks, ..), _)| streaks.len());
                 }
-                let parsed = native::patch::scan_demo_for_highlights_with_analysis(&list[idx]).ok();
-                slots.lock().unwrap()[idx] = parsed.map(|((_, streaks, ..), _)| streaks.len());
             });
         }
     });
@@ -126,7 +129,10 @@ fn collect_demos(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 out.extend(collect_demos(&path));
-            } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("dem")) {
+            } else if path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("dem"))
+            {
                 out.push(path);
             }
         }

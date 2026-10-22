@@ -6,7 +6,11 @@
 // in the web port planning conversation. Report shape (demo_info + state) is
 // identical to what desktop's analyze_demo_full Tauri command returns, so
 // these functions are a near-verbatim copy of their analyzer_pane.js source.
+// studio/src/web_analyzer_copy.test.js fails when a shared function drifts,
+// and lists the deliberate differences (#238).
 import { STRINGS } from './strings.js';
+import { renderFlagsTab } from './analyzer_flags.js';
+import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
 
 let report = null;
 let activeSubTab = 'summary';
@@ -83,17 +87,39 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-function steamIdDisplay(id) {
-  if (!id || !/^\d{15,20}$/.test(id)) return id || STRINGS.ANALYZER.EMPTY_DASH;
-  try {
-    const big = BigInt(id);
-    const base = 76561197960265728n;
-    if (big < base) return id;
-    const accountId = big - base;
-    return `STEAM_0:${accountId % 2n}:${accountId / 2n}`;
-  } catch {
-    return id;
-  }
+// A real player's SteamID in all three forms, each with a Copy button, and
+// one more button for the kill-feed command that shows only them (#536).
+function steamIdRowsHtml(forms) {
+  const A = STRINGS.ANALYZER;
+  const row = (label, value) => `
+    <span class="analyzer-steam-id"><span class="text-muted">${label}</span> <code>${esc(value)}</code>
+      <button type="button" class="analyzer-copy-btn" data-copy="${esc(value)}" title="${esc(A.copyValueTitle(value))}">${A.COPY_BUTTON}</button></span>`;
+  const line = deathmsgShowOnlyLine(forms);
+  return `
+    <div class="analyzer-steam-ids">
+      ${row(A.STEAM_ID64_LABEL, forms.id64)}
+      ${row(A.STEAM_ID_CLASSIC_LABEL, forms.classic)}
+      ${row(A.STEAM_ID3_LABEL, forms.id3)}
+      <button type="button" class="analyzer-copy-btn" data-copy="${esc(line)}" title="${esc(A.copyShowOnlyTitle(line))}">${A.COPY_SHOW_ONLY_BUTTON}</button>
+    </div>`;
+}
+
+// Copy buttons say "Copied" for a moment instead of raising a toast, so the
+// web analyzer's copy of this pane needs nothing extra.
+function wireCopyButtons(root) {
+  root.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const label = btn.textContent;
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        btn.textContent = STRINGS.ANALYZER.COPIED_BUTTON;
+      } catch (err) {
+        console.error('Clipboard write failed:', err);
+        btn.textContent = STRINGS.ANALYZER.COPY_FAILED_BUTTON;
+      }
+      setTimeout(() => { btn.textContent = label; }, 1200);
+    });
+  });
 }
 
 function isConnected(player) {
@@ -175,6 +201,7 @@ export function renderActiveTab() {
     case 'team-details': renderTeamDetailsTab(container); break;
     case 'timeline': renderTimelineTab(container); break;
     case 'rounds': renderRoundsTab(container); break;
+    case 'flags': renderFlagsTab(container, report, { esc, teamColor, teamLabel, durSecs, formatMMSS }); break;
     case 'chat': renderChatTab(container); break;
   }
 }
@@ -252,6 +279,9 @@ function renderSummaryTab(container) {
       ${section(STRINGS.ANALYZER.TECH_SPECS_SECTION, [
         [STRINGS.ANALYZER.DEMO_PROTOCOL_LABEL, String(di.demo_protocol)],
         [STRINGS.ANALYZER.NETWORK_PROTOCOL_LABEL, String(di.network_protocol)],
+        [STRINGS.ANALYZER.PEAK_ENTITIES_LABEL, Number.isInteger(di.peak_packet_entities)
+          ? esc(STRINGS.ANALYZER.peakEntitiesValue(di.peak_packet_entities))
+          : STRINGS.ANALYZER.EMPTY_DASH],
       ])}
     </div>`;
 }
@@ -267,6 +297,7 @@ function buildScoreboardGroups() {
     else if (p.team === 'Spectators') groups.spec.push(p);
     else groups.unassigned.push(p);
   });
+  // Score DESC, Kills DESC, Deaths ASC, Name ASC, id ASC — matches dev's ScoreboardCache sort key.
   const sortFn = (a, b) => {
     if (b.stats[0] !== a.stats[0]) return b.stats[0] - a.stats[0];
     if (b.stats[1] !== a.stats[1]) return b.stats[1] - a.stats[1];
@@ -336,6 +367,9 @@ function renderScoreboardTab(container) {
     tr.addEventListener('click', () => {
       const id = tr.dataset.playerId;
       highlightedPlayerId = highlightedPlayerId === id ? null : id;
+      // Keep the Player Details dropdown in sync so selection works both
+      // ways (dropdown -> scoreboard already did via renderPlayerDetailsTab).
+      if (highlightedPlayerId) selectedPlayerId = highlightedPlayerId;
       renderScoreboardTab(container);
     });
   });
@@ -372,6 +406,8 @@ function renderPlayerDetailsTab(container) {
     selectedId = highlightedPlayerId && players.find((p) => p.id === highlightedPlayerId) ? highlightedPlayerId : players[0].id;
   }
   selectedPlayerId = selectedId;
+  // Any change in the effective selected player (dropdown, scoreboard click,
+  // or a kill-streak victim jump) clears the per-player weapon filter state.
   if (selectedId !== previousSelectedId) disabledWeapons = new Set();
 
   const options = players.map((p) => `<option value="${esc(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
@@ -407,7 +443,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
 
   const connected = isConnected(p);
   const clientId = playerClientId(p);
-  const steamId = steamIdDisplay(p.id);
+  const steamForms = steamIdForms(p.id);
 
   const weaponRows = Object.entries(p.weapon_breakdown || {}).sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
   const totalKills = weaponRows.reduce((s, [, v]) => s + v[0], 0) || 1;
@@ -420,15 +456,16 @@ function renderPlayerDetailsBody(tabContainer, p) {
           <div class="analyzer-hero-sub" style="color:${color};">${esc((teamLabel(p.team, report.state.allies_are_british) || STRINGS.ANALYZER.UNASSIGNED_LABEL).toUpperCase())}${p.class ? ` &nbsp;|&nbsp; ${esc(p.class.toUpperCase())}` : ''}</div>
         </div>
         <div class="analyzer-hero-links">
-          ${/^\d{15,20}$/.test(p.id) ? `<a href="https://www.legit-proof.com/search?q=${esc(steamId)}" target="_blank" rel="noopener" title="${STRINGS.ANALYZER.LEGIT_PROOF_LINK_TITLE}">${STRINGS.ANALYZER.LEGIT_PROOF_TEXT}</a> / <a href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">${STRINGS.ANALYZER.STEAM_PROFILE_TEXT}</a>` : `<span class="text-muted">${STRINGS.ANALYZER.NO_STEAM_ID}</span>`}
+          ${steamForms ? `<a href="https://www.legit-proof.com/search?q=${esc(steamForms.classic)}" target="_blank" rel="noopener" title="${STRINGS.ANALYZER.LEGIT_PROOF_LINK_TITLE}">${STRINGS.ANALYZER.LEGIT_PROOF_TEXT}</a> / <a href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">${STRINGS.ANALYZER.STEAM_PROFILE_TEXT}</a>` : `<span class="text-muted">${STRINGS.ANALYZER.NO_STEAM_ID}</span>`}
         </div>
       </div>
       <div class="analyzer-hero-status">
-        <span>${STRINGS.ANALYZER.STEAM_ID_LABEL}<code>${esc(steamId)}</code></span>
+        ${steamForms ? '' : `<span>${STRINGS.ANALYZER.STEAM_ID_LABEL}<code>${esc(p.id || STRINGS.ANALYZER.EMPTY_DASH)}</code></span>`}
         <span style="color:${connected ? '#4caf50' : '#888'};">${connected ? STRINGS.ANALYZER.connectedSlot(clientId) : STRINGS.ANALYZER.DISCONNECTED}</span>
         ${p.has_reconnected ? `<span style="color:#ffb74d;">${STRINGS.ANALYZER.RECONNECTED_MID_DEMO}</span>` : ''}
         ${p.has_pre_demo_activity ? `<span style="color:#ffb74d;">${STRINGS.ANALYZER.PRE_EXISTING_STATS}</span>` : ''}
       </div>
+      ${steamForms ? steamIdRowsHtml(steamForms) : ''}
     </div>
 
     <div class="analyzer-stat-cards">
@@ -463,6 +500,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
       </div>
     </div>`;
 
+  wireCopyButtons(body);
   renderKillStreaksSection(p);
 }
 
@@ -616,6 +654,8 @@ function renderTeamWeaponSections(players, alliesAreBritish) {
   const axisColor = teamColor('Axis');
 
   const sections = [];
+  // Matches dev exactly: show the Allies/US section unless there's British
+  // data present with no pure-Allies data at all.
   if (alliesPlayers.length > 0 || britishPlayers.length === 0) {
     const label = alliesAreBritish ? STRINGS.ANALYZER.ALLIES_US_LABEL : STRINGS.ANALYZER.ALLIES_LABEL;
     sections.push(`<details open class="analyzer-collapsible"><summary style="color:${alliesColor};">${esc(label)}</summary>${weaponBreakdownTable(alliesPlayers)}</details>`);
@@ -897,7 +937,7 @@ function renderChatTab(container) {
       <label>${STRINGS.ANALYZER.TEAM_LABEL}
         <select id="chat-filter-team">
           ${[
-            ['All', STRINGS.ANALYZER.TYPE_ALL || 'All'],
+            ['All', STRINGS.ANALYZER.TYPE_ALL],
             ['Allies', STRINGS.ANALYZER.ALLIES_LABEL],
             ['British', STRINGS.ANALYZER.BRITISH_LABEL],
             ['Axis', STRINGS.ANALYZER.AXIS_LABEL],

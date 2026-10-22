@@ -1,10 +1,24 @@
-use std::path::PathBuf;
-use std::sync::{Arc, mpsc::Sender, atomic::{AtomicBool, Ordering}};
 use crate::log_markdown;
+use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc::Sender,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CaptureJob {
     pub patched_demo_path: std::path::PathBuf,
+}
+
+/// The demo a patched batch starts on: its first job, which is the primer when
+/// `build_batch_queue` planned one and dodstudio_chain_01 when it didn't
+/// (`patch::builder::plays_primer`, #365). Read from the plan rather than
+/// decided again, so the start can't name a demo the batch never wrote. Named
+/// as the copy into `dod/` names the file.
+fn first_demo_stem(jobs: &[CaptureJob]) -> Option<String> {
+    let stem = jobs.first()?.patched_demo_path.file_stem()?;
+    Some(stem.to_string_lossy().replace('-', "_"))
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +73,11 @@ const MARKER_STALL_FLOOR: std::time::Duration = std::time::Duration::from_secs(3
 /// is broken when it is fine.
 const CONDEBUG_WRITE_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long the game is kept from taking the foreground at most, when the
+/// batch never starts in it (no hook DLL, a patched batch): long enough for
+/// its window to open, short enough that nothing else is held up for long.
+const FOREGROUND_LOCK_MAX: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Size of the engine's console log, or 0 if it is not there.
 ///
 /// Read through an *open handle* rather than `fs::metadata(path)`: on Windows a
@@ -97,11 +116,10 @@ fn marker_stall_deadline(longest_gap: std::time::Duration) -> std::time::Duratio
 /// `remove_file_retrying` is the second, independent line of defence for
 /// whatever this window doesn't cover.
 fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
-    use sysinfo::{ProcessExt, SystemExt};
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        sys.refresh_processes();
-        if !sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe")) {
+        crate::sys::process::refresh(sys);
+        if !crate::sys::process::is_game_in(sys) {
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -109,6 +127,14 @@ fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+/// Ends every `hl.exe` and waits for it to go, as [`wait_for_hl_exe_to_exit`]
+/// describes. Every way out of a batch's loop that leaves the game running
+/// goes through here.
+fn kill_hl_exe_and_wait(sys: &mut sysinfo::System) {
+    crate::sys::process::kill_game();
+    wait_for_hl_exe_to_exit(sys);
 }
 
 struct CaptureCleanupGuard {
@@ -130,6 +156,9 @@ struct CaptureCleanupGuard {
     /// unwinds and no `Drop` runs. That gap, a hard kill and a power cut are
     /// all covered by `obs::recover` on the next start instead.
     obs: Option<std::sync::Arc<std::sync::Mutex<Option<crate::obs::ObsClient>>>>,
+    /// Copies of demos on another drive a hook-run batch plays from
+    /// (`patch::source_copies`), removed however the batch ends.
+    source_copies: Vec<PathBuf>,
     _wake_lock: Option<keepawake::KeepAwake>,
 }
 
@@ -144,13 +173,23 @@ impl CaptureCleanupGuard {
     ) -> Self {
         // Pre-clean any stale signal dirs/junctions from a previous aborted run.
         if let Err(e) = std::fs::remove_dir_all(&exit_trigger)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::new] Failed to pre-clean exit_trigger {:?}: {}", exit_trigger, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::new] Failed to pre-clean exit_trigger {:?}: {}",
+                exit_trigger,
+                e
+            );
+        }
         if let Err(e) = std::fs::remove_dir(&session_junction)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::new] Failed to pre-clean session_junction {:?}: {}", session_junction, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::new] Failed to pre-clean session_junction {:?}: {}",
+                session_junction,
+                e
+            );
+        }
         Self {
             exit_trigger,
             session_junction,
@@ -159,6 +198,7 @@ impl CaptureCleanupGuard {
             auto_clear_previews,
             save_local_patched_copy,
             obs: None,
+            source_copies: Vec::new(),
             _wake_lock: keepawake::Builder::default()
                 .display(false)
                 .idle(true)
@@ -176,21 +216,32 @@ impl Drop for CaptureCleanupGuard {
         // to report to, and a cleanup path that panics is worse than one that
         // quietly does nothing.
         if let Some(obs) = self.obs.take()
-            && let Ok(mut guard) = obs.lock() {
-                if let Some(client) = guard.as_mut() {
-                    client.stop_record_quietly();
-                }
-                *guard = None;
+            && let Ok(mut guard) = obs.lock()
+        {
+            if let Some(client) = guard.as_mut() {
+                client.stop_record_quietly();
             }
+            *guard = None;
+        }
 
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::drop] Failed to remove exit_trigger {:?}: {}", self.exit_trigger, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::drop] Failed to remove exit_trigger {:?}: {}",
+                self.exit_trigger,
+                e
+            );
+        }
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::drop] Failed to remove session_junction {:?}: {}", self.session_junction, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::drop] Failed to remove session_junction {:?}: {}",
+                self.session_junction,
+                e
+            );
+        }
 
         if let Some(game_root) = self.exit_trigger.parent() {
             crate::shared::paths::clear_capture_scratch(
@@ -201,6 +252,8 @@ impl Drop for CaptureCleanupGuard {
                 self.save_local_patched_copy,
             );
         }
+        // Whatever the auto-clear settings say: these are never the user's.
+        crate::patch::source_copies::remove_all(self.source_copies.iter().map(PathBuf::as_path));
     }
 }
 
@@ -224,6 +277,11 @@ pub fn spawn_capture_engine(
     // pointed straight at it. In every other mode HLAE decides that from
     // `mirv_movie_filename` and this is empty.
     obs_take_folders: Vec<PathBuf>,
+    // The hook's batch file (`patch::runtime_batch`), when this batch runs on
+    // the original demos from the hook DLL instead of patched copies (#434).
+    // `jobs` is then empty: nothing is patched into `dod/`, the game starts on
+    // no demo, and the file is handed to it once it takes commands.
+    runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
 ) {
     std::thread::Builder::new()
         .name("capture_engine".into())
@@ -248,11 +306,11 @@ pub fn spawn_capture_engine(
             let hl_exe_parent = match hl_path.parent() {
                 Some(parent) => parent,
                 None => {
-                    log_crash_abort!(tx, "Invalid hl.exe path: hl_path has no parent");
+                    log_crash_abort!(tx, "Invalid hl.exe path: it has no parent folder");
                     return;
                 }
             };
-            let dod_dir = hl_exe_parent.join("dod");
+            let dod_dir = crate::shared::paths::mod_dir(hl_exe_parent);
 
 
 
@@ -262,7 +320,7 @@ pub fn spawn_capture_engine(
 
             let exit_trigger = hl_exe_parent.join("DOD_STUDIO_EXIT_TRIGGER");
             let session_junction = hl_exe_parent.join("dodstudio_session");
-            
+
             let mut _cleanup_guard = CaptureCleanupGuard::new(
                 exit_trigger.clone(),
                 session_junction.clone(),
@@ -271,6 +329,9 @@ pub fn spawn_capture_engine(
                 config.auto_clear_previews,
                 config.save_local_patched_copy,
             );
+            if let Some(batch) = &runtime_batch {
+                _cleanup_guard.source_copies = batch.source_copies.clone();
+            }
 
             let active_export_dir = config.primary_media_dir.clone().unwrap_or_else(|| {
                 let exe_path = std::env::current_exe().expect("Failed to resolve absolute exe path");
@@ -285,17 +346,17 @@ pub fn spawn_capture_engine(
             let session_junction_str = session_junction.to_str().unwrap_or_default();
             let session_dir_str = session_dir.to_str().unwrap_or_default();
             if session_junction_str.is_empty() || session_dir_str.is_empty() {
-                log_crash_abort!(tx, "Invalid UTF-8 in session paths");
+                log_crash_abort!(tx, format!("Can't link {} to {}: the path has characters mklink can't take", session_junction.display(), session_dir.display()));
                 return;
             }
 
             match std::process::Command::new("cmd").args(["/C", "mklink", "/J", session_junction_str, session_dir_str]).output() {
                 Ok(out) if !out.status.success() => {
-                    log_crash_abort!(tx, format!("mklink failed for session_junction: {}", String::from_utf8_lossy(&out.stderr)));
+                    log_crash_abort!(tx, format!("Could not link {} to {} (mklink): {}", session_junction.display(), session_dir.display(), String::from_utf8_lossy(&out.stderr).trim()));
                     return;
                 }
                 Err(e) => {
-                    log_crash_abort!(tx, format!("mklink command failed: {}", e));
+                    log_crash_abort!(tx, format!("Could not run mklink to link {}: {}", session_junction.display(), e));
                     return;
                 }
                 _ => {}
@@ -315,13 +376,13 @@ pub fn spawn_capture_engine(
                 let junction_path = hl_exe_parent.join(format!("dod_pool_{}", idx));
                 let _ = std::fs::remove_dir(&junction_path);
                 if let Err(e) = std::fs::create_dir_all(target_dir) {
-                    log_crash_abort!(tx, format!("Failed to create capture directory {:?}: {}", target_dir, e));
+                    log_crash_abort!(tx, format!("Failed to create capture directory {}: {}", target_dir.display(), e));
                     return;
                 }
                 let junction_str = junction_path.to_str().unwrap_or_default();
                 let target_str = target_dir.to_str().unwrap_or_default();
                 if junction_str.is_empty() || target_str.is_empty() {
-                    log_crash_abort!(tx, "Invalid UTF-8 in pool junction paths");
+                    log_crash_abort!(tx, format!("Can't link {} to capture directory {}: the path has characters mklink can't take", junction_path.display(), target_dir.display()));
                     return;
                 }
                 let status = std::process::Command::new("cmd")
@@ -333,16 +394,16 @@ pub fn spawn_capture_engine(
                     .output();
                 match status {
                     Ok(out) if out.status.success() => {
-                        log_markdown(&format!("[pool] Junction created: {:?} -> {:?}", junction_path, target_dir));
+                        log_markdown(&format!("[pool] Junction created: {} -> {}", junction_path.display(), target_dir.display()));
                         pool_junctions.push(junction_path);
                     }
                     Ok(out) => {
                         let err_msg = String::from_utf8_lossy(&out.stderr);
-                        log_crash_abort!(tx, format!("[pool] mklink failed for dod_pool_{}: {}", idx, err_msg));
+                        log_crash_abort!(tx, format!("Could not link {} to capture directory {} (mklink): {}", junction_path.display(), target_dir.display(), err_msg.trim()));
                         return;
                     }
                     Err(e) => {
-                        log_crash_abort!(tx, format!("[pool] Failed to run mklink for dod_pool_{}: {}", idx, e));
+                        log_crash_abort!(tx, format!("Could not run mklink to link {}: {}", junction_path.display(), e));
                         return;
                     }
                 }
@@ -368,7 +429,7 @@ pub fn spawn_capture_engine(
                 let demo_filename = match job.patched_demo_path.file_name() {
                     Some(name) => name.to_string_lossy().replace("-", "_"),
                     None => {
-                        log_crash_abort!(tx, format!("Invalid demo path: {:?}", job.patched_demo_path));
+                        log_crash_abort!(tx, format!("Invalid demo path: {}", job.patched_demo_path.display()));
                         continue;
                     }
                 };
@@ -412,7 +473,7 @@ pub fn spawn_capture_engine(
                         let mut dest_file = match dest_file_opt {
                             Some(f) => f,
                             None => {
-                                log_crash_abort!(tx, format!("Failed to create dest demo file after retries. Source: {:?}, Dest: {:?}", job.patched_demo_path, dest_demo_path));
+                                log_crash_abort!(tx, format!("Could not create {} after several tries (copying from {}). Is the file open in another program?", dest_demo_path.display(), job.patched_demo_path.display()));
                                 continue;
                             }
                         };
@@ -452,14 +513,14 @@ pub fn spawn_capture_engine(
                     let local_dest = demos_dir.join(&demo_filename);
                     match std::fs::copy(&job.patched_demo_path, &local_dest) {
                         Ok(_) => log_markdown(&format!("- [IO] Saved local copy to demos/{}", demo_filename)),
-                        Err(e) => log::warn!("Failed to save local patched copy to {:?}: {}", local_dest, e),
+                        Err(e) => log::warn!("Failed to save local patched copy to {}: {}", local_dest.display(), e),
                     }
                 }
 
                 active_dest_paths.push(dest_demo_path);
             }
 
-            if active_dest_paths.is_empty() {
+            if active_dest_paths.is_empty() && runtime_batch.is_none() {
                 let _ = tx.send(EngineEvent::AllCompleted);
                 return;
             }
@@ -476,8 +537,8 @@ pub fn spawn_capture_engine(
                 if entry.free_bytes < crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES {
                     let required_gb = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES as f64 / (1024.0 * 1024.0 * 1024.0);
                     log_crash_abort!(tx, format!(
-                        "Capture aborted: {:?} has less than {:.1} GB free space.",
-                        entry.path, required_gb
+                        "{} has less than {:.1} GB free space. Free some space or pick another capture directory.",
+                        entry.path.display(), required_gb
                     ));
                     return;
                 }
@@ -504,8 +565,8 @@ pub fn spawn_capture_engine(
             if hl_exe_drive_free < hl_exe_required_bytes {
                 let required_gb = hl_exe_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                 log_crash_abort!(tx, format!(
-                    "Capture aborted: {:?} (hl.exe's own drive) has less than {:.1} GB free space.",
-                    hl_exe_parent, required_gb
+                    "{} (hl.exe's own drive) has less than {:.1} GB free space for the patched demos.",
+                    hl_exe_parent.display(), required_gb
                 ));
                 return;
             }
@@ -520,6 +581,9 @@ pub fn spawn_capture_engine(
             let mut obs_session: Option<crate::obs::ObsSession> = None;
             let (marker_tx, marker_rx) = std::sync::mpsc::channel::<crate::obs::Marker>();
             let tail_cancel = Arc::new(AtomicBool::new(false));
+            // The log feeds the markers until the game's events pipe
+            // connects, then the pipe does (#434); see `MarkerGate`.
+            let marker_gate = Arc::new(crate::obs::MarkerGate::default());
 
             if obs_mode {
                 if obs_take_folders.is_empty() {
@@ -586,12 +650,30 @@ pub fn spawn_capture_engine(
             let log_len_before_launch = console_log_len(&log_path);
             let tailer = crate::obs::LogTailer::at_end(&log_path);
             let cancel = Arc::clone(&tail_cancel);
+            let gate = Arc::clone(&marker_gate);
+            let log_marker_tx = marker_tx.clone();
             if let Err(e) = std::thread::Builder::new()
                 .name("obs_log_tail".into())
-                .spawn(move || tailer.run(marker_tx, cancel))
+                .spawn(move || tailer.run(log_marker_tx, cancel, gate))
             {
                 log_crash_abort!(tx, format!("could not start the console log reader: {}", e));
                 return;
+            }
+            // The same markers straight from the game, when its hook DLL
+            // serves the events pipe. Not fatal if it can't start: the log
+            // above is still reading.
+            let pipe_tailer = crate::obs::PipeTailer::new(|pid, hello| {
+                log_markdown(&format!(
+                    "[HLAE] Game events pipe connected (hl.exe PID {pid}, `{hello}`) — markers now come from the game directly, not qconsole.log"
+                ));
+            });
+            let cancel = Arc::clone(&tail_cancel);
+            let gate = Arc::clone(&marker_gate);
+            if let Err(e) = std::thread::Builder::new()
+                .name("events_pipe_tail".into())
+                .spawn(move || pipe_tailer.run(marker_tx, cancel, gate))
+            {
+                log_markdown(&format!("[HLAE] Could not start the game events reader ({e}); using qconsole.log only"));
             }
 
             // MUST be embedded here, not appended to `cmd` below: HLAE's own
@@ -601,13 +683,45 @@ pub fn spawn_capture_engine(
             // only text folded into this string reaches `hl.exe`, via the
             // single `-cmdLine` value `build_hlae_process` composes below.
             //
-            // The HLAE alpha flags that used to be composed here now live in
-            // `build_hlae_process` itself, so every `-customLoader` launch this
-            // app makes carries them, not just a capture batch.
-            let extra_args = format!(
-                "+exec dodstudio_helper.cfg +playdemo {}",
-                crate::shared::paths::PRIMER_DEMO_STEM
+            // HLAE's alpha flag (`-afxForceAlpha8 1`, the only one that matters,
+            // #69) lives in `build_hlae_process` itself, so every
+            // `-customLoader` launch this app makes carries it, not just a
+            // capture batch.
+            //
+            // The first demo starts over the hook's pipe once the game is up,
+            // so its map loads after config.cfg/movie.cfg set the user's
+            // brightness and gamma (`game_handoff`). With the hook that demo
+            // is dodstudio_chain_01 itself, without it the primer (#365). A
+            // batch the hook runs starts the same way, with its batch file.
+            let with_start = |args: &str| {
+                if config.keep_game_behind {
+                    format!("{} {args}", crate::patch::builder::START_BEHIND_ARG)
+                } else {
+                    args.to_string()
+                }
+            };
+            let (extra_args, early_lines, first_lines) = match runtime_batch.as_ref() {
+                Some(batch) => (
+                    with_start("+exec dodstudio_helper.cfg"),
+                    crate::patch::runtime_batch::early_lines(config.keep_game_behind),
+                    crate::patch::runtime_batch::start_lines(&batch.file),
+                ),
+                None => {
+                    let (args, lines) = crate::game_handoff::first_demo_start(
+                        &first_demo_stem(&jobs).unwrap_or_default(),
+                        config.goldsrc_hooks_dll().is_some(),
+                    );
+                    (with_start(&args), Vec::new(), lines)
+                }
+            };
+            let early_lines = crate::game_handoff::with_player_overrides(
+                early_lines,
+                config.player_overrides,
+                config.goldsrc_hooks_dll().is_some(),
             );
+            let mut handoff = (!first_lines.is_empty()).then(|| {
+                crate::game_handoff::GameHandoff::with_early(early_lines, first_lines)
+            });
 
             let dummy_path = active_export_dir.join("DOD_BATCH_DONE");
             let _ = std::fs::remove_dir_all(&dummy_path);
@@ -619,10 +733,23 @@ pub fn spawn_capture_engine(
 
             log_markdown(&format!("[HLAE] Spawning: {:?} {:?}", cmd.get_program(), cmd.get_args().collect::<Vec<_>>()));
 
+            // Held until the batch starts in the game (it has stepped aside by
+            // then) or FOREGROUND_LOCK_MAX passes; dropped on every way out.
+            // Not taken when the user wants to watch the game.
+            let mut foreground_lock = if config.keep_game_behind {
+                crate::sys::foreground_lock::ForegroundLock::take()
+            } else {
+                crate::sys::foreground_lock::ForegroundLock::none()
+            };
+            let foreground_locked_at = std::time::Instant::now();
+            if foreground_lock.locked() {
+                log_markdown("[HLAE] The game can't take the foreground while it starts");
+            }
+
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    log_crash_abort!(tx, format!("Failed to spawn HLAE (OS Error): {}", e));
+                    log_crash_abort!(tx, format!("Failed to launch HLAE ({}): {}", cmd.get_program().to_string_lossy(), e));
                     for path in &active_dest_paths {
                         let _ = std::fs::remove_file(path);
                     }
@@ -640,7 +767,7 @@ pub fn spawn_capture_engine(
             let start_time = std::time::Instant::now();
             let mut launcher_exit_logged = false;
             let mut hl_seen_alive = false;
-            let mut failure_reason: Option<&'static str> = None;
+            let mut failure_reason: Option<String> = None;
             // Stall detection state. Both stay untouched outside OBS mode,
             // where no markers are drained and `last_marker_at` never leaves
             // `None` — the watchdog below is inert as a result.
@@ -659,19 +786,23 @@ pub fn spawn_capture_engine(
             // `exit_trigger`) restarts the whole demo from the top as a side
             // effect — harmless in frame-sequence mode (which is already
             // mid-movie-recording throughout), but in OBS mode it replayed
-            // dodstudio_primer.dem *and* dodstudio_chain_01.dem from tick 0, twice, adding ~50s to
+            // the primer (when there is one) *and* dodstudio_chain_01.dem from tick 0, twice, adding ~50s to
             // a real batch before `exit_trigger` ever got written. The
             // BATCH_COMPLETE marker already exists and already fires
             // `ObsSession::on_marker`'s `end_block()` moments before this —
             // taskkilling right after it means hl.exe is dead before it ever
             // gets to process the command that would restart it. See #obs.
             let mut obs_batch_complete_seen = false;
+            // BATCH_COMPLETE straight from the game (#434): the same "done"
+            // the exit-trigger folder signals, a moment sooner and without the
+            // folder, in every capture mode. The folder stays the fallback.
+            let mut pipe_batch_complete_seen = false;
             // One-shot, so a batch cannot spam the log with it.
             let mut condebug_write_checked = false;
-            let mut sys = {
-                use sysinfo::SystemExt;
-                sysinfo::System::new_all()
-            };
+            let mut sys = crate::sys::process::snapshot();
+            let mut last_process_check: Option<std::time::Instant> = None;
+            let mut last_dialog_check: Option<std::time::Instant> = None;
+            let mut hl_alive_cached = false;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -690,6 +821,9 @@ pub fn spawn_capture_engine(
                     }
                     if obs_mode && marker.kind == crate::obs::MarkerKind::BatchComplete {
                         obs_batch_complete_seen = true;
+                    }
+                    if marker.via_pipe && marker.kind == crate::obs::MarkerKind::BatchComplete {
+                        pipe_batch_complete_seen = true;
                     }
                     if marker.kind == crate::obs::MarkerKind::DemoStart
                         && let Some((job_idx, total, clips)) = marker.demo_progress {
@@ -716,16 +850,50 @@ pub fn spawn_capture_engine(
                     }
                 }
 
+                // The process list is re-read at most every 250 ms: OBS mode
+                // spins this loop every 16 ms for its markers, and enumerating
+                // every process 62 times a second for the whole batch buys
+                // nothing when a quarter-second-late "the game is gone" is
+                // as good as an immediate one.
+                if last_process_check
+                    .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(250))
+                {
+                    last_process_check = Some(std::time::Instant::now());
+                    crate::sys::process::refresh(&mut sys);
+                    hl_alive_cached = crate::sys::process::is_game_in(&sys);
+                }
                 let hl_alive = {
-                    use sysinfo::{SystemExt, ProcessExt};
-                    sys.refresh_processes();
-                    let alive = sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe"));
+                    let alive = hl_alive_cached;
                     if alive {
                         hl_seen_alive = true;
                         hl_first_seen.get_or_insert_with(std::time::Instant::now);
                     }
                     alive
                 };
+
+                if foreground_locked_at.elapsed() > FOREGROUND_LOCK_MAX {
+                    foreground_lock.release();
+                }
+
+                if let Some(handoff) = handoff.as_mut() {
+                    use crate::game_handoff::Handoff;
+                    match handoff.poll(&crate::sys::process::game_pids_in(&sys)) {
+                        Handoff::Waiting | Handoff::Sent => {}
+                        Handoff::JustSent(pid) => {
+                            foreground_lock.release();
+                            log_markdown(&format!(
+                                "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
+                                handoff.lines.join("; ")
+                            ))
+                        }
+                        Handoff::Failed(why) => {
+                            log_markdown(&format!("[HLAE] {why}"));
+                            failure_reason = Some(why);
+                            kill_hl_exe_and_wait(&mut sys);
+                            break;
+                        }
+                    }
+                }
 
                 // Is the engine actually writing the console log? Checked once,
                 // after the game has had long enough to produce startup output.
@@ -761,10 +929,67 @@ pub fn spawn_capture_engine(
                             }
                         }
 
+                // An error box from the game or HLAE stops everything until
+                // someone clicks it, and nothing about it reaches Studio. Read
+                // it (never click it), say what it means, and end the batch the
+                // way a failure does. Only processes this batch started: the
+                // game, the launcher, and the launcher's own injector.
+                if last_dialog_check.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+                    last_dialog_check = Some(std::time::Instant::now());
+                    let launcher_pid = child.id();
+                    let game_pids = crate::sys::process::game_pids_in(&sys);
+                    let mut launcher_pids = crate::sys::process::injector_pids_in(&sys, launcher_pid);
+                    if !launcher_exit_logged {
+                        launcher_pids.push(launcher_pid);
+                    }
+                    if let Some(dialog) = crate::sys::dialogs::error_dialogs(&game_pids, &launcher_pids).into_iter().next() {
+                        log_markdown(&format!(
+                            "[HLAE] Error box from PID {} after {:.1}s: {}",
+                            dialog.pid,
+                            start_time.elapsed().as_secs_f32(),
+                            dialog.full_text()
+                        ));
+                        failure_reason = Some(dialog.summary());
+                        for pid in launcher_pids.iter().filter(|&&pid| pid != launcher_pid) {
+                            crate::sys::process::kill_pid(*pid);
+                        }
+                        if !launcher_exit_logged {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
+                        kill_hl_exe_and_wait(&mut sys);
+                        // A game already exiting when its box came up (the
+                        // Anniversary !m_bMounted assert, after the user
+                        // clicked the Steam box themselves) can't be killed:
+                        // Windows won't terminate a terminating process. Its
+                        // box is answered instead, so it doesn't sit there.
+                        let left = crate::sys::dialogs::error_dialogs(&game_pids, &[]);
+                        if !left.is_empty() {
+                            for dialog in &left {
+                                log_markdown(&format!(
+                                    "[HLAE] The game was already exiting and couldn't be ended; answered its box with Ignore: {}",
+                                    dialog.full_text()
+                                ));
+                                crate::sys::dialogs::dismiss(dialog);
+                            }
+                            wait_for_hl_exe_to_exit(&mut sys);
+                        }
+                        break;
+                    }
+                }
+
                 if cancel_token.load(Ordering::Relaxed) {
                     log_markdown(&format!("[HLAE] Cancelled by user after {:.1}s", start_time.elapsed().as_secs_f32()));
-                    std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                    wait_for_hl_exe_to_exit(&mut sys);
+                    // A cancel in the first few seconds catches the launcher
+                    // still injecting into hl.exe. Killing only hl.exe then
+                    // leaves HLAE open on "AfxHook error, Code: 1" (seen
+                    // 2026-09-29, a cancel 1.0s in), so the launcher goes first.
+                    if !launcher_exit_logged {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
+                    }
+                    kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
                 // Counts from the last marker, or from hl.exe first appearing
@@ -789,9 +1014,8 @@ pub fn spawn_capture_engine(
                                 "the demo never started playing — hl.exe came up but produced no console markers at all"
                             } else {
                                 "the batch stopped progressing while hl.exe was still running — no console markers arrived for several minutes"
-                            });
-                            std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                            wait_for_hl_exe_to_exit(&mut sys);
+                            }.into());
+                            kill_hl_exe_and_wait(&mut sys);
                             break;
                         }
                 // OBS gone for good, after a reconnect was already tried.
@@ -799,32 +1023,28 @@ pub fn spawn_capture_engine(
                 // and then report the batch as finished.
                 if obs_session.as_ref().is_some_and(|s| s.is_dead()) {
                     log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
-                    failure_reason = Some("lost contact with OBS mid-batch and could not reconnect");
-                    std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                    wait_for_hl_exe_to_exit(&mut sys);
+                    failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
+                    kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
                 if start_time.elapsed().as_secs() > 10
-                    && (dummy_path.exists() || exit_trigger.exists() || obs_batch_complete_seen)
+                    && (dummy_path.exists()
+                        || exit_trigger.exists()
+                        || obs_batch_complete_seen
+                        || pipe_batch_complete_seen)
                 {
-                    let via = if obs_batch_complete_seen && !exit_trigger.exists() {
-                        // The common OBS-mode case: caught it off the marker,
-                        // ahead of exit_trigger ever needing to be written.
-                        "BATCH_COMPLETE marker".to_string()
-                    } else {
-                        format!(
-                            "done marker: {}, exit trigger: {}",
-                            dummy_path.exists(),
-                            exit_trigger.exists()
-                        )
-                    };
+                    let via = completion_source(
+                        pipe_batch_complete_seen,
+                        obs_batch_complete_seen,
+                        dummy_path.exists(),
+                        exit_trigger.exists(),
+                    );
                     log_markdown(&format!(
                         "[HLAE] Batch complete after {:.1}s (via {}) — taskkilling hl.exe",
                         start_time.elapsed().as_secs_f32(),
                         via
                     ));
-                    std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                    wait_for_hl_exe_to_exit(&mut sys);
+                    kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
                 // Only treat this as a real failure once the launcher has handed off
@@ -843,7 +1063,7 @@ pub fn spawn_capture_engine(
                         "[HLAE] hl.exe never came up after the launcher exited ({:.1}s elapsed) — treating as failure",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe never started after the HLAE launcher exited");
+                    failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat".into());
                     break;
                 }
                 // hl.exe was running and has now disappeared without ever writing
@@ -856,12 +1076,40 @@ pub fn spawn_capture_engine(
                 // visible from out here separates them from an access violation
                 // — the exit status belongs to the launcher, which handed off
                 // long ago — so the wording covers both rather than guessing.
-                if hl_seen_alive && !hl_alive && !dummy_path.exists() && !exit_trigger.exists() {
+                if hl_seen_alive
+                    && !hl_alive
+                    && !dummy_path.exists()
+                    && !exit_trigger.exists()
+                    && !pipe_batch_complete_seen
+                {
                     log_markdown(&format!(
                         "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)");
+                    // The hook DLL's crash recorder says whether it was a
+                    // crash, where, and on which map; a known one is
+                    // remembered so later batches on that map are warned
+                    // (#207).
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let batch_started = std::time::SystemTime::now()
+                        .checked_sub(start_time.elapsed())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    let explained = crate::crash_maps::explain_and_record(
+                        &crate::activity_log_dir(),
+                        &crate::shared::paths::get_appdata_dir(),
+                        batch_started,
+                        now,
+                    );
+                    failure_reason = Some(match explained {
+                        Some(crash) => {
+                            log_markdown(&format!("[HLAE] {crash}"));
+                            crash
+                        }
+                        None => "hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)".into(),
+                    });
                     break;
                 }
                 // 500 ms is fine for watching a process; it is far too coarse
@@ -953,7 +1201,9 @@ pub fn spawn_capture_engine(
                     log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
                 }
             } else {
-                log::info!("[autosave] Lockfile removed after clean completion");
+                // Nothing writes `.autosave.json` yet (#20), so a file found
+                // here is a stray, not recovery state: removed quietly (#352).
+                log::debug!("[autosave] removed a stray .autosave.json");
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);
@@ -961,8 +1211,47 @@ pub fn spawn_capture_engine(
         .unwrap();
 }
 
+/// How the end of a batch was noticed, for the "Batch complete" log line.
+///
+/// The events pipe's `BATCH_COMPLETE` is named whenever it arrived (#434).
+/// Outside OBS mode the capture loop checks only every 500 ms, and the
+/// exit-trigger folder appears a few frames after the marker, so both are
+/// usually there by the same check; naming the folder then hid that the pipe
+/// had already delivered.
+fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool) -> String {
+    if pipe_seen {
+        "BATCH_COMPLETE from the game events pipe".to_string()
+    } else if obs_seen && !trigger {
+        // The common OBS-mode case: caught it off the marker, ahead of
+        // exit_trigger ever needing to be written.
+        "BATCH_COMPLETE marker".to_string()
+    } else {
+        format!("done marker: {dummy}, exit trigger: {trigger}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::completion_source;
+
+    #[test]
+    fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {
+        // Marker and exit-trigger folder both there by the same check.
+        assert_eq!(
+            completion_source(true, false, false, true),
+            "BATCH_COMPLETE from the game events pipe"
+        );
+        assert_eq!(
+            completion_source(false, true, false, false),
+            "BATCH_COMPLETE marker"
+        );
+        // No pipe (an old hook DLL, or GOLDSRC_HOOKS_EVENTS=0): the folder.
+        assert_eq!(
+            completion_source(false, false, false, true),
+            "done marker: false, exit trigger: true"
+        );
+    }
+
     use super::*;
     use crate::test_support::Scratch;
     use std::time::Duration;
@@ -1028,7 +1317,10 @@ mod tests {
         assert!(!dod.join("dodstudio_primer.dem").exists());
         assert!(!dod.join("dodstudio_chain_01.dem").exists());
         assert!(!dod.join("dodstudio_chain_02.dem").exists());
-        assert!(dod.join("not_a_chain_demo.dem").exists(), "must not touch an unrelated file");
+        assert!(
+            dod.join("not_a_chain_demo.dem").exists(),
+            "must not touch an unrelated file"
+        );
     }
 
     /// `save_local_patched_copy` means the user asked to keep these files --
@@ -1054,5 +1346,52 @@ mod tests {
 
         assert!(dod.join("dodstudio_primer.dem").exists());
         assert!(dod.join("dodstudio_chain_01.dem").exists());
+    }
+
+    /// A hook-run batch's copies of demos from another drive go with the
+    /// guard, whatever the auto-clear settings say (#434).
+    #[test]
+    fn dropping_the_guard_removes_the_batchs_source_copies() {
+        let root = Scratch::new("cleanup_guard_copies");
+        let dod = root.join("dod");
+        std::fs::create_dir_all(&dod).unwrap();
+        let copy = dod.join("dodstudio_src_01_match.dem");
+        std::fs::write(&copy, b"x").unwrap();
+        std::fs::write(dod.join("match.dem"), b"x").unwrap();
+
+        {
+            let mut guard = CaptureCleanupGuard::new(
+                root.join("exit_trigger"),
+                root.join("session_junction"),
+                false,
+                false,
+                false,
+                false,
+            );
+            guard.source_copies = vec![copy.clone()];
+        }
+
+        assert!(!copy.exists());
+        assert!(dod.join("match.dem").exists());
+    }
+
+    /// The batch starts on whatever the plan put first: the primer without the
+    /// hook DLL, dodstudio_chain_01 with it (#365).
+    #[test]
+    fn the_batch_starts_on_its_first_planned_demo() {
+        let job = |name: &str| CaptureJob {
+            patched_demo_path: PathBuf::from("game").join("dod").join(name),
+        };
+        let with_primer = [job("dodstudio_primer.dem"), job("dodstudio_chain_01.dem")];
+        assert_eq!(
+            first_demo_stem(&with_primer).as_deref(),
+            Some("dodstudio_primer")
+        );
+        let without = [job("dodstudio_chain_01.dem"), job("dodstudio_chain_02.dem")];
+        assert_eq!(
+            first_demo_stem(&without).as_deref(),
+            Some("dodstudio_chain_01")
+        );
+        assert_eq!(first_demo_stem(&[]), None);
     }
 }

@@ -19,7 +19,7 @@
 //! enough to sample, candidates, distinct leaves they occupy, candidates in
 //! open space, projection hit rate over a strided sample, elapsed ms.
 
-use native::patch::bsp::{Bsp, FaceSampling, CONTENTS_SOLID, CONTENTS_SKY};
+use native::patch::bsp::{Bsp, CONTENTS_SKY, CONTENTS_SOLID, FaceSampling};
 
 /// Only every Nth candidate is projected back onto a face: `decal_draw_point`
 /// walks every world face, so the full set would cost more than the scan it is

@@ -11,7 +11,8 @@ impl Doer for SvcSendExtraInfo {
                 fallback_dir: fallback_dir.to_vec(),
                 can_cheat,
             }
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

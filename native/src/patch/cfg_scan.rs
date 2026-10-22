@@ -57,11 +57,15 @@ pub struct CvarSetting {
 
 impl CvarSetting {
     pub fn file_name(&self) -> String {
-        self.file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.file.to_string_lossy().to_string())
+        display_name(&self.file)
     }
+}
+
+/// A config's file name for a warning, or the whole path when it has none.
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -74,6 +78,25 @@ pub struct CfgScan {
     /// they set nothing today, but a `movie.cfg` is one `exec` away from doing
     /// so, and a user reading a warning deserves to know it is there.
     pub unreferenced: Vec<PathBuf>,
+    /// Lines that use a hook console name from before #555 (`dodstudio_*`),
+    /// which the game no longer knows. Reported, never rewritten.
+    pub renamed: Vec<RenamedConsoleName>,
+}
+
+/// A config line using a console name #555 renamed: the old name as written,
+/// the name that replaced it, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedConsoleName {
+    pub old: String,
+    pub new: String,
+    pub file: PathBuf,
+    pub line: usize,
+}
+
+impl RenamedConsoleName {
+    pub fn file_name(&self) -> String {
+        display_name(&self.file)
+    }
 }
 
 impl CfgScan {
@@ -81,7 +104,8 @@ impl CfgScan {
     /// configs it actually executes. Last one wins, as the console does.
     pub fn effective(&self, cvar: &str) -> Option<&CvarSetting> {
         self.settings
-            .iter().rfind(|s| s.auto_executed && s.cvar.eq_ignore_ascii_case(cvar))
+            .iter()
+            .rfind(|s| s.auto_executed && s.cvar.eq_ignore_ascii_case(cvar))
     }
 
     /// Every watched cvar that an executed config sets.
@@ -93,68 +117,223 @@ impl CfgScan {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.settings.is_empty() && self.unreferenced.is_empty()
-    }
-
-    /// Which of these init commands will override something a config already
-    /// sets.
-    ///
-    /// Init commands reach the engine after its configs have run, so where both
-    /// name the same cvar the init command is the one that takes effect. That
-    /// is usually what the user wants — it is the whole point of putting it
-    /// there — but they should not have to find out by noticing their movie
-    /// looks different. Silence here would mean a value they had set
-    /// deliberately, years ago, quietly stopping applying.
-    pub fn overrides_in(&self, init_commands: &[String]) -> Vec<CommandOverride> {
-        let mut out = Vec::new();
-        for command in init_commands {
-            let trimmed = command.trim();
-            let mut parts = trimmed.split_whitespace();
-            let Some(head) = parts.next() else { continue };
-            let Some(value) = parts.next() else { continue };
-            if parts.next().is_some() {
-                continue;
-            }
-            let Some(setting) = self.effective(head) else {
-                continue;
-            };
-            // Setting it to what the config already says overrides nothing that
-            // anyone would notice.
-            if setting.value.eq_ignore_ascii_case(&unquote(value)) {
-                continue;
-            }
-            out.push(CommandOverride {
-                command: trimmed.to_string(),
-                cvar: setting.cvar.clone(),
-                init_value: unquote(value),
-                cfg_value: setting.value.clone(),
-                file: setting.file.clone(),
-                line: setting.line,
-            });
-        }
-        out
+        self.settings.is_empty() && self.unreferenced.is_empty() && self.renamed.is_empty()
     }
 }
 
-/// One init command silently beaten by a later one in the same list.
-///
-/// The list the engine receives is the user's own init commands followed by the
-/// ones the pipeline appends for itself, so a `mirv_movie_fps 500` typed by hand
-/// is overwritten by the Capture FPS setting a few entries later. Nothing about
-/// the list on screen shows that: both lines are there, and only the last one
-/// happens.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandShadow {
+/// Where a value was stated, for the two value-warning rules (#216).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueSource {
+    /// A line in a config the engine executes.
+    Config { file: PathBuf, line: usize },
+    /// An Initial Command the user typed.
+    Initial,
+    /// An Initial Command the pipeline appends for itself
+    /// (`builder::final_init_commands`), e.g. `mirv_movie_fps` from Capture FPS.
+    App,
+    /// A Scheduled Command, `offset_seconds` before each highlight.
+    ScheduledBefore { offset_seconds: f32 },
+    /// A Scheduled Command, `offset_seconds` after each highlight.
+    ScheduledAfter { offset_seconds: f32 },
+}
+
+impl ValueSource {
+    pub fn is_config(&self) -> bool {
+        matches!(self, ValueSource::Config { .. })
+    }
+
+    pub fn is_scheduled(&self) -> bool {
+        matches!(
+            self,
+            ValueSource::ScheduledBefore { .. } | ValueSource::ScheduledAfter { .. }
+        )
+    }
+}
+
+/// One value stated for a cvar, and where.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatedValue {
+    pub value: String,
+    pub source: ValueSource,
+}
+
+/// Rule 1: a cvar given two or more different values across the configs,
+/// Initial Commands and Scheduled `Before` commands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValueConflict {
     pub cvar: String,
-    /// The command that will not take effect.
-    pub shadowed: String,
-    pub shadowed_value: String,
-    /// The one that will.
-    pub winner: String,
-    pub winner_value: String,
-    /// Position of the winner in the list, so a caller can tell whether it came
-    /// from the user's own entries or was appended after them.
-    pub winner_index: usize,
+    /// Every value stated, in the order the engine runs them: configs, then
+    /// Initial Commands, then Scheduled `Before` commands furthest back first.
+    pub values: Vec<StatedValue>,
+    /// The last of `values`: the one in effect when the highlight plays.
+    pub effective: StatedValue,
+}
+
+/// Rule 2: a Scheduled `After` command with no `Before` for the same cvar,
+/// whose value differs from the baseline. Scheduled Commands fire around every
+/// highlight, so nothing puts the value back: the first clip records at the
+/// baseline and every later clip at the `After`'s value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AsymmetricAfter {
+    pub cvar: String,
+    /// The last unpaired `After` to fire, which is the value every later clip
+    /// starts from.
+    pub after: StatedValue,
+    /// Rule 1's effective value, which the first clip records at.
+    pub baseline: StatedValue,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ValueWarnings {
+    pub conflicts: Vec<ValueConflict>,
+    pub asymmetric: Vec<AsymmetricAfter>,
+}
+
+/// A Scheduled Command, as the value rules need it.
+#[derive(Debug, Clone, Copy)]
+pub struct ScheduledCommand<'a> {
+    pub command: &'a str,
+    pub after: bool,
+    pub offset_seconds: f32,
+}
+
+/// Whether two stated values are the same setting. Case-insensitive, and
+/// numeric where both sides are numbers, so `1` and `1.0` agree.
+fn same_value(a: &str, b: &str) -> bool {
+    match (a.parse::<f64>(), b.parse::<f64>()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a.eq_ignore_ascii_case(b),
+    }
+}
+
+/// The two value-conflict rules from #216, replacing the old override,
+/// shadowed and "Scheduled Commands override earlier values" warnings.
+///
+/// **Rule 1, conflicting values.** Pool every value stated for a cvar in the
+/// executed configs (duplicates included), `init_commands` and the
+/// `Before` commands. If they all agree, however many there are, say nothing.
+/// Otherwise report it once, naming every value and the effective one: the
+/// last in firing order.
+///
+/// **Rule 2, asymmetric value.** An `After` command with no `Before` for the
+/// same cvar ("unpaired"), whose value differs from Rule 1's effective value.
+/// An `After`'s value is never part of Rule 1's pool, paired or not, so once
+/// any `Before` pairs it neither rule looks at it again. That is the accepted
+/// gap in #216: a paired `After` is presumed to be a deliberate restore.
+///
+/// `init_commands` is the list the engine receives (`final_init_commands`),
+/// whose first `user_count` entries the user typed and the rest the pipeline
+/// appends. `scheduled` must already be in firing order (`Before`s furthest
+/// back first, then `After`s nearest first) and exclude anything reported
+/// elsewhere as a hazard or banned.
+///
+/// A conflict made only of config lines is **not** reported: those are
+/// between the user's own files, nothing the app sends is involved, and the
+/// scanner records every `word value` line as an assignment, including
+/// commands such as `echo`, which would make config-only "conflicts" noisy.
+pub fn value_warnings(
+    scan: &CfgScan,
+    init_commands: &[String],
+    user_count: usize,
+    scheduled: &[ScheduledCommand],
+) -> ValueWarnings {
+    // Pool per cvar, in firing order, cvars in first-seen order and spelling.
+    // A Vec rather than a map: a config is a couple of hundred lines.
+    let mut pool: Vec<(String, Vec<StatedValue>)> = Vec::new();
+    let mut add = |cvar: &str, value: String, source: ValueSource| {
+        let stated = StatedValue { value, source };
+        match pool.iter_mut().find(|(c, _)| c.eq_ignore_ascii_case(cvar)) {
+            Some((_, values)) => values.push(stated),
+            None => pool.push((cvar.to_string(), vec![stated])),
+        }
+    };
+
+    for setting in scan.settings.iter().filter(|s| s.auto_executed) {
+        add(
+            &setting.cvar,
+            setting.value.clone(),
+            ValueSource::Config {
+                file: setting.file.clone(),
+                line: setting.line,
+            },
+        );
+    }
+    for (index, command) in init_commands.iter().enumerate() {
+        if let Some((cvar, value)) = assigned_cvar(command) {
+            let source = if index < user_count {
+                ValueSource::Initial
+            } else {
+                ValueSource::App
+            };
+            add(&cvar, value, source);
+        }
+    }
+    for s in scheduled.iter().filter(|s| !s.after) {
+        if let Some((cvar, value)) = assigned_cvar(s.command) {
+            add(
+                &cvar,
+                value,
+                ValueSource::ScheduledBefore {
+                    offset_seconds: s.offset_seconds,
+                },
+            );
+        }
+    }
+
+    let mut out = ValueWarnings::default();
+    for (cvar, values) in &pool {
+        let effective = values.last().expect("a pool entry has a value").clone();
+        let disagree = values
+            .iter()
+            .any(|v| !same_value(&v.value, &effective.value));
+        let app_side = values.iter().any(|v| !v.source.is_config());
+        if disagree && app_side {
+            out.conflicts.push(ValueConflict {
+                cvar: cvar.clone(),
+                values: values.clone(),
+                effective,
+            });
+        }
+    }
+
+    // Rule 2. The last unpaired After per cvar is what later clips start from.
+    let mut last_after: Vec<(String, StatedValue)> = Vec::new();
+    for s in scheduled.iter().filter(|s| s.after) {
+        if let Some((cvar, value)) = assigned_cvar(s.command) {
+            let stated = StatedValue {
+                value,
+                source: ValueSource::ScheduledAfter {
+                    offset_seconds: s.offset_seconds,
+                },
+            };
+            match last_after
+                .iter_mut()
+                .find(|(c, _)| c.eq_ignore_ascii_case(&cvar))
+            {
+                Some((_, slot)) => *slot = stated,
+                None => last_after.push((cvar, stated)),
+            }
+        }
+    }
+    for (cvar, after) in last_after {
+        let Some((_, values)) = pool.iter().find(|(c, _)| c.eq_ignore_ascii_case(&cvar)) else {
+            // Nothing states a baseline, so there is nothing known to differ
+            // from. The old warnings were silent here too.
+            continue;
+        };
+        let paired = values
+            .iter()
+            .any(|v| matches!(v.source, ValueSource::ScheduledBefore { .. }));
+        let baseline = values.last().expect("a pool entry has a value");
+        if !paired && !same_value(&after.value, &baseline.value) {
+            out.asymmetric.push(AsymmetricAfter {
+                cvar,
+                after,
+                baseline: baseline.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// Cvars that must not change once a demo is playing.
@@ -191,12 +370,15 @@ pub struct CommandShadow {
 /// downstream — the fps stamped into take metadata, Render Studio's own
 /// expectation — assumes that never changes mid-batch. `mirv_movie_ffmpeg`
 /// configures the direct-to-video encoder pipe the same way, once, before
-/// anything records into it.
+/// anything records into it. `mirv_agr` is AGR capture mode's recorder: the
+/// route aliases start it into each block's own file and `sys_record_stop`
+/// ends it, so a scheduled one would end a take early or start one into a file
+/// nobody planned.
 ///
 /// `mirv_movie_separate_hud` deliberately is NOT here. It used to be, but the
 /// only reason was that the pipeline always re-appended its own value to
 /// Initial Commands after the user's, making anything the user set — Initial
-/// or Scheduled — moot. That checkbox is gone (removed 2026-09-08; typing the
+/// or Scheduled — moot. That checkbox is gone (#214; typing the
 /// command into Initial Commands directly is the only way to use it now), and
 /// with it the one confirmed reason to flag this cvar at all. Nothing in this
 /// codebase has actually tested what a mid-demo toggle does — unlike
@@ -206,7 +388,10 @@ pub struct CommandShadow {
 /// `host_framerate` is `sys_fast_forward`/`sys_normal_speed`'s own mechanism
 /// for the real-time run-up before recording (`docs/goldsrc_dod_quirks.md`'s
 /// audio-resync entry) — a scheduled one races that timing, not the record
-/// itself (recording pins its own timestep regardless).
+/// itself (recording pins its own timestep regardless). `r_norefresh` is the
+/// same pair's other switch (#724): the fast-forward draws nothing, and the
+/// pre-roll turns drawing back on; a scheduled `1` inside a clip records
+/// frames with no world in them.
 ///
 /// All of these share the same failure mode: the capture still completes and
 /// still looks plausible.
@@ -220,7 +405,17 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
     "mirv_movie_fps",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "r_norefresh",
+    "mirv_agr",
 ];
+
+/// The cvars `sys_fast_forward` sets to run uncapped between clips and
+/// `sys_normal_speed` puts back at every pre-roll (#724; the values are
+/// `builder::speed`'s). Not a tier of their own: in Initial Commands they are
+/// honoured exactly — that value is what every clip gets back — and scheduled
+/// they are reported with `mid_demo_hazards`, because a scheduled one lasts
+/// only until the next clip's pre-roll restores the Initial value.
+pub const FAST_FORWARD_CVARS: &[&str] = &["fps_override", "fps_max", "gl_vsync"];
 
 /// Commands refused wherever a command can be typed (Initial Commands and
 /// Scheduled Commands alike), not merely shadowed or flagged as a mid-demo
@@ -230,7 +425,7 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   * **the pipeline owns it outright** — no dedicated setting exists, and no
 ///     scenario has been found where a user typing one is anything but a
 ///     misunderstanding (`mirv_recordmovie_start`/`_stop`, `mirv_movie_ffmpeg`,
-///     `host_framerate`);
+///     `host_framerate`, `r_norefresh`);
 ///   * **DoD's own client has no legitimate non-default value for it at
 ///     all** — `r_drawentities`, `cl_lw`.
 ///
@@ -239,13 +434,11 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 /// typing that is redundant, not dangerous, so it stays shadowed-with-a-
 /// warning rather than refused. `mirv_movie_separate_hud` is not here either,
 /// and not in `MID_DEMO_HAZARDS`: no setting exists behind it any more
-/// (removed 2026-09-08), Initial Commands is simply the intended way to use
+/// (#214), Initial Commands is simply the intended way to use
 /// it, and typing it in Scheduled Commands instead is untracked rather than
 /// flagged — see `MID_DEMO_HAZARDS`'s own doc comment for why. Also distinct
 /// from `mirv_movie_filename`, which used to be here too — see
-/// `SCHEDULED_BANNED_COMMANDS` for why it moved. User-confirmed tier list,
-/// 2026-09-02 (`mirv_movie_filename` re-tiered 2026-09-05, `r_drawentities`/
-/// `cl_lw` added 2026-09-08).
+/// `SCHEDULED_BANNED_COMMANDS` for why it moved.
 ///
 /// - `mirv_recordmovie_start` / `mirv_recordmovie_stop` — the pipeline's own
 ///   `sys_record_start`/`sys_record_stop` scheduling relies on being the only
@@ -257,6 +450,11 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   legitimate creative use (frame-by-frame stepping, per
 ///   `docs/goldsrc_dod_quirks.md`'s High-Precision Frame Pacing entry) and
 ///   rejected: "It's dangerous and nobody uses that."
+/// - `r_norefresh` — the same pair's drawing switch (#724): `sys_fast_forward`
+///   sets it so the fast-forward skips the 3D pass, `sys_normal_speed` clears
+///   it at every pre-roll. A user's `1` is either undone before any clip
+///   records (Initial Commands) or records clips with no world drawn
+///   (scheduled); there is no value of it a capture can want.
 /// - `r_drawentities` / `cl_lw` — DoD 1.3's `client.dll` runs a cvar-enforcement
 ///   check inside `CHud::Redraw`: if either is not `1`, it forces the correct
 ///   value back, prints an error, and calls `quit` — the process exits
@@ -271,11 +469,22 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   `sv_cheats` is `0` the engine resets it to `1.0` and the value never
 ///   survives long enough for DoD's client to see it. Verified live and in
 ///   the binaries — `hw.dll` `0x1d455c9`, gated on `sv_cheats` at `0x1e56404`.
+/// - `ds_capture_batch` / `ds_capture_schedule` — the hook DLL's runners for a
+///   batch run without patched demos (#434). One started from a batch's own
+///   commands would replace the batch that is running.
+/// - `ds_player_spray` — writes the game's own spray file (`tempdecal.wad`)
+///   (#428). A demo draws the sprays it recorded (or Configuration > Players'),
+///   never that file, so from a batch it would change the user's spray on
+///   disk and nothing on screen.
 pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_recordmovie_start",
     "mirv_recordmovie_stop",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "r_norefresh",
+    "ds_capture_batch",
+    "ds_capture_schedule",
+    "ds_player_spray",
     "r_drawentities",
     "cl_lw",
 ];
@@ -309,8 +518,16 @@ pub struct FatalCvar {
 }
 
 pub const FATAL_CVARS: &[FatalCvar] = &[
-    FatalCvar { cvar: "r_drawentities", required: "1", needs_sv_cheats: true },
-    FatalCvar { cvar: "cl_lw", required: "1", needs_sv_cheats: false },
+    FatalCvar {
+        cvar: "r_drawentities",
+        required: "1",
+        needs_sv_cheats: true,
+    },
+    FatalCvar {
+        cvar: "cl_lw",
+        required: "1",
+        needs_sv_cheats: false,
+    },
 ];
 
 /// Whether an executed config turns cheats on, which is what decides if a
@@ -337,10 +554,7 @@ pub struct FatalCvarSetting {
 
 impl FatalCvarSetting {
     pub fn file_name(&self) -> String {
-        self.file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.file.to_string_lossy().to_string())
+        display_name(&self.file)
     }
 }
 
@@ -388,9 +602,13 @@ fn commands_matching(list: &[&str], commands: &[String]) -> Vec<(String, String)
         .collect()
 }
 
-/// Commands from `MID_DEMO_HAZARDS` that must not be run during playback.
+/// Commands from `MID_DEMO_HAZARDS` that must not be run during playback, and
+/// the `FAST_FORWARD_CVARS` the next pre-roll would put back. Only meaningful
+/// against Scheduled Commands: the latter are honoured in Initial Commands.
 pub fn mid_demo_hazards(commands: &[String]) -> Vec<(String, String)> {
-    commands_matching(MID_DEMO_HAZARDS, commands)
+    let mut hits = commands_matching(MID_DEMO_HAZARDS, commands);
+    hits.extend(commands_matching(FAST_FORWARD_CVARS, commands));
+    hits
 }
 
 /// Commands from `BANNED_COMMANDS` present anywhere in `commands` — Initial
@@ -412,11 +630,10 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// resize anything — the flush already decided what counts as on screen for
 /// the entire clip — so a warning banner isn't enough here the way it is for
 /// the rest of `MID_DEMO_HAZARDS`: the capture would complete and look
-/// plausible while quietly being wrong. User-requested escalation from hazard
-/// to refused, 2026-09-05.
+/// plausible while quietly being wrong, hence refused rather than a hazard.
 ///
 /// `mirv_movie_filename` is a different shape of exception, moved here from
-/// `BANNED_COMMANDS` the same day: in Initial Commands (or a config) it is
+/// `BANNED_COMMANDS`: in Initial Commands (or a config) it is
 /// not merely safe, it is inert — `build_batch_queue` schedules a fresh
 /// `<demo>_route_N` alias (which sets it) at the same tick as every block's
 /// own `sys_record_start`, for every block including the first, so a value
@@ -425,48 +642,223 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// it fires mid-clip — between one block's route alias and the next — and
 /// genuinely misroutes that block's frames, which is the danger it was
 /// originally banned everywhere for.
-pub const SCHEDULED_BANNED_COMMANDS: &[&str] =
-    &["r_decals", "mirv_fov", "gl_widescreenfov", "mirv_movie_filename"];
-
-/// Commands GoldSrc itself silently drops whenever they arrive via a demo's
-/// own message stream — Initial Commands (STUFFTEXT, injected right after
-/// `DemoStart`) and Scheduled Commands (injected `ConsoleCommand` frames)
-/// alike, since the engine's filter does not care when in the stream a
-/// command arrives. Confirmed the hard way, twice: `dod-studio` originally
-/// planned to `exec` a per-demo generated config to set `mirv_movie_filename`
-/// (dodging the quoting/escaping an alias would need) and to inject `quit` at
-/// batch end to close the game automatically — neither ever did anything.
-/// See `docs/hlae_protocols.md`'s "Sandbox Escape" entry, which documents the
-/// actual workaround this pipeline ships instead of `quit` (a
-/// `mirv_movie_filename` exit-trigger folder, polled for by the orchestrator).
 ///
-/// Does NOT apply to a command inside a game config the engine execs
-/// normally at boot (`config.cfg`, `movie.cfg`, ...) — that is a completely
-/// different code path from the demo's own message stream, and an `exec`
-/// inside one of those is exactly how config chaining works.
-pub const NOOP_EVERYWHERE_COMMANDS: &[&str] = &["exec", "quit"];
+/// `mirv_agr` (#450) is here rather than in `BANNED_COMMANDS`, a deliberate
+/// call. Scheduled, it collides with AGR capture mode's own start/stop at each
+/// block's bounds. Outside that mode a scheduled `mirv_agr start` names one
+/// fixed file for every highlight, so each clip overwrites the last; AGR mode
+/// is the way to get one file per clip. In Initial Commands it is not a collision: a
+/// `mirv_agr start` there opens a file at demo load, and in AGR mode the first
+/// block's own start simply closes it and opens the planned one (HLAE's start
+/// closes any recording already open). So it is refused only where it can
+/// actually misplace a take — the same shape as `mirv_movie_filename`.
+pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
+    "r_decals",
+    "mirv_fov",
+    "gl_widescreenfov",
+    "mirv_movie_filename",
+    "mirv_agr",
+];
+
+// ── The demo command filter (#679) ──────────────────────────────────────────
+//
+// Every type-3 `ConsoleCommand` frame a demo carries goes through the same
+// filter as `svc_stufftext` before it reaches the command buffer (`hw+0x1dce0`
+// pre-Anniversary, `hw+0x1aaa30` on the 25th Anniversary build;
+// `docs/goldsrc_hw_dll_survey.md` §13.3). A command it matches is dropped with
+// nothing printed. Initial Commands and Scheduled Commands are both written
+// into the patched demo as `ConsoleCommand` frames (`engine.rs`), so both are
+// filtered; a config the engine execs at start-up is a different path and is
+// not. The lists below are the filter's own, read offline from `hw.dll`.
+//
+// This is the tier `exec` and `quit` used to have to themselves: `dod-studio`
+// once planned to `exec` a per-demo config and to inject `quit` at batch end,
+// and neither ever did anything (`docs/hlae_protocols.md`, "Sandbox Escape").
+// Both are just two cases of this filter.
+//
+// The third stage of the filter, which runs only when `cl_filterstuffcmd` is
+// non-zero (default `0`), is not modelled.
+
+/// Dropped when the command's name contains one of these, any case. A
+/// substring test, so HLAE's `mirv_matte_setcolor` is dropped for `_set`.
+pub const DEMO_FILTER_NAME_CONTAINS: &[&str] = &[
+    "bind",
+    "_set",
+    "unbind",
+    "retry",
+    "quit",
+    "_restart",
+    "motd_write",
+    "motdfile",
+    "kill",
+    "exit",
+    "writecfg",
+    "cl_filterstuffcmd",
+    "unbindall",
+];
+
+/// Dropped when the command's name starts with one of these, any case.
+pub const DEMO_FILTER_NAME_STARTS_WITH: &[&str] = &["connect"];
+
+/// Dropped when the whole line starts with one of these.
+pub const DEMO_FILTER_LINE_STARTS_WITH: &[&str] = &["alias "];
+
+/// Dropped when one of these appears anywhere on the line, arguments
+/// included. `exec` is exempt only in the `tfc` game directory, never in DoD.
+pub const DEMO_FILTER_LINE_CONTAINS: &[&str] = &[
+    "bind ",
+    "unbind ",
+    "_restart",
+    "exit",
+    "writecfg",
+    "cl_filterstuffcmd",
+    "unbindall",
+    "exec",
+];
+
+/// Dropped when one of these starts a word anywhere on the line: at the
+/// start, or after a space, `;` or newline. So `reconnect ` is not caught by
+/// `connect `, but `echo got a kill` is caught by `kill`.
+pub const DEMO_FILTER_WORD_STARTS_WITH: &[&str] = &[
+    "connect ",
+    "motd_write",
+    "motdfile",
+    "retry",
+    "_set",
+    "quit",
+    "kill",
+];
+
+/// Which of the filter's rules dropped a command, and the text it matched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemoFilterRule {
+    NameContains(&'static str),
+    NameStartsWith(&'static str),
+    LineStartsWith(&'static str),
+    LineContains(&'static str),
+    WordStartsWith(&'static str),
+}
+
+impl DemoFilterRule {
+    /// The rule's kind, as the frontend's strings key it.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::NameContains(_) => "nameContains",
+            Self::NameStartsWith(_) => "nameStartsWith",
+            Self::LineStartsWith(_) => "lineStartsWith",
+            Self::LineContains(_) => "lineContains",
+            Self::WordStartsWith(_) => "wordStartsWith",
+        }
+    }
+
+    /// The text the rule matched, without the trailing space some carry.
+    pub fn pattern(&self) -> &'static str {
+        match self {
+            Self::NameContains(p)
+            | Self::NameStartsWith(p)
+            | Self::LineStartsWith(p)
+            | Self::LineContains(p)
+            | Self::WordStartsWith(p) => p.trim_end(),
+        }
+    }
+}
+
+/// The first of the filter's rules `command` matches, in the engine's order
+/// (name first, then the whole line), or `None` when the command gets
+/// through. The name is the first word, as `Cmd_Argv(0)` sees it.
+///
+/// The name stage is case-insensitive in the engine. Whether the line stage
+/// is was not read, so it is matched case-insensitively too: a false "this is
+/// dropped" costs a glance, a missed one costs a clip.
+pub fn demo_filter_rule(command: &str) -> Option<DemoFilterRule> {
+    let line = command.trim().to_ascii_lowercase();
+    let name = line.split_whitespace().next()?.trim_matches('"');
+
+    if let Some(p) = DEMO_FILTER_NAME_CONTAINS.iter().find(|p| name.contains(*p)) {
+        return Some(DemoFilterRule::NameContains(p));
+    }
+    if let Some(p) = DEMO_FILTER_NAME_STARTS_WITH
+        .iter()
+        .find(|p| name.starts_with(*p))
+    {
+        return Some(DemoFilterRule::NameStartsWith(p));
+    }
+    if let Some(p) = DEMO_FILTER_LINE_STARTS_WITH
+        .iter()
+        .find(|p| line.starts_with(*p))
+    {
+        return Some(DemoFilterRule::LineStartsWith(p));
+    }
+    if let Some(p) = DEMO_FILTER_LINE_CONTAINS.iter().find(|p| line.contains(*p)) {
+        return Some(DemoFilterRule::LineContains(p));
+    }
+    let starts_a_word = |p: &str| {
+        line.match_indices(p)
+            .any(|(i, _)| i == 0 || matches!(line.as_bytes()[i - 1], b' ' | b';' | b'\n'))
+    };
+    DEMO_FILTER_WORD_STARTS_WITH
+        .iter()
+        .find(|p| starts_a_word(p))
+        .map(|p| DemoFilterRule::WordStartsWith(p))
+}
+
+/// A command the demo filter drops, and the rule that drops it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DemoFiltered {
+    /// The whole command, trimmed.
+    pub command: String,
+    pub rule: DemoFilterRule,
+}
+
+/// Every command in `commands` the demo filter drops, in order. Applies to
+/// Initial and Scheduled Commands alike: both reach the game as demo frames.
+pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
+    commands
+        .iter()
+        .filter_map(|raw| {
+            demo_filter_rule(raw).map(|rule| DemoFiltered {
+                command: raw.trim().to_string(),
+                rule,
+            })
+        })
+        .collect()
+}
 
 /// Commands that do nothing specifically in Initial Commands (or a config
 /// the engine executes) — not because the engine drops them, but because the
 /// pipeline itself always overwrites the value before anything downstream
 /// could read it. Scheduling one instead is a different, genuinely dangerous
 /// story — see `SCHEDULED_BANNED_COMMANDS`.
-pub const NOOP_IN_INIT_COMMANDS: &[&str] = &["mirv_movie_filename"];
+/// `ds_capture_run_in_background` and `ds_capture_stay_behind` are set by every
+/// batch after the user's own commands, the second from
+/// `PatcherConfig::keep_game_behind`.
+pub const NOOP_IN_INIT_COMMANDS: &[&str] = &[
+    "mirv_movie_filename",
+    "ds_capture_run_in_background",
+    "ds_capture_stay_behind",
+];
 
-/// `NOOP_IN_INIT_COMMANDS` and `NOOP_EVERYWHERE_COMMANDS` combined, checked
-/// against Initial Commands.
+/// `NOOP_IN_INIT_COMMANDS` checked against Initial Commands. What the demo
+/// filter drops is reported separately, by `demo_filtered_commands`.
 pub fn noop_commands_in_init(commands: &[String]) -> Vec<(String, String)> {
-    let mut hits = commands_matching(NOOP_IN_INIT_COMMANDS, commands);
-    hits.extend(commands_matching(NOOP_EVERYWHERE_COMMANDS, commands));
-    hits
+    commands_matching(NOOP_IN_INIT_COMMANDS, commands)
 }
 
-/// The Scheduled Commands half of the same check — `NOOP_EVERYWHERE_COMMANDS`
-/// only. `NOOP_IN_INIT_COMMANDS` entries are dangerous rather than inert once
-/// scheduled (see `SCHEDULED_BANNED_COMMANDS`), so they are refused there,
-/// not reported here.
-pub fn noop_commands_in_scheduled(commands: &[String]) -> Vec<(String, String)> {
-    commands_matching(NOOP_EVERYWHERE_COMMANDS, commands)
+/// Hook console names from before #555 in Initial or Scheduled Commands, as
+/// (old name, new name, whole trimmed command). Studio moves its saved lists
+/// to the new names when settings load, so this only finds one typed or
+/// pasted since. Reported as doing nothing, like `NOOP_IN_INIT_COMMANDS`: the
+/// game no longer knows the name.
+pub fn renamed_commands(commands: &[String]) -> Vec<(String, String, String)> {
+    commands
+        .iter()
+        .flat_map(|raw| {
+            let trimmed = raw.trim();
+            super::console_prefix::old_names_in(trimmed)
+                .into_iter()
+                .map(move |(old, new)| (old, new, trimmed.to_string()))
+        })
+        .collect()
 }
 
 /// Commands from `SCHEDULED_BANNED_COMMANDS` present in `commands`. Only
@@ -501,71 +893,6 @@ pub fn assigned_cvar(command: &str) -> Option<(String, String)> {
         return None;
     }
     Some((head.to_string(), unquote(value)))
-}
-
-/// Commands in this list that a later command in the same list overrides.
-///
-/// Last one wins, as the console does — so every entry for a cvar except the
-/// final one is dead, and each is reported against the one that beat it.
-pub fn self_overrides(commands: &[String]) -> Vec<CommandShadow> {
-    let assignments: Vec<(usize, String, String, String)> = commands
-        .iter()
-        .enumerate()
-        .filter_map(|(i, raw)| {
-            let trimmed = raw.trim();
-            let mut parts = trimmed.split_whitespace();
-            let head = parts.next()?;
-            let value = parts.next()?;
-            if parts.next().is_some() || !is_cvar_name(head) {
-                return None;
-            }
-            Some((i, head.to_lowercase(), unquote(value), trimmed.to_string()))
-        })
-        .collect();
-
-    let mut out = Vec::new();
-    for (index, (_, cvar, value, command)) in assignments.iter().enumerate() {
-        let Some((w_pos, _, w_value, w_command)) = assignments
-            .iter()
-            .skip(index + 1)
-            .find(|(_, other, _, _)| other == cvar)
-        else {
-            continue;
-        };
-        // Repeating a value changes nothing anyone would notice.
-        if value.eq_ignore_ascii_case(w_value) {
-            continue;
-        }
-        out.push(CommandShadow {
-            cvar: cvar.clone(),
-            shadowed: command.clone(),
-            shadowed_value: value.clone(),
-            winner: w_command.clone(),
-            winner_value: w_value.clone(),
-            winner_index: *w_pos,
-        });
-    }
-    out
-}
-
-/// An init command that will take precedence over a config file's value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandOverride {
-    pub command: String,
-    pub cvar: String,
-    pub init_value: String,
-    pub cfg_value: String,
-    pub file: PathBuf,
-    pub line: usize,
-}
-
-impl CommandOverride {
-    pub fn file_name(&self) -> String {
-        self.file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.file.to_string_lossy().to_string())
-    }
 }
 
 /// Scan a mod folder's configs. Never writes anything.
@@ -616,9 +943,10 @@ pub fn scan_cached(game_dir: &Path) -> std::sync::Arc<CfgScan> {
     let key = normalise(game_dir);
 
     if let Ok(read) = cache.read()
-        && let Some(hit) = read.get(&key) {
-            return std::sync::Arc::clone(hit);
-        }
+        && let Some(hit) = read.get(&key)
+    {
+        return std::sync::Arc::clone(hit);
+    }
 
     let scanned = std::sync::Arc::new(scan(game_dir));
     if let Ok(mut write) = cache.write() {
@@ -662,6 +990,19 @@ fn read_config(
             let mut parts = command.split_whitespace();
             let Some(head) = parts.next() else { continue };
             let head_lower = head.to_lowercase();
+
+            // Ahead of the bind/alias skip: an old name in a bind fails just
+            // the same, only later, when the key is pressed.
+            for (old, new) in super::console_prefix::old_names_in(&command) {
+                if out.renamed.len() < MAX_SETTINGS {
+                    out.renamed.push(RenamedConsoleName {
+                        old,
+                        new,
+                        file: path.to_path_buf(),
+                        line: index + 1,
+                    });
+                }
+            }
 
             if NOT_EXECUTED.contains(&head_lower.as_str()) {
                 continue;
@@ -752,7 +1093,9 @@ fn commands_in(line: &str) -> Vec<String> {
 /// `+mlook` and `-attack` are commands with a sign prefix, never assignments.
 fn is_cvar_name(token: &str) -> bool {
     let mut chars = token.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -767,6 +1110,16 @@ mod tests {
 
     fn scratch(tag: &str) -> Scratch {
         Scratch::new(format_args!("cfg_scan_{tag}"))
+    }
+
+    #[test]
+    fn a_warning_names_the_file_or_falls_back_to_the_whole_path() {
+        assert_eq!(
+            display_name(&Path::new("dod").join("movie.cfg")),
+            "movie.cfg"
+        );
+        // `..` has no file name, so the whole path is shown instead.
+        assert_eq!(display_name(Path::new("..")), "..");
     }
 
     #[test]
@@ -798,6 +1151,77 @@ mod tests {
         assert!(scan.effective("r_decals").is_none(), "{:?}", scan.settings);
     }
 
+    /// #555: a config line still using a `dodstudio_` hook name is reported
+    /// with the name that replaced it, a bound key's included, and the file
+    /// is left exactly as it was.
+    #[test]
+    fn an_old_hook_name_in_a_config_is_reported_with_its_new_name() {
+        let dir = scratch("renamed");
+        let config = "dodstudio_hide_scoreboard 1\n\
+                      exec movie.cfg\n\
+                      exec dodstudio_helper.cfg\n";
+        let movie = "// dodstudio_spec_lock 1\n\
+                     bind F7 \"dodstudio_clear_decals\"\n\
+                     ds_hud_hide_crosshair 1; dodstudio_hide_crosshair 1\n";
+        std::fs::write(dir.join("config.cfg"), config).unwrap();
+        std::fs::write(dir.join("movie.cfg"), movie).unwrap();
+
+        let scan = scan(&dir);
+        let found: Vec<(&str, &str, String, usize)> = scan
+            .renamed
+            .iter()
+            .map(|r| (r.old.as_str(), r.new.as_str(), r.file_name(), r.line))
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (
+                    "dodstudio_hide_scoreboard",
+                    "ds_hud_hide_scoreboard",
+                    "config.cfg".to_string(),
+                    1
+                ),
+                (
+                    "dodstudio_clear_decals",
+                    "ds_map_clear_decals",
+                    "movie.cfg".to_string(),
+                    2
+                ),
+                (
+                    "dodstudio_hide_crosshair",
+                    "ds_hud_hide_crosshair",
+                    "movie.cfg".to_string(),
+                    3
+                ),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.cfg")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("movie.cfg")).unwrap(),
+            movie
+        );
+    }
+
+    #[test]
+    fn an_old_hook_name_typed_into_a_command_list_is_reported() {
+        let commands = vec![
+            " dodstudio_spec_lock 1 ".to_string(),
+            "ds_spec_lock 1".to_string(),
+            "mirv_fov 90".to_string(),
+        ];
+        assert_eq!(
+            renamed_commands(&commands),
+            vec![(
+                "dodstudio_spec_lock".to_string(),
+                "ds_spec_lock".to_string(),
+                "dodstudio_spec_lock 1".to_string()
+            )]
+        );
+    }
+
     #[test]
     fn a_comment_is_not_a_setting_and_a_semicolon_separates_commands() {
         let dir = scratch("comment");
@@ -816,7 +1240,11 @@ mod tests {
     fn a_subcommand_is_not_an_assignment() {
         // `mirv_fov handleZoom enabled 1` appears in real movie configs.
         let dir = scratch("subcommand");
-        std::fs::write(dir.join("config.cfg"), "mirv_fov handleZoom enabled \"1\"\n").unwrap();
+        std::fs::write(
+            dir.join("config.cfg"),
+            "mirv_fov handleZoom enabled \"1\"\n",
+        )
+        .unwrap();
 
         assert!(scan(&dir).effective("mirv_fov").is_none());
     }
@@ -835,8 +1263,28 @@ mod tests {
         assert_eq!(scan.unreferenced[0].file_name().unwrap(), "movie.cfg");
     }
 
+    fn init(commands: &[&str]) -> Vec<String> {
+        commands.iter().map(|c| c.to_string()).collect()
+    }
+
+    fn before(command: &str, offset_seconds: f32) -> ScheduledCommand<'_> {
+        ScheduledCommand {
+            command,
+            after: false,
+            offset_seconds,
+        }
+    }
+
+    fn after(command: &str, offset_seconds: f32) -> ScheduledCommand<'_> {
+        ScheduledCommand {
+            command,
+            after: true,
+            offset_seconds,
+        }
+    }
+
     #[test]
-    fn an_init_command_that_overrides_a_config_value_is_reported() {
+    fn an_init_command_that_overrides_a_config_value_is_a_conflict() {
         // The case that matters: someone sets mirv_fov in Init Commands with a
         // different value sitting in movie.cfg. The init command wins, which is
         // the point — but they should be told, not left to notice.
@@ -844,38 +1292,281 @@ mod tests {
         std::fs::write(dir.join("config.cfg"), "exec movie.cfg\n").unwrap();
         std::fs::write(dir.join("movie.cfg"), "mirv_fov \"105\"\nr_decals \"0\"\n").unwrap();
 
-        let scan = scan(&dir);
-        let hits = scan.overrides_in(&[
-            "mirv_fov 90".to_string(),
-            "sys_autodir".to_string(),
-            "cl_showfps 1".to_string(),
-        ]);
+        let w = value_warnings(
+            &scan(&dir),
+            &init(&["mirv_fov 90", "sys_autodir", "cl_showfps 1"]),
+            3,
+            &[],
+        );
 
-        assert_eq!(hits.len(), 1, "{:?}", hits);
-        assert_eq!(hits[0].cvar, "mirv_fov");
-        assert_eq!(hits[0].init_value, "90");
-        assert_eq!(hits[0].cfg_value, "105");
-        assert_eq!(hits[0].file_name(), "movie.cfg");
-        assert_eq!(hits[0].line, 1);
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        let c = &w.conflicts[0];
+        assert_eq!(c.cvar, "mirv_fov");
+        assert_eq!(c.effective.value, "90");
+        assert_eq!(c.effective.source, ValueSource::Initial);
+        assert_eq!(c.values[0].value, "105");
+        assert!(
+            matches!(&c.values[0].source, ValueSource::Config { file, line: 1 }
+                if file.file_name().unwrap() == "movie.cfg")
+        );
     }
 
     #[test]
-    fn a_command_beaten_by_a_later_one_in_the_same_list_is_reported() {
+    fn a_command_beaten_by_a_later_one_in_the_same_list_is_a_conflict() {
         // The real shape: the user types `mirv_movie_fps 500`, and the pipeline
         // appends the Capture FPS setting after it. Both lines are on screen and
         // only the second one happens.
-        let hits = self_overrides(&[
-            "mirv_fov 105".to_string(),
-            "mirv_movie_fps 500".to_string(),
-            "sys_autodir".to_string(),
-            "mirv_movie_fps 120".to_string(),
-        ]);
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&[
+                "mirv_fov 105",
+                "mirv_movie_fps 500",
+                "sys_autodir",
+                "mirv_movie_fps 120",
+            ]),
+            2,
+            &[],
+        );
 
-        assert_eq!(hits.len(), 1, "{:?}", hits);
-        assert_eq!(hits[0].cvar, "mirv_movie_fps");
-        assert_eq!(hits[0].shadowed_value, "500");
-        assert_eq!(hits[0].winner_value, "120");
-        assert_eq!(hits[0].winner_index, 3, "so a caller can tell who appended it");
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        let c = &w.conflicts[0];
+        assert_eq!(c.cvar, "mirv_movie_fps");
+        assert_eq!(c.values[0].value, "500");
+        assert_eq!(c.values[0].source, ValueSource::Initial);
+        assert_eq!(c.effective.value, "120");
+        assert_eq!(
+            c.effective.source,
+            ValueSource::App,
+            "so a caller can tell who appended it"
+        );
+    }
+
+    #[test]
+    fn repeating_the_same_value_is_silent_everywhere() {
+        // Rule 1's "who cares" case: the same value in a config twice, in
+        // Initial Commands and before the clip is nothing worth saying.
+        let dir = scratch("same_everywhere");
+        std::fs::write(
+            dir.join("config.cfg"),
+            "sensitivity \"2\"\nexec movie.cfg\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("movie.cfg"), "sensitivity 2.0\n").unwrap();
+
+        let w = value_warnings(
+            &scan(&dir),
+            &init(&["sensitivity 2", "sensitivity \"2\""]),
+            2,
+            &[before("sensitivity 2", 3.0)],
+        );
+        assert_eq!(w, ValueWarnings::default());
+    }
+
+    #[test]
+    fn setting_a_cvar_to_what_the_config_already_says_is_silent() {
+        let dir = scratch("agrees");
+        std::fs::write(dir.join("config.cfg"), "mirv_fov \"105\"\n").unwrap();
+
+        let w = value_warnings(&scan(&dir), &init(&["mirv_fov 105"]), 1, &[]);
+        assert!(w.conflicts.is_empty(), "{:?}", w.conflicts);
+    }
+
+    #[test]
+    fn a_conflict_only_between_config_lines_is_not_reported() {
+        // Nothing the app sends is involved, and `echo` lines count as
+        // assignments to the scanner. See `value_warnings`' doc comment.
+        let dir = scratch("config_only");
+        std::fs::write(
+            dir.join("config.cfg"),
+            "gl_max_size 256\necho \"one\"\nexec movie.cfg\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("movie.cfg"), "gl_max_size 2048\necho \"two\"\n").unwrap();
+
+        let w = value_warnings(&scan(&dir), &[], 0, &[]);
+        assert!(w.conflicts.is_empty(), "{:?}", w.conflicts);
+    }
+
+    #[test]
+    fn a_config_only_conflict_is_reported_once_the_app_names_the_cvar() {
+        // Any app-side value, even one agreeing with the effective config line,
+        // brings the whole pool into view.
+        let dir = scratch("config_then_init");
+        std::fs::write(dir.join("config.cfg"), "gl_max_size 256\nexec movie.cfg\n").unwrap();
+        std::fs::write(dir.join("movie.cfg"), "gl_max_size 2048\n").unwrap();
+
+        let w = value_warnings(&scan(&dir), &init(&["gl_max_size 2048"]), 1, &[]);
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        assert_eq!(w.conflicts[0].values.len(), 3);
+        assert_eq!(w.conflicts[0].effective.value, "2048");
+    }
+
+    #[test]
+    fn the_last_before_to_fire_is_the_effective_value() {
+        // Scheduled is given in firing order: 10s back runs before 2s back, so
+        // the 2s one, nearest the highlight, is what the clip records at.
+        let w = value_warnings(
+            &CfgScan::default(),
+            &[],
+            0,
+            &[
+                before("hud_deathnotice_time 555", 10.0),
+                before("hud_deathnotice_time 1", 2.0),
+            ],
+        );
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        assert_eq!(w.conflicts[0].effective.value, "1");
+        assert_eq!(
+            w.conflicts[0].effective.source,
+            ValueSource::ScheduledBefore {
+                offset_seconds: 2.0
+            }
+        );
+    }
+
+    #[test]
+    fn every_combination_of_sources_conflicts() {
+        let dir = scratch("combos");
+        std::fs::write(dir.join("config.cfg"), "sensitivity 1\n").unwrap();
+        let cfg = scan(&dir);
+        let none = CfgScan::default();
+
+        // config + Initial, config + Scheduled, Initial + Scheduled, all three.
+        let cases: [(&CfgScan, Vec<String>, Vec<ScheduledCommand>, &str, usize); 4] = [
+            (&cfg, init(&["sensitivity 2"]), vec![], "2", 2),
+            (&cfg, vec![], vec![before("sensitivity 3", 1.0)], "3", 2),
+            (
+                &none,
+                init(&["sensitivity 2"]),
+                vec![before("sensitivity 3", 1.0)],
+                "3",
+                2,
+            ),
+            (
+                &cfg,
+                init(&["sensitivity 2"]),
+                vec![before("sensitivity 3", 1.0)],
+                "3",
+                3,
+            ),
+        ];
+        for (scan, init_commands, scheduled, effective, count) in cases {
+            let w = value_warnings(scan, &init_commands, init_commands.len(), &scheduled);
+            assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+            assert_eq!(w.conflicts[0].effective.value, effective);
+            assert_eq!(w.conflicts[0].values.len(), count);
+        }
+    }
+
+    #[test]
+    fn an_after_value_is_never_part_of_the_conflict_pool() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[after("hud_deathnotice_time 1", 0.5)],
+        );
+        assert!(w.conflicts.is_empty(), "{:?}", w.conflicts);
+    }
+
+    #[test]
+    fn an_unpaired_after_that_differs_from_the_baseline_is_asymmetric() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[after("hud_deathnotice_time 1", 0.5)],
+        );
+        assert_eq!(w.asymmetric.len(), 1, "{:?}", w.asymmetric);
+        let a = &w.asymmetric[0];
+        assert_eq!(a.after.value, "1");
+        assert_eq!(a.baseline.value, "6");
+        assert_eq!(a.baseline.source, ValueSource::Initial);
+    }
+
+    #[test]
+    fn the_last_unpaired_after_is_what_later_clips_start_from() {
+        // 5 then back to the baseline 6 before the next clip: no asymmetry.
+        let restored = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                after("hud_deathnotice_time 5", 0.5),
+                after("hud_deathnotice_time 6", 2.0),
+            ],
+        );
+        assert!(restored.asymmetric.is_empty(), "{:?}", restored.asymmetric);
+
+        let not_restored = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                after("hud_deathnotice_time 6", 0.5),
+                after("hud_deathnotice_time 5", 2.0),
+            ],
+        );
+        assert_eq!(not_restored.asymmetric.len(), 1);
+        assert_eq!(not_restored.asymmetric[0].after.value, "5");
+    }
+
+    #[test]
+    fn an_unpaired_after_matching_the_baseline_is_silent() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[after("hud_deathnotice_time 6.0", 0.5)],
+        );
+        assert_eq!(w, ValueWarnings::default());
+    }
+
+    #[test]
+    fn an_unpaired_after_with_no_baseline_anywhere_is_silent() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &[],
+            0,
+            &[after("hud_deathnotice_time 1", 0.5)],
+        );
+        assert_eq!(w, ValueWarnings::default());
+    }
+
+    #[test]
+    fn any_before_pairs_the_after_and_silences_rule_two() {
+        // Baseline 6, After 1: asymmetric. Add a Before at 555 and Rule 2 goes
+        // quiet at once; Rule 1 now reports 6 against 555 instead.
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                before("hud_deathnotice_time 555", 3.0),
+                after("hud_deathnotice_time 1", 0.5),
+            ],
+        );
+        assert!(w.asymmetric.is_empty(), "{:?}", w.asymmetric);
+        assert_eq!(w.conflicts.len(), 1);
+        assert_eq!(w.conflicts[0].effective.value, "555");
+    }
+
+    #[test]
+    fn a_paired_after_with_a_differing_value_is_the_accepted_gap() {
+        // #216's known, accepted gap: a Before equal to the baseline pairs the
+        // After, Rule 1's pool is all one value, and the After's own (still
+        // different) value is looked at by neither rule. Asserted so a change
+        // here is a decision, not an accident.
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                before("hud_deathnotice_time 6", 3.0),
+                after("hud_deathnotice_time 1", 0.5),
+            ],
+        );
+        assert_eq!(w, ValueWarnings::default());
     }
 
     #[test]
@@ -883,10 +1574,7 @@ mod tests {
         // Setting the ring mid-demo strands every decal above the new limit and
         // breaks the flush, while the capture still completes and still looks
         // plausible — so this is the one that has to be caught by name.
-        let hits = mid_demo_hazards(&[
-            "sensitivity 3".to_string(),
-            "R_Decals 128".to_string(),
-        ]);
+        let hits = mid_demo_hazards(&["sensitivity 3".to_string(), "R_Decals 128".to_string()]);
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "r_decals");
@@ -899,10 +1587,7 @@ mod tests {
         // capture_fov_resolved, read once as a pre-pass before the demo
         // plays — a Scheduled Command changing it mid-clip doesn't
         // retroactively resize anything the flush already decided.
-        let hits = mid_demo_hazards(&[
-            "sensitivity 3".to_string(),
-            "mirv_fov 105".to_string(),
-        ]);
+        let hits = mid_demo_hazards(&["sensitivity 3".to_string(), "mirv_fov 105".to_string()]);
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "mirv_fov");
@@ -959,7 +1644,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_separate_hud_is_untracked_everywhere() {
-        // No setting exists behind it any more (removed 2026-09-08), and
+        // No setting exists behind it any more (#214), and
         // nothing in this codebase has verified what a mid-demo toggle does
         // — unlike r_decals/mirv_fov, which are measured. Rather than assert
         // a mechanism nobody has checked, it gets no special treatment at
@@ -987,6 +1672,7 @@ mod tests {
             "mirv_recordmovie_stop".to_string(),
             "mirv_movie_ffmpeg all enabled 1".to_string(),
             "host_framerate 0.05".to_string(),
+            "r_norefresh 1".to_string(),
             "r_drawentities 0".to_string(),
             "cl_lw 0".to_string(),
         ]);
@@ -999,10 +1685,36 @@ mod tests {
                 "mirv_recordmovie_stop",
                 "mirv_movie_ffmpeg",
                 "host_framerate",
+                "r_norefresh",
                 "r_drawentities",
                 "cl_lw",
             ]
         );
+    }
+
+    #[test]
+    fn the_fast_forward_cvars_are_a_hazard_only_when_scheduled() {
+        // sys_fast_forward sets them between clips and sys_normal_speed puts
+        // the Initial Commands value back at every pre-roll (#724): typed in
+        // Initial Commands they are honoured, so no tier reports them there;
+        // scheduled, they last only until the next clip.
+        let commands: Vec<String> = ["fps_override 1", "FPS_MAX 300", "gl_vsync 0"]
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        let hits = mid_demo_hazards(&commands);
+        let hazards: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
+        assert_eq!(hazards, FAST_FORWARD_CVARS);
+        assert!(banned_commands(&commands).is_empty());
+        assert!(scheduled_banned_commands(&commands).is_empty());
+        assert!(noop_commands_in_init(&commands).is_empty());
+    }
+
+    #[test]
+    fn r_norefresh_is_the_fast_forwards_and_refused_like_host_framerate() {
+        let commands = vec!["r_norefresh 1".to_string()];
+        assert_eq!(banned_commands(&commands).len(), 1);
+        assert_eq!(mid_demo_hazards(&commands).len(), 1);
     }
 
     #[test]
@@ -1033,7 +1745,11 @@ mod tests {
         // A config that sets it wrong and then corrects it is not a hazard --
         // that is genuinely the value the engine ends up running with.
         let dir = scratch("fatal_corrected");
-        std::fs::write(dir.join("config.cfg"), "r_drawentities \"0\"\nr_drawentities \"1\"\n").unwrap();
+        std::fs::write(
+            dir.join("config.cfg"),
+            "r_drawentities \"0\"\nr_drawentities \"1\"\n",
+        )
+        .unwrap();
 
         let scan = scan(&dir);
         assert!(fatal_cvar_hazards(&scan).is_empty());
@@ -1123,7 +1839,33 @@ mod tests {
         ]);
 
         let flagged: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["r_decals", "mirv_fov", "gl_widescreenfov", "mirv_movie_filename"]);
+        assert_eq!(
+            flagged,
+            vec![
+                "r_decals",
+                "mirv_fov",
+                "gl_widescreenfov",
+                "mirv_movie_filename"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_scheduled_mirv_agr_is_refused_but_an_initial_one_is_not() {
+        // AGR capture mode starts and stops mirv_agr at each block's own
+        // bounds (#450); a scheduled one collides with that. At demo load it
+        // collides with nothing, so it is not refused there.
+        let commands = vec![
+            "mirv_agr start \"C:\\agr\\take.agr\"".to_string(),
+            "mirv_agr stop".to_string(),
+        ];
+        let flagged: Vec<String> = scheduled_banned_commands(&commands)
+            .into_iter()
+            .map(|(cvar, _)| cvar)
+            .collect();
+        assert_eq!(flagged, vec!["mirv_agr", "mirv_agr"]);
+        assert!(banned_commands(&commands).is_empty());
+        assert_eq!(mid_demo_hazards(&commands).len(), 2);
     }
 
     #[test]
@@ -1139,7 +1881,8 @@ mod tests {
     }
 
     #[test]
-    fn noop_commands_in_init_covers_mirv_movie_filename_and_engine_dropped_commands() {
+    fn noop_commands_in_init_covers_only_mirv_movie_filename() {
+        // exec and quit are the demo filter's now (demo_filtered_commands).
         let hits = noop_commands_in_init(&[
             "sensitivity 3".to_string(),
             "mirv_movie_filename foo".to_string(),
@@ -1148,21 +1891,161 @@ mod tests {
         ]);
 
         let flagged: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["mirv_movie_filename", "exec", "quit"]);
+        assert_eq!(flagged, vec!["mirv_movie_filename"]);
     }
 
     #[test]
-    fn noop_commands_in_scheduled_covers_only_the_engine_dropped_commands() {
-        // mirv_movie_filename is dangerous, not merely inert, once scheduled
-        // — refused via scheduled_banned_commands, not reported here.
-        let hits = noop_commands_in_scheduled(&[
-            "mirv_movie_filename foo".to_string(),
-            "exec somefile.cfg".to_string(),
+    fn the_demo_filter_drops_a_name_containing_any_of_its_substrings() {
+        use DemoFilterRule::NameContains;
+        assert_eq!(
+            demo_filter_rule("mirv_matte_setcolor 255 0 255"),
+            Some(NameContains("_set"))
+        );
+        assert_eq!(
+            demo_filter_rule("mirv_draw_sv_hitboxes_setucolor 255 0 0"),
+            Some(NameContains("_set"))
+        );
+        assert_eq!(demo_filter_rule("kill"), Some(NameContains("kill")));
+        assert_eq!(
+            demo_filter_rule("cl_killsound 0"),
+            Some(NameContains("kill"))
+        );
+        assert_eq!(
+            demo_filter_rule("bind f7 screenshot"),
+            Some(NameContains("bind"))
+        );
+        assert_eq!(demo_filter_rule("quit"), Some(NameContains("quit")));
+        assert_eq!(demo_filter_rule("exit"), Some(NameContains("exit")));
+        assert_eq!(
+            demo_filter_rule("sv_restart 1"),
+            Some(NameContains("_restart"))
+        );
+        assert_eq!(
+            demo_filter_rule("writecfg mine"),
+            Some(NameContains("writecfg"))
+        );
+    }
+
+    #[test]
+    fn the_demo_filter_name_test_ignores_case() {
+        assert_eq!(
+            demo_filter_rule("MIRV_Matte_SetColor 255 0 255"),
+            Some(DemoFilterRule::NameContains("_set"))
+        );
+        assert_eq!(
+            demo_filter_rule("  Kill  "),
+            Some(DemoFilterRule::NameContains("kill"))
+        );
+    }
+
+    #[test]
+    fn the_demo_filter_drops_a_name_starting_with_connect_but_not_reconnect() {
+        assert_eq!(
+            demo_filter_rule("connect 127.0.0.1"),
+            Some(DemoFilterRule::NameStartsWith("connect"))
+        );
+        assert_eq!(
+            demo_filter_rule("connectionless"),
+            Some(DemoFilterRule::NameStartsWith("connect"))
+        );
+        assert_eq!(demo_filter_rule("reconnect"), None);
+    }
+
+    #[test]
+    fn the_demo_filter_drops_an_alias_line_and_exec_anywhere() {
+        assert_eq!(
+            demo_filter_rule("alias foo \"echo hi\""),
+            Some(DemoFilterRule::LineStartsWith("alias "))
+        );
+        assert_eq!(
+            demo_filter_rule("exec movie.cfg"),
+            Some(DemoFilterRule::LineContains("exec"))
+        );
+        // Anywhere on the line, an argument included.
+        assert_eq!(
+            demo_filter_rule("echo executed"),
+            Some(DemoFilterRule::LineContains("exec"))
+        );
+        // Only `alias ` with its space: a name that merely starts with it
+        // is not an alias line.
+        assert_eq!(demo_filter_rule("aliases"), None);
+    }
+
+    #[test]
+    fn the_demo_filter_drops_a_word_starting_with_a_filtered_prefix_anywhere() {
+        use DemoFilterRule::WordStartsWith;
+        assert_eq!(
+            demo_filter_rule("echo got a kill"),
+            Some(WordStartsWith("kill"))
+        );
+        assert_eq!(
+            demo_filter_rule("echo hi;quit"),
+            Some(WordStartsWith("quit"))
+        );
+        assert_eq!(
+            demo_filter_rule("echo _settings"),
+            Some(WordStartsWith("_set"))
+        );
+        // Inside a word is fine for these.
+        assert_eq!(demo_filter_rule("echo skill"), None);
+        assert_eq!(demo_filter_rule("echo reconnect now"), None);
+    }
+
+    #[test]
+    fn the_demo_filter_lets_ordinary_commands_through() {
+        for command in [
+            "echo ok",
+            "sensitivity 3",
+            "mirv_fov 90",
+            "spec_autodirector 1",
+            "mirv_movie_fps 60",
+            "sys_autodir",
+            "sys_record_start",
+            "dodstudio_chain_01_route_0",
+            "dodstudio_chain_01_next",
+            "echo \"[dod-studio] BREADCRUMB - Tick 500\"",
+            "",
+            "   ",
+        ] {
+            assert_eq!(demo_filter_rule(command), None, "{command:?}");
+        }
+    }
+
+    #[test]
+    fn demo_filtered_commands_reports_each_dropped_command_in_order() {
+        let hits = demo_filtered_commands(&[
+            "sensitivity 3".to_string(),
+            "  exec somefile.cfg ".to_string(),
+            "mirv_matte_setcolor 255 0 255".to_string(),
             "quit".to_string(),
         ]);
+        let got: Vec<(&str, &str, &str)> = hits
+            .iter()
+            .map(|h| (h.command.as_str(), h.rule.kind(), h.rule.pattern()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("exec somefile.cfg", "lineContains", "exec"),
+                ("mirv_matte_setcolor 255 0 255", "nameContains", "_set"),
+                ("quit", "nameContains", "quit"),
+            ]
+        );
+    }
 
-        let flagged: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["exec", "quit"]);
+    #[test]
+    fn no_command_the_pipeline_owns_is_dropped_by_the_demo_filter() {
+        // A tiered command the filter also dropped would be reported twice
+        // and refused for the wrong reason.
+        for name in BANNED_COMMANDS
+            .iter()
+            .chain(SCHEDULED_BANNED_COMMANDS)
+            .chain(MID_DEMO_HAZARDS)
+            .chain(NOOP_IN_INIT_COMMANDS)
+            .chain(FAST_FORWARD_CVARS)
+        {
+            assert_eq!(demo_filter_rule(&format!("{name} 1")), None, "{name}");
+        }
     }
 
     #[test]
@@ -1191,30 +2074,16 @@ mod tests {
             "mirv_movie_fps 120".to_string(),
         ];
 
-        assert_eq!(effective_in(&commands, "mirv_movie_fps").as_deref(), Some("120"));
+        assert_eq!(
+            effective_in(&commands, "mirv_movie_fps").as_deref(),
+            Some("120")
+        );
         assert_eq!(effective_in(&commands, "mirv_fov"), None);
         assert_eq!(
             assigned_cvar("mirv_movie_fps 500"),
             Some(("mirv_movie_fps".to_string(), "500".to_string()))
         );
         assert_eq!(assigned_cvar("sys_autodir"), None);
-    }
-
-    #[test]
-    fn repeating_the_same_value_shadows_nothing_worth_saying() {
-        assert!(self_overrides(&[
-            "mirv_movie_fps 120".to_string(),
-            "mirv_movie_fps 120".to_string(),
-        ])
-        .is_empty());
-    }
-
-    #[test]
-    fn setting_a_cvar_to_what_the_config_already_says_is_not_an_override() {
-        let dir = scratch("agrees");
-        std::fs::write(dir.join("config.cfg"), "mirv_fov \"105\"\n").unwrap();
-
-        assert!(scan(&dir).overrides_in(&["mirv_fov 105".to_string()]).is_empty());
     }
 
     #[test]
@@ -1230,10 +2099,18 @@ mod tests {
 
         let scan = scan(&dir);
         assert_eq!(scan.effective("volume").unwrap().value, "0.5");
-        assert!(scan.effective("+mlook").is_none(), "a verb is not an assignment");
-        assert!(scan.effective("stopsound").is_none(), "nor is a bare command");
+        assert!(
+            scan.effective("+mlook").is_none(),
+            "a verb is not an assignment"
+        );
+        assert!(
+            scan.effective("stopsound").is_none(),
+            "nor is a bare command"
+        );
         assert_eq!(
-            scan.overrides_in(&["volume 1".to_string()]).len(),
+            value_warnings(&scan, &["volume 1".to_string()], 1, &[])
+                .conflicts
+                .len(),
             1,
             "and a collision on any of them is worth reporting"
         );

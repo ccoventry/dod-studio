@@ -9,7 +9,8 @@ impl Doer for SvcCdTrack {
         map((le_i8, le_i8), |(track, loop_track)| Self {
             track,
             loop_track,
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

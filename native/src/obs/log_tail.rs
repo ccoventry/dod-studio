@@ -19,7 +19,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Prefix `build_safe_echos` puts on every marker.
@@ -102,6 +102,59 @@ pub struct Marker {
     pub next_clip_progress: Option<(u32, u32, u32, u32)>,
     /// The text after the tag, for logging.
     pub label: String,
+    /// True when it came over the game's events pipe (`pipe_tail`) rather
+    /// than from `qconsole.log`.
+    pub via_pipe: bool,
+}
+
+/// Which source's markers go on to the capture loop (#434).
+///
+/// Both carry the same lines in the same order: the hook forwards every
+/// tagged `echo`, and the log holds every one the engine printed. The log is
+/// the source until the events pipe connects; from then on the pipe is, and
+/// the log's markers are dropped. The pipe replays everything since the game
+/// started, so its first `log_delivered` markers are ones the log already
+/// sent, and are skipped.
+#[derive(Default)]
+pub struct MarkerGate {
+    inner: Mutex<GateState>,
+}
+
+#[derive(Default)]
+struct GateState {
+    pipe_active: bool,
+    log_delivered: usize,
+}
+
+impl MarkerGate {
+    /// Whether a marker read from the log goes on, counting it if it does.
+    pub fn admit_from_log(&self) -> bool {
+        let Ok(mut state) = self.inner.lock() else {
+            return true;
+        };
+        if state.pipe_active {
+            return false;
+        }
+        state.log_delivered += 1;
+        true
+    }
+
+    /// Hands the stream to the pipe. Returns how many of the pipe's first
+    /// markers the log already delivered (0 on a reconnect).
+    pub fn switch_to_pipe(&self) -> usize {
+        let Ok(mut state) = self.inner.lock() else {
+            return 0;
+        };
+        if state.pipe_active {
+            return 0;
+        }
+        state.pipe_active = true;
+        state.log_delivered
+    }
+
+    pub fn pipe_active(&self) -> bool {
+        self.inner.lock().map(|s| s.pipe_active).unwrap_or(false)
+    }
 }
 
 /// Tails `qconsole.log` and sends every `[dod-studio]` marker onward.
@@ -182,9 +235,15 @@ impl LogTailer {
     ///
     /// Returns when cancelled or when the receiver hangs up. Intended to own a
     /// thread of its own; `capture_engine` reads the channel.
-    pub fn run(mut self, tx: Sender<Marker>, cancel: Arc<AtomicBool>) {
+    ///
+    /// Once `gate` hands the stream to the events pipe, markers are still read
+    /// (so the offset keeps up) but no longer sent.
+    pub fn run(mut self, tx: Sender<Marker>, cancel: Arc<AtomicBool>, gate: Arc<MarkerGate>) {
         while !cancel.load(Ordering::Relaxed) {
             for marker in self.poll() {
+                if !gate.admit_from_log() {
+                    continue;
+                }
                 if tx.send(marker).is_err() {
                     return;
                 }
@@ -194,7 +253,7 @@ impl LogTailer {
     }
 }
 
-fn parse_marker(line: &str) -> Option<Marker> {
+pub(crate) fn parse_marker(line: &str) -> Option<Marker> {
     let line = line.trim_end_matches('\r').trim();
     let (_, rest) = line.split_once(LOG_TAG)?;
     let label = rest.trim().to_string();
@@ -203,11 +262,20 @@ fn parse_marker(line: &str) -> Option<Marker> {
     }
     let kind = MarkerKind::parse(&label);
     Some(Marker {
-        demo_progress: if kind == MarkerKind::DemoStart { parse_demo_progress(&label) } else { None },
-        next_clip_progress: if kind == MarkerKind::NextClip { parse_next_clip_progress(&label) } else { None },
+        demo_progress: if kind == MarkerKind::DemoStart {
+            parse_demo_progress(&label)
+        } else {
+            None
+        },
+        next_clip_progress: if kind == MarkerKind::NextClip {
+            parse_next_clip_progress(&label)
+        } else {
+            None
+        },
         kind,
         tick: parse_tick(&label),
         label,
+        via_pipe: false,
     })
 }
 
@@ -260,15 +328,51 @@ mod tests {
     fn parses_the_markers_the_pipeline_actually_emits() {
         // Exactly as they appeared in the measured batch.
         let cases = [
-            ("[dod-studio] SPEED_FLUSH - Tick 86371", MarkerKind::SpeedFlush, Some(86371)),
-            ("[dod-studio] AUDIO_SYNC - Tick 88267", MarkerKind::AudioSync, Some(88267)),
-            ("[dod-studio] START_RECORD - Tick 88741", MarkerKind::StartRecord, Some(88741)),
-            ("[dod-studio] STOP_RECORD - Tick 93481", MarkerKind::StopRecord, Some(93481)),
-            ("[dod-studio] FAST_FORWARD - Tick 93955", MarkerKind::FastForward, Some(93955)),
-            ("[dod-studio] BREADCRUMB - Tick 45000", MarkerKind::Breadcrumb, Some(45000)),
-            ("[dod-studio] BATCH_COMPLETE", MarkerKind::BatchComplete, None),
-            ("[dod-studio] DEMO_START 5 14 2", MarkerKind::DemoStart, None),
-            ("[dod-studio] NEXT_CLIP 5 14 2 3", MarkerKind::NextClip, None),
+            (
+                "[dod-studio] SPEED_FLUSH - Tick 86371",
+                MarkerKind::SpeedFlush,
+                Some(86371),
+            ),
+            (
+                "[dod-studio] AUDIO_SYNC - Tick 88267",
+                MarkerKind::AudioSync,
+                Some(88267),
+            ),
+            (
+                "[dod-studio] START_RECORD - Tick 88741",
+                MarkerKind::StartRecord,
+                Some(88741),
+            ),
+            (
+                "[dod-studio] STOP_RECORD - Tick 93481",
+                MarkerKind::StopRecord,
+                Some(93481),
+            ),
+            (
+                "[dod-studio] FAST_FORWARD - Tick 93955",
+                MarkerKind::FastForward,
+                Some(93955),
+            ),
+            (
+                "[dod-studio] BREADCRUMB - Tick 45000",
+                MarkerKind::Breadcrumb,
+                Some(45000),
+            ),
+            (
+                "[dod-studio] BATCH_COMPLETE",
+                MarkerKind::BatchComplete,
+                None,
+            ),
+            (
+                "[dod-studio] DEMO_START 5 14 2",
+                MarkerKind::DemoStart,
+                None,
+            ),
+            (
+                "[dod-studio] NEXT_CLIP 5 14 2 3",
+                MarkerKind::NextClip,
+                None,
+            ),
         ];
         for (line, kind, tick) in cases {
             let m = parse_marker(line).unwrap_or_else(|| panic!("no marker from {:?}", line));
@@ -297,7 +401,10 @@ mod tests {
         let m = parse_marker("[dod-studio] NEXT_CLIP 5 14 2 3").unwrap();
         assert_eq!(m.kind, MarkerKind::NextClip);
         assert_eq!(m.next_clip_progress, Some((5, 14, 2, 3)));
-        assert_eq!(m.demo_progress, None, "NextClip must not also carry demo_progress");
+        assert_eq!(
+            m.demo_progress, None,
+            "NextClip must not also carry demo_progress"
+        );
     }
 
     /// The engine prefixes its own text; the tag can sit mid-line.
@@ -368,7 +475,11 @@ mod tests {
     #[test]
     fn a_truncated_log_is_read_from_the_start() {
         let (_dir, p) = temp("truncate");
-        std::fs::write(&p, "[dod-studio] BREADCRUMB - Tick 1\n[dod-studio] BREADCRUMB - Tick 2\n").unwrap();
+        std::fs::write(
+            &p,
+            "[dod-studio] BREADCRUMB - Tick 1\n[dod-studio] BREADCRUMB - Tick 2\n",
+        )
+        .unwrap();
         let mut t = LogTailer::at_end(&p);
         assert!(t.poll().is_empty());
 

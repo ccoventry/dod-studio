@@ -33,7 +33,10 @@ pub fn set_active_language(lang: &'static str) {
 /// own convention, and the game's shipped files (`dod_english.txt`,
 /// `valve_english.txt`, `gameui_english.txt`) all store keys bare. AMXX files
 /// have no prefix by format. Normalizing on both insert and lookup means a file
-/// using either style resolves identically.
+/// using either style resolves identically. (Before this, keys were stored
+/// verbatim and lookups only ever prepended `#`, so every query against the
+/// game's 1,190 bare tokens returned `None`.) Keep `#` out of the key names in
+/// `localizations/dod_studio_english.txt`.
 fn normalize_key(key: &str) -> String {
     key.trim().trim_start_matches('#').to_lowercase()
 }
@@ -158,13 +161,14 @@ fn parse_localization_content(content: &str, map: &mut HashMap<String, String>, 
             let key_clean = normalize_key(&key);
             map.insert(key_clean, val);
         } else if current_lang == target_lang
-            && let Some(pos) = trimmed.find('=') {
-                let key = normalize_key(&trimmed[..pos]);
-                let val = trimmed[pos + 1..].trim().to_string();
-                if !key.is_empty() {
-                    map.insert(key, val);
-                }
+            && let Some(pos) = trimmed.find('=')
+        {
+            let key = normalize_key(&trimmed[..pos]);
+            let val = trimmed[pos + 1..].trim().to_string();
+            if !key.is_empty() {
+                map.insert(key, val);
             }
+        }
     }
 }
 
@@ -191,11 +195,30 @@ fn scan_dir_recursive(
     filter_lang: &str,
     amxx_code: &str,
 ) {
+    scan_dir_to_depth(dir, map, filter_lang, amxx_code, 0);
+}
+
+/// Folder levels read below the localizations folder.
+#[cfg(not(target_arch = "wasm32"))]
+const SCAN_MAX_DEPTH: usize = 16;
+
+/// `file_type` never follows a junction, so a link is never entered; with
+/// the depth cap, no folder layout can make this loop (#376).
+#[cfg(not(target_arch = "wasm32"))]
+fn scan_dir_to_depth(
+    dir: &std::path::Path,
+    map: &mut HashMap<String, String>,
+    filter_lang: &str,
+    amxx_code: &str,
+    depth: usize,
+) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if path.is_dir() {
-                scan_dir_recursive(&path, map, filter_lang, amxx_code);
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if depth < SCAN_MAX_DEPTH {
+                    scan_dir_to_depth(&path, map, filter_lang, amxx_code, depth + 1);
+                }
             } else if path.is_file() && path.extension().map(|s| s == "txt").unwrap_or(false) {
                 let name = path
                     .file_name()
@@ -208,10 +231,9 @@ fn scan_dir_recursive(
                     true
                 };
 
-                if should_load
-                    && let Ok(content) = read_to_string_lossy_utf16_or_utf8(&path) {
-                        parse_localization_content(&content, map, amxx_code);
-                    }
+                if should_load && let Ok(content) = read_to_string_lossy_utf16_or_utf8(&path) {
+                    parse_localization_content(&content, map, amxx_code);
+                }
             }
         }
     }
@@ -423,7 +445,10 @@ mod tests {
         assert_eq!(translate_key("weapon.k98").as_deref(), Some("K98"));
 
         // Case is normalized on the way in.
-        assert_eq!(translate_key("#Game_Joined_Team").as_deref(), Some("*%s1 joined %s2"));
+        assert_eq!(
+            translate_key("#Game_Joined_Team").as_deref(),
+            Some("*%s1 joined %s2")
+        );
 
         assert_eq!(translate_key("#definitely_not_a_real_key"), None);
     }

@@ -6,7 +6,7 @@ name = "desktop-studio"
 # reads the major.minor from *this* file to compute the next release tag
 # (see docs/versioning_and_releases.md), so moving it to the workspace value
 # would silently renumber every release.
-version = "0.1.0"
+version = "0.2.0"
 description = "Capture, patch and analyze Day of Defeat 1.3 demos"
 authors = ["ccoventry"]
 edition.workspace = true
@@ -30,7 +30,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 serde = { workspace = true }
@@ -39,10 +38,8 @@ url = "2"
 native = { path = "../../native" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 log = { workspace = true }
-dod = { path = "../../dod" }
 analysis = { path = "../../analysis" }
 hl-demo-auditor = { path = "../../hl-demo-auditor" }
-indexmap = { workspace = true }
 dirs = { workspace = true }
 sysinfo = { workspace = true }
 

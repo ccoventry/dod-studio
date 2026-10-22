@@ -1,19 +1,17 @@
 # dem (vendored, patched fork)
 
-> **This is `dod-studio`' vendored fork of the upstream `dem` crate** (pulled in via
-> `[patch.crates-io]` in the workspace root `Cargo.toml`, not published to crates.io
-> as this fork). The badges/links below describe the *upstream* project this was
-> forked from — see the root [`README.md`](../README.md)'s "Why the fork of `dem`"
-> section for what's actually changed here and why (the published crate `.unwrap()`s
-> delta-decoder table lookups at 29 call sites across 7 files, so a malformed or
-> unexpected demo panics the whole process instead of returning a parse error;
-> this fork converts those to proper `nom` parse errors instead).
+> **This is `dod-studio`'s vendored fork of the upstream `dem` crate**, pulled in
+> via `[patch.crates-io]` in the workspace root `Cargo.toml` and not published to
+> crates.io. See the root [`README.md`](../README.md)'s "Why the fork of `dem`"
+> section for what changed and why. Unlike the rest of the repo (MIT), this
+> directory is LGPL-3.0 (see `LICENSE`). `examples/` holds `mangle_probe.rs` and
+> `roundtrip_probe.rs`, the parser-hardening safety net (#225).
 
 ---
 
 # dem
 
-[![crates.io](https://img.shields.io/crates/v/dem)](https://crates.io/crates/dem) [![docs.rs](https://img.shields.io/docsrs/dem/latest?logo=brightgreen&link=https%3A%2F%2Fdocs.rs%2Fdem%2Flatest)](https://docs.rs/dem)
+Upstream badges: [![crates.io](https://img.shields.io/crates/v/dem)](https://crates.io/crates/dem) [![docs.rs](https://img.shields.io/docsrs/dem/latest?logo=brightgreen&link=https%3A%2F%2Fdocs.rs%2Fdem%2Flatest)](https://docs.rs/dem)
 
 
 A complete GoldSrc demo parser and writer library

@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  Minimal harness for command_profiles_ui.js (#442) — see tests/e2e/README.md.
+  Carries just the profile row. The two command lists are a plain object here
+  instead of capture_pane.js's list editors: the row only ever reaches them
+  through the getLists/applyLists callbacks main.js passes it, so a test edits
+  them with window.__editLists (which, like the editors, then re-syncs the
+  row) and reads them back with window.__lists.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>command_profiles_ui.js test harness</title>
+</head>
+<body>
+  <select id="command-profile-select"></select>
+  <button id="command-profile-save-changes">Save Changes</button>
+  <input type="text" id="command-profile-name" />
+  <button id="command-profile-save">Save Profile</button>
+  <button id="command-profile-rename">Rename</button>
+  <button id="command-profile-delete">Delete</button>
+
+  <script type="module">
+    import {
+      initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile, syncCommandProfileRow,
+    } from '/src/command_profiles_ui.js';
+
+    let lists = { init_commands: [], custom_commands: [] };
+    window.__saves = 0;
+    window.__lists = () => lists;
+    window.__editLists = (next) => { lists = next; syncCommandProfileRow(); };
+    initCommandProfiles({
+      getLists: () => lists,
+      applyLists: (next) => { lists = next; },
+      onChange: () => { window.__saves += 1; },
+    });
+    window.__setProfiles = setCommandProfiles;
+    window.__getProfiles = getCommandProfiles;
+    window.__getActive = getActiveCommandProfile;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

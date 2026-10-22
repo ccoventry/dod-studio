@@ -79,8 +79,14 @@ const CAPTURE_SOUND_CLASSES: [&str; 2] = ["dod_control_point", "dod_capture_area
 const RELAY_CLASSES: [&str; 2] = ["trigger_relay", "multi_manager"];
 
 /// Keys on a `multi_manager` that are its own settings rather than a target.
-const MULTI_MANAGER_META: [&str; 6] =
-    ["classname", "targetname", "origin", "angles", "spawnflags", "wait"];
+const MULTI_MANAGER_META: [&str; 6] = [
+    "classname",
+    "targetname",
+    "origin",
+    "angles",
+    "spawnflags",
+    "wait",
+];
 
 /// How many hops from the master a win sound may be. Measured: 3 of 204 maps
 /// need one; none needs two.
@@ -297,7 +303,7 @@ fn svc_sound_index(sound: &dem::types::SvcSound) -> Option<u32> {
 /// Replaces every `svc_sound` and triggered `svc_spawnstaticsound` naming one of
 /// `names` with `SvcNop`.
 ///
-/// `names` are compared in [`normalise`]d form; [`map_sounds`] already returns
+/// `names` are compared in `normalise`d form; [`map_sounds`] already returns
 /// them that way.
 pub fn mute_sounds(demo: &mut Demo, names: &BTreeSet<String>) -> MuteStats {
     let mut stats = MuteStats::default();
@@ -541,11 +547,17 @@ mod tests {
 
         assert!(sounds.selected(MuteSelection::default()).is_empty());
 
-        let captures = sounds.selected(MuteSelection { capture: true, round_win: false });
+        let captures = sounds.selected(MuteSelection {
+            capture: true,
+            round_win: false,
+        });
         assert_eq!(captures.len(), 2);
         assert!(captures.contains("ambience/uspointcaptured.wav"));
 
-        let both = sounds.selected(MuteSelection { capture: true, round_win: true });
+        let both = sounds.selected(MuteSelection {
+            capture: true,
+            round_win: true,
+        });
         assert_eq!(both.len(), 4);
     }
 
@@ -555,7 +567,10 @@ mod tests {
         assert!(sounds.is_empty());
         assert!(
             sounds
-                .selected(MuteSelection { capture: true, round_win: true })
+                .selected(MuteSelection {
+                    capture: true,
+                    round_win: true
+                })
                 .is_empty()
         );
     }

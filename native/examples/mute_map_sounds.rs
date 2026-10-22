@@ -17,7 +17,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use native::patch::{map_sounds, mute_sounds, MuteSelection};
+use native::patch::{MuteSelection, map_sounds, mute_sounds};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -52,7 +52,10 @@ fn main() {
     // Neither flag means both, which is what someone asking for a quiet demo
     // almost always wants.
     if !selection_stated {
-        selection = MuteSelection { capture: true, round_win: true };
+        selection = MuteSelection {
+            capture: true,
+            round_win: true,
+        };
     }
 
     let Some(demo_path) = demo else {

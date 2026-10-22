@@ -65,7 +65,9 @@ fn baseline_of(delta: &dem::types::Delta) -> Baseline {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: map_entity_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: map_entity_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -87,10 +89,16 @@ fn main() {
             if stop {
                 break;
             }
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcResourceList(rl) => {
                         for r in &rl.resources {
@@ -149,13 +157,19 @@ fn main() {
 
     // Per-entity detail, in entity-index order: this is what a strip-list is
     // written against.
-    println!("{:>5}  {:>5}  {:<34} {:>26}  flags", "ent", "mdlix", "model", "origin");
+    println!(
+        "{:>5}  {:>5}  {:<34} {:>26}  flags",
+        "ent", "mdlix", "model", "origin"
+    );
     let mut ordered = snapshot.clone();
     ordered.sort_unstable();
     for idx in &ordered {
         let b = baselines.get(idx);
         let mi = b.and_then(|b| b.modelindex).unwrap_or(-1);
-        let name = models.get(&(mi as u32)).cloned().unwrap_or_else(|| "<unknown>".into());
+        let name = models
+            .get(&(mi as u32))
+            .cloned()
+            .unwrap_or_else(|| "<unknown>".into());
         let o = b.map(|b| b.origin).unwrap_or([None; 3]);
         let origin = format!(
             "{:>8.1} {:>8.1} {:>8.1}",
@@ -180,7 +194,10 @@ fn main() {
             if let Some(s) = b.rendermode.filter(|v| *v != 0) {
                 // renderamt only means anything alongside a rendermode, and it
                 // is the field that separates "tinted" from "invisible".
-                flags.push_str(&format!("rendermode={s} renderamt={} ", b.renderamt.unwrap_or(0)));
+                flags.push_str(&format!(
+                    "rendermode={s} renderamt={} ",
+                    b.renderamt.unwrap_or(0)
+                ));
             }
         }
         println!("{idx:>5}  {mi:>5}  {name:<34} {origin}  {flags}");
@@ -192,8 +209,15 @@ fn main() {
     let mut by_model: HashMap<String, usize> = HashMap::new();
     for idx in &snapshot {
         let mi = baselines.get(idx).and_then(|b| b.modelindex).unwrap_or(-1);
-        let name = models.get(&(mi as u32)).cloned().unwrap_or_else(|| "<unknown>".into());
-        let key = if name.starts_with('*') { "*<brush submodel>".to_string() } else { name };
+        let name = models
+            .get(&(mi as u32))
+            .cloned()
+            .unwrap_or_else(|| "<unknown>".into());
+        let key = if name.starts_with('*') {
+            "*<brush submodel>".to_string()
+        } else {
+            name
+        };
         *by_model.entry(key).or_default() += 1;
     }
     let mut rolled: Vec<_> = by_model.into_iter().collect();

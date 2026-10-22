@@ -1,4 +1,4 @@
-//! `dodstudio_overviewmap`: move and resize DoD's overview map.
+//! `ds_hud_overview_layout`: move and resize DoD's overview map.
 //!
 //! ## Four dwords, not a patch
 //!
@@ -26,7 +26,7 @@
 //! map down regardless of where this module put it, and hands it back once
 //! the FOV returns to 90. Preventing that would mean hooking
 //! `OverviewMapMode` itself (a new gate to bypass, not a placement change) --
-//! out of scope for `dodstudio_overviewmap`, not attempted here.
+//! out of scope for `ds_hud_overview_layout`, not attempted here.
 //!
 //! ## The survey has the two rectangles the wrong way round
 //!
@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("overviewmap");
+pub const NAME: &str = console_name!("hud_overview_layout");
 
 /// `mov ecx, gHUD; call CHud::ComputeOverviewMapRects` at the end of
 /// `CHudDoDMap::VidInit`. Both operands are wildcards: the first gives `gHUD`,
@@ -100,6 +100,16 @@ const CALL_AT: usize = 5;
 const FULL_AT: usize = 0x238;
 /// The minimap: 0.24 of the screen, top-right. `OverviewMapMode` 2.
 const MINI_AT: usize = 0x248;
+
+/// `CHud::OverviewMapMode`'s inputs (`+0x228e0`; see
+/// `docs/goldsrc_objective_icons.md` §5): the spectator predicate it calls (a
+/// `.data` function pointer the engine fills), `gHUD`'s FOV field, and
+/// `gHUD`'s cached `_cl_minimap` `cvar_t*`.
+const SPECTATOR_PREDICATE_RVA: usize = 0x19_5e40;
+const FOV_AT: usize = 0x234;
+const MINIMAP_CVAR_AT: usize = 0x6_e280;
+/// `cvar_t::value`.
+const CVAR_VALUE_AT: usize = 0xc;
 
 /// Rejects a rectangle that could not be a screen rectangle. The fields are
 /// plain `int`s the engine hands to the sprite drawing code, so nothing stops a
@@ -174,7 +184,12 @@ impl Rect {
     }
 
     fn from_fields(f: [i32; 4]) -> Self {
-        Self { x: f[0], y: f[1], w: f[2], h: f[3] }
+        Self {
+            x: f[0],
+            y: f[1],
+            w: f[2],
+            h: f[3],
+        }
     }
 
     /// A rectangle with no area would not draw, and one with a negative size
@@ -202,6 +217,12 @@ static HELD_FULL: [AtomicI32; 4] = [const { AtomicI32::new(0) }; 4];
 static HELD_MINI: [AtomicI32; 4] = [const { AtomicI32::new(0) }; 4];
 static HOLDING_FULL: AtomicBool = AtomicBool::new(false);
 static HOLDING_MINI: AtomicBool = AtomicBool::new(false);
+
+/// The minimap's y as the engine last cached it, and the y `shift_mini` last
+/// wrote over it, or [`NOT_SHIFTED`].
+static MINI_STOCK_Y: AtomicI32 = AtomicI32::new(NOT_SHIFTED);
+static MINI_SHIFTED_Y: AtomicI32 = AtomicI32::new(NOT_SHIFTED);
+const NOT_SHIFTED: i32 = i32::MIN;
 
 static GHUD: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -233,7 +254,12 @@ fn ghud() -> Result<usize, String> {
     let (object, called) = unsafe {
         let object = ((call_site + GHUD_AT) as *const u32).read_unaligned() as usize;
         let displacement = ((call_site + CALL_AT + 1) as *const i32).read_unaligned();
-        (object, call_site.wrapping_add(CALL_AT + 5).wrapping_add(displacement as usize))
+        (
+            object,
+            call_site
+                .wrapping_add(CALL_AT + 5)
+                .wrapping_add(displacement as usize),
+        )
     };
     if called != compute {
         return Err(format!(
@@ -336,6 +362,76 @@ pub fn apply() -> Result<usize, String> {
     Ok(written)
 }
 
+/// Which map is up, the way `CHud::OverviewMapMode` decides it: 0 for none,
+/// 1 for the full map, 2 for the minimap. `_cl_minimap`'s value, but only while
+/// the spectator predicate holds and the FOV is 90 (a scope takes the map down).
+pub fn mode() -> Option<i32> {
+    let base = engine::client_module_base()?;
+    let ghud = ghud().ok()?;
+    // Safety: a dword in client.dll's .data, read-only here.
+    let predicate = unsafe { ((base + SPECTATOR_PREDICATE_RVA) as *const usize).read_unaligned() };
+    if predicate == 0 {
+        return Some(0);
+    }
+    // Safety: the engine filled this slot with a function `OverviewMapMode`
+    // itself calls with no arguments, every frame, on this same thread.
+    let predicate: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(predicate) };
+    if unsafe { predicate() } == 0 {
+        return Some(0);
+    }
+    // Safety: fields of the object the engine writes here itself.
+    let (fov, cvar) = unsafe {
+        (
+            ((ghud + FOV_AT) as *const i32).read_unaligned(),
+            ((ghud + MINIMAP_CVAR_AT) as *const usize).read_unaligned(),
+        )
+    };
+    if fov != 90 || cvar == 0 {
+        return Some(0);
+    }
+    // Safety: a registered cvar_t, which lives as long as the client.
+    Some(unsafe { ((cvar + CVAR_VALUE_AT) as *const f32).read_unaligned() } as i32)
+}
+
+/// Moves the minimap `by` pixels from where the engine cached it, for the
+/// spectator layout. Re-asserted every frame: a `VidInit` recomputes the cache,
+/// and the new value becomes the one shifted from. A held minimap (typed with
+/// this command) wins, and is left alone.
+pub fn shift_mini(by: i32) -> Result<(), String> {
+    if is_held(Which::Mini) {
+        MINI_SHIFTED_Y.store(NOT_SHIFTED, Ordering::Relaxed);
+        return Ok(());
+    }
+    let at = ghud()? + MINI_AT + 4;
+    // Safety: a dword inside the object the engine writes here itself.
+    let cached = unsafe { (at as *const i32).read_unaligned() };
+    if cached != MINI_SHIFTED_Y.load(Ordering::Relaxed) {
+        MINI_STOCK_Y.store(cached, Ordering::Relaxed);
+    }
+    let wanted = MINI_STOCK_Y.load(Ordering::Relaxed) + by;
+    if cached != wanted && !unsafe { crate::patch::write_code_bytes(at, &wanted.to_le_bytes()) } {
+        return Err("could not write the mini map's y".to_string());
+    }
+    MINI_SHIFTED_Y.store(wanted, Ordering::Relaxed);
+    Ok(())
+}
+
+/// Puts the minimap's y back where the engine cached it, if `shift_mini` moved
+/// it and nothing has written it since.
+pub fn unshift_mini() {
+    let shifted = MINI_SHIFTED_Y.swap(NOT_SHIFTED, Ordering::Relaxed);
+    if shifted == NOT_SHIFTED || is_held(Which::Mini) {
+        return;
+    }
+    let Ok(ghud) = ghud() else { return };
+    let at = ghud + MINI_AT + 4;
+    // Safety: as in `shift_mini`.
+    if unsafe { (at as *const i32).read_unaligned() } == shifted {
+        let stock = MINI_STOCK_Y.load(Ordering::Relaxed);
+        unsafe { crate::patch::write_code_bytes(at, &stock.to_le_bytes()) };
+    }
+}
+
 /// Both rectangles and what is being held, for the bare command.
 pub fn listing() -> String {
     let mut out = String::new();
@@ -357,7 +453,7 @@ pub fn listing() -> String {
     out
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let held: Vec<&str> = [Which::Full, Which::Mini]
         .into_iter()
@@ -415,10 +511,46 @@ mod tests {
 
     #[test]
     fn a_rect_with_no_area_is_refused() {
-        assert!(Rect { x: 0, y: 0, w: 0, h: 10 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: 10, h: 0 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: -10, h: 10 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: 10, h: 10 }.validate().is_ok());
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 0
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: -10,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 10
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     /// Negative x and y are legal -- sliding a rect off the left or top edge is
@@ -426,14 +558,46 @@ mod tests {
     /// any screen is a typo.
     #[test]
     fn offscreen_is_allowed_but_absurd_is_not() {
-        assert!(Rect { x: -200, y: -50, w: 100, h: 100 }.validate().is_ok());
-        assert!(Rect { x: COORD_LIMIT, y: 0, w: 10, h: 10 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: COORD_LIMIT, h: 10 }.validate().is_err());
+        assert!(
+            Rect {
+                x: -200,
+                y: -50,
+                w: 100,
+                h: 100
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            Rect {
+                x: COORD_LIMIT,
+                y: 0,
+                w: 10,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: COORD_LIMIT,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]
     fn fields_round_trip_in_the_engines_order() {
-        let rect = Rect { x: 1, y: 2, w: 3, h: 4 };
+        let rect = Rect {
+            x: 1,
+            y: 2,
+            w: 3,
+            h: 4,
+        };
         assert_eq!(rect.fields(), [1, 2, 3, 4]);
         assert_eq!(Rect::from_fields(rect.fields()), rect);
     }
@@ -454,7 +618,15 @@ mod tests {
         assert!(is_held(Which::Full));
         assert!(!is_held(Which::Mini));
         assert!(any_held());
-        assert_eq!(held(Which::Full), Some(Rect { x: 10, y: 20, w: 30, h: 40 }));
+        assert_eq!(
+            held(Which::Full),
+            Some(Rect {
+                x: 10,
+                y: 20,
+                w: 30,
+                h: 40
+            })
+        );
         assert_eq!(held(Which::Mini), None);
 
         release();
@@ -465,7 +637,11 @@ mod tests {
     #[test]
     fn status_warns_about_what_moves_with_the_map() {
         clear();
-        assert!(status().contains("where the engine puts it"), "{}", status());
+        assert!(
+            status().contains("where the engine puts it"),
+            "{}",
+            status()
+        );
 
         HOLDING_FULL.store(true, Ordering::Release);
         let text = status();
@@ -479,7 +655,10 @@ mod tests {
         for pattern in [CALL_SITE, COMPUTE] {
             let tokens: Vec<&str> = pattern.split_whitespace().collect();
             assert!(tokens.len() > 8);
-            assert_ne!(tokens[0], "??", "a leading wildcard is rejected by the scanner");
+            assert_ne!(
+                tokens[0], "??",
+                "a leading wildcard is rejected by the scanner"
+            );
             for token in &tokens {
                 assert!(
                     *token == "??" || u8::from_str_radix(token, 16).is_ok(),
@@ -499,9 +678,17 @@ mod tests {
                 assert_eq!(*token, "??", "byte {} is {what}", at + offset);
             }
         };
-        assert_eq!(u8::from_str_radix(tokens[0], 16).unwrap(), 0xb9, "mov ecx, imm32");
+        assert_eq!(
+            u8::from_str_radix(tokens[0], 16).unwrap(),
+            0xb9,
+            "mov ecx, imm32"
+        );
         wildcards(GHUD_AT, "gHUD");
-        assert_eq!(u8::from_str_radix(tokens[CALL_AT], 16).unwrap(), 0xe8, "call rel32");
+        assert_eq!(
+            u8::from_str_radix(tokens[CALL_AT], 16).unwrap(),
+            0xe8,
+            "call rel32"
+        );
         wildcards(CALL_AT + 1, "the displacement");
     }
 

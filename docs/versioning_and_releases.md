@@ -16,11 +16,11 @@ Four files carry a `version` field, but they don't all mean the same thing:
 | `studio/package.json` | Same — display/tooling only, stamped to match. |
 | Root `Cargo.toml` | The Cargo **workspace's** own version (currently `0.10.0`) — unrelated to the app's version above. This is the whole `dod-studio` workspace (native/analysis/dem-patch/etc.), not studio specifically. Don't confuse the two when checking "what version are we on."
 
-**Important:** the release workflows stamp `tauri.conf.json`/`package.json`/`Cargo.toml` with the computed release version *during the CI run only* — that stamp is **not committed back** to the repo. The checked-in versions in these files stay whatever they were (currently `0.1.0` everywhere) until someone deliberately bumps them as part of a release PR (see "Bumping minor/major" below). So `git grep version` in this repo will not tell you what's actually been released — check GitHub Releases instead.
+**Important:** the release workflows stamp `tauri.conf.json`/`package.json`/`Cargo.toml` with the computed release version *during the CI run only* — that stamp is **not committed back** to the repo. The checked-in versions in these files stay whatever they were (`Cargo.toml` is `0.2.0`, starting the 0.2 line; `tauri.conf.json`/`package.json` still say `0.1.0`, display-only) until someone deliberately bumps them as part of a release PR (see "Bumping minor/major" below). So `git grep version` in this repo will not tell you what's actually been released — check GitHub Releases instead.
 
 ## Stable channel — automatic
 
-`.github/workflows/release_stable.yml` fires on every push to `main`. Since `main` is ruleset-protected (PR-only, no direct pushes), every push here really is a `dev` → `main` release-cutover merge — there's no other kind of push that lands on `main`.
+`.github/workflows/release_stable.yml` fires on every push to `main`. Since `main` is ruleset-protected (PR-only, no direct pushes), every push here really is a `dev` → `main` release-cutover merge — there's no other kind of push that lands on `main`. `.github/workflows/main_only_from_dev.yml` enforces the other half: a PR into `main` from any branch but `dev` fails its required check.
 
 **Version is auto-computed, no manual entry required:**
 1. Read `Cargo.toml`'s checked-in version, take just the `major.minor` (e.g. `0.1`).
@@ -31,7 +31,7 @@ So a routine merge to `main` just becomes the next patch automatically — `0.1.
 
 The workflow also accepts an optional `workflow_dispatch` `version` input — a manual override for the rare case that needs one (e.g. skipping a patch number, or re-cutting a release). Leave it blank for the normal auto-computed path.
 
-Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version>`. The `stable` update channel polls this via GitHub's `/releases/latest` alias, which only ever resolves to a release like this one.
+Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version>` and named `DoD Studio v<version>` (releases up to v0.1.3 were named "DoD Tools Studio"). The body is "See assets below to download." followed by the release notes, covering the PRs merged since the previous stable tag (see "Release notes" below). The `stable` update channel polls this via GitHub's `/releases/latest` alias, which only ever resolves to a release like this one.
 
 ## Experimental channel — manual, on-demand
 
@@ -44,11 +44,42 @@ Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version
   2. The run number is monotonically increasing across dispatches, unlike a git short-SHA (which sorts alphabetically, not chronologically) — so a second experimental build always looks newer than the first.
   3. The MSI/WiX bundler Tauri uses on Windows only accepts a single, purely-numeric pre-release segment. `-dev.<sha>` and `-dev.<run number>` were both tried and rejected by real builds before landing on the current bare `-<run number>` — see the workflow's own comment and [this Tauri discussion](https://github.com/tauri-apps/tauri/discussions/7600) for the failure mode.
 
-Published as a **prerelease**, always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
+Published as a **prerelease** named `DoD Studio <version> (experimental)`, with release notes covering the PRs merged since the **latest stable tag** (so they list what this build has that the stable channel lacks, not what an older stable already shipped), always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
+
+## Release notes
+
+Both release workflows build their release body with `.github/scripts/release_notes.py` (a "Collect release notes" step early in the job, so a failure costs seconds, not a build) and pass it to `tauri-action` as `releaseBody`, with `generateReleaseNotes` off. GitHub's own generated notes (#165, #490) listed ~290 bare PR titles, mostly under "Other changes" because few PRs carry a label, and the experimental build compared from v0.1.3 instead of the last stable v0.1.4, so it relisted shipped PRs. `.github/release.yml` still groups GitHub's notes, but only for someone clicking "Generate release notes" on the release page.
+
+**The `Release note:` line.** Every PR body starts with one (`.github/pull_request_template.md`; CLAUDE.md has the rule):
+
+    Release note: Fixed: The game no longer crashes on the first frame of a preview.
+
+One plain-language line for players. The optional prefix (`New:`, `Fixed:`, `Changed:`) picks the group; without one, a `bug` label means Fixed, `enhancement` means New, and anything else is Changed. `none` (or an empty or unfilled line) means internal work: the PR appears only in the full list. Only the first such line in a body counts, and HTML comments are ignored, so the template's guidance never becomes a note.
+
+**What the script does:**
+1. **Previous tag.** The highest stable `vX.Y.Z` tag on `origin`: for experimental, the latest one (never `experimental-latest`); for stable, the highest one below the version being released (`--before`). Only tags on the remote count, since a local clone can also carry the upstream dod-tools tags (`v0.2.0` .. `v0.10.0`), which are not this project's releases. `--from` overrides it.
+2. **PRs in the range.** Every `Merge pull request #N` merge commit in `<previous tag>..<target>`, not just first-parent ones (so a stable release on `main` reaches the PRs that landed on `dev`, and a PR merged into another PR's branch counts too), plus squash merges (`... (#N)`) on the target's first-parent history. The range works for experimental even though the last stable tag sits on `main`, not `dev`: the release merge's second parent is `dev`'s tip at that release, so everything shipped is excluded. Release plumbing PRs (`dev` → `main` cutovers and `main` → `dev` syncs) are dropped.
+3. **Bodies.** One `gh api graphql` call per 50 PRs reads title, body and labels (`pull-requests: read` on the workflows).
+4. **Output.** The workflow's first line ("On-demand experimental build from `dev` …" / "See assets below to download."), then "What's new" (the summary file, below), then `## New`, `## Fixed`, `## Changed` with `- <note> (#N)` bullets, then a collapsed `<details>` list of every merged PR title, then a "Full diff" compare link.
+
+**A hand-written summary per version.** When `.github/release_notes/<version>.md` exists, its content is printed first under "What's new". The version is the experimental workflow's input without the `-<run number>` (an experimental `0.2.0-57` build reads `0.2.0.md`) or the stable workflow's computed version, so one file serves both the experimental builds heading to a version and its stable release. Write it for a release worth a summary (0.2.0 has one); routine patches need none.
+
+**Locally** (needs `gh` logged in; prints to stdout without `--output`):
+
+    python .github/scripts/release_notes.py --target origin/dev --version 0.2.0
+    python -m unittest discover -s .github/scripts -p "test_*.py"
 
 ## Bumping to a new minor or major version
 
 Not automatic on either channel — deliberately a human decision. Edit `studio/src-tauri/Cargo.toml`'s `version` field (e.g. `0.1.0` → `0.2.0`) as part of whatever PR is landing the milestone that justifies it, same as any other code change. The next push to `main` after that lands will have no existing `v0.2.*` tags yet, so `release_stable.yml`'s patch computation naturally starts that new line at `0.2.0`.
+
+## The app's Windows identity
+
+`tauri.conf.json` holds three values that are the installed app's identity, not just labels: `productName` (`DoD Studio`: the install folder `%LOCALAPPDATA%\DoD Studio`, the Apps entry and its uninstall registry key, the Start-menu shortcut), `identifier` (`com.dodstudio.app`: the WebView2 profile in `%LOCALAPPDATA%\com.dodstudio.app`, which holds the panes' `localStorage`, and the notification app id) and `mainBinaryName` (`dod-studio`, so the shipped exe is `dod-studio.exe` whatever the cargo package is called). A new `productName` makes the next installer install beside the old one instead of upgrading it; a new identifier starts an empty WebView2 profile; a new `mainBinaryName` orphans shortcuts that point at the old exe.
+
+They changed once, from `DoD Tools Studio` / `com.dodtools.studio` / `desktop-studio.exe` (#258). The NSIS hook `studio/src-tauri/windows/installer_hooks.nsh` handles that move: after installing, it copies the old profile's `Local Storage` into the new one and runs the old install's uninstaller silently. It is NSIS only: an MSI install of the old name has to be uninstalled by hand. Rename again only with a hook like it. The app's own data in `%APPDATA%\dod-studio` (`native::shared::paths::APPDATA_DIR_NAME`) does not depend on any of the three.
+
+A push to `main` also runs `.github/workflows/sync_wiki.yml`, which publishes `docs/wiki/` and the generated Commands page to the GitHub wiki (#493); that is separate from the releases.
 
 ## Open questions (not yet decided — your call)
 

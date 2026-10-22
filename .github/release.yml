@@ -1,0 +1,23 @@
+# Groups GitHub's generated release notes (#165), which now only appear when
+# someone clicks "Generate release notes" on GitHub's release page. The
+# release workflows build their notes with .github/scripts/release_notes.py
+# instead. Categories go by PR label; an unlabelled PR lands under "Other
+# changes".
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - wontfix
+  categories:
+    - title: New features
+      labels:
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"

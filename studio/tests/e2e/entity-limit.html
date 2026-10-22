@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  Harness for packet_entity_limit.js (#207): the Master Queue table (as in
+  master-pane.html) with three demos, one over the pre-Anniversary limit, one
+  under, and one scanned before the count existed, plus the themed confirm.
+  `window.__confirm(paths, gamePath, preview)` runs confirmOverLimit on those
+  demos and puts the answer in #result; `window.__rerender(gamePath)` reads the
+  engine's limit (a mocked `engine_packet_entity_limit`) and redraws the list.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>packet_entity_limit.js test harness</title>
+</head>
+<body>
+  <input id="demo-search-input" />
+  <table><tbody id="master-demo-table-body"></tbody></table>
+  <div id="result"></div>
+
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { confirmOverLimit, refreshPacketEntityLimit } from '/src/packet_entity_limit.js';
+
+    const demos = [
+      { name: 'lennon2_hltv.dem', path: 'C:\\demos\\lennon2_hltv.dem', peak_packet_entities: 301, streaks: [] },
+      { name: 'anzio.dem', path: 'C:\\demos\\anzio.dem', peak_packet_entities: 240, streaks: [] },
+      { name: 'old.dem', path: 'C:\\demos\\old.dem', streaks: [] },
+    ];
+
+    initThemedConfirm();
+    initMasterPane(null, null, null, null);
+    renderMasterList(demos, null, () => {});
+
+    window.__confirm = async (names, gamePath, preview) => {
+      const picked = demos.filter((d) => names.includes(d.name));
+      const ok = await confirmOverLimit(picked, gamePath, { preview });
+      document.querySelector('#result').textContent = String(ok);
+    };
+    window.__rerender = async (gamePath) => {
+      await refreshPacketEntityLimit(gamePath);
+      renderMasterList(demos, null);
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

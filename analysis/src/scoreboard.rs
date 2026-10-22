@@ -166,10 +166,8 @@ pub fn use_team_score_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) 
         if team == Team::Allies && state.allies_are_british {
             team = Team::British;
         }
-        state.team_scores.add_team_score(
-            state.current_time.clone(),
-            team,
-            team_score.score as i32,
-        );
+        state
+            .team_scores
+            .add_team_score(state.current_time.clone(), team, team_score.score as i32);
     }
 }

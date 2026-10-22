@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::patch::ObsConfig;
 
 use super::client::{ObsClient, ObsError};
-use super::session::{fold_into_take, STREAM_FOLDER, TAKE_FOLDER};
+use super::session::{STREAM_FOLDER, TAKE_FOLDER, fold_into_take};
 
 /// What start-up found.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -34,13 +34,6 @@ pub struct OrphanReport {
     pub directory: String,
     /// Whether that folder is one of ours — see `looks_like_ours`.
     pub ours: bool,
-}
-
-impl OrphanReport {
-    /// Whether there is something worth offering to clean up.
-    pub fn actionable(&self) -> bool {
-        self.recording && self.ours
-    }
 }
 
 /// Whether a record directory could only have been set by this app.
@@ -149,8 +142,8 @@ mod tests {
     #[test]
     fn refuses_everything_else() {
         for path in [
-            r"C:\Users\chris\Videos",
-            r"C:\Users\chris\Videos\take0000",
+            r"C:\Users\someone\Videos",
+            r"C:\Users\someone\Videos\take0000",
             // The stream folder without a take folder above it.
             r"C:\all",
             // Right names, wrong order.

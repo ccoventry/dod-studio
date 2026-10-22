@@ -8,7 +8,8 @@ impl Doer for SvcResourceLocation {
     fn parse(i: &[u8], _: AuxRefCell) -> Result<Self> {
         map(null_string, |download_url| SvcResourceLocation {
             download_url: download_url.to_vec(),
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

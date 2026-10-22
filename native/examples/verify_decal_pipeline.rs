@@ -17,7 +17,7 @@
 
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
-use native::patch::{build_batch_queue, prepare_flushed_source, Cancel, StreamPatcher};
+use native::patch::{Cancel, StreamPatcher, build_batch_queue, prepare_flushed_source};
 
 fn frame_count(path: &std::path::Path) -> Option<usize> {
     let bytes = std::fs::read(path).ok()?;
@@ -85,7 +85,10 @@ fn main() {
             .unwrap_or_default();
 
         if job.blocks.is_empty() {
-            println!("{:<16} no blocks (primer/preview) — flush correctly skipped", label);
+            println!(
+                "{:<16} no blocks (primer/preview) — flush correctly skipped",
+                label
+            );
         } else {
             let pinned = job
                 .init_commands
@@ -110,7 +113,11 @@ fn main() {
                         label,
                         job.blocks.len(),
                         n,
-                        if ok { "ORDINALS MATCH" } else { "ORDINAL SHIFT" },
+                        if ok {
+                            "ORDINALS MATCH"
+                        } else {
+                            "ORDINAL SHIFT"
+                        },
                         pinned,
                         started.elapsed()
                     );

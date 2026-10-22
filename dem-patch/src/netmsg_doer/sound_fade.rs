@@ -14,7 +14,8 @@ impl Doer for SvcSoundFade {
                 fade_out_time,
                 fade_in_time,
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

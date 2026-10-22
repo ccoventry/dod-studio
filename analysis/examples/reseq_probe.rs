@@ -30,7 +30,11 @@ fn main() {
         let mut prev: Option<f32> = None;
         for f in &entry.frames {
             if let Some(p) = prev
-                && f.time - p > best { best = f.time - p; join_time = p; }
+                && f.time - p > best
+            {
+                best = f.time - p;
+                join_time = p;
+            }
             prev = Some(f.time);
         }
     }
@@ -40,31 +44,50 @@ fn main() {
     let (mut last_before, mut first_after) = (None::<u32>, None::<u32>);
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 if let EngineMessage::SvcDeltaPacketEntities(pe) = &**em {
                     let s = pe.delta_sequence.to_u32();
-                    if f.time <= join_time { last_before = Some(s); }
-                    else if first_after.is_none() { first_after = Some(s); }
+                    if f.time <= join_time {
+                        last_before = Some(s);
+                    } else if first_after.is_none() {
+                        first_after = Some(s);
+                    }
                 }
             }
         }
     }
     let (Some(lb), Some(fa)) = (last_before, first_after) else {
-        println!("could not find sequences either side of the join"); return };
+        println!("could not find sequences either side of the join");
+        return;
+    };
     let shift = (lb + 1).wrapping_sub(fa) & 0xff;
     println!("last before = {lb}, first after = {fa}; shifting the tail by +{shift} (mod 256)");
 
     let mut rewritten = 0usize;
     for entry in demo.directory.entries.iter_mut().skip(1) {
         for f in entry.frames.iter_mut() {
-            if f.time <= join_time { continue }
-            let FrameData::NetworkMessage(bt) = &mut f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &mut bt.1.messages else { continue };
+            if f.time <= join_time {
+                continue;
+            }
+            let FrameData::NetworkMessage(bt) = &mut f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &mut bt.1.messages else {
+                continue;
+            };
             for m in msgs.iter_mut() {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 if let EngineMessage::SvcDeltaPacketEntities(pe) = &mut **em {
                     let cur = pe.delta_sequence.to_u32();
                     let new = (cur + shift) & 0xff;
@@ -80,12 +103,22 @@ fn main() {
     std::fs::write(&output, &out).expect("write");
     println!("wrote {output} ({:.1} MB)", out.len() as f64 / 1e6);
     match open_demo_from_bytes(&out) {
-        Ok(d) => println!("re-parse OK: {} frames",
-            d.directory.entries.iter().map(|e| e.frames.len()).sum::<usize>()),
+        Ok(d) => println!(
+            "re-parse OK: {} frames",
+            d.directory
+                .entries
+                .iter()
+                .map(|e| e.frames.len())
+                .sum::<usize>()
+        ),
         Err(e) => println!("re-parse failed: {e}"),
     }
     match analysis::Analysis::try_from_bytes(&out) {
-        Ok(an) => println!("analysis OK: map={:?} players={}", an.state.initial_map_name, an.state.players.len()),
+        Ok(an) => println!(
+            "analysis OK: map={:?} players={}",
+            an.state.initial_map_name,
+            an.state.players.len()
+        ),
         Err(e) => println!("analysis failed: {e}"),
     }
 }

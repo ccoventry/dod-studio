@@ -48,13 +48,95 @@ const PATCH_CONCURRENCY: usize = 4;
 /// memory pressure rather than CPU. This is a desktop app that may be running
 /// alongside the game, so the last 4.8 seconds is not worth 2.2GB. Patching
 /// stays at 4 because it streams frames rather than holding a full analysis.
-const SCAN_CONCURRENCY: usize = 2;
+///
+/// This is the default for the user's own setting (`AppSettings::scan_workers`,
+/// #246): the right number depends on the machine's RAM.
+pub const SCAN_CONCURRENCY: usize = 2;
 
-use native::patch::{PatcherConfig, CaptureStreak, CaptureBlock, PatchJob, StreamPatcher, build_batch_queue, build_preview_patch_jobs, CustomCommand, CommandRelation};
-use native::capture_engine::{spawn_capture_engine, CaptureJob, EngineEvent};
+/// The range the scan worker box accepts (#246), the same as Max Concurrent
+/// Renders. Only the range: nothing clamps to the machine's RAM.
+pub const SCAN_WORKERS_MAX: usize = 8;
+
+use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
+use native::patch::launch_settings::RunningGameCheck;
+use native::patch::{
+    CaptureBlock, CaptureStreak, CommandRelation, CustomCommand, PatchJob, PatcherConfig,
+    StreamPatcher, build_batch_queue, build_preview_patch_jobs,
+};
+use native::sys::folder_walk::{Kind, Step, Walker};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+
+/// Every patch job's stage, folded into the one status line a batch shows
+/// (#75). Jobs report from their own worker threads, so each has an atomic
+/// slot: 0 not running, 1 clearing decals, 2 + percent while writing.
+struct PatchProgress {
+    slots: Vec<std::sync::atomic::AtomicU32>,
+    started: std::time::Instant,
+    /// Milliseconds after `started` of the last throttled emit.
+    last_emit_ms: std::sync::atomic::AtomicU32,
+}
+
+const PATCH_SLOT_IDLE: u32 = 0;
+const PATCH_SLOT_CLEARING: u32 = 1;
+const PATCH_SLOT_WRITING: u32 = 2;
+
+impl PatchProgress {
+    fn new(jobs: usize) -> Self {
+        Self {
+            slots: (0..jobs)
+                .map(|_| std::sync::atomic::AtomicU32::new(PATCH_SLOT_IDLE))
+                .collect(),
+            started: std::time::Instant::now(),
+            last_emit_ms: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+
+    /// Records a job's stage. True when the line should be sent now: always
+    /// for a change of stage, and for percentages at most every ~33ms across
+    /// the whole batch, per CLAUDE.md's telemetry throttle.
+    fn set(&self, job: usize, stage: native::patch::PatchStage) -> bool {
+        use std::sync::atomic::Ordering;
+        let value = match stage {
+            native::patch::PatchStage::ClearingDecals => PATCH_SLOT_CLEARING,
+            native::patch::PatchStage::Writing { percent } => PATCH_SLOT_WRITING + percent as u32,
+        };
+        let previous = self.slots[job].swap(value, Ordering::Relaxed);
+        let stage_changed = (previous >= PATCH_SLOT_WRITING) != (value >= PATCH_SLOT_WRITING)
+            || previous == PATCH_SLOT_IDLE;
+        let now = self.started.elapsed().as_millis() as u32;
+        let last = self.last_emit_ms.load(Ordering::Relaxed);
+        if !stage_changed && now.wrapping_sub(last) < 33 {
+            return false;
+        }
+        self.last_emit_ms.store(now, Ordering::Relaxed);
+        true
+    }
+
+    fn finish(&self, job: usize) {
+        self.slots[job].store(PATCH_SLOT_IDLE, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The status line, and how many jobs' worth of work is done (fractional,
+    /// counting written percent, for the progress bar).
+    fn summary(&self, done: u32) -> (String, f64) {
+        let mut clearing = 0;
+        let mut writing = Vec::new();
+        for slot in &self.slots {
+            match slot.load(std::sync::atomic::Ordering::Relaxed) {
+                PATCH_SLOT_IDLE => {}
+                PATCH_SLOT_CLEARING => clearing += 1,
+                v => writing.push((v - PATCH_SLOT_WRITING).min(100) as u8),
+            }
+        }
+        let partial: f64 = writing.iter().map(|&p| p as f64 / 100.0).sum();
+        (
+            crate::messages::patching_status(done, self.slots.len(), clearing, &writing),
+            done as f64 + partial,
+        )
+    }
+}
 
 // ── IPC payload type ───────────────────────────────────────────────────────────
 
@@ -82,7 +164,7 @@ pub struct CapturePayload {
     /// default rather than failing the batch.
     #[serde(default)]
     pub ffmpeg_capture_codec: String,
-    /// `frame_sequence`, `direct_to_video` or `obs`. Absent on payloads from a
+    /// `frame_sequence`, `direct_to_video`, `obs` or `agr`. Absent on payloads from a
     /// frontend predating the selector, in which case `ffmpeg_capture` above
     /// still decides — see `PatcherConfig::normalise_capture_mode`.
     #[serde(default)]
@@ -95,6 +177,12 @@ pub struct CapturePayload {
     pub obs_password: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
+    /// `PatcherConfig::hook_runs_batch`: on unless the payload says otherwise.
+    #[serde(default = "native::patch::types::default_hook_runs_batch")]
+    pub hook_runs_batch: bool,
+    /// `PatcherConfig::keep_game_behind`.
+    #[serde(default = "crate::settings_manager::default_keep_game_behind")]
+    pub keep_game_behind: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
@@ -107,6 +195,10 @@ pub struct CapturePayload {
     /// OBS mode's own capture rate — see `PatcherConfig::obs_capture_fps`.
     #[serde(default = "default_obs_capture_fps_payload")]
     pub obs_capture_fps: i32,
+    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 (or absent)
+    /// means "the same as `capture_fps`".
+    #[serde(default)]
+    pub agr_fps: i32,
     /// Output drives for AOT capacity simulation and media routing.
     pub drives: Vec<String>,
     #[serde(default)]
@@ -145,11 +237,21 @@ pub struct CapturePayload {
     pub decal_ring_limit: Option<u32>,
 }
 
-fn default_initial_delay() -> f32 { 3.0 }
-fn default_fast_forward_speed() -> f32 { 0.05 }
-fn default_resolution_width() -> i32 { 1280 }
-fn default_obs_capture_fps_payload() -> i32 { 120 }
-fn default_resolution_height() -> i32 { 720 }
+fn default_initial_delay() -> f32 {
+    3.0
+}
+fn default_fast_forward_speed() -> f32 {
+    0.05
+}
+fn default_resolution_width() -> i32 {
+    1280
+}
+fn default_obs_capture_fps_payload() -> i32 {
+    120
+}
+fn default_resolution_height() -> i32 {
+    720
+}
 
 /// One custom command row — serialisable across the Tauri IPC boundary.
 /// `relation` is a plain string ("Before" | "After") rather than
@@ -192,6 +294,31 @@ pub struct SerializedStreak {
     /// native patch engine.
     #[serde(default)]
     pub frame_times: Vec<f32>,
+    /// For the clip name (#441): the killer's side, and each kill's victim
+    /// and victim's side. Empty on a demo from a project saved before these
+    /// existed, until it is scanned again.
+    #[serde(default)]
+    pub faction: Option<String>,
+    #[serde(default)]
+    pub victims: Vec<String>,
+    #[serde(default)]
+    pub victim_factions: Vec<String>,
+    /// The scanned file's size and start hash, checked against the file on
+    /// disk before a batch or preview patches it (#196). Absent from
+    /// projects saved before it existed.
+    #[serde(default)]
+    pub source_key: Option<String>,
+    /// `CaptureStreak::spectated`. Absent from projects saved before it
+    /// existed: such a demo is scanned again (queue_scan.js).
+    #[serde(default)]
+    pub spectated: bool,
+    /// `CaptureStreak::steam_id`.
+    #[serde(default)]
+    pub steam_id: Option<String>,
+    /// `CaptureStreak::recorded_this_demo`. Absent from projects saved
+    /// before #573, which the frontend tells by it (queue_filters.js).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_this_demo: Option<bool>,
 }
 
 impl From<SerializedStreak> for CaptureStreak {
@@ -215,11 +342,50 @@ impl From<SerializedStreak> for CaptureStreak {
             frame_times: std::sync::Arc::new(s.frame_times),
             match_start_tick: s.match_start_tick,
             status: native::patch::types::HighlightStatus::Pending,
+            source_key: s.source_key,
+            spectated: s.spectated,
+            steam_id: s.steam_id,
+            recorded_this_demo: s.recorded_this_demo.unwrap_or(false),
         }
     }
 }
 
 // ── Managed state ──────────────────────────────────────────────────────────────
+
+/// How many of a capture batch's clips are recorded, from the engine's own
+/// console markers (#76). The progress bar used to count game sessions, and a
+/// chained batch is often a single session, so it sat at one end for the
+/// whole capture.
+#[derive(Debug, Default)]
+struct ClipTally {
+    /// Clips on every demo loaded so far, the current one included. This is
+    /// the "X of Y clips total" the notifications show.
+    through_current_demo: u32,
+    /// Clips recorded.
+    done: u32,
+}
+
+impl ClipTally {
+    /// A demo starts: every clip of the demos before it is recorded.
+    fn demo_loading(&mut self, clip_count: u32) {
+        self.done = self.through_current_demo;
+        self.through_current_demo += clip_count;
+    }
+
+    /// Clip `clip_idx` (1-based) of the current demo is next, so the ones
+    /// before it are recorded.
+    fn fast_forward_to(&mut self, clip_idx: u32, clip_count_this_demo: u32) {
+        let before_this_demo = self
+            .through_current_demo
+            .saturating_sub(clip_count_this_demo);
+        self.done = before_this_demo + clip_idx.saturating_sub(1);
+    }
+
+    /// The game session ended: every clip it loaded is recorded.
+    fn session_finished(&mut self) {
+        self.done = self.through_current_demo;
+    }
+}
 
 /// Tauri managed state for the capture subsystem.
 pub struct CaptureManager {
@@ -258,41 +424,62 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.game_path = payload.game_path.clone();
     cfg.pre_roll_seconds = payload.pre_roll_seconds;
     cfg.post_roll_seconds = payload.post_roll_seconds;
-    cfg.capture_directories = payload.capture_directories.iter().map(std::path::PathBuf::from).collect();
+    cfg.capture_directories = payload
+        .capture_directories
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
     cfg.capture_fps = payload.capture_fps;
     cfg.obs_capture_fps = payload.obs_capture_fps;
+    cfg.agr_fps = payload.agr_fps;
     cfg.record_start_lead = payload.record_start_lead;
     cfg.record_stop_trail = payload.record_stop_trail;
     cfg.initial_delay = payload.initial_delay;
     cfg.fast_forward_speed = payload.fast_forward_speed;
     cfg.ffmpeg_override_path = payload.ffmpeg_override_path.clone();
-    cfg.goldsrc_hooks_dll_path = payload.goldsrc_hooks_dll_path.clone();
+    cfg.goldsrc_hooks_dll_path =
+        crate::updater_manager::allowed_hook_dll(payload.goldsrc_hooks_dll_path.clone());
     cfg.resolution_width = payload.resolution_width;
     cfg.resolution_height = payload.resolution_height;
     cfg.ffmpeg_capture = payload.ffmpeg_capture;
-    cfg.ffmpeg_capture_codec = native::patch::CaptureCodec::from_str_id(&payload.ffmpeg_capture_codec);
+    cfg.ffmpeg_capture_codec =
+        native::patch::CaptureCodec::from_str_id(&payload.ffmpeg_capture_codec);
     if !payload.capture_mode.is_empty() {
         cfg.capture_mode = native::patch::CaptureMode::from_str_id(&payload.capture_mode);
     }
     cfg.obs = native::patch::ObsConfig {
-        host: if payload.obs_host.is_empty() { "127.0.0.1".to_string() } else { payload.obs_host.clone() },
-        port: if payload.obs_port == 0 { 4455 } else { payload.obs_port },
+        host: if payload.obs_host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            payload.obs_host.clone()
+        },
+        port: if payload.obs_port == 0 {
+            4455
+        } else {
+            payload.obs_port
+        },
         password: payload.obs_password.clone(),
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
+    cfg.hook_runs_batch = payload.hook_runs_batch;
+    cfg.keep_game_behind = payload.keep_game_behind;
     cfg.auto_clear_logs = payload.auto_clear_logs;
     cfg.auto_clear_previews = payload.auto_clear_previews;
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
     cfg.session_id = payload.session_id.clone();
     cfg.init_commands = payload.init_commands.clone();
-    cfg.custom_commands = payload.custom_commands.iter().map(|c| CustomCommand {
-        command: c.command.clone(),
-        offset: c.offset_seconds,
-        relation: match c.relation.as_str() {
-            "After" => CommandRelation::After,
-            _ => CommandRelation::Before,
-        },
-    }).collect();
+    cfg.custom_commands = payload
+        .custom_commands
+        .iter()
+        .map(|c| CustomCommand {
+            command: c.command.clone(),
+            offset: c.offset_seconds,
+            relation: match c.relation.as_str() {
+                "After" => CommandRelation::After,
+                _ => CommandRelation::Before,
+            },
+        })
+        .collect();
     if let Some(v) = payload.decal_flush {
         cfg.decal_flush = v;
     }
@@ -385,7 +572,11 @@ pub async fn obs_test_connection(
     game_height: i32,
     obs_capture_fps: i32,
 ) -> Result<ObsConnectionReport, String> {
-    let resolved_host = if host.is_empty() { "127.0.0.1".to_string() } else { host };
+    let resolved_host = if host.is_empty() {
+        "127.0.0.1".to_string()
+    } else {
+        host
+    };
     let resolved_port = if port == 0 { 4455 } else { port };
     let url = format!("ws://{resolved_host}:{resolved_port}");
     tokio::task::spawn_blocking(move || {
@@ -518,7 +709,11 @@ pub async fn obs_recover_orphan(
 /// settings file uses so an empty field means "the usual" rather than "".
 fn obs_config(host: String, port: u16, password: String) -> native::patch::ObsConfig {
     native::patch::ObsConfig {
-        host: if host.is_empty() { "127.0.0.1".to_string() } else { host },
+        host: if host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            host
+        },
         port: if port == 0 { 4455 } else { port },
         password,
     }
@@ -535,6 +730,13 @@ pub struct CaptureManifest {
     /// once they verify so Render Studio can tell when its own FPS setting
     /// disagrees. See `native::hlcr::take_meta`.
     pub capture_fps: i32,
+    /// `CaptureMode::to_str_id` of the batch. Only AGR changes what the take
+    /// metadata records (#450).
+    #[serde(default)]
+    pub capture_mode: String,
+    /// The rate an AGR batch recorded at; unused for the movie modes.
+    #[serde(default)]
+    pub agr_fps: i32,
 }
 
 /// One block's post-batch verdict, checked against what's actually on disk.
@@ -551,6 +753,17 @@ pub struct VerifiedBlock {
     pub captured: bool,
     /// Tier 2: Render Studio's scanner would actually admit this take.
     pub renderable: bool,
+    /// What the take folder holds on disk, for the batch results panel (#172).
+    pub bytes: u64,
+}
+
+/// Everything under `path`, in bytes. 0 for a folder that isn't there.
+fn folder_bytes(path: &Path) -> u64 {
+    native::sys::folder_walk::Walker::new()
+        .files(path)
+        .iter()
+        .map(|file| std::fs::metadata(file).map(|m| m.len()).unwrap_or(0))
+        .sum()
 }
 
 fn take_folder_has_content(path: &Path) -> bool {
@@ -585,6 +798,7 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
             source_streak_indices: block.source_streak_indices.clone(),
             captured: take_folder_has_content(&block.take_folder),
             renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+            bytes: 0,
         })
         .collect();
 
@@ -600,6 +814,9 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
                 v.renderable = native::hlcr::scanner::is_renderable_take(&block.take_folder);
             }
         }
+    }
+    for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
+        v.bytes = folder_bytes(&block.take_folder);
     }
 
     verified
@@ -624,10 +841,15 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
     if manifest.capture_fps <= 0 {
         return;
     }
-    let meta = native::hlcr::take_meta::SessionMeta::new(
-        manifest.session_id.clone(),
-        manifest.capture_fps,
-    );
+    let meta = if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::take_meta::SessionMeta::agr(
+            manifest.session_id.clone(),
+            manifest.capture_fps,
+            manifest.agr_fps,
+        )
+    } else {
+        native::hlcr::take_meta::SessionMeta::new(manifest.session_id.clone(), manifest.capture_fps)
+    };
 
     for block in blocks.iter().filter(|b| b.captured) {
         let folder = Path::new(&block.take_folder);
@@ -645,7 +867,12 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
 /// Runs verification for the batch that just ended and reports it to the
 /// frontend. Phase 1 is observe-only — nothing consumes this to change a
 /// highlight's status yet.
-fn emit_take_verification(app: &tauri::AppHandle, manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>) {
+/// `outcome` ("complete" / "cancelled") goes into the manifest file (#19).
+fn emit_take_verification(
+    app: &tauri::AppHandle,
+    manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
+    outcome: &str,
+) {
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
         match guard.as_ref() {
@@ -660,7 +887,10 @@ fn emit_take_verification(app: &tauri::AppHandle, manifest_slot: &Arc<Mutex<Opti
 
     log_markdown(&format!(
         "[take-verify] session {}: {}/{} takes on disk, {} renderable",
-        manifest.session_id, captured_count, blocks.len(), renderable_count
+        manifest.session_id,
+        captured_count,
+        blocks.len(),
+        renderable_count
     ));
     for block in &blocks {
         log_markdown(&format!(
@@ -670,20 +900,30 @@ fn emit_take_verification(app: &tauri::AppHandle, manifest_slot: &Arc<Mutex<Opti
     }
 
     record_capture_settings(&manifest, &blocks);
+    crate::manifest_file::write(&manifest, outcome, Some(&blocks));
 
-    let _ = app.emit("capture_takes_verified", serde_json::json!({
-        "session_id": manifest.session_id,
-        "total_count": blocks.len(),
-        "captured_count": captured_count,
-        "renderable_count": renderable_count,
-        "blocks": blocks,
-    }));
+    let _ = app.emit(
+        "capture_takes_verified",
+        serde_json::json!({
+            "session_id": manifest.session_id,
+            "total_count": blocks.len(),
+            "captured_count": captured_count,
+            "renderable_count": renderable_count,
+            "blocks": blocks,
+            // Both read by the frontend's automatic finish step (#440): it
+            // only finishes a batch that ran to completion, and a frame
+            // sequence has to be encoded at the rate it was captured at.
+            "outcome": outcome,
+            "capture_fps": manifest.capture_fps,
+        }),
+    );
 }
 
 // ── Public command handler ─────────────────────────────────────────────────────
 
-/// `Some(message)` when `init_commands` or any `custom_commands` entry names
-/// a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
+/// `Some(message)` when `init_commands` or any `custom_commands` entry is too
+/// long for a demo's ConsoleCommand frame (`native::patch::too_long_commands`),
+/// names a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
 /// `custom_commands` names a `SCHEDULED_BANNED_COMMANDS` one (fine in Initial
 /// Commands, refused only here) — the first one found, checking the
 /// everywhere-banned tier before the scheduled-only tier. `None` means clean.
@@ -695,6 +935,18 @@ fn first_banned_command_error(
     custom_commands: &[CustomCommandPayload],
 ) -> Option<String> {
     let custom_texts: Vec<String> = custom_commands.iter().map(|c| c.command.clone()).collect();
+
+    // Each command is written into one ConsoleCommand frame as typed; one that
+    // does not fit used to abort the whole app partway through patching (#453).
+    let mut too_long = native::patch::too_long_commands(init_commands);
+    too_long.extend(native::patch::too_long_commands(&custom_texts));
+    if let Some(command) = too_long.first() {
+        return Some(format!(
+            "\"{command}\" is {} bytes — Initial and Scheduled Commands must be under {} bytes each to fit in a demo. Split it into shorter commands.",
+            command.len(),
+            native::patch::MAX_CONSOLE_CMD_LEN
+        ));
+    }
 
     let mut banned = native::patch::cfg_scan::banned_commands(init_commands);
     banned.extend(native::patch::cfg_scan::banned_commands(&custom_texts));
@@ -728,7 +980,8 @@ pub async fn start_capture_batch_impl(
     // check is only as good as the frontend" reasoning as the separate-HUD
     // guard below: whatever reaches this command directly must be refused
     // independently, not trusted because some UI state claimed it was clean.
-    if let Some(err) = first_banned_command_error(&payload.init_commands, &payload.custom_commands) {
+    if let Some(err) = first_banned_command_error(&payload.init_commands, &payload.custom_commands)
+    {
         return Err(err);
     }
 
@@ -743,10 +996,7 @@ pub async fn start_capture_batch_impl(
     // leave the manager wedged.
     // ── Guard: reject concurrent batches ──────────────────────────────────────
     {
-        let mut running = manager
-            .is_running
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
         if *running {
             return Err(crate::messages::CAPTURE_BATCH_ALREADY_RUNNING.to_string());
         }
@@ -759,7 +1009,10 @@ pub async fn start_capture_batch_impl(
         .store(false, std::sync::atomic::Ordering::Relaxed);
 
     // ── Build PatcherConfig from the IPC payload ───────────────────────────────
-    let patcher_config = config_from_payload(&payload);
+    let mut patcher_config = config_from_payload(&payload);
+    // Configuration > Players' box (#428) is a saved setting, not part of
+    // the batch's payload.
+    patcher_config.player_overrides = Some(saved_settings(&app_handle).players.use_in_game);
     {
         let mut slot = manager
             .last_config
@@ -776,16 +1029,16 @@ pub async fn start_capture_batch_impl(
         .collect();
 
     if raw_streaks.is_empty() {
-        let mut running = manager
-            .is_running
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
         *running = false;
-        let _ = app_handle.emit("capture_status", serde_json::json!({
-            "running": false,
-            "error": true,
-            "status": crate::messages::NO_STREAKS_IN_PAYLOAD
-        }));
+        let _ = app_handle.emit(
+            "capture_status",
+            serde_json::json!({
+                "running": false,
+                "error": true,
+                "status": crate::messages::NO_STREAKS_IN_PAYLOAD
+            }),
+        );
         return Err(crate::messages::NO_STREAKS_IN_PAYLOAD.to_string());
     }
 
@@ -800,17 +1053,52 @@ pub async fn start_capture_batch_impl(
 
     // ── Offload blocking I/O to a dedicated thread ────────────────────────────
     tokio::task::spawn_blocking(move || {
-        let (patch_jobs, drive_headroom) = match build_batch_queue(raw_streaks, &patcher_config, &std::collections::HashMap::new()) {
+        // A different demo saved under a scanned one's name would take every
+        // highlight tick with it and crash the game minutes in (#196). Stop
+        // before anything is patched.
+        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks) {
+            log::error!("{}", e);
+            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            *running = false;
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "error": true,
+                    "status": e
+                }),
+            );
+            return;
+        }
+
+        // Kept for the hook-run route, which places each tick by the kills'
+        // demo-player times (#434). A highlight from a project saved before
+        // those existed gets them from a fresh read of its demo first.
+        let planned_streaks = if patcher_config.hook_runs_batch {
+            let mut raw_streaks = raw_streaks.clone();
+            crate::hook_batch::refresh_viewdemo_times(&app_handle_clone, &mut raw_streaks);
+            raw_streaks
+        } else {
+            Vec::new()
+        };
+        let (patch_jobs, drive_headroom) = match build_batch_queue(
+            raw_streaks,
+            &patcher_config,
+            &std::collections::HashMap::new(),
+        ) {
             Ok(v) => v,
             Err(e) => {
                 log::error!("build_batch_queue failed: {}", e);
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
-                let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                    "running": false,
-                    "error": true,
-                    "status": format!("build_batch_queue failed: {}", e)
-                }));
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": format!("build_batch_queue failed: {}", e)
+                    }),
+                );
                 return;
             }
         };
@@ -827,9 +1115,17 @@ pub async fn start_capture_batch_impl(
         {
             let manifest = CaptureManifest {
                 session_id: patcher_config.session_id.clone(),
-                blocks: patch_jobs.iter().flat_map(|j| j.blocks.iter().cloned()).collect(),
+                blocks: patch_jobs
+                    .iter()
+                    .flat_map(|j| j.blocks.iter().cloned())
+                    .collect(),
                 capture_fps: patcher_config.capture_fps,
+                capture_mode: patcher_config.capture_mode.to_str_id().to_string(),
+                agr_fps: patcher_config.effective_agr_fps(),
             };
+            // On disk as well (#19), so a batch that goes wrong leaves a record
+            // behind after the process is gone. Rewritten with outcomes at the end.
+            crate::manifest_file::write(&manifest, "planned", None);
             let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
             *slot = Some(manifest);
         }
@@ -838,12 +1134,30 @@ pub async fn start_capture_batch_impl(
             log::warn!("build_batch_queue produced no jobs");
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
-            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                "running": false,
-                "status": "No jobs produced"
-            }));
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "status": "No jobs produced"
+                }),
+            );
             return;
         }
+
+        // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
+        let runtime_batch = if patcher_config.hook_runs_batch {
+            match crate::hook_batch::prepare(&patch_jobs, &planned_streaks, &patcher_config) {
+                Ok(batch) => Some(batch),
+                Err(why) => {
+                    log_markdown(&format!(
+                        "ℹ️ **This batch is patched instead of seeking between clips** — {why}"
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // ── Write each job's patched demo before the capture engine copies it ───
         // build_batch_queue only plans where each patched demo should land
@@ -852,18 +1166,35 @@ pub async fn start_capture_batch_impl(
         // before spawn_capture_engine tries to copy patched_demo_path into
         // the game's dod/ directory (it would otherwise fail with "file not
         // found" since output_demo never existed).
-        let total_patch_jobs = patch_jobs.len() as u32;
         // Known upfront from the same per-job block lists build_batch_queue
         // already produced — cheap, and lets the demo-loading notification
         // show "X of Y clips total" without any per-demo lookback.
         let total_batch_clips: u32 = patch_jobs.iter().map(|j| j.blocks.len() as u32).sum();
+        // What each clip records, in batch order, for the time left (#643).
+        let clip_frames: Vec<i64> = patch_jobs
+            .iter()
+            .flat_map(|j| j.blocks.iter())
+            .map(|b| i64::from(b.record_stop_tick) - i64::from(b.record_start_tick))
+            .collect();
+        // The hook plays the original demos: nothing to patch or copy.
+        let patch_jobs = if runtime_batch.is_some() {
+            Vec::new()
+        } else {
+            patch_jobs
+        };
+        let total_patch_jobs = patch_jobs.len() as u32;
         // One start + one end notification for the whole patching phase, not
         // per-demo like capture_demo_loading -- decal clearing means patching
         // is no longer instant, but a toast per demo patched would still be
         // noise (see issue #98 discussion).
-        let _ = app_handle_clone.emit("capture_patching_started", serde_json::json!({
-            "total": total_patch_jobs,
-        }));
+        if total_patch_jobs > 0 {
+            let _ = app_handle_clone.emit(
+                "capture_patching_started",
+                serde_json::json!({
+                    "total": total_patch_jobs,
+                }),
+            );
+        }
         // Completed-count progress rather than positional index -- jobs
         // finish out of order once patched concurrently, so "which index is
         // running" no longer means anything.
@@ -878,6 +1209,20 @@ pub async fn start_capture_batch_impl(
         // below tell "a peer job's failure forced cancel_token_arc true"
         // apart from a genuine user Cancel, which never sets it.
         let first_error: Mutex<Option<(String, std::io::Error)>> = Mutex::new(None);
+        let progress = PatchProgress::new(patch_jobs.len());
+        let emit_progress = |app: &tauri::AppHandle, done: u32, in_progress: u32| {
+            let (status, index) = progress.summary(done);
+            let _ = app.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": true,
+                    "index": index,
+                    "total": total_patch_jobs,
+                    "in_progress": in_progress,
+                    "status": status
+                }),
+            );
+        };
 
         std::thread::scope(|scope| {
             let worker_count = PATCH_CONCURRENCY.min(patch_jobs.len()).max(1);
@@ -890,60 +1235,71 @@ pub async fn start_capture_batch_impl(
                 let patch_jobs = &patch_jobs;
                 let patcher_config = &patcher_config;
                 let cancel_token_arc = &cancel_token_arc;
-                scope.spawn(move || loop {
-                    if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= patch_jobs.len() {
-                        break;
-                    }
-                    let job = &patch_jobs[idx];
-                    let started = in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let done_so_far = completed_count.load(std::sync::atomic::Ordering::Relaxed);
-                    let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                        "running": true,
-                        "index": done_so_far,
-                        "total": total_patch_jobs,
-                        "in_progress": started,
-                        "status": format!("Patching {} / {} ({} in progress)", done_so_far, total_patch_jobs, started)
-                    }));
-                    let result = StreamPatcher::new(&job.source_demo, &job.output_demo)
-                        .patch(job, patcher_config, cancel_token_arc);
-                    let still_running = in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
-                    match result {
-                        Ok(()) => {
-                            let done = completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                                "running": true,
-                                "index": done,
-                                "total": total_patch_jobs,
-                                "in_progress": still_running,
-                                "status": format!("Patching {} / {} ({} in progress)", done, total_patch_jobs, still_running)
-                            }));
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                            // Either a real user Cancel, or fallout from a
-                            // peer job's failure just below -- either way
-                            // this job's own output is incomplete.
-                            let _ = std::fs::remove_file(&job.output_demo);
+                let progress = &progress;
+                let emit_progress = &emit_progress;
+                scope.spawn(move || {
+                    loop {
+                        if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
-                        Err(e) => {
-                            {
-                                let mut slot = first_error.lock().unwrap_or_else(|p| p.into_inner());
-                                if slot.is_none() {
-                                    *slot = Some((job.source_demo.clone(), e));
-                                }
+                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= patch_jobs.len() {
+                            break;
+                        }
+                        let job = &patch_jobs[idx];
+                        in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // Each stage change, and each percent written (throttled
+                        // across the batch), updates the one status line.
+                        let result = StreamPatcher::new(&job.source_demo, &job.output_demo)
+                            .patch_with_stages(
+                                job,
+                                patcher_config,
+                                cancel_token_arc,
+                                &mut |stage| {
+                                    if progress.set(idx, stage) {
+                                        emit_progress(
+                                            &app_handle_clone,
+                                            completed_count
+                                                .load(std::sync::atomic::Ordering::Relaxed),
+                                            in_flight.load(std::sync::atomic::Ordering::Relaxed),
+                                        );
+                                    }
+                                },
+                            );
+                        progress.finish(idx);
+                        let still_running =
+                            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
+                        match result {
+                            Ok(()) => {
+                                let done = completed_count
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    + 1;
+                                emit_progress(&app_handle_clone, done, still_running);
                             }
-                            // Stop everything else as fast as the existing
-                            // interrupt mechanism allows -- a batch is
-                            // already all-or-nothing (nothing opens the game
-                            // until every job has patched clean), so letting
-                            // peers run to completion after this would only
-                            // waste CPU on jobs the batch is aborting anyway.
-                            cancel_token_arc.store(true, std::sync::atomic::Ordering::Relaxed);
-                            break;
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                                // Either a real user Cancel, or fallout from a
+                                // peer job's failure just below -- either way
+                                // this job's own output is incomplete.
+                                let _ = std::fs::remove_file(&job.output_demo);
+                                break;
+                            }
+                            Err(e) => {
+                                {
+                                    let mut slot =
+                                        first_error.lock().unwrap_or_else(|p| p.into_inner());
+                                    if slot.is_none() {
+                                        *slot = Some((job.source_demo.clone(), e));
+                                    }
+                                }
+                                // Stop everything else as fast as the existing
+                                // interrupt mechanism allows -- a batch is
+                                // already all-or-nothing (nothing opens the game
+                                // until every job has patched clean), so letting
+                                // peers run to completion after this would only
+                                // waste CPU on jobs the batch is aborting anyway.
+                                cancel_token_arc.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
                         }
                     }
                 });
@@ -957,30 +1313,43 @@ pub async fn start_capture_batch_impl(
             log::error!("Failed to patch {}: {}", source_demo, e);
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
-            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                "running": false,
-                "error": true,
-                "status": format!("Failed to patch {}: {}", source_demo, e)
-            }));
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "error": true,
+                    "status": format!("Failed to patch {}: {}", source_demo, e)
+                }),
+            );
             return;
         }
         if was_cancelled {
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
-            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                "running": false,
-                "status": "Cancelled"
-            }));
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "status": "Cancelled"
+                }),
+            );
             return;
         }
 
-        let _ = app_handle_clone.emit("capture_patching_finished", serde_json::json!({
-            "total": total_patch_jobs,
-        }));
+        if total_patch_jobs > 0 {
+            let _ = app_handle_clone.emit(
+                "capture_patching_finished",
+                serde_json::json!({
+                    "total": total_patch_jobs,
+                }),
+            );
+        }
 
         let capture_jobs: Vec<CaptureJob> = patch_jobs
             .into_iter()
-            .map(|job| CaptureJob { patched_demo_path: job.output_demo })
+            .map(|job| CaptureJob {
+                patched_demo_path: job.output_demo,
+            })
             .collect();
 
         let (engine_tx, engine_rx) = std::sync::mpsc::channel();
@@ -993,101 +1362,183 @@ pub async fn start_capture_batch_impl(
         let app_emitter_for_panic = app_handle_clone.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut total_jobs: u32 = 0;
-            let mut current_idx: u32 = 0;
-            // Running tally of clips captured through and including the
-            // current demo -- updated once per DemoLoading (never per
-            // FastForwardToClip), so every fast-forward-to-clip notification
-            // within a demo reports the same "X of Y clips total" the
-            // demo-loading toast itself would have shown. See issue #98.
-            let mut clips_so_far: u32 = 0;
-            while let Ok(event) = engine_rx.recv() {
-                match event {
-                    EngineEvent::Starting(total) => {
-                        total_jobs = total as u32;
-                        current_idx = 0;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": true,
-                            "index": current_idx,
-                            "total": total_jobs,
-                            "status": "Starting"
-                        }));
+                let mut total_jobs: u32 = 0;
+                let mut current_idx: u32 = 0;
+                // `through_current_demo` counts clips through and including the
+                // current demo -- updated once per DemoLoading (never per
+                // FastForwardToClip), so every fast-forward-to-clip notification
+                // within a demo reports the same "X of Y clips total" the
+                // demo-loading toast itself would have shown. See issue #98.
+                let mut clips = ClipTally::default();
+                let mut last_name = String::new();
+                // Time left (#643): from when the engine starts, priced by
+                // the clips done so far.
+                let eta = crate::batch_eta::BatchEta::new(clip_frames);
+                let mut started: Option<std::time::Instant> = None;
+                let seconds_left = |started: Option<std::time::Instant>, done: u32| {
+                    let elapsed = started?.elapsed().as_secs_f64();
+                    eta.seconds_left(done, elapsed)
+                };
+                // The bar counts clips when the batch knows how many, and
+                // game sessions otherwise.
+                let bar = |clips: &ClipTally, current_idx: u32, total_jobs: u32| {
+                    if total_batch_clips > 0 {
+                        (clips.done, total_batch_clips)
+                    } else {
+                        (current_idx, total_jobs)
                     }
-                    EngineEvent::Launching(name) => {
-                        current_idx += 1;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": true,
-                            "index": current_idx,
-                            "total": total_jobs,
-                            "name": name,
-                            "status": "Launching"
-                        }));
-                    }
-                    EngineEvent::Finished(name) => {
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": true,
-                            "index": current_idx,
-                            "total": total_jobs,
-                            "name": name,
-                            "status": "Finished"
-                        }));
-                    }
-                    EngineEvent::DemoLoading(job_idx, total, clip_count) => {
-                        clips_so_far += clip_count;
-                        let _ = app_emitter.emit("capture_demo_loading", serde_json::json!({
-                            "index": job_idx,
-                            "total": total,
-                            "clip_count": clip_count,
-                            "clips_so_far": clips_so_far,
-                            "total_batch_clips": total_batch_clips,
-                        }));
-                    }
-                    EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count_this_demo) => {
-                        let _ = app_emitter.emit("capture_fast_forward_to_clip", serde_json::json!({
-                            "demo_index": job_idx,
-                            "demo_total": total,
-                            "clip_index": clip_idx,
-                            "clip_count_this_demo": clip_count_this_demo,
-                            "clips_so_far": clips_so_far,
-                            "total_batch_clips": total_batch_clips,
-                        }));
-                    }
-                    EngineEvent::Error(msg) => {
-                        let mut running = is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                        *running = false;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": false,
-                            "error": true,
-                            "status": msg
-                        }));
-                        break;
-                    }
-                    EngineEvent::AllCompleted => {
-                        let mut running = is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                        *running = false;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": false,
-                            "status": "Complete",
-                            "index": total_jobs,
-                            "total": total_jobs
-                        }));
-                        emit_take_verification(&app_emitter, &manifest_for_listener);
-                        break;
-                    }
-                    EngineEvent::Cancelled => {
-                        let mut running = is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                        *running = false;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": false,
-                            "status": "Cancelled"
-                        }));
-                        // A cancelled batch still leaves real finished takes on
-                        // disk — verify anyway rather than discarding them.
-                        emit_take_verification(&app_emitter, &manifest_for_listener);
-                        break;
+                };
+                while let Ok(event) = engine_rx.recv() {
+                    match event {
+                        EngineEvent::Starting(total) => {
+                            started = Some(std::time::Instant::now());
+                            total_jobs = total as u32;
+                            current_idx = 0;
+                            let (index, total) = bar(&clips, current_idx, total_jobs);
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": true,
+                                    "index": index,
+                                    "total": total,
+                                    "status": "Starting"
+                                }),
+                            );
+                        }
+                        EngineEvent::Launching(name) => {
+                            current_idx += 1;
+                            last_name = name.clone();
+                            let (index, total) = bar(&clips, current_idx, total_jobs);
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": true,
+                                    "index": index,
+                                    "total": total,
+                                    "name": name,
+                                    "status": "Launching"
+                                }),
+                            );
+                        }
+                        EngineEvent::Finished(name) => {
+                            clips.session_finished();
+                            let (index, total) = bar(&clips, current_idx, total_jobs);
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": true,
+                                    "index": index,
+                                    "total": total,
+                                    "name": name,
+                                    "status": "Finished",
+                                    "seconds_left": seconds_left(started, clips.done),
+                                }),
+                            );
+                        }
+                        EngineEvent::DemoLoading(job_idx, total, clip_count) => {
+                            clips.demo_loading(clip_count);
+                            let _ = app_emitter.emit(
+                                "capture_demo_loading",
+                                serde_json::json!({
+                                    "index": job_idx,
+                                    "total": total,
+                                    "clip_count": clip_count,
+                                    "clips_so_far": clips.through_current_demo,
+                                    "total_batch_clips": total_batch_clips,
+                                }),
+                            );
+                        }
+                        EngineEvent::FastForwardToClip(
+                            job_idx,
+                            total,
+                            clip_idx,
+                            clip_count_this_demo,
+                        ) => {
+                            clips.fast_forward_to(clip_idx, clip_count_this_demo);
+                            if total_batch_clips > 0 {
+                                let _ = app_emitter.emit(
+                                    "capture_status",
+                                    serde_json::json!({
+                                        "running": true,
+                                        "index": clips.done,
+                                        "total": total_batch_clips,
+                                        "name": last_name,
+                                        "status": crate::messages::capturing_clip(
+                                            clips.done + 1,
+                                            total_batch_clips
+                                        ),
+                                        "seconds_left": seconds_left(started, clips.done),
+                                    }),
+                                );
+                            }
+                            let _ = app_emitter.emit(
+                                "capture_fast_forward_to_clip",
+                                serde_json::json!({
+                                    "demo_index": job_idx,
+                                    "demo_total": total,
+                                    "clip_index": clip_idx,
+                                    "clip_count_this_demo": clip_count_this_demo,
+                                    "clips_so_far": clips.through_current_demo,
+                                    "total_batch_clips": total_batch_clips,
+                                }),
+                            );
+                        }
+                        EngineEvent::Error(msg) => {
+                            let mut running =
+                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            *running = false;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": false,
+                                    "error": true,
+                                    "status": msg
+                                }),
+                            );
+                            break;
+                        }
+                        EngineEvent::AllCompleted => {
+                            let mut running =
+                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            *running = false;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": false,
+                                    "status": "Complete",
+                                    "index": total_jobs,
+                                    "total": total_jobs
+                                }),
+                            );
+                            emit_take_verification(
+                                &app_emitter,
+                                &manifest_for_listener,
+                                "complete",
+                            );
+                            break;
+                        }
+                        EngineEvent::Cancelled => {
+                            let mut running =
+                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            *running = false;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": false,
+                                    "status": "Cancelled"
+                                }),
+                            );
+                            // A cancelled batch still leaves real finished takes on
+                            // disk — verify anyway rather than discarding them.
+                            emit_take_verification(
+                                &app_emitter,
+                                &manifest_for_listener,
+                                "cancelled",
+                            );
+                            break;
+                        }
                     }
                 }
-            }
             }));
 
             if let Err(panic_payload) = result {
@@ -1096,14 +1547,22 @@ pub async fn start_capture_batch_impl(
                     .map(|s| s.to_string())
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                log_markdown(&format!("[capture] Event listener thread panicked: {}", msg));
-                let mut running = is_running_for_panic.lock().unwrap_or_else(|p| p.into_inner());
+                log_markdown(&format!(
+                    "[capture] Event listener thread panicked: {}",
+                    msg
+                ));
+                let mut running = is_running_for_panic
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
                 *running = false;
-                let _ = app_emitter_for_panic.emit("capture_status", serde_json::json!({
-                    "running": false,
-                    "error": true,
-                    "status": format!("Internal error in capture event listener: {}", msg)
-                }));
+                let _ = app_emitter_for_panic.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": format!("Internal error in capture event listener: {}", msg)
+                    }),
+                );
             }
         });
 
@@ -1117,6 +1576,7 @@ pub async fn start_capture_batch_impl(
             patcher_config,
             drive_headroom,
             obs_take_folders,
+            runtime_batch,
         );
     });
 
@@ -1132,6 +1592,159 @@ pub struct SerializedDemo {
     pub local_player_index: Option<usize>,
     pub playback_frames: i32,
     pub streaks: Vec<SerializedStreak>,
+    /// `<size>-<hash>` of the file when it was scanned (see `demo_file_key`).
+    /// A later scan skips this demo while path and key still match. `None`
+    /// for demos from a project saved before the key existed, which are
+    /// simply scanned again.
+    #[serde(default)]
+    pub file_key: Option<String>,
+    /// The map, from the demo header, for the clip name's `{map}` and the
+    /// Master Queue's search (#441).
+    #[serde(default)]
+    pub map_name: Option<String>,
+    /// The file's modified time, for the clip name's `{date}` (#441).
+    #[serde(default)]
+    pub modified_unix_secs: Option<u64>,
+    /// The most entities in one snapshot (#207): over the engine's
+    /// `MAX_PACKET_ENTITIES` the game closes to the desktop. `None` for a
+    /// demo from a project saved before it was counted.
+    #[serde(default)]
+    pub peak_packet_entities: Option<u32>,
+    /// Who recorded this POV demo (#174): the analyzer's global id (a
+    /// SteamID64 when the demo has one) and name. `None` for an HLTV demo,
+    /// and for demos from a project saved before this existed, which the
+    /// Master Queue looks up through the player index instead.
+    #[serde(default)]
+    pub recorder_id: Option<String>,
+    #[serde(default)]
+    pub recorder_name: Option<String>,
+    /// Each playing side and the clan tag its players' names share (#445),
+    /// feeding the project's Teams list. Missing from demos in a project
+    /// saved before it existed; the frontend scans those again.
+    #[serde(default)]
+    pub teams: Vec<analysis::TeamTag>,
+    /// The map of every signon (#217): two or more is a demo the game's
+    /// `viewdemo` can't play past the first level change, so the Master Queue
+    /// offers to split it. Missing from demos in a project saved before it
+    /// existed; the frontend scans those again.
+    #[serde(default)]
+    pub signon_maps: Vec<String>,
+    /// The `analysis::highlights::HIGHLIGHTS_VERSION` that listed this demo's
+    /// highlights; 0 for a demo from a project saved before it was recorded.
+    /// Opening a project offers to rescan demos below the current one.
+    #[serde(default)]
+    pub highlights_version: u32,
+}
+
+/// A demo already in the queue, as the frontend passes it to a scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownDemo {
+    pub path: String,
+    pub file_key: String,
+}
+
+/// What a scan returns: the demos it parsed, how many it skipped because
+/// they were already in the queue, unchanged on disk, and the identical
+/// copies it skipped without parsing (#21).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanOutcome {
+    pub demos: Vec<SerializedDemo>,
+    pub unchanged: u32,
+    #[serde(default)]
+    pub copies: Vec<ScanCopy>,
+    /// Cancel stopped the scan; `demos` holds what was parsed before it,
+    /// none when it stopped while listing folders (#843).
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+/// A scanned file with the same key as a queued demo at another path, or as
+/// another file in the same scan: the same demo under another name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanCopy {
+    pub path: String,
+    pub same_as: String,
+    /// `same_as` was already in the queue; otherwise it's the copy this scan
+    /// kept.
+    pub queued: bool,
+}
+
+/// What `scan_demo_for_highlights_with_analysis` lists for one demo, before
+/// its analysis.
+type ScannedHighlights = (
+    f32,
+    Vec<CaptureStreak>,
+    bool,
+    Option<usize>,
+    i32,
+    Option<i32>,
+    std::sync::Arc<Vec<f32>>,
+);
+
+/// One scanned demo as the queue holds it, stamped with the version of
+/// highlight detection that listed its highlights.
+fn serialized_demo(
+    file: &std::path::Path,
+    file_name: String,
+    file_key: Option<String>,
+    highlights: ScannedHighlights,
+    analysis: &::analysis::Analysis,
+) -> SerializedDemo {
+    let (
+        tickrate,
+        streaks,
+        is_pov,
+        local_player_index,
+        playback_frames,
+        match_start_tick,
+        frame_times_arc,
+    ) = highlights;
+    let recorder = native::player_index::players_in(analysis)
+        .players
+        .into_iter()
+        .find(|p| p.recorder);
+
+    let serialized_streaks: Vec<SerializedStreak> = streaks
+        .into_iter()
+        .map(|mut s| {
+            s.match_start_tick = match_start_tick;
+            s.frame_times = frame_times_arc.clone();
+            let facts = native::clip_facts::streak_facts(
+                analysis,
+                s.player_index,
+                s.kills.first().map_or(s.start_tick, |k| k.0),
+            )
+            .unwrap_or_default();
+            let mut serialized = SerializedStreak::from(s);
+            serialized.faction = Some(facts.faction).filter(|f| !f.is_empty());
+            serialized.victims = facts.victims;
+            serialized.victim_factions = facts.victim_factions;
+            serialized
+        })
+        .collect();
+
+    SerializedDemo {
+        path: file.to_string_lossy().to_string(),
+        name: file_name,
+        tickrate,
+        is_pov,
+        local_player_index,
+        playback_frames,
+        streaks: serialized_streaks,
+        file_key,
+        map_name: Some(analysis.demo_info.map_name.clone()).filter(|m| !m.is_empty()),
+        modified_unix_secs: std::fs::metadata(file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()),
+        peak_packet_entities: analysis.demo_info.peak_packet_entities,
+        recorder_id: recorder.as_ref().map(|p| p.id.clone()),
+        recorder_name: recorder.map(|p| p.name),
+        teams: ::analysis::team_tags(&analysis.state),
+        signon_maps: analysis.state.signon_maps.clone(),
+        highlights_version: ::analysis::highlights::HIGHLIGHTS_VERSION,
+    }
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -1155,8 +1768,373 @@ impl From<CaptureStreak> for SerializedStreak {
             // The inbound From<SerializedStreak> impl re-wraps it in Arc::new().
             frame_times: (*c.frame_times).clone(),
             match_start_tick: c.match_start_tick,
+            faction: None,
+            victims: Vec::new(),
+            victim_factions: Vec::new(),
+            source_key: c.source_key,
+            spectated: c.spectated,
+            steam_id: c.steam_id,
+            recorded_this_demo: Some(c.recorded_this_demo),
         }
     }
+}
+
+/// Threads for a scan of `total` demos: the user's setting, kept to
+/// 1..=`SCAN_WORKERS_MAX`, and never more than there are demos.
+fn scan_worker_count(workers: usize, total: usize) -> usize {
+    workers.clamp(1, SCAN_WORKERS_MAX).min(total).max(1)
+}
+
+/// The scan status line: how many demos are done out of how many, how many
+/// of them the analyzer cache has (they go first, #687), and one demo still
+/// being parsed, when there is one. With several scan workers, "the current
+/// file" is one of the current files. Studio adds the time left.
+fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -> String {
+    let mut line = format!("Scanning {done} / {total}");
+    if cached > 0 {
+        line += &format!(" ({cached} from the analyzer cache)");
+    }
+    if let Some(name) = current {
+        line += &format!(" — {name}");
+    }
+    line
+}
+
+/// The scan's step line while it lists folders, before any demo is parsed.
+fn listing_status_line(folders: u32, demos: u32) -> String {
+    format!("Looking for demos: {folders} folders read, {demos} demos found")
+}
+
+/// Phase 1 of a queue scan: every `.dem` under `dirs` goes into `list`, kept
+/// in file-name order. A picked folder is read through even when it is a
+/// link; links inside it are not, so a junction back up the tree cannot
+/// loop. The Recycle Bin and System Volume Information are skipped (#843).
+/// `progress(folders, demos)` is called as the counts grow (the caller
+/// throttles); `cancel` is checked at every entry. False when cancelled.
+fn list_scan_demos(
+    dirs: &[PathBuf],
+    list: &mut Vec<PathBuf>,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &mut dyn FnMut(u32, u32),
+) -> bool {
+    let mut folders = dirs.len() as u32;
+    progress(folders, list.len() as u32);
+    let outcome = Walker::new()
+        .skip_system_folders()
+        .walk_roots(dirs, &mut |found| {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Step::Stop;
+            }
+            match found.kind {
+                Kind::Dir => folders += 1,
+                Kind::File if found.is_demo() => {
+                    let insert_idx = list
+                        .binary_search_by(|p: &PathBuf| {
+                            p.file_name()
+                                .unwrap_or_default()
+                                .cmp(found.path.file_name().unwrap_or_default())
+                        })
+                        .unwrap_or_else(|pos| pos);
+                    list.insert(insert_idx, found.path.clone());
+                }
+                _ => return Step::Enter,
+            }
+            progress(folders, list.len() as u32);
+            Step::Enter
+        });
+    outcome.complete || !cancel.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// True when a progress line may go out at `now_ms`: at most one per ~33 ms
+/// (CLAUDE.md's telemetry throttle). `last_ms` holds the last emit time, or
+/// `u32::MAX` before the first one.
+pub(crate) fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> bool {
+    use std::sync::atomic::Ordering;
+    let last = last_ms.load(Ordering::Relaxed);
+    if last != u32::MAX && now_ms.saturating_sub(last) < 33 {
+        return false;
+    }
+    last_ms
+        .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
+
+/// A demo file's identity for "has this changed since it was scanned": its
+/// size plus an FNV-1a hash of its first 64 KB -- the same key the Demo
+/// Auditor finds duplicates with (`native::utils::demo_hasher`), and the same
+/// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
+/// whole demo, so checking a folder of 50 costs milliseconds.
+fn demo_file_key(path: &Path) -> Option<String> {
+    native::utils::demo_hasher::demo_key_text(path)
+}
+
+/// The demos whose file is still there but is no longer the one that was
+/// scanned: its key (size + first 64 KB) differs from the saved one. Their
+/// highlights are frame numbers in the old file, so they don't line up (#21).
+/// Missing files and demos with no saved key are left out.
+pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
+    demos
+        .iter()
+        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
+        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
+        .map(|d| d.path.clone())
+        .collect()
+}
+
+/// A project demo that is no longer at its saved path, and the file that
+/// looks like it moved there, if one was found (#21).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingDemo {
+    pub path: String,
+    pub candidate: Option<String>,
+}
+
+/// How deep, and how many entries, the search for a moved demo will walk, so
+/// pointing it at a drive root cannot turn a project load into a hang.
+const LOCATE_MAX_DEPTH: usize = 6;
+const LOCATE_MAX_ENTRIES: usize = 50_000;
+
+/// For every demo in `demos` whose file is gone, looks through `search_dirs`
+/// (recursively, bounded) for a `.dem` with the same `demo_file_key`: the
+/// same size and the same first 64 KB. Only files whose size matches are
+/// read at all, so a folder of hundreds of demos costs one `stat` each.
+///
+/// Breadth-first across all of `search_dirs` together, in the order given:
+/// every folder's own files, then every first-level subfolder, and so on. A
+/// demo moved one folder down is found before the entry budget can be spent
+/// deep inside some large folder listed earlier (a whole `dod/`, say), which
+/// is what a depth-first walk did.
+///
+/// Suggests, never applies: the frontend asks before it moves anything. A
+/// demo with no saved key (a project from before #456) can only be reported
+/// missing.
+pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
+    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
+}
+
+fn locate_missing_demos_within(
+    demos: &[KnownDemo],
+    search_dirs: &[PathBuf],
+    max_entries: usize,
+) -> Vec<MissingDemo> {
+    let mut missing: Vec<MissingDemo> = demos
+        .iter()
+        .filter(|d| !Path::new(&d.path).is_file())
+        .map(|d| MissingDemo {
+            path: d.path.clone(),
+            candidate: None,
+        })
+        .collect();
+    let wanted: Vec<(usize, &str, u64)> = demos
+        .iter()
+        .filter(|d| !Path::new(&d.path).is_file())
+        .enumerate()
+        .filter_map(|(i, d)| {
+            let size = native::utils::demo_hasher::FileKey::from_text(&d.file_key)?.size;
+            Some((i, d.file_key.as_str(), size))
+        })
+        .collect();
+    if wanted.is_empty() {
+        return missing;
+    }
+
+    // A search folder listed twice, or inside another, is read once.
+    let mut visited = std::collections::HashSet::new();
+    let roots: Vec<&PathBuf> = search_dirs
+        .iter()
+        .filter(|d| visited.insert(same_path_key(&d.to_string_lossy())))
+        .collect();
+    Walker::new()
+        .breadth_first()
+        // A deleted copy in the Recycle Bin has the same key (#843).
+        .skip_system_folders()
+        // Folders LOCATE_MAX_DEPTH below a search folder are still read.
+        .max_depth(LOCATE_MAX_DEPTH + 1)
+        .max_entries(max_entries)
+        .walk_roots(&roots, &mut |found| {
+            match found.kind {
+                Kind::Dir => {
+                    return visited
+                        .insert(same_path_key(&found.path.to_string_lossy()))
+                        .into();
+                }
+                Kind::Link => return Step::Skip,
+                Kind::File => {}
+            }
+            if !found.is_demo() {
+                return Step::Enter;
+            }
+            let Ok(meta) = std::fs::metadata(&found.path) else {
+                return Step::Enter;
+            };
+            if !wanted.iter().any(|(_, _, size)| *size == meta.len()) {
+                return Step::Enter;
+            }
+            let Some(key) = demo_file_key(&found.path) else {
+                return Step::Enter;
+            };
+            for (i, wanted_key, _) in &wanted {
+                if missing[*i].candidate.is_none() && key == *wanted_key {
+                    missing[*i].candidate = Some(found.path.to_string_lossy().to_string());
+                }
+            }
+            if missing.iter().all(|m| m.candidate.is_some()) {
+                Step::Stop
+            } else {
+                Step::Enter
+            }
+        });
+    missing
+}
+
+/// Paths compare the way Windows does: case-insensitive, either slash.
+fn same_path_key(path: &str) -> String {
+    path.replace('/', "\\").to_lowercase()
+}
+
+/// Splits `list` into the files still to scan (with their keys, in order),
+/// a count of those skipped because `known` has the same path with the same
+/// key, and the identical copies skipped: files at a path `known` doesn't
+/// have whose key matches a queued demo, or another file in this scan. Of
+/// several new files that are one demo, the one with the shortest name is
+/// kept ("match.dem" over "match - Copy.dem" and "match (2).dem"), whatever
+/// order the scan found them in. Only the key (size + first 64 KB) is read
+/// for the rest, never the demo.
+fn skip_known(
+    list: Vec<PathBuf>,
+    known: &[KnownDemo],
+) -> (Vec<PathBuf>, Vec<Option<String>>, u32, Vec<ScanCopy>) {
+    let known_by_path: std::collections::HashMap<String, &str> = known
+        .iter()
+        .map(|k| (same_path_key(&k.path), k.file_key.as_str()))
+        .collect();
+    let queued_by_key: std::collections::HashMap<&str, &str> = known
+        .iter()
+        .filter(|k| !k.file_key.is_empty())
+        .map(|k| (k.file_key.as_str(), k.path.as_str()))
+        .collect();
+    let name_rank = |path: &Path| {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        (name.chars().count(), name)
+    };
+
+    let entries: Vec<(PathBuf, Option<String>)> = list
+        .into_iter()
+        .map(|path| {
+            let key = demo_file_key(&path);
+            (path, key)
+        })
+        .collect();
+    // The copy to keep for each key that no queued demo has.
+    let mut keeper_by_key: std::collections::HashMap<&str, &Path> =
+        std::collections::HashMap::new();
+    for (path, key) in &entries {
+        let Some(key) = key.as_deref() else { continue };
+        if known_by_path.contains_key(&same_path_key(&path.to_string_lossy()))
+            || queued_by_key.contains_key(key)
+        {
+            continue;
+        }
+        keeper_by_key
+            .entry(key)
+            .and_modify(|best| {
+                if name_rank(path) < name_rank(best) {
+                    *best = path;
+                }
+            })
+            .or_insert(path);
+    }
+
+    let mut keep = Vec::with_capacity(entries.len());
+    let mut keys = Vec::with_capacity(entries.len());
+    let mut unchanged = 0;
+    let mut copies = Vec::new();
+    for (path, key) in &entries {
+        let path_text = path.to_string_lossy().into_owned();
+        let queued_key = known_by_path.get(&same_path_key(&path_text));
+        if key.as_deref().is_some_and(|k| queued_key == Some(&k)) {
+            unchanged += 1;
+            continue;
+        }
+        // A queued path that changed on disk is a rescan, never a copy.
+        if queued_key.is_none()
+            && let Some(k) = key.as_deref()
+        {
+            if let Some(same_as) = queued_by_key.get(k) {
+                copies.push(ScanCopy {
+                    path: path_text,
+                    same_as: same_as.to_string(),
+                    queued: true,
+                });
+                continue;
+            }
+            if let Some(keeper) = keeper_by_key
+                .get(k)
+                .filter(|keeper| **keeper != path.as_path())
+            {
+                copies.push(ScanCopy {
+                    path: path_text,
+                    same_as: keeper.to_string_lossy().into_owned(),
+                    queued: false,
+                });
+                continue;
+            }
+        }
+        keep.push(path.clone());
+        keys.push(key.clone());
+    }
+    (keep, keys, unchanged, copies)
+}
+
+/// The paths in `paths` that do not exist on disk, in the order given.
+fn missing_scan_paths(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|p| !std::path::Path::new(p).exists())
+        .cloned()
+        .collect()
+}
+
+/// Why the scan could not use `path`, in plain words, from the file itself
+/// rather than the scanner's error text: shorter than a demo header, a header
+/// that isn't `HLDEMO`, or a good header on a demo that fails to parse later.
+/// A failure to open or read the file at all (`Failed to read file: ...`,
+/// e.g. access denied) is already readable and passes through as `reason`.
+fn plain_scan_failure(path: &Path, reason: &str) -> String {
+    // Already readable: the file could not be opened at all, or the (never
+    // firing, #247) HLTV guard refused it.
+    if reason.starts_with("Failed to read file") || reason.starts_with("Unsupported HLTV") {
+        return reason.to_string();
+    }
+    let mut head = [0u8; 8];
+    let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if len < native::patch::DEMO_HEADER_SIZE as u64 {
+        return crate::messages::SCAN_FAIL_TOO_SHORT.to_string();
+    }
+    let read_ok = std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
+        .is_ok();
+    if !read_ok {
+        return reason.to_string();
+    }
+    if &head != b"HLDEMO\0\0" {
+        return crate::messages::SCAN_FAIL_NOT_A_DEMO.to_string();
+    }
+    crate::messages::SCAN_FAIL_CORRUPT.to_string()
+}
+
+/// The final `scan_progress` event's `skipped` list: `{name, reason}` per demo
+/// the scan could not read, in file-name order (workers finish out of order).
+fn skipped_demo_rows(mut skipped: Vec<(usize, String, String)>) -> Vec<serde_json::Value> {
+    skipped.sort_by_key(|(idx, _, _)| *idx);
+    skipped
+        .into_iter()
+        .map(|(_, name, reason)| serde_json::json!({ "name": name, "reason": reason }))
+        .collect()
 }
 
 pub async fn scan_directory_impl(
@@ -1164,7 +2142,9 @@ pub async fn scan_directory_impl(
     is_scanning: Arc<std::sync::atomic::AtomicBool>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     paths: Vec<String>,
-) -> Result<Vec<SerializedDemo>, String> {
+    known: Vec<KnownDemo>,
+    workers: usize,
+) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
     is_scanning.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1178,13 +2158,26 @@ pub async fn scan_directory_impl(
         let mut list = Vec::new();
         let mut dir_stack = Vec::new();
 
+        // A picked folder deleted since the picker last saw it used to scan to
+        // "0 demos found" with no reason given (#432).
+        let missing = missing_scan_paths(&paths);
+        if !missing.is_empty() {
+            if missing.len() == paths.len() {
+                return Err(crate::messages::scan_path_not_found(&missing[0]));
+            }
+            log::warn!("Scan skipped paths that no longer exist: {:?}", missing);
+        }
+
         // ── Phase 1: collect all .dem file paths ─────────────────────────────
         for path_str in paths {
             let path_buf = PathBuf::from(path_str);
             if path_buf.is_dir() {
                 dir_stack.push(path_buf);
             } else if path_buf.is_file()
-                && path_buf.extension().map(|ext| ext == "dem").unwrap_or(false)
+                && path_buf
+                    .extension()
+                    .map(|ext| ext == "dem")
+                    .unwrap_or(false)
             {
                 let insert_idx = list
                     .binary_search_by(|p: &PathBuf| {
@@ -1197,87 +2190,191 @@ pub async fn scan_directory_impl(
             }
         }
 
-        while let Some(dir) = dir_stack.pop() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        dir_stack.push(path);
-                    } else if path.is_file()
-                        && path.extension().map(|ext| ext == "dem").unwrap_or(false)
-                    {
-                        let insert_idx = list
-                            .binary_search_by(|p: &PathBuf| {
-                                p.file_name()
-                                    .unwrap_or_default()
-                                    .cmp(path.file_name().unwrap_or_default())
-                            })
-                            .unwrap_or_else(|pos| pos);
-                        list.insert(insert_idx, path);
-                    }
+        // A whole drive takes a minute or more to list (#843): say how far
+        // it got, at most one line per ~33 ms, the first at once.
+        let listing_started = std::time::Instant::now();
+        let last_listing_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let listed = list_scan_demos(
+            &dir_stack,
+            &mut list,
+            &cancel_token,
+            &mut |folders, demos| {
+                let now_ms = listing_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u32::MAX as u128 - 1) as u32;
+                if !progress_emit_due(&last_listing_emit, now_ms) {
+                    return;
                 }
-            }
+                let _ = app_handle.emit(
+                    "scan_progress",
+                    serde_json::json!({
+                        "scanned": 0,
+                        "found": 0,
+                        "status": listing_status_line(folders, demos),
+                        "cancelled": false,
+                        "listing": true,
+                        "folders": folders,
+                        "demos": demos,
+                    }),
+                );
+            },
+        );
+        if !listed {
+            // Cancelled while listing: nothing is parsed, nothing added.
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": 0,
+                    "found": 0,
+                    "status": "Cancelled",
+                    "cancelled": true,
+                    "unchanged": 0,
+                    "skipped": [],
+                }),
+            );
+            return Ok(ScanOutcome {
+                demos: Vec::new(),
+                unchanged: 0,
+                copies: Vec::new(),
+                cancelled: true,
+            });
         }
+
+        // Demos already in the queue and unchanged on disk are not parsed
+        // again: re-adding a folder to pick up one new demo used to re-parse
+        // every demo in it, 5-10 s each.
+        let (list, file_keys, unchanged, copies) = skip_known(list, &known);
 
         let total_files = list.len() as u32;
 
-        // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
+        // ── Phase 2: parse each .dem file, up to `workers` at once ───
         // `list` is already sorted by filename (Phase 1's binary-search
         // insert), so each worker writes its result into a pre-sized slot at
         // its own original index -- the output comes out in sorted order for
         // free, with no re-sort needed once concurrent workers finish out of
         // order.
+        //
+        // The work goes in another order (#687): the demos the analyzer cache
+        // has first, so the count jumps to "cached of total" at once, then
+        // the parses largest first, so no worker idles behind one big demo at
+        // the end.
         let total = list.len();
-        let slots: Mutex<Vec<Option<SerializedDemo>>> = Mutex::new((0..total).map(|_| None).collect());
+        let plan = ::analysis::cache::WorkPlan::new(&native::analyzer_cache_root(), &list);
+        let cached = plan.cached() as u32;
+        let bytes_to_parse = plan.bytes_to_parse();
+        let parsed = std::sync::atomic::AtomicU32::new(0);
+        let bytes_parsed = std::sync::atomic::AtomicU64::new(0);
+        let slots: Mutex<Vec<Option<SerializedDemo>>> =
+            Mutex::new((0..total).map(|_| None).collect());
         let next_index = std::sync::atomic::AtomicUsize::new(0);
         // Completed-count progress rather than positional index -- same
         // reason the patch loop's `capture_status` event uses one: files
         // finish out of order once scanned concurrently.
         let completed = std::sync::atomic::AtomicU32::new(0);
         let found = std::sync::atomic::AtomicU32::new(0);
-
+        // Demos that could not be read, as (index, file name, reason). They
+        // used to vanish from the queue with no explanation (#23).
+        let skipped: Mutex<Vec<(usize, String, String)>> = Mutex::new(Vec::new());
+        // Indices being parsed right now, so every progress line names a demo
+        // still in flight rather than one that just finished (#433).
+        let in_flight: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+        // ~33 ms telemetry throttle (CLAUDE.md), as ms since the scan began.
+        // Starts at u32::MAX so the first line always goes out. `force` skips
+        // it for the lines a count must not wait on: the end of the cached
+        // batch and each parse's end.
+        let scan_started = std::time::Instant::now();
+        let last_emit_ms = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let emit_progress = |done: u32, current: Option<&str>, force: bool| {
+            let now_ms = scan_started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+            if force {
+                last_emit_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+            } else if !progress_emit_due(&last_emit_ms, now_ms) {
+                return;
+            }
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": done,
+                    "found": found.load(std::sync::atomic::Ordering::Relaxed),
+                    "status": scan_status_line(done, total_files, cached, current),
+                    "cancelled": false,
+                    "total": total_files,
+                    "cached": cached,
+                    "parsed": parsed.load(std::sync::atomic::Ordering::Relaxed),
+                    "bytes_to_parse": bytes_to_parse,
+                    "bytes_parsed": bytes_parsed.load(std::sync::atomic::Ordering::Relaxed),
+                }),
+            );
+        };
         std::thread::scope(|scope| {
-            let worker_count = SCAN_CONCURRENCY.min(total).max(1);
+            let worker_count = scan_worker_count(workers, total);
             for _ in 0..worker_count {
-                let app_handle = &app_handle;
                 let cancel_token = &cancel_token;
                 let list = &list;
+                let file_keys = &file_keys;
                 let slots = &slots;
                 let next_index = &next_index;
                 let completed = &completed;
                 let found = &found;
-                scope.spawn(move || loop {
-                    // Honour cancellation before starting the next parse
-                    // (I/O can be slow) -- a parse already in flight is not
-                    // interrupted, same blind spot the patch loop's
-                    // decal-flush pass has (#193).
-                    if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= total {
-                        break;
-                    }
-                    let file = &list[idx];
-                    let file_name = file
+                let skipped = &skipped;
+                let in_flight = &in_flight;
+                let emit_progress = &emit_progress;
+                let plan = &plan;
+                let parsed = &parsed;
+                let bytes_parsed = &bytes_parsed;
+                let file_name_at = move |i: usize| {
+                    list[i]
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
-                        .to_string();
+                        .to_string()
+                };
+                scope.spawn(move || {
+                    loop {
+                        // Honour cancellation before starting the next parse
+                        // (I/O can be slow) -- a parse already in flight is not
+                        // interrupted, same blind spot the patch loop's
+                        // decal-flush pass has (#193).
+                        if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+                        let Some(&idx) = plan
+                            .order
+                            .get(next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                        else {
+                            break;
+                        };
+                        let file = &list[idx];
+                        let file_name = file
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        // Sent when a demo starts too, not only when one finishes:
+                        // before #433 a one-demo folder showed a bare "Scanning..."
+                        // for the whole parse, since its first finish was its last.
+                        // The first of these also carries the total (`0 / N`).
+                        in_flight
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .push(idx);
+                        emit_progress(
+                            completed.load(std::sync::atomic::Ordering::Relaxed),
+                            Some(&file_name),
+                            false,
+                        );
 
-                    let serialized = scan_demo_for_highlights_with_analysis(file).ok().map(
-                        |(
-                            (
-                                tickrate,
-                                streaks,
-                                is_pov,
-                                local_player_index,
-                                playback_frames,
-                                match_start_tick,
-                                frame_times_arc,
-                            ),
-                            analysis,
-                        )| {
+                        let scanned = scan_demo_for_highlights_with_analysis(file);
+                        if let Err(reason) = &scanned {
+                            log::warn!("Scan skipped {}: {}", file.display(), reason);
+                            skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
+                                idx,
+                                file_name.clone(),
+                                plain_scan_failure(file, reason),
+                            ));
+                        }
+                        let serialized = scanned.ok().map(|(highlights, analysis)| {
                             // Pre-warm the analyzer cache with the Analysis
                             // this scan already computed, so opening this
                             // demo in the Demo Analyzer afterward hits the
@@ -1285,50 +2382,50 @@ pub async fn scan_directory_impl(
                             // Best-effort/silent, and safe under concurrency:
                             // keyed per demo path, not one shared cache.
                             native::warm_analyzer_cache(file, &analysis);
+                            serialized_demo(
+                                file,
+                                file_name.clone(),
+                                file_keys[idx].clone(),
+                                highlights,
+                                &analysis,
+                            )
+                        });
 
-                            let serialized_streaks: Vec<SerializedStreak> = streaks
-                                .into_iter()
-                                .map(|mut s| {
-                                    s.match_start_tick = match_start_tick;
-                                    s.frame_times = frame_times_arc.clone();
-                                    SerializedStreak::from(s)
-                                })
-                                .collect();
+                        if serialized.is_some() {
+                            found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
 
-                            SerializedDemo {
-                                path: file.to_string_lossy().to_string(),
-                                name: file_name.clone(),
-                                tickrate,
-                                is_pov,
-                                local_player_index,
-                                playback_frames,
-                                streaks: serialized_streaks,
-                            }
-                        },
-                    );
-
-                    if serialized.is_some() {
-                        found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let was_cached = plan.fresh[idx];
+                        if !was_cached {
+                            parsed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            bytes_parsed
+                                .fetch_add(plan.sizes[idx], std::sync::atomic::Ordering::Relaxed);
+                        }
+                        let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        let still_running = {
+                            let mut running = in_flight.lock().unwrap_or_else(|p| p.into_inner());
+                            running.retain(|&i| i != idx);
+                            running.first().copied()
+                        };
+                        let current = still_running.map(file_name_at);
+                        // A parse takes seconds, so each one reports; so does
+                        // the last cached demo, which the throttle could
+                        // otherwise hold back until the first parse ends.
+                        emit_progress(done, current.as_deref(), !was_cached || done == cached);
                     }
-                    slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
-
-                    let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        serde_json::json!({
-                            "scanned": done,
-                            "found": found.load(std::sync::atomic::Ordering::Relaxed),
-                            "status": format!("Scanning {} / {} — {}", done, total_files, file_name),
-                            "cancelled": false
-                        }),
-                    );
                 });
             }
         });
 
-        let results: Vec<SerializedDemo> =
-            slots.into_inner().unwrap_or_else(|p| p.into_inner()).into_iter().flatten().collect();
+        let results: Vec<SerializedDemo> = slots
+            .into_inner()
+            .unwrap_or_else(|p| p.into_inner())
+            .into_iter()
+            .flatten()
+            .collect();
         let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
+        let skipped = skipped_demo_rows(skipped.into_inner().unwrap_or_else(|p| p.into_inner()));
 
         // ── Final progress event (complete or cancelled) ────────────────────
         let _ = app_handle.emit(
@@ -1337,11 +2434,18 @@ pub async fn scan_directory_impl(
                 "scanned": completed.load(std::sync::atomic::Ordering::Relaxed),
                 "found": results.len() as u32,
                 "status": if was_cancelled { "Cancelled" } else { "Complete" },
-                "cancelled": was_cancelled
+                "cancelled": was_cancelled,
+                "unchanged": unchanged,
+                "skipped": skipped
             }),
         );
 
-        Ok(results)
+        Ok(ScanOutcome {
+            demos: results,
+            unchanged,
+            copies,
+            cancelled: was_cancelled,
+        })
     }))
     .await;
 
@@ -1359,12 +2463,9 @@ pub async fn scan_directory_impl(
 // UI. Each output file is marked with a hidden `.dodstudio_preview` sidecar so
 // it's never mistaken for a real recorded demo.
 //
-// Two entry points share this core:
-//   - `launch_demo_preview`   — single demo, launches HLAE via `+viewdemo`
-//     directly against the patched preview once it's on disk.
-//   - `generate_all_previews` — arbitrary demos in one flat streak list (the
-//     grouping above splits them back out), patched to disk only; the user
-//     loads them manually afterwards.
+// `launch_demo_preview` uses it for a single demo when the game can't play
+// the original in place (#434), then launches HLAE via `+viewdemo` against
+// the patched preview once it's on disk.
 
 fn write_hidden_sidecar(path: &Path) -> std::io::Result<()> {
     use std::fs::OpenOptions;
@@ -1383,8 +2484,8 @@ fn write_hidden_sidecar(path: &Path) -> std::io::Result<()> {
 /// builds a minimal `PatcherConfig` carrying just the fields
 /// `build_hlae_process` reads (hlae_path/game_path/resolution/
 /// goldsrc_hooks_dll_path). `goldsrc_hooks_dll_path` matters only to callers
-/// that actually launch HLAE (`launch_demo_preview`) — `generate_all_previews`
-/// never spawns a process, so it passes `None` here and it's simply unused.
+/// that launch HLAE (`launch_demo_preview`); one that never spawns a process
+/// passes `None`.
 fn resolve_preview_env(
     hlae_path: &str,
     game_path: &str,
@@ -1402,17 +2503,14 @@ fn resolve_preview_env(
         return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
     }
 
-    let dod_dir = hl_p
-        .parent()
-        .map(|p| p.join("dod"))
+    let dod_dir = native::shared::paths::mod_dir_for_exe(hl_p)
         .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string())?;
-    std::fs::create_dir_all(&dod_dir)
-        .map_err(crate::messages::failed_to_create_dod_directory)?;
+    std::fs::create_dir_all(&dod_dir).map_err(crate::messages::failed_to_create_dod_directory)?;
 
     let patcher_config = PatcherConfig {
         hlae_path: hlae_path.to_string(),
         game_path: game_path.to_string(),
-        goldsrc_hooks_dll_path,
+        goldsrc_hooks_dll_path: crate::updater_manager::allowed_hook_dll(goldsrc_hooks_dll_path),
         ..PatcherConfig::default()
     };
     Ok((patcher_config, dod_dir))
@@ -1433,7 +2531,11 @@ fn patch_bookmark_previews(
     if streaks.is_empty() {
         return Err(crate::messages::NO_HIGHLIGHTS_TO_PREVIEW.to_string());
     }
-    let capture_streaks: Vec<CaptureStreak> = streaks.into_iter().map(CaptureStreak::from).collect();
+    let capture_streaks: Vec<CaptureStreak> =
+        streaks.into_iter().map(CaptureStreak::from).collect();
+    // Same check as a capture batch (#196): a preview patched from a
+    // different file crashes the game the same way.
+    native::patch::check_sources_unchanged(&capture_streaks)?;
     let jobs = build_preview_patch_jobs(capture_streaks, Some(dod_dir));
     if jobs.is_empty() {
         return Err(crate::messages::FAILED_TO_BUILD_PREVIEW_JOBS.to_string());
@@ -1442,7 +2544,9 @@ fn patch_bookmark_previews(
     let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut generated = 0usize;
     for job in &jobs {
-        let sidecar_path = job.output_demo.with_extension(native::shared::paths::PREVIEW_SIDECAR_EXT);
+        let sidecar_path = job
+            .output_demo
+            .with_extension(native::shared::paths::PREVIEW_SIDECAR_EXT);
         if job.output_demo.is_file() && sidecar_path.is_file() {
             // Already previewed in an earlier session — the bookmark set is
             // derived purely from this demo's own highlights, which don't
@@ -1467,15 +2571,37 @@ fn patch_bookmark_previews(
 /// `+viewdemo <stem>_preview`.
 #[tauri::command]
 pub async fn launch_demo_preview(
+    app: tauri::AppHandle,
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
+    // The saved resolution, as Launch Game uses it (#358): the preview
+    // config otherwise keeps PatcherConfig's 1280x720 default.
+    let resolution = {
+        let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = settings_state
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (guard.resolution_width, guard.resolution_height)
+    };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        let (mut patcher_config, dod_dir) =
+            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        (
+            patcher_config.resolution_width,
+            patcher_config.resolution_height,
+        ) = resolution;
+        // The original demo, untouched, when the game can play it in place (#434).
+        if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
+            return crate::preview_in_place::launch(app, &patcher_config, &arg);
+        }
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        let job = jobs.first().ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+        let job = jobs
+            .first()
+            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
 
         let preview_stem = job
             .output_demo
@@ -1483,30 +2609,152 @@ pub async fn launch_demo_preview(
             .and_then(|s| s.to_str())
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
 
-        let mut cmd = patcher_config.build_hlae_process(&format!("+viewdemo {}", preview_stem));
-        cmd.spawn()
+        // With the hook DLL, the demo goes over its pipe once the game is up:
+        // on the launch line its map loads before config.cfg/movie.cfg set
+        // brightness and gamma, so the world is built darker than the models
+        // are lit (#662, the same as #705 for batches). Without the DLL there
+        // is no pipe, so the launch line keeps it.
+        let line = format!("viewdemo {preview_stem}");
+        let over_pipe = patcher_config.goldsrc_hooks_dll().is_some();
+        let before = running_game_pids();
+        let extra = if over_pipe {
+            String::new()
+        } else {
+            format!("+{line}")
+        };
+        let mut cmd = patcher_config.build_hlae_process(&extra);
+        let launcher = cmd
+            .spawn()
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
+        watch_for_error_dialogs(app, launcher);
+        if over_pipe {
+            std::thread::spawn(move || {
+                crate::preview_in_place::send_when_ready(&before, &[line]);
+            });
+        }
 
         Ok(())
     }))
     .await
 }
 
-/// Patches every demo represented in `streaks` into its own bookmarked
-/// `<stem>_preview.dem` without launching HLAE, skipping any demo that
-/// already has one from an earlier run. Resolves to the number *freshly
-/// generated* this call so the frontend can report an accurate completion
-/// toast rather than re-counting demos that didn't need any work.
+/// After a preview or Launch Game: reports any error box the game, the HLAE
+/// launcher or its injector shows (`native::sys::dialogs`) as an
+/// `external_error` event, each box once. Report only, unlike a batch: the
+/// user is at the game, so the box stays for them to close. Stops once the
+/// launcher has exited and no game has been running for 5 seconds.
+pub(crate) fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
+    std::thread::spawn(move || {
+        let launcher_pid = launcher.id();
+        let mut launcher_running = true;
+        let mut reported: Vec<isize> = Vec::new();
+        let mut last_game_seen = std::time::Instant::now();
+        let mut sys = native::sys::process::snapshot();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if launcher_running && !matches!(launcher.try_wait(), Ok(None)) {
+                launcher_running = false;
+            }
+            native::sys::process::refresh(&mut sys);
+            let game_pids = native::sys::process::game_pids_in(&sys);
+            let mut launcher_pids = native::sys::process::injector_pids_in(&sys, launcher_pid);
+            if launcher_running {
+                launcher_pids.push(launcher_pid);
+            }
+            if !game_pids.is_empty() {
+                last_game_seen = std::time::Instant::now();
+            }
+            for dialog in native::sys::dialogs::error_dialogs(&game_pids, &launcher_pids) {
+                if reported.contains(&dialog.window) {
+                    continue;
+                }
+                reported.push(dialog.window);
+                log_markdown(&format!(
+                    "[launch] Error box from PID {}: {}",
+                    dialog.pid,
+                    dialog.full_text()
+                ));
+                let _ = app.emit("external_error", dialog.summary());
+            }
+            if !launcher_running
+                && launcher_pids.is_empty()
+                && last_game_seen.elapsed() > std::time::Duration::from_secs(5)
+            {
+                break;
+            }
+        }
+    });
+}
+
+/// Process ids of every running `hl.exe` -- the games Studio could be talking
+/// to. `hlae.exe` is left out: it is the launcher, not the game.
+pub(crate) fn running_game_pids() -> Vec<u32> {
+    native::sys::process::game_pids()
+}
+
+/// Launch Preview for a game that is already running (#413): patches the
+/// same `<stem>_preview.dem` `launch_demo_preview` would (reusing one already
+/// on disk), then, instead of launching a second game, sends
+/// `viewdemo <stem>_preview` to the running one over its hook DLL's pipe.
+///
+/// Resolves to the command sent, or `None` when no running game takes
+/// commands -- one Studio didn't start, with its hooks off, or started with
+/// other launch settings (#666) -- so the caller can fall back to the
+/// "already running" prompt.
 #[tauri::command]
-pub async fn generate_all_previews(
+pub async fn send_preview_to_running_game(
+    app: tauri::AppHandle,
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
-) -> Result<usize, String> {
+    goldsrc_hooks_dll_path: Option<String>,
+) -> Result<Option<String>, String> {
+    let request = LaunchRequest {
+        hlae_path: Some(hlae_path.clone()),
+        game_path: Some(game_path.clone()),
+        goldsrc_hooks_dll_path: goldsrc_hooks_dll_path.clone(),
+        ..LaunchRequest::default()
+    };
+    let launch = launch_config(&saved_settings(&app), &request);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, None)?;
-        let (_jobs, generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        Ok(generated)
+        // Only a game started with the settings a launch would use now: a
+        // preview sent to any other plays at the old resolution or install.
+        let pids =
+            match native::patch::launch_settings::check_running_game(&launch.launch_settings()) {
+                RunningGameCheck::Match { pid } => vec![pid],
+                RunningGameCheck::None | RunningGameCheck::Mismatch { .. } => return Ok(None),
+            };
+        let (patcher_config, dod_dir) =
+            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
+            return crate::preview_in_place::send_to_running(&pids, &arg);
+        }
+        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
+        let job = jobs
+            .first()
+            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+        let preview_stem = job
+            .output_demo
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
+
+        let command = format!("viewdemo {preview_stem}");
+        for pid in pids {
+            match native::sys::game_remote::send_console_commands(
+                pid,
+                std::slice::from_ref(&command),
+            )
+            .map_err(crate::messages::failed_to_send_to_running_game)?
+            {
+                native::sys::game_remote::Sent::Delivered => {
+                    log::info!("[preview] sent \"{command}\" to the running game (pid {pid})");
+                    return Ok(Some(command));
+                }
+                native::sys::game_remote::Sent::NotListening => continue,
+            }
+        }
+        Ok(None)
     }))
     .await
 }
@@ -1568,7 +2816,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
             .collect())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(crate::messages::background_task_crashed)?
 }
 
 // ── Standalone Game Launch ──────────────────────────────────────────────────────
@@ -1588,14 +2836,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
 /// command-line args that config.cfg/movie.cfg can still override).
 #[tauri::command]
 pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String> {
-    let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-    let settings = {
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        guard.clone()
-    };
+    let settings = saved_settings(&app);
 
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         if settings.hlae_path.trim().is_empty() || settings.hl_path.trim().is_empty() {
@@ -1608,22 +2849,138 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
         }
 
-        let patcher_config = PatcherConfig {
-            hlae_path: settings.hlae_path.clone(),
-            game_path: settings.hl_path.clone(),
-            resolution_width: settings.resolution_width,
-            resolution_height: settings.resolution_height,
-            ffmpeg_capture: settings.ffmpeg_capture,
-            ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(&settings.ffmpeg_capture_codec),
-            goldsrc_hooks_dll_path: settings.goldsrc_hooks_dll_path.clone(),
-            ..PatcherConfig::default()
-        };
-
+        let patcher_config = launch_config(&settings, &LaunchRequest::default());
         let mut cmd = patcher_config.build_hlae_process("");
-        cmd.spawn()
+        let launcher = cmd
+            .spawn()
             .map_err(crate::messages::failed_to_launch_hlae)?;
+        watch_for_error_dialogs(app, launcher);
+        // Configuration > Players' box (#428), once the game takes commands.
+        crate::players_tab::send_when_listening(settings.players.use_in_game);
 
         Ok(())
+    }))
+    .await
+}
+
+// ── Reusing a running game (#666) ─────────────────────────────────────────────
+//
+// Some settings only take effect when the game starts (which install, the
+// resolution). Every path that would reuse a running game first checks it
+// was started with the settings a launch would use now; one that wasn't is
+// closed and started again, after the frontend asks.
+
+pub(crate) fn saved_settings(app: &tauri::AppHandle) -> crate::settings_manager::AppSettings {
+    let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+    let guard = settings_state
+        .inner
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    guard.clone()
+}
+
+/// Launch settings a caller has that may not be saved yet: Launch Preview's
+/// paths, a capture batch's payload. Anything left out comes from the saved
+/// settings, as Launch Game and Review use them.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct LaunchRequest {
+    #[serde(default)]
+    pub hlae_path: Option<String>,
+    #[serde(default)]
+    pub game_path: Option<String>,
+    #[serde(default)]
+    pub goldsrc_hooks_dll_path: Option<String>,
+    #[serde(default)]
+    pub resolution_width: Option<i32>,
+    #[serde(default)]
+    pub resolution_height: Option<i32>,
+}
+
+/// The config a launch from `settings` with `request` on top starts the game
+/// with: Launch Game launches from exactly this, and the running-game check
+/// compares against it.
+pub(crate) fn launch_config(
+    settings: &crate::settings_manager::AppSettings,
+    request: &LaunchRequest,
+) -> PatcherConfig {
+    let pick = |given: &Option<String>, saved: &str| {
+        given
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| saved.to_string())
+    };
+    PatcherConfig {
+        hlae_path: pick(&request.hlae_path, &settings.hlae_path),
+        game_path: pick(&request.game_path, &settings.hl_path),
+        resolution_width: request
+            .resolution_width
+            .unwrap_or(settings.resolution_width),
+        resolution_height: request
+            .resolution_height
+            .unwrap_or(settings.resolution_height),
+        ffmpeg_capture: settings.ffmpeg_capture,
+        ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(
+            &settings.ffmpeg_capture_codec,
+        ),
+        goldsrc_hooks_dll_path: crate::updater_manager::allowed_hook_dll(
+            request
+                .goldsrc_hooks_dll_path
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| settings.goldsrc_hooks_dll_path.clone()),
+        ),
+        ..PatcherConfig::default()
+    }
+}
+
+/// Whether a game is running, and whether it was started with the launch
+/// settings `request` (over the saved ones) would start one with.
+#[tauri::command]
+pub async fn check_running_game(
+    app: tauri::AppHandle,
+    request: Option<LaunchRequest>,
+) -> Result<RunningGameCheck, String> {
+    let launch = launch_config(&saved_settings(&app), &request.unwrap_or_default());
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let check = native::patch::launch_settings::check_running_game(&launch.launch_settings());
+        if let RunningGameCheck::Mismatch {
+            pid,
+            running,
+            wanted,
+            differs,
+        } = &check
+        {
+            log_markdown(&format!(
+                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}",
+                running.exe,
+                running.width,
+                running.height,
+                wanted.exe,
+                launch.resolution_width,
+                launch.resolution_height,
+            ));
+        }
+        Ok(check)
+    }))
+    .await
+}
+
+/// How long a game gets to close before the restart gives up.
+const CLOSE_GAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Closes game `pid` so it can start again with the settings Studio has now,
+/// and resolves once it has gone.
+#[tauri::command]
+pub async fn close_running_game(pid: u32) -> Result<(), String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        log_markdown(&format!(
+            "[launch] Closing game {pid} to start it with the current launch settings"
+        ));
+        if native::sys::process::close_game(pid, CLOSE_GAME_TIMEOUT) {
+            Ok(())
+        } else {
+            Err(crate::messages::GAME_DID_NOT_CLOSE.to_string())
+        }
     }))
     .await
 }
@@ -1675,44 +3032,63 @@ pub async fn launch_obs(app: tauri::AppHandle) -> Result<(), String> {
 // before launching, and let the user force-kill stragglers instead of
 // hunting them down in Task Manager.
 
-fn is_engine_process_name(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower == "hl.exe" || lower == "hlae.exe"
-}
+/// The game and its launcher: what Launch Preview and Kill Engine look for.
+const ENGINE_PROCESS_NAMES: &[&str] = &["hl.exe", "hlae.exe"];
 
 /// True if an OBS Studio process is currently running, under any of its
 /// installed binary names. Used to turn a bare "could not connect" into a
 /// deterministic answer instead of asking the user to interpret a raw OS
 /// socket error themselves.
 fn is_obs_process_running() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes().values().any(|p| {
-        let lower = p.name().to_lowercase();
-        lower == "obs64.exe" || lower == "obs32.exe" || lower == "obs.exe"
-    })
+    native::sys::process::is_running(&["obs64.exe", "obs32.exe", "obs.exe"])
 }
 
 /// True if any `hl.exe` or `hlae.exe` process is currently running.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_engine_processes() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes()
-        .values()
-        .any(|p| is_engine_process_name(p.name()))
+    native::sys::process::is_running(ENGINE_PROCESS_NAMES)
+}
+
+/// Steam's state before a game launch: "not_running", "signed_out" or
+/// "ready". `hl.exe` started without Steam exits straight away, reported
+/// only as "Failed to initalize authentication interface".
+#[tauri::command]
+pub async fn steam_state() -> Result<String, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        Ok(native::sys::steam::state().as_str().to_string())
+    }))
+    .await
+}
+
+/// Starts Steam from where it recorded its own install. Steam outlives
+/// DoD Studio, so the child is not tracked.
+///
+/// Handed to `explorer.exe`, which passes it to the running shell and exits,
+/// so Steam's parent is the shell rather than DoD Studio. Started directly,
+/// Steam joined any job object DoD Studio runs in -- `cargo run`, under
+/// `npm run tauri dev`, puts it in one that kills every process inside when
+/// cargo exits -- so closing or rebuilding Studio closed Steam too.
+#[tauri::command(async)]
+pub fn start_steam() -> Result<(), String> {
+    let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
+    // The registry spells it `c:/program files (x86)/steam/steam.exe`, and
+    // explorer.exe reads a leading `/` in an argument as a switch.
+    let exe = exe.to_string_lossy().replace('/', "\\");
+    std::process::Command::new("explorer.exe")
+        .arg(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
 }
 
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn kill_engine_processes() -> Result<(), String> {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
+    let sys = native::sys::process::snapshot();
     for process in sys.processes().values() {
-        if is_engine_process_name(process.name())
-            && !process.kill() {
-                log::warn!("Failed to kill engine process pid={}", process.pid());
-            }
+        if native::sys::process::is_named(process, ENGINE_PROCESS_NAMES) && !process.kill() {
+            log::warn!("Failed to kill engine process pid={}", process.pid());
+        }
     }
     Ok(())
 }
@@ -1737,27 +3113,26 @@ pub struct PreviewFileSummary {
     pub modified_unix_secs: f64,
 }
 
-/// Resolves the `dod` directory to sweep, accepting either an `hl.exe` path
-/// or the `dod` directory itself (mirrors `resolve_preview_env`'s
-/// hl.exe-relative resolution, but tolerates being pointed at the folder
-/// directly since the frontend may pass either).
+/// Resolves the game folder to sweep (`dod` unless the Game folder setting
+/// says otherwise, #402), accepting either an `hl.exe` path or that folder
+/// itself (mirrors `resolve_preview_env`'s hl.exe-relative resolution, but
+/// tolerates being pointed at the folder directly since the frontend may pass
+/// either).
 fn resolve_dod_dir_for_sweep(game_dir: &str) -> Result<PathBuf, String> {
     let p = Path::new(game_dir);
     if p.is_file() {
-        return p
-            .parent()
-            .map(|parent| parent.join("dod"))
+        return native::shared::paths::mod_dir_for_exe(p)
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string());
     }
     if p.is_dir() {
+        let game_folder = native::shared::paths::game_folder();
         let is_dod_dir = p
             .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase() == "dod")
-            .unwrap_or(false);
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(&game_folder));
         if is_dod_dir {
             return Ok(p.to_path_buf());
         }
-        return Ok(p.join("dod"));
+        return Ok(native::shared::paths::mod_dir(p));
     }
     Err(crate::messages::game_directory_not_found(game_dir))
 }
@@ -1772,8 +3147,8 @@ pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileS
             return Ok(Vec::new());
         }
 
-        let entries = std::fs::read_dir(&dod_dir)
-            .map_err(crate::messages::failed_to_read_dod_directory)?;
+        let entries =
+            std::fs::read_dir(&dod_dir).map_err(crate::messages::failed_to_read_dod_directory)?;
 
         let mut results = Vec::new();
         for entry in entries.flatten() {
@@ -1781,7 +3156,11 @@ pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileS
             if !path.is_file() {
                 continue;
             }
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let file_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if !file_name.to_lowercase().ends_with("_preview.dem") {
                 continue;
             }
@@ -1794,7 +3173,9 @@ pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileS
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let sidecar_size = std::fs::metadata(&sidecar_path).map(|m| m.len()).unwrap_or(0);
+            let sidecar_size = std::fs::metadata(&sidecar_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
             let modified_unix_secs = demo_meta
                 .modified()
                 .ok()
@@ -1857,6 +3238,462 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+    use native::patch::PatchStage;
+
+    /// The running-game check compares against what a launch would use: the
+    /// caller's unsaved values over the saved settings, blanks ignored (#666).
+    #[test]
+    fn launch_config_puts_the_callers_values_over_the_saved_ones() {
+        let saved = crate::settings_manager::AppSettings {
+            hlae_path: "C:/hlae/hlae.exe".into(),
+            hl_path: "C:/pre/hl.exe".into(),
+            goldsrc_hooks_dll_path: Some("C:/hooks.dll".into()),
+            resolution_width: 1920,
+            resolution_height: 1080,
+            ..Default::default()
+        };
+        let cfg = launch_config(&saved, &LaunchRequest::default());
+        assert_eq!(cfg.game_path, "C:/pre/hl.exe");
+        assert_eq!((cfg.resolution_width, cfg.resolution_height), (1920, 1080));
+        assert_eq!(cfg.goldsrc_hooks_dll_path.as_deref(), Some("C:/hooks.dll"));
+
+        let request = LaunchRequest {
+            game_path: Some("C:/post/hl.exe".into()),
+            hlae_path: Some("  ".into()),
+            resolution_width: Some(3440),
+            resolution_height: Some(1440),
+            ..Default::default()
+        };
+        let cfg = launch_config(&saved, &request);
+        assert_eq!(cfg.game_path, "C:/post/hl.exe");
+        assert_eq!(cfg.hlae_path, "C:/hlae/hlae.exe");
+        assert_eq!((cfg.resolution_width, cfg.resolution_height), (3440, 1440));
+    }
+
+    #[test]
+    fn the_patching_line_names_what_each_job_is_doing() {
+        let progress = PatchProgress::new(3);
+        assert_eq!(progress.summary(0).0, "Patching 0 / 3");
+
+        progress.set(0, PatchStage::ClearingDecals);
+        assert_eq!(progress.summary(0).0, "Patching 0 / 3: clearing decals");
+
+        progress.set(0, PatchStage::Writing { percent: 40 });
+        let (line, index) = progress.summary(0);
+        assert_eq!(line, "Patching 0 / 3: writing, 40%");
+        assert!((index - 0.4).abs() < 1e-9);
+
+        progress.set(1, PatchStage::ClearingDecals);
+        progress.set(2, PatchStage::Writing { percent: 60 });
+        assert_eq!(
+            progress.summary(0).0,
+            "Patching 0 / 3: 1 clearing decals, 2 writing (50% on average)"
+        );
+
+        progress.finish(0);
+        progress.finish(2);
+        assert_eq!(progress.summary(2).0, "Patching 2 / 3: clearing decals");
+    }
+
+    #[test]
+    fn percentages_are_throttled_but_stage_changes_are_not() {
+        let progress = PatchProgress::new(1);
+        assert!(progress.set(0, PatchStage::ClearingDecals));
+        assert!(progress.set(0, PatchStage::Writing { percent: 0 }));
+        // Within 33ms of the last send.
+        assert!(!progress.set(0, PatchStage::Writing { percent: 1 }));
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        assert!(progress.set(0, PatchStage::Writing { percent: 2 }));
+    }
+
+    #[test]
+    fn a_take_folders_size_counts_its_subfolders() {
+        let dir = Scratch::new("take_folder_bytes");
+        std::fs::create_dir_all(dir.path().join("hud")).unwrap();
+        std::fs::write(dir.path().join("sound.wav"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.path().join("hud").join("00000.tga"), vec![0u8; 50]).unwrap();
+        assert_eq!(folder_bytes(dir.path()), 150);
+        assert_eq!(folder_bytes(&dir.path().join("missing")), 0);
+    }
+
+    #[test]
+    fn a_skipped_demo_gets_a_plain_reason_from_its_contents() {
+        let dir = Scratch::new("plain_scan_failure");
+        let short = dir.path().join("short.dem");
+        let text = dir.path().join("text.dem");
+        let corrupt = dir.path().join("corrupt.dem");
+        std::fs::write(&short, b"hello").unwrap();
+        std::fs::write(&text, vec![b'x'; 2048]).unwrap();
+        let mut demo = b"HLDEMO\0\0".to_vec();
+        demo.resize(2048, 0xAB);
+        std::fs::write(&corrupt, demo).unwrap();
+
+        let r = "Failed to read demo header: failed to fill whole buffer";
+        assert_eq!(
+            plain_scan_failure(&short, r),
+            crate::messages::SCAN_FAIL_TOO_SHORT
+        );
+        assert_eq!(
+            plain_scan_failure(&text, "Failed to parse demo: x"),
+            crate::messages::SCAN_FAIL_NOT_A_DEMO
+        );
+        assert_eq!(
+            plain_scan_failure(&corrupt, "Failed to parse demo: x"),
+            crate::messages::SCAN_FAIL_CORRUPT
+        );
+        let io = "Failed to read file: Access is denied. (os error 5)";
+        assert_eq!(plain_scan_failure(&corrupt, io), io);
+    }
+
+    #[test]
+    fn skipped_demos_are_reported_in_file_order_with_their_reason() {
+        let rows = skipped_demo_rows(vec![
+            (5, "b.dem".into(), "Failed to parse demo: eof".into()),
+            (2, "a.dem".into(), "Failed to read file: denied".into()),
+        ]);
+        assert_eq!(rows[0]["name"], "a.dem");
+        assert_eq!(rows[0]["reason"], "Failed to read file: denied");
+        assert_eq!(rows[1]["name"], "b.dem");
+    }
+
+    #[test]
+    fn the_scan_uses_the_worker_setting_within_its_range() {
+        assert_eq!(scan_worker_count(5, 100), 5);
+        assert_eq!(scan_worker_count(0, 100), 1);
+        assert_eq!(scan_worker_count(20, 100), SCAN_WORKERS_MAX);
+        // Never more threads than demos.
+        assert_eq!(scan_worker_count(8, 3), 3);
+        assert_eq!(scan_worker_count(4, 0), 1);
+    }
+
+    #[test]
+    fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
+        assert_eq!(
+            scan_status_line(0, 1, 0, Some("a.dem")),
+            "Scanning 0 / 1 — a.dem"
+        );
+        assert_eq!(scan_status_line(1, 1, 0, None), "Scanning 1 / 1");
+        assert_eq!(
+            scan_status_line(3, 10, 2, Some("a.dem")),
+            "Scanning 3 / 10 (2 from the analyzer cache) — a.dem"
+        );
+    }
+
+    #[test]
+    fn scan_progress_is_throttled_to_one_line_per_33_ms() {
+        let last = std::sync::atomic::AtomicU32::new(u32::MAX);
+        assert!(
+            progress_emit_due(&last, 0),
+            "the first line always goes out"
+        );
+        assert!(!progress_emit_due(&last, 20));
+        assert!(progress_emit_due(&last, 33));
+        assert!(!progress_emit_due(&last, 40));
+    }
+
+    #[test]
+    fn the_listing_line_counts_folders_and_demos() {
+        assert_eq!(
+            listing_status_line(12, 3),
+            "Looking for demos: 12 folders read, 3 demos found"
+        );
+    }
+
+    /// A drive-like tree: two demos to find, and deleted ones in the
+    /// Recycle Bin and System Volume Information.
+    fn drive_like(scratch: &Scratch) -> PathBuf {
+        let root = scratch.path().to_path_buf();
+        for dir in [
+            "games/dod",
+            "$RECYCLE.BIN/S-1-5-21",
+            "System Volume Information",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for f in [
+            "b.dem",
+            "games/dod/a.dem",
+            "$RECYCLE.BIN/S-1-5-21/$R1A2B3C.dem",
+            "System Volume Information/c.dem",
+        ] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn listing_finds_demos_in_name_order_and_skips_system_folders() {
+        let scratch = Scratch::new("list_scan_demos");
+        let root = drive_like(&scratch);
+        let mut list = Vec::new();
+        let mut last = (0, 0);
+        let listed = list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &std::sync::atomic::AtomicBool::new(false),
+            &mut |folders, demos| last = (folders, demos),
+        );
+        assert!(listed);
+        assert_eq!(list, [root.join("games/dod/a.dem"), root.join("b.dem")]);
+        // The root, games and games/dod; the two system folders not counted.
+        assert_eq!(last, (3, 2));
+    }
+
+    #[test]
+    fn cancel_stops_the_listing_and_says_so() {
+        let scratch = Scratch::new("list_scan_cancel");
+        let root = drive_like(&scratch);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut list = Vec::new();
+        let mut calls = 0;
+        let listed = list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &cancel,
+            &mut |_, _| {
+                calls += 1;
+                // The first call is the start line; cancel on the next.
+                if calls == 2 {
+                    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            },
+        );
+        assert!(!listed);
+        assert_eq!(calls, 2, "nothing more is read once cancelled");
+
+        // Cancelled before it starts: nothing is listed.
+        let mut list = Vec::new();
+        assert!(!list_scan_demos(
+            std::slice::from_ref(&root),
+            &mut list,
+            &cancel,
+            &mut |_, _| {}
+        ));
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn a_known_unchanged_demo_is_skipped_and_a_changed_one_is_not() {
+        let scratch = Scratch::new("skip_known");
+        let a = scratch.path().join("a.dem");
+        let b = scratch.path().join("b.dem");
+        let c = scratch.path().join("c.dem");
+        std::fs::write(&a, b"HLDEMO aaaa").unwrap();
+        std::fs::write(&b, b"HLDEMO bbbb").unwrap();
+        std::fs::write(&c, b"HLDEMO cccc").unwrap();
+        let key_b_before = demo_file_key(&b).unwrap();
+        std::fs::write(&b, b"HLDEMO bbbb, re-recorded").unwrap();
+
+        let known = vec![
+            // Same file, different case and slashes: still a match.
+            KnownDemo {
+                path: a.to_string_lossy().to_uppercase().replace('\\', "/"),
+                file_key: demo_file_key(&a).unwrap(),
+            },
+            // Changed on disk since it was queued: scanned again.
+            KnownDemo {
+                path: b.to_string_lossy().into_owned(),
+                file_key: key_b_before,
+            },
+        ];
+        let (keep, keys, unchanged, copies) = skip_known(vec![a, b.clone(), c.clone()], &known);
+
+        assert_eq!(unchanged, 1);
+        assert_eq!(keep, vec![b.clone(), c.clone()]);
+        assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
+        assert!(copies.is_empty());
+    }
+
+    /// A copy of a queued demo, and a second copy within the scan, are
+    /// reported without being kept for parsing. Within the scan the shorter
+    /// name is kept even though it sorts after its copy.
+    #[test]
+    fn identical_copies_are_skipped_before_parsing() {
+        let scratch = Scratch::new("skip_copies");
+        let queued = scratch.path().join("queued.dem");
+        let copy = scratch.path().join("queued copy.dem");
+        let fresh = scratch.path().join("fresh.dem");
+        let fresh_copy = scratch.path().join("fresh - Copy.dem");
+        std::fs::write(&queued, b"HLDEMO the queued one").unwrap();
+        std::fs::write(&copy, b"HLDEMO the queued one").unwrap();
+        std::fs::write(&fresh, b"HLDEMO a new one").unwrap();
+        std::fs::write(&fresh_copy, b"HLDEMO a new one").unwrap();
+        let known = vec![KnownDemo {
+            path: queued.to_string_lossy().into_owned(),
+            file_key: demo_file_key(&queued).unwrap(),
+        }];
+
+        let (keep, _, unchanged, copies) = skip_known(
+            vec![
+                // "fresh - Copy.dem" sorts first (' ' < '.'), as the scan's
+                // list is.
+                copy.clone(),
+                fresh_copy.clone(),
+                fresh.clone(),
+                queued.clone(),
+            ],
+            &known,
+        );
+
+        assert_eq!(keep, vec![fresh.clone()]);
+        assert_eq!(unchanged, 1);
+        assert_eq!(
+            copies,
+            vec![
+                ScanCopy {
+                    path: copy.to_string_lossy().into_owned(),
+                    same_as: queued.to_string_lossy().into_owned(),
+                    queued: true,
+                },
+                ScanCopy {
+                    path: fresh_copy.to_string_lossy().into_owned(),
+                    same_as: fresh.to_string_lossy().into_owned(),
+                    queued: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_moved_demo_is_found_by_its_key_in_a_subfolder() {
+        let scratch = Scratch::new("locate_moved");
+        let old = scratch.path().join("old");
+        let new = scratch.path().join("archive").join("2026");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        let moved = old.join("match.dem");
+        let kept = old.join("kept.dem");
+        std::fs::write(&moved, b"HLDEMO the moved one").unwrap();
+        std::fs::write(&kept, b"HLDEMO still here").unwrap();
+        let key = demo_file_key(&moved).unwrap();
+        std::fs::rename(&moved, new.join("renamed.dem")).unwrap();
+        // Same size, different content: must not be taken for it.
+        std::fs::write(new.join("decoy.dem"), b"HLDEMO the moved two").unwrap();
+
+        let demos = vec![
+            KnownDemo {
+                path: moved.to_string_lossy().into_owned(),
+                file_key: key,
+            },
+            KnownDemo {
+                path: kept.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&kept).unwrap(),
+            },
+        ];
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+
+        assert_eq!(found.len(), 1, "only the missing demo is reported");
+        assert_eq!(found[0].path, moved.to_string_lossy());
+        assert_eq!(
+            found[0].candidate.as_deref(),
+            Some(new.join("renamed.dem").to_string_lossy().as_ref())
+        );
+    }
+
+    /// A big folder listed first (a whole `dod/`) must not use up the entry
+    /// budget before a demo one folder down from its old place is reached:
+    /// the live failure that broke #477's test.
+    #[test]
+    fn a_nearby_move_is_found_even_behind_a_big_folder() {
+        let scratch = Scratch::new("locate_budget");
+        let big = scratch.path().join("big");
+        let mut deep = big.clone();
+        for level in 0..4 {
+            deep = deep.join(format!("level{level}"));
+            std::fs::create_dir_all(&deep).unwrap();
+            for i in 0..20 {
+                std::fs::write(deep.join(format!("f{i}.txt")), b"x").unwrap();
+            }
+        }
+        let project = scratch.path().join("project");
+        std::fs::create_dir_all(project.join("subfolder")).unwrap();
+        let moved = project.join("match.dem");
+        std::fs::write(&moved, b"HLDEMO moved one level down").unwrap();
+        let key = demo_file_key(&moved).unwrap();
+        std::fs::rename(&moved, project.join("subfolder").join("match.dem")).unwrap();
+
+        let demos = vec![KnownDemo {
+            path: moved.to_string_lossy().into_owned(),
+            file_key: key,
+        }];
+        // 30 entries: the big tree has 84, the project folder 1, then its
+        // subfolder 1. Depth-first from `big` spent them all first.
+        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+        assert_eq!(
+            found[0].candidate.as_deref(),
+            Some(
+                project
+                    .join("subfolder")
+                    .join("match.dem")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn a_demo_replaced_in_place_is_changed_and_an_untouched_one_is_not() {
+        let scratch = Scratch::new("changed_demos");
+        let same = scratch.path().join("same.dem");
+        let replaced = scratch.path().join("replaced.dem");
+        std::fs::write(&same, b"HLDEMO the scanned file").unwrap();
+        std::fs::write(&replaced, b"HLDEMO the scanned file, too").unwrap();
+        let demos = vec![
+            KnownDemo {
+                path: same.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&same).unwrap(),
+            },
+            KnownDemo {
+                path: replaced.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&replaced).unwrap(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "1-00".into(),
+            },
+        ];
+        std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
+        assert_eq!(
+            changed_demos(&demos),
+            vec![replaced.to_string_lossy().into_owned()]
+        );
+    }
+
+    #[test]
+    fn a_missing_demo_with_no_key_or_no_match_is_reported_without_a_candidate() {
+        let scratch = Scratch::new("locate_none");
+        std::fs::write(scratch.path().join("other.dem"), b"HLDEMO other").unwrap();
+        let gone = scratch.path().join("gone.dem");
+        let demos = vec![
+            KnownDemo {
+                path: gone.to_string_lossy().into_owned(),
+                file_key: String::new(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone2.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "999-0000000000000000".to_string(),
+            },
+        ];
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
+    }
+
+    #[test]
+    fn missing_scan_paths_names_only_the_paths_that_are_gone() {
+        let scratch = Scratch::new("missing_scan_paths");
+        let here = scratch.path().to_string_lossy().to_string();
+        let gone = scratch.path().join("deleted").to_string_lossy().to_string();
+        assert_eq!(missing_scan_paths(&[here, gone.clone()]), vec![gone]);
+    }
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {
@@ -1873,12 +3710,15 @@ mod tests {
             obs_port: 0,
             obs_password: String::new(),
             save_local_patched_copy: false,
+            hook_runs_batch: false,
+            keep_game_behind: true,
             streaks: Vec::new(),
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,
             capture_directories: vec!["D:/capture".to_string()],
             capture_fps: 300,
             obs_capture_fps: 120,
+            agr_fps: 0,
             drives: vec!["D:/capture".to_string(), "E:/capture".to_string()],
             record_start_lead: 0.0,
             record_stop_trail: 0.0,
@@ -1890,8 +3730,16 @@ mod tests {
             session_id: "session_test".to_string(),
             init_commands: vec!["exec autoexec".to_string()],
             custom_commands: vec![
-                CustomCommandPayload { command: "say after".to_string(), relation: "After".to_string(), offset_seconds: 1.0 },
-                CustomCommandPayload { command: "say unrecognized".to_string(), relation: "Sideways".to_string(), offset_seconds: 1.0 },
+                CustomCommandPayload {
+                    command: "say after".to_string(),
+                    relation: "After".to_string(),
+                    offset_seconds: 1.0,
+                },
+                CustomCommandPayload {
+                    command: "say unrecognized".to_string(),
+                    relation: "Sideways".to_string(),
+                    offset_seconds: 1.0,
+                },
             ],
             decal_flush: None,
             decal_ring_limit: None,
@@ -1927,6 +3775,23 @@ mod tests {
     }
 
     #[test]
+    fn test_config_from_payload_carries_agr_mode_and_its_fps() {
+        let mut payload = sample_payload();
+        payload.capture_mode = "agr".to_string();
+        payload.agr_fps = 60;
+        let cfg = config_from_payload(&payload);
+        assert_eq!(cfg.capture_mode, native::patch::CaptureMode::Agr);
+        assert_eq!(cfg.effective_agr_fps(), 60);
+        assert!(!cfg.ffmpeg_capture);
+
+        // Absent from an older frontend: follows Capture FPS.
+        let mut value = serde_json::to_value(sample_payload()).unwrap();
+        value.as_object_mut().unwrap().remove("agr_fps");
+        let payload: CapturePayload = serde_json::from_value(value).unwrap();
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 300);
+    }
+
+    #[test]
     fn test_config_from_payload_decal_flush_overrides_only_when_sent() {
         // Absent means "leave the pipeline default alone", so a frontend that
         // knows nothing about decals still gets the flush.
@@ -1949,7 +3814,7 @@ mod tests {
         let payload = sample_payload();
         let cfg = config_from_payload(&payload);
         // Capture Output's first entry is the sole source of primary_media_dir —
-        // there's no separate "Primary Media Dir" field anymore (removed 2026-08-17).
+        // there's no separate "Primary Media Dir" field.
         assert_eq!(cfg.primary_media_dir, Some(PathBuf::from("D:/capture")));
     }
 
@@ -1985,7 +3850,10 @@ mod tests {
     }
 
     fn read_cfg_commands_blocking(path: String) -> Result<Vec<String>, String> {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(read_cfg_commands(path))
     }
 
@@ -1996,7 +3864,10 @@ mod tests {
             "// header comment\nmirv_fov 90\n\n  mirv_movie_fps 300  \n// trailing comment\nsensitivity 3\n",
         );
         let commands = read_cfg_commands_blocking(path.clone()).unwrap();
-        assert_eq!(commands, vec!["mirv_fov 90", "mirv_movie_fps 300", "sensitivity 3"]);
+        assert_eq!(
+            commands,
+            vec!["mirv_fov 90", "mirv_movie_fps 300", "sensitivity 3"]
+        );
     }
 
     #[test]
@@ -2041,6 +3912,23 @@ mod tests {
     }
 
     #[test]
+    fn a_command_too_long_for_a_demo_frame_is_refused_in_either_list() {
+        let long = format!("echo {}", "x".repeat(59)); // 64 bytes
+        let err = first_banned_command_error(std::slice::from_ref(&long), &[]);
+        assert!(err.is_some_and(|e| e.contains("64 bytes")));
+
+        let scheduled = vec![CustomCommandPayload {
+            command: long,
+            relation: "Before".to_string(),
+            offset_seconds: 1.0,
+        }];
+        assert!(first_banned_command_error(&[], &scheduled).is_some());
+
+        let fits = format!("echo {}", "x".repeat(58)); // 63 bytes
+        assert!(first_banned_command_error(&[fits], &[]).is_none());
+    }
+
+    #[test]
     fn a_banned_command_in_init_commands_is_refused() {
         let err = first_banned_command_error(&["mirv_recordmovie_start".to_string()], &[]);
         assert!(err.is_some(), "must be refused");
@@ -2049,7 +3937,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_filename_is_no_longer_refused_in_init_commands() {
-        // Re-tiered 2026-09-05: inert in Initial Commands (see
+        // Inert in Initial Commands (see
         // cfg_scan::NOOP_IN_INIT_COMMANDS), only dangerous once scheduled.
         let err = first_banned_command_error(&["mirv_movie_filename foo".to_string()], &[]);
         assert!(err.is_none(), "{:?}", err);
@@ -2082,7 +3970,11 @@ mod tests {
     #[test]
     fn tier_2_and_tier_3_commands_are_not_refused() {
         let err = first_banned_command_error(
-            &["mirv_movie_fps 500".to_string(), "r_decals \"256\"".to_string(), "mirv_fov 90".to_string()],
+            &[
+                "mirv_movie_fps 500".to_string(),
+                "r_decals \"256\"".to_string(),
+                "mirv_fov 90".to_string(),
+            ],
             &[],
         );
         assert!(err.is_none(), "{:?}", err);
@@ -2093,7 +3985,11 @@ mod tests {
         // r_decals/mirv_fov/gl_widescreenfov are exactly how the decal flush
         // is meant to be configured when set once at demo load.
         let err = first_banned_command_error(
-            &["r_decals 512".to_string(), "mirv_fov 105".to_string(), "gl_widescreenfov 1".to_string()],
+            &[
+                "r_decals 512".to_string(),
+                "mirv_fov 105".to_string(),
+                "gl_widescreenfov 1".to_string(),
+            ],
             &[],
         );
         assert!(err.is_none(), "{:?}", err);
@@ -2115,5 +4011,82 @@ mod tests {
     fn clean_commands_are_not_refused() {
         let err = first_banned_command_error(&["sensitivity 3".to_string()], &[]);
         assert!(err.is_none());
+    }
+
+    #[test]
+    fn the_clip_tally_counts_recorded_clips_across_demos() {
+        let mut clips = ClipTally::default();
+        clips.demo_loading(3);
+        clips.fast_forward_to(1, 3);
+        assert_eq!((clips.done, clips.through_current_demo), (0, 3));
+        clips.fast_forward_to(3, 3);
+        assert_eq!(clips.done, 2);
+
+        // The next demo: all three of the first are recorded.
+        clips.demo_loading(2);
+        assert_eq!((clips.done, clips.through_current_demo), (3, 5));
+        clips.fast_forward_to(2, 2);
+        assert_eq!(clips.done, 4);
+
+        clips.session_finished();
+        assert_eq!(clips.done, 5);
+    }
+
+    fn fixture_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn a_scanned_demo_carries_the_current_highlights_version() {
+        let path = fixture_path();
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let analysis = ::analysis::Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = (
+            100.0,
+            Vec::new(),
+            true,
+            None,
+            0,
+            None,
+            std::sync::Arc::new(Vec::new()),
+        );
+        let demo = serialized_demo(&path, "ci_fixture.dem".into(), None, highlights, &analysis);
+        assert_eq!(
+            demo.highlights_version,
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+        assert!(
+            demo.highlights_version > 0,
+            "0 means 'scanned before it was recorded'"
+        );
+        let json = serde_json::to_value(&demo).unwrap();
+        assert_eq!(
+            json["highlights_version"],
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+    }
+
+    #[test]
+    fn a_demo_from_an_older_project_has_highlights_version_0() {
+        let old = r#"{"path":"D:/demos/a.dem","name":"a.dem","tickrate":100.0,"is_pov":true,
+            "local_player_index":null,"playback_frames":10,"streaks":[]}"#;
+        let demo: SerializedDemo = serde_json::from_str(old).unwrap();
+        assert_eq!(demo.highlights_version, 0);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_highlights_version() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/scan_version.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const HIGHLIGHTS_VERSION = {};",
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/scan_version.js must say `{line}`"
+        );
     }
 }

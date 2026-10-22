@@ -1,0 +1,9 @@
+# Commits `git blame` should skip. GitHub reads this file automatically; for
+# local blame, run once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only purely mechanical commits belong here, since blame attributes their
+# lines to whatever commit came before.
+
+# cargo fmt --all over the whole tree (#235)
+97f83fd3d6b7c3353b4474ec0bfb888929a9abdb

@@ -1,6 +1,5 @@
-
-use std::path::Path;
 use native::utils::demo_hasher::calculate_demo_key;
+use std::path::Path;
 
 fn main() {
     let path_a = Path::new("./local/demos/ktps8w9-gorilla_gskill_rr2_h1.dem");

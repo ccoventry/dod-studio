@@ -1,5 +1,5 @@
-use crate::nom_helper::nom_fail;
 use super::*;
+use crate::nom_helper::nom_fail;
 
 impl Doer for SvcEventReliable {
     fn id(&self) -> u8 {
