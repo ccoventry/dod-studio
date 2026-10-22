@@ -25,7 +25,9 @@ always ends the game it started, and only that one.
                                 hook log since launch (default 60 s)
     cmd <console command>       send it over the remote pipe
     shot <name>                 a frame recorded by HLAE, saved as <run>/<name>.png
-    window                      note the game window's size, minimised and foreground state
+    window                      note the game window's size, minimised and foreground state,
+                                which window holds the mouse capture, and the cursor clip
+                                when it's narrower than the screen
     clip <name> [secs] [fps]    record HLAE frames for a few seconds into <run>/<name>/
                                 and a contact sheet <run>/<name>.png (default 2 s, 30 fps);
                                 demo seconds while a demo plays
@@ -41,6 +43,15 @@ always ends the game it started, and only that one.
     click <x> <y> [2]           left-click at a point in the game window, in the same
                                 pixels as a `grab` image (client area, top left 0 0);
                                 a trailing 2 double-clicks. Same focus check as `key`
+    rawclick <x> <y> [2]        like `click`, but as a user's hand does it: no focus call,
+                                no Alt press, the pointer moved there as real motion
+                                first. Clicks whatever is at that screen point, game in
+                                front or not (#788: a first click the game eats);
+                                a trailing 0 only moves the pointer there
+    rawkey <name>               like `key`, without the focus call and its synthetic Alt;
+                                refuses unless the game is already in front
+    unfocus                     give the foreground to the taskbar, as when the game
+                                starts behind Studio or the user alt-tabs away
     move <x> <y>                put the mouse over a point (hover), same pixels
     drag <x1> <y1> <x2> <y2>    hold the left button at one point and release it at
                                 another (moving or resizing a window), same pixels
@@ -394,14 +405,20 @@ KEYS = {"esc": 0x1B, "enter": 0x0D, "tab": 0x09, "space": 0x20, "backquote": 0xC
         **{f"f{n}": 0x6F + n for n in range(1, 13)}}
 
 
-def press_key(pid, name):
+def press_key(pid, name, focus=True):
     """Presses one key in the game's window. The key goes wherever the
-    foreground is, so this refuses unless that is the game's own window."""
+    foreground is, so this refuses unless that is the game's own window.
+    Without `focus` it skips the focus call (and its synthetic Alt) and only
+    checks the game is already in front."""
     name = name.strip().lower()
     vk = KEYS.get(name) or (ord(name.upper()) if len(name) == 1 and name.isalnum() else None)
     if vk is None:
         return f"unknown key {name!r}"
-    state = focus_window(pid)
+    if focus:
+        state = focus_window(pid)
+    else:
+        fg = user32.GetForegroundWindow()
+        state = "foreground" if fg == game_hwnd(pid) else f"not foreground (the foreground window is {fg:#x})"
     if not state.startswith("foreground"):
         return f"not pressed: {state}"
     scan = user32.MapVirtualKeyW(vk, 0)
@@ -436,6 +453,56 @@ def click(pid, x, y, count=1):
         user32.mouse_event(0x0004, 0, 0, 0, 0)  # left up
         time.sleep(0.08)
     return None
+
+
+def raw_click(pid, x, y, count=1):
+    """Left-clicks at client-area point (x, y) without touching the focus:
+    no SetForegroundWindow and no synthetic Alt, which `click` sends and which
+    can use up whatever a user's first click runs into (#788). The pointer
+    travels there as real motion, in steps, the way a hand moves it."""
+    hwnd = game_hwnd(pid)
+    if not hwnd:
+        return "no visible window"
+    point = wintypes.POINT(x, y)
+    user32.ClientToScreen(hwnd, ctypes.byref(point))
+    # Absolute coordinates over the whole virtual desktop, 0..65535.
+    vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+    vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+
+    def to_abs(px, py):
+        return ((px - vx) * 65535 // max(vw - 1, 1), (py - vy) * 65535 // max(vh - 1, 1))
+
+    start = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(start))
+    flags = 0x0001 | 0x8000 | 0x4000  # MOVE | ABSOLUTE | VIRTUALDESK
+    steps = 10
+    for i in range(1, steps + 1):
+        ax, ay = to_abs(start.x + (point.x - start.x) * i // steps,
+                        start.y + (point.y - start.y) * i // steps)
+        user32.mouse_event(flags, ax, ay, 0, 0)
+        time.sleep(0.02)
+    time.sleep(0.1)
+    for _ in range(count):
+        user32.mouse_event(0x0002, 0, 0, 0, 0)  # left down
+        # A hand holds the button ~0.1 s: long enough for the game to act on
+        # the press (a double-click loads a demo on it) before the release.
+        time.sleep(0.12)
+        user32.mouse_event(0x0004, 0, 0, 0, 0)  # left up
+        time.sleep(0.08)
+    return None
+
+
+def unfocus():
+    """Hands the foreground to the taskbar, so the game is no longer in front."""
+    tray = user32.FindWindowW("Shell_TrayWnd", None)
+    if not tray:
+        return "no taskbar window"
+    user32.keybd_event(0x12, 0, 0, 0)
+    user32.SetForegroundWindow(tray)
+    user32.keybd_event(0x12, 0, 2, 0)
+    time.sleep(0.5)
+    fg = user32.GetForegroundWindow()
+    return "taskbar in front" if fg == tray else f"the foreground window is {fg:#x}"
 
 
 def move_cursor(pid, x, y):
@@ -587,7 +654,34 @@ def window_state(pid):
         return "no visible window"
     _, hwnd, w, h = best
     return (f"{w}x{h}, minimised={bool(user32.IsIconic(hwnd))}, "
-            f"foreground={user32.GetForegroundWindow() == hwnd}")
+            f"foreground={user32.GetForegroundWindow() == hwnd}, {mouse_capture(hwnd)}")
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+                ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+                ("rcCaret", wintypes.RECT)]
+
+
+def mouse_capture(hwnd):
+    """Which window of the game's thread holds the Win32 mouse capture
+    (SetCapture), if any: while one does, a click anywhere on the screen goes
+    to the game (#788). Also the cursor clip, when it's narrower than the screen."""
+    info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
+    tid = user32.GetWindowThreadProcessId(hwnd, None)
+    if not user32.GetGUIThreadInfo(tid, ctypes.byref(info)):
+        return "capture=?"
+    cap = info.hwndCapture or 0
+    who = "none" if not cap else ("game window" if cap == hwnd else f"{cap:#x}")
+    clip = wintypes.RECT()
+    user32.GetClipCursor(ctypes.byref(clip))
+    vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+    clipped = not (clip.left <= user32.GetSystemMetrics(76) and clip.right - clip.left >= vw
+                   and clip.bottom - clip.top >= vh)
+    return (f"capture={who}" + (f", clip=({clip.left},{clip.top})-({clip.right},{clip.bottom})"
+                                if clipped else ""))
 
 
 def alive(pid):
@@ -615,9 +709,11 @@ def run(args):
     console = Tail(install / "qconsole.log")
     hooklog = Tail(hook_log_path())
     # The same line Studio builds (native::patch::types::build_hlae_process).
-    game_cmd = (f"-game {args.game} -insecure -windowed -w {args.width} -h {args.height} "
+    mode = "-full" if args.fullscreen else "-windowed"
+    game_cmd = (f"-game {args.game} -insecure {mode} -w {args.width} -h {args.height} "
                 "-afxForceAlpha8 1 -condebug"
-                + (" -addons" if args.addons else ""))
+                + (" -addons" if args.addons else "")
+                + (" -demoedit" if args.demoedit else ""))
     probe_copy = None
     if args.demo and args.at_launch:
         # `+playdemo` at launch, as a batch without the hook DLL starts its primer: the demo
@@ -753,6 +849,15 @@ def run(args):
                 result["ok"] = err is None
                 if err:
                     result["note"] = err
+            elif kind == "rawclick":
+                parts = rest.split()
+                err = raw_click(pid, int(parts[0]), int(parts[1]),
+                                int(parts[2]) if len(parts) > 2 else 1)
+                result["ok"] = err is None
+                result["note"] = err or window_state(pid)
+            elif kind == "unfocus":
+                result["note"] = unfocus()
+                result["ok"] = result["note"] == "taskbar in front"
             elif kind == "move":
                 x, y = (int(v) for v in rest.split())
                 err = move_cursor(pid, x, y)
@@ -765,8 +870,8 @@ def run(args):
                 result["ok"] = err is None
                 if err:
                     result["note"] = err
-            elif kind == "key":
-                err = press_key(pid, rest)
+            elif kind in ("key", "rawkey"):
+                err = press_key(pid, rest, focus=kind == "key")
                 result["ok"] = err is None
                 if err:
                     result["note"] = err
@@ -882,6 +987,10 @@ def main():
                    help="the -game folder beside hl.exe (default dod; a copy such as dod_movies, #402)")
     p.add_argument("--addons", action="store_true",
                    help="add -addons, so dod_addon is read (as Studio does once #412 is merged)")
+    p.add_argument("--demoedit", action="store_true",
+                   help="add -demoedit, as Studio's launch line does")
+    p.add_argument("--fullscreen", action="store_true",
+                   help="-full instead of -windowed (Studio always launches windowed)")
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
     p.add_argument("--out", help="report folder (default: local/game-probe/<timestamp>)")
