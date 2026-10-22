@@ -154,7 +154,8 @@ fn fresh(calcs: u32, at: u32) -> bool {
 }
 
 fn in_window(window: [f32; 3], now: f32) -> bool {
-    window[2] > 0.0 && now >= window[0] && now <= window[1] + MARGIN
+    // The clock may step back a little right after the shake came in.
+    window[2] > 0.0 && now >= window[0] - MAX_BACK && now <= window[1] + MARGIN
 }
 
 fn wrap(degrees: f32) -> f32 {
@@ -210,8 +211,10 @@ static LAST_NOW: AtomicU32 = AtomicU32::new(0);
 /// The most the clock moves between two frames of one demo played on; at
 /// `dem_speed 4` and 25 fps a frame is 0.16 s.
 const MAX_STEP: f32 = 1.0;
-/// Room for a clock that settles back a little between frames.
-const MAX_BACK: f32 = 0.05;
+/// Room for a clock that settles back between frames: in a POV demo the
+/// client clock steps back by up to 0.14 s every second or so, in normal
+/// play as well as fast-forward (PRE, solifotw-greetz1).
+const MAX_BACK: f32 = 0.5;
 
 /// Whether the clock at `now` carries on from `last` in the same demo. A
 /// clock that went back or jumped is another demo, a restart or a seek: the
@@ -502,6 +505,8 @@ mod tests {
         let open = advance(shut, 10.0, Some((16.0, 1.0)));
         assert_eq!(open, [10.0, 11.0, 16.0]);
         assert!(in_window(open, 10.0) && in_window(open, 11.05));
+        // The client clock stepping back just after the shake came in.
+        assert!(in_window(open, 9.9));
         assert!(!in_window(open, 11.2) && !in_window(open, 9.0));
         // A second blast half way through runs the window on.
         assert_eq!(advance(open, 10.5, Some((8.0, 1.0))), [10.0, 11.5, 16.0]);
@@ -597,7 +602,8 @@ mod tests {
         // A restart, a seek back, a demo whose clock starts later.
         assert!(!continues(10.0, 0.5));
         assert!(continues(10.0, 10.0 - 0.01), "settling back a little");
-        assert!(!continues(10.0, 9.5));
+        assert!(continues(10.0, 10.0 - 0.14), "as measured in game");
+        assert!(!continues(10.0, 9.0));
         assert!(!continues(10.0, 250.0));
         assert!(!continues(10.0, f32::NAN));
     }
