@@ -16,6 +16,7 @@ import { EXE_NAMES, usesPlayFolder, sameDriveFolders, wrongExeName } from './set
 import { STRINGS } from './strings.js';
 import { createGameFolderUi, getGameFolder } from './game_folder_ui.js';
 import { wireReviewSettings } from './review_settings.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -539,4 +540,7 @@ export function initConfigWiring({ persistAppSettings }) {
       }
     });
   }
+  // Clearing the field in a release build hides the row again.
+  document.querySelector('#goldsrc-hooks-dll-path-input')
+    ?.addEventListener('change', () => { refreshHookDllRow(); });
 }

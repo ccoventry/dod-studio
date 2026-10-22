@@ -15,6 +15,7 @@ import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -208,6 +209,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const inputEl = document.querySelector('#goldsrc-hooks-dll-path-input');
     if (inputEl) inputEl.value = settings.goldsrc_hooks_dll_path;
   }
+  // Always: a release build hides the row unless a path is set.
+  refreshHookDllRow();
   if (settings.hlae_path) {
     // Issue #101: this reads both #hlae-path-input and
     // #ffmpeg-override-path-input, so it has to run after *both* are
