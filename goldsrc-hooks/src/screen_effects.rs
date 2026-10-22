@@ -195,7 +195,8 @@ fn learn(sums: [f32; 2], live: &View, recorded: &View) -> [f32; 2] {
     }
     let live_side = dot(eye_offset(live), live.right);
     let recorded_side = dot(eye_offset(recorded), recorded.right);
-    if live_side.abs() > LIVE_SIDEWAYS || recorded_side.abs() > LIVE_SIDEWAYS {
+    // Written so a NaN fails it too: one would stay in the sums for good.
+    if !(live_side.abs() <= LIVE_SIDEWAYS && recorded_side.abs() <= LIVE_SIDEWAYS) {
         return sums;
     }
     [
@@ -256,6 +257,9 @@ fn correction(
         return None;
     }
     let roll = recorded.cl_viewangles[2] + wrap(live.viewangles[2] - live.cl_viewangles[2]);
+    if !roll.is_finite() {
+        return None;
+    }
     Some((vieworg, fix.map(|v| v * GUN_SHARE), roll))
 }
 
@@ -574,6 +578,12 @@ mod tests {
         assert!((bob_scale(sums) - 0.5).abs() < 1e-2, "{}", bob_scale(sums));
         // No live bob to compare with: none.
         assert_eq!(bob_scale([0.0; 2]), 0.0);
+        // A NaN view is skipped, not summed in for good.
+        let mut broken = live;
+        broken.vieworg[0] = f32::NAN;
+        let kept = learn(sums, &broken, &halfway);
+        assert_eq!(kept, sums);
+        assert_eq!(learn(sums, &live, &broken), sums);
     }
 
     #[test]
