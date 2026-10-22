@@ -2,7 +2,7 @@
 //! after another, and passes each answer it sends back to the frontend.
 //!
 //! The queue goes in a file (`review_queue.tsv` in the app data folder); the
-//! game is told to read it with `dodstudio_review start "<file>"` over its
+//! game is told to read it with `ds_demo_review start "<file>"` over its
 //! command pipe (#413). When no game is running, DoD Studio starts one as the
 //! Launch Game button does and waits for its pipe; a running game started
 //! with other launch settings is not reused (#666). The answers come back as
@@ -41,13 +41,13 @@ pub struct ReviewStarted {
 /// The console line that starts a review of `queue`.
 fn start_line(queue: &std::path::Path) -> String {
     format!(
-        "dodstudio_review start \"{}\"",
+        "ds_demo_review start \"{}\"",
         queue.to_string_lossy().replace('\\', "/")
     )
 }
 
 /// What a review sends: Configuration > Players' "Use in the game" box as
-/// `dodstudio_player_overrides` (#428), then the line that starts `queue`.
+/// `ds_player_overrides` (#428), then the line that starts `queue`.
 fn review_lines(queue: &std::path::Path, player_overrides: bool) -> Vec<String> {
     vec![
         native::player_overrides::cvar_line(player_overrides),
@@ -205,7 +205,7 @@ pub async fn stop_highlight_review() -> Result<(), String> {
     let pid = *LISTENING.lock().unwrap_or_else(|e| e.into_inner());
     let Some(pid) = pid else { return Ok(()) };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        game_remote::send_console_commands(pid, &["dodstudio_review stop".to_string()])
+        game_remote::send_console_commands(pid, &["ds_demo_review stop".to_string()])
             .map(|_| ())
             .map_err(crate::messages::failed_to_send_review)
     }))
@@ -223,7 +223,7 @@ mod tests {
         ));
         assert_eq!(
             line,
-            "dodstudio_review start \"C:/Users/me/AppData/Roaming/dod-studio/review_queue.tsv\""
+            "ds_demo_review start \"C:/Users/me/AppData/Roaming/dod-studio/review_queue.tsv\""
         );
         assert!(game_remote::check_command(&line).is_ok());
     }
@@ -235,15 +235,9 @@ mod tests {
         let queue = std::path::Path::new("C:/q.tsv");
         assert_eq!(
             review_lines(queue, true),
-            [
-                "dodstudio_player_overrides 1",
-                "dodstudio_review start \"C:/q.tsv\""
-            ]
+            ["ds_player_overrides 1", "ds_demo_review start \"C:/q.tsv\""]
         );
-        assert_eq!(
-            review_lines(queue, false)[0],
-            "dodstudio_player_overrides 0"
-        );
+        assert_eq!(review_lines(queue, false)[0], "ds_player_overrides 0");
         for line in review_lines(queue, true) {
             assert!(game_remote::check_command(&line).is_ok(), "{line}");
         }

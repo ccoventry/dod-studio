@@ -1,4 +1,4 @@
-//! `dodstudio_hide_menus`: keep the team menu, the class menus and the MOTD
+//! `ds_hud_hide_menus`: keep the team menu, the class menus and the MOTD
 //! window a POV demo replays off the screen (#677), while a demo plays.
 //!
 //! ## What opens them
@@ -18,7 +18,7 @@
 //! segment, before playback starts -- and a class-menu `VGUIMenu` when the
 //! player picks a team or changes class.
 //!
-//! `dodstudio_hide_hudelement menu` doesn't reach them: that is the old text
+//! `ds_hud_hide_element menu` doesn't reach them: that is the old text
 //! menu (`ShowMenu`). HLAE's `mirv_movie_hidepanels 1` keeps VGUI panels out
 //! of its recordings, but not off the screen, so OBS capture shows them.
 //!
@@ -37,7 +37,7 @@
 //! `map_text`'s: `pfnHookUserMsg` prepends, the game's handler is called
 //! through `msglog`'s thunk table, nothing is patched. Both messages arrive
 //! from the network, so the engine's by-number dispatcher stops at our
-//! record. While `dodstudio_debug_msglog` watches one of them, its record sits
+//! record. While `ds_debug_msglog` watches one of them, its record sits
 //! in front and asks [`hide`] instead.
 //!
 //! The hooks go in as soon as the engine's own `HUD_Frame` drives us, not
@@ -57,7 +57,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_menus");
+pub const NAME: &str = console_name!("hud_hide_menus");
 
 const VGUI_MENU: &str = "VGUIMenu";
 const MOTD: &str = "MOTD";
@@ -183,7 +183,7 @@ pub fn poll() {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let wanted = WANTED.load(Ordering::Relaxed);
     let hidden = HIDDEN.load(Ordering::Relaxed);

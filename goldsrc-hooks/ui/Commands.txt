@@ -1,141 +1,153 @@
 SPECTATING (HLTV demos)
-  dodstudio_spec_match_pov 0/1
+  ds_spec_match_pov 0/1
       Make a spectated first-person view match the player's own recording: gun animations, lost gunshots, the crosshair, prone eye height, the gun lowering.
-  dodstudio_spec_lock 0/1
+  ds_spec_lock 0/1
       Keep the camera on the player you are watching when they die.
-  dodstudio_spec_deathcam 0/1
+  ds_spec_deathcam 0/1
       When the player you are watching dies, show the death cam their own recording shows (2.4 s behind their body, turning to the killer), then their eyes again.
-  dodstudio_spec_target <player>
-      Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
-  dodstudio_hide_spectator_bars 0/1
+  ds_spec_target <player>
+      Put the camera on a player (number 1-32; ds_hud_deathmsg players lists them).
+  ds_spec_hide_bars 0/1
       Hide the spectator bars and everything on them.
-  dodstudio_hide_spectator_text 0/1
+  ds_spec_hide_text 0/1
       Hide the camera mode's name ('Free Look', ...) and the green 'Press DUCK for Spectator Menu' (POV deaths too).
-  dodstudio_hide_hltv_messages 0/1
+  ds_spec_hide_hltv_messages 0/1
       Hide the HLTV proxy's on-screen messages.
 
 HUD
-  dodstudio_hide_scoreboard 0/1
+  ds_hud_hide_scoreboard 0/1
       Stop a POV demo's recorded TAB presses showing the scoreboard.
-  dodstudio_hide_crosshair 0/1
+  ds_hud_hide_crosshair 0/1
       Hide the crosshair and keep it hidden.
-  dodstudio_hide_headshot_red_screen 0/1
-      POV demos: no red screen when the player is hit in the head.
-  dodstudio_hide_screen_shake 0/1
-      POV demos: no screen shake from grenades going off nearby.
-  dodstudio_hide_hand_signals 0/1
-      Replace players' hand-signal animations.
-  dodstudio_mute_voice_commands 0/1
-      Silence voice commands ('fire in the hole!' and the rest).
-  dodstudio_hide_voice_menus 0/1
+  ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
-  dodstudio_hide_hudelement <name> 0/1
+  ds_hud_hide_element <name> 0/1
       Hide one HUD element; the bare command lists them.
-  dodstudio_hide_map_text 0/1
+  ds_hud_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
-  dodstudio_hide_clan_text 0/1
+  ds_hud_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
-  dodstudio_hide_center_text 0/1
+  ds_hud_hide_center_text 0/1
       Hide the text the server prints in the middle of the screen (plugin countdowns and notices), the engine's own centre print too.
-  dodstudio_hide_server_hud_text 0/1
+  ds_hud_hide_server_text 0/1
       Hide server plugins' coloured HUD messages (match status, ready lists, banners); the map's own text stays.
-  dodstudio_hide_menus 0/1
+  ds_hud_hide_menus 0/1
       Keep the team menu, class menus and MOTD window a POV demo replays off the screen (demos only).
-  dodstudio_hide_asset list|add|del|clear <model|hud.txt name>...
+  ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
-  dodstudio_deathmsg
+  ds_hud_deathmsg
       Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
-  dodstudio_objectives
-      Move the objective icons and the objective timer.
-  dodstudio_overviewmap
+  ds_hud_objectives
+      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>. The bare command shows the options.
+  ds_hud_overview_layout
       Move or resize the overview map.
-  dodstudio_hud_map_players 0-4
+  ds_hud_overview_players 0-4
       Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
-  dodstudio_hud_map_team_marker 0-2
+  ds_hud_overview_team_marker 0-2
       The camera icon on the overview map: 0 the game's own, 1 their team's icon in HLTV too, 2 none.
-  dodstudio_hud_map_hide_speaker 0/1
+  ds_hud_overview_hide_speaker 0/1
       Leave the speaker icon off the players on the overview map.
-  dodstudio_show_demo_scope 0/1
+  ds_hud_show_scope 0/1
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
-DEMO PLAYBACK
-  dodstudio_run_in_background 0/1
-      Run at full speed while another window is in front, so a capture batch doesn't need the screen.
-  dodstudio_pov_live_bob 0/1
-      POV demos: the view and gun bob by the cl_bob set now (otherwise they don't bob at all).
-  dodstudio_player_overrides 0/1
+VIEW (POV demos: the recording player's own view)
+  ds_view_use_cl_bob 0/1
+      POV demos: the view and gun bob by your cl_bob, cl_bobcycle and cl_bobup (0: the bob the demo recorded, the recording player's own).
+  ds_view_hide_headshot_red_screen 0/1
+      No red screen when the player is hit in the head.
+  ds_view_hide_screen_shake 0/1
+      No screen shake from grenades going off nearby.
+
+PLAYERS
+  ds_player_hide_hand_signals 0/1
+      Replace players' hand-signal animations.
+  ds_player_overrides 0/1
       Sprays and crosshairs in demos follow DoD Studio's Players table (Configuration > Players); 0 is the game's own. Studio sets it.
-  dodstudio_stay_behind_while_capturing 0/1
-      Keep the game behind your other windows while it records, instead of coming to the front.
-  dodstudio_seek_to <time>
-      Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
-  dodstudio_seek_by <seconds>
-      Jump forward (or back, with a minus) by that many seconds.
-  dodstudio_seek_skip_between 0/1
-      A jump skips the events and commands it passes over.
-  dodstudio_demo_fast_load 0/1/<ms>
-      viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
-  dodstudio_reload_demo
-      Play the last demo again.
-  dodstudio_review yes|maybe|no|replay|next|back|stop
-      Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
-  dodstudio_schedule load "<file>"|clear
-      Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
-  dodstudio_batch start "<file>"|away|stop
-      Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
-  dodstudio_clear_decals
-      Clear every decal (bullet holes, blood, sprays).
-  dodstudio_ex_interp_max <ms>
-      Raise the engine's 100 ms ceiling on ex_interp.
-
-DOD STUDIO WINDOW
-  dodstudio_panel [1|0|reset|<tab>]
-      Open (1) or close (0) this window; bare toggles it; reset restores the default layouts; a tab's name (highlights) opens that tab.
-  dodstudio_viewdemo_in_panel 0/1
-      viewdemo opens this window on Playback instead of the VCR bar.
-  dodstudio_console_in_panel 0/1
-      The console key opens this window on the Console tab.
-  dodstudio_resizable_windows 0/1
-      Every game window can be resized by its edges.
-  dodstudio_demo_list_folders 0/1
-      The Load Demo window and the Demos tab also list and open folders.
-  dodstudio_demo_list_hide_empty 0/1
-      Folders with no demo anywhere inside them aren't listed.
-  dodstudio_demo_list_count_subfolders 0/1
-      A folder's demo count includes its subfolders.
-  dodstudio_demo_list_show_counts 0/1
-      Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
-  dodstudio_demo_other_drives 0/1
-      viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
-  dodstudio_remember_window_layout 0/1
-      Game windows come back where you left them.
-
-HD TEXTURES
-  dodstudio_hd_enabled 0/1
-      Load the HD textures built by DoD Studio's HD page.
-  dodstudio_hd_style <name>
-      Which HD style to use (ultrasharp by default).
-  dodstudio_spray [<name>|players]
+  ds_player_spray [<name>|players]
       Make logos\<name>.png your spray for live play (writes tempdecal.wad, shows from the next connect); bare lists the PNGs; players shows what Studio's Players table gives each player in the demo.
-  dodstudio_allow_shaders 0/1
+
+MAP
+  ds_map_clear_decals
+      Clear every decal (bullet holes, blood, sprays).
+  ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
+      Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
+  ds_map_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
 
+SOUND
+  ds_sound_mute_voice_commands 0/1
+      Silence voice commands ('fire in the hole!' and the rest).
+
+DEMO PLAYBACK
+  ds_demo_seek_to <time>
+      Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
+  ds_demo_seek_by <seconds>
+      Jump forward (or back, with a minus) by that many seconds.
+  ds_demo_seek_skip_between 0/1
+      A jump skips the events and commands it passes over.
+  ds_demo_fast_load 0/1/<ms>
+      viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
+  ds_demo_other_drives 0/1
+      viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
+  ds_demo_reload
+      Play the last demo again.
+  ds_demo_review yes|maybe|no|replay|next|back|stop
+      Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
+  ds_demo_ex_interp_max <ms>
+      Raise the engine's 100 ms ceiling on ex_interp.
+
+CAPTURE
+  ds_capture_batch start "<file>"|away|stop
+      Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
+  ds_capture_schedule load "<file>"|clear
+      Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
+  ds_capture_run_in_background 0/1
+      Run at full speed while another window is in front, so a capture batch doesn't need the screen.
+  ds_capture_stay_behind 0/1
+      Keep the game behind your other windows while it records, instead of coming to the front.
+
+DOD STUDIO WINDOW
+  ds_ui_panel [1|0|reset|<tab>]
+      Open (1) or close (0) this window; bare toggles it; reset restores the default layouts; a tab's name (highlights) opens that tab.
+  ds_ui_viewdemo_in_panel 0/1
+      viewdemo opens this window on Playback instead of the VCR bar.
+  ds_ui_console_in_panel 0/1
+      The console key opens this window on the Console tab.
+  ds_ui_resizable_windows 0/1
+      Every game window can be resized by its edges.
+  ds_ui_remember_layout 0/1
+      Game windows come back where you left them.
+  ds_ui_demo_list_folders 0/1
+      The Load Demo window and the Demos tab also list and open folders.
+  ds_ui_demo_list_hide_empty 0/1
+      Folders with no demo anywhere inside them aren't listed.
+  ds_ui_demo_list_count_subfolders 0/1
+      A folder's demo count includes its subfolders.
+  ds_ui_demo_list_show_counts 0/1
+      Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
+
+HD TEXTURES
+  ds_hd_enabled 0/1
+      Load the HD textures built by DoD Studio's HD page.
+  ds_hd_style <name>
+      Which HD style to use (ultrasharp by default).
+
 DEBUG
-  dodstudio_debug_status
+  ds_debug_status
       Print everything DoD Studio's hook is doing to the console.
-  dodstudio_debug_position
+  ds_debug_position
       Print where the view and the watched player are.
-  dodstudio_debug_msglog <name>...
+  ds_debug_msglog <name>...
       Log chosen game messages to the hook log.
-  dodstudio_debug_hd_misses
+  ds_debug_hd_misses
       List the textures that had no HD version, per map.
-  dodstudio_debug_log_weapon_model 0/1
+  ds_debug_log_weapon_model 0/1
       Log the weapon model the spectated player holds.
-  dodstudio_debug_log_spectator_target 0/1
+  ds_debug_log_spectator_target 0/1
       Log who the spectator camera follows.
-  dodstudio_debug_log_texture_loads 0/1
+  ds_debug_log_texture_loads 0/1
       Log every HD texture load.
-  dodstudio_debug_keep_detail_cache 0/1
+  ds_debug_keep_detail_cache 0/1
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
-  dodstudio_debug_cloak_instead 0/1
+  ds_debug_cloak_instead 0/1
       While staying behind, a minimised game is cloaked in place instead of moved off-screen, to compare.

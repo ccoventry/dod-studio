@@ -1,4 +1,4 @@
-//! `dodstudio_hide_asset` — stop the game drawing an asset (a sprite, model or
+//! `ds_map_hide_asset` — stop the game drawing an asset (a sprite, model or
 //! brush entity, named by its file path). Today: specific world entities by their model
 //! path (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`, a brush
 //! entity's `*12`), DoD's particles (`particle_hide`), and the HUD's own 2D
@@ -9,7 +9,7 @@
 //! `HUD_AddEntity` fires for every entity the engine is about to draw, and the
 //! match has only ever been on the model path, so the command was never
 //! sprite-only; the old name promised a restriction the code didn't have.
-//! Then `dodstudio_hide_entity`, and now `dodstudio_hide_asset` (the user's
+//! Then `dodstudio_hide_entity`, and now `ds_map_hide_asset` (the user's
 //! pick, 2026-10-06): what is named is a game file, and #614 extends the same
 //! list to temporary effects, which aren't world entities to a user.
 //! The old names and the old "plain paths replace the list" form are gone,
@@ -20,7 +20,7 @@
 //! Each entry records whether the engine has drawn anything by that path this
 //! session, and the status says so, so a typo stops failing silently.
 //!
-//! ## Why `dodstudio_hide_hudelement` can't reach this
+//! ## Why `ds_hud_hide_element` can't reach this
 //!
 //! That module (issue #265) patches the classic 2D HUD element list —
 //! `CHud::Redraw` walking `CHudBase`-derived elements' vftable slot 3. An
@@ -32,7 +32,7 @@
 //! or draw this sprite by name at all, unlike `mapsprites/speakerIcon.spr`/
 //! `voiceIcon.spr`, which `CHudSpectator::VidInit` loads by name for its own
 //! HUD drawing. `voice.rs` doesn't reach them (it only mutes
-//! voice-command sounds); `dodstudio_hud_map_hide_speaker`
+//! voice-command sounds); `ds_hud_overview_hide_speaker`
 //! (`overview_speaker.rs`) skips the speaker icon's draw (#677).
 //!
 //! ## The mechanism: `HUD_AddEntity`
@@ -64,7 +64,7 @@
 //! smoke, fire, tracers — and indiscriminately suppressing every map-placed
 //! sprite would remove things nobody asked to have removed. This command
 //! only ever hides model paths named explicitly, the same shape
-//! `dodstudio_deathmsg block <id>...` already uses for players.
+//! `ds_hud_deathmsg block <id>...` already uses for players.
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
@@ -86,7 +86,7 @@
 //! genuine `env_sprite`: the capture-area icon and the crosshair are both
 //! ordinary 2D HUD elements (`CHudDodIcons`/`CHudDoDCrossHair`), which this
 //! command was never able to reach in the first place -- see "Why
-//! `dodstudio_hide_hudelement` can't reach this" above, which turns out to cut
+//! `ds_hud_hide_element` can't reach this" above, which turns out to cut
 //! both ways.
 
 use std::sync::RwLock;
@@ -97,7 +97,7 @@ use crate::names::console_name;
 
 /// The one name it answers to.
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
-const COMMAND: &str = console_name!("hide_asset");
+const COMMAND: &str = console_name!("map_hide_asset");
 
 /// Which drawing path asked about a model (#614). The same list is checked in
 /// each, and the status says where each entry turned up.
@@ -448,7 +448,7 @@ pub unsafe extern "C" fn command() {
     };
 }
 
-/// Folded into `dodstudio_debug_status`, gated on being non-empty like
+/// Folded into `ds_debug_status`, gated on being non-empty like
 /// `msglog`'s own status line -- off by default, and a permanent "hiding
 /// nothing" line would be noise in the overwhelmingly common case.
 pub(crate) fn status_line() -> Option<String> {
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn only_the_new_name_is_registered() {
-        assert_eq!(COMMAND_NAMES, ["dodstudio_hide_asset"]);
+        assert_eq!(COMMAND_NAMES, ["ds_map_hide_asset"]);
     }
 
     fn strings(v: &[&str]) -> Vec<String> {

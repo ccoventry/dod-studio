@@ -1,4 +1,4 @@
-//! `dodstudio_hide_server_hud_text`: hide the coloured HUD messages a server
+//! `ds_hud_hide_server_text`: hide the coloured HUD messages a server
 //! plugin puts on screen (`set_hudmessage` / `show_hudmessage`: match, stats
 //! and advert lines), and nothing else (#677).
 //!
@@ -16,7 +16,7 @@
 //! **every** `HudText` record in the list, not just the newest
 //! (see [`crate::engine::HookUserMsgFn`]): `client.dll`'s own handler runs
 //! after any hook of ours, whatever the hook returns. That is also why
-//! `dodstudio_hide_map_text` can't hide a map's `game_text`, which travels
+//! `ds_hud_hide_map_text` can't hide a map's `game_text`, which travels
 //! the same way.
 //!
 //! ## The fix: one call in `hw.dll`
@@ -49,14 +49,14 @@
 //!
 //! - **The map's own text.** A message whose text is a `message` the loaded
 //!   map declares on a text entity (`map_text`'s list, which in practice means
-//!   a `game_text`) is passed on. Hiding that is `dodstudio_hide_map_text`'s
+//!   a `game_text`) is passed on. Hiding that is `ds_hud_hide_map_text`'s
 //!   job, not this one's.
 //! - **Everything on the `HudText` user message itself**: map text
 //!   (`env_message`, `dod_score_ent`) and DoD's own prompts come that way,
 //!   never as a `TE_TEXTMESSAGE`, so they never reach this call.
 //! - **HLTV director text** (`svc_director`), which `client.dll` draws
 //!   straight from the director message, and the HLTV proxy's own text
-//!   (`dodstudio_hide_hltv_messages`).
+//!   (`ds_spec_hide_hltv_messages`).
 //!
 //! A message already on screen when the cvar turns on stays until it fades.
 //! `CHudMessage` draws it from the engine's channel buffer, which the engine
@@ -75,7 +75,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::hw_call_site::{Build, CALL_LEN, CallSite, call_bytes};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_server_hud_text");
+pub const NAME: &str = console_name!("hud_hide_server_text");
 
 /// From the channel-name table read to the call and the `add esp, 0x10`
 /// after it; only the patched call's `rel32` is pinned.
@@ -268,7 +268,7 @@ pub fn poll() {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let wanted = WANTED.load(Ordering::Relaxed);
     let hidden = HIDDEN.load(Ordering::Relaxed);

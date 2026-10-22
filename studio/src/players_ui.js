@@ -2,7 +2,7 @@
 // Configuration > Players (#428): one row per player with the spray and the
 // crosshair they get in a demo, what everyone not listed gets, and whether the
 // game uses the table at all ("Use in the game", sent to a running game as
-// dodstudio_player_overrides). The players come from the queue's demos (the
+// ds_player_overrides). The players come from the queue's demos (the
 // player index, lane 'players'); the sprays are the PNGs in the install's
 // logos folder, the crosshairs a 64x64 tile of a sprite in its sprites
 // folder, picked from a 4x4 preview of the sprite. settings_sync.js saves

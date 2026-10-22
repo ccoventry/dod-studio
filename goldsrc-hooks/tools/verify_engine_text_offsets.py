@@ -3,7 +3,7 @@
 rest of #677's later rows rely on, against real binaries.
 
 `engine_center_print.rs` (the `svc_centerprint` half of
-`dodstudio_hide_center_text`), for each `hw.dll`:
+`ds_hud_hide_center_text`), for each `hw.dll`:
 
   1. Exactly one of its `BUILDS` matches, exactly once.
   2. The match is the svc table's opcode 26 (`svc_centerprint`) handler.
@@ -14,7 +14,7 @@ rest of #677's later rows rely on, against real binaries.
   5. `pop ecx; ret` follows, so five `nop`s leave the stack as it was, and
      the replacement in the Rust is five `nop`s.
 
-`server_hud_text.rs` (`dodstudio_hide_server_hud_text`), for each `hw.dll`:
+`server_hud_text.rs` (`ds_hud_hide_server_text`), for each `hw.dll`:
 
   6. Exactly one of its `BUILDS` matches, exactly once.
   7. The table its first instruction indexes holds the four

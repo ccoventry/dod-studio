@@ -1,9 +1,9 @@
-//! `dodstudio_hide_spectator_text`: hide the two lines DoD prints when the
+//! `ds_spec_hide_text`: hide the two lines DoD prints when the
 //! view becomes a spectator camera (#677) -- the camera mode's name, centred
 //! just above the bottom bar ("Locked Chase Cam", "Free Look", ...), and the
 //! green "Press DUCK for Spectator Menu" written out above it.
 //!
-//! Neither has a narrow switch of its own. `dodstudio_hide_hudelement
+//! Neither has a narrow switch of its own. `ds_hud_hide_element
 //! vgui2print 1` takes the mode name with every other centre-print, and
 //! `message 1` takes the green line with map text, clan prompts and HLTV
 //! director text.
@@ -65,7 +65,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hide_spectator_text");
+pub const NAME: &str = console_name!("spec_hide_text");
 
 /// One patched span in `client.dll`.
 struct Site {
@@ -279,7 +279,7 @@ pub fn poll() {
     HIDDEN_NOW.store(wanted && all, Ordering::Relaxed);
 }
 
-/// One line for `dodstudio_debug_status`, once the cvar has been on.
+/// One line for `ds_debug_status`, once the cvar has been on.
 pub fn status_line() -> Option<String> {
     if !TOUCHED.load(Ordering::Relaxed) {
         return None;

@@ -1,4 +1,4 @@
-//! `dodstudio_debug_msglog` — dump chosen DoD user messages and their payloads to
+//! `ds_debug_msglog` — dump chosen DoD user messages and their payloads to
 //! the log, forwarded to the game untouched.
 //!
 //! Every investigation of "what does the client actually receive, and when"
@@ -35,7 +35,7 @@
 //! back, is suppressed -- most of these resend the same state every tick
 //! while nothing changes, and a log that is one entry per actual change is
 //! the one worth reading. The command's own replies (what's now being
-//! watched) still go to the console, like every other `dodstudio_*` command.
+//! watched) still go to the console, like every other `ds_*` command.
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
@@ -151,7 +151,7 @@ pub(crate) fn find_thunk(name: &str) -> Option<usize> {
         .map(|&(_, rva)| rva)
 }
 
-/// What `dodstudio_debug_msglog` is currently set to watch.
+/// What `ds_debug_msglog` is currently set to watch.
 enum Wanted {
     None,
     All,
@@ -245,7 +245,7 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     } else {
         Some(unsafe { CStr::from_ptr(name) }.to_string_lossy())
     };
-    // Logged above either way; hidden here when dodstudio_hide_map_text says
+    // Logged above either way; hidden here when ds_hud_hide_map_text says
     // so, since this record sits in front of map_text's own while both want
     // HudText.
     if name_str
@@ -261,7 +261,7 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
-    // And dodstudio_hide_menus' VGUIMenu and MOTD (#677).
+    // And ds_hud_hide_menus' VGUIMenu and MOTD (#677).
     if let Some(n) = name_str.as_deref() {
         let payload: &[u8] = if size > 0 && !buf.is_null() {
             unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }
@@ -272,15 +272,15 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
-    // Same for dodstudio_hide_clan_text's three messages, and
-    // dodstudio_hide_center_text's TextMsg, which clan_text's filter asks.
+    // Same for ds_hud_hide_clan_text's three messages, and
+    // ds_hud_hide_center_text's TextMsg, which clan_text's filter asks.
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::clan_text::filter(n, size, buf))
     {
         return result;
     }
-    // And for dodstudio_hide_voice_menus' ShowMenu.
+    // And for ds_hud_hide_voice_menus' ShowMenu.
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::voice_menus::filter(n, size, buf))
@@ -331,7 +331,7 @@ pub fn poll() {
     }
 }
 
-/// The command's own reply to a bare `dodstudio_debug_msglog` -- always something,
+/// The command's own reply to a bare `ds_debug_msglog` -- always something,
 /// including "logging nothing", since a query should never come back empty.
 fn status() -> String {
     match WANTED.lock() {
@@ -344,9 +344,9 @@ fn status() -> String {
     }
 }
 
-/// Folded into `dodstudio_debug_status`. `None` while logging is off, so that
+/// Folded into `ds_debug_status`. `None` while logging is off, so that
 /// command's gate on the other opt-in report (`anim_fix`'s, under
-/// `dodstudio_spec_match_pov`) can treat this the same way -- see `commands.rs`.
+/// `ds_spec_match_pov`) can treat this the same way -- see `commands.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;
@@ -412,7 +412,7 @@ fn dispatch(argv: &[String]) -> String {
     }
     // Anything else is a list of message names, replacing whatever was
     // wanted before -- the same "each call restates the whole set" shape
-    // `dodstudio_deathmsg block <id>...` uses.
+    // `ds_hud_deathmsg block <id>...` uses.
     let canonical = match resolve_names(rest) {
         Ok(names) => names,
         Err(unknown) => {
@@ -492,7 +492,7 @@ mod tests {
     fn a_mixed_known_and_unknown_list_is_rejected_wholesale() {
         // Silently dropping just the bad name and logging the rest would
         // hide a typo instead of naming it -- the same reasoning
-        // dodstudio_hide_hudelement's own fix (commit 3e44cd7) applied.
+        // ds_hud_hide_element's own fix (commit 3e44cd7) applied.
         let err = resolve_names(&["SayText".to_string(), "Nope".to_string()]).unwrap_err();
         assert_eq!(err, vec!["Nope".to_string()]);
     }

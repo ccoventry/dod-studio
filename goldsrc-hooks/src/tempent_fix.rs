@@ -53,7 +53,7 @@
 //! `tools/verify_tempent_offsets.py` checks against the binary, along with
 //! every offset written staying inside [`SCRATCH_SIZE`].
 //!
-//! It is on by default, unlike every `dodstudio_*` setting, because it is a
+//! It is on by default, unlike every `ds_*` setting, because it is a
 //! crash fix rather than a change to what a capture looks like: it only ever
 //! does anything in the case that would otherwise end the game.
 //! `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off for a session.
@@ -69,7 +69,7 @@ use crate::scan;
 
 /// One patched call site.
 struct Site {
-    /// Named in the log and in `dodstudio_debug_status`.
+    /// Named in the log and in `ds_debug_status`.
     what: &'static str,
     /// Unique across `client.dll`'s code, and ends with the stolen bytes, so a
     /// build where they differ does not match at all.
@@ -351,7 +351,7 @@ pub(crate) fn worth_logging(logged: u32, now: u32) -> bool {
     now >= step
 }
 
-/// The `dodstudio_debug_status` line, or `None` when it was never installed.
+/// The `ds_debug_status` line, or `None` when it was never installed.
 pub fn status_line() -> Option<String> {
     if INSTALLED_BASE.load(Ordering::Relaxed) == 0 {
         return None;

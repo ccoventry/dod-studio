@@ -1,4 +1,4 @@
-//! `dodstudio_deathmsg` — control over DoD 1.3's death notices (the kill feed).
+//! `ds_hud_deathmsg` — control over DoD 1.3's death notices (the kill feed).
 //!
 //! HLAE ships `mirv_deathmsg` with the same four subcommands, but only for
 //! `cstrike` and `tfc`: its pattern database names them explicitly
@@ -83,7 +83,7 @@ mod scale;
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
 
 /// The name used in usage and error text, which is the first one registered.
-const COMMAND: &str = console_name!("deathmsg");
+const COMMAND: &str = console_name!("hud_deathmsg");
 
 // ── Addresses, as RVAs into the analysed client.dll ──────────────────────────
 
@@ -1235,7 +1235,7 @@ fn usage() -> String {
     )
 }
 
-/// `pub(crate)`: also folded into `dodstudio_debug_status`'s combined report.
+/// `pub(crate)`: also folded into `ds_debug_status`'s combined report.
 pub(crate) fn status() -> String {
     let max = PATCHED_MAX.load(Ordering::Acquire);
     let offset = match (PATCHED_OFFSET.load(Ordering::Acquire), effective_offset()) {

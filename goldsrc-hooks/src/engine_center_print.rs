@@ -1,5 +1,5 @@
 //! The engine's own centre print, `svc_centerprint`, hidden under
-//! `dodstudio_hide_center_text` (#677) along with the `TextMsg` centre text
+//! `ds_hud_hide_center_text` (#677) along with the `TextMsg` centre text
 //! `center_text` drops.
 //!
 //! ## Why it needs `hw.dll`

@@ -304,12 +304,10 @@ mod tests {
     #[test]
     fn a_message_splits_into_commands() {
         assert_eq!(
-            commands_in(
-                b"viewdemo \"temp demos/a\"\r\n\n  dodstudio_clear_decals  \necho a;echo b"
-            ),
+            commands_in(b"viewdemo \"temp demos/a\"\r\n\n  ds_map_clear_decals  \necho a;echo b"),
             vec![
                 "viewdemo \"temp demos/a\"",
-                "dodstudio_clear_decals",
+                "ds_map_clear_decals",
                 "echo a;echo b"
             ]
         );

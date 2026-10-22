@@ -1,4 +1,4 @@
-//! `dodstudio_hud_map_hide_speaker`: leave the speaker icon
+//! `ds_hud_overview_hide_speaker`: leave the speaker icon
 //! (`sprites/mapsprites/speakerIcon.spr`) off the players' icons on the
 //! overview map (#677).
 //!
@@ -27,7 +27,7 @@
 //! `+0x2f31e`, and the stock path into it arrives with `eax` holding an FPU
 //! status word anyway. Nothing branches into the patched span.
 //!
-//! The player icons stay, unlike `dodstudio_hud_map_players 4`, which was the
+//! The player icons stay, unlike `ds_hud_overview_players 4`, which was the
 //! only way to lose the speaker without blanking the sprite file.
 //!
 //! `tools/verify_hide_text_offsets.py` checks the span, the exit, that the
@@ -40,7 +40,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hud_map_hide_speaker");
+pub const NAME: &str = console_name!("hud_overview_hide_speaker");
 
 /// From the talking check's `mov ecx, [esi]` to the first instruction of the
 /// speaker draw, so both the span and the `jne` that names its exit are in it.
@@ -182,7 +182,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, once the cvar has been on.
+/// One line for `ds_debug_status`, once the cvar has been on.
 pub fn status_line() -> Option<String> {
     TOUCHED.load(Ordering::Relaxed).then(|| {
         if HIDDEN_NOW.load(Ordering::Relaxed) {

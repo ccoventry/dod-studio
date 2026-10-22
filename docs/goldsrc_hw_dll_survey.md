@@ -31,8 +31,8 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 >
 > | Candidate | Built? | Command / module | Issue / PR |
 > | --- | --- | --- | --- |
-> | raise `ex_interp`'s 100 ms ceiling (§3.2) | yes | `dodstudio_ex_interp_max`, `ex_interp.rs` | #271, PR #301 |
-> | empty the decal pool (§3.4, §9) | yes | `dodstudio_clear_decals`, `decals.rs` | PR #297; #290 still open |
+> | raise `ex_interp`'s 100 ms ceiling (§3.2) | yes | `ds_demo_ex_interp_max`, `ex_interp.rs` | #271, PR #301 |
+> | empty the decal pool (§3.4, §9) | yes | `ds_map_clear_decals`, `decals.rs` | PR #297; #290 still open |
 > | the 64-byte command limit (§3.1) | not reachable | — | #256 |
 > | `CL_ParseServerMessage` / demo reader (§3.3) | no | — | — |
 > | `CL_FlushEntityPacket` predicate (§3.5, §8) | located offline, no command | — | #273 |
@@ -101,7 +101,7 @@ other direction, now confirmed against the whole database rather than a
 `strings` dump.
 
 So on the DoD client side we have the module entirely to ourselves, and
-`dodstudio_deathmsg` and `dodstudio_objectives` cannot be colliding with anything
+`ds_hud_deathmsg` and `ds_hud_objectives` cannot be colliding with anything
 of HLAE's. That is worth knowing with certainty rather than by inference.
 
 ---
@@ -276,7 +276,7 @@ pass, not a paragraph.
 ### 3.4 Entity and decal limits — located, not surveyed
 
 *(Resolved by §9 (#273): the ring's size is not reachable; see
-`docs/goldsrc_decals.md` for the shipped `dodstudio_clear_decals`.)*
+`docs/goldsrc_decals.md` for the shipped `ds_map_clear_decals`.)*
 
 `r_decals` is registered at `hw+0x46c35` with a default of `4096.0`, alongside
 `sp_decals` and `mp_decals`. `Draw_DecalMaterial` is one of the fourteen
@@ -569,7 +569,7 @@ What *is* reachable is **emptying** it, which is the thing the pipeline actually
 wanted. `R_DecalInit` alone would be a crash — it wipes the pool without
 unlinking, leaving every `msurface_t::pdecals` pointing at zeroed structures the
 renderer still walks. The engine's own remove functions unlink first, and
-`dodstudio_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
+`ds_map_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
 
 The Anniversary engine inlines `R_DecalUnlink` into its remove loops, so it
 can't be recovered from the loop there. `decals.rs` finds that build's

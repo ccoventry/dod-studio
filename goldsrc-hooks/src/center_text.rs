@@ -1,4 +1,4 @@
-//! `dodstudio_hide_center_text`: hide all the text the server prints in the
+//! `ds_hud_hide_center_text`: hide all the text the server prints in the
 //! middle of the screen (#677) -- every `TextMsg` to `HUD_PRINTCENTER`
 //! (destination 4), such as match plugins' `print_center` countdowns and
 //! notices, and the engine's own `svc_centerprint` (`engine_center_print`).
@@ -15,7 +15,7 @@
 //! 4 s after the post. Destinations 1 (notify), 2 (console) and 3 (chat) go
 //! elsewhere and are left alone, so joins, leaves and chat lines still show.
 //!
-//! The only narrower-than-this switch before was `dodstudio_hide_hudelement
+//! The only narrower-than-this switch before was `ds_hud_hide_element
 //! vgui2print 1`, which also takes the machine gun's "Deploy to reload" hint.
 //!
 //! ## What it doesn't reach
@@ -24,12 +24,12 @@
 //!   `MsgFunc_TextMsg` directly, not through the message dispatcher, so this
 //!   never sees the client's own copy. (The server's copy, a `#Spec_Mode`
 //!   `TextMsg` a demo carries, is centre text like any other and goes.)
-//!   `dodstudio_hide_spectator_text` hides both.
+//!   `ds_spec_hide_text` hides both.
 //! - The viewport's own way in: entry 13 of the function table at
 //!   `+0xc1aa0` (`+0x20480`) also calls `MsgFunc_TextMsg` directly. What, if
 //!   anything, uses it has not been looked into.
 //! - The clan-match countdown: `ClanTimer` posts to the same object every
-//!   frame without a `TextMsg`; `dodstudio_hide_clan_text` covers it.
+//!   frame without a `TextMsg`; `ds_hud_hide_clan_text` covers it.
 //! - The engine's own `svc_centerprint`, which `client.dll` never sees:
 //!   `engine_center_print` patches `hw.dll` for that, under this same cvar.
 //!
@@ -47,7 +47,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hide_center_text");
+pub const NAME: &str = console_name!("hud_hide_center_text");
 
 /// `TextMsg`'s destination byte for the middle of the screen.
 const HUD_PRINTCENTER: u8 = 4;
@@ -170,7 +170,7 @@ fn poll_engine(wanted: bool) {
     }
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let wanted = WANTED.load(Ordering::Relaxed);
     let hidden = HIDDEN.load(Ordering::Relaxed);
