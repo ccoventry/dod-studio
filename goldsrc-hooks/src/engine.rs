@@ -1353,6 +1353,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    crate::screen_effects::after_calc_refdef();
     crate::pov_live_bob::after_calc_refdef(pparams);
 }
 

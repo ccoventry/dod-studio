@@ -96,6 +96,16 @@ pub fn shake_on() -> bool {
 /// The first 4 bytes (amplitude, duration) of the last `ScreenShake` dropped
 /// and not yet seen by [`unshake`]; 0 for none.
 static PENDING: AtomicU32 = AtomicU32::new(0);
+/// [`CALCS`] when [`PENDING`] came in.
+static PENDING_AT: AtomicU32 = AtomicU32::new(0);
+/// How many times the live `V_CalcRefdef` has run, in any demo or live play.
+static CALCS: AtomicU32 = AtomicU32::new(0);
+/// How many `V_CalcRefdef` runs a dropped shake may wait for [`unshake`].
+/// The message comes in before the frame's view is worked out, so a POV demo
+/// takes it one run later; a shake dropped in an HLTV demo or live play,
+/// where the override never runs, is stale by the next POV demo and must not
+/// open a window there. Room for a few views per frame (HLAE's streams).
+const PENDING_RUNS: u32 = 16;
 /// The shake being taken out of the recorded view: start and end on the
 /// client clock, and its amplitude, as f32 bits.
 static WINDOW: [AtomicU32; 3] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
@@ -131,6 +141,16 @@ fn advance(window: [f32; 3], now: f32, new: Option<(f32, f32)>) -> [f32; 3] {
         }
         _ => window,
     }
+}
+
+/// Called by `engine.rs` after every live `V_CalcRefdef`.
+pub fn after_calc_refdef() {
+    CALCS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Whether a shake dropped at run `at` is still this frame's at run `calcs`.
+fn fresh(calcs: u32, at: u32) -> bool {
+    calcs.wrapping_sub(at) <= PENDING_RUNS
 }
 
 fn in_window(window: [f32; 3], now: f32) -> bool {
@@ -233,6 +253,14 @@ pub(crate) fn unshake(live: &View, view: &mut View, gun: &mut [f32; 3]) {
     }
     let now = live.time;
     let pending = PENDING.swap(0, Ordering::Relaxed);
+    let pending = if fresh(
+        CALCS.load(Ordering::Relaxed),
+        PENDING_AT.load(Ordering::Relaxed),
+    ) {
+        pending
+    } else {
+        0
+    };
     let window = WINDOW
         .each_ref()
         .map(|w| f32::from_bits(w.load(Ordering::Relaxed)));
@@ -335,6 +363,7 @@ unsafe extern "C" fn hooked_shake(name: *const c_char, size: i32, buf: *mut c_vo
         if size >= 4 && !buf.is_null() {
             // Safety: the engine hands over `size` bytes of payload.
             let head = unsafe { std::ptr::read_unaligned(buf as *const [u8; 4]) };
+            PENDING_AT.store(CALCS.load(Ordering::Relaxed), Ordering::Relaxed);
             PENDING.store(u32::from_le_bytes(head), Ordering::Relaxed);
         }
         return 1;
@@ -520,6 +549,16 @@ mod tests {
         assert!((bob_scale(sums) - 0.5).abs() < 1e-2, "{}", bob_scale(sums));
         // No live bob to compare with: none.
         assert_eq!(bob_scale([0.0; 2]), 0.0);
+    }
+
+    #[test]
+    fn a_shake_left_over_from_an_hltv_demo_is_stale() {
+        // Dropped this frame, taken by the override one view later.
+        assert!(fresh(101, 100));
+        // Across the counter's wrap.
+        assert!(fresh(2, u32::MAX));
+        // Dropped where no override ran, seconds of frames ago.
+        assert!(!fresh(5000, 100));
     }
 
     #[test]
