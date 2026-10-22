@@ -187,7 +187,7 @@ export const STRINGS = {
     VIEW_TELEMETRY_BUTTON: 'View Match Telemetry',
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
     LAUNCH_STANDALONE_BUTTON: 'Launch Game',
-    LAUNCH_STANDALONE_TITLE: 'Starts the game through HLAE with DoD Studio, no demo loaded. Previews and reviews then use this game instead of starting another.',
+    LAUNCH_STANDALONE_TITLE: 'Starts the game with no demo loaded. Previews and reviews then use this game instead of starting another.',
     MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
