@@ -3,6 +3,12 @@ import {
   mostPerType, styleGaps, gapsSentence, mapCoverage, coverageSentence, uncoveredChosen, mapListWarning,
 } from './hd_coverage.js';
 
+// gapsSentence's toLocaleString() is the first Intl call in this worker, and
+// the first one pays for loading ICU's data: on a cold CI runner that took
+// 0.8 to 6.9 s inside one test and timed it out at 5 s. Pay it here, while
+// the file loads, where no test timeout applies.
+(0).toLocaleString();
+
 // The 2026-09-26 install from #426: ultrasharp built everywhere,
 // ultrasharpv2 only for anzio's textures and skins.
 const STATUS = {
