@@ -12,9 +12,11 @@ import { showToast } from './toast.js';
 import { numberField } from './number_field.js';
 // The Steam-install and program-name checks (#373) are shared with the
 // Setup window (#599).
-import { EXE_NAMES, isSteamPlayInstall, sameDriveFolders, wrongExeName } from './setup_checklist.js';
+import { EXE_NAMES, usesPlayFolder, sameDriveFolders, wrongExeName } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
-import { createGameFolderUi } from './game_folder_ui.js';
+import { createGameFolderUi, getGameFolder } from './game_folder_ui.js';
+import { wireReviewSettings } from './review_settings.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -71,7 +73,7 @@ export async function refreshPathWarnings() {
     if (states[i] === 'not_found') message = STRINGS.CAPTURE_CONFIG.PATH_NOT_FOUND;
     else if (states[i] === 'not_a_file') message = STRINGS.CAPTURE_CONFIG.PATH_IS_A_FOLDER;
     else if (wrong) message = STRINGS.CAPTURE_CONFIG.wrongExe(wrong, expected);
-    else if (row.input.id === 'hl-path-input' && isSteamPlayInstall(row.input.value)) {
+    else if (row.input.id === 'hl-path-input' && usesPlayFolder(row.input.value, getGameFolder())) {
       message = STRINGS.CAPTURE_CONFIG.HL_PATH_PLAY_INSTALL;
     }
     // 'empty' says nothing on purpose: these are legitimately blank before they
@@ -332,6 +334,7 @@ export async function linkHlaeToFfmpeg() {
  * @param {object} app  persistAppSettings() from settings_sync.js
  */
 export function initConfigWiring({ persistAppSettings }) {
+  wireReviewSettings(persistAppSettings);
   // Game Folder (#402): its list comes from the folder holding hl.exe, so it
   // is re-read whenever that path changes.
   const gameFolderUi = createGameFolderUi({
@@ -341,6 +344,9 @@ export function initConfigWiring({ persistAppSettings }) {
   gameFolderUi.refresh();
   document.querySelector('#hl-path-input')
     ?.addEventListener('change', () => { gameFolderUi.refresh(); });
+  // The Half-Life Executable's movie-copy note depends on the game folder too.
+  document.querySelector('#config-game-folder')
+    ?.addEventListener('change', () => { refreshPathWarnings(); });
 
   const hlaeBrowseBtn = document.querySelector('#hlae-browse-btn');
   if (hlaeBrowseBtn) {
@@ -534,4 +540,7 @@ export function initConfigWiring({ persistAppSettings }) {
       }
     });
   }
+  // Clearing the field in a release build hides the row again.
+  document.querySelector('#goldsrc-hooks-dll-path-input')
+    ?.addEventListener('change', () => { refreshHookDllRow(); });
 }

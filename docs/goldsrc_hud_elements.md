@@ -1,4 +1,4 @@
-# `dodstudio_hide_hudelement` and the CHudDoD* element notes
+# `ds_hud_hide_element` and the CHudDoD* element notes
 
 Split out of `docs/goldsrc_hud_suppression.md` (the shared pattern, voice
 muting and the per-frame re-apply loop stay there; the crosshair is in
@@ -11,7 +11,7 @@ Same method as the rest: offline `client.dll` analysis, plus
 
 ---
 
-## `dodstudio_hide_hudelement` -- the general case
+## `ds_hud_hide_element` -- the general case
 
 The voice mute, the crosshair hide and the spectator crosshair each patch one function for one purpose, and the crosshair hide's
 own module doc says why it is not this: patching a function needs no vftable
@@ -97,7 +97,7 @@ cvar or hook:
   no calls. The overview map is rendered some other way entirely; not yet
   found, plausibly VGUI2 like the scoreboard. *(Update: the map's placement is
   cached geometry in `.data`, not drawn by a `Draw` override, and
-  `dodstudio_overviewmap` (`goldsrc-hooks/src/overview_map.rs`, see
+  `ds_hud_overview_layout` (`goldsrc-hooks/src/overview_map.rs`, see
   `docs/goldsrc_client_dll_survey.md` §5) moves and resizes it. Hiding it
   outright is still not done.)*
 - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks a
@@ -117,7 +117,7 @@ cvar or hook:
   `CHudScope::DrawTriApiScope` (`client+0x46690`): the rifle's `scope_*.spr`
   as four TriAPI quads, refused outright while a demo plays
   (`IsPlayingback()`, `+0x46701`), which is why no demo showed it.
-  `dodstudio_show_demo_scope` now lifts that gate, so the scope shows in a
+  `ds_hud_show_scope` now lifts that gate, so the scope shows in a
   POV demo whenever the recorder zoomed, and in-eye it gives the watched
   player's rifle instead of the Springfield DoD forces there (#307,
   `goldsrc-hooks/src/demo_scope.rs`). Hiding it needs nothing: it already
@@ -146,8 +146,8 @@ ever been seen to make it draw:
 
 ### `vgui2print` is narrower than its name suggests
 
-`CHudVGUI2Print` has three real callers, but only one goes through the
-vtable slot this element hides:
+`CHudVGUI2Print` has two queueing methods and a drawing method. Only the
+queued text goes through the vtable slot this element hides:
 
 - `CHudDoDCommon` (key `Dod_mg_reload` -- "Deploy your machine gun to
   Reload!") calls a *queueing* method (`client+0x3a990`) that only writes
@@ -155,6 +155,17 @@ vtable slot this element hides:
   are drawn later, when `CHudVGUI2Print::Draw` itself runs and reads that
   state -- the vtable-dispatched path this element's hide actually
   intercepts. Live-confirmed.
+- A second queueing method (`client+0x3a830`, the same fields) takes every
+  centre-print: each `HUD_PRINTCENTER` `TextMsg` (`MsgFunc_TextMsg`'s
+  destination-4 branch, `client+0x4c3e9`), which includes the spectator
+  camera mode's name (`CHudSpectator::SetMode` calls `MsgFunc_TextMsg`
+  directly), and the clan-match countdown (`DrawClanTimer`,
+  `client+0x2d3f7`). `CHudVGUI2Print::Draw` (`client+0x3aa10`) draws these
+  too, so hiding `vgui2print` should hide **all centre text** along with the
+  MG-reload hint. Found offline (#677), not checked in the game. The narrow
+  switches are `ds_hud_hide_center_text` (server centre text),
+  `ds_spec_hide_text` (the camera mode's name) and
+  `ds_hud_hide_clan_text` (the countdown).
 - `CObjectiveIcons` (key `clan_warmup_mode` -- "Warmup Mode") calls a
   *drawing* method (`client+0x3a3f0`) that renders immediately via a shared
   low-level helper (`client+0x3a4b0`) at a fixed address, never touching
@@ -166,9 +177,9 @@ vtable slot this element hides:
   `menu`'s own vftable hide is what stops this, by not letting
   `CHudMenu::Draw` run at all.
 
-So `vgui2print` only ever hides queued, timed prompts like the MG-reload
-message. Anything drawn immediately through the shared helper is a different
-code path this element's vtable slot cannot see.
+So `vgui2print` only ever hides queued, timed prompts: the MG-reload message
+and every centre-print. Anything drawn immediately through the shared helper
+is a different code path this element's vtable slot cannot see.
 
 ### `all 1` is refused
 
@@ -177,7 +188,7 @@ refused on purpose: it would hide `CHudMenu` too, and a session that cannot see
 a server's text menus (a vote) is a support question rather than a feature.
 `CHudMenu` draws only `ShowMenu` text menus: DoD's voice-command menus and
 server plugin menus. The team and class menus are VGUI2 and not on this list.
-`dodstudio_hide_voice_menus` hides only the voice menus
+`ds_hud_hide_voice_menus` hides only the voice menus
 (`goldsrc-hooks/src/voice_menus.rs`).
 
 ### What it reaches that nothing else did

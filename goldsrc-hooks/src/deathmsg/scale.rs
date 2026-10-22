@@ -1,4 +1,4 @@
-//! `dodstudio_deathmsg scale <S>`: the kill feed's weapon icons S times
+//! `ds_hud_deathmsg scale <S>`: the kill feed's weapon icons S times
 //! bigger, with the lines spaced and right-anchored to match (#728).
 //!
 //! ## What the game does
@@ -303,10 +303,7 @@ pub(super) fn describe() -> String {
 
 #[cfg(target_arch = "x86")]
 mod hook {
-    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 
     use super::*;
     use crate::engine;
@@ -343,62 +340,6 @@ mod hook {
     static LINE_BASE: AtomicUsize = AtomicUsize::new(0);
     static LINE_DETOUR: std::sync::Mutex<Option<crate::detour::Detour>> =
         std::sync::Mutex::new(None);
-
-    const GL_MATRIX_MODE: u32 = 0x0ba0;
-    const GL_MODELVIEW: u32 = 0x1700;
-
-    /// The matrix calls, from `opengl32.dll`: the engine's own GL, loaded
-    /// before anything draws. Not the engine's `qgl*` slots (per-build
-    /// addresses) and not TriAPI (no matrix calls).
-    struct Gl {
-        get_integerv: GetIntegervFn,
-        matrix_mode: MatrixModeFn,
-        push_matrix: NoArgFn,
-        pop_matrix: NoArgFn,
-        translatef: ThreeFloatsFn,
-        scalef: ThreeFloatsFn,
-    }
-
-    type GetIntegervFn = unsafe extern "system" fn(u32, *mut i32);
-    type MatrixModeFn = unsafe extern "system" fn(u32);
-    type NoArgFn = unsafe extern "system" fn();
-    type ThreeFloatsFn = unsafe extern "system" fn(f32, f32, f32);
-
-    static GL: OnceLock<Gl> = OnceLock::new();
-
-    fn load_gl() -> Result<Gl, String> {
-        let module = unsafe { GetModuleHandleA(c"opengl32.dll".as_ptr() as *const u8) };
-        if module.is_null() {
-            return Err("opengl32.dll is not loaded".to_string());
-        }
-        let proc = |name: &std::ffi::CStr| -> Result<usize, String> {
-            unsafe { GetProcAddress(module, name.as_ptr() as *const u8) }
-                .map(|p| p as usize)
-                .ok_or_else(|| format!("opengl32.dll has no {}", name.to_string_lossy()))
-        };
-        // Safety: the exported functions' own signatures (stdcall).
-        unsafe {
-            Ok(Gl {
-                get_integerv: std::mem::transmute::<usize, GetIntegervFn>(proc(c"glGetIntegerv")?),
-                matrix_mode: std::mem::transmute::<usize, MatrixModeFn>(proc(c"glMatrixMode")?),
-                push_matrix: std::mem::transmute::<usize, NoArgFn>(proc(c"glPushMatrix")?),
-                pop_matrix: std::mem::transmute::<usize, NoArgFn>(proc(c"glPopMatrix")?),
-                translatef: std::mem::transmute::<usize, ThreeFloatsFn>(proc(c"glTranslatef")?),
-                scalef: std::mem::transmute::<usize, ThreeFloatsFn>(proc(c"glScalef")?),
-            })
-        }
-    }
-
-    /// The GL calls, loaded on first use; a failure is not cached, so a
-    /// later try can succeed.
-    fn gl() -> Result<&'static Gl, String> {
-        if let Some(gl) = GL.get() {
-            return Ok(gl);
-        }
-        let loaded = load_gl()?;
-        let _ = GL.set(loaded);
-        GL.get().ok_or_else(|| "GL functions not kept".to_string())
-    }
 
     /// `mov eax, [imm32]` reading `at`.
     fn read_bytes(at: usize) -> [u8; READ_LEN] {
@@ -541,30 +482,14 @@ mod hook {
         }
         .unwrap_or_else(|| unscale_rect(scaled, s));
         let y = icon_y(y, scaled.bottom - scaled.top, font::tall());
-        let Ok(gl) = gl() else {
+        let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
+        // Safety: inside the HUD draw, on the engine's thread.
+        let zoomed =
+            unsafe { crate::gl_zoom::about(cx, cy, s, || original(frame, x, y, &unscaled)) };
+        if !zoomed {
             // No matrix calls: the right pixels at the game's size beat the
             // wrong pixels at ours.
             unsafe { original(frame, x, y, &unscaled) };
-            return;
-        };
-        let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
-        // Safety: GL calls on the engine's thread with its context current,
-        // balanced push/pop, the matrix mode put back if it was changed.
-        unsafe {
-            let mut mode: i32 = GL_MODELVIEW as i32;
-            (gl.get_integerv)(GL_MATRIX_MODE, &mut mode);
-            if mode != GL_MODELVIEW as i32 {
-                (gl.matrix_mode)(GL_MODELVIEW);
-            }
-            (gl.push_matrix)();
-            (gl.translatef)(cx, cy, 0.0);
-            (gl.scalef)(s, s, 1.0);
-            (gl.translatef)(-cx, -cy, 0.0);
-            original(frame, x, y, &unscaled);
-            (gl.pop_matrix)();
-            if mode != GL_MODELVIEW as i32 {
-                (gl.matrix_mode)(mode as u32);
-            }
         }
     }
 
@@ -714,7 +639,7 @@ mod hook {
         let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
         install(base)?;
         if !is_unity(s) {
-            gl().map_err(|why| format!("cannot scale the icons: {why}"))?;
+            crate::gl_zoom::ready().map_err(|why| format!("cannot scale the icons: {why}"))?;
             // The names are centred beside the bigger icon through `font`'s
             // text calls, which forward to the engine while no font is set.
             font::ensure_installed().map_err(|why| format!("cannot centre the names: {why}"))?;

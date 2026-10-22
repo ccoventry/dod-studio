@@ -2381,13 +2381,15 @@ tr.keyboard-selected {
   overflow-wrap: anywhere;
 }
 
-.split-maps {
-  margin: 6px 0;
-  border-collapse: collapse;
+/* The app's table style (analyzer-table), sized to its content. */
+.split-maps.analyzer-table {
+  width: auto;
+  min-width: 420px;
+  margin: 8px 0;
 }
 
-.split-maps td {
-  padding: 2px 10px 2px 0;
+.split-maps th {
+  position: static;
 }
 
 .split-map-num,
@@ -2396,13 +2398,31 @@ tr.keyboard-selected {
   font-variant-numeric: tabular-nums;
 }
 
+.split-done td {
+  opacity: 0.75;
+}
+
+.split-map-done {
+  color: var(--text-muted, #aaa);
+  font-size: 0.9em;
+}
+
+.split-done-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  color: #5fb85f;
+}
+
 .split-short td {
   opacity: 0.6;
 }
 
+/* The result goes under the button, not beside it. */
 .split-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   align-items: flex-start;
 }
@@ -3277,8 +3297,14 @@ button.setup-skip:hover:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: 3px;
   padding: 5px 8px;
-  overflow-x: auto;
-  white-space: nowrap;
+  /* A long path wraps at its folder separators (setup_window.js adds a
+     <wbr> after each), never behind a scrollbar. */
+  overflow-wrap: anywhere;
+}
+
+.setup-path-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .setup-path.empty {
@@ -3670,6 +3696,46 @@ button.setup-skip:hover:not(:disabled) {
   gap: 3px;
   align-items: center;
   font-size: 12px;
+}
+
+/* Duplicates (#844): a group's header row stands out from its files, and the
+   row buttons are the compact kind the render list uses. */
+.audit-table .audit-group-row td {
+  background: #1c1c1c;
+  border-top: 1px solid var(--border-color);
+}
+
+.audit-table .group-toggle-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.audit-table .audit-file-path {
+  word-break: break-all;
+}
+
+.audit-table th:nth-child(1) { width: 32px; }
+.audit-table th:nth-child(2) { width: 210px; }
+.audit-table th:nth-child(3) { width: 90px; }
+.audit-table th:nth-child(5) { width: 200px; }
+
+.audit-table .audit-keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(3),
+.audit-table td:last-child {
+  white-space: nowrap;
+}
+
+.audit-table td:last-child button {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 4px;
 }
 
 .audit-status-current {

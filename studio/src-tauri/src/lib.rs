@@ -33,9 +33,9 @@ mod test_support;
 use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
 use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
-    generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
-    launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
-    send_preview_to_running_game, start_steam, steam_state,
+    kill_engine_processes, launch_demo_preview, launch_obs, launch_standalone_game,
+    read_cfg_commands, scan_orphaned_previews, send_preview_to_running_game, start_steam,
+    steam_state,
 };
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
@@ -211,15 +211,16 @@ async fn list_fixed_drives() -> Result<Vec<String>, String> {
     .await
 }
 
-/// To the Recycle Bin, or for good when `permanent` (#844).
+/// To the Recycle Bin, or for good when `permanent` (#844), each copy only
+/// once it matches its group's kept copy byte for byte.
 #[tauri::command]
 async fn delete_audit_files(
     app_handle: tauri::AppHandle,
-    paths: Vec<String>,
+    copies: Vec<audit_manager::DeleteCopy>,
     permanent: bool,
 ) -> Result<DeleteOutcome, String> {
     crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
-        audit_manager::delete_audit_files_impl(&app_handle, paths, permanent)
+        audit_manager::delete_audit_files_impl(&app_handle, copies, permanent)
     }))
     .await
 }
@@ -470,9 +471,12 @@ fn hlae_ffmpeg_report(
     // produces `None`, so the check never ran and a typo'd override said
     // nothing at all. Failing to resolve is itself the problem worth reporting.
     let configured = ffmpeg_path.as_deref().unwrap_or("").trim().to_string();
+    // The frontend sends the bare default `ffmpeg` when no override is set, so
+    // that is "no override" too, not a file called ffmpeg that went missing.
+    let no_override = configured.is_empty() || configured.eq_ignore_ascii_case("ffmpeg");
     let app_ffmpeg_problem = match &app_ffmpeg {
         Some(p) => hf::verify_is_ffmpeg(p).err(),
-        None if configured.is_empty() => {
+        None if no_override => {
             Some("no ffmpeg.exe was found on PATH, and no override is set".to_string())
         }
         None => Some(format!("there is no file at \"{}\"", configured)),
@@ -837,7 +841,6 @@ pub fn run() {
             load_map_overview,
             start_capture_batch,
             launch_demo_preview,
-            generate_all_previews,
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,
@@ -895,6 +898,7 @@ pub fn run() {
             demo_split_manager::cancel_multi_map_scan,
             demo_split_manager::demo_map_segments,
             demo_split_manager::split_demo_maps,
+            demo_split_manager::cancel_demo_split,
             demo_split_manager::split_demo_auto,
             delete_audit_files,
             list_fixed_drives,
@@ -955,6 +959,7 @@ pub fn run() {
             updater_manager::restart_app,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
+            updater_manager::hook_dll_override_allowed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
