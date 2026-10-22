@@ -11,7 +11,9 @@ import {
   checkHlaeFfmpeg,
   diagnoseExecutablePaths,
   enginePacketEntityLimit,
+  listGameFolders,
 } from './ipc_bridge.js';
+import { getGameFolder } from './game_folder_ui.js';
 import { refreshPathWarnings, refreshHlaeFfmpegStatus, linkHlaeToFfmpeg } from './config_wiring.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { setupChecklist, shouldOpenSetupAtLaunch, engineBuild } from './setup_checklist.js';
@@ -71,6 +73,14 @@ export function createSetup({
     }
     const [hlState, hlaeState] = states;
     const hlBuild = hlPath && hlState === 'ok' ? engineBuild(await enginePacketEntityLimit(hlPath)) : null;
+    let gameFolders = [];
+    if (hlPath && hlState === 'ok') {
+      try {
+        gameFolders = (await listGameFolders(hlPath)) || [];
+      } catch {
+        // Logged by the bridge; the step says to pick hl.exe first.
+      }
+    }
     let ffmpegUsable = null;
     let ffmpegCanLink = false;
     let appFfmpeg;
@@ -94,6 +104,7 @@ export function createSetup({
     ]);
     return {
       hlPath, hlState, hlaePath, hlaeState, hlBuild, ffmpegUsable, ffmpegCanLink,
+      gameFolder: getGameFolder(), gameFolders,
       appFfmpeg, appFfmpegProblem, hlaeBundledFfmpeg,
       targetDrives, renderExportDirs,
       demoCount: (getDemos() || []).length,
@@ -192,6 +203,16 @@ export function createSetup({
     // Finish clips and the HLAE link all read.
     pickFfmpeg: () => pickExe('#ffmpeg-override-path-input', STRINGS.MAIN.SELECT_FFMPEG_EXE_TITLE),
     useHlaeFfmpeg: () => setExe('#ffmpeg-override-path-input', snapshot.hlaeBundledFfmpeg),
+    // Through Configuration's own Game Folder list, which saves it.
+    setGameFolder: async (name) => {
+      const select = document.querySelector('#config-game-folder');
+      if (select && name) {
+        select.value = name;
+        select.dispatchEvent(new Event('change'));
+      }
+      await refreshPathWarnings();
+      await refresh();
+    },
     openFfmpegPage: () => openUrl(STRINGS.SETUP.FFMPEG_URL).catch((err) => console.error('Error opening the FFmpeg page:', err)),
     addFolder,
     removeFolder,

@@ -8,6 +8,7 @@ import {
   defaultDemoFolder,
   engineBuild,
   isSteamPlayInstall,
+  usesPlayFolder,
   wrongExeName,
   EXE_NAMES,
   sameDriveFolders,
@@ -155,6 +156,15 @@ describe('Half-Life install helpers', () => {
     expect(isSteamPlayInstall('c:/steam/STEAMAPPS/COMMON/half-life/HL.EXE')).toBe(true);
     expect(isSteamPlayInstall('C:\\Steam\\steamapps\\common\\Half-Life - PRE-Anniversary for Movies\\hl.exe')).toBe(false);
     expect(isSteamPlayInstall('')).toBe(false);
+  });
+
+  it("only Steam's own Half-Life with its own dod folder gets the movie-copy note", () => {
+    const steam = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Half-Life\\hl.exe';
+    expect(usesPlayFolder(steam, 'dod')).toBe(true);
+    expect(usesPlayFolder(steam, 'DOD')).toBe(true);
+    expect(usesPlayFolder(steam, '')).toBe(true);
+    expect(usesPlayFolder(steam, 'dod_movies')).toBe(false);
+    expect(usesPlayFolder('D:\\Half-Life - Movies\\hl.exe', 'dod')).toBe(false);
   });
 
   it('names the engine build from its packet-entity limit', () => {

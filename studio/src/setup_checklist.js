@@ -21,6 +21,16 @@ export function isSteamPlayInstall(hlPath) {
   return normalised.endsWith('/steamapps/common/half-life/hl.exe');
 }
 
+/**
+ * Whether Studio would launch Steam's own Half-Life with its own `dod`
+ * folder, the pair people play online with. A copy of the dod folder beside
+ * it (`dod_movies`, picked as the Game Folder) keeps movie files out of that
+ * game, so only this pair gets the "highly recommended" note.
+ */
+export function usesPlayFolder(hlPath, gameFolder) {
+  return isSteamPlayInstall(hlPath) && (gameFolder || 'dod').trim().toLowerCase() === 'dod';
+}
+
 /** The program each path must name: any other .exe (hlds.exe sits beside
  *  hl.exe in every install) passes the picker's filter but can't run. */
 export const EXE_NAMES = { hl: 'hl.exe', hlae: 'HLAE.exe' };

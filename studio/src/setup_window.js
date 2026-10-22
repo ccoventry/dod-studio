@@ -2,8 +2,8 @@
 // The Setup window (#599): six steps, one at a time, each with a status and a
 // way past it. It draws from the snapshot setup_wiring.js keeps and calls back
 // for every action (pickers, the FFmpeg link, the demo scan), so it does no
-// IPC of its own. Step 1 explains how to make a movie copy of Half-Life; it
-// never copies anything itself.
+// IPC of its own. Step 1 explains how to make a movie copy of the dod folder;
+// it never copies anything itself.
 import { STRINGS } from './strings.js';
 import { escapeHtml } from './html.js';
 import {
@@ -12,7 +12,7 @@ import {
   driveLabel,
   formatBytes,
   EXE_NAMES,
-  isSteamPlayInstall,
+  usesPlayFolder,
   sameDriveFolders,
   setupChecklist,
   wrongExeName,
@@ -23,6 +23,7 @@ import {
  *   getSnapshot(): the current state (setup_wiring.js's snapshot).
  *   pickHl(), pickHlae(), linkFfmpeg(), openHlaePage(): step actions.
  *   pickFfmpeg(), useHlaeFfmpeg(), openFfmpegPage(): the FFmpeg step's own.
+ *   setGameFolder(name): the Half-Life step's game folder pick.
  *   addFolder(kind), removeFolder(kind, path): kind is 'captures' | 'renders'.
  *   pickDemoFolder(): resolves to a folder or null.
  *   onSkip(): "Skip setup for now". onFinish(demoFolder): the last step's
@@ -80,14 +81,30 @@ export function createSetupWindow(deps) {
 
   function hlStep(snap) {
     const build = snap.hlBuild && !wrongExeName(snap.hlPath, EXE_NAMES.hl) ?`<span class="setup-chip ${snap.hlBuild === 'anniversary' ? 'ok' : 'info'}">${escapeHtml(S.HL_BUILD[snap.hlBuild])}</span>` : '';
-    const playWarn = isSteamPlayInstall(snap.hlPath)
-      ? `<div class="setup-note warn" id="setup-hl-play-warning">${escapeHtml(S.HL_PLAY_INSTALL)}</div>` : '';
+    const playWarn = usesPlayFolder(snap.hlPath, snap.gameFolder)
+      ? `<div class="setup-note warn" id="setup-hl-play-warning">${escapeHtml(S.HL_DOD_FOLDER)}</div>` : '';
     return `<p>${escapeHtml(S.HL_INTRO)}</p>
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
       <div class="setup-field">
         <div class="setup-field-label">${escapeHtml(S.HL_FIELD)} ${exeStatus(snap.hlPath, snap.hlState, S.HL_FOUND, EXE_NAMES.hl)} ${build}</div>
         ${pathRow(snap.hlPath, 'setup-hl-browse', S.BROWSE)}
-      </div>${playWarn}`;
+      </div>
+      ${gameFolderField(snap)}${playWarn}`;
+  }
+
+  // The same setting as Configuration > Paths > Game Folder: the folders
+  // beside hl.exe that hold a game, so a dod_movies copy is one pick away.
+  function gameFolderField(snap) {
+    const current = snap.gameFolder || 'dod';
+    const folders = snap.gameFolders || [];
+    const select = folders.length
+      ? `<select id="setup-game-folder">${folders.map((f) =>
+          `<option value="${escapeHtml(f)}"${f.toLowerCase() === current.toLowerCase() ? ' selected' : ''}>${escapeHtml(f)}</option>`).join('')}</select>`
+      : `<span class="setup-path empty">${escapeHtml(S.GAME_FOLDER_NONE)}</span>`;
+    return `<div class="setup-field">
+        <div class="setup-field-label">${escapeHtml(S.GAME_FOLDER_FIELD)}</div>
+        <div class="setup-path-row">${select}</div>
+      </div>`;
   }
 
   function hlaeStep(snap) {
@@ -199,6 +216,8 @@ export function createSetupWindow(deps) {
 
     const on = (id, fn) => contentEl.querySelector(`#${id}`)?.addEventListener('click', fn);
     on('setup-hl-browse', () => deps.pickHl());
+    contentEl.querySelector('#setup-game-folder')
+      ?.addEventListener('change', (e) => deps.setGameFolder(e.target.value));
     on('setup-hlae-browse', () => deps.pickHlae());
     on('setup-hlae-get', () => deps.openHlaePage());
     on('setup-ffmpeg-get', () => deps.openFfmpegPage());

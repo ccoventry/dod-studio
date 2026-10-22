@@ -391,9 +391,9 @@ export const STRINGS = {
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
     wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
-    // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
+    // #373. Shown under Half-Life Executable only; see usesPlayFolder.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended (made from the 25th Anniversary build): it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
+        "This is Steam's own Half-Life with its dod folder, the one you play online with. That works. A copy of the dod folder for movies (dod_movies, say, picked as the Game Folder below) is highly recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -2736,16 +2736,18 @@ export const STRINGS = {
     demosSummary: (count) => (count === 1 ? '1 demo in the queue' : `${count} demos in the queue`),
 
     // Step 1: Half-Life.
-    HL_TITLE: 'Set up a movie copy of Half-Life',
-    HL_INTRO: 'DoD Studio loads HLAE and its own add-on into the game. Do that in a separate copy of Half-Life used only for movies, never the one you play online with. To make one, copy your Half-Life folder somewhere else and pick the hl.exe inside the copy here.',
-    HL_RECOMMEND: 'Make the copy from the 25th Anniversary build. DoD Studio fixes the problems that build brought in (ESC closing the demo bar, textures glitching as you walk past them), and it is the build DoD Studio is developed on.',
-    HL_FIELD: 'Movie copy: hl.exe',
+    HL_TITLE: 'Set up Day of Defeat for movies',
+    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. To make one, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, and pick it as the game folder below.",
+    HL_RECOMMEND: "The 25th Anniversary build is recommended for movies: it has higher engine limits (some demos only play on it), DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them), and it's the build DoD Studio is developed on. The pre-Anniversary build works too, the same way.",
+    HL_FIELD: 'Half-Life: hl.exe',
+    GAME_FOLDER_FIELD: 'Game folder',
+    GAME_FOLDER_NONE: 'Pick hl.exe first: the folders beside it are listed here.',
+    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), then pick it here.",
     HL_FOUND: 'Found hl.exe.',
     HL_BUILD: {
       anniversary: '25th Anniversary build',
       pre_anniversary: 'pre-Anniversary build',
     },
-    HL_PLAY_INSTALL: "This is Steam's own Half-Life, the one you play online with. Pick your movie copy instead: copy the Half-Life folder to a new folder and pick its hl.exe here.",
 
     // Step 2: HLAE.
     HLAE_TITLE: 'Point DoD Studio at HLAE',

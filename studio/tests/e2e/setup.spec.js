@@ -58,6 +58,23 @@ test("the Half-Life step warns about Steam's own install and names the build", a
   expect(await calls(page)).toContainEqual(['openHlaePage']);
 });
 
+test("the Half-Life step picks a copy of the dod folder, and the note goes once it's picked", async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    Object.assign(window.__snapshot, { gameFolder: 'dod', gameFolders: ['dod', 'dod_movies', 'valve'] });
+    window.__win.open(0);
+  });
+  await expect(page.locator('#setup-hl-play-warning')).toContainText('copy the dod folder');
+  await page.locator('#setup-game-folder').selectOption('dod_movies');
+  expect(await calls(page)).toContainEqual(['setGameFolder', 'dod_movies']);
+  await page.evaluate(() => {
+    window.__snapshot.gameFolder = 'dod_movies';
+    window.__win.render();
+  });
+  await expect(page.locator('#setup-hl-play-warning')).toHaveCount(0);
+  await expect(page.locator('#setup-game-folder')).toHaveValue('dod_movies');
+});
+
 test('the FFmpeg step lets a fresh install pick ffmpeg.exe before pointing HLAE at it', async ({ page }) => {
   await loadHarness(page);
   // A fresh install: the bare `ffmpeg` is on no PATH folder, HLAE has no ini.
