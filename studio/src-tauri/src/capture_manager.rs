@@ -437,7 +437,8 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.initial_delay = payload.initial_delay;
     cfg.fast_forward_speed = payload.fast_forward_speed;
     cfg.ffmpeg_override_path = payload.ffmpeg_override_path.clone();
-    cfg.goldsrc_hooks_dll_path = payload.goldsrc_hooks_dll_path.clone();
+    cfg.goldsrc_hooks_dll_path =
+        crate::updater_manager::allowed_hook_dll(payload.goldsrc_hooks_dll_path.clone());
     cfg.resolution_width = payload.resolution_width;
     cfg.resolution_height = payload.resolution_height;
     cfg.ffmpeg_capture = payload.ffmpeg_capture;
@@ -2509,7 +2510,7 @@ fn resolve_preview_env(
     let patcher_config = PatcherConfig {
         hlae_path: hlae_path.to_string(),
         game_path: game_path.to_string(),
-        goldsrc_hooks_dll_path,
+        goldsrc_hooks_dll_path: crate::updater_manager::allowed_hook_dll(goldsrc_hooks_dll_path),
         ..PatcherConfig::default()
     };
     Ok((patcher_config, dod_dir))
@@ -2921,11 +2922,13 @@ pub(crate) fn launch_config(
         ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(
             &settings.ffmpeg_capture_codec,
         ),
-        goldsrc_hooks_dll_path: request
-            .goldsrc_hooks_dll_path
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| settings.goldsrc_hooks_dll_path.clone()),
+        goldsrc_hooks_dll_path: crate::updater_manager::allowed_hook_dll(
+            request
+                .goldsrc_hooks_dll_path
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| settings.goldsrc_hooks_dll_path.clone()),
+        ),
         ..PatcherConfig::default()
     }
 }

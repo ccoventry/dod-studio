@@ -1050,6 +1050,16 @@ export async function localGitBranch() {
   });
 }
 
+/** Whether this build uses Configuration's GoldSrc Hooks DLL override: a
+ *  debug build or one made on this PC. An installed release always runs its
+ *  bundled DLL. Best-effort: false on error, which only hides the row. */
+export async function hookDllOverrideAllowed() {
+  return invoke("hook_dll_override_allowed").catch((err) => {
+    console.error("IPC Execution Error (hook_dll_override_allowed):", err);
+    return false;
+  });
+}
+
 export async function restartApp() {
   return invoke("restart_app")
     .catch((err) => {

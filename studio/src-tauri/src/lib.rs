@@ -959,6 +959,7 @@ pub fn run() {
             updater_manager::restart_app,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
+            updater_manager::hook_dll_override_allowed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,30 +1,23 @@
 // hook_dll_row.js
 // Configuration > Paths > GoldSrc Hooks DLL is for testing a hook build
-// instead of the one DoD Studio ships, so it shows in local and debug builds.
-// A release build shows it only while a path is set, so an override saved
-// earlier can still be seen and cleared rather than applying out of sight.
-import { isLocalOrDebugBuild } from './updater_pane.js';
+// instead of the one DoD Studio ships. Only a debug build or one made on this
+// PC uses it (updater_manager.rs `hook_dll_override_allowed`); an installed
+// release always runs its bundled DLL, whatever is saved, so the row is
+// hidden there.
+import { hookDllOverrideAllowed } from './ipc_bridge.js';
 
-/** Whether the row shows: always for a local or debug build, else only with
- *  a path in the field. */
-export function hookDllRowShown(isLocalBuild, path) {
-  return !!isLocalBuild || !!(path || '').trim();
-}
-
-/** Shows or hides the row from the field's current value. */
+/** Shows the row only where the override is used. */
 export async function refreshHookDllRow() {
   const row = document.querySelector('#goldsrc-hooks-dll-row');
   if (!row) return;
-  const path = document.querySelector('#goldsrc-hooks-dll-path-input')?.value || '';
-  let local = false;
+  let allowed = false;
   try {
-    local = await isLocalOrDebugBuild();
+    allowed = await hookDllOverrideAllowed();
   } catch {
-    // Unknown counts as a release build: the row still shows with a path set.
+    // Logged by the bridge. Unknown counts as a release build.
   }
-  const shown = hookDllRowShown(local, path);
-  row.style.display = shown ? '' : 'none';
-  if (!shown) {
+  row.style.display = allowed ? '' : 'none';
+  if (!allowed) {
     const warning = document.querySelector('#goldsrc-hooks-path-warning');
     if (warning) warning.style.display = 'none';
   }
