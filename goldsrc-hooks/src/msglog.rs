@@ -260,7 +260,8 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
-    // Same for ds_hud_hide_clan_text's three messages.
+    // Same for ds_hud_hide_clan_text's three messages, and
+    // ds_hud_hide_center_text's TextMsg, which clan_text's filter asks.
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::clan_text::filter(n, size, buf))

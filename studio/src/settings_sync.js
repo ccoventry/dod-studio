@@ -15,6 +15,7 @@ import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -34,8 +35,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
     // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
     const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRoll = numberField('#config-pre-roll', 2.0);
-    const postRoll = numberField('#config-post-roll', 0.6);
+    const preRoll = numberField('#config-pre-roll', 5.0);
+    const postRoll = numberField('#config-post-roll', 1.0);
 
     const resWidth = numberField('#config-res-width', 1280, { integer: true, positive: true });
     const resHeight = numberField('#config-res-height', 720, { integer: true, positive: true });
@@ -208,6 +209,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const inputEl = document.querySelector('#goldsrc-hooks-dll-path-input');
     if (inputEl) inputEl.value = settings.goldsrc_hooks_dll_path;
   }
+  // Always: a release build hides the row unless a path is set.
+  refreshHookDllRow();
   if (settings.hlae_path) {
     // Issue #101: this reads both #hlae-path-input and
     // #ffmpeg-override-path-input, so it has to run after *both* are
@@ -333,6 +336,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
   if (hookRunsBatchEl) hookRunsBatchEl.checked = settings.hook_runs_batch !== false;
+  // Again: Initial Delay shows only with Seek Between Clips off.
+  renderTimingDiagram();
   const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
   if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {
