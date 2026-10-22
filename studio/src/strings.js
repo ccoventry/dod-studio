@@ -186,11 +186,8 @@ export const STRINGS = {
     LAUNCHING: 'Launching…',
     VIEW_TELEMETRY_BUTTON: 'View Match Telemetry',
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
-    GENERATE_ALL_PREVIEWS_BUTTON: 'Generate All Previews',
-    GENERATE_ALL_PREVIEWS_TITLE: 'Generates _preview.dem files with a BOOKMARK event for every highlight across all demos, skipping any demo that already has one.',
-    GENERATING: 'Generating…',
-    LAUNCH_STANDALONE_BUTTON: 'Launch Game (HLAE)',
-    LAUNCH_STANDALONE_TITLE: 'Boots HLAE against hl.exe directly with no demo loaded.',
+    LAUNCH_STANDALONE_BUTTON: 'Launch Game',
+    LAUNCH_STANDALONE_TITLE: "Starts the game with DoD Studio, no demo loaded. Previews, reviews and capture batches use this game while it's open. Only close it when Studio asks.",
     MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
@@ -238,9 +235,6 @@ export const STRINGS = {
     secondsSuffix: (n) => `${n}s`,
     HLAE_PATH_REQUIRED: 'Set the HLAE and Half-Life executable paths in Configuration → Paths before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
-    generatedPreviews: (count) => count === 0
-      ? 'Every demo already had a preview — nothing new to generate.'
-      : `Generated ${count} preview demo(s). Load them manually via HLAE.`,
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
     sentToRunningGame: (cmd) => `Sent "${cmd}" to the running game.`,
     COPY_VIEW_COMMAND_FAILED: 'Failed to copy the view command to clipboard.',
@@ -391,9 +385,9 @@ export const STRINGS = {
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
     wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
-    // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
+    // #373. Shown under Half-Life Executable only; see usesPlayFolder.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended (made from the 25th Anniversary build): it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
+        "This is Steam's own Half-Life with its dod folder, the one you play online with. That works. A copy of the dod folder for movies (dod_movies, say, picked as the Game Folder below) is highly recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -2378,7 +2372,6 @@ export const STRINGS = {
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,
     killEngineFailed: (err) => `Failed to close running engine processes: ${err}`,
-    batchPreviewFailed: (err) => `Batch preview generation failed: ${err}`,
     cancelScanError: (err) => `Cancel scan error: ${err}`,
     settingsLoadFailed: (err) => `Failed to load settings: ${err}`,
     settingsSaveFailed: (err) => `Failed to save settings: ${err}`,
@@ -2754,16 +2747,18 @@ export const STRINGS = {
     demosSummary: (count) => (count === 1 ? '1 demo in the queue' : `${count} demos in the queue`),
 
     // Step 1: Half-Life.
-    HL_TITLE: 'Set up a movie copy of Half-Life',
-    HL_INTRO: 'DoD Studio loads HLAE and its own add-on into the game. Do that in a separate copy of Half-Life used only for movies, never the one you play online with. To make one, copy your Half-Life folder somewhere else and pick the hl.exe inside the copy here.',
-    HL_RECOMMEND: 'Make the copy from the 25th Anniversary build. DoD Studio fixes the problems that build brought in (ESC closing the demo bar, textures glitching as you walk past them), and it is the build DoD Studio is developed on.',
-    HL_FIELD: 'Movie copy: hl.exe',
+    HL_TITLE: 'Set up Day of Defeat for movies',
+    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. To make one, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, and pick it as the game folder below.",
+    HL_RECOMMEND: "DoD Studio supports both the 25th Anniversary and the pre-Anniversary build, but the 25th Anniversary build gives the best results: the game can use up to 4 GB of memory instead of 2 GB (room for HD textures), it has higher engine limits (some demos only play on it), and DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them).",
+    HL_FIELD: 'Half-Life: hl.exe',
+    GAME_FOLDER_FIELD: 'Game folder',
+    GAME_FOLDER_NONE: 'Pick hl.exe first: the folders beside it are listed here.',
+    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), then pick it here.",
     HL_FOUND: 'Found hl.exe.',
     HL_BUILD: {
       anniversary: '25th Anniversary build',
       pre_anniversary: 'pre-Anniversary build',
     },
-    HL_PLAY_INSTALL: "This is Steam's own Half-Life, the one you play online with. Pick your movie copy instead: copy the Half-Life folder to a new folder and pick its hl.exe here.",
 
     // Step 2: HLAE.
     HLAE_TITLE: 'Point DoD Studio at HLAE',
@@ -2775,7 +2770,17 @@ export const STRINGS = {
 
     // Step 3: FFmpeg.
     FFMPEG_TITLE: 'FFmpeg (optional)',
-    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. HLAE looks for FFmpeg in its own folder; the button below points it at the one DoD Studio uses.',
+    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. Pick your ffmpeg.exe below (DoD Studio renders with it), then point HLAE at the same one.',
+    FFMPEG_GET: 'Get FFmpeg (ffmpeg.org)',
+    FFMPEG_URL: 'https://ffmpeg.org/download.html',
+    FFMPEG_FIELD: 'ffmpeg.exe',
+    FFMPEG_APP_FOUND: 'Found FFmpeg.',
+    FFMPEG_APP_MISSING: "Not found: it isn't on the Windows PATH. Pick your ffmpeg.exe.",
+    ffmpegAppProblem: (why) => `Can't use this one: ${why}.`,
+    FFMPEG_HLAE_LABEL: 'HLAE',
+    FFMPEG_USE_HLAE: "Use HLAE's FFmpeg",
+    ffmpegHlaeHasOne: (path) => `HLAE has its own FFmpeg (${path}). DoD Studio can render with it too.`,
+    FFMPEG_PICK_FIRST: 'Pick ffmpeg.exe above first, then point HLAE at it.',
     FFMPEG_CHECKING: 'Checking…',
     FFMPEG_MISSING: "HLAE can't find FFmpeg yet.",
     FFMPEG_LINK_NOTE: 'Windows may ask for permission if HLAE is in a protected folder.',

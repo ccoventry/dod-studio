@@ -535,23 +535,39 @@ fn default_capture_fov() -> f32 {
     90.0
 }
 
-/// Where `dodstudio_goldsrc_hooks.dll` lives if nothing overrides it: Tauri's Windows
-/// bundler places `bundle.resources` entries under a `resources` folder
-/// beside the installed app's own executable, and
-/// `studio/src-tauri/tauri.conf.json` maps this crate's release
-/// build to `resources/goldsrc-hooks/dodstudio_goldsrc_hooks.dll` there. In a dev
-/// build (`npm run tauri dev`) that folder won't exist -- Studio ->
-/// Configuration -> Paths' override field is the way to point at
-/// `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` directly while
-/// developing. Either way, `build_hlae_process` treats a missing file here
-/// as "not installed" and simply doesn't inject it, same as any other
-/// optional path.
+/// Where `dodstudio_goldsrc_hooks.dll` lives if nothing overrides it:
+/// `studio/src-tauri/tauri.conf.json` maps this crate's release build to
+/// `goldsrc-hooks/dodstudio_goldsrc_hooks.dll` among `bundle.resources`, and
+/// Tauri v2's NSIS installer puts those beside the app's own executable
+/// (Tauri's `resource_dir`). Installs made before that kept them under a
+/// `resources` folder there, so that spot is checked second. Looking only
+/// in `resources` found no DLL in a current install, which went unnoticed
+/// while the override was set; once installed releases ignored the override
+/// (#912) the game launched without the hook. In a dev build
+/// (`npm run tauri dev`) neither exists -- Studio -> Configuration -> Paths'
+/// override points at `target/i686-pc-windows-msvc/release/` there. Either
+/// way, `build_hlae_process` treats a missing file as "not installed" and
+/// doesn't inject it, same as any other optional path.
 pub fn default_goldsrc_hooks_dll_path() -> Option<std::path::PathBuf> {
-    std::env::current_exe().ok()?.parent().map(|dir| {
-        dir.join("resources")
-            .join("goldsrc-hooks")
-            .join("dodstudio_goldsrc_hooks.dll")
-    })
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    Some(bundled_hooks_dll_in(&dir))
+}
+
+/// The bundled DLL under an install folder: the first spot that has it, else
+/// the current layout's (so a message names where it should be).
+fn bundled_hooks_dll_in(install_dir: &std::path::Path) -> std::path::PathBuf {
+    let current = install_dir
+        .join("goldsrc-hooks")
+        .join("dodstudio_goldsrc_hooks.dll");
+    let older = install_dir
+        .join("resources")
+        .join("goldsrc-hooks")
+        .join("dodstudio_goldsrc_hooks.dll");
+    if !current.exists() && older.exists() {
+        older
+    } else {
+        current
+    }
 }
 
 impl PatcherConfig {
@@ -925,6 +941,56 @@ mod capture_codec_tests {
     #[test]
     fn test_default_is_the_one_proven_in_a_real_capture() {
         assert_eq!(CaptureCodec::default(), CaptureCodec::UtVideo);
+    }
+}
+
+#[cfg(test)]
+mod bundled_hooks_dll_tests {
+    use super::bundled_hooks_dll_in;
+
+    fn install(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "dodstudio_bundled_dll_{name}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("install dir");
+        dir
+    }
+
+    fn put(dir: &std::path::Path, rel: &[&str]) -> std::path::PathBuf {
+        let path = rel.iter().fold(dir.to_path_buf(), |p, part| p.join(part));
+        std::fs::create_dir_all(path.parent().unwrap()).expect("folders");
+        std::fs::write(&path, b"").expect("dll");
+        path
+    }
+
+    #[test]
+    fn a_current_install_finds_the_dll_beside_the_exe() {
+        // Tauri v2's installer: resources beside the exe, no `resources` folder.
+        let dir = install("current");
+        let dll = put(&dir, &["goldsrc-hooks", "dodstudio_goldsrc_hooks.dll"]);
+        assert_eq!(bundled_hooks_dll_in(&dir), dll);
+    }
+
+    #[test]
+    fn an_older_install_finds_it_under_resources() {
+        let dir = install("older");
+        let dll = put(
+            &dir,
+            &["resources", "goldsrc-hooks", "dodstudio_goldsrc_hooks.dll"],
+        );
+        assert_eq!(bundled_hooks_dll_in(&dir), dll);
+    }
+
+    #[test]
+    fn with_neither_it_names_the_current_spot() {
+        let dir = install("neither");
+        assert_eq!(
+            bundled_hooks_dll_in(&dir),
+            dir.join("goldsrc-hooks")
+                .join("dodstudio_goldsrc_hooks.dll")
+        );
     }
 }
 
