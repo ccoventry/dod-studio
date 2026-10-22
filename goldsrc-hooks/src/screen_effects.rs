@@ -204,6 +204,21 @@ fn learn(sums: [f32; 2], live: &View, recorded: &View) -> [f32; 2] {
     ]
 }
 
+/// The client clock at the last [`unshake`], as f32 bits.
+static LAST_NOW: AtomicU32 = AtomicU32::new(0);
+/// The most the clock moves between two frames of one demo played on; at
+/// `dem_speed 4` and 25 fps a frame is 0.16 s.
+const MAX_STEP: f32 = 1.0;
+/// Room for a clock that settles back a little between frames.
+const MAX_BACK: f32 = 0.05;
+
+/// Whether the clock at `now` carries on from `last` in the same demo. A
+/// clock that went back or jumped is another demo, a restart or a seek: the
+/// window and the learnt bob (maybe another recorder's) start over.
+fn continues(last: f32, now: f32) -> bool {
+    (-MAX_BACK..=MAX_STEP).contains(&(now - last))
+}
+
 /// The recorder's bob over the live one, from [`learn`]'s sums.
 fn bob_scale(sums: [f32; 2]) -> f32 {
     if sums[1] > 1e-3 {
@@ -261,16 +276,26 @@ pub(crate) fn unshake(live: &View, view: &mut View, gun: &mut [f32; 3]) {
     } else {
         0
     };
-    let window = WINDOW
-        .each_ref()
-        .map(|w| f32::from_bits(w.load(Ordering::Relaxed)));
+    let last = f32::from_bits(LAST_NOW.swap(now.to_bits(), Ordering::Relaxed));
+    let same_demo = continues(last, now);
+    let window = if same_demo {
+        WINDOW
+            .each_ref()
+            .map(|w| f32::from_bits(w.load(Ordering::Relaxed)))
+    } else {
+        [0.0; 3]
+    };
     let window = advance(window, now, (pending != 0).then(|| decode(pending)));
     for (slot, value) in WINDOW.iter().zip(window) {
         slot.store(value.to_bits(), Ordering::Relaxed);
     }
-    let sums = BOB_SUMS
-        .each_ref()
-        .map(|s| f32::from_bits(s.load(Ordering::Relaxed)));
+    let sums = if same_demo {
+        BOB_SUMS
+            .each_ref()
+            .map(|s| f32::from_bits(s.load(Ordering::Relaxed)))
+    } else {
+        [0.0; 2]
+    };
     if !in_window(window, now) {
         for (slot, value) in BOB_SUMS.iter().zip(learn(sums, live, view)) {
             slot.store(value.to_bits(), Ordering::Relaxed);
@@ -549,6 +574,19 @@ mod tests {
         assert!((bob_scale(sums) - 0.5).abs() < 1e-2, "{}", bob_scale(sums));
         // No live bob to compare with: none.
         assert_eq!(bob_scale([0.0; 2]), 0.0);
+    }
+
+    #[test]
+    fn a_jump_in_the_clock_is_another_demo() {
+        assert!(continues(10.0, 10.01));
+        // Paused: the clock stands still.
+        assert!(continues(10.0, 10.0));
+        // A restart, a seek back, a demo whose clock starts later.
+        assert!(!continues(10.0, 0.5));
+        assert!(continues(10.0, 10.0 - 0.01), "settling back a little");
+        assert!(!continues(10.0, 9.5));
+        assert!(!continues(10.0, 250.0));
+        assert!(!continues(10.0, f32::NAN));
     }
 
     #[test]
