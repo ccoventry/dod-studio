@@ -478,6 +478,14 @@ fn search_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Whether a file's name says FFmpeg: its stem has `ffmpeg` in it, any case.
+/// `ffplay.exe` and `ffprobe.exe` don't.
+fn named_like_ffmpeg(exe: &Path) -> bool {
+    exe.file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase().contains("ffmpeg"))
+        .unwrap_or(false)
+}
+
 /// Whether an executable is actually FFmpeg, by asking it.
 ///
 /// "It exists" is not the same question. `ffplay.exe` and `ffprobe.exe` ship in
@@ -486,15 +494,26 @@ fn search_path(name: &str) -> Option<PathBuf> {
 /// that spawns the wrong program and records nothing, which is the same silent
 /// failure this whole module exists to prevent.
 ///
-/// The name is not enough either — a renamed `ffmpeg.exe` is still FFmpeg, and
-/// something else named `ffmpeg.exe` is still not. So it is asked: every FFmpeg
-/// tool prints `<toolname> version ...` as its first line, which distinguishes
-/// them from each other as well as from anything that is not FFmpeg at all.
+/// The name is not enough either — something else named `ffmpeg.exe` is still
+/// not FFmpeg. So it is asked: every FFmpeg tool prints `<toolname> version
+/// ...` as its first line, which distinguishes them from each other as well as
+/// from anything that is not FFmpeg at all.
+///
+/// Asking means starting it, though, and this runs on whatever the user
+/// picked: `HLAE.exe` picked by mistake opened HLAE. So only a file whose name
+/// says FFmpeg (`ffmpeg.exe`, `ffmpeg-7.1.exe`) is started; anything else is
+/// refused by name without running.
 ///
 /// Returns the version banner on success, so a caller can show what it found.
 pub fn verify_is_ffmpeg(exe: &Path) -> Result<String, String> {
     if !exe.is_file() {
         return Err(crate::messages::not_a_file(exe.display()));
+    }
+    if !named_like_ffmpeg(exe) {
+        let name = exe.file_name().map(|n| n.to_string_lossy().into_owned());
+        return Err(crate::messages::not_named_ffmpeg(
+            name.as_deref().unwrap_or_default(),
+        ));
     }
 
     let mut cmd = std::process::Command::new(exe);
@@ -1037,6 +1056,23 @@ mod tests {
         // the name is not the test.
         assert!(verify_is_ffmpeg(&fake).is_err());
         assert!(verify_is_ffmpeg(&dir.join("absent.exe")).is_err());
+    }
+
+    #[test]
+    fn a_program_not_named_ffmpeg_is_refused_without_running_it() {
+        let dir = scratch("verify_not_named");
+        // A real program would start if it were run: this one is a stand-in,
+        // so the test is that the refusal names it and never gets to running.
+        for name in ["HLAE.exe", "ffplay.exe", "setup.exe"] {
+            let exe = dir.join(name);
+            std::fs::write(&exe, b"MZ").expect("write");
+            let why = verify_is_ffmpeg(&exe).expect_err(name);
+            assert!(why.contains(name), "{why}");
+            assert!(why.contains("wasn't started"), "{why}");
+        }
+        assert!(named_like_ffmpeg(Path::new("C:/tools/ffmpeg.exe")));
+        assert!(named_like_ffmpeg(Path::new("C:/tools/FFmpeg-7.1.exe")));
+        assert!(!named_like_ffmpeg(Path::new("C:/tools/ffprobe.exe")));
     }
 
     #[test]
