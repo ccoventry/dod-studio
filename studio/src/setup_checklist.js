@@ -57,6 +57,8 @@ function foldersAreSet(folders) {
  *   hlPath, hlaePath: the two executables as typed.
  *   hlState, hlaeState: 'ok' | 'empty' | 'not_found' | 'not_a_file' | undefined.
  *   ffmpegUsable: whether HLAE can run FFmpeg (null while unknown).
+ *   appFfmpeg: the ffmpeg.exe DoD Studio itself renders with, '' when it
+ *     finds none (undefined while unknown).
  *   targetDrives, renderExportDirs: [{ path, freeBytes }].
  *   demoCount: demos in the Master Queue.
  *   pinnedFolders: the remembered demo folders.
@@ -68,7 +70,9 @@ export function setupChecklist(state = {}) {
   const done = {
     hl: pathIsSet(state.hlPath, state.hlState, EXE_NAMES.hl),
     hlae: pathIsSet(state.hlaePath, state.hlaeState, EXE_NAMES.hlae),
-    ffmpeg: state.ffmpegUsable === true,
+    // Both halves: HLAE for Video capture, DoD Studio for Render and Finish
+    // clips. HLAE's own bundled copy leaves Studio without one.
+    ffmpeg: state.ffmpegUsable === true && state.appFfmpeg !== '',
     captures: foldersAreSet(state.targetDrives),
     renders: foldersAreSet(state.renderExportDirs),
     demos: (state.demoCount || 0) > 0 || (state.pinnedFolders || []).length > 0,

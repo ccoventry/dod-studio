@@ -2757,7 +2757,17 @@ export const STRINGS = {
 
     // Step 3: FFmpeg.
     FFMPEG_TITLE: 'FFmpeg (optional)',
-    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. HLAE looks for FFmpeg in its own folder; the button below points it at the one DoD Studio uses.',
+    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. Pick your ffmpeg.exe below (DoD Studio renders with it), then point HLAE at the same one.',
+    FFMPEG_GET: 'Get FFmpeg (ffmpeg.org)',
+    FFMPEG_URL: 'https://ffmpeg.org/download.html',
+    FFMPEG_FIELD: 'ffmpeg.exe',
+    FFMPEG_APP_FOUND: 'Found FFmpeg.',
+    FFMPEG_APP_MISSING: "Not found: it isn't on the Windows PATH. Pick your ffmpeg.exe.",
+    ffmpegAppProblem: (why) => `Can't use this one: ${why}.`,
+    FFMPEG_HLAE_LABEL: 'HLAE',
+    FFMPEG_USE_HLAE: "Use HLAE's FFmpeg",
+    ffmpegHlaeHasOne: (path) => `HLAE has its own FFmpeg (${path}). DoD Studio can render with it too.`,
+    FFMPEG_PICK_FIRST: 'Pick ffmpeg.exe above first, then point HLAE at it.',
     FFMPEG_CHECKING: 'Checking…',
     FFMPEG_MISSING: "HLAE can't find FFmpeg yet.",
     FFMPEG_LINK_NOTE: 'Windows may ask for permission if HLAE is in a protected folder.',

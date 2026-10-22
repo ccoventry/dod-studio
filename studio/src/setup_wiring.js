@@ -73,11 +73,17 @@ export function createSetup({
     const hlBuild = hlPath && hlState === 'ok' ? engineBuild(await enginePacketEntityLimit(hlPath)) : null;
     let ffmpegUsable = null;
     let ffmpegCanLink = false;
+    let appFfmpeg;
+    let appFfmpegProblem = null;
+    let hlaeBundledFfmpeg = null;
     if (hlaePath && hlaeState === 'ok') {
       try {
         const result = await checkHlaeFfmpeg(hlaePath, value('#ffmpeg-override-path-input') || 'ffmpeg');
         ffmpegUsable = !!result?.usable;
         ffmpegCanLink = !!result?.can_link;
+        appFfmpeg = result?.app_ffmpeg || '';
+        appFfmpegProblem = result?.app_ffmpeg ? (result?.app_ffmpeg_problem || null) : null;
+        hlaeBundledFfmpeg = result?.state?.state === 'bundled' ? (result.state.path || null) : null;
       } catch {
         ffmpegUsable = false;
       }
@@ -88,6 +94,7 @@ export function createSetup({
     ]);
     return {
       hlPath, hlState, hlaePath, hlaeState, hlBuild, ffmpegUsable, ffmpegCanLink,
+      appFfmpeg, appFfmpegProblem, hlaeBundledFfmpeg,
       targetDrives, renderExportDirs,
       demoCount: (getDemos() || []).length,
       pinnedFolders: [...(getScanPaths() || [])],
@@ -125,7 +132,10 @@ export function createSetup({
     } catch (err) {
       console.error('Error opening the executable picker:', err);
     }
-    const path = Array.isArray(selected) ? selected[0] : selected;
+    await setExe(inputSel, Array.isArray(selected) ? selected[0] : selected);
+  }
+
+  async function setExe(inputSel, path) {
     if (!path) return;
     const input = document.querySelector(inputSel);
     if (input) {
@@ -178,6 +188,11 @@ export function createSetup({
     pickHlae: () => pickExe('#hlae-path-input', STRINGS.MAIN.SELECT_HLAE_EXE_TITLE),
     linkFfmpeg: async () => { await linkHlaeToFfmpeg(); await refresh(); },
     openHlaePage: () => openUrl(STRINGS.SETUP.HLAE_URL).catch((err) => console.error('Error opening the HLAE page:', err)),
+    // Fills Configuration's FFmpeg Override Path, the one setting Render,
+    // Finish clips and the HLAE link all read.
+    pickFfmpeg: () => pickExe('#ffmpeg-override-path-input', STRINGS.MAIN.SELECT_FFMPEG_EXE_TITLE),
+    useHlaeFfmpeg: () => setExe('#ffmpeg-override-path-input', snapshot.hlaeBundledFfmpeg),
+    openFfmpegPage: () => openUrl(STRINGS.SETUP.FFMPEG_URL).catch((err) => console.error('Error opening the FFmpeg page:', err)),
     addFolder,
     removeFolder,
     pickDemoFolder: () => pickFolder(STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE),

@@ -59,6 +59,13 @@ describe('setup checklist (#599)', () => {
     expect(c.steps.filter((s) => s.required).map((s) => s.key)).toEqual(['hl', 'hlae', 'captures']);
   });
 
+  it("FFmpeg is done only when DoD Studio finds one too, not just HLAE's own copy", () => {
+    const ffmpegDone = (state) => setupChecklist({ ...complete, ...state }).steps.find((s) => s.key === 'ffmpeg').done;
+    expect(ffmpegDone({ appFfmpeg: 'C:\\Programs\\FFmpeg\\ffmpeg.exe' })).toBe(true);
+    expect(ffmpegDone({ appFfmpeg: '' })).toBe(false);
+    expect(ffmpegDone({ appFfmpeg: 'C:\\Programs\\FFmpeg\\ffmpeg.exe', ffmpegUsable: false })).toBe(false);
+  });
+
   it('a path the check says is missing is not done, whatever the box says', () => {
     const c = setupChecklist({ ...complete, hlState: 'not_found' });
     expect(c.steps.find((s) => s.key === 'hl').done).toBe(false);

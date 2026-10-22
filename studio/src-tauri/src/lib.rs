@@ -471,9 +471,12 @@ fn hlae_ffmpeg_report(
     // produces `None`, so the check never ran and a typo'd override said
     // nothing at all. Failing to resolve is itself the problem worth reporting.
     let configured = ffmpeg_path.as_deref().unwrap_or("").trim().to_string();
+    // The frontend sends the bare default `ffmpeg` when no override is set, so
+    // that is "no override" too, not a file called ffmpeg that went missing.
+    let no_override = configured.is_empty() || configured.eq_ignore_ascii_case("ffmpeg");
     let app_ffmpeg_problem = match &app_ffmpeg {
         Some(p) => hf::verify_is_ffmpeg(p).err(),
-        None if configured.is_empty() => {
+        None if no_override => {
             Some("no ffmpeg.exe was found on PATH, and no override is set".to_string())
         }
         None => Some(format!("there is no file at \"{}\"", configured)),

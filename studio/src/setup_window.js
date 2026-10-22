@@ -22,6 +22,7 @@ import {
  * @param {object} deps
  *   getSnapshot(): the current state (setup_wiring.js's snapshot).
  *   pickHl(), pickHlae(), linkFfmpeg(), openHlaePage(): step actions.
+ *   pickFfmpeg(), useHlaeFfmpeg(), openFfmpegPage(): the FFmpeg step's own.
  *   addFolder(kind), removeFolder(kind, path): kind is 'captures' | 'renders'.
  *   pickDemoFolder(): resolves to a folder or null.
  *   onSkip(): "Skip setup for now". onFinish(demoFolder): the last step's
@@ -99,18 +100,40 @@ export function createSetupWindow(deps) {
   }
 
   function ffmpegStep(snap) {
-    let body;
-    if (!snap.hlaePath) body = `<div class="setup-note info">${escapeHtml(S.FFMPEG_NEEDS_HLAE)}</div>`;
-    else if (snap.ffmpegUsable == null) body = status('', S.FFMPEG_CHECKING);
-    else if (snap.ffmpegUsable) body = status('ok', S.FFMPEG_FOUND);
+    const intro = `<p>${escapeHtml(S.FFMPEG_INTRO)}</p>`;
+    if (!snap.hlaePath) return `${intro}<div class="setup-note info">${escapeHtml(S.FFMPEG_NEEDS_HLAE)}</div>`;
+    if (snap.ffmpegUsable == null) return `${intro}${status('', S.FFMPEG_CHECKING)}`;
+
+    // DoD Studio's own FFmpeg first: Render and Finish clips use it, and the
+    // link below writes it into HLAE's ini. A fresh install has only the bare
+    // name `ffmpeg`, which most unzipped copies are not on PATH for.
+    let appStatus;
+    if (!snap.appFfmpeg) appStatus = status('warn', S.FFMPEG_APP_MISSING);
+    else if (snap.appFfmpegProblem) appStatus = status('bad', S.ffmpegAppProblem(snap.appFfmpegProblem));
+    else appStatus = status('ok', S.FFMPEG_APP_FOUND);
+    let body = `<div class="setup-btn-row"><button type="button" id="setup-ffmpeg-get">${escapeHtml(S.FFMPEG_GET)}</button></div>
+      <div class="setup-field">
+        <div class="setup-field-label">${escapeHtml(S.FFMPEG_FIELD)} ${appStatus}</div>
+        ${pathRow(snap.appFfmpeg || '', 'setup-ffmpeg-browse', S.BROWSE)}
+      </div>`;
+    if (!snap.appFfmpeg && snap.hlaeBundledFfmpeg) {
+      body += `<div class="setup-note info">${escapeHtml(S.ffmpegHlaeHasOne(snap.hlaeBundledFfmpeg))}</div>
+        <div class="setup-btn-row"><button type="button" id="setup-ffmpeg-use-hlae">${escapeHtml(S.FFMPEG_USE_HLAE)}</button></div>`;
+    }
+
+    let hlae;
+    if (snap.ffmpegUsable) hlae = status('ok', S.FFMPEG_FOUND);
     else {
-      body = status('warn', S.FFMPEG_MISSING);
-      if (snap.ffmpegCanLink) {
-        body += `<div class="setup-btn-row"><button type="button" id="setup-ffmpeg-link">${escapeHtml(STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_LINK_BUTTON)}</button></div>
+      hlae = status('warn', S.FFMPEG_MISSING);
+      if (snap.ffmpegCanLink && snap.appFfmpeg && !snap.appFfmpegProblem) {
+        hlae += `<div class="setup-btn-row"><button type="button" id="setup-ffmpeg-link">${escapeHtml(STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_LINK_BUTTON)}</button></div>
           <p class="setup-muted">${escapeHtml(S.FFMPEG_LINK_NOTE)}</p>`;
+      } else if (snap.ffmpegCanLink) {
+        hlae += `<p class="setup-muted">${escapeHtml(S.FFMPEG_PICK_FIRST)}</p>`;
       }
     }
-    return `<p>${escapeHtml(S.FFMPEG_INTRO)}</p>${body}`;
+    body += `<div class="setup-field"><div class="setup-field-label">${escapeHtml(S.FFMPEG_HLAE_LABEL)}</div>${hlae}</div>`;
+    return `${intro}${body}`;
   }
 
   function folderStep(kind, snap) {
@@ -178,6 +201,9 @@ export function createSetupWindow(deps) {
     on('setup-hl-browse', () => deps.pickHl());
     on('setup-hlae-browse', () => deps.pickHlae());
     on('setup-hlae-get', () => deps.openHlaePage());
+    on('setup-ffmpeg-get', () => deps.openFfmpegPage());
+    on('setup-ffmpeg-browse', () => deps.pickFfmpeg());
+    on('setup-ffmpeg-use-hlae', () => deps.useHlaeFfmpeg());
     on('setup-ffmpeg-link', async (e) => {
       e.currentTarget.disabled = true;
       await deps.linkFfmpeg();
