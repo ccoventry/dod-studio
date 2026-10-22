@@ -58,6 +58,69 @@ test("the Half-Life step warns about Steam's own install and names the build", a
   expect(await calls(page)).toContainEqual(['openHlaePage']);
 });
 
+test("the Half-Life step picks a copy of the dod folder, and the note goes once it's picked", async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    Object.assign(window.__snapshot, { gameFolder: 'dod', gameFolders: ['dod', 'dod_movies', 'valve'] });
+    window.__win.open(0);
+  });
+  await expect(page.locator('#setup-hl-play-warning')).toContainText('copy the dod folder');
+  await page.locator('#setup-game-folder').selectOption('dod_movies');
+  expect(await calls(page)).toContainEqual(['setGameFolder', 'dod_movies']);
+  await page.evaluate(() => {
+    window.__snapshot.gameFolder = 'dod_movies';
+    window.__win.render();
+  });
+  await expect(page.locator('#setup-hl-play-warning')).toHaveCount(0);
+  await expect(page.locator('#setup-game-folder')).toHaveValue('dod_movies');
+});
+
+test('the FFmpeg step lets a fresh install pick ffmpeg.exe before pointing HLAE at it', async ({ page }) => {
+  await loadHarness(page);
+  // A fresh install: the bare `ffmpeg` is on no PATH folder, HLAE has no ini.
+  await page.evaluate(() => {
+    Object.assign(window.__snapshot, {
+      hlaePath: 'C:\\HLAE\\HLAE.exe', hlaeState: 'ok',
+      ffmpegUsable: false, ffmpegCanLink: true, appFfmpeg: '', appFfmpegProblem: null, hlaeBundledFfmpeg: null,
+    });
+    window.__win.open('ffmpeg');
+  });
+  const content = page.locator('#setup-step-content');
+  await expect(content).toContainText("Not found: it isn't on the Windows PATH");
+  await expect(content).toContainText('Pick ffmpeg.exe above first');
+  await expect(page.locator('#setup-ffmpeg-link')).toHaveCount(0);
+  await page.locator('#setup-ffmpeg-browse').click();
+  await page.locator('#setup-ffmpeg-get').click();
+  expect(await calls(page)).toContainEqual(['pickFfmpeg']);
+  expect(await calls(page)).toContainEqual(['openFfmpegPage']);
+  await expect(page.locator('#setup-next-btn')).toHaveText('Skip this step');
+
+  // Picked: the HLAE row now offers the link.
+  await page.evaluate(() => {
+    window.__snapshot.appFfmpeg = 'C:\\Programs\\FFmpeg\\ffmpeg.exe';
+    window.__win.render();
+  });
+  await expect(content).toContainText('Found FFmpeg.');
+  await expect(page.locator('#setup-ffmpeg-link')).toBeVisible();
+});
+
+test("the FFmpeg step offers HLAE's own copy when DoD Studio has none", async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    Object.assign(window.__snapshot, {
+      hlaePath: 'C:\\HLAE\\HLAE.exe', hlaeState: 'ok',
+      ffmpegUsable: true, ffmpegCanLink: false, appFfmpeg: '',
+      hlaeBundledFfmpeg: 'C:\\HLAE\\ffmpeg\\bin\\ffmpeg.exe',
+    });
+    window.__win.open('ffmpeg');
+  });
+  await expect(page.locator('#setup-step-content')).toContainText('HLAE has its own FFmpeg (C:\\HLAE\\ffmpeg\\bin\\ffmpeg.exe)');
+  // HLAE can record video, but Render can't yet, so the step is not done.
+  await expect(page.locator('#setup-next-btn')).toHaveText('Skip this step');
+  await page.locator('#setup-ffmpeg-use-hlae').click();
+  expect(await calls(page)).toContainEqual(['useHlaeFfmpeg']);
+});
+
 test('the demo step suggests the movie copy\'s dod folder and Finish hands it over', async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(() => window.__win.open('demos'));
