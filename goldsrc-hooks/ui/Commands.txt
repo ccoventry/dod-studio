@@ -9,6 +9,8 @@ SPECTATING (HLTV demos)
       Put the camera on a player (number 1-32; ds_hud_deathmsg players lists them).
   ds_spec_hide_bars 0/1
       Hide the spectator bars and everything on them.
+  ds_spec_hide_text 0/1
+      Hide the camera mode's name ('Free Look', ...) and the green 'Press DUCK for Spectator Menu' (POV deaths too).
   ds_spec_hide_hltv_messages 0/1
       Hide the HLTV proxy's on-screen messages.
 
@@ -25,6 +27,10 @@ HUD
       Hide the text a map puts on screen itself (mortar warnings, round results).
   ds_hud_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
+  ds_hud_hide_center_text 0/1
+      Hide the text the server prints in the middle of the screen (plugin countdowns and notices).
+  ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
+      Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_hud_deathmsg
       Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
   ds_hud_objectives
@@ -33,8 +39,10 @@ HUD
       Move or resize the overview map.
   ds_hud_overview_players 0-4
       Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
-  ds_hud_overview_team_marker 0/1
-      HLTV: mark the watched player on the overview map with their team's camera icon.
+  ds_hud_overview_team_marker 0-2
+      The camera icon on the overview map: 0 the game's own, 1 their team's icon in HLTV too, 2 none.
+  ds_hud_overview_hide_speaker 0/1
+      Leave the speaker icon off the players on the overview map.
   ds_hud_show_scope 0/1
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
