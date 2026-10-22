@@ -26,7 +26,7 @@ DoD Studio turns Day of Defeat 1.3 demos into highlight clips.
 
 1. **Scan** a folder of `.dem` files. Every kill streak becomes a highlight row.
 2. **Pick** highlights and press Start Capture Batch.
-3. The app **patches** copies of the demos with timed console commands, then launches `hl.exe` through HLAE. The game fast-forwards between highlights and records each one. This is **HLAE Game Capture**; OBS can record instead.
+3. The app launches `hl.exe` through HLAE and hands DoD Studio's hook DLL a schedule: the game plays the original demos, seeks between highlights and records each one (**Seek Between Clips**, on by default). With it off, the app **patches** copies of the demos with timed console commands instead and the game fast-forwards between highlights. This is **HLAE Game Capture**; OBS can record instead.
 4. **Render Studio** finds the recorded takes and transcodes them with FFmpeg.
 
 Around that pipeline sit a demo analyzer (scoreboards, streaks, chat, rounds), a duplicate-demo auditor, an HD texture builder, and a companion DLL that fixes and hides things inside the game.
