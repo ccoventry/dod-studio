@@ -106,9 +106,9 @@ pub fn analyzer_error(err: impl Display) -> String {
 
 pub fn ffmpeg_could_not_be_resolved(ffmpeg_path: &str) -> String {
     format!(
-        "Could not resolve an FFmpeg from \"{}\". Set Render Studio's FFmpeg path to a real \
-         ffmpeg.exe first — HLAE's ini needs an absolute path and cannot use a bare command \
-         name.",
+        "Could not find FFmpeg from \"{}\": no such file, and no ffmpeg.exe on the Windows \
+         PATH. Pick your ffmpeg.exe first (Setup's FFmpeg step, or Configuration > Paths > \
+         FFmpeg Override Path): HLAE's ini needs a full path.",
         ffmpeg_path
     )
 }
@@ -530,9 +530,9 @@ mod tests {
         assert_eq!(
             ffmpeg_could_not_be_resolved("ffmpeg"),
             format!(
-                "Could not resolve an FFmpeg from \"{}\". Set Render Studio's FFmpeg path to a real \
-                 ffmpeg.exe first — HLAE's ini needs an absolute path and cannot use a bare command \
-                 name.",
+                "Could not find FFmpeg from \"{}\": no such file, and no ffmpeg.exe on the Windows \
+                 PATH. Pick your ffmpeg.exe first (Setup's FFmpeg step, or Configuration > Paths > \
+                 FFmpeg Override Path): HLAE's ini needs a full path.",
                 "ffmpeg"
             )
         );
