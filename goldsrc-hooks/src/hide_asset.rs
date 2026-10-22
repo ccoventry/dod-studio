@@ -30,8 +30,10 @@
 //! `client.dll` has **zero** references to the string `"caparea"` anywhere in
 //! the binary (confirmed by a full binary string search) — it doesn't load
 //! or draw this sprite by name at all, unlike `mapsprites/speakerIcon.spr`/
-//! `voiceIcon.spr`, which are hardcoded HUD elements and already reachable
-//! through `voice.rs`.
+//! `voiceIcon.spr`, which `CHudSpectator::VidInit` loads by name for its own
+//! HUD drawing. `voice.rs` doesn't reach them (it only mutes
+//! voice-command sounds); `ds_hud_overview_hide_speaker`
+//! (`overview_speaker.rs`) skips the speaker icon's draw (#677).
 //!
 //! ## The mechanism: `HUD_AddEntity`
 //!
