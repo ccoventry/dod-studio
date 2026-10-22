@@ -298,6 +298,9 @@ pub(crate) fn unshake(live: &View, view: &mut View, gun: &mut [f32; 3]) {
             .each_ref()
             .map(|s| f32::from_bits(s.load(Ordering::Relaxed)))
     } else {
+        for slot in &BOB_SUMS {
+            slot.store(0, Ordering::Relaxed);
+        }
         [0.0; 2]
     };
     if !in_window(window, now) {
