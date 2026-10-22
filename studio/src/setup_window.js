@@ -63,9 +63,15 @@ export function createSetupWindow(deps) {
     return `<span class="setup-status"><span class="setup-dot ${kind}"></span>${escapeHtml(text)}</span>`;
   }
 
+  // A path that may wrap: a break opportunity after each folder separator,
+  // so a long one breaks between folders rather than mid-name.
+  function pathHtml(path) {
+    return escapeHtml(path).replace(/([\\/])/g, '$1<wbr>');
+  }
+
   function pathRow(path, buttonId, buttonLabel) {
     const shown = path
-      ? `<span class="setup-path">${escapeHtml(path)}</span>`
+      ? `<span class="setup-path">${pathHtml(path)}</span>`
       : `<span class="setup-path empty">${escapeHtml(S.NOT_SET)}</span>`;
     return `<div class="setup-path-row">${shown}<button type="button" id="${buttonId}">${escapeHtml(buttonLabel)}</button></div>`;
   }
@@ -160,7 +166,7 @@ export function createSetupWindow(deps) {
       if (typeof f.freeBytes === 'number') {
         free = f.freeBytes > 0 ? S.freeOn(formatBytes(f.freeBytes), driveLabel(f.path)) : S.NO_SPACE_FOUND;
       }
-      return `<div class="setup-path-row"><span class="setup-path">${escapeHtml(f.path)}<span class="setup-free">${escapeHtml(free)}</span></span>
+      return `<div class="setup-path-row"><span class="setup-path">${pathHtml(f.path)}<span class="setup-free">${escapeHtml(free)}</span></span>
         <button type="button" class="setup-folder-remove" data-path="${escapeHtml(f.path)}">${escapeHtml(S.REMOVE)}</button></div>`;
     }).join('') || `<div class="setup-path-row"><span class="setup-path empty">${escapeHtml(S.NO_FOLDERS_YET)}</span></div>`;
     const intro = kind === 'captures' ? S.CAPTURES_INTRO : S.RENDERS_INTRO;
@@ -178,7 +184,7 @@ export function createSetupWindow(deps) {
     // queue should not get a whole dod folder scanned into it by Finish.
     if (demoFolder == null) demoFolder = done ? '' : defaultDemoFolder(snap.hlPath);
     const shown = demoFolder
-      ? `<span class="setup-path">${escapeHtml(demoFolder)}</span>`
+      ? `<span class="setup-path">${pathHtml(demoFolder)}</span>`
       : `<span class="setup-path empty">${escapeHtml(S.DEMOS_NONE)}</span>`;
     return `<p>${escapeHtml(S.DEMOS_INTRO)}</p>
       <div class="setup-field"><div class="setup-field-label">${escapeHtml(S.DEMOS_FIELD)}</div>
