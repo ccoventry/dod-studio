@@ -30,6 +30,8 @@ where it lands.
   8. The signature matches once; `JE_AT` and `SKIP_AT` are short `je`s; the
      skip follows `test esi, esi`, the draw after it starts with `fld`, and its
      target is the function's epilogue (no x87 instruction before the `ret`).
+     `TEAM_OPERAND_AT` is the address operand of a 7-byte `cmp [imm32], 2`,
+     the team test #907 points at the watched player's team.
 
 `overview_speaker.rs`:
 
@@ -44,7 +46,7 @@ where it lands.
  11. `MsgFunc_TextMsg`'s destination-4 case posts to the same object whose
      hold `clan_text::end_center_line` clears.
 
-All five patched spans:
+All six patched spans:
 
  12. Nothing in `.text` branches into the middle of one.
 
@@ -320,6 +322,12 @@ def main() -> int:
         check(tail and tail[-1].mnemonic == "ret" and not fpu and all(i.mnemonic in ("pop", "mov", "ret") for i in tail),
               f"its target +{exit_:#x} is the epilogue: {' / '.join(i.mnemonic + ' ' + i.op_str for i in tail)}",
               f"its target +{exit_:#x}: {[(i.mnemonic, i.op_str) for i in tail]}")
+        team_at = rust_usize(osrc, "TEAM_OPERAND_AT")
+        cmp = im.one(start + team_at - 2)
+        check(cmp.mnemonic == "cmp" and cmp.op_str.endswith(", 2") and cmp.size == 7,
+              f"+{start + team_at - 2:#x} is `cmp {cmp.op_str}` (the team test whose address #907 points at the watched player's team)",
+              f"+{start + team_at - 2:#x} is `{cmp.mnemonic} {cmp.op_str}`")
+        spans.append(("the camera team test's address", start + team_at, 4))
         spans.append(("the camera sprite je", start + je_at, 2))
         spans.append(("the camera draw je", start + skip_at, 2))
 
