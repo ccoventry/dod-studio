@@ -1610,6 +1610,10 @@ pub struct SerializedDemo {
     /// demo from a project saved before it was counted.
     #[serde(default)]
     pub peak_packet_entities: Option<u32>,
+    /// No playback frame carries a view (#920): a capture of it is a frozen
+    /// camera. `None` for a demo from a project saved before it was checked.
+    #[serde(default)]
+    pub no_camera_data: Option<bool>,
     /// Who recorded this POV demo (#174): the analyzer's global id (a
     /// SteamID64 when the demo has one) and name. `None` for an HLTV demo,
     /// and for demos from a project saved before this existed, which the
@@ -1739,6 +1743,7 @@ fn serialized_demo(
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs()),
         peak_packet_entities: analysis.demo_info.peak_packet_entities,
+        no_camera_data: Some(analysis.demo_info.no_camera_data),
         recorder_id: recorder.as_ref().map(|p| p.id.clone()),
         recorder_name: recorder.map(|p| p.name),
         teams: ::analysis::team_tags(&analysis.state),

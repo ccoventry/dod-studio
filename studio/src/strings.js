@@ -2055,6 +2055,22 @@ export const STRINGS = {
     PREVIEW_ANYWAY: 'Launch anyway',
   },
 
+  // ── camera_data.js: demos with no camera data (#920) ───────────────────
+  CAMERA_DATA: {
+    BADGE: 'no camera',
+    BADGE_TITLE: 'This demo has no camera data: none of its frames holds the recorder\'s view, so it plays as a frozen camera with no gun. '
+      + 'Kills and the scoreboard still read fine. It is usually a bad copy; if there is another copy of the demo, use that one.',
+    batchTitle: (count) => `${count} demo${count === 1 ? ' has' : 's have'} no camera data`,
+    batchMessage: (count) => `${count === 1 ? 'This demo has' : 'These demos have'} no camera data, so ${count === 1 ? 'its clips come' : 'their clips come'} out as a frozen camera with no gun. Start the batch anyway?`,
+    PREVIEW_TITLE: 'This demo has no camera data',
+    PREVIEW_MESSAGE: 'None of its frames holds the recorder\'s view, so it plays as a frozen camera with no gun. Launch it anyway?',
+    DETAIL: 'No camera data: plays as a frozen camera',
+    ANALYZER_NOTICE: 'No camera data: none of this demo\'s frames holds the recorder\'s view, so it plays and captures as a frozen camera with no gun. '
+      + 'The kills and scoreboard here are fine. It is usually a bad copy; if there is another copy of the demo, use that one.',
+    START_ANYWAY: 'Start anyway',
+    PREVIEW_ANYWAY: 'Launch anyway',
+  },
+
   // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
   COMBINE: {
     OPEN_BUTTON: 'Combine Clips…',

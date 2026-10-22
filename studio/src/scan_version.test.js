@@ -8,7 +8,7 @@ import { createProjectRescan } from './project_rescan.js';
 
 const hl = (extra = {}) => ({ spectated: false, viewdemo_times: [], kills: [[1, 1, 'K98']], ...extra });
 const current = (path, extra = {}) => ({
-  path, file_key: '1-abc', map_name: 'dod_anzio', teams: [], signon_maps: ['dod_anzio'],
+  path, file_key: '1-abc', map_name: 'dod_anzio', teams: [], signon_maps: ['dod_anzio'], no_camera_data: false,
   highlights_version: HIGHLIGHTS_VERSION, streaks: [hl()], ...extra,
 });
 
@@ -33,6 +33,7 @@ describe('which demos an older Studio scanned', () => {
     expect(scanIsCurrent(current('a.dem', { map_name: undefined }))).toBe(false);
     expect(scanIsCurrent(current('a.dem', { teams: undefined }))).toBe(false);
     expect(scanIsCurrent(current('a.dem', { signon_maps: undefined }))).toBe(false);
+    expect(scanIsCurrent(current('a.dem', { no_camera_data: undefined }))).toBe(false);
     expect(scanIsCurrent(current('a.dem', { streaks: [hl({ spectated: undefined })] }))).toBe(false);
     expect(scanIsCurrent(current('a.dem', { streaks: [hl({ viewdemo_times: undefined })] }))).toBe(false);
   });
