@@ -57,7 +57,11 @@ pub enum EngineEvent {
 
 /// The hook batch command that asks for `hold` (true) or `go` (false), #861.
 pub fn hold_command(hold: bool) -> String {
-    format!("dodstudio_batch {}", if hold { "hold" } else { "go" })
+    format!(
+        "{} {}",
+        crate::patch::runtime_batch::BATCH_COMMAND,
+        if hold { "hold" } else { "go" }
+    )
 }
 
 /// Longest a batch may go without a console marker before OBS mode calls it
@@ -1310,7 +1314,13 @@ fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool
 
 #[cfg(test)]
 mod tests {
-    use super::completion_source;
+    use super::{completion_source, hold_command};
+
+    #[test]
+    fn hold_and_go_use_the_hooks_batch_command() {
+        assert_eq!(hold_command(true), "ds_capture_batch hold");
+        assert_eq!(hold_command(false), "ds_capture_batch go");
+    }
 
     #[test]
     fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {

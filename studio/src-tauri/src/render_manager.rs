@@ -114,7 +114,13 @@ struct RenderJobRuntime {
     /// — snapshotted alongside `codec` for the same reason: Reset always
     /// re-runs with exactly what the job was queued with.
     custom_codec_args: String,
+    /// Render Settings' Source FPS when queued: used only for a take whose
+    /// `dodstudio_take.json` doesn't record its capture rate (`take_fps`).
     fps: u32,
+    /// The rate the take was captured at, from its `dodstudio_take.json`
+    /// (`take_meta::recorded_fps`), read when the row is made. A render reads
+    /// the frames at this rate when there is one (#14).
+    take_fps: Option<u32>,
     /// This take's render history (#438), read from its `dodstudio_take.json`
     /// when the job is queued and kept current as attempts start and end.
     history: Vec<HistoryEntry>,
@@ -250,11 +256,15 @@ impl RenderJobRuntime {
             progress: self.progress,
             error_log: self.error_log.clone(),
             // Skip mode never reads `fps` — showing it would imply a setting
-            // that has no effect on a plain file copy.
-            settings_summary: if is_source_copy {
+            // that has no effect on a plain file copy. Nor does a captured
+            // video, which carries its own rate.
+            settings_summary: if is_source_copy || self.clip.video_file.is_some() {
                 codec_label
             } else {
-                format!("{} @ {}fps", codec_label, self.fps)
+                match self.take_fps {
+                    Some(fps) => format!("{} @ {}fps (as captured)", codec_label, fps),
+                    None => format!("{} @ {}fps (Render Settings)", codec_label, self.fps),
+                }
             },
             output_path: self.output_path.clone(),
             output_size_bytes: self.output_size_bytes,
@@ -955,7 +965,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                                 } else {
                                     String::new()
                                 },
-                                fps: job.fps,
+                                fps: job.take_fps.unwrap_or(job.fps),
                                 outcome: RenderOutcome::Started,
                                 output_path: String::new(),
                                 output_size_bytes: None,
@@ -1153,10 +1163,14 @@ async fn scan_and_merge(
                         // what has no render yet, and Retry queues it again.
                         let finished_output =
                             last_finished_output(&history, &attempt_stream(&clip));
+                        let take_fps = native::hlcr::take_meta::recorded_fps(std::path::Path::new(
+                            &clip.take_folder,
+                        ));
                         ScannedTake {
                             clip,
                             history,
                             finished_output,
+                            take_fps,
                         }
                     })
                     .collect();
@@ -1940,6 +1954,9 @@ fn recovered_jobs(session: &RenderSessionData) -> Vec<RenderJobRuntime> {
                 codec: RenderCodec::from_str_id(&settings.codec),
                 custom_codec_args: settings.custom_codec_args,
                 fps: settings.fps,
+                take_fps: native::hlcr::take_meta::recorded_fps(std::path::Path::new(
+                    &rj.take_folder,
+                )),
                 history: history_for(&rj.take_folder),
                 current_attempt: None,
             }
@@ -2094,7 +2111,14 @@ mod tests {
         assert!(!config.ffmpeg_path.is_empty());
         // Each job keeps its own settings, not the batch's.
         assert_eq!(views[0].codec_id, "h264");
-        assert!(views[0].settings_summary.ends_with("@ 60fps"));
+        // A take with no recorded capture rate: the job's own Source FPS.
+        assert!(
+            views[0]
+                .settings_summary
+                .ends_with("@ 60fps (Render Settings)"),
+            "{}",
+            views[0].settings_summary
+        );
     }
 
     #[test]

@@ -1860,15 +1860,11 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
     let targets = job
         .scheduled_commands
         .iter()
-        .filter(|(_, c)| c == "dodstudio_spec_target 7")
+        .filter(|(_, c)| c == "ds_spec_target 7")
         .count();
     // The start, and the drop back to real time before each of the two clips.
     assert_eq!(targets, 3, "{:?}", job.scheduled_commands);
-    assert!(
-        job.init_commands
-            .iter()
-            .any(|c| c == "dodstudio_spec_lock 1")
-    );
+    assert!(job.init_commands.iter().any(|c| c == "ds_spec_lock 1"));
     // First person, each time the camera is pointed.
     let in_eye = job
         .scheduled_commands
@@ -1887,13 +1883,9 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
     assert!(
         !job.scheduled_commands
             .iter()
-            .any(|(_, c)| c.starts_with("dodstudio_spec") || c.starts_with("spec_mode"))
+            .any(|(_, c)| c.starts_with("ds_spec") || c.starts_with("spec_mode"))
     );
-    assert!(
-        !job.init_commands
-            .iter()
-            .any(|c| c.starts_with("dodstudio_spec"))
-    );
+    assert!(!job.init_commands.iter().any(|c| c.starts_with("ds_spec")));
 }
 
 #[test]

@@ -5,7 +5,8 @@
 // (pinned folders, capture drives, ...) and hands them over through getState().
 
 import { saveSettings } from './ipc_bridge.js';
-import { getCommandsState, renderTimingDiagram } from './capture_pane.js';
+import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
+import { readReviewSettings, applyReviewSettings } from './review_settings.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -16,6 +17,7 @@ import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js'
 import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
+import { refreshHookDllRow } from './hook_dll_row.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -31,12 +33,12 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const hlPath = document.querySelector('#hl-path-input')?.value?.trim() || "";
     const ffmpegPath = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
-    const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+    const captureFps = numberField('#config-capture-fps', 120, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
     // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
     const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRoll = numberField('#config-pre-roll', 2.0);
-    const postRoll = numberField('#config-post-roll', 0.6);
+    const preRoll = numberField('#config-pre-roll', 5.0);
+    const postRoll = numberField('#config-post-roll', 1.0);
 
     const resWidth = numberField('#config-res-width', 1280, { integer: true, positive: true });
     const resHeight = numberField('#config-res-height', 720, { integer: true, positive: true });
@@ -55,14 +57,15 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
 
     const autoClearLogs = document.querySelector('#config-auto-clear-logs')?.checked || false;
     const autoClearPreviews = document.querySelector('#config-auto-clear-previews')?.checked || false;
-    const autoClearTempDemos = document.querySelector('#config-auto-clear-temp-demos')?.checked || false;
+    const autoClearTempDemos = document.querySelector('#config-auto-clear-temp-demos')?.checked ?? true;
 
-    // OS notification toggles (issue #98) — default on, matching decalFlush's
-    // `?? true` style above rather than `|| false`, which would silently
-    // disable them for anyone whose settings predate this field.
-    const notifyPatching = document.querySelector('#config-notify-patching')?.checked ?? true;
-    const notifyDemoLoading = document.querySelector('#config-notify-demo-loading')?.checked ?? true;
-    const notifyBetweenClips = document.querySelector('#config-notify-between-clips')?.checked ?? true;
+    // OS notification toggles (issue #98), with the backend's defaults when
+    // an element is missing: the three per-demo / per-clip ones off, the rest
+    // on. `?? true` rather than `|| false` for those, which would silently
+    // disable them.
+    const notifyPatching = document.querySelector('#config-notify-patching')?.checked ?? false;
+    const notifyDemoLoading = document.querySelector('#config-notify-demo-loading')?.checked ?? false;
+    const notifyBetweenClips = document.querySelector('#config-notify-between-clips')?.checked ?? false;
     const notifyCapturesDone = document.querySelector('#config-notify-captures-done')?.checked ?? true;
     const notifyRendersDone = document.querySelector('#config-notify-renders-done')?.checked ?? true;
     const notifyError = document.querySelector('#config-notify-error')?.checked ?? true;
@@ -70,10 +73,12 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const updateChannel = document.querySelector('#config-update-channel')?.value || 'stable';
     const autoCheckUpdates = document.querySelector('#config-auto-check-updates')?.checked ?? true;
 
-    const recordStartLead = numberField('#config-record-start-lead', 0.0);
-    const recordStopTrail = numberField('#config-record-stop-trail', 0.0);
+    const recordStartLead = numberField('#config-record-start-lead', 5.0);
+    const recordStopTrail = numberField('#config-record-stop-trail', 5.0);
     const initialDelay = numberField('#config-initial-delay', 3.0);
-    const fastForwardSpeed = numberField('#config-fast-forward-speed', 0.05, { positive: true });
+    // No longer on the form (the Timing tab's FF Speed box is gone); the
+    // saved value goes back as it came.
+    const fastForwardSpeed = getFastForwardStep();
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
     const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
@@ -159,10 +164,11 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
       players: getPlayers(),
+      ...readReviewSettings(),
       // "After a clip is finished" (#644).
       ...getTakeCleanupSetting(),
       // "Render while capturing" (#861).
-      ...getRenderWhileCapturing()
+      ...getRenderWhileCapturing(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -209,6 +215,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     const inputEl = document.querySelector('#goldsrc-hooks-dll-path-input');
     if (inputEl) inputEl.value = settings.goldsrc_hooks_dll_path;
   }
+  // Always: a release build hides the row unless a path is set.
+  refreshHookDllRow();
   if (settings.hlae_path) {
     // Issue #101: this reads both #hlae-path-input and
     // #ffmpeg-override-path-input, so it has to run after *both* are
@@ -289,19 +297,21 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   const autoClearPreviewsEl = document.querySelector('#config-auto-clear-previews');
   if (autoClearPreviewsEl) autoClearPreviewsEl.checked = !!settings.auto_clear_previews;
   const autoClearTempDemosEl = document.querySelector('#config-auto-clear-temp-demos');
-  if (autoClearTempDemosEl) autoClearTempDemosEl.checked = !!settings.auto_clear_temp_demos;
+  if (autoClearTempDemosEl) autoClearTempDemosEl.checked = settings.auto_clear_temp_demos !== false;
+  // Missing reads as the backend default, the same as the save above: off
+  // for the three per-demo / per-clip toasts, on for the rest.
   const notifyPatchingEl = document.querySelector('#config-notify-patching');
-  if (notifyPatchingEl) notifyPatchingEl.checked = !!settings.notify_patching;
+  if (notifyPatchingEl) notifyPatchingEl.checked = settings.notify_patching === true;
   const notifyDemoLoadingEl = document.querySelector('#config-notify-demo-loading');
-  if (notifyDemoLoadingEl) notifyDemoLoadingEl.checked = !!settings.notify_demo_loading;
+  if (notifyDemoLoadingEl) notifyDemoLoadingEl.checked = settings.notify_demo_loading === true;
   const notifyBetweenClipsEl = document.querySelector('#config-notify-between-clips');
-  if (notifyBetweenClipsEl) notifyBetweenClipsEl.checked = !!settings.notify_between_clips;
+  if (notifyBetweenClipsEl) notifyBetweenClipsEl.checked = settings.notify_between_clips === true;
   const notifyCapturesDoneEl = document.querySelector('#config-notify-captures-done');
-  if (notifyCapturesDoneEl) notifyCapturesDoneEl.checked = !!settings.notify_captures_done;
+  if (notifyCapturesDoneEl) notifyCapturesDoneEl.checked = settings.notify_captures_done !== false;
   const notifyRendersDoneEl = document.querySelector('#config-notify-renders-done');
-  if (notifyRendersDoneEl) notifyRendersDoneEl.checked = !!settings.notify_renders_done;
+  if (notifyRendersDoneEl) notifyRendersDoneEl.checked = settings.notify_renders_done !== false;
   const notifyErrorEl = document.querySelector('#config-notify-error');
-  if (notifyErrorEl) notifyErrorEl.checked = !!settings.notify_error;
+  if (notifyErrorEl) notifyErrorEl.checked = settings.notify_error !== false;
   const notifyUpdatesEl = document.querySelector('#config-notify-updates');
   if (notifyUpdatesEl) notifyUpdatesEl.checked = settings.notify_updates !== false;
   const updateChannelEl = document.querySelector('#config-update-channel');
@@ -327,14 +337,13 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   // All five timing fields are set by this point — reflect the loaded
   // values in the Timings tab's visual timeline (#150).
   renderTimingDiagram();
-  if (settings.fast_forward_speed) {
-    const inputEl = document.querySelector('#config-fast-forward-speed');
-    if (inputEl) inputEl.value = settings.fast_forward_speed;
-  }
+  setFastForwardStep(settings.fast_forward_speed);
   const saveLocalPatchedEl = document.querySelector('#config-save-local-patched');
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
   if (hookRunsBatchEl) hookRunsBatchEl.checked = settings.hook_runs_batch !== false;
+  // Again: Initial Delay shows only with Seek Between Clips off.
+  renderTimingDiagram();
   const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
   if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {
@@ -354,6 +363,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     if (inputEl) inputEl.value = settings.render_max_concurrent;
   }
   setRenderPresets(settings.render_presets);
+  applyReviewSettings(settings);
   if (settings.scan_workers) {
     const inputEl = document.querySelector('#config-scan-workers');
     if (inputEl) inputEl.value = settings.scan_workers;

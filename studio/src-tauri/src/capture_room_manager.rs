@@ -6,7 +6,7 @@
 //!
 //! - **A clip starts recording** (`START_RECORD`): is there room for it to
 //!   finish *and* for the clip after it? If not, the hook's batch is asked to
-//!   hold at the next clip boundary (`dodstudio_batch hold`), and a watcher
+//!   hold at the next clip boundary (`ds_capture_batch hold`), and a watcher
 //!   checks the drive every second until `may_resume` says go.
 //! - **A clip stops recording** (`STOP_RECORD`): once its take stops growing
 //!   it is sent to the frontend (`capture_clip_ready`), which queues its

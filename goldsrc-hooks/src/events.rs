@@ -188,7 +188,7 @@ pub fn pipe_in_use() -> bool {
     WRAPPED.load(Ordering::Relaxed)
 }
 
-/// One `dodstudio_debug_status` line.
+/// One `ds_debug_status` line.
 pub fn status_line() -> Option<String> {
     WRAPPED.load(Ordering::Relaxed).then(|| {
         format!(

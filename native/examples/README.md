@@ -25,7 +25,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `frame_inspector` | What frames are in this demo, in what order, at what ordinal? |
 | `debug_cmds` | Which `ConsoleCommand` frames does a demo already carry? |
 | `stufftext_probe` | Which injected commands does the engine's demo command filter drop? Writes a demo for the in-game check (#679) |
-| `schedule_timing_probe` | How close `dodstudio_schedule` runs a command to an injected frame: writes a demo with marker frames and the matching schedule file (#434) |
+| `schedule_timing_probe` | How close `ds_capture_schedule` runs a command to an injected frame: writes a demo with marker frames and the matching schedule file (#434) |
 | `debug_scanner` | What does the highlight scanner see in this demo? |
 | `game_dir_patch_probe` | Writes one patched copy whose header and svc_serverinfo name a given game folder, for the in-game check that a copy of DoD plays it (#402) |
 | `check_ticks` | Do the batch queue's computed tick boundaries line up with the demo? |
