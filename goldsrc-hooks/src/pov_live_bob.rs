@@ -32,10 +32,11 @@
 //! With this on, the call to the override goes through [`after_override`]:
 //! once the recorded view is in place, the recorded bob is measured from it
 //! (the sideways part of `vieworg - simorg - viewheight`, which is all
-//! `V_CalcRefdef` adds there besides a fixed 1/32 and screen shake) and
-//! replaced by the live one [`after_calc_refdef`] measured the same way a
-//! moment earlier. The camera moves sideways and the gun forward by the
-//! difference, so the recorded path, its smoothing and everything else in the
+//! `V_CalcRefdef` adds there besides a fixed 1/32 and a grenade's screen
+//! shake, which `screen_effects::unshake` takes out first when
+//! `ds_view_hide_screen_shake` is on) and replaced by the live one [`after_calc_refdef`]
+//! measured the same way a moment earlier. The camera moves sideways and the
+//! gun forward by the difference, so the recorded path, its smoothing and everything else in the
 //! view stay as recorded. The live tilt is added to the gun's angles in
 //! [`before_view_model`], after the engine has set them and before the gun is
 //! drawn.
@@ -51,7 +52,8 @@
 //! clamp.
 //!
 //! The call site is found by a byte pattern per build, each unique in its own
-//! `hw.dll`, and redirected only once the setting is first turned on;
+//! `hw.dll`, and redirected only once this setting or
+//! `ds_view_hide_screen_shake` (which shares the call) is first turned on;
 //! `tools/verify_pov_live_bob_offsets.py` re-derives both.
 //!
 //! `ds_debug_log_view_bob 1` logs each frame's numbers: in a POV demo the live
@@ -94,35 +96,36 @@ const SITES: &[Site] = &[
 
 /// `ref_params_s` (`common/ref_params.h`) up to `playernum`.
 #[repr(C)]
-struct View {
-    vieworg: [f32; 3],
-    viewangles: [f32; 3],
-    forward: [f32; 3],
-    right: [f32; 3],
-    up: [f32; 3],
-    frametime: f32,
-    time: f32,
-    intermission: i32,
-    paused: i32,
-    spectator: i32,
-    onground: i32,
-    waterlevel: i32,
-    simvel: [f32; 3],
-    simorg: [f32; 3],
-    viewheight: [f32; 3],
-    idealpitch: f32,
-    cl_viewangles: [f32; 3],
-    health: i32,
-    crosshairangle: [f32; 3],
-    viewsize: f32,
-    punchangle: [f32; 3],
-    maxclients: i32,
-    viewentity: i32,
-    playernum: i32,
+#[derive(Clone, Copy)]
+pub(crate) struct View {
+    pub vieworg: [f32; 3],
+    pub viewangles: [f32; 3],
+    pub forward: [f32; 3],
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub frametime: f32,
+    pub time: f32,
+    pub intermission: i32,
+    pub paused: i32,
+    pub spectator: i32,
+    pub onground: i32,
+    pub waterlevel: i32,
+    pub simvel: [f32; 3],
+    pub simorg: [f32; 3],
+    pub viewheight: [f32; 3],
+    pub idealpitch: f32,
+    pub cl_viewangles: [f32; 3],
+    pub health: i32,
+    pub crosshairangle: [f32; 3],
+    pub viewsize: f32,
+    pub punchangle: [f32; 3],
+    pub maxclients: i32,
+    pub viewentity: i32,
+    pub playernum: i32,
 }
 
 /// `V_CalcRefdef` adds this to every axis of `vieworg`.
-const NUDGE: f32 = 1.0 / 32.0;
+pub(crate) const NUDGE: f32 = 1.0 / 32.0;
 /// `V_CalcBob`'s clamp (`client.dll+0x4ede0`, `+0x4ee05`), with room for
 /// float error.
 const BOB_MIN: f32 = -7.0 - 0.05;
@@ -315,9 +318,18 @@ unsafe extern "C" fn after_override(view: *mut View, gun: *mut [f32; 3], viewmod
     let original = ORIGINAL.load(Ordering::Acquire);
     // Safety: the address the call went to before it was redirected.
     let original: OverrideFn = unsafe { std::mem::transmute(original) };
+    // Safety: the engine's ref_params_s, still holding the live view.
+    let live = (!view.is_null()).then(|| unsafe { *view });
     unsafe { original(view, gun, viewmodel) };
     TILT_PENDING.store(false, Ordering::Relaxed);
-    if view.is_null() || gun.is_null() || !on() || !HAVE_LIVE.swap(false, Ordering::Relaxed) {
+    if view.is_null() || gun.is_null() {
+        return;
+    }
+    if let Some(live) = live {
+        // Safety: as below.
+        unsafe { crate::screen_effects::unshake(&live, &mut *view, &mut *gun) };
+    }
+    if !on() || !HAVE_LIVE.swap(false, Ordering::Relaxed) {
         return;
     }
     let live = f32::from_bits(LIVE_BOB.load(Ordering::Relaxed));
@@ -425,16 +437,20 @@ fn redirect() -> Result<&'static str, String> {
     ))
 }
 
-/// Redirects the call the first time the setting is on. Every frame.
+/// Redirects the call the first time this setting or
+/// `ds_view_hide_screen_shake` is on. Every frame.
 pub fn poll() {
-    if ORIGINAL.load(Ordering::Acquire) != 0 || GAVE_UP.load(Ordering::Relaxed) || !on() {
+    if ORIGINAL.load(Ordering::Acquire) != 0
+        || GAVE_UP.load(Ordering::Relaxed)
+        || !(on() || crate::screen_effects::shake_on())
+    {
         return;
     }
     let line = match redirect() {
-        Ok(build) => format!("{NAME}: on ({build} hw.dll)"),
+        Ok(build) => format!("demo view override redirected ({build} hw.dll)"),
         Err(why) => {
             GAVE_UP.store(true, Ordering::Relaxed);
-            format!("{NAME}: {why}")
+            format!("{NAME}, {}: {why}", crate::screen_effects::SHAKE_NAME)
         }
     };
     unsafe { crate::debug::report(&line) };
