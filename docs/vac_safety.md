@@ -36,7 +36,7 @@ loaded into the game when it joins a server, whichever folder it runs from.
 | --- | --- | --- | --- |
 | Capture batch | `capture_engine` → `PatcherConfig::build_hlae_process` | HLAE's hook, plus ours if found | the hook DLL's connect refusal (when ours is found); HLAE's connect warning; `-insecure` |
 | Launch Preview | `launch_demo_preview` → `build_hlae_process` | same | same |
-| Launch Game (HLAE) | `launch_standalone_game` → `build_hlae_process` | same | same. This one opens at the main menu with no demo, so the server browser is one click away |
+| Launch Game | `launch_standalone_game` → `build_hlae_process` | same | same. This one opens at the main menu with no demo, so the server browser is one click away |
 | `inject.exe` (manual testing, `goldsrc-hooks/README.md`) | the user, any way they like | ours only, into any running `hl.exe` | the hook DLL's connect refusal, once the DLL has hooked the engine (its log says `connect_guard: wrapped`). No HLAE, so no connect warning |
 
 Every DoD Studio launch goes through the one function,

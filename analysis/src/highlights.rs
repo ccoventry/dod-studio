@@ -34,7 +34,7 @@ pub struct HighlightKill {
     pub frame_index: usize,
     /// Seconds from the start of the recording.
     pub real_secs: f32,
-    /// Seconds on the `viewdemo` bar (what `dodstudio_seek_to` takes).
+    /// Seconds on the `viewdemo` bar (what `ds_demo_seek_to` takes).
     pub viewdemo_secs: f32,
     pub weapon: Weapon,
 }
@@ -59,7 +59,7 @@ pub struct Highlight {
 
 impl Highlight {
     /// The player's number when they scored these kills: their entity
-    /// index, what `dodstudio_spec_target` takes and what the in-game
+    /// index, what `ds_spec_target` takes and what the in-game
     /// Highlights tab shows. The analysis counts slots from 0, the game
     /// numbers players from 1.
     pub fn number(&self) -> Option<u8> {

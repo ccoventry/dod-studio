@@ -210,15 +210,15 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
 /// The hook DLL's camera follow for HLTV demos (goldsrc-hooks
 /// `spectator_follow.rs`, #206): the command that puts the camera on a
 /// player by number, and the setting that keeps it there through their death.
-pub const SPEC_TARGET: &str = "dodstudio_spec_target";
-pub const SPEC_LOCK: &str = "dodstudio_spec_lock";
+pub const SPEC_TARGET: &str = "ds_spec_target";
+pub const SPEC_LOCK: &str = "ds_spec_lock";
 /// The game's first-person spectator mode (HL's `OBS_IN_EYE`): an HLTV demo
 /// otherwise plays in a chase camera behind the player.
 pub const IN_EYE: &str = "spec_mode 4";
 
-/// The hook DLL's `dodstudio_run_in_background` (goldsrc-hooks
+/// The hook DLL's `ds_capture_run_in_background` (goldsrc-hooks
 /// `run_in_background.rs`), which every batch turns on.
-pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
+pub const RUN_IN_BACKGROUND: &str = "ds_capture_run_in_background";
 
 /// Bytes one recording block is expected to need on its capture drive: the
 /// figure `build_batch_queue` routes blocks to drives by.
@@ -254,9 +254,9 @@ pub fn estimate_batch_capture_bytes(streaks: &[CaptureStreak], config: &PatcherC
         .fold(0u64, u64::saturating_add)
 }
 
-/// The hook DLL's `dodstudio_stay_behind_while_capturing` (goldsrc-hooks `hlae_window.rs`),
+/// The hook DLL's `ds_capture_stay_behind` (goldsrc-hooks `hlae_window.rs`),
 /// which every batch sets from `PatcherConfig::keep_game_behind`.
-pub const STAY_BEHIND: &str = "dodstudio_stay_behind_while_capturing";
+pub const STAY_BEHIND: &str = "ds_capture_stay_behind";
 
 /// On a capture batch's game launch line, with `keep_game_behind` on: the hook
 /// DLL keeps the window behind from the moment it opens, before the pipe can

@@ -170,7 +170,7 @@
                   <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
                 </select>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
-                  <input type="checkbox" id="review-tick-yes-cb" />
+                  <input type="checkbox" id="review-tick-yes-cb" checked />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
                 </label>
                 <!-- #665: gaps between kills play fast. -->
@@ -229,11 +229,10 @@
               <div class="header-title-group" style="display: flex; gap: 8px; align-items: center;">
                 <h3 id="detail-demo-title" data-str="HIGHLIGHTS.DEFAULT_TITLE">Highlight Details</h3>
                 <button id="btn-launch-preview" disabled data-str="HIGHLIGHTS.LAUNCH_PREVIEW_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_PREVIEW_TITLE">Launch Preview</button>
+                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game</button>
               </div>
               <div class="header-controls" style="display: flex; gap: 8px; align-items: center;">
                 <button id="view-telemetry-btn" disabled data-str="HIGHLIGHTS.VIEW_TELEMETRY_BUTTON">View Match Telemetry</button>
-                <button id="btn-generate-all-previews" disabled data-str="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_BUTTON" data-str-title="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_TITLE">Generate All Previews</button>
-                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game (HLAE)</button>
                 <div class="control-group">
                   <label for="input-min-kills" data-str="HIGHLIGHTS.MIN_KILLS_LABEL">Min Kills:</label>
                   <input type="number" id="input-min-kills" value="1" min="1" style="width: 50px;" />
@@ -297,7 +296,9 @@
                 <button id="ffmpeg-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="ffmpeg-path-warning" class="path-warning" style="display: none;"></div>
-              <div class="input-row">
+              <!-- Shown in local and debug builds, or while a path is set
+                   (hook_dll_row.js). -->
+              <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
                 <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
@@ -320,6 +321,8 @@
               <div class="inline-controls">
                 <div class="control-group">
                   <label for="config-res-width" data-str="CAPTURE_CONFIG.WIDTH_LABEL">Width:</label>
+                  <!-- Before the settings load only: a new install gets 1920x1080 when the
+                       primary screen holds it (settings_manager.rs default_resolution). -->
                   <input type="number" id="config-res-width" value="1280" style="width: 80px;" />
                 </div>
                 <div class="control-group">
@@ -328,7 +331,7 @@
                 </div>
                 <div class="control-group" id="capture-fps-group">
                   <label for="config-capture-fps" data-str="CAPTURE_CONFIG.CAPTURE_FPS_LABEL" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE">Capture FPS:</label>
-                  <input type="number" id="config-capture-fps" value="300" style="width: 80px;" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE" />
+                  <input type="number" id="config-capture-fps" value="120" style="width: 80px;" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE" />
                 </div>
                 <!-- A two-state choice rather than an option you switch on:
                      the alternative to video is not "no capture", it is a BMP
@@ -453,47 +456,42 @@
                    Lead, Stop Trail, Post-roll follow in the order they occur
                    around a single clip. -->
               <div class="grid-controls">
-                <div class="control-group control-group-stacked">
+                <!-- Hidden while Seek Between Clips is on: the hook waits for
+                     the demo itself (renderTimingDiagram). -->
+                <div class="control-group control-group-stacked" id="config-initial-delay-group">
                   <div class="control-group">
                     <label for="config-initial-delay" data-str="CAPTURE_CONFIG.INITIAL_DELAY_LABEL">Initial Delay (s):</label>
                     <input type="number" step="0.1" id="config-initial-delay" value="3.0" style="width: 80px;" />
                   </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.INITIAL_DELAY_HINT">Time between the demo loading and fast-forward starting.</p>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.INITIAL_DELAY_HINT">Time between the demo loading and the game moving to the first clip.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-pre-roll" data-str="CAPTURE_CONFIG.PRE_ROLL_LABEL">Pre-roll (s):</label>
-                    <input type="number" step="0.1" id="config-pre-roll" value="2.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-pre-roll" value="5.0" style="width: 80px;" />
                   </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between fast-forward stopping and capture starting.</p>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between the game reaching the clip and capture starting.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-record-start-lead" data-str="CAPTURE_CONFIG.START_LEAD_LABEL">Start Lead (s):</label>
-                    <input type="number" step="0.1" id="config-record-start-lead" value="0.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-record-start-lead" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.START_LEAD_HINT">Time between capture starting and the first kill.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-record-stop-trail" data-str="CAPTURE_CONFIG.STOP_TRAIL_LABEL">Stop Trail (s):</label>
-                    <input type="number" step="0.1" id="config-record-stop-trail" value="0.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-record-stop-trail" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.STOP_TRAIL_HINT">Time between the last kill and capture stopping.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-post-roll" data-str="CAPTURE_CONFIG.POST_ROLL_LABEL">Post-roll (s):</label>
-                    <input type="number" step="0.1" id="config-post-roll" value="0.6" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-post-roll" value="1.0" style="width: 80px;" />
                   </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and fast-forward resuming.</p>
-                </div>
-                <div class="control-group control-group-stacked">
-                  <div class="control-group">
-                    <label for="config-fast-forward-speed" data-str="CAPTURE_CONFIG.FF_SPEED_LABEL">FF Speed (x):</label>
-                    <input type="number" step="0.01" id="config-fast-forward-speed" value="0.05" style="width: 80px;" disabled data-str-title="CAPTURE_CONFIG.FF_SPEED_TITLE" title="Locked, matching dev — not currently user-editable." />
-                  </div>
-                  <p class="setting-hint" data-str="CAPTURE_CONFIG.FF_SPEED_HINT">How fast playback races toward each clip between kills, as a multiple of real time. Locked at 0.05x, matching dev — not currently user-editable.</p>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>
               </div>
 
@@ -552,7 +550,7 @@
                   <label for="config-auto-clear-previews" data-str="CAPTURE_CONFIG.AUTO_CLEAR_PREVIEWS_LABEL">Auto-clear Previews</label>
                 </div>
                 <div class="control-group">
-                  <input type="checkbox" id="config-auto-clear-temp-demos" />
+                  <input type="checkbox" id="config-auto-clear-temp-demos" checked />
                   <label for="config-auto-clear-temp-demos" data-str="CAPTURE_CONFIG.AUTO_CLEAR_TEMP_DEMOS_LABEL">Auto-clear Temp Demos</label>
                 </div>
                 <div class="control-group">
@@ -638,8 +636,8 @@
                   <input type="text" id="render-custom-codec-input" data-str-placeholder="RENDER.CUSTOM_CODEC_PLACEHOLDER" placeholder="-c:v mpeg4 -q:v 3" style="width: 260px;" />
                 </div>
                 <div class="control-group">
-                  <label for="render-fps-input" data-str="RENDER.SOURCE_FPS_LABEL">Source FPS:</label>
-                  <input type="number" id="render-fps-input" value="300" min="1" max="1000" style="width: 70px;" />
+                  <label for="render-fps-input" data-str="RENDER.SOURCE_FPS_LABEL" data-str-title="RENDER.SOURCE_FPS_TITLE">Source FPS:</label>
+                  <input type="number" id="render-fps-input" value="300" min="1" max="1000" style="width: 70px;" data-str-title="RENDER.SOURCE_FPS_TITLE" />
                 </div>
                 <div class="control-group">
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
@@ -752,7 +750,7 @@
                  by default, each stage independently switchable. -->
             <!-- Tab Content: Players (#428) -- each player's spray and
                  crosshair in a demo. players_ui.js fills it; the hook DLL
-                 applies it while dodstudio_player_overrides is 1. -->
+                 applies it while ds_player_overrides is 1. -->
             <div id="tab-players" class="config-tab-content" style="display: none;">
               <div class="setting-toggle">
                 <span class="setting-label"><span data-str="PLAYERS.USE_IN_GAME_LABEL">Use in the game</span><span class="info-icon" data-str-title="PLAYERS.USE_IN_GAME_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
@@ -823,21 +821,21 @@
                 <div class="setting-toggle">
                   <span class="setting-label"><span data-str="CAPTURE_CONFIG.NOTIFY_PATCHING_LABEL">Patching Started/Complete</span><span class="info-icon" data-str-title="CAPTURE_CONFIG.NOTIFY_PATCHING_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
                   <label class="setting-switch">
-                    <input type="checkbox" id="config-notify-patching" checked />
+                    <input type="checkbox" id="config-notify-patching" />
                     <span class="setting-switch-slider"></span>
                   </label>
                 </div>
                 <div class="setting-toggle">
                   <span class="setting-label"><span data-str="CAPTURE_CONFIG.NOTIFY_DEMO_LOADING_LABEL">Demo Loading</span><span class="info-icon" data-str-title="CAPTURE_CONFIG.NOTIFY_DEMO_LOADING_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
                   <label class="setting-switch">
-                    <input type="checkbox" id="config-notify-demo-loading" checked />
+                    <input type="checkbox" id="config-notify-demo-loading" />
                     <span class="setting-switch-slider"></span>
                   </label>
                 </div>
                 <div class="setting-toggle">
                   <span class="setting-label"><span data-str="CAPTURE_CONFIG.NOTIFY_BETWEEN_CLIPS_LABEL">Fast-Forward to Clip</span><span class="info-icon" data-str-title="CAPTURE_CONFIG.NOTIFY_BETWEEN_CLIPS_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
                   <label class="setting-switch">
-                    <input type="checkbox" id="config-notify-between-clips" checked />
+                    <input type="checkbox" id="config-notify-between-clips" />
                     <span class="setting-switch-slider"></span>
                   </label>
                 </div>
@@ -955,12 +953,14 @@
               <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
-              <div class="input-row">
+              <!-- Split Maps and Rename Demos use this folder; Duplicates has its
+                   own list, so auditor_tabs.js hides this row there (#844). -->
+              <div class="input-row" id="audit-target-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
                 <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <!-- One tab per tool; all of them work on the folder above (#624). -->
+              <!-- One tab per tool (#624). -->
               <div class="auditor-tabs" role="tablist">
                 <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
                 <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
@@ -972,9 +972,9 @@
           <div class="auditor-tab-panel" data-auditor-panel="duplicates">
             <div class="egui-panel" style="margin-top: 10px;">
               <div class="panel-body">
-                <!-- Folders to check (#844): audit_folders.js. The Target
-                     Folder above, folders added with the picker, or every
-                     fixed drive, in one pass. -->
+                <!-- Folders to check (#844): audit_folders.js. Folders added
+                     with the picker (starting from the Target Folder the other
+                     tabs use), or every fixed drive, in one pass. -->
                 <label data-str="AUDITOR.FOLDERS_TO_CHECK_LABEL">Folders to check:</label>
                 <ul id="audit-folder-list" class="audit-folder-list"></ul>
                 <div class="row-inputs">
@@ -1000,12 +1000,17 @@
             <div class="panel-header flex-between">
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
               <div class="row-inputs">
+                <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
                 <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
-                <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+                <!-- Hidden for 0.2.0, so every delete can be put back from the
+                     Recycle Bin; remove `hidden` to offer it again. -->
+                <button id="delete-permanent-audits-btn" hidden style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
               </div>
             </div>
-            <div class="table-wrapper" style="max-height: 400px;">
-              <table id="audit-results-table">
+            <!-- The app's table style; the list grows with the window, like the
+                 render list (#818), never shorter than 280px. -->
+            <div class="table-wrapper" style="max-height: max(280px, calc(100vh - 470px));">
+              <table id="audit-results-table" class="analyzer-table audit-table">
                 <thead>
                   <tr>
                     <th><input type="checkbox" id="audit-select-all" /></th>
@@ -1022,7 +1027,7 @@
                 </tbody>
               </table>
             </div>
-            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
           </div>
           </div>
 
@@ -1040,6 +1045,8 @@
                   <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
                   <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
                 </div>
+                <!-- Find's two steps: finding the demos, then reading each one's map lengths. -->
+                <div id="split-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="split-status" class="status-indicator"></p>
                 <div id="split-list" class="split-list"></div>
               </div>
@@ -1328,7 +1335,7 @@
               </div>
             </div>
 
-            <!-- What dodstudio_debug_hd_misses last wrote to the hook log, by map. -->
+            <!-- What ds_debug_hd_misses last wrote to the hook log, by map. -->
             <div class="egui-panel">
               <div class="panel-header flex-between">
                 <h3 data-str="HD.MISSES_TITLE">Textures that kept their original</h3>
@@ -1746,7 +1753,7 @@
              Configuration-specific later if a need comes up. -->
         <div id="footer-configuration" class="pinned-footer-content" style="display: none;"></div>
         <div id="footer-demo-auditor" class="pinned-footer-content" style="display: none;">
-          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          <div id="footer-audit-summary" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.0 MB</div>
         </div>
         <div id="footer-demo-analyzer" class="pinned-footer-content" style="display: none;">
           <div id="footer-analyzer-current-file" data-str="ANALYZER.NO_DEMO_LOADED">No demo loaded</div>

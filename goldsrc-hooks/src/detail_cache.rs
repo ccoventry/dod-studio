@@ -30,7 +30,7 @@
 //! own scale. That costs one bind and one matrix set per detailed run of
 //! surfaces, which the engine did anyway before it cached them.
 //!
-//! `dodstudio_debug_keep_detail_cache 1` puts the engine's bytes back, to
+//! `ds_debug_keep_detail_cache 1` puts the engine's bytes back, to
 //! compare.
 //!
 //! Found by a byte pattern per build, each unique in its own `hw.dll`;
