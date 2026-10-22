@@ -2738,7 +2738,7 @@ export const STRINGS = {
     // Step 1: Half-Life.
     HL_TITLE: 'Set up Day of Defeat for movies',
     HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. To make one, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, and pick it as the game folder below.",
-    HL_RECOMMEND: "The 25th Anniversary build is recommended for movies: the game can use up to 4 GB of memory instead of 2 GB (room for HD textures), it has higher engine limits (some demos only play on it), DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them), and it's the build DoD Studio is developed on. The pre-Anniversary build works too, the same way.",
+    HL_RECOMMEND: "DoD Studio supports both the 25th Anniversary and the pre-Anniversary build, but the 25th Anniversary build gives the best results: the game can use up to 4 GB of memory instead of 2 GB (room for HD textures), it has higher engine limits (some demos only play on it), and DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them).",
     HL_FIELD: 'Half-Life: hl.exe',
     GAME_FOLDER_FIELD: 'Game folder',
     GAME_FOLDER_NONE: 'Pick hl.exe first: the folders beside it are listed here.',
