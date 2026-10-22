@@ -229,11 +229,10 @@
               <div class="header-title-group" style="display: flex; gap: 8px; align-items: center;">
                 <h3 id="detail-demo-title" data-str="HIGHLIGHTS.DEFAULT_TITLE">Highlight Details</h3>
                 <button id="btn-launch-preview" disabled data-str="HIGHLIGHTS.LAUNCH_PREVIEW_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_PREVIEW_TITLE">Launch Preview</button>
+                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game</button>
               </div>
               <div class="header-controls" style="display: flex; gap: 8px; align-items: center;">
                 <button id="view-telemetry-btn" disabled data-str="HIGHLIGHTS.VIEW_TELEMETRY_BUTTON">View Match Telemetry</button>
-                <button id="btn-generate-all-previews" disabled data-str="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_BUTTON" data-str-title="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_TITLE">Generate All Previews</button>
-                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game (HLAE)</button>
                 <div class="control-group">
                   <label for="input-min-kills" data-str="HIGHLIGHTS.MIN_KILLS_LABEL">Min Kills:</label>
                   <input type="number" id="input-min-kills" value="1" min="1" style="width: 50px;" />
@@ -297,7 +296,9 @@
                 <button id="ffmpeg-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="ffmpeg-path-warning" class="path-warning" style="display: none;"></div>
-              <div class="input-row">
+              <!-- Shown in local and debug builds, or while a path is set
+                   (hook_dll_row.js). -->
+              <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
                 <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
@@ -455,7 +456,9 @@
                    Lead, Stop Trail, Post-roll follow in the order they occur
                    around a single clip. -->
               <div class="grid-controls">
-                <div class="control-group control-group-stacked">
+                <!-- Hidden while Seek Between Clips is on: the hook waits for
+                     the demo itself (renderTimingDiagram). -->
+                <div class="control-group control-group-stacked" id="config-initial-delay-group">
                   <div class="control-group">
                     <label for="config-initial-delay" data-str="CAPTURE_CONFIG.INITIAL_DELAY_LABEL">Initial Delay (s):</label>
                     <input type="number" step="0.1" id="config-initial-delay" value="3.0" style="width: 80px;" />
@@ -465,7 +468,7 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-pre-roll" data-str="CAPTURE_CONFIG.PRE_ROLL_LABEL">Pre-roll (s):</label>
-                    <input type="number" step="0.1" id="config-pre-roll" value="2.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-pre-roll" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between the game reaching the clip and capture starting.</p>
                 </div>
@@ -486,7 +489,7 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-post-roll" data-str="CAPTURE_CONFIG.POST_ROLL_LABEL">Post-roll (s):</label>
-                    <input type="number" step="0.1" id="config-post-roll" value="0.6" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-post-roll" value="1.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>

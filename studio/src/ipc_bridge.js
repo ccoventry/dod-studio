@@ -433,18 +433,6 @@ export async function killEngineProcesses() {
     });
 }
 
-/** Patches every demo's highlights into its own `<stem>_preview.dem` (grouped
- *  server-side by source demo) without launching HLAE, skipping any demo that
- *  already has one. Resolves to the number of preview demos freshly generated
- *  this call. */
-export async function generateAllPreviews(hlaePath, gamePath, streaks) {
-  return invoke("generate_all_previews", { hlaePath, gamePath, streaks })
-    .catch((err) => {
-      console.error("IPC Execution Error (generate_all_previews):", err);
-      showToast(STRINGS.IPC.batchPreviewFailed(err), 'error');
-      throw err;
-    });
-}
 
 export async function cancelCaptureBatch() {
   return invoke("cancel_capture_batch")
@@ -1089,6 +1077,16 @@ export async function localGitBranch() {
   return invoke("local_git_branch").catch((err) => {
     console.error("IPC Execution Error (local_git_branch):", err);
     return null;
+  });
+}
+
+/** Whether this build uses Configuration's GoldSrc Hooks DLL override: a
+ *  debug build or one made on this PC. An installed release always runs its
+ *  bundled DLL. Best-effort: false on error, which only hides the row. */
+export async function hookDllOverrideAllowed() {
+  return invoke("hook_dll_override_allowed").catch((err) => {
+    console.error("IPC Execution Error (hook_dll_override_allowed):", err);
+    return false;
   });
 }
 
