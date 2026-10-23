@@ -1554,6 +1554,7 @@ pub fn install() {
         crate::spectator_follow::target_command,
     );
     add_command(crate::position::NAME, crate::position::command);
+    add_command(crate::gait_log::NAME, crate::gait_log::command);
 
     // Standalone, like `ds_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll, and a failed

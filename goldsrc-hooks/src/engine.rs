@@ -780,6 +780,23 @@ pub fn engfuncs() -> Option<&'static ClEngineFuncsPartial> {
 /// Returns the captured studio-model engine interface, once `client.dll` has
 /// loaded and been successfully signature-scanned. `None` before that (or if
 /// the scan found `pEngfuncs` but not `pstudio`).
+/// `player_info_t *PlayerInfo(int index)` (engine_studio slot 7): the engine's
+/// record for player `index` (0-based), which the studio renderer keeps its
+/// gait state in (`gaitsequence` +380, `gaitframe` +384, `gaityaw` +388,
+/// `prevgaitorigin` +392). Null when unavailable.
+pub fn studio_player_info(index: i32) -> *const u8 {
+    let Some(studio) = engine_studio() else {
+        return std::ptr::null();
+    };
+    let slot = studio._slots_before_view_info[1];
+    if slot.is_null() {
+        return std::ptr::null();
+    }
+    // Safety: the engine's own accessor, called on its thread.
+    let f: unsafe extern "C" fn(i32) -> *const u8 = unsafe { std::mem::transmute(slot) };
+    unsafe { f(index) }
+}
+
 pub fn engine_studio() -> Option<&'static EngineStudioApiPartial> {
     let ptr = ENGINE_STUDIO.load(Ordering::Acquire);
     if ptr.is_null() {
@@ -1438,6 +1455,7 @@ unsafe extern "C" fn tramp_hud_add_entity(
         }
     }
 
+    crate::gait_log::on_add_entity(entity_type, ent as *const ClEntityS);
     let real = REAL_HUD_ADD_ENTITY.load(Ordering::Acquire);
     if real.is_null() {
         // Can't tell the entity apart from one that should draw, so the safe
