@@ -1836,7 +1836,14 @@ export const STRINGS = {
     SCENE_LABEL: 'Build scene',
     RENDER_LABEL: 'Render',
     ENCODE_LABEL: 'Encode',
-    running: (label) => `${label}: running...`,
+    // What each step's line says until it has frames to count (#956).
+    STARTING: {
+      import: 'Importing the demo into Blender…',
+      scene: 'Building the scene…',
+      render: 'Rendering…',
+      encode: 'Encoding the MP4…',
+    },
+    soFar: (line, elapsed) => `${line} (${elapsed} so far)`,
     done: (label, elapsed) => `${label}: done in ${elapsed}.`,
     failed: (label) => `${label}: stopped with an error (see the message).`,
     CANCELLED: 'Stopped. A render keeps the frames it finished; Render again to carry on.',
@@ -1914,6 +1921,7 @@ export const STRINGS = {
     buildStep: (step, steps, style, type, elapsed) => `Step ${step} of ${steps}: ${style}, ${type} (${elapsed} so far)`,
     buildDone: (steps, elapsed, log) => `Done: ${steps} step${steps === 1 ? '' : 's'} in ${elapsed}. Every step's counts are in ${log}.`,
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
+    BUILD_STARTING: 'Starting the build…',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
@@ -1936,8 +1944,8 @@ export const STRINGS = {
     cfgGapsComment: (sentence) => `// ${sentence}`,
     // #426: which maps a style has map textures for, and the warning when
     // the maps being built include one it hasn't.
-    COVERAGE_CHECKING: 'Checking which maps each style has map textures for…',
-    coverageChecking: (done, total) => `Checking which maps each style has map textures for… (${done} of ${total} maps)`,
+    COVERAGE_CHECKING: 'Reading the maps…',
+    coverageChecking: (done, total) => `Reading the maps: ${done} of ${total}`,
     coverageFailed: (err) => `Could not check which maps are covered: ${err}`,
     coverageAll: (style, maps, listed) => `${style} has every map texture for ${maps === 1 ? 'the 1 map' : `all ${maps} maps`}${listed ? ' in your map list' : ''}.`,
     coverageCounts: (style, full, part, none, listed) => {
@@ -1994,8 +2002,9 @@ export const STRINGS = {
     modelsMissing: (styles) => `Missing models for: ${styles.join(', ')}.`,
     ALL_MODELS_PRESENT: 'All style models are present.',
     bytesOf: (done, total) => `${done} of ${total}`,
-    progressLine: (item, step, steps, done) => `${step} of ${steps}: ${item} (${done})`,
-    unpackingLine: (item, step, steps) => `${step} of ${steps}: unpacking ${item}...`,
+    SETUP_CHECKING: "Checking what's already installed…",
+    progressLine: (item, step, steps, done) => `Downloading ${item} (${step} of ${steps}): ${done}`,
+    unpackingLine: (item, step, steps) => `Unpacking ${item} (${step} of ${steps})…`,
     setupDone: (count) => count ? `Done: downloaded ${count} file${count === 1 ? '' : 's'}.` : 'Everything was already there.',
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',

@@ -1195,6 +1195,31 @@ button.primary-btn:hover:not(:disabled) {
   to { transform: translateX(333%); }
 }
 
+/* A job's steps so far, with the block sliding over the running step's
+   share only (step_bar.js, #956). */
+.progress-bar-container.step-bar {
+  position: relative;
+}
+
+.progress-bar-step {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.progress-bar-step::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  background: var(--primary-accent);
+  opacity: 0.6;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {
