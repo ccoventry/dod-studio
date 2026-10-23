@@ -1701,6 +1701,8 @@ export const STRINGS = {
     // Opening a project, on the queue's line (#958).
     OPENING_PROJECT: 'Opening the project…',
     CHECKING_PROJECT_DEMOS: "Checking the project's demos are where they were…",
+    // The line once it has opened, so the last scan's "Done in…" doesn't come back.
+    projectOpenedLine: (n) => `Opened the project: ${n} demo${n === 1 ? '' : 's'}`,
     lookingForMissingDemos: (n) => `Looking for ${n} missing demo${n === 1 ? '' : 's'}…`,
     lookingLine: (folders, demos, last) => {
       const n = (x) => Number(x || 0).toLocaleString('en-US');
