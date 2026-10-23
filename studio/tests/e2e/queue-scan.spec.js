@@ -140,8 +140,16 @@ test('one bar from looking for demos, through reading them, to grouping them', a
   }));
   await expect(status).toHaveText(/^Looking for demos: 20 folders \(about 40 last time\), 1 demo found · /);
   await expect(bar).not.toHaveClass(/indeterminate/);
-  // Half of the last scan's folders, on the looking step's tenth of the bar.
-  expect(await width()).toBe(5);
+  // Half of the last scan's folders, on the looking step's twentieth of the bar.
+  expect(await width()).toBe(2.5);
+
+  // Then each listed demo's first 64 KB, to skip the queued ones and copies.
+  await page.evaluate(() => window.__mockEmit('scan_progress', {
+    scanned: 0, found: 0, cancelled: false, keying: true, keyed: 1, total: 2,
+    status: 'Checking which demos are new: 1 of 2',
+  }));
+  await expect(status).toHaveText(/^Checking which demos are new: 1 of 2 · /);
+  expect(await width()).toBe(7.5);
 
   await page.evaluate(() => window.__mockEmit('scan_progress', {
     scanned: 1, found: 1, cancelled: false, total: 2, cached: 0, parsed: 1,

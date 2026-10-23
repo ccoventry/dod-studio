@@ -1719,11 +1719,18 @@ export const STRINGS = {
     // Opening a project, on the queue's line (#958).
     OPENING_PROJECT: 'Opening the project…',
     CHECKING_PROJECT_DEMOS: "Checking the project's demos are where they were…",
+    // The line once it has opened, so the last scan's "Done in…" doesn't come back.
+    projectOpenedLine: (n) => `Opened the project: ${n} demo${n === 1 ? '' : 's'}`,
     lookingForMissingDemos: (n) => `Looking for ${n} missing demo${n === 1 ? '' : 's'}…`,
     lookingLine: (folders, demos, last) => {
       const n = (x) => Number(x || 0).toLocaleString('en-US');
       const was = last > 0 ? ` (about ${n(last)} last time)` : '';
       return `Looking for demos: ${n(folders)} folder${folders === 1 ? '' : 's'}${was}, ${n(demos)} demo${demos === 1 ? '' : 's'} found`;
+    },
+    // Then 64 KB of each, to skip demos already queued and identical copies.
+    keyingLine: (done, total) => {
+      const n = (x) => Number(x || 0).toLocaleString('en-US');
+      return `Checking which demos are new: ${n(done)} of ${n(total)}`;
     },
     scanDoneLine: (seconds, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
       const parts = [
@@ -2434,10 +2441,11 @@ export const STRINGS = {
     SAVING: 'Saving the overview…',
     SAVING_HD: 'Saving the high-quality copy…',
     // Where Save put things, short; the full paths are the line's tooltip.
-    saved: (hd) => (hd
-      ? 'Saved the overview in dod/overviews, and the high-quality copy and your edits in dod_addon/overviews.'
-      : 'Saved the overview in dod/overviews, and your edits in dod_addon/overviews.'),
-    BACKED_UP: 'Your own overview was kept in dod/overviews/dodstudio_backup first.',
+    // `game` is the Game Folder setting (`dod`, or e.g. `dod_movies`).
+    saved: (hd, game = 'dod') => (hd
+      ? `Saved the overview in ${game}/overviews, and the high-quality copy and your edits in ${game}_addon/overviews.`
+      : `Saved the overview in ${game}/overviews, and your edits in ${game}_addon/overviews.`),
+    backedUp: (game = 'dod') => `Your own overview was kept in ${game}/overviews/dodstudio_backup first.`,
     savedPaths: (paths) => `Saved:\n${paths.join('\n')}`,
     savedToast: (map) => `${map} overview saved.`,
     BADGE_HAS_OVERVIEW: 'has one',
