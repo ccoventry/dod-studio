@@ -3860,6 +3860,17 @@ button.setup-skip:hover:not(:disabled) {
   word-break: break-all;
 }
 
+/* A copy inside a zip (#929): kept, never deleted. */
+.audit-zip-chip {
+  font-size: 0.8em;
+  padding: 0 7px;
+  border: 1px solid #4a86c5;
+  border-radius: 10px;
+  color: #4a86c5;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .audit-table th:nth-child(1) { width: 32px; }
 .audit-table th:nth-child(2) { width: 210px; }
 .audit-table th:nth-child(3) { width: 90px; }

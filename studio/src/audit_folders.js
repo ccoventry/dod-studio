@@ -3,19 +3,22 @@
 // choice. The page's Target Folder row is hidden on this tab, so the list is
 // the one place folders are picked here: it starts from the Target Folder,
 // and follows it until a folder is added or removed. auditor_pane.js reads it
-// through `getRequest()` when Start Audit is clicked.
+// through `getRequest()` when Start Audit is clicked. "Look inside .zip
+// files" (#929) is saved with the app settings (settings_sync.js), so
+// `onSettingsChange` runs when it is ticked.
 import { pickPath } from './pick_path.js';
 import { listFixedDrives } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 import { addFolders, allDrivesLabel, canStartAudit } from './audit_duplicates.js';
 
-export function createAuditFolders({ onChange = () => {} } = {}) {
+export function createAuditFolders({ onChange = () => {}, onSettingsChange = () => {} } = {}) {
   const $ = (sel) => document.querySelector(sel);
   const targetInput = $('#audit-target-folder-input');
   const listEl = $('#audit-folder-list');
   const addBtn = $('#audit-add-folder-btn');
   const allDrivesCb = $('#audit-all-drives');
   const allDrivesText = $('#audit-all-drives-label');
+  const lookInZipsCb = $('#audit-look-in-zips');
   let folders = [];
   // Set once the list is edited here: from then on it no longer follows the
   // Target Folder the other tabs use.
@@ -64,6 +67,7 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
     listEl.classList.toggle('dimmed', allDrives());
     if (addBtn) addBtn.disabled = locked || allDrives();
     if (allDrivesCb) allDrivesCb.disabled = locked;
+    if (lookInZipsCb) lookInZipsCb.disabled = locked;
   }
 
   addBtn?.addEventListener('click', async () => {
@@ -79,6 +83,7 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
     }
   });
   allDrivesCb?.addEventListener('change', () => { render(); onChange(); });
+  lookInZipsCb?.addEventListener('change', () => onSettingsChange());
   targetInput?.addEventListener('input', () => { followTarget(); render(); onChange(); });
 
   listFixedDrives()
@@ -90,7 +95,7 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
 
   return {
     /// What Start Audit sends: the folders, and whether to add every drive.
-    getRequest: () => ({ paths: [...folders], allDrives: allDrives() }),
+    getRequest: () => ({ paths: [...folders], allDrives: allDrives(), lookInZips: !!lookInZipsCb?.checked }),
     canStart: () => canStartAudit('', folders, allDrives()),
     /// Locks the list while an audit runs.
     setLocked: (value) => { locked = value; render(); },

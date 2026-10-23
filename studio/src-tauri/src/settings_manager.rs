@@ -252,6 +252,10 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
+    /// Demo Auditor > Duplicates' "Look inside .zip files" (#929): off by
+    /// default, since a first scan of big zips reads every demo in them.
+    #[serde(default)]
+    pub audit_look_in_zips: bool,
     /// "Skip setup for now" in the Setup window (#599): it stops opening by
     /// itself at launch. Finishing setup clears it, so a required path that
     /// goes missing later opens the window again.
@@ -504,6 +508,7 @@ impl Default for AppSettings {
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
+            audit_look_in_zips: false,
             setup_dismissed: false,
             players: native::player_overrides::PlayerTable::default(),
             review_covers: default_review_covers(),

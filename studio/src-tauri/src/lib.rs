@@ -196,6 +196,7 @@ async fn run_demo_audit(
     paths: Vec<String>,
     all_drives: bool,
     queued: Vec<String>,
+    look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
     let hl_path = settings
         .inner
@@ -213,6 +214,7 @@ async fn run_demo_audit(
         Arc::clone(&state.cancel_token),
         paths,
         all_drives,
+        look_in_zips.unwrap_or(false),
         (game_folders, queued),
     )
     .await
