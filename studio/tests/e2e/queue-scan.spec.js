@@ -55,17 +55,58 @@ test('listing a drive shows its progress, and Cancel while listing adds nothing'
   await expect(page.locator('.toast', { hasText: 'Scan complete' })).toHaveCount(0);
   await expect(page.locator('.toast', { hasText: 'cancellation requested' })).toHaveCount(0);
   // A drive the user gave up on is not remembered.
-  expect(await page.evaluate(() => window.__scanPaths)).toEqual([]);
+  expect(await page.evaluate(() => window.__recent)).toEqual([]);
   await expect(page.locator('#add-folder-btn')).toBeEnabled();
   await expect(cancel).toBeDisabled();
   await expect(page.locator('#scan-progress')).toHaveAttribute('hidden');
 });
 
-test('a folder whose scan finishes is remembered', async ({ page }) => {
+test('a folder whose scan finishes goes into Recent (#533)', async ({ page }) => {
   await gotoHarness(page);
   await startAddFolder(page, 'D:/demos');
   await page.evaluate(() => window.__finishScan({ demos: [], unchanged: 0, copies: [], cancelled: false }));
   await page.evaluate(() => window.__added);
   await expect(page.locator('.toast', { hasText: 'Scan complete (0 demo(s) found)' })).toBeVisible();
-  expect(await page.evaluate(() => window.__scanPaths)).toEqual(['D:/demos']);
+  expect(await page.evaluate(() => window.__recent)).toEqual(['D:/demos']);
+});
+
+test('Include subfolders goes with the scan and is saved when changed (#531)', async ({ page }) => {
+  await gotoHarness(page);
+  await startAddFolder(page, 'D:/demos');
+  await page.evaluate(() => window.__finishScan({ demos: [], unchanged: 0, copies: [], cancelled: false }));
+  await page.evaluate(() => window.__added);
+  let scans = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'scan_directory'));
+  expect(scans[0].args.includeSubfolders).toBe(true);
+
+  await page.locator('#scan-include-subfolders').uncheck();
+  expect(await page.evaluate(() => window.__saves)).toBe(1);
+  await page.evaluate(() => { window.__finishScan = null; });
+  await startAddFolder(page, 'D:/demos');
+  await page.evaluate(() => window.__finishScan({ demos: [], unchanged: 0, copies: [], cancelled: false }));
+  await page.evaluate(() => window.__added);
+  scans = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'scan_directory'));
+  expect(scans[1].args.includeSubfolders).toBe(false);
+});
+
+test('a scan stopped by the depth cap says so in a toast (#531)', async ({ page }) => {
+  await gotoHarness(page);
+  await startAddFolder(page, 'D:/');
+  await page.evaluate(() => window.__finishScan({
+    demos: [], unchanged: 0, copies: [], cancelled: false,
+    cap: { depth: true, entries: false, max_depth: 6, max_entries: 50000 },
+  }));
+  await page.evaluate(() => window.__added);
+  await expect(page.locator('.toast', { hasText: 'folders more than 6 levels down were not read' })).toBeVisible();
+});
+
+test('dropped demos and folders scan together, and the folders go into Recent (#530)', async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate(() => { window.__added = window.__addDropped(['D:/a.dem'], ['D:/one', 'D:/two']); });
+  await page.waitForFunction(() => typeof window.__finishScan === 'function');
+  const scans = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'scan_directory'));
+  expect(scans[0].args.paths).toEqual(['D:/a.dem', 'D:/one', 'D:/two']);
+  await page.evaluate(() => window.__finishScan({ demos: [], unchanged: 0, copies: [], cancelled: false }));
+  await page.evaluate(() => window.__added);
+  // The first folder dropped ends up on top.
+  expect(await page.evaluate(() => window.__recent)).toEqual(['D:/one', 'D:/two']);
 });

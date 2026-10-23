@@ -85,6 +85,9 @@ export const STRINGS = {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
     ADD_FOLDER_BUTTON: '+ Add Folder',
+    // #531: beside + Add Folder; also what a dropped folder follows.
+    INCLUDE_SUBFOLDERS_LABEL: 'Include subfolders',
+    INCLUDE_SUBFOLDERS_TITLE: "Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.",
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     CANCEL_SCAN_TITLE: 'Cancel the running directory scan',
     SCAN_STATUS_READY: 'Status: Ready',
@@ -1718,6 +1721,13 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    // #531: the folder walk's bounds stopped it short; `cap` is the scan's.
+    scanCapToast: (cap) => {
+      const parts = [];
+      if (cap.depth) parts.push(`folders more than ${cap.max_depth} levels down were not read`);
+      if (cap.entries) parts.push(`the walk stopped after ${Number(cap.max_entries).toLocaleString('en-US')} files and folders`);
+      return `Some demos may be missing: ${parts.join(', and ')}. Add a folder further down to scan the rest.`;
+    },
     scanCancelledToast: (count) =>
       count > 0
         ? `Scan cancelled (${count} demo(s) added before cancel)`
@@ -2455,6 +2465,7 @@ export const STRINGS = {
     hdMapListFailed: (err) => `Could not change hd_maps.txt: ${err}`,
     hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
+    dropError: (err) => `Could not read what was dropped: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
@@ -2790,6 +2801,23 @@ export const STRINGS = {
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  // Dropping demos and folders from Windows (#530): demo_drop.js.
+  DROP: {
+    skippedToast: (names) => {
+      const shown = names.slice(0, 5).join(', ');
+      const more = names.length > 5 ? ` and ${names.length - 5} more` : '';
+      return `Not a demo or a folder, so not added: ${shown}${more}`;
+    },
+    BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+  },
+  // The one-time look at the pinned folders (#533): pinned_review.js.
+  PINNED_REVIEW: {
+    TITLE: 'Pinned folders',
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
+    SAVE_BUTTON: 'Save',
+    KEEP_ALL_BUTTON: 'Keep all',
   },
   SETUP: {
     MENU_ITEM: 'Setup…',

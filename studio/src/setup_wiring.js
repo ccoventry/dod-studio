@@ -302,5 +302,5 @@ export function createSetup({
     if (shouldOpenSetupAtLaunch(checklist, setupDismissed)) openWindow(prefilled ? stepIndex('hl') : checklist.nextIndex);
   }
 
-  return { refresh, start, isDismissed: () => setupDismissed };
+  return { refresh, start, isDismissed: () => setupDismissed, isOpen: () => win.isOpen() };
 }

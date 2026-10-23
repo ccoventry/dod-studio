@@ -4,7 +4,8 @@
   line and bar from index.html, with Tauri's IPC mocked (vite.config.e2e.js).
   `scan_directory` stays pending until a test calls
   `window.__finishScan(outcome)`; `window.__addDemoFolder(folder)` is + Add
-  Folder after its picker, and `window.__scanPaths` the remembered folders.
+  Folder after its picker, and `window.__recent` the Recent folders it fills
+  (#533).
 -->
 <html lang="en">
 <head>
@@ -14,6 +15,7 @@
 <body>
   <button id="add-files-btn">+ Add Demo Files</button>
   <button id="add-folder-btn">+ Add Folder</button>
+  <input type="checkbox" id="scan-include-subfolders" checked />
   <button id="cancel-scan-btn" disabled>Cancel Scan</button>
   <span id="scan-spinner" style="display: none;"></span>
   <p id="scan-status">Status: Ready</p>
@@ -27,8 +29,8 @@
       new Promise((resolve) => { window.__finishScan = resolve; });
 
     const demos = [];
-    window.__scanPaths = [];
-    const { addDemoFolder } = createQueueScan({
+    window.__recent = [];
+    const { addDemoFolder, addDroppedPaths } = createQueueScan({
       getDemos: () => demos,
       setSelectedDemoIdx: () => {},
       selectDemoAndRenderDetail: () => {},
@@ -36,10 +38,11 @@
       markProjectDirty: () => {},
       readScanWorkers: () => 2,
       offerIdenticalCopies: async () => {},
-      getScanPaths: () => window.__scanPaths,
-      persistAppSettings: async () => {},
+      rememberRecentFolder: async (f) => { window.__recent.unshift(f); },
+      persistAppSettings: async () => { window.__saves = (window.__saves || 0) + 1; },
     });
     window.__addDemoFolder = addDemoFolder;
+    window.__addDropped = addDroppedPaths;
     window.__harnessReady = true;
   </script>
 </body>
