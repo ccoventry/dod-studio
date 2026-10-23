@@ -5,6 +5,7 @@
 // release always runs its bundled DLL, whatever is saved, so the row is
 // hidden there.
 import { hookDllOverrideAllowed } from './ipc_bridge.js';
+import { refreshHookDllPicker } from './hook_dll_picker.js';
 
 /** Shows the row only where the override is used. */
 export async function refreshHookDllRow() {
@@ -20,5 +21,7 @@ export async function refreshHookDllRow() {
   if (!allowed) {
     const warning = document.querySelector('#goldsrc-hooks-path-warning');
     if (warning) warning.style.display = 'none';
+    return;
   }
+  await refreshHookDllPicker();
 }

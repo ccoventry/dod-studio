@@ -8,6 +8,7 @@ import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
+import { confirmNoCameraData } from './camera_data.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
@@ -1443,6 +1444,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));
       const hlPathNow = document.querySelector('#hl-path-input')?.value?.trim() || '';
       if (!(await confirmOverLimit(picked, hlPathNow))) return;
+      // One with no camera data captures a frozen view (#920).
+      if (!(await confirmNoCameraData(picked))) return;
 
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
