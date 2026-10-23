@@ -6,8 +6,11 @@
 //! structural selection the demo patcher uses (`native::patch::map_sounds`:
 //! capture keyvalues, and the win music the round-end wiring fires), and
 //! prints the union with a map count per name. It also prints every name that
-//! some *other* map places as plain ambience, since muting one of those would
-//! silence that map's atmosphere: such a name must not go in the table.
+//! some *other* map places as plain ambience, since muting one of those could
+//! silence that map's atmosphere: check what each is there before it goes in
+//! the table. The three it prints today (dod_vicenza's `uswin` / `germanwin`,
+//! dod_escape's `usobjectivesecure`) are round-end and objective sounds there
+//! too, wired another way, so they stay in.
 //!
 //!     cargo run --release -p native --example map_sound_table -- \
 //!         "<PRE>/dod/maps" "<POST>/dod/maps"
@@ -43,7 +46,10 @@ fn main() {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase)
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
                 != Some("bsp".into())
             {
                 continue;
@@ -106,7 +112,11 @@ fn main() {
         let as_win = win.get(*name).cloned().unwrap_or_default();
         let other: Vec<&String> = maps.difference(&as_win).collect();
         if !other.is_empty() {
-            println!("{name}: {} maps, e.g. {:?}", other.len(), &other[..other.len().min(5)]);
+            println!(
+                "{name}: {} maps, e.g. {:?}",
+                other.len(),
+                &other[..other.len().min(5)]
+            );
         }
     }
 
