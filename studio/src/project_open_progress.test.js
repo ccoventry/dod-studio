@@ -55,6 +55,20 @@ describe('project_open_progress (#958)', () => {
     expect(doc.line()).toBe('Ready');
   });
 
+  it("ends on the opened line, not the last scan's, once grouping and search are over", () => {
+    const { doc, progress, open } = setUp();
+    open.opening();
+    open.opened('Opened the project: 3 demos');
+    expect(doc.line()).toBe('Opened the project: 3 demos');
+    const grouping = progress.begin({ ifIdle: true, text: 'Grouping by match: 0 of 3' });
+    open.searching();
+    open.searched();
+    progress.end(grouping);
+    open.opened();
+    open.searched();
+    expect(doc.line()).toBe('Opened the project: 3 demos');
+  });
+
   it('the grouping the loaded demos start gets the line back after the search', () => {
     const { doc, progress, open } = setUp();
     open.opening();
