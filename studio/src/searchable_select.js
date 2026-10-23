@@ -29,8 +29,12 @@ export function moveIndex(index, step, count) {
  * option is picked that isn't the current one; `noMatch` is the list's line
  * when the filter leaves nothing. Returns `{ setOptions, setValue }`: the
  * options as `{ value, text, title }` rows, and the value to show as picked.
+ * A row may also carry `action: { label, title, run }`, a button at its end,
+ * or `command()`, which a pick runs instead of picking the row.
+ * `onOpen()` runs as the list opens, before it draws, so the caller can
+ * `setOptions` for a fresh list.
  */
-export function createSearchableSelect(input, { onPick, noMatch = 'No match' }) {
+export function createSearchableSelect(input, { onPick, onOpen = () => {}, noMatch = 'No match' }) {
   let options = [];
   let value = '';
   let shown = [];
@@ -64,6 +68,22 @@ export function createSearchableSelect(input, { onPick, noMatch = 'No match' }) 
       row.setAttribute('role', 'option');
       row.textContent = o.text;
       row.title = o.title || '';
+      row.classList.toggle('command', !!o.command);
+      // A small button at the row's end (install_picker.js's Hide): it runs
+      // `o.action.run()` and leaves the list open.
+      if (o.action) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'search-select-action';
+        btn.textContent = o.action.label;
+        btn.title = o.action.title || '';
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          o.action.run();
+        });
+        row.appendChild(btn);
+      }
       row.classList.toggle('picked', o.value === value);
       row.classList.toggle('active', i === active);
       row.addEventListener('mouseenter', () => {
@@ -88,6 +108,7 @@ export function createSearchableSelect(input, { onPick, noMatch = 'No match' }) 
 
   function open() {
     if (!panel.hidden) return;
+    onOpen();
     typed = false;
     active = options.findIndex((o) => o.value === value);
     panel.hidden = false;
@@ -103,6 +124,12 @@ export function createSearchableSelect(input, { onPick, noMatch = 'No match' }) 
   }
 
   function pick(option) {
+    // A row that does something instead of being picked ("Show hidden
+    // installs"): the list stays open for the caller's setOptions.
+    if (option.command) {
+      option.command();
+      return;
+    }
     const changed = option.value !== value;
     value = option.value;
     close();

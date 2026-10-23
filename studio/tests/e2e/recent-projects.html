@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<!--
+  Harness for recent_projects.js (#935): the File menu from index.html with
+  its Open Recent submenu, wired to the real project_session.js the way
+  main.js wires them, with Tauri's IPC mocked (vite.config.e2e.js).
+  `window.__missing` lists the paths `files_exist` reports gone;
+  `window.__recent` is the factory, `window.__markDirty()` gives the session
+  unsaved changes. `window.__hold = true` makes the file read and the
+  missing-demo check wait for `window.__release.load()` / `.search()`, for
+  the queue's line while a project opens (#958).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>recent_projects.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <header id="top-navbar">
+    <nav class="nav-menubar">
+      <div class="menu-dropdown" data-menu="file">
+        <button class="menu-dropdown-btn" id="file-menu-btn">File</button>
+        <div class="menu-dropdown-panel" id="file-menu-panel">
+          <button class="menu-dropdown-item" id="new-session-btn"><span>New Session</span></button>
+          <button class="menu-dropdown-item" id="load-project-btn"><span>Load Session</span></button>
+          <div class="menu-dropdown-item menu-submenu" id="recent-projects-menu">
+            <span>Open Recent</span><span class="menu-shortcut-hint">▸</span>
+            <div class="menu-submenu-panel" id="recent-projects-panel"></div>
+          </div>
+          <button class="menu-dropdown-item" id="save-project-btn"><span>Save Session</span></button>
+        </div>
+      </div>
+    </nav>
+    <span id="session-file-indicator">No session loaded</span>
+  </header>
+
+  <span id="scan-spinner" style="display: none;"></span>
+  <span id="scan-status">Ready</span>
+  <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+
+  <div id="unsaved-changes-modal" class="modal" style="display: none;">
+    <button id="unsaved-changes-save-btn">Save & Close</button>
+    <button id="unsaved-changes-discard-btn">Close Without Saving</button>
+    <button id="unsaved-changes-cancel-btn">Cancel</button>
+  </div>
+
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+
+  <script type="module">
+    import { initAppMenu } from '/src/app_menu.js';
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { createProjectSession } from '/src/project_session.js';
+    import { createRecentProjects } from '/src/recent_projects.js';
+
+    window.__missing = [];
+    window.__mockInvokeHandlers.files_exist = ({ paths }) => paths.map((p) => !window.__missing.includes(p));
+    window.__release = {};
+    const held = (name, value) => (window.__hold
+      ? new Promise((resolve) => { window.__release[name] = () => resolve(value); })
+      : value);
+    window.__mockInvokeHandlers.load_project_session = () => held('load', JSON.stringify({ version: '0.12.0', demos: [] }));
+
+    initThemedConfirm();
+    initAppMenu();
+    let demos = [];
+    window.__saved = [];
+    const { openProject, markProjectDirty } = createProjectSession({
+      getDemos: () => demos,
+      replaceDemos: (d) => { demos = d; },
+      loadDemos: (d) => { demos = d; },
+      getTakeIndex: () => ({}),
+      setTakeIndex: () => {},
+      getProjectTeams: () => ({}),
+      setProjectTeams: () => {},
+      checkMissingDemos: async (path, scanPaths, { onSearched } = {}) => {
+        await held('search', null);
+        onSearched?.();
+      },
+      onProjectFile: (path) => recent.remember(path),
+    });
+    const recent = createRecentProjects({
+      openProject,
+      persistAppSettings: async () => { window.__saved.push(recent.list()); },
+    });
+    window.__recent = recent;
+    window.__markDirty = () => { demos = [{ path: 'D:/demos/a.dem', streaks: [] }]; markProjectDirty(); };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

@@ -4,7 +4,8 @@
 // owns the queue, the take index and the Teams list; they're reassigned
 // there, so they're reached through getters and setters rather than held.
 
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { invoke } from '@tauri-apps/api/core';
 import { defaultProjectsDir } from './ipc_bridge.js';
 import { updateStreakVisuals } from './detail_pane.js';
@@ -17,16 +18,19 @@ import { projectFolders } from './project_paths.js';
 import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { createProjectOpenProgress } from './project_open_progress.js';
 
 /**
  * @param {object} app  What this needs from main.js:
  *   getDemos() the queue, replaceDemos(demos) main.js's replaceScannedDemos,
  *   loadDemos(demos) make a loaded project's demos the queue and show them,
  *   getTakeIndex()/setTakeIndex(index), getProjectTeams()/setProjectTeams(teams),
- *   checkMissingDemos(projectPath, scanPaths) from project_demos.js,
+ *   checkMissingDemos(projectPath, scanPaths, { onSearched }) from
+ *   project_demos.js, `onSearched` called once its folder search is done,
  *   offerRescan() from project_rescan.js, and getReviewSettings()/
  *   setReviewSettings(raw), the Review box's HLTV pick (#828,
- *   review_hltv_picker.js).
+ *   review_hltv_picker.js), and onProjectFile(path), told each file opened
+ *   or saved (File → Open Recent, #935).
  */
 export function createProjectSession({
   getDemos,
@@ -40,6 +44,7 @@ export function createProjectSession({
   offerRescan = async () => false,
   getReviewSettings = () => undefined,
   setReviewSettings = () => {},
+  onProjectFile = () => {},
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -50,6 +55,9 @@ export function createProjectSession({
   // changes" prompt on window close. Cleared by saveProjectSession() and
   // Load Session; set by markProjectDirty() at every mutation site.
   let hasUnsavedChanges = false;
+  // "Opening the project…", then the search for its missing demos, on the
+  // queue's line (#958).
+  const openProgress = createProjectOpenProgress();
 
   /** Every highlight's durable uid across every currently-scanned demo — the
    *  "still exists" set pruneTakeIndex() checks the take index against on save. */
@@ -154,6 +162,7 @@ export function createProjectSession({
       hasUnsavedChanges = false;
       updateSessionFileIndicator();
       showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
+      onProjectFile(filePath);
       return true;
     } catch (err) {
       console.error("Save project error:", err);
@@ -164,82 +173,113 @@ export function createProjectSession({
 
   document.querySelector('#save-project-btn')?.addEventListener('click', () => saveProjectSession());
 
+  // Loading replaces currentScannedDemos/takeIndex wholesale — same
+  // data-loss risk as closing the window, so it gets the same prompt
+  // before that happens, reusing the same modal. False on Cancel; 'save'
+  // already wrote the file inside the modal's Save button handler, and
+  // 'discard' loads over it either way.
+  async function confirmReplaceProject() {
+    if (!needsSavePrompt()) return true;
+    return !!(await requestUnsavedChangesConfirmation());
+  }
+
   // Load Project Session
   document.querySelector('#load-project-btn')?.addEventListener('click', async () => {
-    // Loading replaces currentScannedDemos/takeIndex wholesale — same
-    // data-loss risk as closing the window, so it gets the same prompt
-    // before that happens, reusing the same modal.
-    if (needsSavePrompt()) {
-      const outcome = await requestUnsavedChangesConfirmation();
-      if (!outcome) return; // Cancel — abort the load, keep current state
-      // 'save' already wrote the file inside the modal's Save button
-      // handler; 'discard' falls through to load over it either way.
-    }
+    if (!(await confirmReplaceProject())) return;
     try {
       const projectsDir = await defaultProjectsDir();
-      const selected = await open({
+      const selected = await pickPath({
+        field: 'project.open',
+        current: currentSessionPath,
+        fallback: projectsDir,
         multiple: false,
-        ...(projectsDir ? { defaultPath: projectsDir } : {}),
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
-      if (selected) {
-        const content = await invoke('load_project_session', { path: selected });
-        const data = JSON.parse(content);
-        if (data) {
-          currentSessionPath = selected;
-          hasUnsavedChanges = false;
-          updateSessionFileIndicator();
-          // Load Session is reachable from any tab (#122) — jump to Studio
-          // so the loaded project is actually visible, same cross-tab-jump
-          // pattern as detail_pane.js's "View Match Telemetry" button.
-          switchNavTab('workspace');
-          clearCheckedPaths();
-          // An older project's hlaePath / hlPath are ignored: Settings own
-          // those paths, and applying them here silently switched the game
-          // install (a PRE project opened on a POST setup).
-          // Tolerant: a 0.10.0 project file has no takeIndex at all — load
-          // as empty rather than reject the file. Auto-Rendered just won't
-          // retroactively apply to takes captured before this existed.
-          const takeIndex = data.takeIndex || {};
-          setTakeIndex(takeIndex);
-          // Deliberately verbose: this is the only place takeIndex is ever
-          // populated from disk, so logging it here — with exactly what
-          // came out of the file, before anything else touches it — is
-          // what makes it possible to prove a later auto-Rendered flip
-          // came from this loaded data and not a leftover in-memory state.
-          console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
-          // Tolerant the same way: a project saved before the Teams list
-          // (#445) has no `teams`, and loads with none named or merged.
-          setProjectTeams(normalizeProjectTeams(data.teams));
-          // A project saved before #828 has no `review`: the HLTV box goes
-          // back to its default, nobody picked.
-          setReviewSettings(data.review);
-          if (data.demos) {
-            // timeline_string is a derived field, saved as a convenience
-            // snapshot rather than the source of truth — recompute it from
-            // each streak's raw kills on every load so a display-only fix
-            // (e.g. a weapon-name-resolution bug) shows correctly for
-            // sessions saved before the fix, instead of replaying whatever
-            // text got baked in at save time.
-            data.demos.forEach(demo => (demo.streaks || []).forEach(updateStreakVisuals));
-            // A project saved before #573 holds other players' highlights
-            // the table never showed; a new scan lists the recorder's alone.
-            data.demos.forEach(dropOtherPlayersSavedStreaks);
-            loadDemos(data.demos);
-            showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
-            await checkMissingDemos(selected, data.scanPaths || []);
-            // After the missing check: a demo it relocates can be rescanned,
-            // one still missing can't.
-            await offerRescan();
-          }
-          refreshTeamsPane();
-        }
-      }
+      if (selected) await loadProjectFile(selected);
     } catch (err) {
       console.error("Load project error:", err);
       showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
     }
   });
+
+  /** Opens the project at `path` as Load Session would once its file is
+   *  picked, unsaved-changes prompt first (File → Open Recent, #935).
+   *  Resolves whether it opened. */
+  async function openProject(path) {
+    if (!(await confirmReplaceProject())) return false;
+    return loadProjectFile(path);
+  }
+
+  // Reads and applies a project file: the half of Load Session after the
+  // picker. Resolves whether it loaded.
+  async function loadProjectFile(selected) {
+    openProgress.opening();
+    try {
+      const content = await invoke('load_project_session', { path: selected });
+      const data = JSON.parse(content);
+      if (!data) return false;
+      currentSessionPath = selected;
+      hasUnsavedChanges = false;
+      updateSessionFileIndicator();
+      onProjectFile(selected);
+      // Load Session is reachable from any tab (#122) — jump to Studio
+      // so the loaded project is actually visible, same cross-tab-jump
+      // pattern as detail_pane.js's "View Match Telemetry" button.
+      switchNavTab('workspace');
+      clearCheckedPaths();
+      // An older project's hlaePath / hlPath are ignored: Settings own
+      // those paths, and applying them here silently switched the game
+      // install (a PRE project opened on a POST setup).
+      // Tolerant: a 0.10.0 project file has no takeIndex at all — load
+      // as empty rather than reject the file. Auto-Rendered just won't
+      // retroactively apply to takes captured before this existed.
+      const takeIndex = data.takeIndex || {};
+      setTakeIndex(takeIndex);
+      // Deliberately verbose: this is the only place takeIndex is ever
+      // populated from disk, so logging it here — with exactly what
+      // came out of the file, before anything else touches it — is
+      // what makes it possible to prove a later auto-Rendered flip
+      // came from this loaded data and not a leftover in-memory state.
+      console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
+      // Tolerant the same way: a project saved before the Teams list
+      // (#445) has no `teams`, and loads with none named or merged.
+      setProjectTeams(normalizeProjectTeams(data.teams));
+      // A project saved before #828 has no `review`: the HLTV box goes
+      // back to its default, nobody picked.
+      setReviewSettings(data.review);
+      if (data.demos) {
+        // timeline_string is a derived field, saved as a convenience
+        // snapshot rather than the source of truth — recompute it from
+        // each streak's raw kills on every load so a display-only fix
+        // (e.g. a weapon-name-resolution bug) shows correctly for
+        // sessions saved before the fix, instead of replaying whatever
+        // text got baked in at save time.
+        data.demos.forEach(demo => (demo.streaks || []).forEach(updateStreakVisuals));
+        // A project saved before #573 holds other players' highlights
+        // the table never showed; a new scan lists the recorder's alone.
+        data.demos.forEach(dropOtherPlayersSavedStreaks);
+        // Before the demos load: the grouping they start takes the line.
+        openProgress.opened();
+        loadDemos(data.demos);
+        showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
+        openProgress.searching();
+        await checkMissingDemos(selected, data.scanPaths || [], { onSearched: () => openProgress.searched() });
+        openProgress.searched();
+        // After the missing check: a demo it relocates can be rescanned,
+        // one still missing can't.
+        await offerRescan();
+      }
+      refreshTeamsPane();
+    } catch (err) {
+      console.error("Load project error:", err);
+      showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
+      return false;
+    } finally {
+      openProgress.opened();
+      openProgress.searched();
+    }
+    return true;
+  }
 
   // New Session (#122/#149) — resets to the same blank state the app starts
   // in: no session file, no demos, no take index. Reuses main.js's
@@ -298,5 +338,5 @@ export function createProjectSession({
     });
   }
 
-  return { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation };
+  return { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject };
 }
