@@ -134,20 +134,60 @@ pub fn demo_rename_cancel(state: tauri::State<'_, DemoRenameManager>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
 
+/// Whether a rename count is worth an event: the first and the last always,
+/// the rest at most every `PROGRESS_INTERVAL_MS`.
+fn count_due(
+    last: Option<std::time::Instant>,
+    now: std::time::Instant,
+    done: usize,
+    total: usize,
+) -> bool {
+    done <= 1
+        || done >= total
+        || last
+            .is_none_or(|t| now.duration_since(t).as_millis() >= u128::from(PROGRESS_INTERVAL_MS))
+}
+
+/// Sends `demo_rename_apply_progress` (`{ done, total }`) for Apply and Undo,
+/// throttled by [`count_due`] (#958).
+fn rename_counter(app: &AppHandle) -> impl FnMut(usize, usize) + '_ {
+    let mut last = None;
+    move |done, total| {
+        let now = std::time::Instant::now();
+        if count_due(last, now, done, total) {
+            last = Some(now);
+            let _ = app.emit(
+                "demo_rename_apply_progress",
+                serde_json::json!({ "done": done, "total": total }),
+            );
+        }
+    }
+}
+
 /// Renames each pair in place and logs the batch for Undo.
 #[tauri::command]
-pub async fn demo_rename_apply(renames: Vec<RenamePair>) -> Result<RenameOutcome, String> {
+pub async fn demo_rename_apply(
+    app_handle: AppHandle,
+    renames: Vec<RenamePair>,
+) -> Result<RenameOutcome, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(demo_rename::apply(&renames, &log_dir()))
+        Ok(demo_rename::apply_reporting(
+            &renames,
+            &log_dir(),
+            &mut rename_counter(&app_handle),
+        ))
     }))
     .await
 }
 
 /// Puts the newest batch back.
 #[tauri::command]
-pub async fn demo_rename_undo() -> Result<RenameOutcome, String> {
+pub async fn demo_rename_undo(app_handle: AppHandle) -> Result<RenameOutcome, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(demo_rename::undo_last(&log_dir()))
+        Ok(demo_rename::undo_last_reporting(
+            &log_dir(),
+            &mut rename_counter(&app_handle),
+        ))
     }))
     .await
 }
@@ -160,4 +200,25 @@ pub async fn demo_rename_undoable() -> Result<Option<UndoableBatch>, String> {
         demo_rename::undoable(&log_dir())
     }))
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn rename_counts_are_throttled_but_the_first_and_last_always_go() {
+        let t = Instant::now();
+        let soon = t + Duration::from_millis(5);
+        let later = t + Duration::from_millis(40);
+        assert!(count_due(None, t, 1, 40), "the first count");
+        assert!(count_due(Some(t), soon, 40, 40), "the last count");
+        assert!(
+            !count_due(Some(t), soon, 12, 40),
+            "too soon after the last event"
+        );
+        assert!(count_due(Some(t), later, 12, 40), "33 ms on");
+        assert!(count_due(None, t, 12, 40), "no event yet");
+    }
 }
