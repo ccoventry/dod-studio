@@ -70,6 +70,15 @@ describe('queue_progress (#951)', () => {
     expect(again.indeterminate).toBe(false);
   });
 
+  it('counts the demos checked for being new, between looking and reading', () => {
+    const view = scanStepView({ keying: true, keyed: 300, total: 1200, scanned: 0, status: 'x' });
+    expect(view).toEqual({ step: 'keying', text: 'Checking which demos are new: 300 of 1,200', pct: 25, indeterminate: false });
+    // After looking's share of the bar and before reading's, so it never goes back.
+    expect(placed(nest({ range: [0, 100] }, SCAN_STEPS.keying), view).pct).toBe(6.25);
+    expect(SCAN_STEPS.looking[1]).toBe(SCAN_STEPS.keying[0]);
+    expect(SCAN_STEPS.keying[1]).toBe(SCAN_STEPS.reading[0]);
+  });
+
   it('shows reading demos as the backend words it, with the time left', () => {
     const view = scanStepView(
       { scanned: 12, total: 48, status: 'Reading demos: 12 of 48, a.dem' },
