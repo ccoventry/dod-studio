@@ -1092,6 +1092,12 @@ export function initAnalyzerPane({
   initAnalyzerBrowser();
 }
 
+// Redraws the Pinned/Recent/Local links after a change made outside the
+// pane, such as the start-up pinned-folders review unpinning folders (#533).
+export function refreshAnalyzerQuickLinks() {
+  renderQuickLinksSection();
+}
+
 // Entry point for cross-pane jumps (e.g. Workspace's "View Match Telemetry"
 // button) — points the Explorer sidebar at the demo's own folder first, so
 // the Demos table reliably highlights it instead of only coincidentally
