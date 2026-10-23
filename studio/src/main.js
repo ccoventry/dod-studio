@@ -146,7 +146,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     setTakeIndex: (index) => { takeIndex = index; },
     getProjectTeams: () => projectTeams,
     setProjectTeams: (teams) => { projectTeams = teams; },
-    checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+    checkMissingDemos: (path, scanPaths, options) => checkMissingDemos(path, scanPaths, undefined, options),
     offerRescan: () => offerRescan(),
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),

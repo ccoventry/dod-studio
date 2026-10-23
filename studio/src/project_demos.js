@@ -25,8 +25,9 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // 64 KB) near the project and its old folders, and ask before using a
   // match. Anything still missing is named in a toast. Also run by Start
   // Capture Batch over the demos with a highlight picked (no project path
-  // then). Resolves to how many of `demos` are still missing.
-  async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos()) {
+  // then). Resolves to how many of `demos` are still missing. `onSearched`
+  // is called when the folder search is done, before any dialog (#958).
+  async function checkMissingDemos(projectPath, savedScanPaths, demos = getDemos(), { onSearched } = {}) {
     const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
     const nameOf = (p) => p.split(/[\\/]/).pop();
     // Nearest first: where each demo was, then the project's folder, then the
@@ -44,6 +45,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       demos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
       dirs
     );
+    onSearched?.();
     // A demo marked missing earlier that is back where the queue says.
     const missingPaths = new Set(missing.map((m) => m.path));
     const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));

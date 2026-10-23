@@ -1132,6 +1132,9 @@ export const STRINGS = {
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',
     analyzingPct: (pct) => `Analyzing… ${pct}%`,
     analyzingDemoPct: (pct) => `Analyzing demo… ${pct}%`,
+    // A demo the analyzer cache has is read, not parsed (#958).
+    READING_CACHE: 'Reading from the analyzer cache…',
+    READING_CACHE_SHORT: 'Reading from the cache…',
     analyzeFailed: (err) => `Failed to analyze demo: ${err}`,
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
@@ -1682,6 +1685,10 @@ export const STRINGS = {
 
     // The queue's progress line through a scan (#951): queue_progress.js.
     SCAN_STARTING: 'Looking for demos…',
+    // Opening a project, on the queue's line (#958).
+    OPENING_PROJECT: 'Opening the project…',
+    CHECKING_PROJECT_DEMOS: "Checking the project's demos are where they were…",
+    lookingForMissingDemos: (n) => `Looking for ${n} missing demo${n === 1 ? '' : 's'}…`,
     lookingLine: (folders, demos, last) => {
       const n = (x) => Number(x || 0).toLocaleString('en-US');
       const was = last > 0 ? ` (about ${n(last)} last time)` : '';
@@ -2353,7 +2360,9 @@ export const STRINGS = {
       return `Some earlier edits don't fit this map any more and are kept aside: ${parts.join(', ')}.`;
     },
     building: (map, fraction) => `${map}: working out where players can go... ${Math.round(fraction * 100)}%`,
-    SAVING: 'Saving...',
+    // Its two steps (#958): drawing and writing each takes a moment.
+    SAVING: 'Saving the overview…',
+    SAVING_HD: 'Saving the high-quality copy…',
     // Where Save put things, short; the full paths are the line's tooltip.
     saved: (hd) => (hd
       ? 'Saved the overview in dod/overviews, and the high-quality copy and your edits in dod_addon/overviews.'
@@ -2617,6 +2626,14 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
+    // Rename and Undo's progress line (#958).
+    renamingStart: (count) => `Renaming ${count} demo${count === 1 ? '' : 's'}…`,
+    renaming: (done, total) => `Renaming ${done} of ${total}…`,
+    UNDO_STARTING: 'Putting back the last renames…',
+    puttingBack: (done, total) => `Putting back ${done} of ${total}…`,
+    renamedIn: (count, secs) => `Renamed ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    putBackIn: (count, secs) => `Put back ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    notRenamed: (count) => ` ${count} couldn't be renamed.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
     // Rename Demos' own meaning of a placeholder, where it isn't the one in
     // PLACEHOLDERS.DESCRIPTIONS.

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, parseDemoTemplate, demoValues, planRenames, renamePairs,
   placeholdersFor, nameWithoutTag, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, listProgressView,
+  renameProgressView, renameDoneLine,
 } from './demo_rename.js';
 import { emptyProjectTeams, renameTeam, mergeTeam } from './project_teams.js';
 
@@ -250,5 +251,22 @@ describe('listProgressView', () => {
   it('says no time left once nothing is left to parse', () => {
     expect(listProgressView({ done: 6, total: 6, cached: 5, parsed: 1 }, 1000).text)
       .toBe('Reading demos: 6 / 6 (5 from the analyzer cache)');
+  });
+});
+
+describe('Rename and Undo progress (#958)', () => {
+  it('slides until the first file, then counts', () => {
+    expect(renameProgressView('apply', null, 40)).toEqual({ text: 'Renaming 40 demos…', pct: 0, indeterminate: true });
+    expect(renameProgressView('apply', { done: 12, total: 40 }, 40))
+      .toEqual({ text: 'Renaming 12 of 40…', pct: 30, indeterminate: false });
+    expect(renameProgressView('undo', null)).toEqual({ text: 'Putting back the last renames…', pct: 0, indeterminate: true });
+    expect(renameProgressView('undo', { done: 1, total: 4 }).text).toBe('Putting back 1 of 4…');
+  });
+
+  it('ends with how many, how long, and what failed', () => {
+    const ok = { renamed: new Array(40).fill({}), failed: [] };
+    expect(renameDoneLine('apply', ok, '1.2')).toBe('Renamed 40 demos in 1.2 s.');
+    expect(renameDoneLine('undo', { renamed: [{}], failed: [{}, {}] }, '0.1'))
+      .toBe("Put back 1 demo in 0.1 s. 2 couldn't be renamed.");
   });
 });
