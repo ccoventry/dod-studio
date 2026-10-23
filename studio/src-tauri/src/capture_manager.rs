@@ -1713,6 +1713,14 @@ pub struct ScanOutcome {
     pub not_cached: u32,
     #[serde(default)]
     pub not_cached_ms: u64,
+    /// Of the `not_cached` demos, the ones with no older entry to upgrade
+    /// either, read in full, and their bytes: Studio learns this PC's read
+    /// rate from them for the rescan prompt's estimate (#937). The upgrades
+    /// take milliseconds, so `not_cached_ms` is their time near enough.
+    #[serde(default)]
+    pub full_reads: u32,
+    #[serde(default)]
+    pub full_read_bytes: u64,
 }
 
 /// A scanned file with the same key as a queued demo at another path, or as
@@ -2299,6 +2307,8 @@ pub async fn scan_directory_impl(
                 cached: 0,
                 not_cached: 0,
                 not_cached_ms: 0,
+                full_reads: 0,
+                full_read_bytes: 0,
             });
         }
 
@@ -2321,11 +2331,14 @@ pub async fn scan_directory_impl(
         // the parses largest first, so no worker idles behind one big demo at
         // the end.
         let total = list.len();
-        let plan = ::analysis::cache::WorkPlan::new(&native::analyzer_cache_root(), &list);
+        let cache_root = native::analyzer_cache_root();
+        let plan = ::analysis::cache::WorkPlan::new(&cache_root, &list);
         let cached = plan.cached() as u32;
         let bytes_to_parse = plan.bytes_to_parse();
         let parsed = std::sync::atomic::AtomicU32::new(0);
         let bytes_parsed = std::sync::atomic::AtomicU64::new(0);
+        let full_reads = std::sync::atomic::AtomicU32::new(0);
+        let full_read_bytes = std::sync::atomic::AtomicU64::new(0);
         // When the first demo without a current cache entry started.
         let first_parse: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         let slots: Mutex<Vec<Option<SerializedDemo>>> =
@@ -2384,8 +2397,11 @@ pub async fn scan_directory_impl(
                 let in_flight = &in_flight;
                 let emit_progress = &emit_progress;
                 let plan = &plan;
+                let cache_root = &cache_root;
                 let parsed = &parsed;
                 let bytes_parsed = &bytes_parsed;
+                let full_reads = &full_reads;
+                let full_read_bytes = &full_read_bytes;
                 let first_parse = &first_parse;
                 let file_name_at = move |i: usize| {
                     list[i]
@@ -2431,6 +2447,13 @@ pub async fn scan_directory_impl(
 
                         if !plan.fresh[idx] {
                             first_parse.get_or_init(std::time::Instant::now);
+                            if !::analysis::cache::has_older_entry(cache_root, file) {
+                                full_reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                full_read_bytes.fetch_add(
+                                    plan.sizes[idx],
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
+                            }
                         }
                         let scanned = scan_demo_for_highlights_with_analysis(file);
                         if let Err(reason) = &scanned {
@@ -2517,6 +2540,8 @@ pub async fn scan_directory_impl(
             not_cached_ms: first_parse
                 .get()
                 .map_or(0, |t| t.elapsed().as_millis() as u64),
+            full_reads: full_reads.load(std::sync::atomic::Ordering::Relaxed),
+            full_read_bytes: full_read_bytes.load(std::sync::atomic::Ordering::Relaxed),
         })
     }))
     .await;

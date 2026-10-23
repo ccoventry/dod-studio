@@ -31,6 +31,11 @@
                 <button class="menu-dropdown-item" id="load-project-btn" data-str-title="NAV.LOAD_SESSION_TITLE">
                   <span data-str="NAV.LOAD_SESSION_BUTTON">Load Session</span><span class="menu-shortcut-hint">Ctrl+O</span>
                 </button>
+                <!-- #935: filled by recent_projects.js; opens on hover. -->
+                <div class="menu-dropdown-item menu-submenu" id="recent-projects-menu">
+                  <span data-str="NAV.OPEN_RECENT">Open Recent</span><span class="menu-shortcut-hint">▸</span>
+                  <div class="menu-submenu-panel" id="recent-projects-panel"></div>
+                </div>
                 <button class="menu-dropdown-item" id="save-project-btn" data-str-title="NAV.SAVE_SESSION_TITLE">
                   <span id="save-project-btn-label" data-str="NAV.SAVE_SESSION_BUTTON">Save Session</span><span class="menu-shortcut-hint">Ctrl+S</span>
                 </button>
@@ -273,7 +278,10 @@
                    consequence of the two rows above and belongs after them. -->
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HL_EXEC_LABEL">Half-Life Executable:</label>
-                <input type="text" id="hl-path-input" data-str-placeholder="CAPTURE_CONFIG.HL_EXEC_PLACEHOLDER" placeholder="Path to hl.exe" style="flex: 1;" />
+                <!-- The saved path; the install list sets it (install_picker.js, #931). -->
+                <input type="text" id="hl-path-input" data-str-placeholder="CAPTURE_CONFIG.HL_EXEC_PLACEHOLDER" placeholder="Path to hl.exe" hidden />
+                <input type="text" id="hl-install-choice" />
+                <!-- ^ a dropdown you can type into (searchable_select.js) -->
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
@@ -987,6 +995,10 @@
                   <label class="audit-all-drives" data-str-title="AUDITOR.ALL_DRIVES_TITLE" title="Check every fixed drive in one pass">
                     <input type="checkbox" id="audit-all-drives" />
                     <span id="audit-all-drives-label" data-str="AUDITOR.ALL_DRIVES_LABEL">All drives</span>
+                  </label>
+                  <label class="audit-all-drives" data-str-title="AUDITOR.LOOK_IN_ZIPS_TITLE" title="Also check the demos inside .zip files">
+                    <input type="checkbox" id="audit-look-in-zips" />
+                    <span data-str="AUDITOR.LOOK_IN_ZIPS_LABEL">Look inside .zip files</span>
                   </label>
                 </div>
                 <div class="row-inputs">

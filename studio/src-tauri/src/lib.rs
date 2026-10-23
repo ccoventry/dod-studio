@@ -12,12 +12,15 @@ mod dir_browser;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
+mod installs_manager;
 mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
 mod messages;
+mod movie_copy_manager;
 mod overview_manager;
 mod packet_limit_manager;
+mod pick_paths;
 mod players_tab;
 mod preview_in_place;
 mod render_manager;
@@ -169,6 +172,20 @@ async fn load_project_session(path: String) -> Result<String, String> {
     .await
 }
 
+/// One `true` per path that is a file that's there: File → Open Recent dims
+/// the rest (#935). Off the main thread, since a path on a sleeping network
+/// or cloud drive can take seconds to answer (#789).
+#[tauri::command]
+async fn files_exist(paths: Vec<String>) -> Result<Vec<bool>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(paths
+            .iter()
+            .map(|p| std::path::Path::new(p).is_file())
+            .collect())
+    }))
+    .await
+}
+
 // ── Auditor IPC Commands ───────────────────────────────────────────────────────
 
 /// `paths` plus every fixed drive when `all_drives`, in one key pass (#844).
@@ -182,6 +199,7 @@ async fn run_demo_audit(
     paths: Vec<String>,
     all_drives: bool,
     queued: Vec<String>,
+    look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
     let hl_path = settings
         .inner
@@ -199,6 +217,7 @@ async fn run_demo_audit(
         Arc::clone(&state.cancel_token),
         paths,
         all_drives,
+        look_in_zips.unwrap_or(false),
         (game_folders, queued),
     )
     .await
@@ -312,6 +331,21 @@ async fn scan_directory(
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
     )
+    .await
+}
+
+/// What a rescan of `paths` has to do, for the rescan prompt's time line
+/// (#937): stats each demo and reads its cache entries' first bytes, opening
+/// no demo, so a few hundred take well under a second (longer on a slow or
+/// cloud drive, hence off the main thread).
+#[tauri::command]
+async fn estimate_rescan(paths: Vec<String>) -> Result<analysis::cache::RescanEstimate, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(analysis::cache::RescanEstimate::new(
+            &native::analyzer_cache_root(),
+            &paths,
+        ))
+    }))
     .await
 }
 
@@ -813,6 +847,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
@@ -846,6 +881,9 @@ pub fn run() {
             diagnose_executable_paths,
             settings_manager::list_game_folders,
             settings_manager::game_folder_language_file,
+            movie_copy_manager::movie_copy_plan,
+            movie_copy_manager::start_movie_copy,
+            movie_copy_manager::cancel_movie_copy,
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
@@ -876,6 +914,7 @@ pub fn run() {
             delete_orphaned_previews,
             cancel_capture_batch,
             scan_directory,
+            estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
             diagnose_capture_output_paths,
@@ -904,6 +943,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            files_exist,
             index_demo_players,
             default_projects_dir,
             locate_missing_demos,
@@ -925,6 +965,7 @@ pub fn run() {
             demo_links_manager::add_demo_link,
             demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
+            installs_manager::find_installs,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,
@@ -939,6 +980,8 @@ pub fn run() {
             open_recycle_bin,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
+            pick_paths::pick_path_states,
+            pick_paths::pick_user_folders,
             dir_browser::count_demo_files_in_folder,
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
