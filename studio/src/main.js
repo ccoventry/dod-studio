@@ -436,7 +436,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
     rememberRecentFolder: (folder) => recordDemoFolderVisit(folder),
     persistAppSettings: () => persistAppSettings(),
-    regroupMatches: () => regroupMatches(),
+    regroupMatches: (opts) => regroupMatches(opts),
     getTakeIndex: () => takeIndex,
   });
 

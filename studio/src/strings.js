@@ -90,7 +90,7 @@ export const STRINGS = {
     INCLUDE_SUBFOLDERS_TITLE: "Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.",
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     CANCEL_SCAN_TITLE: 'Cancel the running directory scan',
-    SCAN_STATUS_READY: 'Status: Ready',
+    SCAN_STATUS_READY: 'Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
     // #174: demos you can capture a player from (POV demos they recorded).
@@ -127,7 +127,7 @@ export const STRINGS = {
     GROUP_NO_DATE: 'Date not known',
     GROUP_NO_TYPE: 'Demo type not known',
     groupDateTitle: (day) => `Demo files last changed on ${day}`,
-    groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
+    groupingStatus: (done, total) => (total > 0 ? `Grouping by match: ${done} of ${total}` : 'Grouping by match…'),
     matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
     matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
     matchHalfCount: (half, count) => `${half ? `h${half}` : 'half unknown'}: ${count} demo${count === 1 ? '' : 's'}`,
@@ -975,7 +975,6 @@ export const STRINGS = {
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
-    elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
     zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
@@ -1673,7 +1672,10 @@ export const STRINGS = {
       notes && `Note: "${notes}"`,
     ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
-    queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
+    // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
+    queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
+    QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
+    queueSplitDoneLine: (seconds, demos) => `Done in ${seconds} s: split ${demos} demo${demos === 1 ? '' : 's'}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
     MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
@@ -1681,9 +1683,23 @@ export const STRINGS = {
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
-    cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
-    readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
-    // Appended to the two statuses above when the scan skipped demos (#23).
+    // The queue's progress line through a scan (#951): queue_progress.js.
+    SCAN_STARTING: 'Looking for demos…',
+    lookingLine: (folders, demos, last) => {
+      const n = (x) => Number(x || 0).toLocaleString('en-US');
+      const was = last > 0 ? ` (about ${n(last)} last time)` : '';
+      return `Looking for demos: ${n(folders)} folder${folders === 1 ? '' : 's'}${was}, ${n(demos)} demo${demos === 1 ? '' : 's'} found`;
+    },
+    scanDoneLine: (seconds, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
+      const parts = [
+        added > 0 && `${added} demo${added === 1 ? '' : 's'} added`,
+        rescanned > 0 && `${rescanned} rescanned`,
+        unchanged > 0 && `${unchanged} already in the queue`,
+      ].filter(Boolean);
+      return `Done in ${seconds} s: ${parts.length ? parts.join(', ') : 'no demos found'}`;
+    },
+    scanCancelledLine: (seconds, added) => `Cancelled after ${seconds} s: ${added > 0 ? `${added} demo${added === 1 ? '' : 's'} added` : 'nothing added'}`,
+    // Appended to the two lines above when the scan skipped demos (#23).
     skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
     // `skipped` is [{name, reason}]; names the first three, counts the rest.
     skippedDemosToast: (skipped) => {
@@ -1692,9 +1708,7 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
-    SCANNING_STATUS: 'Status: Scanning...',
-    SCANNING_TOAST: 'Scanning directories...',
+    SCAN_CANCELLING_STATUS: 'Cancelling…',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
     scanCompleteToast: (count, unchanged = 0) =>
       unchanged > 0
@@ -1712,7 +1726,7 @@ export const STRINGS = {
         ? `Scan cancelled (${count} demo(s) added before cancel)`
         : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
-    scanErrorStatus: (err) => `Status: Error — ${err}`,
+    scanErrorStatus: (err) => `Could not scan: ${err}`,
 
     EXPORT_POOL_FREE_DEFAULT: 'Capture Output Free: 0.0 GB',
     exportPoolFree: (gb) => `Capture Output Free: ${gb} GB`,
@@ -2553,6 +2567,11 @@ export const STRINGS = {
       const onThisDemo = `Fast-forwarding to clip ${clipIndex} of ${clipCountThisDemo}`;
       return totalBatchClips ? `${onThisDemo} · ${clipsSoFar} of ${totalBatchClips} clips total` : onThisDemo;
     },
+  },
+
+  // ── progress_view.js: what every long job's progress line shares (#951)
+  PROGRESS: {
+    elapsedSuffix: (clock) => ` · ${clock}`,
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to

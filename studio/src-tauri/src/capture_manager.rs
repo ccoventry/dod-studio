@@ -1814,14 +1814,15 @@ fn scan_worker_count(workers: usize, total: usize) -> usize {
 /// The scan status line: how many demos are done out of how many, how many
 /// of them the analyzer cache has (they go first, #687), and one demo still
 /// being parsed, when there is one. With several scan workers, "the current
-/// file" is one of the current files. Studio adds the time left.
+/// file" is one of the current files. Studio adds the time left, and shows
+/// the line as the Reading step of the queue's bar (#951).
 fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -> String {
-    let mut line = format!("Scanning {done} / {total}");
+    let mut line = format!("Reading demos: {done} of {total}");
     if cached > 0 {
         line += &format!(" ({cached} from the analyzer cache)");
     }
     if let Some(name) = current {
-        line += &format!(" — {name}");
+        line += &format!(", {name}");
     }
     line
 }
@@ -3597,12 +3598,12 @@ mod tests {
     fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
         assert_eq!(
             scan_status_line(0, 1, 0, Some("a.dem")),
-            "Scanning 0 / 1 — a.dem"
+            "Reading demos: 0 of 1, a.dem"
         );
-        assert_eq!(scan_status_line(1, 1, 0, None), "Scanning 1 / 1");
+        assert_eq!(scan_status_line(1, 1, 0, None), "Reading demos: 1 of 1");
         assert_eq!(
             scan_status_line(3, 10, 2, Some("a.dem")),
-            "Scanning 3 / 10 (2 from the analyzer cache) — a.dem"
+            "Reading demos: 3 of 10 (2 from the analyzer cache), a.dem"
         );
     }
 
