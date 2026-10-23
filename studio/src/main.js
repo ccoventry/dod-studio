@@ -433,7 +433,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
     getScanPaths: () => scanPaths,
     persistAppSettings: () => persistAppSettings(),
-    regroupMatches: () => regroupMatches(),
+    regroupMatches: (opts) => regroupMatches(opts),
     getTakeIndex: () => takeIndex,
   });
 

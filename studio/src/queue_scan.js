@@ -19,6 +19,8 @@ import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
 import { learnFromScan } from './rescan_estimate.js';
+import { lastRunKey, readLastRun, rememberLastRun, secondsText } from './progress_view.js';
+import { SCAN_STEPS, nest, placed, queueProgress, scanStepView } from './queue_progress.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -32,9 +34,10 @@ const scanParses = parseClock();
  *   selectDemoAndRenderDetail(demo, idx), updateDemoFooter(demos),
  *   markProjectDirty(), readScanWorkers(), offerIdenticalCopies(copies,
  *   pickedFiles) from project_demos.js, getScanPaths() the pinned-folder
- *   list (pushed to in place), persistAppSettings(), and regroupMatches()
- *   from queue_match_groups.js, run after a scan so {match} and {half}
- *   know the new demos (#685), and getTakeIndex() the project's take index,
+ *   list (pushed to in place), persistAppSettings(), and
+ *   regroupMatches({ within }) from queue_match_groups.js, run after a scan
+ *   so {match} and {half} know the new demos (#685), as the last step on the
+ *   scan's bar (#951), and getTakeIndex() the project's take index,
  *   whose uids follow a rescanned highlight's work (rescan_carry.js).
  */
 export function createQueueScan({
@@ -56,11 +59,14 @@ export function createQueueScan({
   // line says so instead of a toast, so it isn't followed a moment later by
   // the cancelled one (#843).
   let cancelling = false;
+  // The running scan: where it draws on the queue's line (queue_progress.js),
+  // how many folders the last scan of the same paths listed, and the most
+  // this one has listed so far.
+  let active = null;
+  const progress = queueProgress();
   listen('scan_progress', (event) => {
     const p = event.payload || {};
-    const scanStatusEl = document.querySelector('#scan-status');
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
-    showScanBar(p);
 
     // Demos the scan could not read (#23). Only the final event carries it.
     const skipped = Array.isArray(p.skipped) ? p.skipped : [];
@@ -69,41 +75,28 @@ export function createQueueScan({
       showToast(STRINGS.MAIN.skippedDemosToast(skipped), 'warning', 10000);
     }
 
-    if (p.cancelled) {
+    if (p.cancelled || p.status === 'Complete') {
+      // The scan's end line says how it went, once its demos are merged.
       cancelling = false;
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
+      if (active) active.skipped = skipped.length;
       if (cancelScanBtn) cancelScanBtn.disabled = true;
-    } else if (p.status === 'Complete') {
-      cancelling = false;
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
-      if (cancelScanBtn) cancelScanBtn.disabled = true;
-    } else if (cancelling) {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCAN_CANCELLING_STATUS;
+      return;
+    }
+    if (!active) return;
+    if (p.listing) active.foldersSeen = Math.max(active.foldersSeen, p.folders ?? 0);
+    // While folders are being listed (#843) no parse has started, so the
+    // parse clock must not start either.
+    const timeLeft = p.listing ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
+    const view = scanStepView(p, { expectedFolders: active.expectedFolders, timeLeft });
+    if (!view) return;
+    const shown = placed(nest(active.place, SCAN_STEPS[view.step]), view);
+    if (cancelling) {
+      progress.show(active.place.job, { ...shown, text: STRINGS.MAIN.SCAN_CANCELLING_STATUS });
     } else {
-      if (scanStatusEl) {
-        // While folders are being listed (#843) no parse has started, so the
-        // parse clock must not start either.
-        scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status)
-          + (p.listing ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached)));
-      }
+      progress.show(active.place.job, shown);
       if (cancelScanBtn) cancelScanBtn.disabled = false;
     }
   }).then(fn => { unlistenScanProgress = fn; });
-
-  // The bar under the status line: demos done of the scan's total.
-  function showScanBar(p) {
-    const fill = document.querySelector('#scan-progress .progress-bar-fill');
-    if (!fill || !(p.total > 0)) return;
-    fill.style.width = `${Math.min(100, (100 * (p.scanned || 0)) / p.total)}%`;
-  }
-
-  function scanBarShown(shown) {
-    const bar = document.querySelector('#scan-progress');
-    if (!bar) return;
-    bar.hidden = !shown;
-    const fill = bar.querySelector('.progress-bar-fill');
-    if (fill && shown) fill.style.width = '0%';
-  }
 
   // ── Cancel Scan button ────────────────────────────────────────────────────
   const cancelScanBtn = document.querySelector('#cancel-scan-btn');
@@ -112,8 +105,7 @@ export function createQueueScan({
     cancelScanBtn.addEventListener('click', async () => {
       cancelScanBtn.disabled = true;
       cancelling = true;
-      const scanStatusEl = document.querySelector('#scan-status');
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCAN_CANCELLING_STATUS;
+      if (active) progress.show(active.place.job, { text: STRINGS.MAIN.SCAN_CANCELLING_STATUS });
       try {
         await cancelScan();
       } catch (_) {
@@ -139,13 +131,14 @@ export function createQueueScan({
   // `pickedFiles`: the paths are files the user picked one by one (+ Add
   // Demo Files), so a copy of a queued demo is offered in its place rather
   // than only skipped (#21).
-  async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
+  // `within`: the scan is a step of a bigger job on the queue's line (a
+  // split's, queue_split.js), as a queue_progress.js place; it draws there
+  // and leaves the job's end to its owner. Otherwise it is its own job.
+  async function triggerAutoScan(pathsToScan, { pickedFiles = false, within = null } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
     lastScanAddedNothingCancelled = false;
     cancelling = false;
 
-    const scanStatusEl = document.querySelector('#scan-status');
-    const scanSpinnerEl = document.querySelector('#scan-spinner');
     const addFilesBtn = document.querySelector('#add-files-btn');
     const addFolderBtn = document.querySelector('#add-folder-btn');
     const cancelScanBtnInner = document.querySelector('#cancel-scan-btn');
@@ -153,13 +146,20 @@ export function createQueueScan({
     if (addFilesBtn) addFilesBtn.disabled = true;
     if (addFolderBtn) addFolderBtn.disabled = true;
     if (cancelScanBtnInner) cancelScanBtnInner.disabled = false;
-    if (scanSpinnerEl) scanSpinnerEl.style.display = 'inline-block';
-    scanBarShown(true);
-    if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
+    // On the line the moment it starts, before the backend says anything:
+    // a whole drive takes a while to list (#951).
+    const job = within ? null : progress.begin();
+    const place = within ?? { job, range: [0, 100] };
+    progress.show(place.job, placed(nest(place, SCAN_STEPS.looking), {
+      text: STRINGS.MAIN.SCAN_STARTING, pct: 0, indeterminate: true,
+    }));
+    const foldersKey = lastRunKey('queue_scan_last_folders', pathsToScan);
+    active = { place, expectedFolders: readLastRun(foldersKey), foldersSeen: 0, skipped: 0 };
+    // The line the scan ends on; `finally` puts it up if the scan didn't.
+    let endLine = null;
     scanParses.reset();
     const startedAt = Date.now();
     logFrontendEvent(STRINGS.SCAN_PROGRESS.startLog(pathsToScan.length));
-    showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
 
     const masterTableBody = document.querySelector('#master-demo-table-body');
     if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="7">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
@@ -257,22 +257,32 @@ export function createQueueScan({
       );
       refreshTeamsPane();
       // Which match and half each demo is (#685), from the analyzer cache
-      // the scan just warmed. Not awaited: the queue is already usable.
-      if (newlyScanned.length > 0) regroupMatches();
+      // the scan just warmed: the scan's last step, on its bar (#951). It
+      // takes a moment, more when the queue is grouped by match and some
+      // queued demos aren't cached yet.
+      if (newlyScanned.length > 0) await regroupMatches({ within: nest(place, SCAN_STEPS.grouping) });
+      if (!cancelled) rememberLastRun(foldersKey, active.foldersSeen);
+      const seconds = secondsText(Date.now() - startedAt);
+      const added = newlyScanned.length - rescans.length;
+      endLine = (cancelled
+        ? STRINGS.MAIN.scanCancelledLine(seconds, newlyScanned.length)
+        : STRINGS.MAIN.scanDoneLine(seconds, { added, rescanned: rescans.length, unchanged }))
+        + STRINGS.MAIN.skippedStatusSuffix(active.skipped);
+      progress.end(job, endLine);
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
       logFrontendEvent(scanFailedLogLine(Date.now() - startedAt, err));
       showToast(STRINGS.MAIN.scanErrorToast(err), 'error');
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
+      endLine = STRINGS.MAIN.scanErrorStatus(err);
       return false;
     } finally {
       if (addFilesBtn) addFilesBtn.disabled = false;
       if (addFolderBtn) addFolderBtn.disabled = false;
       if (cancelScanBtnInner) cancelScanBtnInner.disabled = true;
-      if (scanSpinnerEl) scanSpinnerEl.style.display = 'none';
-      scanBarShown(false);
+      if (active?.place === place) active = null;
+      progress.end(job, endLine);
     }
   }
 
