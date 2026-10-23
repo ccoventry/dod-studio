@@ -1,13 +1,14 @@
 // hook_dll_picker.js
 // Configuration > Paths > GoldSrc Hooks DLL as a list of the test builds in
 // the checkout's local\ folder (hook_dll_list.rs), so trying another build
-// is one pick instead of editing a path: a box with a datalist, so typing
-// `91` narrows it to the matching builds. The path itself stays in
-// #goldsrc-hooks-dll-path-input (hidden), which every launch reads and
-// settings_sync.js saves; this only sets it. Browse still picks any file.
-// Only in builds that use the override (hook_dll_row.js).
+// is one pick instead of editing a path. A plain dropdown, with a filter box
+// before it: typing `91` narrows the dropdown to the matching builds. The
+// path itself stays in #goldsrc-hooks-dll-path-input (hidden), which every
+// launch reads and settings_sync.js saves; this only sets it. Browse still
+// picks any file. Only in builds that use the override (hook_dll_row.js).
 
 import { listHookDlls } from './ipc_bridge.js';
+import { makeClearable } from './clearable_input.js';
 import { STRINGS } from './strings.js';
 
 /** Same file, whatever the slashes or case. */
@@ -69,70 +70,79 @@ export function resolveTyped(options, typed) {
   return containing.length === 1 ? containing[0] : null;
 }
 
-/** The rows the box offers, kept for resolving what is typed. */
-let shown = [];
-
-const choiceBox = () => document.querySelector('#goldsrc-hooks-dll-choice');
-const pathInput = () => document.querySelector('#goldsrc-hooks-dll-path-input');
-
-/** The text the box shows for the saved path. */
-function savedText() {
-  const value = selectedValue(shown, pathInput()?.value.trim() || '');
-  return shown.find((o) => o.value === value)?.text ?? '';
+/** The rows that contain `typed` (any case), with the one `current` picks
+ *  always kept so the dropdown never shows a row that isn't the saved one. */
+export function filterOptions(options, typed, current) {
+  const want = String(typed || '').trim().toLowerCase();
+  if (!want) return options;
+  const keep = selectedValue(options, current);
+  return options.filter((o) => o.value === keep || o.text.toLowerCase().includes(want));
 }
 
-/** Fills the list from the folder again and shows the saved path's row. */
-export async function refreshHookDllPicker() {
-  const box = choiceBox();
-  const list = document.querySelector('#goldsrc-hooks-dll-options');
+/** Every row from the last listing. */
+let all = [];
+
+const pathInput = () => document.querySelector('#goldsrc-hooks-dll-path-input');
+const select = () => document.querySelector('#goldsrc-hooks-dll-select');
+const filterBox = () => document.querySelector('#goldsrc-hooks-dll-filter');
+
+/** Shows the rows the filter leaves, the saved one selected. */
+function render() {
+  const el = select();
+  if (!el) return;
+  const current = pathInput()?.value.trim() || '';
+  const rows = filterOptions(all, filterBox()?.value, current);
+  el.replaceChildren(...rows.map((o) => {
+    const option = document.createElement('option');
+    option.value = o.value;
+    option.textContent = o.text;
+    option.title = o.title;
+    return option;
+  }));
+  el.value = selectedValue(rows, current);
+}
+
+/** Saves `value` as the path, through the path field's own change handler
+ *  (config_wiring.js), which checks it and saves the settings. */
+function pick(value) {
   const input = pathInput();
-  if (!box || !list || !input) return;
+  if (!input || input.value.trim() === value) return;
+  input.value = value;
+  input.dispatchEvent(new Event('change'));
+}
+
+/** Fills the dropdown from the folder again and selects the saved path. */
+export async function refreshHookDllPicker() {
+  const input = pathInput();
+  if (!select() || !input) return;
   const refresh = document.querySelector('#goldsrc-hooks-refresh-btn');
   if (refresh) refresh.disabled = true;
   try {
     const found = await listHookDlls();
-    shown = pickerOptions(found, input.value.trim());
-    list.replaceChildren(...shown.map((o) => {
-      const el = document.createElement('option');
-      el.value = o.text;
-      return el;
-    }));
-    if (document.activeElement !== box) box.value = savedText();
-    box.title = found?.folder ? STRINGS.CAPTURE_CONFIG.hookDllFolderHint(found.folder) : '';
+    all = pickerOptions(found, input.value.trim());
+    render();
+    const hint = found?.folder ? STRINGS.CAPTURE_CONFIG.hookDllFolderHint(found.folder) : '';
+    select().title = hint;
   } finally {
     if (refresh) refresh.disabled = false;
   }
 }
 
-/** Wires the box and its Refresh button. Clicking the box empties it so the
- *  whole list shows; typing narrows it. A pick goes through the path field's
- *  own change handler (config_wiring.js), which checks the path and saves the
- *  settings; text that matches no single row puts the saved pick back. */
+/** Wires the dropdown, its filter box and the Refresh button. Typing in the
+ *  filter narrows the dropdown; Enter picks the one row it matches. */
 export function initHookDllPicker() {
-  const box = choiceBox();
+  select()?.addEventListener('change', (e) => pick(e.target.value));
+  const box = filterBox();
   if (box) {
-    box.addEventListener('focus', () => {
-      box.placeholder = box.value;
-      box.value = '';
-    });
-    box.addEventListener('change', () => {
-      const input = pathInput();
-      const picked = resolveTyped(shown, box.value);
-      if (!input || !picked) return;
-      box.value = picked.text;
-      if (input.value.trim() !== picked.value) {
-        input.value = picked.value;
-        input.dispatchEvent(new Event('change'));
-      }
-    });
-    box.addEventListener('blur', () => {
-      if (!resolveTyped(shown, box.value)) box.value = savedText();
-      box.placeholder = STRINGS.CAPTURE_CONFIG.HOOK_DLL_TYPE_PLACEHOLDER;
-    });
+    makeClearable(box, STRINGS.CAPTURE_CONFIG.HOOK_DLL_FILTER_CLEAR);
+    box.addEventListener('input', render);
     box.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        box.value = savedText();
-        box.blur();
+      if (e.key !== 'Enter') return;
+      const match = resolveTyped(all, box.value);
+      if (match) {
+        pick(match.value);
+        box.value = '';
+        render();
       }
     });
   }

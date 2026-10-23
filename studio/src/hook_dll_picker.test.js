@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('./ipc_bridge.js', () => ({ listHookDlls: vi.fn() }));
 
-import { pickerOptions, selectedValue, shortDate, resolveTyped } from './hook_dll_picker.js';
+import { pickerOptions, selectedValue, shortDate, resolveTyped, filterOptions } from './hook_dll_picker.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CAPTURE_CONFIG;
@@ -74,5 +74,26 @@ describe('resolveTyped', () => {
     expect(pick('999')).toBeNull();
     expect(pick('91')).toBeNull();
     expect(pick('Oct 22')).toBeNull();
+  });
+});
+
+describe('filterOptions', () => {
+  const options = [
+    { value: '', text: 'Bundled (none in a local dev build)' },
+    { value: 'a', text: '910 · Oct 22 17:54' },
+    { value: 'b', text: '918 · Oct 22 01:10' },
+    { value: 'c', text: '889 · Oct 22 17:54' },
+  ];
+  const values = (typed, current = '') => filterOptions(options, typed, current).map((o) => o.value);
+
+  it('keeps the rows that contain what is typed, in any case', () => {
+    expect(values('91')).toEqual(['', 'a', 'b']);
+    expect(values('BUNDLED')).toEqual(['']);
+    expect(values('')).toEqual(['', 'a', 'b', 'c']);
+  });
+
+  it('always keeps the saved pick, so the dropdown still shows it', () => {
+    expect(values('91', 'c')).toEqual(['a', 'b', 'c']);
+    expect(values('nothing', 'c')).toEqual(['c']);
   });
 });
