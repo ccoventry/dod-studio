@@ -88,3 +88,30 @@ test('clicking the Open Recent row itself keeps the File menu open', async ({ pa
   await page.locator('#recent-projects-menu > span').first().click();
   await expect(page.locator('#file-menu-panel')).toBeVisible();
 });
+
+test('opening a project says so on the queue\'s line, then while it looks for missing demos (#958)', async ({ page }) => {
+  await gotoHarness(page, ['D:/projects/monday.json']);
+  await page.evaluate(() => { window.__hold = true; });
+  await openRecentMenu(page);
+  await page.locator('.recent-project-item').click();
+
+  const line = page.locator('#scan-status');
+  const bar = page.locator('#scan-progress');
+  await expect(line).toHaveText(/^Opening the project… · 0:0\d$/);
+  await expect(bar).toHaveJSProperty('hidden', false);
+  await expect(bar).toHaveClass(/indeterminate/);
+
+  await expect.poll(() => page.evaluate(() => typeof window.__release.load)).toBe('function');
+  await page.evaluate(() => window.__release.load());
+  await expect(line).toHaveText(/^Checking the project's demos are where they were… · 0:0\d$/);
+  // The backend says how many it looks for once the search starts.
+  await page.evaluate(() => window.__mockEmit('missing_demos_search', { missing: 3 }));
+  await expect(line).toHaveText(/^Looking for 3 missing demos… · 0:0\d$/);
+  await expect(bar).toHaveClass(/indeterminate/);
+
+  await expect.poll(() => page.evaluate(() => typeof window.__release.search)).toBe('function');
+  await page.evaluate(() => window.__release.search());
+  await expect(line).toHaveText('Ready');
+  await expect(bar).toHaveJSProperty('hidden', true);
+  await expect(page.locator('#session-file-indicator')).toHaveText('monday.json');
+});

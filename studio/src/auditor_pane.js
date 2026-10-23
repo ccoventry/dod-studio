@@ -10,8 +10,9 @@ import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
   withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
-  elapsedText, auditFoldersKey, isArchived, canDelete, copiesToDelete, revealPath,
+  auditFoldersKey, isArchived, canDelete, copiesToDelete, revealPath,
 } from './audit_duplicates.js';
+import { createClock, readLastRun, rememberLastRun, secondsText, showBar } from './progress_view.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
 /// copies in it are kept first and never start ticked. `onSettingsChange`
@@ -64,38 +65,16 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
   // the same folders listed (the walk's bar measures against it), the most
   // this one has listed so far, and the last view drawn, which the clock
   // redraws every second.
-  let auditStartedAt = 0;
   let expectedFolders = 0;
   let foldersSeen = 0;
   let lastView = null;
-  let clock = null;
+  const clock = createClock({ redraw: () => { if (lastView) showProgress(lastView); } });
 
   function showProgress(view) {
     if (!progressEl) return;
     lastView = view;
-    progressEl.hidden = false;
-    progressEl.classList.toggle('indeterminate', !!view.indeterminate);
-    const fill = progressEl.querySelector('.progress-bar-fill');
-    if (fill) fill.style.width = `${view.pct}%`;
-    const elapsed = running && auditStartedAt
-      ? STRINGS.AUDITOR.elapsedSuffix(elapsedText(Date.now() - auditStartedAt)) : '';
-    setStatus(view.text + elapsed, view.current);
-  }
-
-  function readExpectedFolders(key) {
-    try {
-      return Number(localStorage.getItem(key)) || 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  function rememberFolders(key, count) {
-    try {
-      if (count > 0) localStorage.setItem(key, String(count));
-    } catch {
-      // A convenience only: the next audit's bar just moves without a width.
-    }
+    showBar(progressEl, view);
+    setStatus(view.text + (running ? clock.suffix() : ''), view.current);
   }
 
   function hideProgress() {
@@ -153,19 +132,18 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       if (cancelAuditBtn) cancelAuditBtn.disabled = false;
       setDeleteButtons(0);
       const foldersKey = auditFoldersKey(paths, allDrives);
-      expectedFolders = readExpectedFolders(foldersKey);
+      expectedFolders = readLastRun(foldersKey);
       foldersSeen = 0;
-      auditStartedAt = Date.now();
-      clock = setInterval(() => { if (lastView) showProgress(lastView); }, 1000);
+      clock.start();
       showProgress(auditProgressView(null, expectedFolders));
       if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.AUDITING_IN_PROGRESS_ROW}</td></tr>`;
 
       try {
         const outcome = await runDemoAudit(paths, allDrives, queued, lookInZips);
-        const seconds = ((Date.now() - auditStartedAt) / 1000).toFixed(1);
+        const seconds = secondsText(clock.ms());
         currentAuditResults = withAuditOrder(outcome?.groups);
         renderAuditResults({ resetTicks: true });
-        if (!outcome?.cancelled) rememberFolders(foldersKey, foldersSeen);
+        if (!outcome?.cancelled) rememberLastRun(foldersKey, foldersSeen);
         setStatus(outcome?.cancelled
           ? STRINGS.AUDITOR.CANCELLED_STATUS
           : STRINGS.AUDITOR.doneStatus(outcome?.demos ?? 0, currentAuditResults.length, seconds));
@@ -186,7 +164,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         }
       } finally {
         running = false;
-        clearInterval(clock);
+        clock.stop();
         lastView = null;
         hideProgress();
         folders.setLocked(false);

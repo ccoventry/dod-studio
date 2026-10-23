@@ -48,6 +48,8 @@ test('adds a queue player, gives them a spray and a crosshair tile, and removes 
   const [list] = await calls(page, 'list_crosshair_sprites');
   expect(list.args).toEqual({ gamePath: 'C:/Games/Half-Life/hl.exe', gameFolder: 'dod' });
   await expect(page.locator('#players-players-status')).toHaveText("2 players in the queue's 2 demos");
+  // Its bar (#958) is gone once every demo is read.
+  await expect(page.locator('#players-players-bar')).toHaveJSProperty('hidden', true);
 
   const add = page.locator('#players-add-btn');
   await expect(add).toBeDisabled();
