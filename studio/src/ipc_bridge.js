@@ -173,6 +173,37 @@ export async function listGameFolders(gamePath) {
     });
 }
 
+/** Setup's movie copy (#939): the sizes of the `dod` beside hl.exe (`files`,
+ *  `bytes` without demos, `demo_files`, `demo_bytes`), the drive's
+ *  `free_bytes` (null when unknown), `headroom_bytes`, the names `existing`
+ *  in the Half-Life folder and the `default_name`. */
+export async function movieCopyPlan(gamePath) {
+  return invoke('movie_copy_plan', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (movie_copy_plan):", err);
+      throw err;
+    });
+}
+
+/** Copies `dod` to `name`; resolves `{ state: 'done', folder, target, files,
+ *  bytes }` or `{ state: 'cancelled' }`. Progress comes as
+ *  `movie_copy_progress` events. */
+export async function startMovieCopy(gamePath, name, includeDemos) {
+  return invoke('start_movie_copy', { gamePath, name, includeDemos })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_movie_copy):", err);
+      throw err;
+    });
+}
+
+export async function cancelMovieCopy() {
+  return invoke('cancel_movie_copy')
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_movie_copy):", err);
+      throw err;
+    });
+}
+
 /** The language file a dod copy lacks (#925): `{ folder, language, needed,
  *  rename_from }`, or null when it has it (or is dod). Best-effort: null on
  *  error, which only leaves the warning out. */
