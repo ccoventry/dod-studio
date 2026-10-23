@@ -1814,14 +1814,15 @@ fn scan_worker_count(workers: usize, total: usize) -> usize {
 /// The scan status line: how many demos are done out of how many, how many
 /// of them the analyzer cache has (they go first, #687), and one demo still
 /// being parsed, when there is one. With several scan workers, "the current
-/// file" is one of the current files. Studio adds the time left.
+/// file" is one of the current files. Studio adds the time left, and shows
+/// the line as the Reading step of the queue's bar (#951).
 fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -> String {
-    let mut line = format!("Scanning {done} / {total}");
+    let mut line = format!("Reading demos: {done} of {total}");
     if cached > 0 {
         line += &format!(" ({cached} from the analyzer cache)");
     }
     if let Some(name) = current {
-        line += &format!(" — {name}");
+        line += &format!(", {name}");
     }
     line
 }
@@ -2061,13 +2062,39 @@ fn demo_file_key(path: &Path) -> Option<String> {
 /// scanned: its key (size + first 64 KB) differs from the saved one. Their
 /// highlights are frame numbers in the old file, so they don't line up (#21).
 /// Missing files and demos with no saved key are left out.
-pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
-    demos
-        .iter()
-        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
-        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
-        .map(|d| d.path.clone())
-        .collect()
+///
+/// `checked(done, total)` runs after each demo, so Start Capture's line can
+/// count them (#953). Every call; the caller throttles.
+pub fn changed_demos_with_progress(
+    demos: &[KnownDemo],
+    mut checked: impl FnMut(usize, usize),
+) -> Vec<String> {
+    let mut changed = Vec::new();
+    for (i, d) in demos.iter().enumerate() {
+        if !d.file_key.is_empty()
+            && Path::new(&d.path).is_file()
+            && demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key)
+        {
+            changed.push(d.path.clone());
+        }
+        checked(i + 1, demos.len());
+    }
+    changed
+}
+
+/// Whether a `changed_demos_progress` event goes out: the last demo always
+/// (so the count ends on "12 of 12"), the others at most one per ~33 ms.
+pub(crate) fn changed_progress_due(
+    last_ms: &std::sync::atomic::AtomicU32,
+    now_ms: u32,
+    done: usize,
+    total: usize,
+) -> bool {
+    if done == total {
+        last_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+        return true;
+    }
+    progress_emit_due(last_ms, now_ms)
 }
 
 /// A project demo that is no longer at its saved path, and the file that
@@ -2097,14 +2124,23 @@ const LOCATE_MAX_ENTRIES: usize = 50_000;
 /// Suggests, never applies: the frontend asks before it moves anything. A
 /// demo with no saved key (a project from before #456) can only be reported
 /// missing.
-pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
-    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
+///
+/// `on_search(n)` is called once, before the walk, with the number of
+/// missing demos it looks for (those with a saved key), so the page can say
+/// so (#958); not at all when nothing needs looking for.
+pub fn locate_missing_demos(
+    demos: &[KnownDemo],
+    search_dirs: &[PathBuf],
+    on_search: &mut dyn FnMut(usize),
+) -> Vec<MissingDemo> {
+    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES, on_search)
 }
 
 fn locate_missing_demos_within(
     demos: &[KnownDemo],
     search_dirs: &[PathBuf],
     max_entries: usize,
+    on_search: &mut dyn FnMut(usize),
 ) -> Vec<MissingDemo> {
     let mut missing: Vec<MissingDemo> = demos
         .iter()
@@ -2126,6 +2162,7 @@ fn locate_missing_demos_within(
     if wanted.is_empty() {
         return missing;
     }
+    on_search(wanted.len());
 
     // A search folder listed twice, or inside another, is read once.
     let mut visited = std::collections::HashSet::new();
@@ -3597,12 +3634,12 @@ mod tests {
     fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
         assert_eq!(
             scan_status_line(0, 1, 0, Some("a.dem")),
-            "Scanning 0 / 1 — a.dem"
+            "Reading demos: 0 of 1, a.dem"
         );
-        assert_eq!(scan_status_line(1, 1, 0, None), "Scanning 1 / 1");
+        assert_eq!(scan_status_line(1, 1, 0, None), "Reading demos: 1 of 1");
         assert_eq!(
             scan_status_line(3, 10, 2, Some("a.dem")),
-            "Scanning 3 / 10 (2 from the analyzer cache) — a.dem"
+            "Reading demos: 3 of 10 (2 from the analyzer cache), a.dem"
         );
     }
 
@@ -3930,9 +3967,14 @@ mod tests {
                 file_key: demo_file_key(&kept).unwrap(),
             },
         ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
 
         assert_eq!(found.len(), 1, "only the missing demo is reported");
+        // The page is told once, before the walk, how many it looks for.
+        assert_eq!(searched, vec![1]);
         assert_eq!(found[0].path, moved.to_string_lossy());
         assert_eq!(
             found[0].candidate.as_deref(),
@@ -3968,7 +4010,7 @@ mod tests {
         }];
         // 30 entries: the big tree has 84, the project folder 1, then its
         // subfolder 1. Depth-first from `big` spent them all first.
-        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30, &mut |_| {});
         assert_eq!(
             found[0].candidate.as_deref(),
             Some(
@@ -4008,9 +4050,46 @@ mod tests {
         ];
         std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
         assert_eq!(
-            changed_demos(&demos),
+            changed_demos_with_progress(&demos, |_, _| {}),
             vec![replaced.to_string_lossy().into_owned()]
         );
+    }
+
+    #[test]
+    fn the_changed_demo_check_counts_every_demo_it_reads() {
+        let scratch = Scratch::new("changed_count");
+        let same = scratch.path().join("same.dem");
+        std::fs::write(&same, b"HLDEMO the scanned one").unwrap();
+        let demos = vec![
+            KnownDemo {
+                path: same.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&same).unwrap(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "1-00".into(),
+            },
+        ];
+        let mut seen = Vec::new();
+        let changed = changed_demos_with_progress(&demos, |done, total| seen.push((done, total)));
+        assert!(changed.is_empty());
+        assert_eq!(seen, vec![(1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn the_changed_demo_count_is_throttled_but_always_ends_on_the_last() {
+        use std::sync::atomic::AtomicU32;
+        let last = AtomicU32::new(u32::MAX);
+        assert!(changed_progress_due(&last, 0, 1, 10));
+        assert!(!changed_progress_due(&last, 10, 2, 10));
+        assert!(!changed_progress_due(&last, 32, 3, 10));
+        assert!(changed_progress_due(&last, 33, 4, 10));
+        // The last demo goes out however soon after the one before.
+        assert!(changed_progress_due(&last, 34, 10, 10));
     }
 
     #[test]
@@ -4032,9 +4111,31 @@ mod tests {
                 file_key: "999-0000000000000000".to_string(),
             },
         ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
         assert_eq!(found.len(), 2);
         assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
+        // Only the demo with a key can be looked for (#958).
+        assert_eq!(searched, vec![1]);
+    }
+
+    #[test]
+    fn nothing_missing_means_no_search_to_report() {
+        let scratch = Scratch::new("locate_present");
+        let here = scratch.path().join("here.dem");
+        std::fs::write(&here, b"HLDEMO here").unwrap();
+        let demos = vec![KnownDemo {
+            path: here.to_string_lossy().into_owned(),
+            file_key: demo_file_key(&here).unwrap(),
+        }];
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
+        assert!(found.is_empty());
+        assert!(searched.is_empty());
     }
 
     #[test]

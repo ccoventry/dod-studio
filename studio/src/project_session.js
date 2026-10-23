@@ -19,13 +19,15 @@ import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
+import { createProjectOpenProgress } from './project_open_progress.js';
 
 /**
  * @param {object} app  What this needs from main.js:
  *   getDemos() the queue, replaceDemos(demos) main.js's replaceScannedDemos,
  *   loadDemos(demos) make a loaded project's demos the queue and show them,
  *   getTakeIndex()/setTakeIndex(index), getProjectTeams()/setProjectTeams(teams),
- *   checkMissingDemos(projectPath, scanPaths) from project_demos.js,
+ *   checkMissingDemos(projectPath, scanPaths, { onSearched }) from
+ *   project_demos.js, `onSearched` called once its folder search is done,
  *   offerRescan() from project_rescan.js, and getReviewSettings()/
  *   setReviewSettings(raw), the Review box's HLTV pick (#828,
  *   review_hltv_picker.js), and onProjectFile(path), told each file opened
@@ -59,6 +61,9 @@ export function createProjectSession({
   // changes" prompt on window close. Cleared by saveProjectSession() and
   // Load Session; set by markProjectDirty() at every mutation site.
   let hasUnsavedChanges = false;
+  // "Opening the project…", then the search for its missing demos, on the
+  // queue's line (#958).
+  const openProgress = createProjectOpenProgress();
 
   /** Every highlight's durable uid across every currently-scanned demo — the
    *  "still exists" set pruneTakeIndex() checks the take index against on save. */
@@ -212,6 +217,7 @@ export function createProjectSession({
   // Reads and applies a project file: the half of Load Session after the
   // picker. Resolves whether it loaded.
   async function loadProjectFile(selected) {
+    openProgress.opening();
     try {
       const content = await invoke('load_project_session', { path: selected });
       const data = JSON.parse(content);
@@ -256,9 +262,13 @@ export function createProjectSession({
         // A project saved before #573 holds other players' highlights
         // the table never showed; a new scan lists the recorder's alone.
         data.demos.forEach(dropOtherPlayersSavedStreaks);
+        // Before the demos load: the grouping they start takes the line.
+        openProgress.opened();
         loadDemos(data.demos);
         showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
-        await checkMissingDemos(selected, data.scanPaths || []);
+        openProgress.searching();
+        await checkMissingDemos(selected, data.scanPaths || [], { onSearched: () => openProgress.searched() });
+        openProgress.searched();
         // After the missing check: a demo it relocates can be rescanned,
         // one still missing can't.
         await offerRescan();
@@ -268,6 +278,9 @@ export function createProjectSession({
       console.error("Load project error:", err);
       showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
       return false;
+    } finally {
+      openProgress.opened();
+      openProgress.searched();
     }
     await switchToDodstudio(selected);
     return true;

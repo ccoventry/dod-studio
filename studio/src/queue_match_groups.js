@@ -11,6 +11,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import { queueMatchGroups, queueMatchGroupsCancel } from './ipc_bridge.js';
+import { groupingStepView, placed, queueProgress } from './queue_progress.js';
 import { STRINGS } from './strings.js';
 
 /**
@@ -150,22 +151,25 @@ export function matchesInQueue() {
  * cache alone unless `parseMissing` (then demos the cache lacks are parsed,
  * about a second each; the default while `parseMissingByDefault()` says so,
  * i.e. while the queue is grouped by match, #823). A regroup asked for while
- * one runs follows it.
+ * one runs follows it, on its own.
+ *
+ * Its progress goes on the queue's line and bar (queue_progress.js, #951):
+ * `within` is a scan's place, when the grouping is the scan's last step;
+ * otherwise it is a job of its own, unless something else has the line,
+ * and the line it found comes back when it's done.
  */
 export function createQueueMatchGroups({ getDemos, renderQueue, parseMissingByDefault = () => false }) {
   let previous = new Map();
   let running = false;
   let queued = null;
-  const statusEl = () => document.querySelector('#scan-status');
-  let statusBefore = null;
+  const progress = queueProgress();
+  let place = null;
 
   listen('match_group_progress', (event) => {
-    const p = event.payload || {};
-    const el = statusEl();
-    if (running && el) el.textContent = STRINGS.WORKSPACE.groupingStatus(p.done || 0, p.total || 0);
+    if (running && place) progress.show(place.job, placed(place, groupingStepView(event.payload)));
   }).catch((err) => console.error('Failed to register match_group_progress listener:', err));
 
-  async function regroup({ parseMissing = parseMissingByDefault() } = {}) {
+  async function regroup({ parseMissing = parseMissingByDefault(), within = null } = {}) {
     if (running) {
       queued = { parseMissing: parseMissing || queued?.parseMissing || false };
       return;
@@ -177,8 +181,11 @@ export function createQueueMatchGroups({ getDemos, renderQueue, parseMissingByDe
       return;
     }
     running = true;
-    const el = statusEl();
-    statusBefore = el ? el.textContent : null;
+    const job = within ? null : progress.begin({ ifIdle: true, text: STRINGS.WORKSPACE.groupingStatus(0, 0) });
+    place = within ?? (job && { job, range: [0, 100] });
+    // Until the backend counts the demos: the sliding block on a bar of its
+    // own, or a scan's bar where the scan left it.
+    if (place) progress.show(place.job, placed(place, { ...groupingStepView(null), indeterminate: !within }));
     try {
       const grouping = await queueMatchGroups(demos.map((d) => d.path), parseMissing);
       const numbers = stableNumbers(previous, grouping.matches || []);
@@ -189,8 +196,8 @@ export function createQueueMatchGroups({ getDemos, renderQueue, parseMissingByDe
       // ipc_bridge already said why.
     } finally {
       running = false;
-      const after = statusEl();
-      if (after && statusBefore !== null) after.textContent = statusBefore;
+      place = null;
+      progress.end(job);
       if (queued) {
         const next = queued;
         queued = null;

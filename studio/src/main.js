@@ -4,7 +4,8 @@ import {
   calculateExportPoolSpace,
   getSettings,
   openActivityLog,
-  systemMemoryBytes
+  systemMemoryBytes,
+  builtinCommandProfiles
 } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -151,7 +152,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     setTakeIndex: (index) => { takeIndex = index; },
     getProjectTeams: () => projectTeams,
     setProjectTeams: (teams) => { projectTeams = teams; },
-    checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+    checkMissingDemos: (path, scanPaths, options) => checkMissingDemos(path, scanPaths, undefined, options),
     offerRescan: () => offerRescan(),
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
@@ -317,7 +318,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         refreshRenderButtons();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
-      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active,
+        { builtins: await builtinCommandProfiles(), notice: settings.builtin_profile_notice });
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -443,7 +445,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
     rememberRecentFolder: (folder) => recordDemoFolderVisit(folder),
     persistAppSettings: () => persistAppSettings(),
-    regroupMatches: () => regroupMatches(),
+    regroupMatches: (opts) => regroupMatches(opts),
     getTakeIndex: () => takeIndex,
   });
 
