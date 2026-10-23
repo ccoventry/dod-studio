@@ -23,9 +23,10 @@ export function scanFoldersKey(paths, includeSubfolders = true) {
 }
 
 /// Each step's share of a scan's bar. Looking for demos is quick unless the
-/// folder is a whole drive; reading the demos is the scan; grouping reads
-/// the analyzer cache the scan just filled.
-export const SCAN_STEPS = { looking: [0, 10], reading: [10, 90], grouping: [90, 100] };
+/// folder is a whole drive; checking which demos are new reads 64 KB of each
+/// (seconds over hundreds of demos on a cold disk); reading the demos is the
+/// scan; grouping reads the analyzer cache the scan just filled.
+export const SCAN_STEPS = { looking: [0, 5], keying: [5, 10], reading: [10, 90], grouping: [90, 100] };
 
 /// A split's share of its demo's part of the bar; the scan of the maps it
 /// wrote fills the rest.
@@ -56,8 +57,9 @@ export function placed(place, view) {
 /// One `scan_progress` event as the step's own view, `null` for the last
 /// event (complete or cancelled), which says nothing the scan's end doesn't.
 /// While folders are listed (`listing`) the bar measures against the last
-/// scan of the same folders, `expectedFolders`, or slides; then it counts
-/// demos read of the total, with the time left `timeLeft` (scan_progress.js).
+/// scan of the same folders, `expectedFolders`, or slides; while each listed
+/// demo's key is read (`keying`) it counts those; then it counts demos read
+/// of the total, with the time left `timeLeft` (scan_progress.js).
 export function scanStepView(p, { expectedFolders = 0, timeLeft = '' } = {}) {
   if (!p || p.cancelled || p.status === 'Complete') return null;
   if (p.listing) {
@@ -67,6 +69,16 @@ export function scanStepView(p, { expectedFolders = 0, timeLeft = '' } = {}) {
       text: STRINGS.MAIN.lookingLine(p.folders ?? 0, p.demos ?? 0, expectedFolders),
       pct: bar.pct,
       indeterminate: bar.indeterminate,
+    };
+  }
+  if (p.keying) {
+    const total = p.total ?? 0;
+    const done = Math.min(p.keyed ?? 0, total);
+    return {
+      step: 'keying',
+      text: STRINGS.MAIN.keyingLine(done, total),
+      pct: total > 0 ? (100 * done) / total : 0,
+      indeterminate: false,
     };
   }
   const total = p.total ?? 0;
