@@ -85,6 +85,9 @@ export const STRINGS = {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
     ADD_FOLDER_BUTTON: '+ Add Folder',
+    // #531: beside + Add Folder; also what a dropped folder follows.
+    INCLUDE_SUBFOLDERS_LABEL: 'Include subfolders',
+    INCLUDE_SUBFOLDERS_TITLE: "Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.",
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     CANCEL_SCAN_TITLE: 'Cancel the running directory scan',
     SCAN_STATUS_READY: 'Status: Ready',
@@ -1697,6 +1700,13 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    // #531: the folder walk's bounds stopped it short; `cap` is the scan's.
+    scanCapToast: (cap) => {
+      const parts = [];
+      if (cap.depth) parts.push(`folders more than ${cap.max_depth} levels down were not read`);
+      if (cap.entries) parts.push(`the walk stopped after ${Number(cap.max_entries).toLocaleString('en-US')} files and folders`);
+      return `Some demos may be missing: ${parts.join(', and ')}. Add a folder further down to scan the rest.`;
+    },
     scanCancelledToast: (count) =>
       count > 0
         ? `Scan cancelled (${count} demo(s) added before cancel)`

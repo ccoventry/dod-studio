@@ -124,6 +124,11 @@ export function createQueueScan({
     });
   }
 
+  // "Include subfolders" (#531), saved with the settings when changed.
+  const subfoldersBox = document.querySelector('#scan-include-subfolders');
+  const includeSubfolders = () => subfoldersBox?.checked ?? true;
+  subfoldersBox?.addEventListener('change', () => persistAppSettings());
+
   // Cancel stopped the last scan before it added anything (e.g. while it
   // was still listing a whole drive's folders, #843).
   let lastScanAddedNothingCancelled = false;
@@ -172,7 +177,7 @@ export function createQueueScan({
       const known = getDemos()
         .filter(scanIsCurrent)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const outcome = await scanDirectory(pathsToScan, known, readScanWorkers());
+      const outcome = await scanDirectory(pathsToScan, known, readScanWorkers(), includeSubfolders());
       const {
         demos: scanned, unchanged, copies: unparsedCopies = [], cancelled = false,
       } = outcome;
@@ -238,6 +243,8 @@ export function createQueueScan({
       if (cancelled) showToast(STRINGS.MAIN.scanCancelledToast(newlyScanned.length), 'info');
       else showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
       if (carryReport.toast) showToast(carryReport.toast.text, carryReport.toast.type, 10000);
+      // The backend wrote the activity log's line (#531).
+      if (outcome.cap?.depth || outcome.cap?.entries) showToast(STRINGS.MAIN.scanCapToast(outcome.cap), 'warning', 12000);
       const selectedDemoIdx = newlyScanned.length > 0
         ? getDemos().indexOf(newlyScanned[0])
         : (getDemos().length > 0 ? 0 : null);
