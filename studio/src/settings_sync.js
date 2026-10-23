@@ -7,21 +7,25 @@
 import { saveSettings } from './ipc_bridge.js';
 import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
+import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
-import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
 import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
+import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
+import { getPickFolders, setPickFolders } from './pick_path.js';
+import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
- *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
+ *   form doesn't hold ({ scanPaths, demoFolderHistory, recentProjects, scanFoldersForDemos,
  *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
  *   setupDismissed }),
  *   and currentCaptureMode().
@@ -105,6 +109,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
+      recent_projects: state.recentProjects || [],
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",
@@ -139,6 +144,9 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       demo_rename_pov_template: getDemoRenameTemplates().pov,
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       demo_rename_lowercase: getDemoRenameTemplates().lowercase,
+      audit_look_in_zips: !!document.querySelector('#audit-look-in-zips')?.checked,
+      // On unless unticked, matching the backend default (#531).
+      scan_include_subfolders: document.querySelector('#scan-include-subfolders')?.checked ?? true,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -148,6 +156,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       custom_commands,
       command_profiles: getCommandProfiles(),
       command_profile_active: getActiveCommandProfile(),
+      builtin_profile_notice: getBuiltinProfileNotice(),
       save_local_patched_copy: saveLocalPatchedCopy,
       hook_runs_batch: hookRunsBatch,
       keep_game_behind: keepGameBehind,
@@ -163,8 +172,12 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_video: finishCodecVideo,
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
+      pinned_folders_reviewed: getPinnedReviewed(),
       players: getPlayers(),
+      hidden_installs: getHiddenInstalls(),
+      pick_folders: getPickFolders(),
       ...readReviewSettings(),
+      ...scanRateSettings(),
       // "After a clip is finished" (#644).
       ...getTakeCleanupSetting(),
       // "Render while capturing" (#861).
@@ -207,6 +220,9 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
   setPlayers(settings.players);
+  setHiddenInstalls(settings.hidden_installs);
+  // Each Browse button's last folder (#936).
+  setPickFolders(settings.pick_folders);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;
@@ -322,6 +338,11 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
   );
+  const lookInZipsEl = document.querySelector('#audit-look-in-zips');
+  if (lookInZipsEl) lookInZipsEl.checked = settings.audit_look_in_zips === true;
+  setPinnedReviewed(settings.pinned_folders_reviewed);
+  const subfoldersEl = document.querySelector('#scan-include-subfolders');
+  if (subfoldersEl) subfoldersEl.checked = settings.scan_include_subfolders !== false;
   if (settings.record_start_lead != null) {
     const inputEl = document.querySelector('#config-record-start-lead');
     if (inputEl) inputEl.value = settings.record_start_lead;
@@ -364,6 +385,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   }
   setRenderPresets(settings.render_presets);
   applyReviewSettings(settings);
+  applyScanRateSettings(settings);
   if (settings.scan_workers) {
     const inputEl = document.querySelector('#config-scan-workers');
     if (inputEl) inputEl.value = settings.scan_workers;

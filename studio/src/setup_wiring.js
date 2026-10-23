@@ -4,7 +4,7 @@
 // space, demos) into one snapshot, redraws both from it, and runs their
 // actions against the same fields and lists Configuration edits, so the two
 // never hold separate copies of a setting.
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   calculateExportPoolSpace,
@@ -15,11 +15,14 @@ import {
   listGameFolders,
   revealInExplorer,
 } from './ipc_bridge.js';
-import { getGameFolder } from './game_folder_ui.js';
+import { getGameFolder, refreshGameFolderList } from './game_folder_ui.js';
+import { isListedFolder } from './game_folder.js';
+import { createMovieCopy } from './movie_copy_ui.js';
 import { refreshPathWarnings, refreshHlaeFfmpegStatus, linkHlaeToFfmpeg } from './config_wiring.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
-import { setupChecklist, shouldOpenSetupAtLaunch, engineBuild } from './setup_checklist.js';
+import { setupChecklist, shouldOpenSetupAtLaunch, engineBuild, stepIndex } from './setup_checklist.js';
 import { renderSetupCard } from './setup_card.js';
+import { prefillSingleInstall } from './install_picker.js';
 import { createSetupWindow } from './setup_window.js';
 import { STRINGS } from './strings.js';
 
@@ -83,8 +86,11 @@ export function createSetup({
       } catch {
         // Logged by the bridge; the step says to pick hl.exe first.
       }
-      // A dod copy without its <folder>_<language>.txt (#925).
-      gameFolderLanguage = await gameFolderLanguageFile(hlPath, getGameFolder());
+      // A dod copy without its <folder>_<language>.txt (#925), checked only
+      // when the folder is there: a missing one gets gameFolderMissing.
+      if (isListedFolder(gameFolders, getGameFolder())) {
+        gameFolderLanguage = await gameFolderLanguageFile(hlPath, getGameFolder());
+      }
     }
     let ffmpegUsable = null;
     let ffmpegCanLink = false;
@@ -137,10 +143,19 @@ export function createSetup({
     return draw();
   }
 
+  // Configuration's own fields, so both Browse buttons share a start.
+  const EXE_FIELDS = {
+    '#hl-path-input': 'config.hl',
+    '#hlae-path-input': 'config.hlae',
+    '#ffmpeg-override-path-input': 'config.ffmpeg',
+  };
+
   async function pickExe(inputSel, title) {
     let selected = null;
     try {
-      selected = await open({
+      selected = await pickPath({
+        field: EXE_FIELDS[inputSel],
+        current: document.querySelector(inputSel)?.value?.trim(),
         multiple: false,
         filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
         title,
@@ -166,9 +181,9 @@ export function createSetup({
     await refresh();
   }
 
-  async function pickFolder(title) {
+  async function pickFolder(field, title) {
     try {
-      const selected = await open({ directory: true, multiple: false, title });
+      const selected = await pickPath({ field, directory: true, multiple: false, title });
       return (Array.isArray(selected) ? selected[0] : selected) || null;
     } catch (err) {
       console.error('Error opening the folder picker:', err);
@@ -177,12 +192,12 @@ export function createSetup({
   }
 
   const folders = {
-    captures: { list: captureFolders, title: () => STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE },
-    renders: { list: renderFolders, title: () => STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE },
+    captures: { list: captureFolders, field: 'capture.output_folder', title: () => STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE },
+    renders: { list: renderFolders, field: 'render.export_folder', title: () => STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE },
   };
 
   async function addFolder(kind) {
-    const path = await pickFolder(folders[kind].title());
+    const path = await pickFolder(folders[kind].field, folders[kind].title());
     if (path) folders[kind].list.add(path);
     await refresh();
   }
@@ -193,10 +208,32 @@ export function createSetup({
   }
 
   async function pickAndScanDemos() {
-    const folder = await pickFolder(STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE);
+    const folder = await pickFolder('queue.add_folder', STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE);
     if (folder) await addDemoFolder(folder);
     await refresh();
   }
+
+  // Through Configuration's own Game Folder list, which saves it and runs
+  // its checks.
+  async function setGameFolder(name) {
+    const select = document.querySelector('#config-game-folder');
+    if (select && name) {
+      select.value = name;
+      select.dispatchEvent(new Event('change'));
+    }
+    await refreshPathWarnings();
+    await refresh();
+  }
+
+  // Make a movie copy (#939): the new folder joins the Game Folder's list,
+  // then is picked there.
+  const movieCopy = createMovieCopy({
+    getHlPath: () => value('#hl-path-input'),
+    onDone: async (folder) => {
+      await refreshGameFolderList();
+      await setGameFolder(folder);
+    },
+  });
 
   const win = createSetupWindow({
     getSnapshot: () => snapshot,
@@ -208,16 +245,8 @@ export function createSetup({
     // Finish clips and the HLAE link all read.
     pickFfmpeg: () => pickExe('#ffmpeg-override-path-input', STRINGS.MAIN.SELECT_FFMPEG_EXE_TITLE),
     useHlaeFfmpeg: () => setExe('#ffmpeg-override-path-input', snapshot.hlaeBundledFfmpeg),
-    // Through Configuration's own Game Folder list, which saves it.
-    setGameFolder: async (name) => {
-      const select = document.querySelector('#config-game-folder');
-      if (select && name) {
-        select.value = name;
-        select.dispatchEvent(new Event('change'));
-      }
-      await refreshPathWarnings();
-      await refresh();
-    },
+    setGameFolder,
+    openMovieCopy: () => movieCopy.open(),
     showLanguageFile: () => {
       const path = snapshot?.gameFolderLanguage?.show;
       if (path) revealInExplorer(path).catch(() => {});
@@ -225,7 +254,7 @@ export function createSetup({
     openFfmpegPage: () => openUrl(STRINGS.SETUP.FFMPEG_URL).catch((err) => console.error('Error opening the FFmpeg page:', err)),
     addFolder,
     removeFolder,
-    pickDemoFolder: () => pickFolder(STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE),
+    pickDemoFolder: () => pickFolder('queue.add_folder', STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE),
     onSkip: async () => {
       setupDismissed = true;
       await persistAppSettings();
@@ -268,11 +297,14 @@ export function createSetup({
   });
 
   /** First draw at launch; opens the window when something required is
-   *  missing and setup was not skipped. */
+   *  missing and setup was not skipped. On a PC with one Half-Life install
+   *  and no hl.exe set yet, its hl.exe is filled in first (#931), and the
+   *  window opens on that step so the user sees what was picked. */
   async function start() {
+    const prefilled = await prefillSingleInstall().catch(() => false);
     const checklist = await refresh();
-    if (shouldOpenSetupAtLaunch(checklist, setupDismissed)) openWindow(checklist.nextIndex);
+    if (shouldOpenSetupAtLaunch(checklist, setupDismissed)) openWindow(prefilled ? stepIndex('hl') : checklist.nextIndex);
   }
 
-  return { refresh, start, isDismissed: () => setupDismissed };
+  return { refresh, start, isDismissed: () => setupDismissed, isOpen: () => win.isOpen() };
 }

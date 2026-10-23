@@ -5,11 +5,13 @@
 // (native::hlcr::combine). The Rough Cut page idea (#585) builds on this.
 
 import { listen } from '@tauri-apps/api/event';
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { combinePlan, combineClips, combineCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { clockRound } from './time_format.js';
+import { startView, combineProgressView, endText } from './combine_progress.js';
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi'];
 
@@ -62,12 +64,22 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
   const cancelBtn = $('#combine-cancel-btn');
   const progress = $('#combine-progress');
   const fill = $('#combine-progress-fill');
+  const statusEl = $('#combine-status');
   if (!modal || !listEl) return;
 
   let clips = [];
   let plan = null;
   let planToken = 0;
   let running = false;
+  let startedAt = 0;
+  let joinStartedAt = 0;
+
+  /// The bar and the step line (#955): `view` from combine_progress.js.
+  function showView(view) {
+    progress.classList.toggle('indeterminate', !!view.indeterminate);
+    fill.style.width = `${view.pct}%`;
+    if (statusEl) statusEl.textContent = view.text;
+  }
 
   function setRunning(value) {
     running = value;
@@ -137,6 +149,8 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
 
   function setClips(next) {
     clips = next;
+    // The last join's end line is about the old list.
+    if (statusEl && !running) statusEl.textContent = '';
     render();
     refreshPlan();
   }
@@ -156,7 +170,8 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
   });
   $('#combine-add-files-btn')?.addEventListener('click', async () => {
     try {
-      const picked = await open({
+      const picked = await pickPath({
+        field: 'combine.add_files',
         multiple: true,
         title: STRINGS.COMBINE.ADD_FILES_TITLE,
         filters: [{ name: STRINGS.COMBINE.VIDEO_FILTER, extensions: VIDEO_EXTENSIONS }],
@@ -183,21 +198,32 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
     }
     if (!output) return;
     setRunning(true);
+    startedAt = Date.now();
+    joinStartedAt = 0;
+    showView(startView());
+    let outcome = 'failed';
     try {
       await combineClips(clips, output, ffmpegPath());
+      outcome = 'saved';
       showToast(STRINGS.COMBINE.saved(fileName(output)), 'success', 6000, {
         action: { label: STRINGS.COMBINE.SHOW_FILE, onClick: () => revealInExplorer(output).catch(() => {}) },
       });
-    } catch {
+    } catch (err) {
       // ipc_bridge already said why (and nothing for a cancel).
+      if (String(err) === 'cancelled') outcome = 'cancelled';
     } finally {
       setRunning(false);
+      progress.classList.remove('indeterminate');
+      if (statusEl) statusEl.textContent = endText(outcome, Date.now() - startedAt);
     }
   });
   cancelBtn.addEventListener('click', () => combineCancel().catch(() => {}));
 
   listen('combine_progress', (event) => {
-    if (running) fill.style.width = `${Math.round((event.payload?.fraction || 0) * 100)}%`;
+    if (!running) return;
+    const p = event.payload;
+    if (p?.step !== 'checking' && !joinStartedAt) joinStartedAt = Date.now();
+    showView(combineProgressView(p, plan?.total_secs ?? 0, joinStartedAt ? Date.now() - joinStartedAt : 0));
   });
 
   render();

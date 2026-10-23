@@ -1,10 +1,11 @@
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath, configurePickPath } from './pick_path.js';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   calculateExportPoolSpace,
   getSettings,
   openActivityLog,
-  systemMemoryBytes
+  systemMemoryBytes,
+  builtinCommandProfiles
 } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -54,6 +55,7 @@ import { createProjectRescan } from './project_rescan.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
+import { createRecentProjects } from './recent_projects.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
@@ -61,6 +63,8 @@ import { initReviewMode } from './review_mode.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
+import { offerPinnedReview } from './pinned_review.js';
+import { createDemoDrop } from './demo_drop.js';
 import { createPlayersUi } from './players_ui.js';
 import { getGameFolder } from './game_folder_ui.js';
 
@@ -127,6 +131,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     saveProjectSession,
     needsSavePrompt,
     requestUnsavedChangesConfirmation,
+    openProject,
   } = createProjectSession({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
@@ -146,15 +151,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     setTakeIndex: (index) => { takeIndex = index; },
     getProjectTeams: () => projectTeams,
     setProjectTeams: (teams) => { projectTeams = teams; },
-    checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+    checkMissingDemos: (path, scanPaths, options) => checkMissingDemos(path, scanPaths, undefined, options),
     offerRescan: () => offerRescan(),
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
+    onProjectFile: (path) => recentProjects.remember(path),
   });
+  // File → Open Recent (#935), saved in the settings file.
+  const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane({ getDemos: () => currentScannedDemos });
+  initAuditorPane({ getDemos: () => currentScannedDemos, onSettingsChange: () => persistAppSettings() });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({
@@ -183,7 +191,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function pickTargetDrive() {
     try {
-      return await open({ directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
+      return await pickPath({ field: 'capture.output_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
     } catch (err) {
       console.error("Error opening capture output directory dialog:", err);
       return null;
@@ -192,7 +200,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function pickRenderExportDir() {
     try {
-      return await open({ directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
+      return await pickPath({ field: 'render.export_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
     } catch (err) {
       console.error("Error opening render export directory dialog:", err);
       return null;
@@ -252,6 +260,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getState: () => ({
       scanPaths,
       demoFolderHistory,
+      recentProjects: recentProjects.list(),
       scanFoldersForDemos,
       analyzerExplorerWidth,
       targetDrives,
@@ -262,6 +271,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       setupDismissed: setup ? setup.isDismissed() : savedSetupDismissed,
     }),
     currentCaptureMode,
+  });
+  // Where each Browse dialog starts (#936): the game paths, and saving a
+  // newly remembered folder.
+  configurePickPath({
+    getContext: () => ({ hlPath: document.querySelector('#hl-path-input')?.value?.trim() || '', gameFolder: getGameFolder() }),
+    persist: () => persistAppSettings(),
   });
 
   // Load persistent settings on startup
@@ -280,6 +295,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (Array.isArray(settings.demo_folder_history) && settings.demo_folder_history.length > 0) {
         demoFolderHistory = [...settings.demo_folder_history];
       }
+      recentProjects.load(settings.recent_projects);
       scanFoldersForDemos = !!settings.scan_folders_for_demos;
       savedSetupDismissed = !!settings.setup_dismissed;
       if (settings.analyzer_explorer_width) {
@@ -297,7 +313,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         refreshRenderButtons();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
-      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active,
+        { builtins: await builtinCommandProfiles(), notice: settings.builtin_profile_notice });
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -336,7 +353,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   } = createProjectDemos({
     getDemos: () => currentScannedDemos,
     getTakeIndex: () => takeIndex,
-    getScanPaths: () => scanPaths,
+    // Pinned and Recent: + Add Folder fills Recent, not the pins (#533).
+    getScanPaths: () => [...scanPaths, ...demoFolderHistory],
     refreshQueue: refreshAfterRelocation,
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
@@ -412,7 +430,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
   // queue_scan.js. Declared before anything can start a scan; the earlier
   // callers above reach triggerAutoScan through closures.
-  const { triggerAutoScan, addDemoFolder } = createQueueScan({
+  const { triggerAutoScan, addDemoFolder, addDroppedPaths, isScanning } = createQueueScan({
     getDemos: () => currentScannedDemos,
     setSelectedDemoIdx: (idx) => { selectedDemoIdx = idx; },
     selectDemoAndRenderDetail: (demo, idx) => selectDemoAndRenderDetail(demo, idx),
@@ -420,11 +438,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     markProjectDirty: () => markProjectDirty(),
     readScanWorkers: () => readScanWorkers(),
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
-    getScanPaths: () => scanPaths,
+    rememberRecentFolder: (folder) => recordDemoFolderVisit(folder),
     persistAppSettings: () => persistAppSettings(),
-    regroupMatches: () => regroupMatches(),
+    regroupMatches: (opts) => regroupMatches(opts),
     getTakeIndex: () => takeIndex,
   });
+
+  // Demos and folders dropped from Windows (#530): demo_drop.js.
+  createDemoDrop({ addDroppedPaths, isScanning });
 
   // Demos an older DoD Studio scanned, offered for a rescan when a project
   // opens: project_rescan.js.
@@ -817,7 +838,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   setup = createSetup({
     getDemos: () => currentScannedDemos,
-    getScanPaths: () => scanPaths,
+    getScanPaths: () => [...scanPaths, ...demoFolderHistory],
     getTargetDrives: () => targetDrives,
     getRenderExportDirs: () => renderExportDirs,
     captureFolders: { add: (p) => driveOverridesEditor.addItem(p), remove: (p) => driveOverridesEditor.removeItem(p) },
@@ -826,7 +847,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     persistAppSettings: () => persistAppSettings(),
     dismissed: savedSetupDismissed,
   });
-  setup.start();
+  // The one-time look at the pins older builds' + Add Folder made (#533).
+  setup.start().finally(() => offerPinnedReview({
+    getPinned: () => scanPaths,
+    unpin: (drop) => { scanPaths = scanPaths.filter((f) => !drop.includes(f)); return persistAppSettings(); },
+    isSetupOpen: () => setup.isOpen(),
+    persist: () => persistAppSettings(),
+  }));
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {
