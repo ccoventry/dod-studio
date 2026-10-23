@@ -310,9 +310,10 @@ vgui2 surface (`ISurface::DrawUnicodeChar`): a quad per glyph, cut from a
 font page where the glyphs sit side by side, sampled nearest-texel, with its
 corners on whole pixels. Zoomed with the row about `anchor + 0.5`, those
 corners land on pixel centres at every even scale; the glyph's edge column
-then samples exactly its cell boundary and gets the neighbouring glyph's last
-column, a one-pixel line the height of the digits (seen between the `2` and
-the `/`). So the count has its own transform: its top-left point goes where
+then samples exactly its cell boundary and can get the neighbouring glyph's
+last column, a one-pixel line the height of the digits between the `2` and
+the `/` (measured: POST at scale 2, 4, 6 and 8, PRE at 6, never at an odd
+scale). So the count has its own transform: its top-left point goes where
 the row's zoom puts it, rounded to a whole pixel, and the text is drawn
 `count_scale` times its size from there (`count_scale` follows `scale`
 unless set).

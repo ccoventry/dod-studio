@@ -58,10 +58,12 @@
 //! `anchor + 0.5 + S * (v - anchor - 0.5)`: half a pixel off the grid
 //! whenever S is even. The glyph's left (and top) edge then runs through a
 //! column of pixel centres, those pixels sample the texture exactly at the
-//! glyph's cell boundary, and the rounding takes the texel before it: the
+//! glyph's cell boundary, and the rounding can take the texel before it: the
 //! last column of the neighbouring glyph in the font page, a one-pixel line
-//! the height of the digits beside the `/` at scale 2, 4, 6 and 8, never at
-//! an odd scale, where every corner lands on the grid.
+//! the height of the digits beside the `/`. Measured on one HLTV and one POV
+//! demo: POST at scale 2, 4, 6 and 8, PRE at 6 (its rounding went the other
+//! way at 2, 4 and 8), never at an odd scale, where every corner lands on
+//! the grid.
 //!
 //! So the count gets its own transform: its top-left point `(x, y)`, where
 //! the game draws it (4 px in from its icon's left, 4 px under it), goes
