@@ -85,6 +85,13 @@ pub async fn check_for_update(
     }
 }
 
+/// The update a check found, left in place: a failed download re-enables
+/// Download & Install (`updater_pane.js`), and a retry needs it still there.
+/// Taking it out made every retry fail with "no update available".
+fn pending_update<T: Clone>(slot: &Mutex<Option<T>>) -> Option<T> {
+    slot.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
 #[tauri::command]
 pub async fn download_and_install_update(
     app: AppHandle,
@@ -96,12 +103,8 @@ pub async fn download_and_install_update(
     if cfg!(debug_assertions) {
         return Err(crate::messages::LOCAL_BUILD_CANNOT_INSTALL_UPDATE.to_string());
     }
-    let pending = Arc::clone(&state.pending);
-    let update = pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .take()
-        .ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
+    let update =
+        pending_update(&state.pending).ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
 
     // Download, then install, rather than `download_and_install`: its
     // download-finished callback fires before the signature check and the
@@ -275,4 +278,19 @@ mod git_branch_tests {
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
+}
+
+#[cfg(test)]
+mod pending_update_tests {
+    use super::pending_update;
+    use std::sync::Mutex;
+
+    /// A download that fails leaves the update for Download & Install's retry.
+    #[test]
+    fn reading_the_pending_update_leaves_it_for_a_retry() {
+        let slot = Mutex::new(Some("v0.3.0"));
+        assert_eq!(pending_update(&slot), Some("v0.3.0"));
+        assert_eq!(pending_update(&slot), Some("v0.3.0"));
+        assert_eq!(pending_update(&Mutex::new(None::<&str>)), None);
+    }
 }
