@@ -1,5 +1,7 @@
+use crate::download_progress::DownloadMeter;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -101,26 +103,28 @@ pub async fn download_and_install_update(
         .take()
         .ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
 
-    let progress_app = app.clone();
-    let mut downloaded: u64 = 0;
-    update
-        .download_and_install(
-            move |chunk_length, content_length| {
-                downloaded += chunk_length as u64;
-                let _ = progress_app.emit(
-                    "update_download_progress",
-                    serde_json::json!({
-                        "downloaded": downloaded,
-                        "total": content_length,
-                    }),
-                );
+    // Download, then install, rather than `download_and_install`: its
+    // download-finished callback fires before the signature check and the
+    // install, too early for "Installing" or "Ready" (#957).
+    let mut meter = DownloadMeter::default();
+    let bytes = update
+        .download(
+            |chunk_length, content_length| {
+                if let Some(p) = meter.chunk(chunk_length as u64, content_length, Instant::now()) {
+                    let _ = app.emit("update_download_progress", p);
+                }
             },
-            move || {
-                let _ = app.emit("update_ready", ());
-            },
+            || {},
         )
         .await
         .map_err(|e| e.to_string())?;
+    // The throttle may have held back the last chunk: the bar ends full.
+    let _ = app.emit("update_download_progress", meter.progress());
+    let _ = app.emit("update_installing", ());
+    // On Windows this starts the installer and quits Studio, so nothing after
+    // it runs there.
+    update.install(bytes).map_err(|e| e.to_string())?;
+    let _ = app.emit("update_ready", ());
 
     Ok(())
 }

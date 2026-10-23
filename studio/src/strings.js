@@ -1396,6 +1396,10 @@ export const STRINGS = {
     DOWNLOAD_ALL_BUTTON: 'Download all',
     DISMISS_BUTTON: 'Dismiss',
     DOWNLOADING: 'Downloading…',
+    // "Downloading dod_anzio (1 of 3): 2.1 of 6 MB"; no count for one map.
+    downloadingLine: (map, index, count, bytes) =>
+      `Downloading ${map}${count > 1 ? ` (${index} of ${count})` : ''}${bytes ? `: ${bytes}` : '…'}`,
+    checkingLine: (map) => `Checking ${map}…`,
     NO_GAME_PATH: 'Set the hl.exe path in Configuration to check demo maps.',
     demoCount: (n) => (n === 1 ? '1 demo' : `${n} demos`),
     missingSummary: (maps, demos) =>
@@ -2506,8 +2510,11 @@ export const STRINGS = {
     STATUS_CHECKING: 'Checking for updates…',
     STATUS_UP_TO_DATE: 'Up to date.',
     STATUS_AVAILABLE: (v) => `Update available: v${v}`,
-    STATUS_DOWNLOADING: 'Downloading update…',
-    STATUS_READY: 'Update downloaded — restart to apply.',
+    STATUS_DOWNLOADING: 'Downloading the update…',
+    statusDownloadingBytes: (bytes) => `Downloading the update: ${bytes}`,
+    // On Windows the installer closes Studio and takes over from here.
+    STATUS_INSTALLING: 'Installing the update… DoD Studio closes while it installs.',
+    STATUS_READY: 'Ready: restart to finish.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
     // Local and debug builds: report what's published, never offer to install
     // it -- the installer would replace the *installed* app, not this one.
@@ -2515,6 +2522,12 @@ export const STRINGS = {
       `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
       + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
       + 'Get the published build from the Releases page.',
+  },
+
+  // Byte counts on the update and map downloads (download_progress.js).
+  DOWNLOADS: {
+    bytesOf: (done, total) => `${done} of ${total} MB`,
+    bytes: (done) => `${done} MB`,
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────

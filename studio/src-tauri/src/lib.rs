@@ -9,6 +9,7 @@ mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
+mod download_progress;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
