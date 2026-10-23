@@ -75,3 +75,14 @@ describe('finish step (#440)', () => {
     expect(STRINGS.FINISH.doneSummary(10, 1, 1)).toBe('10 clips ready, 1 failed, 1 cancelled — see the Render tab.');
   });
 });
+
+describe('scanCapToast (#531)', () => {
+  it('names the bound that stopped the walk', () => {
+    expect(STRINGS.MAIN.scanCapToast({ depth: true, entries: false, max_depth: 6, max_entries: 50000 })).toBe(
+      'Some demos may be missing: folders more than 6 levels down were not read. Add a folder further down to scan the rest.'
+    );
+    expect(STRINGS.MAIN.scanCapToast({ depth: true, entries: true, max_depth: 6, max_entries: 50000 })).toContain(
+      'not read, and the walk stopped after 50,000 files and folders.'
+    );
+  });
+});

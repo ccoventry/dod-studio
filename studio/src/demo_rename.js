@@ -71,6 +71,37 @@ export function listProgressView(p = {}, parseMs = 0) {
   return { pct, text };
 }
 
+/**
+ * Rename (`kind` 'apply', `count` pairs) or Undo ('undo') on its way, from a
+ * `demo_rename_apply_progress` event `{ done, total }` (none yet: `null`),
+ * as `{ text, pct, indeterminate }` for progress_view.js's `showBar` (#958).
+ * The block slides until the first file is done.
+ */
+export function renameProgressView(kind, p, count = 0) {
+  const undo = kind === 'undo';
+  if (!p?.total) {
+    return {
+      text: undo ? STRINGS.DEMO_RENAME.UNDO_STARTING : STRINGS.DEMO_RENAME.renamingStart(count),
+      pct: 0,
+      indeterminate: true,
+    };
+  }
+  const done = Math.min(p.done ?? 0, p.total);
+  return {
+    text: undo ? STRINGS.DEMO_RENAME.puttingBack(done, p.total) : STRINGS.DEMO_RENAME.renaming(done, p.total),
+    pct: (100 * done) / p.total,
+    indeterminate: false,
+  };
+}
+
+/** The line Rename or Undo ends on: how many, how long, and what failed. */
+export function renameDoneLine(kind, outcome, secs) {
+  const count = outcome?.renamed?.length ?? 0;
+  const failed = outcome?.failed?.length ?? 0;
+  const line = kind === 'undo' ? STRINGS.DEMO_RENAME.putBackIn(count, secs) : STRINGS.DEMO_RENAME.renamedIn(count, secs);
+  return failed ? line + STRINGS.DEMO_RENAME.notRenamed(failed) : line;
+}
+
 /** A file name made plain: letters, digits, `-` and `_` only. Anything
  *  else (spaces, brackets, `#`, emoji) becomes `_`, accents are dropped,
  *  runs of `_` collapse, and none is left at either end. */
