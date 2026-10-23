@@ -3968,3 +3968,29 @@ button.setup-skip:hover:not(:disabled) {
   overflow-wrap: anywhere;
   min-height: 1em;
 }
+
+/* Command profiles (#911): a built-in profile's mark beside the picker, and
+   the one-time notice about a kept copy under the row. */
+.profile-builtin-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid var(--border-accent);
+  border-radius: 10px;
+  color: var(--text-muted, #aaa);
+  cursor: help;
+}
+
+.profile-builtin-chip[hidden],
+.profile-notice[hidden] {
+  display: none;
+}
+
+.profile-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
+}

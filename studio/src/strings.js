@@ -540,7 +540,7 @@ export const STRINGS = {
     // #442: named sets of both command lists. Row laid out like Render
     // Output's preset row (#108).
     PROFILE_LABEL: 'Profile:',
-    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one.',
+    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one. Built-in profiles can be picked or duplicated, not changed.',
     PROFILE_NONE: '—',
     profileEditedOption: (name) => `${name} (edited)`,
     PROFILE_NAME_PLACEHOLDER: 'Name for these commands',
@@ -556,6 +556,16 @@ export const STRINGS = {
     profileAppliedToast: (name) => `Replaced both command lists with the "${name}" profile.`,
     profileDeletedToast: (name) => `Deleted the "${name}" profile.`,
     profileNameTakenToast: (name) => `There is already a profile named "${name}".`,
+    // Built-in profiles (#911): shipped with the app, kept up to date, locked.
+    PROFILE_BUILTIN_CHIP: 'Built-in',
+    PROFILE_BUILTIN_TITLE: "Comes with DoD Studio and stays up to date with it, so it can't be changed. Duplicate it to make your own copy.",
+    PROFILE_BUILTIN_LOCKED_TITLE: "Built-in profiles can't be changed. Duplicate it to make your own copy.",
+    profileBuiltinNameTitle: (name) => `"${name}" is a built-in profile. Type another name.`,
+    PROFILE_DUPLICATE_BUTTON: 'Duplicate',
+    PROFILE_DUPLICATE_TITLE: 'Make a copy of the picked profile that is yours to change.',
+    profileDuplicatedToast: (name) => `Made "${name}", your own copy. Save Changes now saves into it.`,
+    builtinProfileNotice: (names) => `Built-in profiles now stay up to date and can't be changed. You had changed your copy, so it's kept as ${names.map((n) => `"${n}"`).join(' and ')}.`,
+    PROFILE_NOTICE_OK: 'OK',
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
       "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",

@@ -1,6 +1,7 @@
 mod audit_manager;
 mod batch_eta;
 mod blender_manager;
+mod builtin_profiles;
 mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
@@ -107,6 +108,13 @@ async fn save_settings(
         Ok(())
     }))
     .await
+}
+
+/// The built-in command profiles (#911), which the Commands tab lists locked
+/// beside the user's own. Never saved: every update replaces them.
+#[tauri::command]
+fn builtin_command_profiles() -> Vec<settings_manager::CommandProfile> {
+    builtin_profiles::builtin_command_profiles()
 }
 
 // ── Project Session IPC Commands ───────────────────────────────────────────────
@@ -964,6 +972,7 @@ pub fn run() {
             get_render_jobs,
             get_settings,
             save_settings,
+            builtin_command_profiles,
             save_project_session,
             load_project_session,
             files_exist,
