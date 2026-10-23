@@ -2,8 +2,8 @@
 // The Setup window (#599): six steps, one at a time, each with a status and a
 // way past it. It draws from the snapshot setup_wiring.js keeps and calls back
 // for every action (pickers, the FFmpeg link, the demo scan), so it does no
-// IPC of its own. Step 1 explains how to make a movie copy of the dod folder;
-// it never copies anything itself.
+// IPC of its own. Step 1 explains how to make a movie copy of the dod folder,
+// and its Make a movie copy… button opens movie_copy_ui.js's dialog (#939).
 import { STRINGS } from './strings.js';
 import { escapeHtml } from './html.js';
 import { languageFileNote, languageFileButton } from './game_folder.js';
@@ -27,6 +27,7 @@ import {
  *   setGameFolder(name): the Half-Life step's game folder pick.
  *   showLanguageFile(): opens Explorer on the language file a dod copy
  *   needs renamed (#925).
+ *   openMovieCopy(): opens Make a movie copy (#939).
  *   addFolder(kind), removeFolder(kind, path): kind is 'captures' | 'renders'.
  *   pickDemoFolder(): resolves to a folder or null.
  *   onSkip(): "Skip setup for now". onFinish(demoFolder): the last step's
@@ -98,13 +99,20 @@ export function createSetupWindow(deps) {
       ? `<div class="setup-note warn" id="setup-hl-language-warning">${escapeHtml(languageNote)}${languageButton
         ? `<div class="setup-btn-row setup-note-actions"><button type="button" id="setup-hl-language-show">${escapeHtml(languageButton)}</button></div>` : ''}</div>`
       : '';
-    return `<p>${escapeHtml(S.HL_INTRO)}</p>
+    return `<p>${escapeHtml(S.HL_INTRO)}</p>${movieCopyButton(snap)}
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
       <div class="setup-field">
         <div class="setup-field-label">${escapeHtml(S.HL_FIELD)} ${exeStatus(snap.hlPath, snap.hlState, S.HL_FOUND, EXE_NAMES.hl)} ${build}</div>
         ${pathRow(snap.hlPath, 'setup-hl-browse', S.BROWSE)}
       </div>
       ${gameFolderField(snap)}${playWarn}${languageWarn}`;
+  }
+
+  // Make a movie copy (#939): once hl.exe is found with a dod beside it.
+  function movieCopyButton(snap) {
+    const hasDod = (snap.gameFolders || []).some((f) => f.toLowerCase() === 'dod');
+    if (snap.hlState !== 'ok' || !hasDod) return '';
+    return `<div class="setup-btn-row"><button type="button" id="setup-hl-movie-copy" title="${escapeHtml(S.MOVIE_COPY.OPEN_TITLE)}">${escapeHtml(S.MOVIE_COPY.OPEN)}</button></div>`;
   }
 
   // The same setting as Configuration > Paths > Game Folder: the folders
@@ -234,6 +242,7 @@ export function createSetupWindow(deps) {
     contentEl.querySelector('#setup-game-folder')
       ?.addEventListener('change', (e) => deps.setGameFolder(e.target.value));
     on('setup-hl-language-show', () => deps.showLanguageFile());
+    on('setup-hl-movie-copy', () => deps.openMovieCopy());
     on('setup-hlae-browse', () => deps.pickHlae());
     on('setup-hlae-get', () => deps.openHlaePage());
     on('setup-ffmpeg-get', () => deps.openFfmpegPage());

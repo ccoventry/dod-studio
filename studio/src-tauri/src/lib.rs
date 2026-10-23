@@ -16,6 +16,7 @@ mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
 mod messages;
+mod movie_copy_manager;
 mod overview_manager;
 mod packet_limit_manager;
 mod pick_paths;
@@ -829,6 +830,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
@@ -862,6 +864,9 @@ pub fn run() {
             diagnose_executable_paths,
             settings_manager::list_game_folders,
             settings_manager::game_folder_language_file,
+            movie_copy_manager::movie_copy_plan,
+            movie_copy_manager::start_movie_copy,
+            movie_copy_manager::cancel_movie_copy,
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
