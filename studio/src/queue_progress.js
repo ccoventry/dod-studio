@@ -12,7 +12,15 @@
 // own. The pure parts come first, so they can be tested on their own.
 
 import { STRINGS } from './strings.js';
-import { againstLastRun, createClock, hideBar, showBar } from './progress_view.js';
+import { againstLastRun, createClock, hideBar, lastRunKey, showBar } from './progress_view.js';
+
+/// Where a scan's folder count is remembered for "about N last time": the
+/// same folders listed without their subfolders (#531) count far fewer, so
+/// they get a key of their own. With subfolders it keeps the key older
+/// builds saved, which always listed them.
+export function scanFoldersKey(paths, includeSubfolders = true) {
+  return lastRunKey('queue_scan_last_folders', paths, includeSubfolders ? '' : 'top');
+}
 
 /// Each step's share of a scan's bar. Looking for demos is quick unless the
 /// folder is a whole drive; reading the demos is the scan; grouping reads
