@@ -289,6 +289,16 @@ export const STRINGS = {
     gameFolderMissing: (name) =>
         `There's no "${name}" folder beside hl.exe with a liblist.gam and a cl_dlls/client.dll, so the game can't start it. Pick one from the list.`,
     GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
+    // #925: a copy of dod lacks <folder>_<language>.txt, so VGUI2 text shows
+    // raw keys. Studio only says what to do; it never writes the folder.
+    languageFileMissing: (folder, needed, renameFrom) =>
+      `${folder} has no resource\\${needed}, so in-game text shows as codes like #Dod_Spec_Allies_Score. `
+      + `In ${folder}\\resource, rename ${renameFrom} to ${needed}.`,
+    languageFileMissingNoSource: (folder, needed, language) =>
+      `${folder} has no resource\\${needed}, so in-game text shows as codes like #Dod_Spec_Allies_Score. `
+      + `Copy dod\\resource\\dod_${language}.txt into ${folder}\\resource and name it ${needed}.`,
+    LANGUAGE_FILE_SHOW: 'Show me the file',
+    LANGUAGE_FILE_OPEN_FOLDER: 'Open the folder',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -904,6 +914,8 @@ export const STRINGS = {
     STATUS_READY: 'Status: Ready to audit',
     RESULTS_TITLE: 'Duplicate Groups Found',
     DELETE_SELECTED_BUTTON: 'Move to Recycle Bin',
+    OPEN_RECYCLE_BIN_BUTTON: 'Open Recycle Bin',
+    OPEN_RECYCLE_BIN_TITLE: 'Open Windows’ Recycle Bin, to see or restore the demos moved there',
     TABLE_HEADER_STATUS: 'Status',
     TABLE_HEADER_SIZE: 'Size',
     TABLE_HEADER_FILE_PATH: 'File Path',
@@ -930,12 +942,14 @@ export const STRINGS = {
     CANCELLED_ROW: 'The audit was cancelled before it finished, so no groups are listed.',
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
+    listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
+    elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups) => `Done: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
+    doneStatus: (demos, groups, seconds) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
@@ -2766,12 +2780,12 @@ export const STRINGS = {
 
     // Step 1: Half-Life.
     HL_TITLE: 'Set up Day of Defeat for movies',
-    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. To make one, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, and pick it as the game folder below.",
+    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. To make one, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, then in the copy's resource folder rename dod_english.txt to dod_movies_english.txt (your folder's name, and your language if Steam isn't in English), and pick the copy as the game folder below.",
     HL_RECOMMEND: "DoD Studio supports both the 25th Anniversary and the pre-Anniversary build, but the 25th Anniversary build gives the best results: the game can use up to 4 GB of memory instead of 2 GB (room for HD textures), it has higher engine limits (some demos only play on it), and DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them).",
     HL_FIELD: 'Half-Life: hl.exe',
     GAME_FOLDER_FIELD: 'Game folder',
     GAME_FOLDER_NONE: 'Pick hl.exe first: the folders beside it are listed here.',
-    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), then pick it here.",
+    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), rename its resource\\dod_english.txt to match (dod_movies_english.txt), then pick it here.",
     HL_FOUND: 'Found hl.exe.',
     HL_BUILD: {
       anniversary: '25th Anniversary build',

@@ -237,6 +237,19 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     audit_manager::reveal_in_explorer_impl(path)
 }
 
+/// Opens Windows' Recycle Bin (the Demo Auditor's deletes go there).
+#[tauri::command(async)]
+fn open_recycle_bin() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg("shell:RecycleBinFolder")
+            .spawn()
+            .map_err(crate::messages::failed_to_open_explorer)?;
+    }
+    Ok(())
+}
+
 // ── Tauri commands ─────────────────────────────────────────────────────────────
 
 /// Triggers a batch capture run from the Vite frontend.
@@ -831,6 +844,7 @@ pub fn run() {
             check_hlae_ffmpeg,
             diagnose_executable_paths,
             settings_manager::list_game_folders,
+            settings_manager::game_folder_language_file,
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
@@ -921,6 +935,7 @@ pub fn run() {
             match_group_cmd::queue_match_groups,
             match_group_cmd::queue_match_groups_cancel,
             reveal_in_explorer,
+            open_recycle_bin,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
             dir_browser::count_demo_files_in_folder,

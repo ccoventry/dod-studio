@@ -1101,6 +1101,19 @@ button.primary-btn:hover:not(:disabled) {
   transition: width 0.2s ease-in-out;
 }
 
+/* Working, with nothing to measure against yet (the Duplicates audit's
+   first folder walk): a short block slides across instead of a width. */
+.progress-bar-container.indeterminate .progress-bar-fill {
+  width: 30% !important;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(333%); }
+}
+
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {
@@ -2254,6 +2267,13 @@ tr.keyboard-selected {
   padding-left: 2px;
   font-size: 0.85em;
   color: #ffa726;
+}
+
+/* A fix-it button at the end of a path warning (#925). */
+.path-warning-action {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.95em;
 }
 
 /* HD Textures page (#372). */
@@ -3416,6 +3436,11 @@ button.setup-skip:hover:not(:disabled) {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* A note's own buttons, on a row under its text (#925). */
+.setup-note-actions {
+  margin-top: 8px;
 }
 
 .setup-muted {
