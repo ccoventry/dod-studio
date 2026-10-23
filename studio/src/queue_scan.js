@@ -31,8 +31,9 @@ const scanParses = parseClock();
  *   getDemos() the queue (merged into in place), setSelectedDemoIdx(idx),
  *   selectDemoAndRenderDetail(demo, idx), updateDemoFooter(demos),
  *   markProjectDirty(), readScanWorkers(), offerIdenticalCopies(copies,
- *   pickedFiles) from project_demos.js, getScanPaths() the pinned-folder
- *   list (pushed to in place), persistAppSettings(), and regroupMatches()
+ *   pickedFiles) from project_demos.js, rememberRecentFolder(folder) puts a
+ *   scanned folder at the top of Recent and saves it (#533),
+ *   persistAppSettings(), and regroupMatches()
  *   from queue_match_groups.js, run after a scan so {match} and {half}
  *   know the new demos (#685), and getTakeIndex() the project's take index,
  *   whose uids follow a rescanned highlight's work (rescan_carry.js).
@@ -45,7 +46,7 @@ export function createQueueScan({
   markProjectDirty,
   readScanWorkers,
   offerIdenticalCopies,
-  getScanPaths,
+  rememberRecentFolder = async () => {},
   persistAppSettings,
   regroupMatches = () => {},
   getTakeIndex = () => ({}),
@@ -302,19 +303,14 @@ export function createQueueScan({
   // Shared by + Add Folder and the Setup window's demo step (#599).
   async function addDemoFolder(folder) {
     // Always scan (#432): a folder added before, then emptied from the
-    // list (bin icon, Clear All), used to be a silent no-op here.
-    // scanPaths only decides whether to remember it, and a folder that
-    // turned out not to exist is not remembered. The merge in
-    // triggerAutoScan replaces demos by path, so a re-scan adds no
-    // duplicate rows. A scan cancelled before it added anything does not
-    // remember the folder: a drive root the user gave up on would be
-    // walked again by every list that reads the pinned folders.
+    // list (bin icon, Clear All), used to be a silent no-op here. The merge
+    // in triggerAutoScan replaces demos by path, so a re-scan adds no
+    // duplicate rows. The folder goes into Recent, not the pinned list
+    // (#533): pinning is the user's own choice. A folder that turned out
+    // not to exist, or a scan cancelled before it added anything (a drive
+    // root the user gave up on), is not remembered.
     const scanned = await triggerAutoScan([folder]);
-    if (scanned && !lastScanAddedNothingCancelled && !getScanPaths().includes(folder)) {
-      getScanPaths().push(folder);
-      markProjectDirty();
-      await persistAppSettings();
-    }
+    if (scanned && !lastScanAddedNothingCancelled) await rememberRecentFolder(folder);
   }
 
   // Native Demo Folder Ingestion (+ Add Folder)

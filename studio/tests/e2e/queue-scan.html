@@ -4,7 +4,8 @@
   line and bar from index.html, with Tauri's IPC mocked (vite.config.e2e.js).
   `scan_directory` stays pending until a test calls
   `window.__finishScan(outcome)`; `window.__addDemoFolder(folder)` is + Add
-  Folder after its picker, and `window.__scanPaths` the remembered folders.
+  Folder after its picker, and `window.__recent` the Recent folders it fills
+  (#533).
 -->
 <html lang="en">
 <head>
@@ -27,7 +28,7 @@
       new Promise((resolve) => { window.__finishScan = resolve; });
 
     const demos = [];
-    window.__scanPaths = [];
+    window.__recent = [];
     const { addDemoFolder } = createQueueScan({
       getDemos: () => demos,
       setSelectedDemoIdx: () => {},
@@ -36,7 +37,7 @@
       markProjectDirty: () => {},
       readScanWorkers: () => 2,
       offerIdenticalCopies: async () => {},
-      getScanPaths: () => window.__scanPaths,
+      rememberRecentFolder: async (f) => { window.__recent.unshift(f); },
       persistAppSettings: async () => {},
     });
     window.__addDemoFolder = addDemoFolder;

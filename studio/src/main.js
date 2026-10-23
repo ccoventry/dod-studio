@@ -60,6 +60,7 @@ import { initReviewMode } from './review_mode.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
+import { offerPinnedReview } from './pinned_review.js';
 import { createPlayersUi } from './players_ui.js';
 import { getGameFolder } from './game_folder_ui.js';
 
@@ -347,7 +348,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   } = createProjectDemos({
     getDemos: () => currentScannedDemos,
     getTakeIndex: () => takeIndex,
-    getScanPaths: () => scanPaths,
+    // Pinned and Recent: + Add Folder fills Recent, not the pins (#533).
+    getScanPaths: () => [...scanPaths, ...demoFolderHistory],
     refreshQueue: refreshAfterRelocation,
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
@@ -431,7 +433,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     markProjectDirty: () => markProjectDirty(),
     readScanWorkers: () => readScanWorkers(),
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
-    getScanPaths: () => scanPaths,
+    rememberRecentFolder: (folder) => recordDemoFolderVisit(folder),
     persistAppSettings: () => persistAppSettings(),
     regroupMatches: () => regroupMatches(),
     getTakeIndex: () => takeIndex,
@@ -824,7 +826,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   setup = createSetup({
     getDemos: () => currentScannedDemos,
-    getScanPaths: () => scanPaths,
+    getScanPaths: () => [...scanPaths, ...demoFolderHistory],
     getTargetDrives: () => targetDrives,
     getRenderExportDirs: () => renderExportDirs,
     captureFolders: { add: (p) => driveOverridesEditor.addItem(p), remove: (p) => driveOverridesEditor.removeItem(p) },
@@ -833,7 +835,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     persistAppSettings: () => persistAppSettings(),
     dismissed: savedSetupDismissed,
   });
-  setup.start();
+  // The one-time look at the pins older builds' + Add Folder made (#533).
+  setup.start().finally(() => offerPinnedReview({
+    getPinned: () => scanPaths,
+    unpin: (drop) => { scanPaths = scanPaths.filter((f) => !drop.includes(f)); return persistAppSettings(); },
+    isSetupOpen: () => setup.isOpen(),
+    persist: () => persistAppSettings(),
+  }));
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {
