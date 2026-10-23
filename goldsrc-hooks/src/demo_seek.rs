@@ -92,6 +92,32 @@
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.
 //!
+//! ## The gap before a POV demo's first frame (#893)
+//!
+//! A POV demo's LOADING segment holds the connection's sign-on, from when the
+//! recorder joined the server; its playback starts when they typed `record`,
+//! often minutes later (median 103 s over 469 POV demos). The player's clock
+//! starts at the LOADING frames, so the first stretch of it has no frames.
+//!
+//! The player means to jump such a gap: `RunClocks` (PRE `DemoPlayer.dll`
+//! `+0x42e0`, Anniversary `+0x3c40`) moves the clock to 0.01 s before the next
+//! frame when the frame after the last one sent is more than 2 s on. But it
+//! looks only from the last frame *sent*, and `WriteDatagram` sends the first
+//! frame at or after the clock. The LOADING frames span about 14 ms of server
+//! time, so an engine frame longer than that (a loading frame often is) steps
+//! the clock past them, sends the first playback frame straight away, and the
+//! check then compares that frame with the one after it: no gap. The clock
+//! then crawls through the whole gap at normal speed while `GetDemoViewInfo`
+//! interpolates the view from the LOADING frame's position to the first
+//! playback frame's: the view floats from where the recorder joined to where
+//! the recording starts, for as long as the gap.
+//!
+//! [`skip_gap`] does the jump the player missed: whenever the frame at or after
+//! the clock is the one already sent and more than [`GAP_SECONDS`] ahead of it,
+//! the clock goes to 0.01 s before that frame, as `RunClocks` would have put
+//! it. Never while paused (the player's clock doesn't run then either) or
+//! while a seek is on its way.
+//!
 //! ## Finding the player
 //!
 //! `DemoPlayer.dll` exports only `CreateInterface`, and `demoplayer001` is a
@@ -355,6 +381,8 @@ pub fn poll() {
         return;
     };
     let Some(seek) = pending.as_mut() else {
+        drop(pending);
+        skip_gap();
         return;
     };
     // A stepped seek drops the console commands each step replays: the
@@ -399,6 +427,35 @@ pub fn poll() {
     };
     *pending = None;
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
+}
+
+/// The demo player's own gap threshold (`RunClocks`): a stretch longer than
+/// this with no frames is jumped.
+const GAP_SECONDS: f64 = 2.0;
+/// Where `RunClocks` puts the clock ahead of the frame after a gap.
+const GAP_LANDING_BEFORE: f32 = 0.01;
+
+/// Where the clock should go when it sits in a gap the player failed to jump
+/// (see the module doc): `frame` is the frame at or after the clock, `sent`
+/// the last frame the player sent.
+fn gap_landing(now: f64, frame_time: f32, frame_seq: u32, sent_seq: u32) -> Option<f64> {
+    (frame_seq == sent_seq && f64::from(frame_time) - now > GAP_SECONDS)
+        .then(|| f64::from(frame_time - GAP_LANDING_BEFORE))
+}
+
+/// Jumps the clock over a gap the demo player missed (#893). Only once
+/// `Core.dll` is in: `viewdemo` loads it, and the player's world is null
+/// before.
+fn skip_gap() {
+    #[cfg(target_arch = "x86")]
+    if let Some((from, to)) = player::skip_gap() {
+        unsafe {
+            crate::debug::report(&format!(
+                "demo_seek: jumped {:.1} s with no frames ({from:.2} -> {to:.2} s), the gap the demo player meant to skip (#893)",
+                to - from
+            ))
+        };
+    }
 }
 
 /// Whether a seek is still on its way (a stepped one, or one waiting to land),
@@ -599,6 +656,43 @@ mod player {
                 end: get_end(player),
                 time_scale: get_scale(player),
             })
+        }
+    }
+
+    /// [`super::skip_gap`]'s look and jump: the clock before and after.
+    pub(super) fn skip_gap() -> Option<(f64, f64)> {
+        // Safety: a plain lookup of a loaded module by name.
+        if unsafe { GetModuleHandleA(c"Core.dll".as_ptr() as *const u8) }.is_null() {
+            return None;
+        }
+        let (player, _) = find().ok()?;
+        // Safety: the slots and fields `seek` uses, checked against both
+        // builds by tools/verify_demo_seek_offsets.py.
+        unsafe {
+            let is_active: ByteFn = slot(player, SLOT_IS_ACTIVE);
+            let is_paused: ByteFn = slot(player, SLOT_IS_PAUSED);
+            if !is_set(is_active(player)) || is_set(is_paused(player)) {
+                return None;
+            }
+            let world = *((player as *const u8).add(FIELD_WORLD) as *const *mut c_void);
+            if world.is_null() {
+                return None;
+            }
+            let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
+            let now = get_now(player);
+            let frame_by_time: FrameByTimeFn = slot(world, WORLD_SLOT_GET_FRAME_BY_TIME);
+            let frame = frame_by_time(world, now);
+            if frame.is_null() {
+                return None;
+            }
+            let frame_time = (frame as *const f32).read_unaligned();
+            let frame_seq = (frame.add(FRAME_SEQ_NR) as *const u32).read_unaligned();
+            let sent_seq =
+                ((player as *const u8).add(FIELD_LAST_FRAME_SEQ_NR) as *const u32).read_unaligned();
+            let to = gap_landing(now, frame_time, frame_seq, sent_seq)?;
+            let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
+            set_world_time(player, to, 0);
+            Some((now, to))
         }
     }
 
@@ -829,6 +923,20 @@ mod tests {
             !stepped(90.0, 1335.3, true),
             "the skip jumps at once on purpose"
         );
+    }
+
+    /// The float of #893 on `ktps8w1-m00cat_soul_lenn_h2` (Anniversary): the
+    /// clock at 8.52 s, the first playback frame (71.388 s) already sent.
+    #[test]
+    fn a_clock_stuck_behind_a_sent_frame_jumps_to_just_before_it() {
+        let to = gap_landing(8.522, 71.388, 3, 3).expect("a gap");
+        assert!((to - 71.378).abs() < 1e-3, "{to}");
+        // Not sent yet: the player's own check still has its chance.
+        assert_eq!(gap_landing(8.522, 71.388, 3, 2), None);
+        // Normal playback: the next frame is a few milliseconds on.
+        assert_eq!(gap_landing(226.663, 226.664, 14075, 14075), None);
+        // A short gap the player plays through.
+        assert_eq!(gap_landing(100.0, 101.5, 7, 7), None);
     }
 
     #[test]

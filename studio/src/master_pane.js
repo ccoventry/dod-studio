@@ -10,6 +10,7 @@ import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
+import { noCameraDataBadge } from './camera_data.js';
 import { multiMapSplitButton } from './queue_multimap.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { matchesInQueue } from './queue_match_groups.js';
@@ -460,6 +461,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // More entities in a snapshot than the game's engine takes (#207).
     const limitBadge = overLimitBadge(demo);
     if (limitBadge) tdName.appendChild(limitBadge);
+
+    // No frame holds the recorder's view: captures come out frozen (#920).
+    const cameraBadge = noCameraDataBadge(demo);
+    if (cameraBadge) tdName.appendChild(cameraBadge);
 
     // More than one map: the game stops at the first map change (#217).
     const splitBtn = multiMapSplitButton(demo, currentOnSplitDemo);
