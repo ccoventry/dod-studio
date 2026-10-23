@@ -12,6 +12,7 @@ mod dir_browser;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
+mod installs_manager;
 mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
@@ -963,6 +964,7 @@ pub fn run() {
             demo_links_manager::add_demo_link,
             demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
+            installs_manager::find_installs,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,

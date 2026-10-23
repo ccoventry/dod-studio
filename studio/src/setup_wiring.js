@@ -19,8 +19,9 @@ import { getGameFolder, refreshGameFolderList } from './game_folder_ui.js';
 import { createMovieCopy } from './movie_copy_ui.js';
 import { refreshPathWarnings, refreshHlaeFfmpegStatus, linkHlaeToFfmpeg } from './config_wiring.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
-import { setupChecklist, shouldOpenSetupAtLaunch, engineBuild } from './setup_checklist.js';
+import { setupChecklist, shouldOpenSetupAtLaunch, engineBuild, stepIndex } from './setup_checklist.js';
 import { renderSetupCard } from './setup_card.js';
+import { prefillSingleInstall } from './install_picker.js';
 import { createSetupWindow } from './setup_window.js';
 import { STRINGS } from './strings.js';
 
@@ -292,10 +293,13 @@ export function createSetup({
   });
 
   /** First draw at launch; opens the window when something required is
-   *  missing and setup was not skipped. */
+   *  missing and setup was not skipped. On a PC with one Half-Life install
+   *  and no hl.exe set yet, its hl.exe is filled in first (#931), and the
+   *  window opens on that step so the user sees what was picked. */
   async function start() {
+    const prefilled = await prefillSingleInstall().catch(() => false);
     const checklist = await refresh();
-    if (shouldOpenSetupAtLaunch(checklist, setupDismissed)) openWindow(checklist.nextIndex);
+    if (shouldOpenSetupAtLaunch(checklist, setupDismissed)) openWindow(prefilled ? stepIndex('hl') : checklist.nextIndex);
   }
 
   return { refresh, start, isDismissed: () => setupDismissed };

@@ -700,6 +700,26 @@ input.search-select-input {
   color: var(--text-muted);
 }
 
+/* A row's own button (install_picker.js's Hide), at its end. */
+.search-select-option:has(.search-select-action) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-select-action {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  flex: none;
+}
+
+/* A row that does something rather than being picked. */
+.search-select-option.command {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 button {
   background: #2a2a2a;
   color: #dddddd;

@@ -17,6 +17,7 @@ import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
+import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
 import { getPickFolders, setPickFolders } from './pick_path.js';
 
 /**
@@ -166,6 +167,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
       players: getPlayers(),
+      hidden_installs: getHiddenInstalls(),
       pick_folders: getPickFolders(),
       ...readReviewSettings(),
       ...scanRateSettings(),
@@ -207,6 +209,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
   setPlayers(settings.players);
+  setHiddenInstalls(settings.hidden_installs);
   // Each Browse button's last folder (#936).
   setPickFolders(settings.pick_folders);
   if (settings.ffmpeg_path) {
