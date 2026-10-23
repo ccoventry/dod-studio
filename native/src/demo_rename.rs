@@ -300,16 +300,28 @@ fn rename_one(pair: &RenamePair) -> Result<(), String> {
 /// another folder. A failure is reported and the rest carry on. What was
 /// renamed is logged in `log_dir`, newest batch last.
 pub fn apply(pairs: &[RenamePair], log_dir: &Path) -> RenameOutcome {
+    apply_reporting(pairs, log_dir, &mut |_, _| {})
+}
+
+/// [`apply`], calling `on_done(done, total)` after each file, renamed or
+/// not, for the page's count (#958): a cloud or USB folder can take a while.
+pub fn apply_reporting(
+    pairs: &[RenamePair],
+    log_dir: &Path,
+    on_done: &mut dyn FnMut(usize, usize),
+) -> RenameOutcome {
     let mut outcome = RenameOutcome::default();
-    for pair in pairs.iter().filter(|p| p.from != p.to) {
+    let todo: Vec<&RenamePair> = pairs.iter().filter(|p| p.from != p.to).collect();
+    for (i, pair) in todo.iter().enumerate() {
         match rename_one(pair) {
-            Ok(()) => outcome.renamed.push(pair.clone()),
+            Ok(()) => outcome.renamed.push((*pair).clone()),
             Err(error) => outcome.failed.push(RenameFailure {
                 from: pair.from.clone(),
                 to: pair.to.clone(),
                 error,
             }),
         }
+        on_done(i + 1, todo.len());
     }
     if !outcome.renamed.is_empty() {
         let log = RenameLog {
@@ -386,11 +398,17 @@ pub fn undoable(log_dir: &Path) -> Option<UndoableBatch> {
 /// has since moved or been renamed again is reported and left alone. The log
 /// is then marked undone, so the next Undo reaches the batch before it.
 pub fn undo_last(log_dir: &Path) -> RenameOutcome {
+    undo_last_reporting(log_dir, &mut |_, _| {})
+}
+
+/// [`undo_last`], calling `on_done(done, total)` after each file (#958).
+pub fn undo_last_reporting(log_dir: &Path, on_done: &mut dyn FnMut(usize, usize)) -> RenameOutcome {
     let Some((path, mut log)) = logs(log_dir).into_iter().find(|(_, log)| !log.undone) else {
         return RenameOutcome::default();
     };
     let mut outcome = RenameOutcome::default();
-    for pair in log.renames.iter().rev() {
+    let total = log.renames.len();
+    for (i, pair) in log.renames.iter().rev().enumerate() {
         let back = RenamePair {
             from: pair.to.clone(),
             to: pair.from.clone(),
@@ -403,6 +421,7 @@ pub fn undo_last(log_dir: &Path) -> RenameOutcome {
                 error,
             }),
         }
+        on_done(i + 1, total);
     }
     log.undone = true;
     if let Ok(json) = serde_json::to_vec_pretty(&log) {
@@ -509,6 +528,35 @@ mod tests {
         assert_eq!(undoable(&logs), None);
         // Nothing left to undo is not an error.
         assert_eq!(undo_last(&logs), RenameOutcome::default());
+    }
+
+    #[test]
+    fn apply_and_undo_count_every_file_they_try() {
+        let dir = Scratch::new("demo_rename_counts");
+        let logs = dir.join("logs");
+        std::fs::write(dir.join("a.dem"), b"a").unwrap();
+        std::fs::write(dir.join("b.dem"), b"b").unwrap();
+        std::fs::write(dir.join("taken.dem"), b"t").unwrap();
+        let mut counts = Vec::new();
+        let outcome = apply_reporting(
+            &[
+                pair(&dir, "a.dem", "x.dem"),
+                // Left alone: not a rename, so not counted.
+                pair(&dir, "b.dem", "b.dem"),
+                // Refused (never replaces a file), but still counted.
+                pair(&dir, "b.dem", "taken.dem"),
+            ],
+            &logs,
+            &mut |done, total| counts.push((done, total)),
+        );
+        assert_eq!(outcome.renamed.len(), 1);
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(counts, vec![(1, 2), (2, 2)]);
+
+        let mut counts = Vec::new();
+        undo_last_reporting(&logs, &mut |done, total| counts.push((done, total)));
+        assert_eq!(counts, vec![(1, 1)]);
+        assert!(dir.join("a.dem").exists());
     }
 
     #[test]
