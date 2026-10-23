@@ -9,6 +9,7 @@ mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
+mod drop_paths;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
@@ -875,6 +876,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             demo_cache_cmd::cache_demos,
+            drop_paths::sort_dropped_paths,
             demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,

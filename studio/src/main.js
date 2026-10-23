@@ -61,6 +61,7 @@ import { createHltvPicker } from './review_hltv_picker.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
 import { offerPinnedReview } from './pinned_review.js';
+import { createDemoDrop } from './demo_drop.js';
 import { createPlayersUi } from './players_ui.js';
 import { getGameFolder } from './game_folder_ui.js';
 
@@ -425,7 +426,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
   // queue_scan.js. Declared before anything can start a scan; the earlier
   // callers above reach triggerAutoScan through closures.
-  const { triggerAutoScan, addDemoFolder } = createQueueScan({
+  const { triggerAutoScan, addDemoFolder, addDroppedPaths, isScanning } = createQueueScan({
     getDemos: () => currentScannedDemos,
     setSelectedDemoIdx: (idx) => { selectedDemoIdx = idx; },
     selectDemoAndRenderDetail: (demo, idx) => selectDemoAndRenderDetail(demo, idx),
@@ -438,6 +439,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     regroupMatches: () => regroupMatches(),
     getTakeIndex: () => takeIndex,
   });
+
+  // Demos and folders dropped from Windows (#530): demo_drop.js.
+  createDemoDrop({ addDroppedPaths, isScanning });
 
   // Demos an older DoD Studio scanned, offered for a rescan when a project
   // opens: project_rescan.js.

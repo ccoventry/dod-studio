@@ -3857,6 +3857,18 @@ button.setup-skip:hover:not(:disabled) {
   opacity: 0.45;
 }
 
+/* Dropping demos from Windows (#530): both zones show while dragging, the
+   one under the pointer more. */
+.drop-zone-active {
+  outline: 2px dashed rgba(100, 160, 255, 0.5);
+  outline-offset: -2px;
+}
+
+.drop-zone-hover {
+  outline: 2px solid #64a0ff;
+  background: rgba(100, 160, 255, 0.08);
+}
+
 .audit-all-drives, .scan-subfolders {
   display: flex;
   gap: 3px;

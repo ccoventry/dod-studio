@@ -30,7 +30,7 @@
 
     const demos = [];
     window.__recent = [];
-    const { addDemoFolder } = createQueueScan({
+    const { addDemoFolder, addDroppedPaths } = createQueueScan({
       getDemos: () => demos,
       setSelectedDemoIdx: () => {},
       selectDemoAndRenderDetail: () => {},
@@ -42,6 +42,7 @@
       persistAppSettings: async () => { window.__saves = (window.__saves || 0) + 1; },
     });
     window.__addDemoFolder = addDemoFolder;
+    window.__addDropped = addDroppedPaths;
     window.__harnessReady = true;
   </script>
 </body>

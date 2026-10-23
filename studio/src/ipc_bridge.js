@@ -54,6 +54,19 @@ export async function filesExist(paths) {
  * disk and counts it in `unchanged` instead of parsing it again.
  * `includeSubfolders` false reads only each folder's own demos (#531).
  */
+/**
+ * Files and folders dropped from Windows (#530), sorted on disk: resolves
+ * `{ demos, folders, skipped }` (skipped: file names).
+ */
+export async function sortDroppedPaths(paths) {
+  return invoke("sort_dropped_paths", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (sort_dropped_paths):", err);
+      showToast(STRINGS.IPC.dropError(err), 'error');
+      throw err;
+    });
+}
+
 export async function scanDirectory(scanPaths, known = [], workers = undefined, includeSubfolders = true) {
   return invoke("scan_directory", { paths: scanPaths, known, workers, includeSubfolders })
     .catch((err) => {
