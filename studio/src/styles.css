@@ -3425,6 +3425,11 @@ button.setup-skip:hover:not(:disabled) {
   flex-wrap: wrap;
 }
 
+/* A note's own buttons, on a row under its text (#925). */
+.setup-note-actions {
+  margin-top: 8px;
+}
+
 .setup-muted {
   color: var(--text-muted);
   font-size: 12px;

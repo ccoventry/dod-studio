@@ -96,7 +96,7 @@ export function createSetupWindow(deps) {
     const languageButton = languageFileButton(snap.gameFolderLanguage);
     const languageWarn = languageNote
       ? `<div class="setup-note warn" id="setup-hl-language-warning">${escapeHtml(languageNote)}${languageButton
-        ? ` <button type="button" id="setup-hl-language-show" class="path-warning-action">${escapeHtml(languageButton)}</button>` : ''}</div>`
+        ? `<div class="setup-btn-row setup-note-actions"><button type="button" id="setup-hl-language-show">${escapeHtml(languageButton)}</button></div>` : ''}</div>`
       : '';
     return `<p>${escapeHtml(S.HL_INTRO)}</p>
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
