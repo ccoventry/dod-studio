@@ -109,4 +109,32 @@ describe('audit_consolidate (#872)', () => {
     expect(singlesAfterDelete(GROUPS, ['E:\\a.dem'])).toEqual([{ path: 'D:\\a.dem', size: 5, in_use: 'queue' }]);
     expect(singlesAfterDelete(GROUPS, [])).toEqual([]);
   });
+
+  // A zip is never changed (#929): its demo never moves or is recycled.
+  const ZIPPED = {
+    size: 9,
+    files: [
+      { path: 'D:\\old.zip › m.dem', in_use: null, archive: { zip: 'D:\\old.zip', entry: 'm.dem' } },
+      { path: 'E:\\m.dem', in_use: null },
+      { path: 'F:\\m.dem', in_use: null },
+    ],
+  };
+
+  it('never moves or recycles a demo inside a zip; its loose copies consolidate among themselves', () => {
+    const req = consolidateRequest({ groups: [ZIPPED], destination: 'G:\\Demos' });
+    expect(req.keep.map((d) => d.path)).toEqual(['E:\\m.dem']);
+    expect(req.recycle.map((d) => [d.path, d.keep])).toEqual([['F:\\m.dem', 'E:\\m.dem']]);
+    // A loose copy marked as another demo is neither kept nor recycled.
+    const marked = consolidateRequest({ groups: [{ ...ZIPPED, notCopies: ['E:\\m.dem'] }], destination: 'G:\\Demos' });
+    expect(marked.keep.map((d) => d.path)).toEqual(['F:\\m.dem']);
+    expect(marked.recycle).toEqual([]);
+    // Only zips: nothing to move.
+    const onlyZip = consolidateRequest({ groups: [{ ...ZIPPED, files: [ZIPPED.files[0]] }], destination: 'G:\\Demos' });
+    expect([onlyZip.keep, onlyZip.recycle]).toEqual([[], []]);
+  });
+
+  it('a group a delete left with only its zip copy adds no single', () => {
+    expect(singlesAfterDelete([ZIPPED], ['E:\\m.dem', 'F:\\m.dem'])).toEqual([]);
+    expect(singlesAfterDelete([ZIPPED], ['F:\\m.dem'])).toEqual([]);
+  });
 });

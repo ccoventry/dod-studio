@@ -3,7 +3,7 @@
 // say. audit_consolidate_ui.js does the DOM; native::demo_consolidate plans
 // and moves.
 import { STRINGS } from './strings.js';
-import { wastedSizeText, isNotCopy } from './audit_duplicates.js';
+import { wastedSizeText, isNotCopy, isArchived } from './audit_duplicates.js';
 
 const asDemo = (file, size) => ({ path: file.path, size, game_folder: file.in_use === 'game_folder' });
 
@@ -11,16 +11,21 @@ const asDemo = (file, size) => ({ path: file.path, size, game_folder: file.in_us
 /// (its first file) and every demo without copies move; the group's other
 /// copies are recycled once the backend finds each matches its `keep` byte
 /// for byte. A row already marked "Not an exact copy" is a different demo,
-/// so it is never sent to be recycled.
+/// so it is never sent to be recycled. A demo inside a zip (#929) is never
+/// sent at all, since a zip is never changed: when the group keeps that
+/// one, its first loose copy not marked "Not an exact copy" moves instead
+/// and the other loose copies are checked against that.
 export function consolidateRequest({ groups, singles, roots, destination, layout, includeGameFolders }) {
   const keep = [];
   const recycle = [];
   for (const g of groups ?? []) {
-    if (!g.files?.length) continue;
-    keep.push(asDemo(g.files[0], g.size));
-    g.files.slice(1)
-      .filter((f) => !isNotCopy(g, f.path))
-      .forEach((f) => recycle.push({ ...asDemo(f, g.size), keep: g.files[0].path }));
+    const loose = (g.files ?? []).filter((f) => !isArchived(f));
+    if (!loose.length) continue;
+    const kept = loose.find((f) => !isNotCopy(g, f.path)) ?? loose[0];
+    keep.push(asDemo(kept, g.size));
+    loose
+      .filter((f) => f !== kept && !isNotCopy(g, f.path))
+      .forEach((f) => recycle.push({ ...asDemo(f, g.size), keep: kept.path }));
   }
   (singles ?? []).forEach((s) => keep.push(asDemo(s, s.size)));
   return {
@@ -90,7 +95,8 @@ export function singlesAfterDelete(groups, deleted) {
   const out = [];
   for (const g of groups ?? []) {
     const left = g.files.filter((f) => !gone.has(f.path));
-    if (left.length === 1 && left.length < g.files.length) {
+    // A demo left only inside a zip has no file to move.
+    if (left.length === 1 && left.length < g.files.length && !isArchived(left[0])) {
       out.push({ path: left[0].path, size: g.size, in_use: left[0].in_use ?? null });
     }
   }

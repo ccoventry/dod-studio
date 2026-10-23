@@ -51,9 +51,24 @@ async fn exclusive<T: Send + 'static>(
     result
 }
 
+/// The request without any demo inside a zip (#929), moved or recycled, or
+/// any copy checked against one: a zip is never changed, and its shown name
+/// (`<zip> › <entry>`) is no file to move. The frontend already leaves them
+/// out (`audit_consolidate.js`); this keeps a stale or hand-made request
+/// from reaching the disk with one.
+fn without_zip_entries(mut request: Request) -> Request {
+    let in_zip = |p: &str| p.contains(hl_demo_auditor::archive::SEPARATOR);
+    request.keep.retain(|d| !in_zip(&d.path));
+    request
+        .recycle
+        .retain(|d| !in_zip(&d.path) && !in_zip(&d.keep));
+    request
+}
+
 /// What Consolidate would do, for the preview. Reads the disk only.
 #[tauri::command]
 pub async fn consolidate_plan(request: Request) -> Result<Plan, String> {
+    let request = without_zip_entries(request);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         demo_consolidate::plan_on_disk(&request)
     }))
@@ -67,6 +82,7 @@ pub async fn consolidate_run(
     state: tauri::State<'_, ConsolidateManager>,
     request: Request,
 ) -> Result<Outcome, String> {
+    let request = without_zip_entries(request);
     exclusive(state.inner(), move |cancel| {
         let mut emit = emitter(app_handle);
         demo_consolidate::run(&request, &log_dir(), cancel, &mut emit)
@@ -99,4 +115,35 @@ pub async fn consolidate_undoable() -> Result<Option<UndoableBatch>, String> {
 #[tauri::command]
 pub fn consolidate_cancel(state: tauri::State<'_, ConsolidateManager>) {
     state.cancel.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use native::demo_consolidate::AuditedDemo;
+
+    fn demo(path: &str, keep: &str) -> AuditedDemo {
+        AuditedDemo {
+            path: path.to_string(),
+            size: 1,
+            game_folder: false,
+            keep: keep.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_demo_inside_a_zip_never_reaches_the_move_or_the_recycle() {
+        let zipped = format!("D:/old.zip{}m.dem", hl_demo_auditor::archive::SEPARATOR);
+        let request = without_zip_entries(Request {
+            keep: vec![demo(&zipped, ""), demo("E:/m.dem", "")],
+            recycle: vec![
+                demo("F:/m.dem", &zipped),
+                demo("G:/m.dem", "E:/m.dem"),
+                demo(&zipped, "E:/m.dem"),
+            ],
+            ..Request::default()
+        });
+        assert_eq!(request.keep, vec![demo("E:/m.dem", "")]);
+        assert_eq!(request.recycle, vec![demo("G:/m.dem", "E:/m.dem")]);
+    }
 }
