@@ -19,7 +19,7 @@ import { refreshHookDllRow } from './hook_dll_row.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
- *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
+ *   form doesn't hold ({ scanPaths, demoFolderHistory, recentProjects, scanFoldersForDemos,
  *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
  *   setupDismissed }),
  *   and currentCaptureMode().
@@ -103,6 +103,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
+      recent_projects: state.recentProjects || [],
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",

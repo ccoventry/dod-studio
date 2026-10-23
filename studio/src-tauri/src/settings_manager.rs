@@ -47,6 +47,10 @@ pub struct AppSettings {
     /// demo listing. Mirrors dev's `settings.demo_folder_history`.
     #[serde(default)]
     pub demo_folder_history: Vec<String>,
+    /// File → Open Recent (#935): project files opened or saved, newest
+    /// first, at most 10 (`recent_projects.js` keeps the list).
+    #[serde(default)]
+    pub recent_projects: Vec<String>,
     /// Gates the Demo Analyzer Explorer tree's per-subfolder "(N)" demo-count
     /// badge (Quick Links counts are always shown, matching dev — see
     /// docs/archive/tauri_parity_audit.md Area 1). Defaults to `false`, matching
@@ -424,6 +428,7 @@ impl Default for AppSettings {
             goldsrc_hooks_dll_path: None,
             pinned_folders: Vec::new(),
             demo_folder_history: Vec::new(),
+            recent_projects: Vec::new(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
             language: "en".to_string(),
@@ -762,6 +767,25 @@ mod tests {
         let json = serde_json::to_string(&original).expect("settings must serialize");
         let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
         assert!(restored.setup_dismissed);
+    }
+
+    /// Open Recent's list survives a save, and a file from before it has none (#935).
+    #[test]
+    fn recent_projects_roundtrip_and_default() {
+        let original = AppSettings {
+            recent_projects: vec!["D:/projects/a.json".into(), "D:/projects/b.json".into()],
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.recent_projects, original.recent_projects);
+
+        let older: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert!(older.recent_projects.is_empty());
     }
 
     /// A file saved while Seek Between Clips was experimental (off by default)
