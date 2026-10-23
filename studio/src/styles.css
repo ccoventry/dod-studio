@@ -1101,6 +1101,19 @@ button.primary-btn:hover:not(:disabled) {
   transition: width 0.2s ease-in-out;
 }
 
+/* Working, with nothing to measure against yet (the Duplicates audit's
+   first folder walk): a short block slides across instead of a width. */
+.progress-bar-container.indeterminate .progress-bar-fill {
+  width: 30% !important;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(333%); }
+}
+
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {

@@ -47,18 +47,45 @@ export function allDrivesLabel(roots) {
 }
 
 /// `audit_progress` → the bar's width and the step line. `total` is 0 while
-/// folders are still being listed, when there's nothing to measure against.
-export function auditProgressView(p) {
+/// folders are still being listed. Then the bar measures against
+/// `expectedFolders`, how many the last audit of the same folders listed,
+/// stopping short of full since this one may list more; with no earlier
+/// audit there's nothing to measure against, and the bar moves without a
+/// width (`indeterminate`).
+export function auditProgressView(p, expectedFolders = 0) {
   const current = p?.current ? shownPath(p.current) : '';
   if (!p?.total) {
-    return { pct: 0, text: STRINGS.AUDITOR.listingLine(p?.folders ?? 0), current };
+    const folders = p?.folders ?? 0;
+    if (expectedFolders > 0) {
+      return {
+        pct: Math.min(95, Math.round((folders / expectedFolders) * 100)),
+        text: STRINGS.AUDITOR.listingLineOf(folders, expectedFolders),
+        current,
+        indeterminate: false,
+      };
+    }
+    return { pct: 0, text: STRINGS.AUDITOR.listingLine(folders), current, indeterminate: true };
   }
   const done = Math.min(p.done ?? 0, p.total);
   return {
     pct: Math.round((done / p.total) * 100),
     text: STRINGS.AUDITOR.keyingLine(done, p.total),
     current,
+    indeterminate: false,
   };
+}
+
+/// `m:ss` for an audit's running time.
+export function elapsedText(ms) {
+  const secs = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+}
+
+/// The key the last audit's folder count is remembered under: the same
+/// folders, in any order, or All drives.
+export function auditFoldersKey(paths, allDrives) {
+  const sorted = [...(paths || [])].map((p) => String(p).toLowerCase()).sort();
+  return `audit_last_folders:${allDrives ? 'all|' : ''}${sorted.join('|')}`;
 }
 
 /// `audit_delete_progress` → the same bar, while copies are compared with
