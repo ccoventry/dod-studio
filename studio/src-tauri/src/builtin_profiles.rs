@@ -51,13 +51,15 @@ const CLEAN_CLIPS: &[&str] = &[
     "ds_view_hide_screen_shake 1",
     "ds_player_hide_hand_signals 0",
     "ds_sound_mute_voice_commands 0",
+    "ds_sound_mute_win_and_capture 0",
     "ds_map_allow_shaders 0",
 ];
 
 /// Every earlier version of Clean clips that settings migration 2 could have
 /// copied into a settings file, oldest first (from git history: #898 in
-/// dbfcaa64, b2b638f0, then b1d05fcb's, which is the current one). A copy
-/// equal to any of these was never changed by the user.
+/// dbfcaa64, b2b638f0, then b1d05fcb's, the last one migration 2 added; #284 then added
+/// `ds_sound_mute_win_and_capture 0` to the current one). A copy equal to any of
+/// these was never changed by the user.
 const CLEAN_CLIPS_SHIPPED: &[&[&str]] = &[
     &[
         "r_decals 256",
@@ -99,6 +101,31 @@ const CLEAN_CLIPS_SHIPPED: &[&[&str]] = &[
         "ds_view_use_cl_bob 0",
         "ds_view_hide_headshot_red_screen 1",
         "ds_view_hide_screen_shake 0",
+        "ds_player_hide_hand_signals 0",
+        "ds_sound_mute_voice_commands 0",
+        "ds_map_allow_shaders 0",
+    ],
+    &[
+        "r_decals 256",
+        "mirv_fov 90",
+        "ds_spec_match_pov 1",
+        "ds_spec_hide_hltv_messages 1",
+        "ds_spec_hide_bars 1",
+        "ds_spec_deathcam 0",
+        "ds_spec_hide_text 1",
+        "ds_hud_hide_scoreboard 1",
+        "ds_hud_hide_voice_menus 1",
+        "ds_hud_hide_crosshair 0",
+        "ds_hud_hide_map_text 1",
+        "ds_hud_hide_clan_text 1",
+        "ds_hud_hide_center_text 1",
+        "ds_hud_show_scope 1",
+        "ds_hud_overview_players 0",
+        "ds_hud_overview_team_marker 0",
+        "ds_hud_overview_hide_speaker 0",
+        "ds_view_use_cl_bob 0",
+        "ds_view_hide_headshot_red_screen 1",
+        "ds_view_hide_screen_shake 1",
         "ds_player_hide_hand_signals 0",
         "ds_sound_mute_voice_commands 0",
         "ds_map_allow_shaders 0",
