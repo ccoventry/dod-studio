@@ -300,7 +300,12 @@
                    (hook_dll_row.js). -->
               <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
-                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
+                <!-- The saved path; the dropdown sets it (hook_dll_picker.js). -->
+                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" hidden />
+                <input type="text" id="goldsrc-hooks-dll-choice" />
+                <!-- ^ a dropdown you can type into (searchable_select.js) -->
+
+                <button id="goldsrc-hooks-refresh-btn" data-str="CAPTURE_CONFIG.HOOK_DLL_REFRESH" data-str-title="CAPTURE_CONFIG.HOOK_DLL_REFRESH_TITLE" title="List the test DLLs in local\ again">Refresh</button>
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="goldsrc-hooks-path-warning" class="path-warning" style="display: none;"></div>
@@ -1011,6 +1016,7 @@
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
               <div class="row-inputs">
                 <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
+                <button id="open-recycle-bin-btn" data-str="AUDITOR.OPEN_RECYCLE_BIN_BUTTON" data-str-title="AUDITOR.OPEN_RECYCLE_BIN_TITLE">Open Recycle Bin</button>
                 <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
                 <!-- Hidden for 0.2.0, so every delete can be put back from the
                      Recycle Bin; remove `hidden` to offer it again. -->
@@ -1692,6 +1698,7 @@
               </div>
               <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
               <div id="analyzer-damage-banner" class="analyzer-warning-banner" hidden></div>
+              <div id="analyzer-camera-banner" class="analyzer-warning-banner" hidden></div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
                 <p class="analyzer-empty" data-str="ANALYZER.EMPTY_PICK_DEMO">Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".</p>
               </div>

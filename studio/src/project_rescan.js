@@ -17,14 +17,14 @@ import { STRINGS } from './strings.js';
 export function createProjectRescan({ getDemos, scan }) {
   /** Resolves true when it rescanned. */
   async function offerRescan() {
-    const outdated = outdatedDemos(getDemos());
+    const demos = getDemos() || [];
+    const outdated = outdatedDemos(demos);
     if (outdated.length === 0) return false;
-    const ok = await themedConfirm(STRINGS.MAIN.outdatedDemosMessage(outdated.length), {
+    const ok = await themedConfirm(STRINGS.MAIN.outdatedDemosMessage(outdated.length, demos.length), {
       title: STRINGS.MAIN.OUTDATED_DEMOS_TITLE,
       confirmLabel: STRINGS.MAIN.OUTDATED_DEMOS_RESCAN,
       cancelLabel: STRINGS.MAIN.OUTDATED_DEMOS_NOT_NOW,
       details: outdated.map((d) => ({ primary: fileNameOf(d.path), secondary: shortFolder(folderOf(d.path)), title: d.path })),
-      footer: STRINGS.MAIN.OUTDATED_DEMOS_FOOTER,
       focusConfirm: true,
     });
     if (!ok) return false;

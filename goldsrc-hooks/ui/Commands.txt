@@ -34,7 +34,7 @@ HUD
   ds_hud_deathmsg
       Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
   ds_hud_objectives
-      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>. The bare command shows the options.
+      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>, and count_scale <1..8> for the player count under a flag. The bare command shows the options.
   ds_hud_overview_layout
       Move or resize the overview map.
   ds_hud_overview_players 0-4
@@ -48,7 +48,7 @@ HUD
 
 VIEW (POV demos: the recording player's own view)
   ds_view_use_cl_bob 0/1
-      POV demos: the view and gun bob by your cl_bob, cl_bobcycle and cl_bobup (0: the bob the demo recorded, the recording player's own).
+      POV demos: the view and gun bob by your cl_bob, cl_bobcycle and cl_bobup, as in live play (0: the bob the demo recorded, the recording player's own).
   ds_view_hide_headshot_red_screen 0/1
       No red screen when the player is hit in the head.
   ds_view_hide_screen_shake 0/1
@@ -76,9 +76,10 @@ SOUND
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
-      Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
-  ds_demo_seek_by <seconds>
-      Jump forward (or back, with a minus) by that many seconds.
+      Jump viewdemo playback to a time on the VCR bar's clock: 610, 10:10 or 1:02:03.
+      Typed on the same line as viewdemo, it waits until the demo has loaded.
+  ds_demo_seek_by <time>
+      Jump forward (or back, with a minus) by that much: 30, 1:30 or -0:30.
   ds_demo_seek_skip_between 0/1
       A jump skips the events and commands it passes over.
   ds_demo_fast_load 0/1/<ms>
@@ -143,6 +144,8 @@ DEBUG
       Log who the spectator camera follows.
   ds_debug_log_texture_loads 0/1
       Log every HD texture load.
+  ds_debug_log_view_bob 0/1
+      Log the live and recorded bob every frame (ds_view_use_cl_bob).
   ds_debug_keep_detail_cache 0/1
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
   ds_debug_cloak_instead 0/1
