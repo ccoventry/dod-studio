@@ -102,10 +102,11 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
   // Start Capture Batch's demo checks: picks in a demo with more than one map
   // first, then missing or changed demos (#21). Resolves true to go ahead,
   // false when a demo is missing (capture_pane.js says so), or 'handled' when
-  // this already told the user why not.
-  async function captureDemosReady() {
+  // this already told the user why not. `options.onProgress` counts the
+  // changed-demo check (#953).
+  async function captureDemosReady(options = {}) {
     const multi = pickedMultiMapDemos(getDemos());
-    if (multi.length === 0) return pickedDemosPresent();
+    if (multi.length === 0) return pickedDemosPresent(options);
     const split = await themedConfirm(STRINGS.MAIN.MULTI_MAP_PICKED_MESSAGE, {
       title: STRINGS.MAIN.MULTI_MAP_PICKED_TITLE,
       confirmLabel: STRINGS.MAIN.MULTI_MAP_PICKED_SPLIT,

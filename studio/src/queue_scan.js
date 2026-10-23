@@ -33,11 +33,12 @@ const scanParses = parseClock();
  *   getDemos() the queue (merged into in place), setSelectedDemoIdx(idx),
  *   selectDemoAndRenderDetail(demo, idx), updateDemoFooter(demos),
  *   markProjectDirty(), readScanWorkers(), offerIdenticalCopies(copies,
- *   pickedFiles) from project_demos.js, getScanPaths() the pinned-folder
- *   list (pushed to in place), persistAppSettings(), and
- *   regroupMatches({ within }) from queue_match_groups.js, run after a scan
- *   so {match} and {half} know the new demos (#685), as the last step on the
- *   scan's bar (#951), and getTakeIndex() the project's take index,
+ *   pickedFiles) from project_demos.js, rememberRecentFolder(folder) puts a
+ *   scanned folder at the top of Recent and saves it (#533),
+ *   persistAppSettings(), and regroupMatches({ within })
+ *   from queue_match_groups.js, run after a scan so {match} and {half}
+ *   know the new demos (#685), as the last step on the scan's bar (#951),
+ *   and getTakeIndex() the project's take index,
  *   whose uids follow a rescanned highlight's work (rescan_carry.js).
  */
 export function createQueueScan({
@@ -48,7 +49,7 @@ export function createQueueScan({
   markProjectDirty,
   readScanWorkers,
   offerIdenticalCopies,
-  getScanPaths,
+  rememberRecentFolder = async () => {},
   persistAppSettings,
   regroupMatches = () => {},
   getTakeIndex = () => ({}),
@@ -115,6 +116,14 @@ export function createQueueScan({
     });
   }
 
+  // "Include subfolders" (#531), saved with the settings when changed.
+  const subfoldersBox = document.querySelector('#scan-include-subfolders');
+  const includeSubfolders = () => subfoldersBox?.checked ?? true;
+  subfoldersBox?.addEventListener('change', () => persistAppSettings());
+
+  // A scan is running: the buttons are disabled, and a drop waits (#530).
+  let scanning = false;
+
   // Cancel stopped the last scan before it added anything (e.g. while it
   // was still listing a whole drive's folders, #843).
   let lastScanAddedNothingCancelled = false;
@@ -136,6 +145,7 @@ export function createQueueScan({
   // and leaves the job's end to its owner. Otherwise it is its own job.
   async function triggerAutoScan(pathsToScan, { pickedFiles = false, within = null } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
+    scanning = true;
     lastScanAddedNothingCancelled = false;
     cancelling = false;
 
@@ -171,7 +181,7 @@ export function createQueueScan({
       const known = getDemos()
         .filter(scanIsCurrent)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const outcome = await scanDirectory(pathsToScan, known, readScanWorkers());
+      const outcome = await scanDirectory(pathsToScan, known, readScanWorkers(), includeSubfolders());
       const {
         demos: scanned, unchanged, copies: unparsedCopies = [], cancelled = false,
       } = outcome;
@@ -237,6 +247,8 @@ export function createQueueScan({
       if (cancelled) showToast(STRINGS.MAIN.scanCancelledToast(newlyScanned.length), 'info');
       else showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
       if (carryReport.toast) showToast(carryReport.toast.text, carryReport.toast.type, 10000);
+      // The backend wrote the activity log's line (#531).
+      if (outcome.cap?.depth || outcome.cap?.entries) showToast(STRINGS.MAIN.scanCapToast(outcome.cap), 'warning', 12000);
       const selectedDemoIdx = newlyScanned.length > 0
         ? getDemos().indexOf(newlyScanned[0])
         : (getDemos().length > 0 ? 0 : null);
@@ -278,6 +290,7 @@ export function createQueueScan({
       endLine = STRINGS.MAIN.scanErrorStatus(err);
       return false;
     } finally {
+      scanning = false;
       if (addFilesBtn) addFilesBtn.disabled = false;
       if (addFolderBtn) addFolderBtn.disabled = false;
       if (cancelScanBtnInner) cancelScanBtnInner.disabled = true;
@@ -312,19 +325,14 @@ export function createQueueScan({
   // Shared by + Add Folder and the Setup window's demo step (#599).
   async function addDemoFolder(folder) {
     // Always scan (#432): a folder added before, then emptied from the
-    // list (bin icon, Clear All), used to be a silent no-op here.
-    // scanPaths only decides whether to remember it, and a folder that
-    // turned out not to exist is not remembered. The merge in
-    // triggerAutoScan replaces demos by path, so a re-scan adds no
-    // duplicate rows. A scan cancelled before it added anything does not
-    // remember the folder: a drive root the user gave up on would be
-    // walked again by every list that reads the pinned folders.
+    // list (bin icon, Clear All), used to be a silent no-op here. The merge
+    // in triggerAutoScan replaces demos by path, so a re-scan adds no
+    // duplicate rows. The folder goes into Recent, not the pinned list
+    // (#533): pinning is the user's own choice. A folder that turned out
+    // not to exist, or a scan cancelled before it added anything (a drive
+    // root the user gave up on), is not remembered.
     const scanned = await triggerAutoScan([folder]);
-    if (scanned && !lastScanAddedNothingCancelled && !getScanPaths().includes(folder)) {
-      getScanPaths().push(folder);
-      markProjectDirty();
-      await persistAppSettings();
-    }
+    if (scanned && !lastScanAddedNothingCancelled) await rememberRecentFolder(folder);
   }
 
   // Native Demo Folder Ingestion (+ Add Folder)
@@ -345,5 +353,16 @@ export function createQueueScan({
     });
   }
 
-  return { triggerAutoScan, addDemoFolder };
+  // Demos and folders dropped from Windows (#530): one scan, as + Add Demo
+  // Files and + Add Folder would. Dropped files count as picked by hand, so
+  // a copy of a queued demo is offered in its place (#477); the folders go
+  // into Recent like + Add Folder's.
+  async function addDroppedPaths(files, folders) {
+    const scanned = await triggerAutoScan([...files, ...folders], { pickedFiles: files.length > 0 });
+    if (!scanned || lastScanAddedNothingCancelled) return;
+    // Last to first, so the first folder dropped ends up on top of Recent.
+    for (const folder of [...folders].reverse()) await rememberRecentFolder(folder);
+  }
+
+  return { triggerAutoScan, addDemoFolder, addDroppedPaths, isScanning: () => scanning };
 }

@@ -6,7 +6,7 @@
 // and its Make a movie copy… button opens movie_copy_ui.js's dialog (#939).
 import { STRINGS } from './strings.js';
 import { escapeHtml } from './html.js';
-import { languageFileNote, languageFileButton } from './game_folder.js';
+import { languageFileNote, languageFileButton, isListedFolder, gameFolderOptions } from './game_folder.js';
 import {
   SETUP_STEPS,
   defaultDemoFolder,
@@ -99,13 +99,19 @@ export function createSetupWindow(deps) {
       ? `<div class="setup-note warn" id="setup-hl-language-warning">${escapeHtml(languageNote)}${languageButton
         ? `<div class="setup-btn-row setup-note-actions"><button type="button" id="setup-hl-language-show">${escapeHtml(languageButton)}</button></div>` : ''}</div>`
       : '';
+    // The saved Game Folder isn't beside this hl.exe (an install switched
+    // by Browse): Configuration's own line for it, not a language warning.
+    const folders = snap.gameFolders || [];
+    const folderWarn = folders.length && !isListedFolder(folders, snap.gameFolder)
+      ? `<div class="setup-note warn" id="setup-hl-folder-missing">${escapeHtml(STRINGS.CAPTURE_CONFIG.gameFolderMissing(snap.gameFolder || 'dod'))}</div>`
+      : '';
     return `<p>${escapeHtml(S.HL_INTRO)}</p>${movieCopyButton(snap)}
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
       <div class="setup-field">
         <div class="setup-field-label">${escapeHtml(S.HL_FIELD)} ${exeStatus(snap.hlPath, snap.hlState, S.HL_FOUND, EXE_NAMES.hl)} ${build}</div>
         ${pathRow(snap.hlPath, 'setup-hl-browse', S.BROWSE)}
       </div>
-      ${gameFolderField(snap)}${playWarn}${languageWarn}`;
+      ${gameFolderField(snap)}${folderWarn}${playWarn}${languageWarn}`;
   }
 
   // Make a movie copy (#939): once hl.exe is found with a dod beside it.
@@ -121,8 +127,10 @@ export function createSetupWindow(deps) {
     const current = snap.gameFolder || 'dod';
     const folders = snap.gameFolders || [];
     const select = folders.length
-      ? `<select id="setup-game-folder">${folders.map((f) =>
-          `<option value="${escapeHtml(f)}"${f.toLowerCase() === current.toLowerCase() ? ' selected' : ''}>${escapeHtml(f)}</option>`).join('')}</select>`
+      // A saved folder that isn't there shows as such, as in Configuration.
+      ? `<select id="setup-game-folder">${gameFolderOptions(folders, current).map((o) =>
+          `<option value="${escapeHtml(o.value)}"${o.selected ? ' selected' : ''}>${escapeHtml(o.missing
+            ? STRINGS.CAPTURE_CONFIG.gameFolderNotFoundOption(o.value) : o.value)}</option>`).join('')}</select>`
       : `<span class="setup-path empty">${escapeHtml(S.GAME_FOLDER_NONE)}</span>`;
     return `<div class="setup-field">
         <div class="setup-field-label">${escapeHtml(S.GAME_FOLDER_FIELD)}</div>

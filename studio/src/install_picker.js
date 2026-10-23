@@ -147,6 +147,13 @@ export function createInstallPicker({ persist }) {
   const dropdown = createSearchableSelect(box, {
     noMatch: STRINGS.CAPTURE_CONFIG.INSTALL_NO_MATCH,
     onPick: (value) => { switchTo(value); },
+    // "Show hidden installs" lasts while the list is open: opened again, it
+    // is the short list, so hidden installs stay out of the way.
+    onOpen: () => {
+      if (!showHidden) return;
+      showHidden = false;
+      render();
+    },
   });
   box.placeholder = STRINGS.CAPTURE_CONFIG.INSTALL_NONE;
   box.title = STRINGS.CAPTURE_CONFIG.INSTALL_PICKER_TITLE;

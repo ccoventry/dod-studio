@@ -4,8 +4,8 @@
   line and bar from index.html, with Tauri's IPC mocked (vite.config.e2e.js).
   `scan_directory` stays pending until a test calls
   `window.__finishScan(outcome)`; `window.__addDemoFolder(folder)` is + Add
-  Folder after its picker, and `window.__scanPaths` the remembered folders.
-  The scan's grouping step is the real queue_match_groups.js, whose
+  Folder after its picker, and `window.__recent` the Recent folders it fills
+  (#533). The scan's grouping step is the real queue_match_groups.js, whose
   `queue_match_groups` stays pending until `window.__finishGrouping()` (#951).
 -->
 <html lang="en">
@@ -17,6 +17,7 @@
 <body>
   <button id="add-files-btn">+ Add Demo Files</button>
   <button id="add-folder-btn">+ Add Folder</button>
+  <input type="checkbox" id="scan-include-subfolders" checked />
   <button id="cancel-scan-btn" disabled>Cancel Scan</button>
   <span id="scan-spinner" style="display: none;"></span>
   <p id="scan-status">Ready</p>
@@ -33,9 +34,9 @@
       new Promise((resolve) => { window.__finishGrouping = () => resolve({ demos: [], matches: [] }); });
 
     const demos = [];
-    window.__scanPaths = [];
+    window.__recent = [];
     const { regroup } = createQueueMatchGroups({ getDemos: () => demos, renderQueue: () => {} });
-    const { addDemoFolder } = createQueueScan({
+    const { addDemoFolder, addDroppedPaths } = createQueueScan({
       getDemos: () => demos,
       setSelectedDemoIdx: () => {},
       selectDemoAndRenderDetail: () => {},
@@ -43,11 +44,12 @@
       markProjectDirty: () => {},
       readScanWorkers: () => 2,
       offerIdenticalCopies: async () => {},
-      getScanPaths: () => window.__scanPaths,
-      persistAppSettings: async () => {},
+      rememberRecentFolder: async (f) => { window.__recent.unshift(f); },
+      persistAppSettings: async () => { window.__saves = (window.__saves || 0) + 1; },
       regroupMatches: (opts) => regroup(opts),
     });
     window.__addDemoFolder = addDemoFolder;
+    window.__addDropped = addDroppedPaths;
     window.__harnessReady = true;
   </script>
 </body>

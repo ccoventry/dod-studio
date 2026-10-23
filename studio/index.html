@@ -91,7 +91,8 @@
 
         <!-- Left / Top Split Pane: Workspace Setup & Master Demo Queue -->
         <section id="pane-workspace" class="content-pane">
-          <div class="egui-panel">
+          <!-- #scan-panel and #master-pane take dropped demos and folders: demo_drop.js (#530) -->
+          <div id="scan-panel" class="egui-panel">
             <div class="panel-header">
               <h3 data-str="WORKSPACE.SCAN_PANEL_TITLE">Directory Scan & Management</h3>
             </div>
@@ -99,6 +100,10 @@
               <div class="row-inputs">
                 <button id="add-files-btn" data-str="WORKSPACE.ADD_FILES_BUTTON">+ Add Demo Files</button>
                 <button id="add-folder-btn" data-str="WORKSPACE.ADD_FOLDER_BUTTON">+ Add Folder</button>
+                <label class="scan-subfolders" data-str-title="WORKSPACE.INCLUDE_SUBFOLDERS_TITLE" title="Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.">
+                  <input type="checkbox" id="scan-include-subfolders" checked />
+                  <span data-str="WORKSPACE.INCLUDE_SUBFOLDERS_LABEL">Include subfolders</span>
+                </label>
                 <button id="cancel-scan-btn" disabled data-str="WORKSPACE.CANCEL_SCAN_BUTTON" data-str-title="WORKSPACE.CANCEL_SCAN_TITLE">Cancel Scan</button>
               </div>
               <div class="scan-status-row">
@@ -583,11 +588,20 @@
               <div class="input-row" style="margin-bottom: 12px;">
                 <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
                 <select id="command-profile-select"><option value="">—</option></select>
+                <!-- #911: shown while a built-in profile is picked. -->
+                <span id="command-profile-builtin-chip" class="profile-builtin-chip" hidden data-str="CAPTURE_CONFIG.PROFILE_BUILTIN_CHIP" data-str-title="CAPTURE_CONFIG.PROFILE_BUILTIN_TITLE">Built-in</span>
                 <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
                 <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
                 <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
+                <button id="command-profile-duplicate" disabled data-str="CAPTURE_CONFIG.PROFILE_DUPLICATE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DUPLICATE_TITLE">Duplicate</button>
                 <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
                 <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
+              </div>
+              <!-- #911: once, for a changed copy of a built-in profile that was
+                   kept under a new name. -->
+              <div id="command-profile-notice" class="profile-notice" hidden>
+                <span data-notice-text></span>
+                <button data-notice-ok data-str="CAPTURE_CONFIG.PROFILE_NOTICE_OK">OK</button>
               </div>
               <div class="input-row">
                 <strong data-str="CAPTURE_CONFIG.INIT_COMMANDS_LABEL">Initial Commands (run once at demo load):</strong>
@@ -761,6 +775,7 @@
                 <button id="players-refresh-btn" data-str="PLAYERS.REFRESH_BUTTON" data-str-title="PLAYERS.REFRESH_TITLE">Refresh</button>
               </div>
               <div id="players-players-status" class="players-status"></div>
+              <div id="players-players-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               <div id="players-list" class="players-list"></div>
               <div id="players-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 12px;">
@@ -1591,6 +1606,7 @@
                 <button id="ov-save-btn" class="primary" data-str="OVERVIEWS.SAVE_BUTTON">Save overview</button>
                 <button id="ov-reset-btn" data-str="OVERVIEWS.RESET_BUTTON">Start over</button>
                 <p id="ov-save-status" class="hd-hint"></p>
+                <div id="ov-save-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               </div>
             </div>
           </div>
@@ -1850,6 +1866,7 @@
         <ol id="combine-list" class="combine-list"></ol>
         <p id="combine-plan" class="combine-plan"></p>
         <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <p id="combine-status" class="combine-plan" aria-live="polite"></p>
         <div class="combine-actions">
           <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
           <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>

@@ -114,4 +114,39 @@ describe('queue_progress (#951)', () => {
     progress.end(regroup);
     expect(doc.line()).toBe('Done in 2.0 s: 4 demos added');
   });
+
+  it('a job that takes the line gives it back to the one it took it from (#958)', () => {
+    vi.useFakeTimers();
+    const doc = fakeDoc('Ready');
+    const progress = createQueueProgress({ doc });
+    const grouping = progress.begin({ ifIdle: true, text: 'Grouping by match: 0 of 0' });
+    vi.advanceTimersByTime(3_000);
+    const search = progress.begin({ text: 'Looking for 3 missing demos…' });
+    expect(doc.line()).toBe('Looking for 3 missing demos… · 0:00');
+    // The grouping carries on under it; its line is kept, not drawn.
+    progress.show(grouping, { text: 'Grouping by match: 5 of 40', pct: 12.5, indeterminate: false });
+    expect(doc.line()).toBe('Looking for 3 missing demos… · 0:00');
+    expect(doc.bar().sliding).toBe(true);
+    expect(progress.ms(grouping)).toBe(3_000);
+
+    progress.end(search);
+    expect(doc.line()).toBe('Grouping by match: 5 of 40 · 0:03');
+    expect(doc.bar()).toEqual({ hidden: false, sliding: false, width: '12.5%' });
+    expect(doc.spinner()).toBe('inline-block');
+    progress.end(grouping);
+    expect(doc.line()).toBe('Ready');
+    expect(doc.bar().hidden).toBe(true);
+  });
+
+  it('a job under another that ends meanwhile leaves its last line for the end', () => {
+    const doc = fakeDoc('Ready');
+    const progress = createQueueProgress({ doc });
+    const scan = progress.begin();
+    const split = progress.begin({ text: 'Splitting a.dem' });
+    progress.end(scan, 'Done in 2.0 s: 4 demos added');
+    expect(doc.line()).toBe('Splitting a.dem · 0:00');
+    progress.end(split);
+    expect(doc.line()).toBe('Done in 2.0 s: 4 demos added');
+    expect(doc.spinner()).toBe('none');
+  });
 });
