@@ -1,43 +1,65 @@
 //! `ds_view_use_cl_bob`: a POV demo bobs the view and the gun by the `cl_bob`,
-//! `cl_bobcycle` and `cl_bobup` set now (#359). Off (0), a POV demo shows the
-//! bob it recorded, the recording player's own, whatever `cl_bob` says here:
-//! about 13 of 20 POV demos from different recorders carry one, the rest
-//! were recorded with none.
+//! `cl_bobcycle` and `cl_bobup` set now (#359), the way live play and an
+//! HLTV demo watched in first person do. Off (0), a POV demo shows the bob it
+//! recorded, the recording player's own, whatever `cl_bob` says here: 15 of
+//! the 24 players in the `solifotw-*` demos recorded with DoD's default
+//! `cl_bob 0.005`, the rest with none.
 //!
 //! ## What the engine does
 //!
-//! `client.dll`'s `V_CalcRefdef` works the bob out live in every demo: the
-//! view moves sideways by `bob` along `right`, and the gun by `0.4 * bob`
-//! along `forward` and `bob` up, where `bob` comes from `cl_bob`,
-//! `cl_bobcycle`, `cl_bobup` and the player's speed (`V_CalcBob`). Logged in
-//! a POV demo, its output followed `cl_bob` (0.01 against 0.1: a sideways
-//! offset of 1-2 units against up to the -7/+4 clamp).
+//! `client.dll`'s `V_CalcNormalRefdef` (`+0x4f430`, the same file in both
+//! installs) works the bob out live in every demo: `V_CalcBob` (`+0x4ed10`)
+//! gives `bob` from `cl_bob`, `cl_bobcycle`, `cl_bobup` and the player's
+//! speed, clamped to -7..+4. Then DoD, unlike the Half-Life SDK, moves the
+//! view sideways by `bob` along `right` and nothing up; the gun by `0.4 * bob`
+//! along `forward` and nothing up or sideways; and tilts the gun by
+//! `0.3 * bob` pitch, `0.5 * bob` yaw and `bob` roll, all subtracted. The
+//! recorded gun of four players who recorded with a bob agrees: it moves
+//! 0.39-0.43 x bob forward and -0.03..-0.06 x bob up (#889).
 //!
 //! But in POV playback `V_RenderView` throws that away: right after
 //! `ClientDLL_CalcRefdef` it calls the demo view override (pre-Anniversary
 //! `hw.dll+0xd75d`, 25th Anniversary `+0x198e90`; `playdemo` and `viewdemo`
 //! alike), which copies the recorded `ref_params_s` over the live one and
-//! puts the gun at the recorded position. Both carry the recorder's bob, not
-//! ours: on wsod25_grp2_h1_m00cat, recorded with no bob, the recorded
-//! `vieworg` sits exactly at `simorg + viewheight + 1/32` on every frame, and
-//! the recorded gun height never moves. So changing `cl_bob` does nothing. HLTV demos skip the
-//! override (the engine's spectator flag), which is why the cvar works there.
+//! puts the gun at the recorded position; the engine then sets the gun's
+//! angles from the recorded view angles alone. So the view and gun carry the
+//! recorder's bob, the gun's tilt is lost even for recorders who had one, and
+//! changing `cl_bob` does nothing. HLTV demos skip the override (the engine's
+//! spectator flag), which is why the cvars work there.
 //!
 //! ## The change
 //!
 //! With this on, the call to the override goes through [`after_override`]:
 //! once the recorded view is in place, the recorded bob is measured from it
 //! (the sideways part of `vieworg - simorg - viewheight`, which is all
-//! `V_CalcRefdef` adds there besides a fixed 1/32 and screen shake; zero in
-//! the demos measured) and replaced by the live one [`after_calc_refdef`]
-//! measured the same way a moment earlier. The camera and the gun move by the
-//! difference, so the recorded path, its smoothing and everything else in the
-//! view stay as recorded. The gun's bob tilt stays out: the override sets the
-//! gun's angles from the view angles alone, so a POV demo has never shown it.
+//! `V_CalcRefdef` adds there besides a fixed 1/32 and a grenade's screen
+//! shake, which `screen_effects::unshake` takes out first when
+//! `ds_view_hide_screen_shake` is on) and replaced by the live one [`after_calc_refdef`]
+//! measured the same way a moment earlier. The camera moves sideways and the
+//! gun forward by the difference, so the recorded path, its smoothing and everything else in the
+//! view stay as recorded. The live tilt is added to the gun's angles in
+//! [`before_view_model`], after the engine has set them and before the gun is
+//! drawn.
+//!
+//! That only holds while the recorded view is the recorder's own living eye.
+//! While the recorder is dead or spectates a teammate in first person,
+//! `vieworg` is someone else's eye and `simorg` still the recorder's body, so
+//! the "bob" measured is a large, changing distance (a median of 2-15 units
+//! on dead frames, past the clamp on half of them, in five demos), and the
+//! live `V_CalcRefdef` has gone through the spectator camera too. [`decide`]
+//! leaves the recorded view alone then: while spectating (`g_iUser1`), dead,
+//! in an intermission, or when either measured bob is outside `V_CalcBob`'s
+//! clamp.
 //!
 //! The call site is found by a byte pattern per build, each unique in its own
-//! `hw.dll`, and redirected only once the setting is first turned on;
+//! `hw.dll`, and redirected only once this setting or
+//! `ds_view_hide_screen_shake` (which shares the call) is first turned on;
 //! `tools/verify_pov_live_bob_offsets.py` re-derives both.
+//!
+//! `ds_debug_log_view_bob 1` logs each frame's numbers: in a POV demo the live
+//! and recorded bob, why a frame was left alone, and where the gun ends up
+//! relative to the camera; in an HLTV demo watched in first person the same
+//! for the view `client.dll` works out live, to compare against.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
@@ -46,6 +68,7 @@ use crate::names::console_name;
 use crate::scan;
 
 pub const NAME: &str = console_name!("view_use_cl_bob");
+pub const LOG_NAME: &str = console_name!("debug_log_view_bob");
 
 /// One build's call to the demo view override in `V_RenderView`.
 struct Site {
@@ -71,51 +94,102 @@ const SITES: &[Site] = &[
     },
 ];
 
-/// `ref_params_s` (`common/ref_params.h`) up to `viewheight`.
+/// `ref_params_s` (`common/ref_params.h`) up to `playernum`.
 #[repr(C)]
-struct View {
-    vieworg: [f32; 3],
-    viewangles: [f32; 3],
-    forward: [f32; 3],
-    right: [f32; 3],
-    up: [f32; 3],
-    frametime: f32,
-    time: f32,
-    intermission: i32,
-    paused: i32,
-    spectator: i32,
-    onground: i32,
-    waterlevel: i32,
-    simvel: [f32; 3],
-    simorg: [f32; 3],
-    viewheight: [f32; 3],
+#[derive(Clone, Copy)]
+pub(crate) struct View {
+    pub vieworg: [f32; 3],
+    pub viewangles: [f32; 3],
+    pub forward: [f32; 3],
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub frametime: f32,
+    pub time: f32,
+    pub intermission: i32,
+    pub paused: i32,
+    pub spectator: i32,
+    pub onground: i32,
+    pub waterlevel: i32,
+    pub simvel: [f32; 3],
+    pub simorg: [f32; 3],
+    pub viewheight: [f32; 3],
+    pub idealpitch: f32,
+    pub cl_viewangles: [f32; 3],
+    pub health: i32,
+    pub crosshairangle: [f32; 3],
+    pub viewsize: f32,
+    pub punchangle: [f32; 3],
+    pub maxclients: i32,
+    pub viewentity: i32,
+    pub playernum: i32,
 }
 
 /// `V_CalcRefdef` adds this to every axis of `vieworg`.
-const NUDGE: f32 = 1.0 / 32.0;
+pub(crate) const NUDGE: f32 = 1.0 / 32.0;
+/// `V_CalcBob`'s clamp (`client.dll+0x4ede0`, `+0x4ee05`), with room for
+/// float error.
+const BOB_MIN: f32 = -7.0 - 0.05;
+const BOB_MAX: f32 = 4.0 + 0.05;
+/// How far along `forward` DoD moves the gun per unit of bob
+/// (`client.dll+0x4f85d`).
+const GUN_FORWARD: f32 = 0.4;
+/// DoD's gun tilt per unit of bob, subtracted from its pitch, yaw and roll
+/// (`client.dll+0x4f86b`..`+0x4f8a1`).
+const GUN_TILT: [f32; 3] = [0.3, 0.5, 1.0];
 
 type OverrideFn = unsafe extern "C" fn(*mut View, *mut [f32; 3], *mut i32);
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static LOG_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 /// The override's own address, once the call is redirected.
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
 /// The bob the live `V_CalcRefdef` worked out this frame, as f32 bits.
 static LIVE_BOB: AtomicU32 = AtomicU32::new(0);
+/// The live view's speed, for the log, as f32 bits.
+static LIVE_SPEED: AtomicU32 = AtomicU32::new(0);
 static HAVE_LIVE: AtomicBool = AtomicBool::new(false);
+/// The live bob whose tilt [`before_view_model`] still has to put on the gun,
+/// as f32 bits, while [`TILT_PENDING`].
+static TILT_BOB: AtomicU32 = AtomicU32::new(0);
+static TILT_PENDING: AtomicBool = AtomicBool::new(false);
+/// The recorded view angles of the frame the tilt is for, for the log.
+static TILT_VIEW_YAW: AtomicU32 = AtomicU32::new(0);
+static TILT_VIEW_ROLL: AtomicU32 = AtomicU32::new(0);
 
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
 
-fn on() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
+pub fn set_log_cvar(cvar: *mut CvarSPartial) {
+    LOG_CVAR.store(cvar, Ordering::Release);
+}
+
+fn cvar_on(cvar: &AtomicPtr<CvarSPartial>) -> bool {
+    let cvar = cvar.load(Ordering::Acquire);
     // Safety: the engine owns the cvar for the session.
     !cvar.is_null() && unsafe { (*cvar).value } != 0.0
 }
 
+fn on() -> bool {
+    cvar_on(&CVAR)
+}
+
+fn logging() -> bool {
+    cvar_on(&LOG_CVAR)
+}
+
+fn log(line: &str) {
+    // Safety: plain file append; the log cvar is a diagnostic.
+    unsafe { crate::debug::report(line) };
+}
+
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn speed_of(view: &View) -> f32 {
+    view.simvel[0].hypot(view.simvel[1])
 }
 
 /// The sideways offset `V_CalcRefdef` put into `vieworg`: its bob.
@@ -124,27 +198,119 @@ fn bob_of(view: &View) -> f32 {
     dot(side, view.right)
 }
 
-/// What [`after_override`] adds to the recorded view and gun for a live bob
-/// of `live`: (camera, gun) offsets.
-fn shift(recorded: &View, live: f32) -> ([f32; 3], [f32; 3]) {
-    let delta = live - bob_of(recorded);
+fn is_a_bob(bob: f32) -> bool {
+    (BOB_MIN..=BOB_MAX).contains(&bob)
+}
+
+/// Why [`after_override`] left a frame's recorded view alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Skip {
+    /// The camera is the spectator's (`g_iUser1`), on someone else.
+    Spectating,
+    Dead,
+    Intermission,
+    /// One of the two measured bobs is bigger than `V_CalcBob` ever gives.
+    NotABob,
+}
+
+impl Skip {
+    fn word(self) -> &'static str {
+        match self {
+            Skip::Spectating => "spectating",
+            Skip::Dead => "dead",
+            Skip::Intermission => "intermission",
+            Skip::NotABob => "not a bob",
+        }
+    }
+}
+
+/// Whether the recorded view is the recorder's own living eye, so its bob can
+/// be swapped for `live`: the recorded bob when it is.
+fn decide(recorded: &View, live: f32, spectating: bool) -> Result<f32, Skip> {
+    if spectating || recorded.spectator != 0 {
+        return Err(Skip::Spectating);
+    }
+    if recorded.intermission != 0 {
+        return Err(Skip::Intermission);
+    }
+    if recorded.health <= 0 {
+        return Err(Skip::Dead);
+    }
+    let bob = bob_of(recorded);
+    if !is_a_bob(bob) || !is_a_bob(live) {
+        return Err(Skip::NotABob);
+    }
+    Ok(bob)
+}
+
+/// What [`after_override`] adds to the recorded view and gun to swap the
+/// recorded bob for `live`: (camera, gun) offsets.
+fn shift(recorded: &View, recorded_bob: f32, live: f32) -> ([f32; 3], [f32; 3]) {
+    let delta = live - recorded_bob;
     let camera = recorded.right.map(|r| r * delta);
-    let mut gun = recorded.forward.map(|f| f * delta * 0.4);
-    gun[2] += delta;
+    let gun = recorded.forward.map(|f| f * delta * GUN_FORWARD);
     (camera, gun)
+}
+
+/// The gun's tilt for a bob of `bob`, added to its pitch, yaw and roll.
+fn tilt(bob: f32) -> [f32; 3] {
+    GUN_TILT.map(|k| -k * bob)
+}
+
+/// The gun relative to the camera, along `forward`, `right` and world up.
+fn gun_from_camera(view: &View, gun: [f32; 3]) -> [f32; 3] {
+    let rel = [0, 1, 2].map(|i| gun[i] - view.vieworg[i]);
+    [dot(rel, view.forward), dot(rel, view.right), rel[2]]
 }
 
 /// Called by `engine.rs` right after `client.dll`'s `V_CalcRefdef`, with the
 /// view it worked out live.
 pub fn after_calc_refdef(params: *const RefParamsPartial) {
-    if params.is_null() || ORIGINAL.load(Ordering::Acquire) == 0 {
+    if params.is_null() {
+        return;
+    }
+    let redirected = ORIGINAL.load(Ordering::Acquire) != 0;
+    let logging = logging();
+    if !redirected && !logging {
         return;
     }
     // Safety: the engine's ref_params_s for this frame, which is at least
     // `View` long.
     let view = unsafe { &*(params as *const View) };
-    LIVE_BOB.store(bob_of(view).to_bits(), Ordering::Relaxed);
+    let bob = bob_of(view);
+    LIVE_BOB.store(bob.to_bits(), Ordering::Relaxed);
+    LIVE_SPEED.store(speed_of(view).to_bits(), Ordering::Relaxed);
     HAVE_LIVE.store(true, Ordering::Relaxed);
+    // An HLTV demo watched in someone's eyes: the live view is the drawn one,
+    // the reference the POV numbers are compared with.
+    if logging
+        && view.spectator != 0
+        && let Some(target) = crate::spectator_target::in_eye_target()
+    {
+        log_hltv(view, bob, target);
+    }
+}
+
+fn log_hltv(view: &View, bob: f32, target: i32) {
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    // Safety: the engine's own viewmodel entity, placed by V_CalcRefdef.
+    let viewmodel = unsafe { (engfuncs.get_view_model)() };
+    if viewmodel.is_null() {
+        return;
+    }
+    let (origin, angles) = unsafe { ((*viewmodel).origin, (*viewmodel).angles) };
+    let [f, r, u] = gun_from_camera(view, [origin.x, origin.y, origin.z]);
+    log(&format!(
+        "{LOG_NAME}: hltv t {:.3} player {target} speed {:.0} onground {} bob {bob:+.3} gun f {f:+.3} r {r:+.3} u {u:+.3} \
+         gun yaw-view {:+.3} roll-view {:+.3}",
+        view.time,
+        speed_of(view),
+        view.onground,
+        angles.y - view.viewangles[1],
+        angles.z - view.viewangles[2],
+    ));
 }
 
 /// Stands in for the engine's demo view override at its one call site.
@@ -152,19 +318,91 @@ unsafe extern "C" fn after_override(view: *mut View, gun: *mut [f32; 3], viewmod
     let original = ORIGINAL.load(Ordering::Acquire);
     // Safety: the address the call went to before it was redirected.
     let original: OverrideFn = unsafe { std::mem::transmute(original) };
+    // Safety: the engine's ref_params_s, still holding the live view.
+    let live = (!view.is_null()).then(|| unsafe { *view });
     unsafe { original(view, gun, viewmodel) };
-    if view.is_null() || gun.is_null() || !on() || !HAVE_LIVE.swap(false, Ordering::Relaxed) {
+    TILT_PENDING.store(false, Ordering::Relaxed);
+    if view.is_null() || gun.is_null() {
+        return;
+    }
+    if let Some(live) = live {
+        // Safety: as below.
+        unsafe { crate::screen_effects::unshake(&live, &mut *view, &mut *gun) };
+    }
+    if !on() || !HAVE_LIVE.swap(false, Ordering::Relaxed) {
         return;
     }
     let live = f32::from_bits(LIVE_BOB.load(Ordering::Relaxed));
+    let spectating = crate::spectator_target::mode().is_some_and(|mode| mode != 0);
     // Safety: the engine's ref_params_s and the gun entity's origin, both
     // live for this call.
-    unsafe {
-        let (camera, gun_shift) = shift(&*view, live);
+    let (view, gun) = unsafe { (&mut *view, &mut *gun) };
+    let decision = decide(view, live, spectating);
+    if let Ok(recorded) = decision {
+        let (camera, gun_shift) = shift(view, recorded, live);
         for i in 0..3 {
-            (*view).vieworg[i] += camera[i];
-            (*gun)[i] += gun_shift[i];
+            view.vieworg[i] += camera[i];
+            gun[i] += gun_shift[i];
         }
+        TILT_BOB.store(live.to_bits(), Ordering::Relaxed);
+        TILT_VIEW_YAW.store(view.viewangles[1].to_bits(), Ordering::Relaxed);
+        TILT_VIEW_ROLL.store(view.viewangles[2].to_bits(), Ordering::Relaxed);
+        TILT_PENDING.store(true, Ordering::Relaxed);
+    }
+    if logging() {
+        let [f, r, u] = gun_from_camera(view, *gun);
+        let action = match decision {
+            Ok(recorded) => format!("swapped, recorded bob {recorded:+.3}"),
+            Err(why) => format!(
+                "left alone ({}), recorded bob {:+.3}",
+                why.word(),
+                bob_of(view)
+            ),
+        };
+        log(&format!(
+            "{LOG_NAME}: pov t {:.3} speed {:.0} (live {:.0}) onground {} health {} g_iUser1 {} \
+             live bob {live:+.3}, {action}; gun f {f:+.3} r {r:+.3} u {u:+.3}",
+            view.time,
+            speed_of(view),
+            f32::from_bits(LIVE_SPEED.load(Ordering::Relaxed)),
+            view.onground,
+            view.health,
+            crate::spectator_target::mode().unwrap_or(-1),
+        ));
+    }
+}
+
+/// Puts the live bob's tilt on the gun of a POV demo, once the engine has set
+/// its angles from the recorded view and before it is drawn. Called from
+/// `HUD_DrawTransparentTriangles`, which the engine runs before
+/// `R_DrawViewModel`; once per [`after_override`] that swapped the bob.
+pub fn before_view_model() {
+    if !TILT_PENDING.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    // Safety: the engine's own viewmodel entity, valid for the frame.
+    let viewmodel = unsafe { (engfuncs.get_view_model)() };
+    if viewmodel.is_null() {
+        return;
+    }
+    let bob = f32::from_bits(TILT_BOB.load(Ordering::Relaxed));
+    let [pitch, yaw, roll] = tilt(bob);
+    // Safety: as above; the renderer reads these next.
+    let entity = unsafe { &mut *viewmodel };
+    for angles in [&mut entity.angles, &mut entity.curstate.angles] {
+        angles.x += pitch;
+        angles.y += yaw;
+        angles.z += roll;
+    }
+    if logging() {
+        log(&format!(
+            "{LOG_NAME}: pov tilt bob {bob:+.3} gun yaw-view {:+.3} roll-view {:+.3}",
+            entity.angles.y - f32::from_bits(TILT_VIEW_YAW.load(Ordering::Relaxed)),
+            entity.angles.z - f32::from_bits(TILT_VIEW_ROLL.load(Ordering::Relaxed)),
+        ));
     }
 }
 
@@ -199,16 +437,20 @@ fn redirect() -> Result<&'static str, String> {
     ))
 }
 
-/// Redirects the call the first time the setting is on. Every frame.
+/// Redirects the call the first time this setting or
+/// `ds_view_hide_screen_shake` is on. Every frame.
 pub fn poll() {
-    if ORIGINAL.load(Ordering::Acquire) != 0 || GAVE_UP.load(Ordering::Relaxed) || !on() {
+    if ORIGINAL.load(Ordering::Acquire) != 0
+        || GAVE_UP.load(Ordering::Relaxed)
+        || !(on() || crate::screen_effects::shake_on())
+    {
         return;
     }
     let line = match redirect() {
-        Ok(build) => format!("{NAME}: on ({build} hw.dll)"),
+        Ok(build) => format!("demo view override redirected ({build} hw.dll)"),
         Err(why) => {
             GAVE_UP.store(true, Ordering::Relaxed);
-            format!("{NAME}: {why}")
+            format!("{NAME}, {}: {why}", crate::screen_effects::SHAKE_NAME)
         }
     };
     unsafe { crate::debug::report(&line) };
@@ -235,27 +477,111 @@ mod tests {
             simvel: [0.0; 3],
             simorg,
             viewheight: [0.0, 0.0, 22.0],
+            idealpitch: 0.0,
+            cl_viewangles: [0.0; 3],
+            health: 100,
+            crosshairangle: [0.0; 3],
+            viewsize: 120.0,
+            punchangle: [0.0; 3],
+            maxclients: 32,
+            viewentity: 3,
+            playernum: 2,
         }
+    }
+
+    /// A living recorder's view with a recorded sideways bob of `bob`.
+    fn bobbing(bob: f32) -> View {
+        view([NUDGE, -bob + NUDGE, 22.0 + NUDGE], [0.0; 3])
+    }
+
+    #[test]
+    fn the_view_is_as_long_as_ref_params_up_to_playernum() {
+        assert_eq!(std::mem::offset_of!(View, health), 0x8c);
+        assert_eq!(std::mem::offset_of!(View, viewentity), 0xb0);
+        assert_eq!(std::mem::size_of::<View>(), 0xb8);
     }
 
     #[test]
     fn the_bob_is_the_sideways_part_of_the_eye_offset() {
-        // Moved 2 units along `right` (-y), plus the fixed nudge.
-        let v = view([NUDGE, -2.0 + NUDGE, 22.0 + NUDGE], [0.0; 3]);
-        assert!((bob_of(&v) - 2.0).abs() < 1e-5);
+        assert!((bob_of(&bobbing(2.0)) - 2.0).abs() < 1e-5);
     }
 
     #[test]
-    fn the_view_and_gun_move_by_the_live_minus_the_recorded_bob() {
-        let recorded = view([NUDGE, -1.0 + NUDGE, 22.0 + NUDGE], [0.0; 3]);
-        let (camera, gun) = shift(&recorded, 3.0);
+    fn the_camera_moves_sideways_and_the_gun_forward_only() {
+        let recorded = bobbing(1.0);
+        let (camera, gun) = shift(&recorded, bob_of(&recorded), 3.0);
         assert!((camera[1] + 2.0).abs() < 1e-5, "{camera:?}");
-        assert!(
-            (gun[0] - 0.8).abs() < 1e-5 && (gun[2] - 2.0).abs() < 1e-5,
-            "{gun:?}"
-        );
-        let (camera, gun) = shift(&recorded, 1.0);
+        // DoD's gun has no vertical bob, unlike the Half-Life SDK's.
+        assert!((gun[0] - 0.8).abs() < 1e-5, "{gun:?}");
+        assert!(gun[1].abs() < 1e-5 && gun[2].abs() < 1e-5, "{gun:?}");
+        let (camera, gun) = shift(&recorded, bob_of(&recorded), 1.0);
         assert!(camera.iter().chain(&gun).all(|v| v.abs() < 1e-5));
+    }
+
+    #[test]
+    fn the_gun_tilts_as_dod_tilts_it() {
+        let [pitch, yaw, roll] = tilt(2.0);
+        assert!(
+            (pitch + 0.6).abs() < 1e-5 && (yaw + 1.0).abs() < 1e-5 && (roll + 2.0).abs() < 1e-5
+        );
+    }
+
+    #[test]
+    fn a_living_recorders_own_view_is_swapped() {
+        let recorded = bobbing(0.5);
+        let got = decide(&recorded, 1.5, false).expect("swapped");
+        assert!((got - 0.5).abs() < 1e-5);
+        // In the air V_CalcBob keeps its last bob, recorded and live alike.
+        let mut airborne = bobbing(0.5);
+        airborne.onground = 0;
+        assert!(decide(&airborne, 1.5, false).is_ok());
+        // Both ends of the clamp are still a bob.
+        assert!(decide(&bobbing(-7.0), 4.0, false).is_ok());
+    }
+
+    #[test]
+    fn spectating_a_teammate_leaves_the_recorded_view_alone() {
+        // In-eye on a teammate 40 units to the side of the recorder's body:
+        // well inside the clamp is no proof, the camera mode decides.
+        let teammate = view([0.0, -3.0 + NUDGE, 22.0 + NUDGE], [0.0; 3]);
+        assert_eq!(decide(&teammate, 1.0, true), Err(Skip::Spectating));
+        let mut hltv = bobbing(0.5);
+        hltv.spectator = 1;
+        assert_eq!(decide(&hltv, 1.0, false), Err(Skip::Spectating));
+    }
+
+    #[test]
+    fn a_dead_recorder_is_left_alone() {
+        for health in [0, -40] {
+            let mut dead = bobbing(0.5);
+            dead.health = health;
+            assert_eq!(decide(&dead, 1.0, false), Err(Skip::Dead));
+        }
+    }
+
+    #[test]
+    fn an_intermission_is_left_alone() {
+        let mut over = bobbing(0.5);
+        over.intermission = 1;
+        assert_eq!(decide(&over, 1.0, false), Err(Skip::Intermission));
+    }
+
+    #[test]
+    fn anything_past_the_clamp_is_not_a_bob() {
+        // The recorded eye 40 units from the recorder's body.
+        assert_eq!(decide(&bobbing(40.0), 1.0, false), Err(Skip::NotABob));
+        assert_eq!(decide(&bobbing(-7.5), 1.0, false), Err(Skip::NotABob));
+        assert_eq!(decide(&bobbing(4.5), 1.0, false), Err(Skip::NotABob));
+        // A live view that isn't the player's own eye either.
+        assert_eq!(decide(&bobbing(0.5), -25.0, false), Err(Skip::NotABob));
+        assert_eq!(decide(&bobbing(0.5), f32::NAN, false), Err(Skip::NotABob));
+    }
+
+    #[test]
+    fn the_gun_is_measured_from_the_camera() {
+        let v = bobbing(0.0);
+        let [f, r, u] = gun_from_camera(&v, [2.0 + NUDGE, -1.0 + NUDGE, 21.0 + NUDGE]);
+        assert!((f - 2.0).abs() < 1e-5 && (r - 1.0).abs() < 1e-5 && (u + 1.0).abs() < 1e-5);
     }
 
     #[test]

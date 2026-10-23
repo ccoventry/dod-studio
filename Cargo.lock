@@ -1841,6 +1841,8 @@ version = "0.10.0"
 dependencies = [
  "analysis",
  "clap",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
