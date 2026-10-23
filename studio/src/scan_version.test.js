@@ -62,6 +62,7 @@ describe('the rescan offer on opening a project', () => {
     const [message, options] = themedConfirm.mock.calls[0];
     expect(message).toMatch(/^2\/3 demos in this project were scanned with an older DoD Studio\. Rescan them now\?/);
     expect(message).toContain('marks, notes, status and kill ranges are carried over');
+    expect(message).toContain('usually takes a few seconds; a demo that has to be read again in full takes about 2 seconds');
     // What "Not now" does sits with the question, above the long list.
     expect(message).toContain('Press “Not now” to leave them as they are');
     expect(options.footer).toBeUndefined();

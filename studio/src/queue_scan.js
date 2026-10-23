@@ -55,12 +55,8 @@ export function createQueueScan({
   // line says so instead of a toast, so it isn't followed a moment later by
   // the cancelled one (#843).
   let cancelling = false;
-  // The scan's latest progress event, for the cached/parsed split its end
-  // line in the activity log gives (#926).
-  let lastProgress = null;
   listen('scan_progress', (event) => {
     const p = event.payload || {};
-    lastProgress = p;
     const scanStatusEl = document.querySelector('#scan-status');
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
     showScanBar(p);
@@ -160,7 +156,6 @@ export function createQueueScan({
     scanBarShown(true);
     if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
     scanParses.reset();
-    lastProgress = null;
     const startedAt = Date.now();
     logFrontendEvent(STRINGS.SCAN_PROGRESS.startLog(pathsToScan.length));
     showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
@@ -175,9 +170,10 @@ export function createQueueScan({
       const known = getDemos()
         .filter(scanIsCurrent)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
+      const outcome = await scanDirectory(pathsToScan, known, readScanWorkers());
       const {
         demos: scanned, unchanged, copies: unparsedCopies = [], cancelled = false,
-      } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      } = outcome;
       lastScanAddedNothingCancelled = cancelled && scanned.length === 0;
       // An identical copy under another name would be a second row for the
       // same demo, capturing every highlight twice (#21). The scan skips them
@@ -222,8 +218,7 @@ export function createQueueScan({
         ms: Date.now() - startedAt,
         read: scanned.length,
         unchanged,
-        progress: lastProgress,
-        parseMs: lastProgress ? scanParses.elapsed(lastProgress.scanned, lastProgress.cached) : 0,
+        outcome,
       }));
       const carryReport = rescanReport(rescans);
       carryReport.log.forEach((line) => logFrontendEvent(line));

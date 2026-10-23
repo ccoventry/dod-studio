@@ -1574,6 +1574,7 @@ export const STRINGS = {
     outdatedDemosMessage: (n, total = n) => {
       const which = n < total ? `${n}/${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
       return `${which} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over. `
+        + 'It usually takes a few seconds; a demo that has to be read again in full takes about 2 seconds. '
         + `Press “Not now” to leave ${n === 1 ? 'it' : 'them'} as ${n === 1 ? 'it is' : 'they are'}; you'll be asked again the next time you open the project.`;
     },
     OUTDATED_DEMOS_RESCAN: 'Rescan',
@@ -2495,7 +2496,7 @@ export const STRINGS = {
     // times, so how long a rescan takes can be measured (#926).
     startLog: (paths) => `[scan] started: ${paths} path(s) to read`,
     endLog: (outcome, seconds, read, unchanged) => `[scan] ${outcome} after ${seconds} s: ${read} demo(s) read, ${unchanged} unchanged`,
-    endLogSplit: (cached, parsed, parseSeconds) => ` (${cached} from the analyzer cache, ${parsed} parsed${parsed > 0 ? ` in ${parseSeconds} s` : ''})`,
+    endLogSplit: (cached, notCached, seconds) => ` (${cached} from the analyzer cache, ${notCached} not${notCached > 0 ? `: those took ${seconds} s` : ''})`,
     failedLog: (seconds, err) => `[scan] failed after ${seconds} s: ${err}`,
   },
 

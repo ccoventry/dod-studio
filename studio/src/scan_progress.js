@@ -32,17 +32,19 @@ const secs = (ms) => (Math.max(0, ms) / 1000).toFixed(1);
 
 /**
  * The activity log's line for a finished or cancelled scan: how long it
- * took, how many demos it read and how many it skipped as unchanged, and,
- * when the last progress event said, how many came from the analyzer cache
- * and how long the parses took.
+ * took, how many demos it read and how many it skipped as unchanged, and how
+ * many had a current analyzer cache entry, how many didn't and how long
+ * those took (the scan's own counts, `outcome` from scan_directory).
  */
 export function scanEndLogLine({
-  cancelled = false, ms = 0, read = 0, unchanged = 0, progress = null, parseMs = 0,
+  cancelled = false, ms = 0, read = 0, unchanged = 0, outcome = null,
 } = {}) {
   const S = STRINGS.SCAN_PROGRESS;
   const line = S.endLog(cancelled ? 'cancelled' : 'finished', secs(ms), read, unchanged);
-  if (!progress || !(progress.total > 0)) return line;
-  return line + S.endLogSplit(progress.cached || 0, progress.parsed || 0, secs(parseMs));
+  const cached = outcome?.cached || 0;
+  const notCached = outcome?.not_cached || 0;
+  if (cached + notCached === 0) return line;
+  return line + S.endLogSplit(cached, notCached, secs(outcome?.not_cached_ms || 0));
 }
 
 /** The activity log's line for a scan that failed. */
