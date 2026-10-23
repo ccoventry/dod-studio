@@ -4,7 +4,8 @@
 // OBS buttons and the HLAE FFmpeg link. Moved out of main.js (#683); main.js
 // calls initConfigWiring once the settings are in the form.
 
-import { open, confirm } from '@tauri-apps/plugin-dialog';
+import { confirm } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { invoke } from '@tauri-apps/api/core';
 import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs } from './ipc_bridge.js';
 import { refreshLaunchGuard, runObsConnectionTest } from './capture_pane.js';
@@ -354,7 +355,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (hlaeBrowseBtn) {
     hlaeBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.hlae',
+          current: document.querySelector('#hlae-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_HLAE_EXE_TITLE
@@ -427,7 +430,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (obsBrowseBtn) {
     obsBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.obs',
+          current: document.querySelector('#config-obs-exe-path')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_OBS_EXE_TITLE
@@ -477,7 +482,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (hlBrowseBtn) {
     hlBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.hl',
+          current: document.querySelector('#hl-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_HL_EXE_TITLE
@@ -500,7 +507,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (ffmpegBrowseBtn) {
     ffmpegBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.ffmpeg',
+          current: document.querySelector('#ffmpeg-override-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
           title: STRINGS.MAIN.SELECT_FFMPEG_EXE_TITLE
@@ -526,7 +535,9 @@ export function initConfigWiring({ persistAppSettings }) {
   if (goldsrcHooksBrowseBtn) {
     goldsrcHooksBrowseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'config.hook_dll',
+          current: document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim(),
           multiple: false,
           filters: [{ name: STRINGS.MAIN.DLL_FILTER_NAME, extensions: ['dll'] }],
           title: STRINGS.MAIN.SELECT_GOLDSRC_HOOKS_DLL_TITLE

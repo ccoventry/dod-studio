@@ -977,6 +977,26 @@ export async function defaultBrowseDir() {
     });
 }
 
+/** Where a Browse dialog can start (#936): each path's state on disk, in
+ *  order ({ path, is_file, exact, is_root } or null). [] on failure, so the
+ *  dialog still opens, wherever Windows puts it. */
+export async function pickPathStates(paths) {
+  return invoke("pick_path_states", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_path_states):", err);
+      return [];
+    });
+}
+
+/** The user's Videos, Documents and Program Files folders (#936). */
+export async function pickUserFolders() {
+  return invoke("pick_user_folders")
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_user_folders):", err);
+      return null;
+    });
+}
+
 /** Non-recursive `.dem` count for a single folder — used by the Explorer
  *  sidebar's Quick Links rows (Pinned/Recent/Local). */
 export async function countDemoFiles(path) {

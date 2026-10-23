@@ -1,4 +1,4 @@
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath, configurePickPath } from './pick_path.js';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   calculateExportPoolSpace,
@@ -186,7 +186,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function pickTargetDrive() {
     try {
-      return await open({ directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
+      return await pickPath({ field: 'capture.output_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
     } catch (err) {
       console.error("Error opening capture output directory dialog:", err);
       return null;
@@ -195,7 +195,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function pickRenderExportDir() {
     try {
-      return await open({ directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
+      return await pickPath({ field: 'render.export_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
     } catch (err) {
       console.error("Error opening render export directory dialog:", err);
       return null;
@@ -266,6 +266,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       setupDismissed: setup ? setup.isDismissed() : savedSetupDismissed,
     }),
     currentCaptureMode,
+  });
+  // Where each Browse dialog starts (#936): the game paths, and saving a
+  // newly remembered folder.
+  configurePickPath({
+    getContext: () => ({ hlPath: document.querySelector('#hl-path-input')?.value?.trim() || '', gameFolder: getGameFolder() }),
+    persist: () => persistAppSettings(),
   });
 
   // Load persistent settings on startup

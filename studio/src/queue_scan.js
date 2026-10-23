@@ -5,7 +5,7 @@
 // owns the queue, the selection and the pinned-folder list; they're reached
 // through the getters and setters below.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
 import { scanDirectory, cancelScan, logFrontendEvent } from './ipc_bridge.js';
 import { renderMasterList } from './master_pane.js';
@@ -274,7 +274,8 @@ export function createQueueScan({
   if (addFilesBtn) {
     addFilesBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'queue.add_files',
           multiple: true,
           filters: [{ name: STRINGS.MAIN.DEMO_FILES_FILTER_NAME, extensions: ['dem'] }],
           title: STRINGS.MAIN.SELECT_DEMO_FILES_TITLE
@@ -314,7 +315,8 @@ export function createQueueScan({
   if (addFolderBtn) {
     addFolderBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'queue.add_folder',
           directory: true,
           multiple: false,
           title: STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE
