@@ -30,6 +30,10 @@
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
 //!     player's own would (sprint, jump, prone, ladder).
+//! - `strafe_twitch`: `ds_player_fix_model_flicker`, player models hold
+//!   still for the frame an HLTV demo's clock steps back, which would turn a
+//!   strafing model round (#927). Its own switch, on by default: a bug in how
+//!   the game draws, not a difference in what HLTV records.
 //! - `spectator_deathcam`: `ds_spec_deathcam`, the game's own death cam
 //!   when the watched player dies, as his recording shows it, instead of the
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
@@ -291,6 +295,7 @@ mod spectator_text;
 mod spray;
 mod spray_hltv;
 mod sprite_blend;
+mod strafe_twitch;
 mod streaks;
 mod studio_panel;
 mod tempent_fix;

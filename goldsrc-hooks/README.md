@@ -102,6 +102,13 @@ is the complete list):
   which `V_CalcRefdef` never reaches for a spectator. A movie wants it, a
   shoutcast does not, so it is not part of `spec_match_pov`. See
   `docs/goldsrc_spectator_camera.md`.
+- **Model flicker fix** (`ds_player_fix_model_flicker 1`, on by default): in
+  an HLTV demo under `viewdemo` above the packet rate, the client clock steps
+  back about 1 ms on some frames, and a strafing player's model turns round
+  for that frame, so his upper body flickers. This draws each player model at
+  the last place it was shown until the clock catches up (#927). A bug in how
+  the game draws, not a difference in what HLTV records, so it is not part of
+  `spec_match_pov`. See `src/strafe_twitch.rs`.
 - **Overview map icons** (`ds_hud_overview_players 0-4`): which players the
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the

@@ -57,6 +57,8 @@ VIEW (POV demos: the recording player's own view)
 PLAYERS
   ds_player_hide_hand_signals 0/1
       Replace players' hand-signal animations.
+  ds_player_fix_model_flicker 0/1
+      HLTV demos: strafing players' models no longer flicker round for a frame when the demo clock steps back (on by default).
   ds_player_overrides 0/1
       Sprays and crosshairs in demos follow DoD Studio's Players table (Configuration > Players); 0 is the game's own. Studio sets it.
   ds_player_spray [<name>|players]
