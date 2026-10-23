@@ -2,7 +2,7 @@
 // the destination, layout and game-folder tick, the preview line, Move
 // Demos with its progress and Cancel, and Undo. The pure parts are in
 // audit_consolidate.js.
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
@@ -124,7 +124,13 @@ export function createAuditConsolidate({
   browseBtn?.addEventListener('click', async () => {
     let folder;
     try {
-      folder = await open({ directory: true, multiple: false, title: STRINGS.AUDITOR.CONSOLIDATE_DIALOG_TITLE });
+      folder = await pickPath({
+        field: 'auditor.consolidate_folder',
+        current: destInput?.value,
+        directory: true,
+        multiple: false,
+        title: STRINGS.AUDITOR.CONSOLIDATE_DIALOG_TITLE,
+      });
     } catch (err) {
       console.error('Error picking the folder to consolidate into:', err);
       return;

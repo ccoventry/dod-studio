@@ -9,9 +9,18 @@
 //! a second scan costs the folder walk and opens only new or changed demos.
 //! A copy the delete finds different has its whole-file hash remembered
 //! there too, and later scans no longer group it with the kept copy.
+//!
+//! "Look inside .zip files" (#929) adds the demos inside zips: one of those
+//! is always the copy kept, since an archive is never changed, and the loose
+//! copies are offered for deletion as usual, each compared byte for byte
+//! with the zip's entry first.
 
-use hl_demo_auditor::{AuditProgress, KeyCache, find_duplicates_cached, scan_roots};
-use native::demo_compare::{Refusal, check_same_contents};
+use hl_demo_auditor::{
+    AuditProgress, KeyCache, ZipRef, find_duplicates_in, scan_roots, scan_roots_and_zips,
+};
+use native::demo_compare::{
+    Refusal, check_same_contents, compare_readers, copy_compare_failed, kept_copy_missing,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -47,8 +56,61 @@ pub enum InUse {
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct AuditFile {
+    /// A loose file's path, or `<zip> › <entry>` for a demo inside a zip.
     pub path: String,
     pub in_use: Option<InUse>,
+    /// Set for a demo inside a zip (#929): never deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive: Option<ZipAt>,
+}
+
+/// A demo inside a zip, as the frontend gets it and sends it back as a kept
+/// copy to compare with.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct ZipAt {
+    pub zip: String,
+    pub entry: String,
+}
+
+impl ZipAt {
+    fn from_ref(z: &ZipRef) -> Self {
+        Self {
+            zip: z.zip.to_string_lossy().into_owned(),
+            entry: z.entry.clone(),
+        }
+    }
+
+    fn shown(&self) -> PathBuf {
+        PathBuf::from(format!(
+            "{}{}{}",
+            self.zip,
+            hl_demo_auditor::archive::SEPARATOR,
+            self.entry
+        ))
+    }
+}
+
+/// A group's demos inside zips, the one to keep first: the shortest path,
+/// then by name. They come before every loose copy (#929).
+pub fn order_archived(archived: &[ZipRef]) -> Vec<AuditFile> {
+    let mut ranked: Vec<(usize, String, AuditFile)> = archived
+        .iter()
+        .map(|z| {
+            let shown = z.display();
+            let file = AuditFile {
+                path: shown.clone(),
+                in_use: None,
+                archive: Some(ZipAt::from_ref(z)),
+            };
+            (
+                comparable(Path::new(&shown)).len(),
+                shown.to_lowercase(),
+                file,
+            )
+        })
+        .collect();
+    ranked.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    ranked.into_iter().map(|(_, _, file)| file).collect()
 }
 
 #[derive(Serialize)]
@@ -195,6 +257,7 @@ pub fn order_for_keeping(files: Vec<PathBuf>, rules: &KeepRules) -> Vec<AuditFil
             let file = AuditFile {
                 path: path.to_string_lossy().into_owned(),
                 in_use,
+                archive: None,
             };
             (in_use.is_none(), shown.len(), shown, file)
         })
@@ -239,6 +302,10 @@ pub fn audit_roots(folders: &[String], drives: &[String]) -> Vec<PathBuf> {
 #[derive(Serialize, Clone, Default)]
 struct AuditProgressEvent {
     folders: usize,
+    /// Zips found and zips whose list of demos is read (#929); between the
+    /// folder walk and the key pass, while `total` is still 0.
+    zips_total: usize,
+    zips_done: usize,
     total: usize,
     done: usize,
     current: String,
@@ -259,6 +326,9 @@ struct AuditTimes {
     copies: usize,
     wasted_bytes: u64,
     reads: hl_demo_auditor::Reads,
+    /// Zips looked inside, and the demos in them (#929); `None` when the
+    /// audit didn't look.
+    zips: Option<(usize, usize)>,
 }
 
 /// The activity log's line when an audit ends: how long the folder walk and
@@ -269,10 +339,18 @@ fn audit_end_log(t: &AuditTimes) -> String {
     if t.cancelled {
         return format!("[audit] cancelled after {total:.1} s");
     }
+    let zips = match t.zips {
+        Some((zips, demos)) => format!(
+            "; looked inside {zips} zip(s) holding {demos} demo(s), opened {} zip(s) and read {} \
+             demo(s) in them in full, the rest remembered",
+            t.reads.zips, t.reads.zip_demos,
+        ),
+        None => String::new(),
+    };
     format!(
         "[audit] finished after {total:.1} s (walk {:.1} s, keys {:.1} s): {} demo(s) checked, \
          {} group(s) with copies, {} copies, {:.2} GB; opened {} start(s), {} end(s), {} whole file(s), \
-         the rest remembered",
+         the rest remembered{zips}",
         t.walk_secs,
         t.key_secs,
         t.demos,
@@ -285,8 +363,29 @@ fn audit_end_log(t: &AuditTimes) -> String {
     )
 }
 
+/// The most zips or zipped demos the activity log names as skipped in one
+/// audit; the rest are counted.
+const SKIPPED_LINES: usize = 20;
+
+/// The activity log's lines for zips, or demos in them, the audit left out
+/// because they couldn't be read (corrupt, encrypted).
+fn skipped_log(skipped: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = skipped
+        .iter()
+        .take(SKIPPED_LINES)
+        .map(|s| format!("[audit] skipped {s}"))
+        .collect();
+    if skipped.len() > SKIPPED_LINES {
+        lines.push(format!(
+            "[audit] skipped {} more zip(s) or zipped demo(s) that couldn't be read",
+            skipped.len() - SKIPPED_LINES
+        ));
+    }
+    lines
+}
+
 /// The activity log's line when an audit starts: what it walks.
-fn audit_start_log(folders: &[String], drives: &[String]) -> String {
+fn audit_start_log(folders: &[String], drives: &[String], look_in_zips: bool) -> String {
     let mut what: Vec<String> = Vec::new();
     if !drives.is_empty() {
         what.push(format!("all drives ({})", drives.join(" ")));
@@ -294,7 +393,12 @@ fn audit_start_log(folders: &[String], drives: &[String]) -> String {
     if !folders.is_empty() {
         what.push(format!("{} folder(s)", folders.len()));
     }
-    format!("[audit] started: {}", what.join(" and "))
+    let zips = if look_in_zips {
+        ", looking inside .zip files"
+    } else {
+        ""
+    };
+    format!("[audit] started: {}{zips}", what.join(" and "))
 }
 
 /// Runs the audit off the main thread: lists every root's demos, keys them
@@ -305,6 +409,7 @@ pub async fn run_demo_audit_impl(
     cancel_token: Arc<AtomicBool>,
     folders: Vec<String>,
     all_drives: bool,
+    look_in_zips: bool,
     rules: (Vec<PathBuf>, Vec<String>),
 ) -> Result<AuditOutcome, String> {
     is_running.store(true, Ordering::SeqCst);
@@ -327,7 +432,7 @@ pub async fn run_demo_audit_impl(
             native::log_markdown(&format!("[audit] failed: {why}"));
             return Err(why);
         }
-        native::log_markdown(&audit_start_log(&folders, &drives));
+        native::log_markdown(&audit_start_log(&folders, &drives, look_in_zips));
         let (tx, rx) = mpsc::channel();
         let ah = app_handle.clone();
         // At most one event per ~33 ms, the first at once (CLAUDE.md).
@@ -339,6 +444,11 @@ pub async fn run_demo_audit_impl(
                 match msg {
                     AuditProgress::Scanning(p) => {
                         event.folders += 1;
+                        event.current = p;
+                    }
+                    AuditProgress::Archives(total) => event.zips_total = total,
+                    AuditProgress::ReadingArchive(p) => {
+                        event.zips_done += 1;
                         event.current = p;
                     }
                     AuditProgress::Keying(total) => event.total = total,
@@ -358,16 +468,29 @@ pub async fn run_demo_audit_impl(
 
         let walked: Vec<PathBuf> = roots.into_iter().filter(|r| r.is_dir()).collect();
         let walk_started = Instant::now();
-        let files = scan_roots(&walked, &cancel_token, &Some(tx.clone()));
+        let (files, zips) = if look_in_zips {
+            scan_roots_and_zips(&walked, &cancel_token, &Some(tx.clone()))
+        } else {
+            (
+                scan_roots(&walked, &cancel_token, &Some(tx.clone())),
+                Vec::new(),
+            )
+        };
         let walk_secs = walk_started.elapsed().as_secs_f64();
-        let demos = files.len();
+        let loose_demos = files.len();
         let key_started = Instant::now();
         let cache_file = key_cache_file();
         let mut cache = KeyCache::load(&cache_file);
-        let audit = find_duplicates_cached(files, &cancel_token, &Some(tx), &mut cache);
+        let audit = find_duplicates_in(files, zips, &cancel_token, &Some(tx), &mut cache);
+        let demos = loose_demos + audit.zip_demos;
         let key_secs = key_started.elapsed().as_secs_f64();
         let last = progress_handle.join().unwrap_or_default();
         let cancelled = cancel_token.load(Ordering::Relaxed);
+        if !cancelled {
+            for line in skipped_log(&audit.skipped) {
+                native::log_markdown(&line);
+            }
+        }
         native::log_markdown(&audit_end_log(&AuditTimes {
             cancelled,
             walk_secs,
@@ -377,11 +500,12 @@ pub async fn run_demo_audit_impl(
             copies: audit.copies,
             wasted_bytes: audit.wasted_bytes,
             reads: audit.reads,
+            zips: look_in_zips.then_some((audit.zips, audit.zip_demos)),
         }));
         let duplicate_groups = audit.groups;
         let unique = audit.unique_files;
         if !cancelled {
-            cache.prune_unseen_under(&walked);
+            cache.prune_unseen_under(&walked, look_in_zips);
         }
         // A cancelled pass still saves the keys it read. Only a cache: a
         // failed save costs the next scan time, nothing else.
@@ -415,10 +539,14 @@ pub async fn run_demo_audit_impl(
                 .collect();
             let groups = duplicate_groups
                 .into_iter()
-                .map(|g| SerializedDuplicateGroup {
-                    size: g.key.size,
-                    header_hash: g.key.header_hash,
-                    files: order_for_keeping(g.files, &keep_rules),
+                .map(|g| {
+                    let mut files = order_archived(&g.archived);
+                    files.extend(order_for_keeping(g.files, &keep_rules));
+                    SerializedDuplicateGroup {
+                        size: g.key.size,
+                        header_hash: g.key.header_hash,
+                        files,
+                    }
                 })
                 .collect();
             (groups, singles)
@@ -484,6 +612,38 @@ fn check_deletable(path: &Path) -> Result<(), String> {
 pub struct DeleteCopy {
     pub path: String,
     pub keep: String,
+    /// Set when the kept copy is inside a zip (#929): `keep` is then only
+    /// its shown name, and the copy is compared with the zip's entry.
+    #[serde(default)]
+    pub keep_zip: Option<ZipAt>,
+}
+
+/// [`check_same_contents`] against a kept copy inside a zip (#929): the
+/// entry is decompressed as it is compared, never written anywhere.
+fn check_same_as_zip_entry(copy: &Path, keep: &ZipAt) -> Result<(), Refusal> {
+    let shown = keep.shown();
+    let zip = Path::new(&keep.zip);
+    let in_zip = zip.symlink_metadata().is_ok_and(|m| m.is_file())
+        && hl_demo_auditor::archive::list_zip_demos(zip)
+            .is_ok_and(|demos| demos.iter().any(|d| d.name == keep.entry));
+    if !in_zip {
+        return Err(Refusal::Other(kept_copy_missing(copy, &shown)));
+    }
+    let unreadable = |e: std::io::Error| Refusal::Other(copy_compare_failed(copy, &shown, e));
+    let mut a = std::fs::File::open(copy).map_err(unreadable)?;
+    let len_a = a.metadata().map_err(unreadable)?.len();
+    let compared = hl_demo_auditor::archive::with_zip_entry(zip, &keep.entry, |entry, len_b| {
+        Ok(compare_readers(
+            copy,
+            &shown,
+            (&mut a, len_a),
+            (entry, len_b),
+        ))
+    });
+    match compared {
+        Ok(result) => result,
+        Err(e) => Err(unreadable(e)),
+    }
 }
 
 /// Deletes the picked copies: to the Recycle Bin, or for good when
@@ -513,14 +673,20 @@ pub fn delete_audit_files_impl(
     let mut deletable = vec![];
     for (i, copy) in copies.into_iter().enumerate() {
         let path = Path::new(&copy.path);
-        match check_deletable(path)
-            .map_err(Refusal::Other)
-            .and_then(|()| check_same_contents(path, Path::new(&copy.keep)))
-        {
+        let same = |()| match &copy.keep_zip {
+            Some(zip) => check_same_as_zip_entry(path, zip),
+            None => check_same_contents(path, Path::new(&copy.keep)),
+        };
+        match check_deletable(path).map_err(Refusal::Other).and_then(same) {
             Ok(()) => deletable.push(copy.path),
             Err(refusal) => {
                 if matches!(refusal, Refusal::NotACopy(_)) {
-                    remember_differing(&mut cache, path, Path::new(&copy.keep));
+                    match &copy.keep_zip {
+                        // The zip's entry was read in full when it was
+                        // grouped, so only the copy needs remembering.
+                        Some(_) => remember_contents_of(&mut cache, path),
+                        None => remember_differing(&mut cache, path, Path::new(&copy.keep)),
+                    }
                 }
                 outcome.failed.push(failure_of(refusal, copy.path))
             }
@@ -565,20 +731,26 @@ pub fn delete_audit_files_impl(
 /// costs nothing extra. Files of two sizes are never grouped, so they are
 /// not read; a file that changes while it is read is not remembered.
 fn remember_differing(cache: &mut KeyCache, copy: &Path, keep: &Path) {
-    use hl_demo_auditor::{content_hashes, stamp};
+    use hl_demo_auditor::stamp;
     let sizes = (stamp(copy).map(|s| s.size), stamp(keep).map(|s| s.size));
     if sizes.0.is_none() || sizes.0 != sizes.1 {
         return;
     }
     for path in [copy, keep] {
-        let Ok(canonical) = std::fs::canonicalize(path) else {
-            continue;
-        };
-        if let (Some(before), Ok(hashes)) = (stamp(&canonical), content_hashes(&canonical))
-            && stamp(&canonical) == Some(before)
-        {
-            cache.remember_contents(&canonical, before, hashes);
-        }
+        remember_contents_of(cache, path);
+    }
+}
+
+/// `path`'s whole-file hash into `cache`, unless it changes while read.
+fn remember_contents_of(cache: &mut KeyCache, path: &Path) {
+    use hl_demo_auditor::{content_hashes, stamp};
+    let Ok(canonical) = std::fs::canonicalize(path) else {
+        return;
+    };
+    if let (Some(before), Ok(hashes)) = (stamp(&canonical), content_hashes(&canonical))
+        && stamp(&canonical) == Some(before)
+    {
+        cache.remember_contents(&canonical, before, hashes);
     }
 }
 
@@ -628,16 +800,21 @@ pub fn reveal_in_explorer_impl(path: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hl_demo_auditor::find_duplicates_cached;
 
     #[test]
     fn the_audit_log_lines_say_what_ran_how_long_and_what_was_read() {
         assert_eq!(
-            audit_start_log(&[], &["C:/".into(), "D:/".into()]),
+            audit_start_log(&[], &["C:/".into(), "D:/".into()], false),
             "[audit] started: all drives (C:/ D:/)"
         );
         assert_eq!(
-            audit_start_log(&["E:/demos".into()], &[]),
+            audit_start_log(&["E:/demos".into()], &[], false),
             "[audit] started: 1 folder(s)"
+        );
+        assert_eq!(
+            audit_start_log(&["E:/demos".into()], &[], true),
+            "[audit] started: 1 folder(s), looking inside .zip files"
         );
         let mut times = AuditTimes {
             cancelled: false,
@@ -651,7 +828,10 @@ mod tests {
                 heads: 2930,
                 tails: 2919,
                 fulls: 0,
+                zips: 3,
+                zip_demos: 2,
             },
+            zips: None,
         };
         assert_eq!(
             audit_end_log(&times),
@@ -659,8 +839,153 @@ mod tests {
              1007 group(s) with copies, 1909 copies, 129.00 GB; opened 2930 start(s), 2919 end(s), \
              0 whole file(s), the rest remembered"
         );
+        times.zips = Some((40, 120));
+        assert!(
+            audit_end_log(&times).ends_with(
+                "the rest remembered; looked inside 40 zip(s) holding 120 demo(s), opened 3 zip(s) \
+                 and read 2 demo(s) in them in full, the rest remembered"
+            ),
+            "{}",
+            audit_end_log(&times)
+        );
         times.cancelled = true;
         assert_eq!(audit_end_log(&times), "[audit] cancelled after 6.6 s");
+    }
+
+    #[test]
+    fn skipped_zips_are_named_up_to_a_limit() {
+        let few = skipped_log(&["Z:\\a.zip: invalid Zip archive".to_string()]);
+        assert_eq!(few, ["[audit] skipped Z:\\a.zip: invalid Zip archive"]);
+        let many: Vec<String> = (0..25).map(|i| format!("Z:\\{i}.zip: bad")).collect();
+        let lines = skipped_log(&many);
+        assert_eq!(lines.len(), SKIPPED_LINES + 1);
+        assert_eq!(
+            lines.last().unwrap(),
+            "[audit] skipped 5 more zip(s) or zipped demo(s) that couldn't be read"
+        );
+    }
+
+    /// Writes a zip at `path` with `entries` (name, bytes, deflated?).
+    fn write_zip(path: &Path, entries: &[(&str, &[u8], bool)]) {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, bytes, deflate) in entries {
+            let method = if *deflate {
+                zip::CompressionMethod::Deflated
+            } else {
+                zip::CompressionMethod::Stored
+            };
+            let options = zip::write::SimpleFileOptions::default().compression_method(method);
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    fn zip_at(zip: &Path, entry: &str) -> ZipAt {
+        ZipAt {
+            zip: zip.to_string_lossy().into_owned(),
+            entry: entry.into(),
+        }
+    }
+
+    /// A loose copy is checked byte for byte against a kept copy inside a
+    /// zip, stored or deflated, and the zip is left as it was (#929).
+    #[test]
+    fn a_copy_is_compared_with_the_entry_a_zip_keeps() {
+        let s = Scratch::new("zip_keep");
+        let copy = s.file("copy.dem", &demo_bytes(1));
+        let odd = s.file("odd.dem", &demo_bytes(2));
+        let zip = s.0.join("pack.zip");
+        write_zip(
+            &zip,
+            &[
+                ("s/keep.dem", &demo_bytes(1), false),
+                ("d/keep.dem", &demo_bytes(1), true),
+            ],
+        );
+        let before = std::fs::read(&zip).unwrap();
+        for entry in ["s/keep.dem", "d/keep.dem"] {
+            assert_eq!(check_same_as_zip_entry(&copy, &zip_at(&zip, entry)), Ok(()));
+            let Err(Refusal::NotACopy(err)) = check_same_as_zip_entry(&odd, &zip_at(&zip, entry))
+            else {
+                panic!("a different file must be refused as not a copy");
+            };
+            assert!(err.contains(&format!("pack.zip › {entry}")), "{err}");
+        }
+        let Err(Refusal::Other(err)) = check_same_as_zip_entry(&copy, &zip_at(&zip, "gone.dem"))
+        else {
+            panic!("an entry no longer in the zip must be refused");
+        };
+        assert!(err.contains("no longer there"), "{err}");
+        let gone = s.0.join("gone.zip");
+        assert!(matches!(
+            check_same_as_zip_entry(&copy, &zip_at(&gone, "s/keep.dem")),
+            Err(Refusal::Other(_))
+        ));
+        assert_eq!(std::fs::read(&zip).unwrap(), before, "the zip is unchanged");
+    }
+
+    /// The copy a zip holds comes first, so it is the one kept, ahead of a
+    /// copy in the game folder; the loose copies keep their own order.
+    #[test]
+    fn a_zips_copy_is_the_one_kept() {
+        let s = Scratch::new("zip_order");
+        let bytes = demo_bytes(4);
+        let loose = s.file("match.dem", &bytes);
+        let long_zip = s.0.join("a much longer archive name.zip");
+        let zip = s.0.join("p.zip");
+        write_zip(&long_zip, &[("match.dem", &bytes, true)]);
+        write_zip(&zip, &[("match.dem", &bytes, false)]);
+        let never = AtomicBool::new(false);
+        let audit = find_duplicates_in(
+            vec![loose],
+            vec![long_zip, zip],
+            &never,
+            &None,
+            &mut KeyCache::default(),
+        );
+        assert_eq!(audit.groups.len(), 1);
+        let g = &audit.groups[0];
+        let rules = KeepRules::new(std::slice::from_ref(&s.0), &[]);
+        let mut files = order_archived(&g.archived);
+        files.extend(order_for_keeping(g.files.clone(), &rules));
+        assert!(
+            files[0].path.ends_with("p.zip › match.dem"),
+            "{:?}",
+            files[0]
+        );
+        assert_eq!(
+            files[0].archive.as_ref().map(|z| z.entry.as_str()),
+            Some("match.dem")
+        );
+        assert!(files[1].archive.is_some());
+        assert_eq!(files[2].archive, None);
+        assert_eq!(files[2].in_use, Some(InUse::GameFolder));
+        // Serialized for the frontend: `archive` only on a zip's copy.
+        let json = serde_json::to_value(&files).unwrap();
+        assert!(
+            json[0]["archive"]["zip"]
+                .as_str()
+                .unwrap()
+                .ends_with("p.zip")
+        );
+        assert!(json[2].get("archive").is_none());
+    }
+
+    #[test]
+    fn a_delete_request_names_a_kept_zip_only_when_there_is_one() {
+        let plain: DeleteCopy =
+            serde_json::from_str(r#"{"path":"C:\\a.dem","keep":"C:\\b.dem"}"#).unwrap();
+        assert_eq!(plain.keep_zip, None);
+        let zipped: DeleteCopy = serde_json::from_str(
+            r#"{"path":"C:\\a.dem","keep":"C:\\p.zip › a.dem","keep_zip":{"zip":"C:\\p.zip","entry":"a.dem"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            zipped.keep_zip,
+            Some(zip_at(Path::new(r"C:\p.zip"), "a.dem"))
+        );
     }
 
     fn paths(list: &[&str]) -> Vec<PathBuf> {
@@ -769,6 +1094,7 @@ mod tests {
             AuditFile {
                 path: r"\\?\Z:\No-Such-Install\Half-Life\DOD\demos\m.dem".into(),
                 in_use: Some(InUse::GameFolder),
+                archive: None,
             }
         );
         assert_eq!(files[1].in_use, None);

@@ -93,7 +93,7 @@ test('All drives alone can start an audit and dims the list', async ({ page }) =
   await expect(page.locator('#run-audit-btn')).toBeEnabled();
   await page.click('#run-audit-btn');
   const [args] = await calls(page, 'run_demo_audit');
-  expect(args).toEqual({ paths: [], allDrives: true, queued: [] });
+  expect(args).toEqual({ paths: [], allDrives: true, queued: [], lookInZips: false });
 });
 
 test('a running audit shows its step and a bar, and locks its controls', async ({ page }) => {
@@ -103,7 +103,7 @@ test('a running audit shows its step and a bar, and locks its controls', async (
   await page.click('#run-audit-btn');
 
   const [args] = await calls(page, 'run_demo_audit');
-  expect(args).toEqual({ paths: ['C:\\Demos'], allDrives: false, queued: ['G:\\project\\match.dem'] });
+  expect(args).toEqual({ paths: ['C:\\Demos'], allDrives: false, queued: ['G:\\project\\match.dem'], lookInZips: false });
   await expect(page.locator('#run-audit-btn')).toBeDisabled();
   await expect(page.locator('#cancel-audit-btn')).toBeEnabled();
   await expect(page.locator('#audit-all-drives')).toBeDisabled();
@@ -508,4 +508,80 @@ test('a file that fails to delete stays listed and is reported', async ({ page }
   await confirm(page);
   await expect(page.locator('#audit-status-text')).toHaveText('Moved to the Recycle Bin: 1, 1 not deleted.');
   await expect(page.locator('#audit-results-body .audit-file-path')).toContainText(['E:\\old\\a.dem']);
+});
+
+// "Look inside .zip files" (#929): a demo inside a zip is the copy kept,
+// shown as `archive.zip › inner/path.dem` with a chip, and never deleted.
+const ZIP_GROUPS = [
+  {
+    size: 1024 * 1024,
+    header_hash: 0x123,
+    files: [
+      {
+        path: '\\\\?\\D:\\packs\\lan.zip › hltv/m.dem',
+        in_use: null,
+        archive: { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' },
+      },
+      { path: '\\\\?\\C:\\demos\\m.dem', in_use: null },
+    ],
+  },
+];
+
+test('Look inside .zip files is sent, saved, and its zips show in the progress line', async ({ page }) => {
+  await loadHarness(page);
+  await expect(page.locator('#audit-look-in-zips')).not.toBeChecked();
+  await page.check('#audit-look-in-zips');
+  expect(await page.evaluate(() => window.__settingsSaves)).toBe(1);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  const [args] = await calls(page, 'run_demo_audit');
+  expect(args.lookInZips).toBe(true);
+  await expect(page.locator('#audit-look-in-zips')).toBeDisabled();
+  await page.evaluate(() => window.__mockEmit('audit_progress', {
+    folders: 12, zips_total: 4, zips_done: 1, total: 0, done: 0, current: '\\\\?\\D:\\packs\\lan.zip',
+  }));
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking inside zips: 1 \/ 4 · 0:0\d$/);
+  await expect(page.locator('#audit-status-current')).toHaveText('D:\\packs\\lan.zip');
+  await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await page.evaluate((groups) => window.__finishAudit({ groups, demos: 2, cancelled: false }), ZIP_GROUPS);
+  await expect(page.locator('#audit-look-in-zips')).toBeEnabled();
+});
+
+test('a copy inside a zip is kept, marked, never ticked, and loose copies are checked against it', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate((groups) => window.__finishAudit({ groups, demos: 2, cancelled: false }), ZIP_GROUPS);
+
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.locator('.audit-file-path')).toHaveText(['D:\\packs\\lan.zip › hltv/m.dem in a zip', 'C:\\demos\\m.dem']);
+  await expect(rows.nth(0).locator('.audit-zip-chip')).toHaveAttribute('title', /never changed/);
+  await expect(rows.nth(0).locator('.audit-file-status')).toHaveText('Kept');
+  await expect(rows.nth(0).locator('input.audit-row-cb')).toBeDisabled();
+  await expect(rows.nth(0).locator('input.audit-row-cb')).toHaveAttribute('title', /never changed/);
+  await expect(rows.nth(1).locator('input.audit-row-cb')).toBeChecked();
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 1 | Wasted Space: 1.0 MB');
+
+  // Open Folder shows the zip itself.
+  await rows.nth(0).getByText('Open Folder').click();
+  const [reveal] = await calls(page, 'reveal_in_explorer');
+  expect(reveal.path).toBe('D:\\packs\\lan.zip');
+
+  // Keeping the loose copy instead leaves nothing to delete: the zip's copy
+  // can't be ticked, even by Select all.
+  await rows.nth(1).locator('input[type=radio]').click();
+  await expect(rows.nth(0).locator('input.audit-row-cb')).toBeDisabled();
+  await page.check('#audit-select-all');
+  await expect(rows.nth(0).locator('input.audit-row-cb')).not.toBeChecked();
+  await expect(page.locator('#delete-selected-audits-btn')).toBeDisabled();
+  await page.click('.audit-keep-reset-btn');
+
+  await page.click('#delete-selected-audits-btn');
+  await confirm(page);
+  const [del] = await calls(page, 'delete_audit_files');
+  expect(del.copies).toEqual([{
+    path: '\\\\?\\C:\\demos\\m.dem',
+    keep: '\\\\?\\D:\\packs\\lan.zip › hltv/m.dem',
+    keep_zip: { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' },
+  }]);
 });

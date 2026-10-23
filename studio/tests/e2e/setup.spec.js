@@ -58,6 +58,24 @@ test("the Half-Life step warns about Steam's own install and names the build", a
   expect(await calls(page)).toContainEqual(['openHlaePage']);
 });
 
+test('the Half-Life step offers Make a movie copy once hl.exe has a dod beside it (#939)', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => window.__win.open(0));
+  // No folders listed yet: nothing to copy.
+  await expect(page.locator('#setup-hl-movie-copy')).toHaveCount(0);
+  await page.evaluate(() => {
+    Object.assign(window.__snapshot, { gameFolder: 'dod', gameFolders: ['dod', 'valve'] });
+    window.__win.render();
+  });
+  await page.locator('#setup-hl-movie-copy').click();
+  expect(await calls(page)).toContainEqual(['openMovieCopy']);
+  await page.evaluate(() => {
+    window.__snapshot.hlState = 'not_found';
+    window.__win.render();
+  });
+  await expect(page.locator('#setup-hl-movie-copy')).toHaveCount(0);
+});
+
 test("the Half-Life step picks a copy of the dod folder, and the note goes once it's picked", async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(() => {

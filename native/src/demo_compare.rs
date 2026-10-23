@@ -7,8 +7,9 @@ use std::io::Read;
 use std::path::Path;
 
 /// A path as Explorer shows it, without the audit's `\\?\` prefix: the
-/// messages here use it, and so does Studio's delete error.
-pub use crate::messages::shown;
+/// messages here use it, and so does Studio's delete error. The other two
+/// are for Studio's compare with a kept copy inside a zip (#929).
+pub use crate::messages::{copy_compare_failed, kept_copy_missing, shown};
 
 /// Why [`check_same_contents`] refused a copy.
 #[derive(Debug, PartialEq)]
@@ -34,7 +35,7 @@ impl Refusal {
 const COMPARE_CHUNK: usize = 1 << 20;
 
 /// Fills `buf` from `file` until it is full or the file ends; how many bytes.
-fn read_chunk(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+fn read_chunk(file: &mut dyn Read, buf: &mut [u8]) -> std::io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
         match file.read(&mut buf[filled..])? {
@@ -49,9 +50,7 @@ fn read_chunk(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize
 /// the same. The audit's key reads only the first 64 KiB, so two different
 /// demos can share a group; this keeps a delete from trusting that.
 pub fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), Refusal> {
-    use crate::messages::{
-        copy_compare_failed, copy_differs_from_kept, copy_is_the_kept_copy, kept_copy_missing,
-    };
+    use crate::messages::copy_is_the_kept_copy;
     let kept_is_there = keep.symlink_metadata().is_ok_and(|m| m.is_file());
     if !kept_is_there {
         return Err(Refusal::Other(kept_copy_missing(copy, keep)));
@@ -62,13 +61,27 @@ pub fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), Refusal> {
         return Err(Refusal::Other(copy_is_the_kept_copy(copy)));
     }
     let unreadable = |e: std::io::Error| Refusal::Other(copy_compare_failed(copy, keep, e));
-    let differs = |at: u64| Refusal::NotACopy(copy_differs_from_kept(copy, keep, at));
     let mut a = std::fs::File::open(copy).map_err(unreadable)?;
     let mut b = std::fs::File::open(keep).map_err(unreadable)?;
     let (len_a, len_b) = (
         a.metadata().map_err(unreadable)?.len(),
         b.metadata().map_err(unreadable)?.len(),
     );
+    compare_readers(copy, keep, (&mut a, len_a), (&mut b, len_b))
+}
+
+/// Whether `a` (the copy, `len_a` bytes) and `b` (the kept copy) hold the
+/// same bytes; `copy` and `keep` only name them in the refusal. Studio also
+/// uses it with a zip's entry as `b` (#929).
+pub fn compare_readers(
+    copy: &Path,
+    keep: &Path,
+    (a, len_a): (&mut dyn Read, u64),
+    (b, len_b): (&mut dyn Read, u64),
+) -> Result<(), Refusal> {
+    use crate::messages::copy_differs_from_kept;
+    let unreadable = |e: std::io::Error| Refusal::Other(copy_compare_failed(copy, keep, e));
+    let differs = |at: u64| Refusal::NotACopy(copy_differs_from_kept(copy, keep, at));
     if len_a != len_b {
         return Err(differs(len_a.min(len_b)));
     }
@@ -76,8 +89,8 @@ pub fn check_same_contents(copy: &Path, keep: &Path) -> Result<(), Refusal> {
     let mut buf_b = vec![0u8; COMPARE_CHUNK];
     let mut offset: u64 = 0;
     loop {
-        let n_a = read_chunk(&mut a, &mut buf_a).map_err(unreadable)?;
-        let n_b = read_chunk(&mut b, &mut buf_b).map_err(unreadable)?;
+        let n_a = read_chunk(a, &mut buf_a).map_err(unreadable)?;
+        let n_b = read_chunk(b, &mut buf_b).map_err(unreadable)?;
         if let Some(i) = buf_a[..n_a.min(n_b)]
             .iter()
             .zip(&buf_b[..n_a.min(n_b)])
