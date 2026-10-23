@@ -379,9 +379,12 @@ test('Consolidate previews the plan, then moves, updates the queue and offers Un
       log: 'x.json',
     });
   });
-  await expect(page.locator('#audit-status-text')).toHaveText("Moved 2 demos, recycled 1 copy. 2 in this project's queue updated.");
+  // The harness counts every pair it's handed as a queue row.
+  await expect(page.locator('#audit-status-text')).toHaveText("Moved 2 demos, recycled 1 copy. 3 in this project's queue updated.");
   expect(await page.evaluate(() => window.__relocated)).toEqual([
     { from: 'D:\\a.dem', to: 'H:\\All\\a.dem' }, { from: 'G:\\solo.dem', to: 'H:\\All\\solo.dem' },
+    // A queued row on the recycled copy follows its kept demo to where it moved.
+    { from: 'E:\\old\\a.dem', to: 'H:\\All\\a.dem' },
   ]);
   await expect(page.locator('#audit-results-body')).toContainText('Run the audit again');
   await expect(page.locator('#audit-progress')).toHaveAttribute('hidden');

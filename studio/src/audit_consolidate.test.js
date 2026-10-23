@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   consolidateRequest, hasDemos, planView, consolidateProgressView, singlesAfterDelete,
+  recycledFollowPairs,
 } from './audit_consolidate.js';
 import { STRINGS } from './strings.js';
 
@@ -131,6 +132,26 @@ describe('audit_consolidate (#872)', () => {
     // Only zips: nothing to move.
     const onlyZip = consolidateRequest({ groups: [{ ...ZIPPED, files: [ZIPPED.files[0]] }], destination: 'G:\\Demos' });
     expect([onlyZip.keep, onlyZip.recycle]).toEqual([[], []]);
+  });
+
+  it('a recycled copy points at its kept demo where that is now, so a queued row on it follows', () => {
+    const req = {
+      recycle: [
+        { path: '\\\\?\\E:\\a.dem', keep: '\\\\?\\D:\\a.dem' },
+        { path: 'F:\\dl\\m.dem', keep: 'C:\\HL\\dod\\m.dem' },
+        { path: 'G:\\kept.dem', keep: 'D:\\x.dem' },
+      ],
+    };
+    const outcome = {
+      moved: [{ from: 'D:\\a.dem', to: 'H:\\All\\a.dem' }],
+      recycled: ['\\\\?\\E:\\a.dem', 'f:\\DL\\m.dem'],
+    };
+    expect(recycledFollowPairs(req, outcome)).toEqual([
+      { from: 'E:\\a.dem', to: 'H:\\All\\a.dem' },
+      // A kept demo that stayed (a game folder) is where the row goes.
+      { from: 'F:\\dl\\m.dem', to: 'C:\\HL\\dod\\m.dem' },
+    ]);
+    expect(recycledFollowPairs(req, { moved: [], recycled: [] })).toEqual([]);
   });
 
   it('a group a delete left with only its zip copy adds no single', () => {

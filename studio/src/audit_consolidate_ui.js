@@ -10,7 +10,9 @@ import { STRINGS } from './strings.js';
 import {
   consolidatePlan, consolidateRun, consolidateUndo, consolidateUndoable, consolidateCancel,
 } from './ipc_bridge.js';
-import { consolidateRequest, hasDemos, planView, consolidateProgressView } from './audit_consolidate.js';
+import {
+  consolidateRequest, hasDemos, planView, consolidateProgressView, recycledFollowPairs,
+} from './audit_consolidate.js';
 
 /**
  * @param {object} pane  What this needs from auditor_pane.js:
@@ -147,14 +149,14 @@ export function createAuditConsolidate({
     if (failed.length) showToast(STRINGS.AUDITOR.consolidateFailedToast(failed.length, failed[0].error), 'error', 12000);
   }
 
-  async function runJob(kind, job, status) {
+  async function runJob(kind, job, status, followPairs = () => []) {
     working = kind;
     setBusy(true);
     refreshButtons();
     showProgress(consolidateProgressView({ step: kind === 'undo' ? 'undoing' : 'moving' }));
     try {
       const outcome = await job();
-      const queued = relocateMoved(outcome.moved ?? []);
+      const queued = relocateMoved([...(outcome.moved ?? []), ...followPairs(outcome)]);
       setStatus(status(outcome, queued));
       reportFailures(outcome);
       // A copy with other bytes is a different demo: marked, as the delete does.
@@ -183,7 +185,8 @@ export function createAuditConsolidate({
     });
     if (!ok) return;
     const req = request();
-    await runJob('run', () => consolidateRun(req), STRINGS.AUDITOR.consolidatedStatus);
+    await runJob('run', () => consolidateRun(req), STRINGS.AUDITOR.consolidatedStatus,
+      (outcome) => recycledFollowPairs(req, outcome));
   });
 
   cancelBtn?.addEventListener('click', async () => {

@@ -3,7 +3,7 @@
 // say. audit_consolidate_ui.js does the DOM; native::demo_consolidate plans
 // and moves.
 import { STRINGS } from './strings.js';
-import { wastedSizeText, isNotCopy, isArchived } from './audit_duplicates.js';
+import { wastedSizeText, isNotCopy, isArchived, shownPath } from './audit_duplicates.js';
 
 const asDemo = (file, size) => ({ path: file.path, size, game_folder: file.in_use === 'game_folder' });
 
@@ -86,6 +86,18 @@ export function consolidateProgressView(p) {
     text: line(files, total, wastedSizeText(bytes), wastedSizeText(bytesTotal)),
     current: p?.current ?? '',
   };
+}
+
+/// Where each copy the run recycled went: to its kept demo, which it matched
+/// byte for byte, wherever that is now. A queued row on a recycled copy (the
+/// Keep pick was another copy) follows it, as rows on moved demos do.
+export function recycledFollowPairs(request, outcome) {
+  const key = (p) => shownPath(p ?? '').replace(/\//g, '\\').toLowerCase();
+  const movedTo = new Map((outcome?.moved ?? []).map((m) => [key(m.from), m.to]));
+  const recycled = new Set((outcome?.recycled ?? []).map(key));
+  return (request?.recycle ?? [])
+    .filter((c) => c.keep && recycled.has(key(c.path)))
+    .map((c) => ({ from: shownPath(c.path), to: movedTo.get(key(c.keep)) ?? shownPath(c.keep) }));
 }
 
 /// Demos a delete left without copies (`groups` before it): they join the
