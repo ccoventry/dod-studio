@@ -1,6 +1,8 @@
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cache;
+/// Whether a demo carries a camera to play back (#920).
+pub mod camera_data;
 mod chat;
 mod clan_match;
 /// The clock offset between two recordings of one half (#708).
@@ -198,6 +200,12 @@ pub struct DemoInfo {
     /// was noted (a damaged demo had no analysis then).
     #[serde(default)]
     pub damage: Option<DemoDamage>,
+
+    /// No playback frame carries a view (#920): a file rebuilt from server
+    /// traffic, whose kill feed and scoreboard play while the camera stays
+    /// frozen at the map origin. See [`camera_data`].
+    #[serde(default)]
+    pub no_camera_data: bool,
 }
 
 /// Where a damaged demo stopped being read, and why (#811).
@@ -344,24 +352,7 @@ impl From<&Demo> for DemoInfo {
             .map(|e| e.frames.len() as i32)
             .sum::<i32>();
 
-        let mut is_hltv = false;
-        'outer: for entry in &value.directory.entries {
-            for frame in &entry.frames {
-                if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let MessageData::Parsed(msgs) = &box_type.1.messages
-                {
-                    for msg in msgs {
-                        if let NetMessage::EngineMessage(eng_msg) = msg
-                            && is_hltv_message(eng_msg)
-                        {
-                            is_hltv = true;
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-        }
-        let demo_type = if is_hltv {
+        let demo_type = if is_hltv_demo(value) {
             "HLTV".to_string()
         } else {
             "POV".to_string()
@@ -378,8 +369,27 @@ impl From<&Demo> for DemoInfo {
             map_checksum: value.header.map_checksum,
             peak_packet_entities: Some(peak_packet_entities(value)),
             damage: None,
+            no_camera_data: camera_data::camera_frames(value).is_missing(),
         }
     }
+}
+
+/// Whether `demo` is an HLTV proxy's recording: it carries a message only
+/// one has ([`is_hltv_message`]).
+fn is_hltv_demo(demo: &Demo) -> bool {
+    demo.directory.entries.iter().any(|entry| {
+        entry.frames.iter().any(|frame| {
+            let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
+                return false;
+            };
+            let MessageData::Parsed(msgs) = &box_type.1.messages else {
+                return false;
+            };
+            msgs.iter().any(
+                |msg| matches!(msg, NetMessage::EngineMessage(eng_msg) if is_hltv_message(eng_msg)),
+            )
+        })
+    })
 }
 
 /// A message only an HLTV proxy's recording carries: `svc_hltv`, or a

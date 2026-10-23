@@ -300,7 +300,12 @@
                    (hook_dll_row.js). -->
               <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
-                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
+                <!-- The saved path; the dropdown sets it (hook_dll_picker.js). -->
+                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" hidden />
+                <input type="text" id="goldsrc-hooks-dll-choice" />
+                <!-- ^ a dropdown you can type into (searchable_select.js) -->
+
+                <button id="goldsrc-hooks-refresh-btn" data-str="CAPTURE_CONFIG.HOOK_DLL_REFRESH" data-str-title="CAPTURE_CONFIG.HOOK_DLL_REFRESH_TITLE" title="List the test DLLs in local\ again">Refresh</button>
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="goldsrc-hooks-path-warning" class="path-warning" style="display: none;"></div>
@@ -1663,6 +1668,7 @@
               </div>
               <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
               <div id="analyzer-damage-banner" class="analyzer-warning-banner" hidden></div>
+              <div id="analyzer-camera-banner" class="analyzer-warning-banner" hidden></div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
                 <p class="analyzer-empty" data-str="ANALYZER.EMPTY_PICK_DEMO">Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".</p>
               </div>

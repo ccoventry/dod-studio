@@ -1060,6 +1060,16 @@ export async function hookDllOverrideAllowed() {
   });
 }
 
+/** The test hook DLLs in the checkout's `local\` folder (hook_dll_list.rs):
+ *  `{ folder, checkout_build, dlls: [{ label, path, modified_unix_secs }] }`.
+ *  Best-effort: an empty list on error. */
+export async function listHookDlls() {
+  return invoke("list_hook_dlls").catch((err) => {
+    console.error("IPC Execution Error (list_hook_dlls):", err);
+    return { folder: null, checkout_build: null, dlls: [] };
+  });
+}
+
 export async function restartApp() {
   return invoke("restart_app")
     .catch((err) => {

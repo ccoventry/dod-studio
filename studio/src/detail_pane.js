@@ -9,6 +9,7 @@ import { STRINGS } from './strings.js';
 import { automaticClipName } from './clip_name.js';
 import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
+import { confirmNoCameraData } from './camera_data.js';
 import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
 import { clockFloor, clockRound } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -254,6 +255,8 @@ window.addEventListener("DOMContentLoaded", () => {
       const highlights = allPreviewableStreaks(currentDemo);
       // The game closes on a demo over its entity limit (#207).
       if (!(await confirmOverLimit([currentDemo], hlPath, { preview: true }))) return;
+      // A demo with no camera data plays as a frozen view (#920).
+      if (!(await confirmNoCameraData([currentDemo], { preview: true }))) return;
       // A game started with other launch settings is never sent the preview
       // (#666): asked to close it, or stop here.
       const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
