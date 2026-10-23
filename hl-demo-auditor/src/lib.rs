@@ -123,15 +123,18 @@ const SCAN_MAX_DEPTH: usize = 32;
 
 /// Folders [`scan_dir`] never enters, by name at any depth: a demo in the
 /// Recycle Bin is a deleted copy, not a duplicate to clean up (#843), System
-/// Volume Information is usually unreadable, and `node_modules` and `.git`
-/// are tens of thousands of folders that never hold a demo (#888). The same
-/// list as `native::sys::folder_walk::SYSTEM_FOLDERS`, which can't be used
-/// here (`native` depends on this crate); a test there checks they agree.
-pub const SYSTEM_FOLDERS: [&str; 4] = [
+/// Volume Information is usually unreadable, and `node_modules`, `.git`,
+/// `__pycache__` and `site-packages` (Python's own) are tens of thousands of
+/// folders that never hold a demo (#888). The same list as
+/// `native::sys::folder_walk::SYSTEM_FOLDERS`, which can't be used here
+/// (`native` depends on this crate); a test there checks they agree.
+pub const SYSTEM_FOLDERS: [&str; 6] = [
     "$RECYCLE.BIN",
     "System Volume Information",
     "node_modules",
     ".git",
+    "__pycache__",
+    "site-packages",
 ];
 
 fn is_system_folder(path: &Path) -> bool {
@@ -1019,6 +1022,7 @@ mod tests {
                 "OS2",
                 "keep/.github",
                 "keep/node_modules_old",
+                "venv/Lib/site-packages/torch/__pycache__",
             ] {
                 fs::create_dir_all(root.join(dir)).unwrap();
             }
@@ -1030,6 +1034,9 @@ mod tests {
                 "OS2/w.dem",
                 "keep/.github/k.dem",
                 "keep/node_modules_old/n.dem",
+                "venv/Lib/site-packages/p.dem",
+                "venv/Lib/site-packages/torch/__pycache__/q.dem",
+                "venv/v.dem",
             ] {
                 fs::write(root.join(f), b"").unwrap();
             }
@@ -1073,7 +1080,9 @@ mod tests {
                 "OS2/w.dem",
                 "a.dem",
                 "keep/.github/k.dem",
-                "keep/node_modules_old/n.dem"
+                "keep/node_modules_old/n.dem",
+                // A folder named venv is the user's to name: still read.
+                "venv/v.dem"
             ]
         );
         // A folder picked inside the Windows folder is still read.
@@ -1128,9 +1137,9 @@ mod tests {
             .try_iter()
             .filter(|m| matches!(m, AuditProgress::Scanning(_)))
             .count();
-        // Every folder but the skipped .git and NODE_MODULES trees, keep's
-        // three twice.
-        assert_eq!(folders, 12);
+        // Every folder but the skipped .git, NODE_MODULES and site-packages
+        // trees (venv and venv/Lib are read), keep's three twice.
+        assert_eq!(folders, 14);
         // A cancel ends the walk at once.
         cancel.store(true, Ordering::Relaxed);
         assert!(scan_roots_with(&roots, 4, None, &cancel, &None).is_empty());

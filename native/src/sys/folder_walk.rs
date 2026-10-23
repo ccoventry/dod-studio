@@ -83,15 +83,17 @@ pub struct Outcome {
 /// Folders that hold no demos of the user's, skipped by name at any depth:
 /// the Recycle Bin keeps a deleted file's extension (`$R1A2B3C.dem`), so a
 /// walk into it brings deleted demos back, System Volume Information is
-/// usually unreadable (#843), and `node_modules` and `.git` are tens of
-/// thousands of folders that never hold a demo (#888). `hl_demo_auditor`
-/// keeps its own copy, since it can't depend on `native`; a test below
-/// checks the two agree.
-pub const SYSTEM_FOLDERS: [&str; 4] = [
+/// usually unreadable (#843), and `node_modules`, `.git`, `__pycache__` and
+/// `site-packages` (Python's own) are tens of thousands of folders that
+/// never hold a demo (#888). `hl_demo_auditor` keeps its own copy, since it
+/// can't depend on `native`; a test below checks the two agree.
+pub const SYSTEM_FOLDERS: [&str; 6] = [
     "$RECYCLE.BIN",
     "System Volume Information",
     "node_modules",
     ".git",
+    "__pycache__",
+    "site-packages",
 ];
 
 /// True for a folder name in [`SYSTEM_FOLDERS`], in any case.
