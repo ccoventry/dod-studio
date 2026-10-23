@@ -1217,6 +1217,26 @@ fn wrap_toggleconsole() {
     }
 }
 
+/// The engine's own `toggleconsole` handler (`Con_ToggleConsole_f`), whether
+/// or not [`wrap_toggleconsole`] has swapped it for ours yet. None until the
+/// engine's command list is reachable.
+pub fn engine_toggleconsole() -> Option<usize> {
+    let mut handler = None;
+    crate::cmd_list::for_each(|name, entry| {
+        if name.eq_ignore_ascii_case(b"toggleconsole") {
+            handler = entry.function.map(|f| {
+                let ours: crate::engine::ConsoleCommandFn = wrapped_toggleconsole;
+                if f as usize == ours as usize {
+                    REAL_TOGGLECONSOLE.load(Ordering::Relaxed)
+                } else {
+                    f as usize
+                }
+            });
+        }
+    });
+    handler.filter(|&address| address != 0)
+}
+
 /// The console key. With `ds_ui_console_in_panel 1` it goes back to the
 /// game when the Console tab is showing, leaving our window open for the next
 /// ESC; otherwise it runs the engine's own `toggleconsole` (which also brings

@@ -55,6 +55,14 @@ pub fn steam_exe() -> Option<PathBuf> {
     exe.is_file().then_some(exe)
 }
 
+/// The language Steam runs in (`english`, `french`…), lowercased: the one
+/// VGUI2 picks a game's `resource\<game>_<language>.txt` by (#925).
+pub fn steam_language() -> Option<String> {
+    reg_value(STEAM_KEY, "Language")
+        .map(|l| l.trim().to_ascii_lowercase())
+        .filter(|l| !l.is_empty())
+}
+
 /// One value from `reg query`, as text. No new dependency for two reads.
 fn reg_value(key: &str, name: &str) -> Option<String> {
     let mut cmd = Command::new("reg");
