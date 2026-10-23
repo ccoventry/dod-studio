@@ -76,9 +76,10 @@ SOUND
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
-      Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
-  ds_demo_seek_by <seconds>
-      Jump forward (or back, with a minus) by that many seconds.
+      Jump viewdemo playback to a time on the VCR bar's clock: 610, 10:10 or 1:02:03.
+      Typed on the same line as viewdemo, it waits until the demo has loaded.
+  ds_demo_seek_by <time>
+      Jump forward (or back, with a minus) by that much: 30, 1:30 or -0:30.
   ds_demo_seek_skip_between 0/1
       A jump skips the events and commands it passes over.
   ds_demo_fast_load 0/1/<ms>

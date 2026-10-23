@@ -162,11 +162,23 @@ See [`goldsrc_decals.md`](goldsrc_decals.md).
 
 ### `ds_demo_seek_to` / `ds_demo_seek_by`
 
-`ds_demo_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
-clock the editor's events list shows); `ds_demo_seek_by <seconds>` jumps
-from where playback is, back when negative. Neither pauses, and both refuse
-while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
-Anniversary `DemoPlayer.dll`.
+`ds_demo_seek_to <time>` jumps `viewdemo` playback to a world time (the
+clock the editor's events list shows); `ds_demo_seek_by <time>` jumps
+from where playback is, back when negative. The time is seconds (`610`,
+`610.5`), `m:ss` (`10:10`) or `h:mm:ss` (`1:02:03`), quoted or not, with a
+minus for going back (`ds_demo_seek_by -0:30`); anything else is refused with
+a line saying which forms it takes (#928). Neither pauses, and both refuse
+under `playdemo`. Pre-Anniversary and 25th Anniversary `DemoPlayer.dll`.
+
+While the demo is still loading, a seek typed on the same line as the
+`viewdemo` (`viewdemo mydemo; ds_demo_seek_to 10:05`) waits:
+`will seek to 10:05 once the demo has loaded`, then
+`the demo has loaded; seeking to 10:05` when it runs. Only the last one
+counts, and anything done to the demo first cancels it, with
+`cancelled the seek to 10:05 (you <did what>)`: another seek, pausing, a
+speed change, moving the clock (a demo-bar click or drag), or loading or
+closing a demo. A seek typed later while the demo is still loading is
+refused, as before.
 
 A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
