@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('./ipc_bridge.js', () => ({ listHookDlls: vi.fn() }));
 
-import { pickerOptions, selectedValue, shortDate } from './hook_dll_picker.js';
+import { pickerOptions, selectedValue, shortDate, resolveTyped } from './hook_dll_picker.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CAPTURE_CONFIG;
@@ -47,5 +47,32 @@ describe('pickerOptions', () => {
     const options = pickerOptions({ dlls: [{ label: '924', path: 'x.dll', modified_unix_secs: secs }] }, '');
     expect(options[1].text).toBe('924 · Oct 22 17:54');
     expect(shortDate(null)).toBe('');
+  });
+});
+
+describe('resolveTyped', () => {
+  const options = [
+    { value: '', text: 'Bundled (none in a local dev build)' },
+    { value: 'a', text: '910 · Oct 22 17:54' },
+    { value: 'b', text: '910b · Oct 22 18:01' },
+    { value: 'c', text: '889 · Oct 22 17:54' },
+    { value: 'd', text: 'capture-wsod25d · Oct 18 02:10' },
+  ];
+  const pick = (typed) => resolveTyped(options, typed)?.value ?? null;
+
+  it('takes the picked row, its label alone, or the one row that contains it', () => {
+    expect(pick('910 · Oct 22 17:54')).toBe('a');
+    expect(pick('910')).toBe('a');
+    expect(pick('910B')).toBe('b');
+    expect(pick('wsod')).toBe('d');
+    expect(pick('bundled')).toBe('');
+  });
+
+  it('is null for nothing typed, no match, or several', () => {
+    expect(pick('')).toBeNull();
+    expect(pick('   ')).toBeNull();
+    expect(pick('999')).toBeNull();
+    expect(pick('91')).toBeNull();
+    expect(pick('Oct 22')).toBeNull();
   });
 });

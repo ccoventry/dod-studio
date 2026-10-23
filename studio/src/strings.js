@@ -429,6 +429,7 @@ export const STRINGS = {
     HOOK_DLL_CHECKOUT: "This checkout's build (target\\…\\release)",
     hookDllOther: (name) => `Other: ${name}`,
     hookDllFolderHint: (folder) => `Test builds: put dodstudio_goldsrc_hooks_<name>.dll in ${folder}, or dodstudio_goldsrc_hooks.dll in its own folder under local\\. Then Refresh.`,
+    HOOK_DLL_TYPE_PLACEHOLDER: 'Click to list the test DLLs, or type to narrow them',
     HOOK_DLL_REFRESH: 'Refresh',
     HOOK_DLL_REFRESH_TITLE: 'List the test DLLs in local\\ again',
     BROWSE_BUTTON: 'Browse',

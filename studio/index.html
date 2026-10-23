@@ -300,9 +300,10 @@
                    (hook_dll_row.js). -->
               <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
-                <!-- The saved path; the dropdown sets it (hook_dll_picker.js). -->
+                <!-- The saved path; the box below sets it (hook_dll_picker.js). -->
                 <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" hidden />
-                <select id="goldsrc-hooks-dll-select" style="flex: 1;"></select>
+                <input type="text" id="goldsrc-hooks-dll-choice" list="goldsrc-hooks-dll-options" autocomplete="off" style="flex: 1;" data-str-placeholder="CAPTURE_CONFIG.HOOK_DLL_TYPE_PLACEHOLDER" placeholder="Click to list the test DLLs, or type to narrow them" />
+                <datalist id="goldsrc-hooks-dll-options"></datalist>
                 <button id="goldsrc-hooks-refresh-btn" data-str="CAPTURE_CONFIG.HOOK_DLL_REFRESH" data-str-title="CAPTURE_CONFIG.HOOK_DLL_REFRESH_TITLE" title="List the test DLLs in local\ again">Refresh</button>
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
