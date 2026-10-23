@@ -579,7 +579,7 @@ fn run_plan(
             }
             Err(MoveError::Failed(error)) => outcome.failed.push(Failure {
                 path: m.from.clone(),
-                error,
+                error: crate::messages::consolidate_not_moved(Path::new(&m.from), &error),
                 not_a_copy: false,
             }),
         }
@@ -680,8 +680,8 @@ fn recycle_copies(
         match error {
             None => outcome.recycled.push(path),
             Some(error) => outcome.recycle_failed.push(Failure {
+                error: crate::messages::consolidate_not_recycled(Path::new(&path), &error),
                 path,
-                error,
                 not_a_copy: false,
             }),
         }
@@ -787,8 +787,8 @@ pub fn undo_last(
                 not_reached.push(pair);
             }
             Err(MoveError::Failed(error)) => outcome.failed.push(Failure {
+                error: crate::messages::consolidate_not_put_back(Path::new(&pair.to), &error),
                 path: pair.to,
-                error,
                 not_a_copy: false,
             }),
         }
@@ -1237,6 +1237,40 @@ mod tests {
             move_one(&gone, &dir.path().join("x.dem"), &no, &mut |_| {}),
             Err(MoveError::Failed(_))
         ));
+    }
+
+    /// The toast shows only the first failure's text, so it names the demo.
+    #[test]
+    fn a_failed_move_names_the_demo() {
+        let dir = Scratch::new("consolidate_fail_names");
+        let gone = dir.path().join("gone.dem");
+        let plan = Plan {
+            moves: vec![PlannedMove {
+                from: gone.to_string_lossy().into_owned(),
+                to: dir
+                    .path()
+                    .join("all")
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                size: 1,
+                cross_drive: false,
+                renamed: false,
+            }],
+            ..Plan::default()
+        };
+        let outcome = run_plan(
+            &plan,
+            &dir.path().join("logs"),
+            &AtomicBool::new(false),
+            &mut |_| {},
+        );
+        let error = &outcome.failed[0].error;
+        assert!(error.contains(&gone.display().to_string()), "{error}");
+        assert!(
+            error.contains(crate::messages::CONSOLIDATE_SOURCE_GONE),
+            "{error}"
+        );
     }
 
     #[test]

@@ -357,6 +357,19 @@ pub fn consolidate_copy_mismatch(to: &std::path::Path) -> String {
     )
 }
 
+/// A failure names the demo, since the toast shows only the first one.
+pub fn consolidate_not_moved(from: &std::path::Path, err: &str) -> String {
+    format!("Not moved: {}: {}", shown(from), err)
+}
+
+pub fn consolidate_not_recycled(path: &std::path::Path, err: &str) -> String {
+    format!("Not recycled: {}: {}", shown(path), err)
+}
+
+pub fn consolidate_not_put_back(at: &std::path::Path, err: &str) -> String {
+    format!("Not put back: {}: {}", shown(at), err)
+}
+
 // ── demo_compare.rs (#871, #872) ─────────────────────────────────────────
 
 /// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`
