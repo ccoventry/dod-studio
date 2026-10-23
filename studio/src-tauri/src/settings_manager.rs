@@ -583,6 +583,7 @@ pub fn clean_clips_profile() -> CommandProfile {
         "ds_view_hide_screen_shake 1",
         "ds_player_hide_hand_signals 0",
         "ds_sound_mute_voice_commands 0",
+        "ds_sound_mute_win_and_capture 0",
         "ds_map_allow_shaders 0",
     ];
     CommandProfile {
