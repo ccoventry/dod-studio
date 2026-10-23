@@ -263,7 +263,7 @@ export function createProjectSession({
         // the table never showed; a new scan lists the recorder's alone.
         data.demos.forEach(dropOtherPlayersSavedStreaks);
         // Before the demos load: the grouping they start takes the line.
-        openProgress.opened();
+        openProgress.opened(STRINGS.MAIN.projectOpenedLine(data.demos.length));
         loadDemos(data.demos);
         showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
         openProgress.searching();

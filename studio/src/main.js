@@ -24,7 +24,7 @@ import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane } from './demo_rename_ui.js';
 import { initThemedConfirm } from './themed_confirm.js';
-import { initAnalyzerPane, openAnalyzerDemo } from './analyzer_pane.js';
+import { initAnalyzerPane, openAnalyzerDemo, refreshAnalyzerQuickLinks } from './analyzer_pane.js';
 import { createLaunchFiles } from './launch_files.js';
 import { initFileTypeSettings, getDemOpenTarget } from './file_types_settings.js';
 import { initHdPane } from './hd_pane.js';
@@ -850,7 +850,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // The one-time look at the pins older builds' + Add Folder made (#533).
   setup.start().finally(() => offerPinnedReview({
     getPinned: () => scanPaths,
-    unpin: (drop) => { scanPaths = scanPaths.filter((f) => !drop.includes(f)); return persistAppSettings(); },
+    unpin: (drop) => { scanPaths = scanPaths.filter((f) => !drop.includes(f)); refreshAnalyzerQuickLinks(); return persistAppSettings(); },
     isSetupOpen: () => setup.isOpen(),
     persist: () => persistAppSettings(),
   }));
