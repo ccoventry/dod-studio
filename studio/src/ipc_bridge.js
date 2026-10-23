@@ -62,6 +62,17 @@ export async function scanDirectory(scanPaths, known = [], workers = undefined) 
     });
 }
 
+// What a rescan of `paths` has to do (#937): `{ cached, upgradable, to_parse,
+// bytes_to_parse }`, from the analyzer cache's file names and first bytes.
+// No toast on failure: the rescan prompt just leaves its time line out.
+export async function estimateRescan(paths) {
+  return invoke("estimate_rescan", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (estimate_rescan):", err);
+      throw err;
+    });
+}
+
 // Which of a loaded project's demos are missing, and a moved copy of each if
 // one with the same file key turns up in `searchDirs` (#21). Resolves
 // `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
@@ -179,6 +190,37 @@ export async function listGameFolders(gamePath) {
   return await invoke('list_game_folders', { gamePath })
     .catch((err) => {
       console.error("IPC Execution Error (list_game_folders):", err);
+      throw err;
+    });
+}
+
+/** Setup's movie copy (#939): the sizes of the `dod` beside hl.exe (`files`,
+ *  `bytes` without demos, `demo_files`, `demo_bytes`), the drive's
+ *  `free_bytes` (null when unknown), `headroom_bytes`, the names `existing`
+ *  in the Half-Life folder and the `default_name`. */
+export async function movieCopyPlan(gamePath) {
+  return invoke('movie_copy_plan', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (movie_copy_plan):", err);
+      throw err;
+    });
+}
+
+/** Copies `dod` to `name`; resolves `{ state: 'done', folder, target, files,
+ *  bytes }` or `{ state: 'cancelled' }`. Progress comes as
+ *  `movie_copy_progress` events. */
+export async function startMovieCopy(gamePath, name, includeDemos) {
+  return invoke('start_movie_copy', { gamePath, name, includeDemos })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_movie_copy):", err);
+      throw err;
+    });
+}
+
+export async function cancelMovieCopy() {
+  return invoke('cancel_movie_copy')
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_movie_copy):", err);
       throw err;
     });
 }
@@ -714,8 +756,8 @@ export async function saveSettings(settings) {
 // Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
 // `allDrives`, in one key pass; copies in `queued` (the project's queue) or
 // the install's game folder are listed first, as the ones to keep.
-export async function runDemoAudit(paths, allDrives = false, queued = []) {
-  return invoke("run_demo_audit", { paths, allDrives, queued })
+export async function runDemoAudit(paths, allDrives = false, queued = [], lookInZips = false) {
+  return invoke("run_demo_audit", { paths, allDrives, queued, lookInZips })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');

@@ -17,6 +17,7 @@ mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
 mod messages;
+mod movie_copy_manager;
 mod overview_manager;
 mod packet_limit_manager;
 mod pick_paths;
@@ -197,6 +198,7 @@ async fn run_demo_audit(
     paths: Vec<String>,
     all_drives: bool,
     queued: Vec<String>,
+    look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
     let hl_path = settings
         .inner
@@ -214,6 +216,7 @@ async fn run_demo_audit(
         Arc::clone(&state.cancel_token),
         paths,
         all_drives,
+        look_in_zips.unwrap_or(false),
         (game_folders, queued),
     )
     .await
@@ -327,6 +330,21 @@ async fn scan_directory(
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
     )
+    .await
+}
+
+/// What a rescan of `paths` has to do, for the rescan prompt's time line
+/// (#937): stats each demo and reads its cache entries' first bytes, opening
+/// no demo, so a few hundred take well under a second (longer on a slow or
+/// cloud drive, hence off the main thread).
+#[tauri::command]
+async fn estimate_rescan(paths: Vec<String>) -> Result<analysis::cache::RescanEstimate, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(analysis::cache::RescanEstimate::new(
+            &native::analyzer_cache_root(),
+            &paths,
+        ))
+    }))
     .await
 }
 
@@ -828,6 +846,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
@@ -861,6 +880,9 @@ pub fn run() {
             diagnose_executable_paths,
             settings_manager::list_game_folders,
             settings_manager::game_folder_language_file,
+            movie_copy_manager::movie_copy_plan,
+            movie_copy_manager::start_movie_copy,
+            movie_copy_manager::cancel_movie_copy,
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
@@ -891,6 +913,7 @@ pub fn run() {
             delete_orphaned_previews,
             cancel_capture_batch,
             scan_directory,
+            estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
             diagnose_capture_output_paths,

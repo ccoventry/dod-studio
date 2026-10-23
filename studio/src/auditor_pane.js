@@ -10,12 +10,13 @@ import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
   withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
-  elapsedText, auditFoldersKey,
+  elapsedText, auditFoldersKey, isArchived, canDelete, copiesToDelete, revealPath,
 } from './audit_duplicates.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
-/// copies in it are kept first and never start ticked.
-export function initAuditorPane({ getDemos = () => [] } = {}) {
+/// copies in it are kept first and never start ticked. `onSettingsChange`
+/// saves the app settings when "Look inside .zip files" changes (#929).
+export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => {} } = {}) {
   let currentAuditResults = [];
   // Groups default to expanded; this tracks the exceptions. Reset on every
   // new audit run so a fresh result set always starts fully expanded.
@@ -37,7 +38,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   const footerEl = document.querySelector('#audit-list-footer');
   const tbody = document.querySelector('#audit-results-body');
 
-  const folders = createAuditFolders({ onChange: () => refreshStartButtonState() });
+  const folders = createAuditFolders({ onChange: () => refreshStartButtonState(), onSettingsChange });
 
   // To see or restore what a delete moved there.
   document.querySelector('#open-recycle-bin-btn')
@@ -141,7 +142,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         showToast(STRINGS.AUDITOR.CHOOSE_FOLDER_FIRST, 'error');
         return;
       }
-      const { paths, allDrives } = folders.getRequest();
+      const { paths, allDrives, lookInZips } = folders.getRequest();
       const queued = (getDemos() || []).map((d) => d?.path).filter(Boolean);
 
       running = true;
@@ -160,7 +161,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.AUDITING_IN_PROGRESS_ROW}</td></tr>`;
 
       try {
-        const outcome = await runDemoAudit(paths, allDrives, queued);
+        const outcome = await runDemoAudit(paths, allDrives, queued, lookInZips);
         const seconds = ((Date.now() - auditStartedAt) / 1000).toFixed(1);
         currentAuditResults = withAuditOrder(outcome?.groups);
         renderAuditResults({ resetTicks: true });
@@ -276,6 +277,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
       shownFiles(group).forEach(({ file, kept }) => {
         const fileIdx = kept ? 0 : 1;
         const notCopy = !kept && isNotCopy(group, file.path);
+        const archived = isArchived(file);
         const tr = document.createElement('tr');
         tr.className = kept ? 'audit-file-row audit-kept' : 'audit-file-row';
         // The kept copy stands out where it is: rows don't move when
@@ -287,7 +289,10 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         cb.type = 'checkbox';
         cb.className = 'audit-row-cb';
         cb.dataset.file = file.path;
-        if (fileIdx === 0) {
+        if (archived) {
+          cb.disabled = true; // Zips are never changed (#929), kept or not.
+          cb.title = STRINGS.AUDITOR.IN_ZIP_TITLE;
+        } else if (fileIdx === 0) {
           cb.disabled = true; // The kept copy is never deleted.
           cb.title = STRINGS.AUDITOR.ORIGINAL_FILE_TITLE;
         } else if (notCopy) {
@@ -329,6 +334,13 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         const tdPath = document.createElement('td');
         tdPath.className = 'audit-file-path';
         tdPath.textContent = displayPath;
+        if (archived) {
+          const chip = document.createElement('span');
+          chip.className = 'audit-zip-chip';
+          chip.textContent = STRINGS.AUDITOR.IN_ZIP_CHIP;
+          chip.title = STRINGS.AUDITOR.IN_ZIP_TITLE;
+          tdPath.append(' ', chip);
+        }
         if (notCopy) {
           tdPath.style.color = '#f0c060';
         } else if (fileIdx > 0) {
@@ -357,7 +369,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
         openBtn.type = 'button';
         openBtn.textContent = STRINGS.AUDITOR.OPEN_FOLDER_BUTTON;
         openBtn.addEventListener('click', () => {
-          revealInExplorer(displayPath).catch(() => {});
+          revealInExplorer(revealPath(file)).catch(() => {});
         });
         tdAction.appendChild(copyBtn);
         tdAction.appendChild(openBtn);
@@ -416,9 +428,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   /// The ticked copies still in the results (a collapsed group's count too),
   /// each with the copy its group keeps, which the delete compares it to.
   function tickedCopies() {
-    return currentAuditResults.flatMap((g) => g.files.slice(1)
-      .filter((f) => ticked.has(f.path) && !isNotCopy(g, f.path))
-      .map((f) => ({ path: f.path, keep: g.files[0].path })));
+    return copiesToDelete(currentAuditResults, ticked);
   }
 
   function tickedFiles() {
@@ -446,7 +456,7 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
     selectAllCb.addEventListener('change', (e) => {
       const isChecked = e.target.checked;
       currentAuditResults.forEach((g) => g.files.slice(1).forEach((f) => {
-        if (isChecked && !isNotCopy(g, f.path)) ticked.add(f.path); else ticked.delete(f.path);
+        if (isChecked && canDelete(g, f)) ticked.add(f.path); else ticked.delete(f.path);
       }));
       renderAuditResults();
     });

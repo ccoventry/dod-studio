@@ -18,6 +18,7 @@ import { updateStreakVisuals } from './detail_pane.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
+import { learnFromScan } from './rescan_estimate.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -220,6 +221,12 @@ export function createQueueScan({
         unchanged,
         outcome,
       }));
+      // This PC's full-read rate, for the rescan prompt's estimate (#937).
+      const rateLog = learnFromScan(outcome);
+      if (rateLog) {
+        logFrontendEvent(rateLog);
+        persistAppSettings();
+      }
       const carryReport = rescanReport(rescans);
       carryReport.log.forEach((line) => logFrontendEvent(line));
 

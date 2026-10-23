@@ -7,6 +7,7 @@
 import { saveSettings } from './ipc_bridge.js';
 import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
+import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -140,6 +141,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       demo_rename_pov_template: getDemoRenameTemplates().pov,
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       demo_rename_lowercase: getDemoRenameTemplates().lowercase,
+      audit_look_in_zips: !!document.querySelector('#audit-look-in-zips')?.checked,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -168,6 +170,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       hidden_installs: getHiddenInstalls(),
       pick_folders: getPickFolders(),
       ...readReviewSettings(),
+      ...scanRateSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -324,6 +327,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
   );
+  const lookInZipsEl = document.querySelector('#audit-look-in-zips');
+  if (lookInZipsEl) lookInZipsEl.checked = settings.audit_look_in_zips === true;
   if (settings.record_start_lead != null) {
     const inputEl = document.querySelector('#config-record-start-lead');
     if (inputEl) inputEl.value = settings.record_start_lead;
@@ -366,6 +371,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   }
   setRenderPresets(settings.render_presets);
   applyReviewSettings(settings);
+  applyScanRateSettings(settings);
   if (settings.scan_workers) {
     const inputEl = document.querySelector('#config-scan-workers');
     if (inputEl) inputEl.value = settings.scan_workers;

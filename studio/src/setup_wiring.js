@@ -15,7 +15,8 @@ import {
   listGameFolders,
   revealInExplorer,
 } from './ipc_bridge.js';
-import { getGameFolder } from './game_folder_ui.js';
+import { getGameFolder, refreshGameFolderList } from './game_folder_ui.js';
+import { createMovieCopy } from './movie_copy_ui.js';
 import { refreshPathWarnings, refreshHlaeFfmpegStatus, linkHlaeToFfmpeg } from './config_wiring.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { setupChecklist, shouldOpenSetupAtLaunch, engineBuild, stepIndex } from './setup_checklist.js';
@@ -208,6 +209,28 @@ export function createSetup({
     await refresh();
   }
 
+  // Through Configuration's own Game Folder list, which saves it and runs
+  // its checks.
+  async function setGameFolder(name) {
+    const select = document.querySelector('#config-game-folder');
+    if (select && name) {
+      select.value = name;
+      select.dispatchEvent(new Event('change'));
+    }
+    await refreshPathWarnings();
+    await refresh();
+  }
+
+  // Make a movie copy (#939): the new folder joins the Game Folder's list,
+  // then is picked there.
+  const movieCopy = createMovieCopy({
+    getHlPath: () => value('#hl-path-input'),
+    onDone: async (folder) => {
+      await refreshGameFolderList();
+      await setGameFolder(folder);
+    },
+  });
+
   const win = createSetupWindow({
     getSnapshot: () => snapshot,
     pickHl: () => pickExe('#hl-path-input', STRINGS.MAIN.SELECT_HL_EXE_TITLE),
@@ -218,16 +241,8 @@ export function createSetup({
     // Finish clips and the HLAE link all read.
     pickFfmpeg: () => pickExe('#ffmpeg-override-path-input', STRINGS.MAIN.SELECT_FFMPEG_EXE_TITLE),
     useHlaeFfmpeg: () => setExe('#ffmpeg-override-path-input', snapshot.hlaeBundledFfmpeg),
-    // Through Configuration's own Game Folder list, which saves it.
-    setGameFolder: async (name) => {
-      const select = document.querySelector('#config-game-folder');
-      if (select && name) {
-        select.value = name;
-        select.dispatchEvent(new Event('change'));
-      }
-      await refreshPathWarnings();
-      await refresh();
-    },
+    setGameFolder,
+    openMovieCopy: () => movieCopy.open(),
     showLanguageFile: () => {
       const path = snapshot?.gameFolderLanguage?.show;
       if (path) revealInExplorer(path).catch(() => {});
