@@ -43,7 +43,10 @@
 //! `ds_spec_match_pov` drives five modules at once: the viewmodel's
 //! animations, the gunshots an HLTV demo lost, the spectator crosshair, the
 //! in-eye camera's height for a prone player, and the gun lowering off screen
-//! (`spectator_gun`). The first three used to
+//! (`spectator_gun`). The strafing models that would turn round for a frame
+//! (`strafe_twitch`) have their own switch, `ds_player_fix_model_flicker`:
+//! that is a bug in how the game draws, which HLTV only shows more often
+//! (#927). The first three used to
 //! have a cvar of their own
 //! (`dodstudio_hltv_show_viewmodel_animations`,
 //! `dodstudio_hltv_play_missing_gunshots`, `dodstudio_match_pov_crosshair`).
@@ -711,6 +714,12 @@ fn status_text() -> String {
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
+    lines.push(format!(
+        "{} = {} -- strafe twitch: {}",
+        crate::strafe_twitch::NAME,
+        bit(crate::strafe_twitch::enabled()),
+        crate::strafe_twitch::status()
+    ));
     if let Some(deathcam) = crate::spectator_deathcam::status_line() {
         lines.push(deathcam);
     }
@@ -1319,6 +1328,15 @@ unsafe extern "C" fn cmd_viewdemo_in_panel() {
     );
 }
 
+/// Only registered when `ds_player_fix_model_flicker` could not be a cvar.
+unsafe extern "C" fn cmd_fix_model_flicker() {
+    handle_toggle(
+        crate::strafe_twitch::NAME,
+        &crate::strafe_twitch::FIX_MODEL_FLICKER,
+        crate::strafe_twitch::status,
+    );
+}
+
 /// Only registered when `ds_ui_console_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
@@ -1714,6 +1732,12 @@ pub fn install() {
     if let Some(speaker) = register(crate::overview_speaker::NAME, "0") {
         crate::overview_speaker::set_cvar(speaker);
     }
+    // On by default: a model turned round for a frame is wrong in any demo
+    // (#927). A failed registration falls back to a plain toggle.
+    match register(crate::strafe_twitch::NAME, "1") {
+        Some(flicker) => crate::strafe_twitch::set_cvar(flicker),
+        None => add_command(crate::strafe_twitch::NAME, cmd_fix_model_flicker),
+    }
     // On by default: a demo then shows the sniper scope the player saw.
     if let Some(scope) = register(crate::demo_scope::NAME, "1") {
         crate::demo_scope::set_cvar(scope);
@@ -1848,6 +1872,8 @@ mod tests {
             SPEC_MATCH_POV_NAME,
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
+            // Its own switch (#927), listed whatever match_pov is.
+            crate::strafe_twitch::NAME,
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
@@ -1923,20 +1949,23 @@ mod tests {
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,
             crate::detail_cache::KEEP_NAME,
+            crate::strafe_twitch::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }
     }
 
     /// The console's autocomplete swaps a name that is the whole start of
-    /// another for the longer one on space, so none of #677's names may be
-    /// the start of any name in the crate, or have one as its start.
+    /// another for the longer one on space, so none of #677's names, nor
+    /// #927's, may be the start of any name in the crate, or have one as its
+    /// start.
     #[test]
     fn the_hide_text_names_are_no_other_names_start() {
         let ours = [
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::strafe_twitch::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")
@@ -1950,7 +1979,11 @@ mod tests {
             let text = std::fs::read_to_string(&path).unwrap();
             for part in text.split("console_name!(\"").skip(1) {
                 let name = part.split('"').next().unwrap();
-                all.push(format!("dodstudio_{name}"));
+                // `console_name!("")` is the bare prefix, not a name.
+                if name.is_empty() {
+                    continue;
+                }
+                all.push(format!("{}{name}", console_name!("")));
             }
         }
         assert!(all.len() > 50, "found only {} names", all.len());
