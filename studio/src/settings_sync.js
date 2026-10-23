@@ -16,10 +16,11 @@ import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
+import { getPickFolders, setPickFolders } from './pick_path.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
- *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
+ *   form doesn't hold ({ scanPaths, demoFolderHistory, recentProjects, scanFoldersForDemos,
  *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
  *   setupDismissed }),
  *   and currentCaptureMode().
@@ -103,6 +104,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
+      recent_projects: state.recentProjects || [],
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",
@@ -137,6 +139,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       demo_rename_pov_template: getDemoRenameTemplates().pov,
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       demo_rename_lowercase: getDemoRenameTemplates().lowercase,
+      audit_look_in_zips: !!document.querySelector('#audit-look-in-zips')?.checked,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -162,6 +165,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
       players: getPlayers(),
+      pick_folders: getPickFolders(),
       ...readReviewSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -201,6 +205,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
   setPlayers(settings.players);
+  // Each Browse button's last folder (#936).
+  setPickFolders(settings.pick_folders);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;
@@ -316,6 +322,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
   );
+  const lookInZipsEl = document.querySelector('#audit-look-in-zips');
+  if (lookInZipsEl) lookInZipsEl.checked = settings.audit_look_in_zips === true;
   if (settings.record_start_lead != null) {
     const inputEl = document.querySelector('#config-record-start-lead');
     if (inputEl) inputEl.value = settings.record_start_lead;

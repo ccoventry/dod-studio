@@ -38,6 +38,16 @@ export async function defaultProjectsDir() {
     });
 }
 
+/** One boolean per path: whether it is a file that's there (#935, Open
+ *  Recent's missing entries). `null` when the check itself failed. */
+export async function filesExist(paths) {
+  return invoke("files_exist", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (files_exist):", err);
+      return null;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
@@ -735,8 +745,8 @@ export async function saveSettings(settings) {
 // Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
 // `allDrives`, in one key pass; copies in `queued` (the project's queue) or
 // the install's game folder are listed first, as the ones to keep.
-export async function runDemoAudit(paths, allDrives = false, queued = []) {
-  return invoke("run_demo_audit", { paths, allDrives, queued })
+export async function runDemoAudit(paths, allDrives = false, queued = [], lookInZips = false) {
+  return invoke("run_demo_audit", { paths, allDrives, queued, lookInZips })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');
@@ -994,6 +1004,26 @@ export async function defaultBrowseDir() {
   return invoke("default_browse_dir")
     .catch((err) => {
       console.error("IPC Execution Error (default_browse_dir):", err);
+      return null;
+    });
+}
+
+/** Where a Browse dialog can start (#936): each path's state on disk, in
+ *  order ({ path, is_file, exact, is_root } or null). [] on failure, so the
+ *  dialog still opens, wherever Windows puts it. */
+export async function pickPathStates(paths) {
+  return invoke("pick_path_states", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_path_states):", err);
+      return [];
+    });
+}
+
+/** The user's Videos, Documents and Program Files folders (#936). */
+export async function pickUserFolders() {
+  return invoke("pick_user_folders")
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_user_folders):", err);
       return null;
     });
 }

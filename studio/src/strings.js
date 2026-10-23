@@ -68,6 +68,16 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Open Recent (#935).
+    OPEN_RECENT: 'Open Recent',
+    OPEN_RECENT_EMPTY: 'No recent sessions',
+    OPEN_RECENT_MISSING: '(missing)',
+    CLEAR_RECENT: 'Clear Recent',
+    CLEAR_RECENT_EMPTY_TITLE: 'Nothing to clear yet',
+    RECENT_MISSING_TITLE: 'Session file not found',
+    RECENT_MISSING_MESSAGE: "This session file isn't there any more. Remove it from Open Recent?",
+    RECENT_MISSING_REMOVE: 'Remove from list',
+    RECENT_MISSING_KEEP: 'Keep',
   },
 
   // ── Workspace Pane: Directory Scan & Master Demo Queue ──────────────────
@@ -934,6 +944,11 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
+    // "Look inside .zip files" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
+    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
+    IN_ZIP_CHIP: 'in a zip',
+    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -945,6 +960,7 @@ export const STRINGS = {
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`

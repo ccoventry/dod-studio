@@ -19,6 +19,7 @@ mod messages;
 mod movie_copy_manager;
 mod overview_manager;
 mod packet_limit_manager;
+mod pick_paths;
 mod players_tab;
 mod preview_in_place;
 mod render_manager;
@@ -169,6 +170,20 @@ async fn load_project_session(path: String) -> Result<String, String> {
     .await
 }
 
+/// One `true` per path that is a file that's there: File → Open Recent dims
+/// the rest (#935). Off the main thread, since a path on a sleeping network
+/// or cloud drive can take seconds to answer (#789).
+#[tauri::command]
+async fn files_exist(paths: Vec<String>) -> Result<Vec<bool>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(paths
+            .iter()
+            .map(|p| std::path::Path::new(p).is_file())
+            .collect())
+    }))
+    .await
+}
+
 // ── Auditor IPC Commands ───────────────────────────────────────────────────────
 
 /// `paths` plus every fixed drive when `all_drives`, in one key pass (#844).
@@ -182,6 +197,7 @@ async fn run_demo_audit(
     paths: Vec<String>,
     all_drives: bool,
     queued: Vec<String>,
+    look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
     let hl_path = settings
         .inner
@@ -199,6 +215,7 @@ async fn run_demo_audit(
         Arc::clone(&state.cancel_token),
         paths,
         all_drives,
+        look_in_zips.unwrap_or(false),
         (game_folders, queued),
     )
     .await
@@ -908,6 +925,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            files_exist,
             index_demo_players,
             default_projects_dir,
             locate_missing_demos,
@@ -943,6 +961,8 @@ pub fn run() {
             open_recycle_bin,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
+            pick_paths::pick_path_states,
+            pick_paths::pick_user_folders,
             dir_browser::count_demo_files_in_folder,
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,

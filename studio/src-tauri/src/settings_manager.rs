@@ -1,5 +1,6 @@
 use crate::capture_manager::CustomCommandPayload;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -47,6 +48,10 @@ pub struct AppSettings {
     /// demo listing. Mirrors dev's `settings.demo_folder_history`.
     #[serde(default)]
     pub demo_folder_history: Vec<String>,
+    /// File → Open Recent (#935): project files opened or saved, newest
+    /// first, at most 10 (`recent_projects.js` keeps the list).
+    #[serde(default)]
+    pub recent_projects: Vec<String>,
     /// Gates the Demo Analyzer Explorer tree's per-subfolder "(N)" demo-count
     /// badge (Quick Links counts are always shown, matching dev — see
     /// docs/archive/tauri_parity_audit.md Area 1). Defaults to `false`, matching
@@ -247,6 +252,10 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
+    /// Demo Auditor > Duplicates' "Look inside .zip files" (#929): off by
+    /// default, since a first scan of big zips reads every demo in them.
+    #[serde(default)]
+    pub audit_look_in_zips: bool,
     /// "Skip setup for now" in the Setup window (#599): it stops opening by
     /// itself at launch. Finishing setup clears it, so a required path that
     /// goes missing later opens the window again.
@@ -272,6 +281,11 @@ pub struct AppSettings {
     pub review_fast_forward: bool,
     #[serde(default = "default_review_fast_forward_gap")]
     pub review_fast_forward_gap: i32,
+    /// The folder each Browse button last picked from, keyed by the field's
+    /// id in `studio/src/pick_path.js` (#936), so an empty field's dialog
+    /// starts there instead of wherever any other picker last was.
+    #[serde(default)]
+    pub pick_folders: BTreeMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -424,6 +438,7 @@ impl Default for AppSettings {
             goldsrc_hooks_dll_path: None,
             pinned_folders: Vec::new(),
             demo_folder_history: Vec::new(),
+            recent_projects: Vec::new(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
             language: "en".to_string(),
@@ -493,6 +508,7 @@ impl Default for AppSettings {
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
+            audit_look_in_zips: false,
             setup_dismissed: false,
             players: native::player_overrides::PlayerTable::default(),
             review_covers: default_review_covers(),
@@ -500,6 +516,7 @@ impl Default for AppSettings {
             review_tick_yes: true,
             review_fast_forward: true,
             review_fast_forward_gap: default_review_fast_forward_gap(),
+            pick_folders: BTreeMap::new(),
         }
     }
 }
@@ -764,6 +781,25 @@ mod tests {
         assert!(restored.setup_dismissed);
     }
 
+    /// Open Recent's list survives a save, and a file from before it has none (#935).
+    #[test]
+    fn recent_projects_roundtrip_and_default() {
+        let original = AppSettings {
+            recent_projects: vec!["D:/projects/a.json".into(), "D:/projects/b.json".into()],
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.recent_projects, original.recent_projects);
+
+        let older: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert!(older.recent_projects.is_empty());
+    }
+
     /// A file saved while Seek Between Clips was experimental (off by default)
     /// gets the new default once; a later choice sticks (#434).
     #[test]
@@ -944,6 +980,7 @@ mod tests {
             assert!(s.review_tick_yes);
             assert!(s.review_fast_forward);
             assert_eq!(s.review_fast_forward_gap, 8);
+            assert!(s.pick_folders.is_empty());
         }
 
         let saved: AppSettings = serde_json::from_str(
