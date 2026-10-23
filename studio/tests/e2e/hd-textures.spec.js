@@ -133,12 +133,28 @@ test('download progress, then cancel', async ({ page }) => {
   await page.click('#hd-setup-btn');
   await expect(page.locator('#hd-setup-btn')).toBeDisabled();
   await expect(page.locator('#hd-setup-cancel-btn')).toBeEnabled();
+  // #956: a line and the sliding block the moment it's clicked.
+  await expect(page.locator('#hd-setup-progress')).toHaveText("Checking what's already installed…");
+  await expect(page.locator('#hd-setup-bar')).toHaveJSProperty('hidden', false);
+  await expect(page.locator('#hd-setup-bar')).toHaveClass(/indeterminate/);
 
+  // File 2 of 4, 12 of 40 MB: a quarter for file 1, then 30% of the next quarter.
   await page.evaluate(() => window.__mockEmit('hd_setup_progress', {
-    item: 'realesrgan-ncnn-vulkan.zip', step: 1, steps: 9,
-    bytes_done: 10 * 1024 ** 2, bytes_total: 45 * 1024 ** 2, unpacking: false,
+    item: 'realesrgan-ncnn-vulkan.zip', step: 2, steps: 4,
+    bytes_done: 12 * 1024 ** 2, bytes_total: 40 * 1024 ** 2, unpacking: false,
   }));
-  await expect(page.locator('#hd-setup-progress')).toHaveText('1 of 9: realesrgan-ncnn-vulkan.zip (10.0 MB of 45.0 MB)');
+  await expect(page.locator('#hd-setup-progress')).toHaveText('Downloading realesrgan-ncnn-vulkan.zip (2 of 4): 12.0 MB of 40.0 MB');
+  await expect(page.locator('#hd-setup-bar')).not.toHaveClass(/indeterminate/);
+  await expect(page.locator('#hd-setup-bar .progress-bar-fill')).toHaveAttribute('style', /width: 32.5%/);
+  await expect(page.locator('#hd-setup-bar .progress-bar-step')).toHaveCount(0);
+
+  // Unpacking: the block slides over that file's quarter only.
+  await page.evaluate(() => window.__mockEmit('hd_setup_progress', {
+    item: 'realesrgan-ncnn-vulkan.zip', step: 2, steps: 4, bytes_done: 0, bytes_total: null, unpacking: true,
+  }));
+  await expect(page.locator('#hd-setup-progress')).toHaveText('Unpacking realesrgan-ncnn-vulkan.zip (2 of 4)…');
+  await expect(page.locator('#hd-setup-bar .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await expect(page.locator('#hd-setup-bar .progress-bar-step')).toHaveAttribute('style', /left: 25%; width: 25%/);
 
   await page.click('#hd-setup-cancel-btn');
   const cancelled = await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'hd_cancel'));
@@ -146,6 +162,7 @@ test('download progress, then cancel', async ({ page }) => {
   await page.evaluate(() => window.__finishSetup.reject('cancelled'));
   await expect(page.locator('#hd-setup-progress')).toContainText('Cancelled');
   await expect(page.locator('#hd-setup-btn')).toBeEnabled();
+  await expect(page.locator('#hd-setup-bar')).toHaveJSProperty('hidden', true);
 });
 
 test('the Python line says which Python the build uses, and why another is not', async ({ page }) => {
@@ -265,11 +282,18 @@ test('build progress, the finished line, and cancel', async ({ page }) => {
   await page.click('#hd-build-btn');
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
   await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+  // #956: a line and the sliding block at once, before the script prints.
+  await expect(page.locator('#hd-build-progress')).toHaveText('Starting the build…');
+  await expect(page.locator('#hd-build-bar')).toHaveClass(/indeterminate/);
 
   await page.evaluate(() => window.__mockEmit('hd_build_progress', {
     step: 5, steps: 10, style: 'plain', asset_type: 'world', line: null, elapsed_secs: 75,
   }));
   await expect(page.locator('#hd-build-progress')).toHaveText('Step 5 of 10: plain, Map textures (1m 15s so far)');
+  // Four steps done fill 40%, and the block slides over step 5's 40-50%.
+  await expect(page.locator('#hd-build-bar')).not.toHaveClass(/indeterminate/);
+  await expect(page.locator('#hd-build-bar .progress-bar-fill')).toHaveAttribute('style', /width: 40%/);
+  await expect(page.locator('#hd-build-bar .progress-bar-step')).toHaveAttribute('style', /left: 40%; width: 10%/);
   await page.evaluate(() => window.__mockEmit('hd_build_progress', {
     step: 5, steps: 10, style: 'plain', asset_type: 'world', line: 'plain      world   exit 0, 12 new', elapsed_secs: 80,
   }));
@@ -280,6 +304,7 @@ test('build progress, the finished line, and cancel', async ({ page }) => {
   await page.evaluate(() => window.__finishBuild.reject('cancelled'));
   await expect(page.locator('#hd-build-progress')).toContainText('Stopped. Files already built are kept');
   await expect(page.locator('#hd-build-btn')).toBeEnabled();
+  await expect(page.locator('#hd-build-bar')).toHaveJSProperty('hidden', true);
 
   await page.click('#hd-build-btn');
   await page.evaluate(() => window.__finishBuild.resolve({ steps: 10, elapsed_secs: 200, log_path: 'C:/x/build_all.log' }));
@@ -925,16 +950,19 @@ test('map coverage (#426): checks off the page thread, then says which maps a st
   await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
   await page.click('#hd-refresh-btn');
 
-  // While the scan runs: a checking line, and a bar once it reports.
-  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Checking which maps each style has map textures for…');
+  // While the scan runs: its line and the sliding block from the start
+  // (#956), then the bar by maps read.
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Reading the maps…');
+  await expect(page.locator('#hd-style-maps-progress')).toHaveJSProperty('hidden', false);
+  await expect(page.locator('#hd-style-maps-progress')).toHaveClass(/indeterminate/);
   await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
   await page.evaluate(() => window.__mockEmit('hd_coverage_progress', { done: 2, total: 4 }));
-  await expect(page.locator('#hd-style-maps-summary')).toContainText('(2 of 4 maps)');
-  await expect(page.locator('#hd-style-maps-progress')).toBeVisible();
-  await expect(page.locator('#hd-style-maps-progress')).toHaveAttribute('max', '4');
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Reading the maps: 2 of 4');
+  await expect(page.locator('#hd-style-maps-progress')).not.toHaveClass(/indeterminate/);
+  await expect(page.locator('#hd-style-maps-progress .progress-bar-fill')).toHaveAttribute('style', /width: 50%/);
 
   await page.evaluate((c) => window.__finishCoverage.resolve(c), WORLD_COVERAGE);
-  await expect(page.locator('#hd-style-maps-progress')).toBeHidden();
+  await expect(page.locator('#hd-style-maps-progress')).toHaveJSProperty('hidden', true);
   await page.selectOption('#hd-style-select', 'ultrasharp');
   await expect(page.locator('#hd-style-maps-summary')).toHaveText('ultrasharp has every map texture for all 3 maps in your map list.');
   await expect(page.locator('#hd-style-map-warning')).toBeHidden();

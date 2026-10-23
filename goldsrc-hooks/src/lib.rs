@@ -257,6 +257,7 @@ mod hull_trace_guard;
 mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
+mod map_sounds;
 mod map_text;
 mod missing_shots;
 mod msglog;

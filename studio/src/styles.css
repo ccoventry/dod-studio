@@ -1195,6 +1195,31 @@ button.primary-btn:hover:not(:disabled) {
   to { transform: translateX(333%); }
 }
 
+/* A job's steps so far, with the block sliding over the running step's
+   share only (step_bar.js, #956). */
+.progress-bar-container.step-bar {
+  position: relative;
+}
+
+.progress-bar-step {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.progress-bar-step::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  background: var(--primary-accent);
+  opacity: 0.6;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {
@@ -1433,6 +1458,12 @@ button.primary-btn:hover:not(:disabled) {
   color: var(--text-muted);
   padding: 24px;
   text-align: center;
+}
+
+/* Under "Analyzing demo… 40%" while a demo opens (analyzer_loading.js). */
+.analyzer-loading-bar {
+  max-width: 320px;
+  margin: -12px auto 0;
 }
 
 .analyzer-heading {
@@ -3857,7 +3888,19 @@ button.setup-skip:hover:not(:disabled) {
   opacity: 0.45;
 }
 
-.audit-all-drives {
+/* Dropping demos from Windows (#530): both zones show while dragging, the
+   one under the pointer more. */
+.drop-zone-active {
+  outline: 2px dashed rgba(100, 160, 255, 0.5);
+  outline-offset: -2px;
+}
+
+.drop-zone-hover {
+  outline: 2px solid #64a0ff;
+  background: rgba(100, 160, 255, 0.08);
+}
+
+.audit-all-drives, .scan-subfolders {
   display: flex;
   gap: 3px;
   align-items: center;
@@ -3955,4 +3998,30 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 12px;
   overflow-wrap: anywhere;
   min-height: 1em;
+}
+
+/* Command profiles (#911): a built-in profile's mark beside the picker, and
+   the one-time notice about a kept copy under the row. */
+.profile-builtin-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid var(--border-accent);
+  border-radius: 10px;
+  color: var(--text-muted, #aaa);
+  cursor: help;
+}
+
+.profile-builtin-chip[hidden],
+.profile-notice[hidden] {
+  display: none;
+}
+
+.profile-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
 }
