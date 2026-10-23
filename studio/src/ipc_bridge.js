@@ -173,6 +173,17 @@ export async function listGameFolders(gamePath) {
     });
 }
 
+/** The language file a dod copy lacks (#925): `{ folder, language, needed,
+ *  rename_from }`, or null when it has it (or is dod). Best-effort: null on
+ *  error, which only leaves the warning out. */
+export async function gameFolderLanguageFile(gamePath, folder) {
+  return invoke('game_folder_language_file', { gamePath, folder })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_folder_language_file):", err);
+      return null;
+    });
+}
+
 /** The PNGs in the game install's logos folder, for Configuration >
  *  Players' spray column (#428). Empty when they can't be listed. */
 export async function listLogoPngs(gamePath, gameFolder) {

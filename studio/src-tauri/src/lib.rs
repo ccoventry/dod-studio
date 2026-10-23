@@ -844,6 +844,7 @@ pub fn run() {
             check_hlae_ffmpeg,
             diagnose_executable_paths,
             settings_manager::list_game_folders,
+            settings_manager::game_folder_language_file,
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
