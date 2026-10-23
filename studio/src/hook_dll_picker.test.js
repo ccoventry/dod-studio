@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('./ipc_bridge.js', () => ({ listHookDlls: vi.fn() }));
 
-import { pickerOptions, selectedValue, shortDate, resolveTyped, filterOptions } from './hook_dll_picker.js';
+import { pickerOptions, selectedValue, shortDate } from './hook_dll_picker.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CAPTURE_CONFIG;
@@ -50,50 +50,13 @@ describe('pickerOptions', () => {
   });
 });
 
-describe('resolveTyped', () => {
-  const options = [
-    { value: '', text: 'Bundled (none in a local dev build)' },
-    { value: 'a', text: '910 · Oct 22 17:54' },
-    { value: 'b', text: '910b · Oct 22 18:01' },
-    { value: 'c', text: '889 · Oct 22 17:54' },
-    { value: 'd', text: 'capture-wsod25d · Oct 18 02:10' },
-  ];
-  const pick = (typed) => resolveTyped(options, typed)?.value ?? null;
-
-  it('takes the picked row, its label alone, or the one row that contains it', () => {
-    expect(pick('910 · Oct 22 17:54')).toBe('a');
-    expect(pick('910')).toBe('a');
-    expect(pick('910B')).toBe('b');
-    expect(pick('wsod')).toBe('d');
-    expect(pick('bundled')).toBe('');
-  });
-
-  it('is null for nothing typed, no match, or several', () => {
-    expect(pick('')).toBeNull();
-    expect(pick('   ')).toBeNull();
-    expect(pick('999')).toBeNull();
-    expect(pick('91')).toBeNull();
-    expect(pick('Oct 22')).toBeNull();
-  });
-});
-
-describe('filterOptions', () => {
-  const options = [
-    { value: '', text: 'Bundled (none in a local dev build)' },
-    { value: 'a', text: '910 · Oct 22 17:54' },
-    { value: 'b', text: '918 · Oct 22 01:10' },
-    { value: 'c', text: '889 · Oct 22 17:54' },
-  ];
-  const values = (typed, current = '') => filterOptions(options, typed, current).map((o) => o.value);
-
-  it('keeps the rows that contain what is typed, in any case', () => {
-    expect(values('91')).toEqual(['', 'a', 'b']);
-    expect(values('BUNDLED')).toEqual(['']);
-    expect(values('')).toEqual(['', 'a', 'b', 'c']);
-  });
-
-  it('always keeps the saved pick, so the dropdown still shows it', () => {
-    expect(values('91', 'c')).toEqual(['a', 'b', 'c']);
-    expect(values('nothing', 'c')).toEqual(['c']);
+describe('pickerOptions order', () => {
+  it('puts the newest test DLL first, after the bundled and checkout rows', () => {
+    const dll = (label, secs) => ({ label, path: `${label}.dll`, modified_unix_secs: secs });
+    const options = pickerOptions({
+      checkout_build: 'target.dll',
+      dlls: [dll('402b', 100), dll('555', 300), dll('889', null), dll('910', 200)],
+    }, '');
+    expect(options.map((o) => o.value)).toEqual(['', 'target.dll', '555.dll', '910.dll', '402b.dll', '889.dll']);
   });
 });

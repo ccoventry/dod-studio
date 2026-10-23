@@ -302,8 +302,9 @@
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
                 <!-- The saved path; the dropdown sets it (hook_dll_picker.js). -->
                 <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" hidden />
-                <input type="text" id="goldsrc-hooks-dll-filter" autocomplete="off" style="width: 110px;" data-str-placeholder="CAPTURE_CONFIG.HOOK_DLL_FILTER_PLACEHOLDER" placeholder="Filter, e.g. 91" data-str-title="CAPTURE_CONFIG.HOOK_DLL_FILTER_TITLE" title="Type to narrow the dropdown; Enter picks the one that matches" />
-                <select id="goldsrc-hooks-dll-select" style="flex: 1;"></select>
+                <input type="text" id="goldsrc-hooks-dll-choice" />
+                <!-- ^ a dropdown you can type into (searchable_select.js) -->
+
                 <button id="goldsrc-hooks-refresh-btn" data-str="CAPTURE_CONFIG.HOOK_DLL_REFRESH" data-str-title="CAPTURE_CONFIG.HOOK_DLL_REFRESH_TITLE" title="List the test DLLs in local\ again">Refresh</button>
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
