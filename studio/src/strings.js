@@ -85,6 +85,9 @@ export const STRINGS = {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
     ADD_FOLDER_BUTTON: '+ Add Folder',
+    // #531: beside + Add Folder; also what a dropped folder follows.
+    INCLUDE_SUBFOLDERS_LABEL: 'Include subfolders',
+    INCLUDE_SUBFOLDERS_TITLE: "Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.",
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     CANCEL_SCAN_TITLE: 'Cancel the running directory scan',
     SCAN_STATUS_READY: 'Ready',
@@ -537,7 +540,7 @@ export const STRINGS = {
     // #442: named sets of both command lists. Row laid out like Render
     // Output's preset row (#108).
     PROFILE_LABEL: 'Profile:',
-    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one.',
+    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one. Built-in profiles can be picked or duplicated, not changed.',
     PROFILE_NONE: '—',
     profileEditedOption: (name) => `${name} (edited)`,
     PROFILE_NAME_PLACEHOLDER: 'Name for these commands',
@@ -553,6 +556,16 @@ export const STRINGS = {
     profileAppliedToast: (name) => `Replaced both command lists with the "${name}" profile.`,
     profileDeletedToast: (name) => `Deleted the "${name}" profile.`,
     profileNameTakenToast: (name) => `There is already a profile named "${name}".`,
+    // Built-in profiles (#911): shipped with the app, kept up to date, locked.
+    PROFILE_BUILTIN_CHIP: 'Built-in',
+    PROFILE_BUILTIN_TITLE: "Comes with DoD Studio and stays up to date with it, so it can't be changed. Duplicate it to make your own copy.",
+    PROFILE_BUILTIN_LOCKED_TITLE: "Built-in profiles can't be changed. Duplicate it to make your own copy.",
+    profileBuiltinNameTitle: (name) => `"${name}" is a built-in profile. Type another name.`,
+    PROFILE_DUPLICATE_BUTTON: 'Duplicate',
+    PROFILE_DUPLICATE_TITLE: 'Make a copy of the picked profile that is yours to change.',
+    profileDuplicatedToast: (name) => `Made "${name}", your own copy. Save Changes now saves into it.`,
+    builtinProfileNotice: (names) => `Built-in profiles now stay up to date and can't be changed. You had changed your copy, so it's kept as ${names.map((n) => `"${n}"`).join(' and ')}.`,
+    PROFILE_NOTICE_OK: 'OK',
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
       "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",
@@ -1718,6 +1731,13 @@ export const STRINGS = {
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    // #531: the folder walk's bounds stopped it short; `cap` is the scan's.
+    scanCapToast: (cap) => {
+      const parts = [];
+      if (cap.depth) parts.push(`folders more than ${cap.max_depth} levels down were not read`);
+      if (cap.entries) parts.push(`the walk stopped after ${Number(cap.max_entries).toLocaleString('en-US')} files and folders`);
+      return `Some demos may be missing: ${parts.join(', and ')}. Add a folder further down to scan the rest.`;
+    },
     scanCancelledToast: (count) =>
       count > 0
         ? `Scan cancelled (${count} demo(s) added before cancel)`
@@ -2186,6 +2206,29 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
     saved: (name) => `Saved ${name}.`,
     SHOW_FILE: 'Show',
+    // combine_progress.js: the step line under the bar (#955).
+    CHECKING_STEP: 'Checking the clips…',
+    checkingLine: (n, total) => `Checking the clips (${n} of ${total})…`,
+    joiningLine: (done, total) => `Joining clips: ${done} of ${total}`,
+    savedIn: (elapsed) => `Saved in ${elapsed}.`,
+    STOPPED: 'Cancelled. Nothing was saved.',
+    FAILED: 'Stopped with an error (see the message).',
+  },
+
+  // ── capture_precheck.js: the Capture footer's line while Start Capture
+  //    Batch checks everything before the batch starts (#953)
+  CAPTURE_PRECHECK: {
+    STARTING: 'Getting ready to capture…',
+    OBS: 'Checking OBS…',
+    DISK: 'Checking the disk space…',
+    DEMOS: 'Checking the picked demos are where they were…',
+    demosCounted: (done, total) => `Checking the picked demos are where they were (${done} of ${total})…`,
+    MAPS: 'Checking the maps and demos for known problems…',
+    PATHS: 'Checking the game and HLAE paths…',
+    GAME: 'Checking whether the game is already open…',
+    STEAM: 'Checking Steam…',
+    NOT_STARTED: 'Not started.',
+    GAME_OPEN: 'Not started yet: the game is already open.',
   },
 
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
@@ -2457,6 +2500,7 @@ export const STRINGS = {
     hdMapListFailed: (err) => `Could not change hd_maps.txt: ${err}`,
     hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
+    dropError: (err) => `Could not read what was dropped: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
@@ -2805,6 +2849,23 @@ export const STRINGS = {
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  // Dropping demos and folders from Windows (#530): demo_drop.js.
+  DROP: {
+    skippedToast: (names) => {
+      const shown = names.slice(0, 5).join(', ');
+      const more = names.length > 5 ? ` and ${names.length - 5} more` : '';
+      return `Not a demo or a folder, so not added: ${shown}${more}`;
+    },
+    BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+  },
+  // The one-time look at the pinned folders (#533): pinned_review.js.
+  PINNED_REVIEW: {
+    TITLE: 'Pinned folders',
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
+    SAVE_BUTTON: 'Save',
+    KEEP_ALL_BUTTON: 'Keep all',
   },
   SETUP: {
     MENU_ITEM: 'Setup…',

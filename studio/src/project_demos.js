@@ -125,8 +125,9 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
 
   // Start Capture Batch's check: a demo can go missing after the queue was
   // loaded. True when every demo with a highlight picked is where the queue
-  // says, after any the user chose to relocate.
-  async function pickedDemosPresent() {
+  // says, after any the user chose to relocate. `onProgress({ done, total })`
+  // counts the changed-demo check, for Start Capture's line (#953).
+  async function pickedDemosPresent({ onProgress = null } = {}) {
     const picked = getDemos().filter((d) => (d.streaks || []).some((s) => s.selected === true));
     if (picked.length === 0) return true;
     if ((await checkMissingDemos(null, [], picked)) !== 0) return false;
@@ -135,7 +136,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     // anyway") is at the right path but isn't the demo that was scanned:
     // every highlight would record the wrong moment, and any past its end
     // would leave the game stopped at the end of the demo.
-    const changed = await changedDemos(picked.filter((d) => d.file_key).map((d) => ({ path: d.path, file_key: d.file_key })));
+    const changed = await changedDemos(picked.filter((d) => d.file_key).map((d) => ({ path: d.path, file_key: d.file_key })), onProgress);
     if (changed.length === 0) return true;
     const rescan = await themedConfirm(STRINGS.MAIN.CHANGED_DEMOS_MESSAGE, {
       title: STRINGS.MAIN.CHANGED_DEMOS_TITLE,
