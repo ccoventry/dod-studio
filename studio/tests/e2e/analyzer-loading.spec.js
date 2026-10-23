@@ -82,6 +82,24 @@ test('clicking a demo that is still analysing does not start it again', async ({
   await expect(page.locator('#analyzer-current-file')).toHaveText('slow.dem');
 });
 
+test('the loading view shows while the demo\'s folder is still being listed', async ({ page }) => {
+  const path = 'C:/other/slow.dem';
+  await page.evaluate(() => {
+    window.__listings = [];
+    window.__mockInvokeHandlers.browse_directory = ({ path: dir }) => new Promise((resolve) => {
+      const finish = () => resolve({ path: dir, dirs: [], demos: [] });
+      if (window.__listed) finish(); else window.__listings.push(finish);
+    });
+  });
+  const opened = page.evaluate((p) => window.__openDemo(p), path);
+  await page.waitForFunction(() => window.__listings.length > 0);
+  await expect(page.locator('#analyzer-tab-content')).toHaveText('Analyzing demo…');
+  await page.evaluate(() => { window.__listed = true; window.__listings.forEach((finish) => finish()); });
+  await page.waitForFunction((p) => !!window.__finish[p], path);
+  await page.evaluate((p) => window.__finish[p](), path);
+  await opened;
+});
+
 test('opening a demo shows a bar from its %, and a cached demo says so (#958)', async ({ page }) => {
   page.evaluate((path) => window.__openDemo(path), A);
   await page.waitForFunction((p) => !!window.__finish[p], A);
