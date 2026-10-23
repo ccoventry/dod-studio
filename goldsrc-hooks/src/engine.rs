@@ -507,15 +507,16 @@ pub struct ClEntityS {
     /// Where the entity is drawn this frame. For the viewmodel,
     /// `V_CalcRefdef` sets it and the renderer reads it next.
     pub origin: Vec3,
-    angles: Vec3,
+    pub angles: Vec3,
     attachment: [Vec3; 4],
     trivial_accept: i32,
     pub model: *mut ModelSPartial,
 }
 
 /// Partial mirror of `ref_params_s` (`common/ref_params.h`) up through the
-/// fields read here: the view's vectors and the frame's time. Its layout is
-/// the same as a demo frame's `refparams` block, which `dem-patch` reads.
+/// fields used here: the view's vectors, the frame's time, `simorg` and
+/// `nextView`. Its layout is the same as a demo frame's `refparams` block,
+/// which `dem-patch` reads.
 #[repr(C)]
 pub struct RefParamsPartial {
     pub vieworg: [f32; 3],
@@ -525,7 +526,46 @@ pub struct RefParamsPartial {
     pub up: [f32; 3],
     pub frametime: f32,
     pub time: f32,
+    intermission: i32,
+    paused: i32,
+    spectator: i32,
+    onground: i32,
+    waterlevel: i32,
+    simvel: [f32; 3],
+    /// The client's simulated origin. The engine copies it back into
+    /// `cl.simorg` after `V_CalcRefdef`, and culls an HLTV demo's entities
+    /// from there (`spectator_chase_pvs`).
+    pub simorg: [f32; 3],
+    viewheight: [f32; 3],
+    idealpitch: f32,
+    cl_viewangles: [f32; 3],
+    health: i32,
+    crosshairangle: [f32; 3],
+    viewsize: f32,
+    punchangle: [f32; 3],
+    maxclients: i32,
+    viewentity: i32,
+    playernum: i32,
+    max_entities: i32,
+    demoplayback: i32,
+    hardware: i32,
+    smoothing: i32,
+    cmd: *mut c_void,
+    movevars: *mut c_void,
+    viewport: [i32; 4],
+    /// 0 for the main view, 1 for a second view (an inset) the client asked
+    /// for on the first.
+    pub next_view: i32,
 }
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    // Offsets from `ref_params.h` on a 32-bit build.
+    assert!(std::mem::offset_of!(RefParamsPartial, time) == 64);
+    assert!(std::mem::offset_of!(RefParamsPartial, simorg) == 100);
+    assert!(std::mem::offset_of!(RefParamsPartial, viewentity) == 176);
+    assert!(std::mem::offset_of!(RefParamsPartial, next_view) == 224);
+};
 
 /// Partial mirror of `model_s` (`common/com_model.h`) -- `name` is its first
 /// field, so this is all we need to identify a model by filename substring.
@@ -1397,7 +1437,9 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
     unsafe { real(version, ppinterface, pstudio) }
 }
 
-/// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
+/// Runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's
+/// position where the engine culls an HLTV demo's entities from
+/// (`spectator_chase_pvs`), lets the spectated view
 /// replace the camera for a dead player (`spectator_deathcam`, before the
 /// position is recorded, so the recorded view is the drawn one), adjust the
 /// viewmodel it just placed (`spectator_gun`) and keep its live bob for a POV
@@ -1408,13 +1450,16 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         return;
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
+    let main_view = unsafe { crate::spectator_chase_pvs::is_main_view(pparams) };
     unsafe { real(pparams) };
+    unsafe { crate::spectator_chase_pvs::after_calc_refdef(pparams, main_view) };
     unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {
         // Safety: the engine's ref_params_s for this view, valid for the call.
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    crate::screen_effects::after_calc_refdef();
     crate::pov_live_bob::after_calc_refdef(pparams);
 }
 
@@ -1427,6 +1472,7 @@ unsafe extern "C" fn tramp_draw_transparent_triangles() {
         return;
     }
     crate::demo_scope::before_transparent_triangles();
+    crate::pov_live_bob::before_view_model();
     let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
     // Safety: the client's own export, called on the engine's thread.
     crate::demo_scope::with_black_fill(|| unsafe { real() });
