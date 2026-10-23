@@ -75,6 +75,9 @@ fn main() {
     let mut survey: BTreeMap<u16, Survey> = BTreeMap::new();
     let mut names: BTreeMap<u16, String> = BTreeMap::new();
     let mut svc_time = 0f32;
+    // GAIT_DUMP=1: one CSV line per player update (`U,time,ent,x,y,z,yaw,gait,seq`)
+    // for the strafe search in the #927 scratch scripts.
+    let dump = std::env::var_os("GAIT_DUMP").is_some();
 
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
@@ -137,6 +140,19 @@ fn main() {
                     }
                     if let Some(b) = field(delta, "frame") {
                         st.frame = f32::from_le_bytes(b);
+                    }
+                    if dump {
+                        println!(
+                            "U,{:.4},{},{:.3},{:.3},{:.3},{:.2},{},{}",
+                            svc_time,
+                            ent,
+                            st.origin[0],
+                            st.origin[1],
+                            st.origin[2],
+                            st.yaw,
+                            st.gait,
+                            st.seq
+                        );
                     }
                     let first = !st.seen;
                     st.seen = true;

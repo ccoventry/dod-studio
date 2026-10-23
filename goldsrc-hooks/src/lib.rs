@@ -233,6 +233,7 @@ mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod gait_hold;
 mod gait_log;
 mod game_dir_check;
 mod game_folder;

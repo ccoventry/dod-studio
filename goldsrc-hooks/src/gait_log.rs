@@ -57,13 +57,19 @@ fn read_i32(base: *const u8, offset: usize) -> i32 {
 /// From `HUD_AddEntity`, for every entity about to be drawn.
 pub fn on_add_entity(entity_type: i32, ent: *const ClEntityS) {
     let target = TARGET.load(Ordering::Relaxed);
-    if target <= 0 || ent.is_null() {
+    if target == 0 || ent.is_null() {
         return;
     }
     // Safety: the engine's entity, valid for this call.
     let e = unsafe { &*ent };
     let second = TARGET2.load(Ordering::Relaxed);
-    if e.index != target && (second <= 0 || e.index != second) {
+    // -1: every player.
+    let wanted = if target == -1 {
+        (1..=32).contains(&e.index)
+    } else {
+        e.index == target || (second > 0 && e.index == second)
+    };
+    if !wanted {
         return;
     }
     let target = e.index;
@@ -88,7 +94,7 @@ pub fn on_add_entity(entity_type: i32, ent: *const ClEntityS) {
     };
     let line = format!(
         "gait: t {clock:.3} type {entity_type} ent {} org {:.2} {:.2} {:.2} ang {:.1} \
-         cur {:.2} {:.2} msg {:.3} seq {} frame {:.1} fr {:.2} gaitseq {} vel {:.0} {:.0} {}",
+         cur {:.2} {:.2} msg {:.3} seq {} frame {:.1} fr {:.2} gaitseq {} vel {:.0} {:.0} ct {:.4} bl {} {} {}",
         e.index,
         e.origin.x,
         e.origin.y,
@@ -103,7 +109,27 @@ pub fn on_add_entity(entity_type: i32, ent: *const ClEntityS) {
         cs.gaitsequence,
         cs.velocity.x,
         cs.velocity.y,
+        engine::engine_client_time().unwrap_or(-1.0),
+        cs.blending[0],
+        cs.blending[1],
         gait,
     );
+    unsafe { crate::debug::report(&line) };
+}
+
+/// R&D toggle for `gait_hold`: `ds_debug_gait_hold <0|1>`.
+pub const HOLD_NAME: &str = console_name!("debug_gait_hold");
+
+pub unsafe extern "C" fn hold_command() {
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let on = unsafe {
+        let raw = (engfuncs.cmd_argv)(1);
+        !raw.is_null() && std::ffi::CStr::from_ptr(raw as *const std::ffi::c_char).to_bytes() == b"1"
+    };
+    crate::gait_hold::ENABLED.store(on, Ordering::Relaxed);
+    let line = format!("{HOLD_NAME}: {} (held so far {})", on as i32, crate::gait_hold::held());
+    crate::commands::console_print(&format!("{line}\n"));
     unsafe { crate::debug::report(&line) };
 }

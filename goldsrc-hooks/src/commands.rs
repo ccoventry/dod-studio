@@ -1555,6 +1555,7 @@ pub fn install() {
     );
     add_command(crate::position::NAME, crate::position::command);
     add_command(crate::gait_log::NAME, crate::gait_log::command);
+    add_command(crate::gait_log::HOLD_NAME, crate::gait_log::hold_command);
 
     // Standalone, like `ds_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll, and a failed
