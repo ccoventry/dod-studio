@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!--
+  Harness for searchable_select.js: one box with five options, styled as
+  Studio styles it. Each pick is appended to window.__picks.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>searchable_select.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div class="input-row" style="width: 500px;">
+    <input type="text" id="box" />
+    <button id="after">After</button>
+  </div>
+
+  <script type="module">
+    import { createSearchableSelect } from '/src/searchable_select.js';
+
+    window.__picks = [];
+    const select = createSearchableSelect(document.querySelector('#box'), {
+      noMatch: 'No test DLL matches',
+      onPick: (value) => window.__picks.push(value),
+    });
+    select.setOptions([
+      { value: '', text: 'Bundled (none in a local dev build)' },
+      { value: 'p910', text: '910 · Oct 22 17:54' },
+      { value: 'p918', text: '918 · Oct 22 01:10' },
+      { value: 'p889', text: '889 · Oct 22 17:54' },
+      { value: 'p555', text: '555 · Oct 20 16:03' },
+    ]);
+    select.setValue('p889');
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
