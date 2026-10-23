@@ -34,7 +34,7 @@ HUD
   ds_hud_deathmsg
       Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
   ds_hud_objectives
-      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>. The bare command shows the options.
+      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>, and count_scale <1..8> for the player count under a flag. The bare command shows the options.
   ds_hud_overview_layout
       Move or resize the overview map.
   ds_hud_overview_players 0-4
@@ -76,9 +76,10 @@ SOUND
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
-      Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
-  ds_demo_seek_by <seconds>
-      Jump forward (or back, with a minus) by that many seconds.
+      Jump viewdemo playback to a time on the VCR bar's clock: 610, 10:10 or 1:02:03.
+      Typed on the same line as viewdemo, it waits until the demo has loaded.
+  ds_demo_seek_by <time>
+      Jump forward (or back, with a minus) by that much: 30, 1:30 or -0:30.
   ds_demo_seek_skip_between 0/1
       A jump skips the events and commands it passes over.
   ds_demo_fast_load 0/1/<ms>

@@ -39,6 +39,17 @@ pub(crate) fn ready() -> Result<(), String> {
 /// Safety: on the engine's thread with its GL context current (inside a HUD
 /// draw), which is where every caller is.
 pub(crate) unsafe fn about(cx: f32, cy: f32, s: f32, draw: impl FnOnce()) -> bool {
+    // Safety: the caller's.
+    unsafe { mapped((cx, cy), (cx, cy), s, draw) }
+}
+
+/// Runs `draw` with the point `from` moved to `to` and everything about it
+/// `s` times bigger: `translate(to) * scale(s) * translate(-from)`. [`about`]
+/// is the case `from == to`. Returns `false`, without calling `draw`, when
+/// the GL calls cannot be had.
+///
+/// Safety: as [`about`].
+pub(crate) unsafe fn mapped(from: (f32, f32), to: (f32, f32), s: f32, draw: impl FnOnce()) -> bool {
     #[cfg(target_arch = "x86")]
     {
         let Ok(gl) = gl::get() else {
@@ -46,12 +57,12 @@ pub(crate) unsafe fn about(cx: f32, cy: f32, s: f32, draw: impl FnOnce()) -> boo
         };
         // Safety: see the function's own; balanced push/pop, the matrix mode
         // put back if it was changed.
-        unsafe { gl.zoomed(cx, cy, s, draw) };
+        unsafe { gl.zoomed(from, to, s, draw) };
         true
     }
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = (cx, cy, s, draw);
+        let _ = (from, to, s, draw);
         false
     }
 }
@@ -80,7 +91,13 @@ mod gl {
     }
 
     impl Gl {
-        pub(super) unsafe fn zoomed(&self, cx: f32, cy: f32, s: f32, draw: impl FnOnce()) {
+        pub(super) unsafe fn zoomed(
+            &self,
+            from: (f32, f32),
+            to: (f32, f32),
+            s: f32,
+            draw: impl FnOnce(),
+        ) {
             // Safety: the caller's (engine thread, context current).
             unsafe {
                 let mut mode: i32 = GL_MODELVIEW as i32;
@@ -89,9 +106,9 @@ mod gl {
                     (self.matrix_mode)(GL_MODELVIEW);
                 }
                 (self.push_matrix)();
-                (self.translatef)(cx, cy, 0.0);
+                (self.translatef)(to.0, to.1, 0.0);
                 (self.scalef)(s, s, 1.0);
-                (self.translatef)(-cx, -cy, 0.0);
+                (self.translatef)(-from.0, -from.1, 0.0);
                 draw();
                 (self.pop_matrix)();
                 if mode != GL_MODELVIEW as i32 {

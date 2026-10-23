@@ -162,11 +162,23 @@ See [`goldsrc_decals.md`](goldsrc_decals.md).
 
 ### `ds_demo_seek_to` / `ds_demo_seek_by`
 
-`ds_demo_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
-clock the editor's events list shows); `ds_demo_seek_by <seconds>` jumps
-from where playback is, back when negative. Neither pauses, and both refuse
-while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
-Anniversary `DemoPlayer.dll`.
+`ds_demo_seek_to <time>` jumps `viewdemo` playback to a world time (the
+clock the editor's events list shows); `ds_demo_seek_by <time>` jumps
+from where playback is, back when negative. The time is seconds (`610`,
+`610.5`), `m:ss` (`10:10`) or `h:mm:ss` (`1:02:03`), quoted or not, with a
+minus for going back (`ds_demo_seek_by -0:30`); anything else is refused with
+a line saying which forms it takes (#928). Neither pauses, and both refuse
+under `playdemo`. Pre-Anniversary and 25th Anniversary `DemoPlayer.dll`.
+
+While the demo is still loading, a seek typed on the same line as the
+`viewdemo` (`viewdemo mydemo; ds_demo_seek_to 10:05`) waits:
+`will seek to 10:05 once the demo has loaded`, then
+`the demo has loaded; seeking to 10:05` when it runs. Only the last one
+counts, and anything done to the demo first cancels it, with
+`cancelled the seek to 10:05 (you <did what>)`: another seek, pausing, a
+speed change, moving the clock (a demo-bar click or drag), or loading or
+closing a demo. A seek typed later while the demo is still loading is
+refused, as before.
 
 A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
@@ -286,6 +298,7 @@ draws them bigger for high resolutions. The game draws both ~117px lower at
 | `ds_hud_objectives xoffset <x>` | x the icon row starts at |
 | `ds_hud_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
 | `ds_hud_objectives scale <1..8>` | draw the icons (with their capture bars and player counts) and the timer that many times bigger, from the next frame (#891); each grows from its top-left corner, so `offset`, `xoffset` and `timer` still place that corner, and the game's own icon x scales with the timer so the row stays clear of it. `scale 1` or `scale default` is the game's own size. Not on the full overview map (`_cl_minimap 1`), where the icons sit at map positions |
+| `ds_hud_objectives count_scale <1..8>` | draw the `1/2`-style player count under a flag that many times its size, whatever `scale` is (#943): it keeps the game's place, its top-left corner 4 px in from its icon's left and 4 px under it (both times `scale`), and grows from there. `count_scale default` (the default) draws it at `scale`, as big as the icons |
 | `ds_hud_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
 
 ### `ds_debug_hd_misses`
