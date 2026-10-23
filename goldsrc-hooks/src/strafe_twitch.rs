@@ -1,7 +1,11 @@
 //! Stops strafing players' models twitching in an HLTV demo (#927): on the
 //! frame the demo clock steps back, each player model is drawn where it was
-//! drawn the frame before. Part of `ds_spec_match_pov`: a POV demo and live
-//! play don't twitch.
+//! drawn the frame before. Its own switch, `ds_player_fix_model_flicker`
+//! (on by default), not part of `ds_spec_match_pov`: it is a bug in how the
+//! game draws a model, which HLTV playback only shows more often, not a
+//! difference in what an HLTV demo records, so it is wanted with or without
+//! the match-POV changes. It stands down in a POV demo, where the clock
+//! (almost) never steps back and the hold is untested.
 //!
 //! ## What the twitch is
 //!
@@ -29,21 +33,50 @@
 //!
 //! ## The hold
 //!
-//! This wraps the renderer's `StudioDrawPlayer`. On a frame whose clock is
-//! earlier than the last frame's, a player drawn on the last frame is drawn
-//! at that frame's origin again: the renderer sees no movement, keeps the legs
-//! where they were, and the torso blend stays put. The entity's own origin is
-//! put back after the call, so nothing else sees a change. The model is drawn
-//! at most a fraction of a unit from where it would have been, for one frame.
+//! This wraps the renderer's `StudioDrawPlayer`. Each player has a mark: the
+//! clock and origin of the last frame he was drawn at unheld. On a frame whose
+//! clock is behind his mark, a player drawn on the frame before (held or not)
+//! is drawn at the mark's origin again: the renderer sees no movement, keeps
+//! the legs where they were, and the torso blend stays put. That is every
+//! frame until the clock passes the mark again, not just the first: at 1/4
+//! speed and 239.5 fps a frame moves the clock about 1 ms, the size of the
+//! step back, so the few frames after one are behind the mark too. The
+//! entity's own origin is put back after the call, so nothing else sees a
+//! change. The model is drawn at most a fraction of a unit from where it would
+//! have been, for those few frames.
 //!
 //! It has to be the renderer's call: `HUD_AddEntity` sees the same entity,
 //! but the engine sets the origin it draws from after that (measured: an
 //! origin written there never reached the gait estimate).
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, ClEntityS, Vec3};
+use crate::engine::{self, ClEntityS, CvarSPartial, Vec3};
+use crate::names::console_name;
+
+/// The switch: 1 holds the models on a step-back frame (#927).
+pub const NAME: &str = console_name!("player_fix_model_flicker");
+
+/// The fallback toggle, when the cvar could not be registered.
+pub static FIX_MODEL_FLICKER: AtomicBool = AtomicBool::new(true);
+static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Called by `commands.rs` once the cvar is registered.
+pub fn set_cvar(cvar: *mut CvarSPartial) {
+    CVAR.store(cvar, Ordering::Release);
+}
+
+/// Whether the switch is on: the cvar, or the fallback toggle without one.
+pub fn enabled() -> bool {
+    let cvar = CVAR.load(Ordering::Acquire);
+    if cvar.is_null() {
+        FIX_MODEL_FLICKER.load(Ordering::Relaxed)
+    } else {
+        // Safety: the engine owns the cvar for the session.
+        unsafe { (*cvar).value != 0.0 }
+    }
+}
 
 /// GoldSrc's player slots, entity indices 1..=32.
 const MAX_PLAYERS: usize = 32;
@@ -69,10 +102,15 @@ static PREVIOUS_CLOCK: AtomicU64 = AtomicU64::new(0);
 /// No clock yet.
 const NEVER: u64 = u64::MAX;
 
-/// Per player: the origin he was last drawn at, the clock of that frame, and
-/// the clock of the frame he was last held on.
-static LAST_ORIGIN: [[AtomicU32; 3]; MAX_PLAYERS + 1] =
+/// Per player, the mark: the origin he was last drawn at unheld and the clock
+/// of that frame. Held frames leave it alone, so it is the furthest point he
+/// has been shown at.
+static MARK_ORIGIN: [[AtomicU32; 3]; MAX_PLAYERS + 1] =
     [const { [const { AtomicU32::new(0) }; 3] }; MAX_PLAYERS + 1];
+static MARK_CLOCK: [AtomicU64; MAX_PLAYERS + 1] =
+    [const { AtomicU64::new(NEVER) }; MAX_PLAYERS + 1];
+/// Per player: the clock of the frame he was last drawn on, held or not, and
+/// of the frame he was last held on.
 static LAST_CLOCK: [AtomicU64; MAX_PLAYERS + 1] =
     [const { AtomicU64::new(NEVER) }; MAX_PLAYERS + 1];
 static HELD_CLOCK: [AtomicU64; MAX_PLAYERS + 1] =
@@ -82,17 +120,53 @@ static HELD_CLOCK: [AtomicU64; MAX_PLAYERS + 1] =
 static HELD: AtomicU32 = AtomicU32::new(0);
 
 /// Whether a player is held this frame. `now` is this frame's clock,
-/// `previous` the last frame's, `last_drawn` the clock of the frame the player
-/// was last drawn on, `last_held` the clock of the frame he was last held on
-/// (f64 bits, [`NEVER`] for none).
-fn should_hold(now: f64, previous: f64, last_drawn: u64, last_held: u64) -> bool {
+/// `previous` the last frame's, `mark` the clock of the frame the player was
+/// last drawn on unheld, `last_drawn` the clock of the frame he was last drawn
+/// on held or not, `last_held` the clock of the frame he was last held on (f64
+/// bits, [`NEVER`] for none).
+///
+/// Every frame below the mark is held, not just the first: at 1/4 speed a
+/// frame moves the clock about as far as the step back, so the frames after
+/// one are still behind the mark, and drawing him there points his legs
+/// backwards just the same (#927, seen at `fps_max 239.5`).
+fn should_hold(now: f64, previous: f64, mark: u64, last_drawn: u64, last_held: u64) -> bool {
     if last_held == now.to_bits() {
         // Drawn twice this frame: the same answer both times.
         return true;
     }
-    let stepped_back = now < previous && previous - now < MAX_STEP_BACK;
-    // Only a player drawn on the frame right before has an origin to hold.
-    stepped_back && last_drawn == previous.to_bits()
+    if mark == NEVER {
+        return false;
+    }
+    let mark = f64::from_bits(mark);
+    let behind = now < mark && mark - now < MAX_STEP_BACK;
+    // A player missing from the frame right before has gone out of view; his
+    // mark may be anywhere by now.
+    behind && last_drawn == previous.to_bits()
+}
+
+/// One player's clocks, f64 bits: the mark's, the last frame he was drawn on,
+/// and the last frame he was held on. The statics hold them between frames.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Track {
+    mark: u64,
+    last_drawn: u64,
+    last_held: u64,
+}
+
+impl Track {
+    /// Decides this draw and moves the clocks on: true when he is drawn at
+    /// the mark's origin, false when he is drawn where he is and that becomes
+    /// the mark.
+    fn draw(&mut self, now: f64, previous: f64) -> bool {
+        let hold = should_hold(now, previous, self.mark, self.last_drawn, self.last_held);
+        if hold {
+            self.last_held = now.to_bits();
+        } else {
+            self.mark = now.to_bits();
+        }
+        self.last_drawn = now.to_bits();
+        hold
+    }
 }
 
 /// Swaps `StudioDrawPlayer` in the renderer's interface for [`draw_player`].
@@ -136,7 +210,7 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
     }
     // Safety: the renderer's own function, with its own arguments.
     let real: DrawPlayerFn = unsafe { std::mem::transmute(real) };
-    if !crate::anim_fix::active() {
+    if !enabled() || crate::anim_fix::pov_demo_playing() {
         return unsafe { real(flags, pplayer) };
     }
     let Some(studio) = engine::engine_studio() else {
@@ -169,22 +243,28 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
         return unsafe { real(flags, pplayer) };
     }
     let slot = index as usize;
-    let hold = should_hold(
-        now,
-        previous,
-        LAST_CLOCK[slot].load(Ordering::Relaxed),
-        HELD_CLOCK[slot].load(Ordering::Relaxed),
-    );
+    let mut track = Track {
+        mark: MARK_CLOCK[slot].load(Ordering::Relaxed),
+        last_drawn: LAST_CLOCK[slot].load(Ordering::Relaxed),
+        last_held: HELD_CLOCK[slot].load(Ordering::Relaxed),
+    };
+    let held_before = track.last_held;
+    let hold = track.draw(now, previous);
+    MARK_CLOCK[slot].store(track.mark, Ordering::Relaxed);
+    LAST_CLOCK[slot].store(track.last_drawn, Ordering::Relaxed);
+    HELD_CLOCK[slot].store(track.last_held, Ordering::Relaxed);
     if !hold {
         let result = unsafe { real(flags, pplayer) };
-        let store = &LAST_ORIGIN[slot];
+        let store = &MARK_ORIGIN[slot];
         store[0].store(e.origin.x.to_bits(), Ordering::Relaxed);
         store[1].store(e.origin.y.to_bits(), Ordering::Relaxed);
         store[2].store(e.origin.z.to_bits(), Ordering::Relaxed);
-        LAST_CLOCK[slot].store(now_bits, Ordering::Relaxed);
         return result;
     }
-    let held = &LAST_ORIGIN[slot];
+    if held_before != track.last_held {
+        HELD.fetch_add(1, Ordering::Relaxed);
+    }
+    let held = &MARK_ORIGIN[slot];
     let saved = Vec3 {
         x: e.origin.x,
         y: e.origin.y,
@@ -195,14 +275,10 @@ unsafe extern "C" fn draw_player(flags: i32, pplayer: *mut c_void) -> i32 {
         y: f32::from_bits(held[1].load(Ordering::Relaxed)),
         z: f32::from_bits(held[2].load(Ordering::Relaxed)),
     };
-    if HELD_CLOCK[slot].swap(now_bits, Ordering::Relaxed) != now_bits {
-        HELD.fetch_add(1, Ordering::Relaxed);
-    }
     let result = unsafe { real(flags, pplayer) };
     // Safety: the same entity; still this call's.
     let e = unsafe { &mut *ent };
     e.origin = saved;
-    LAST_CLOCK[slot].store(now_bits, Ordering::Relaxed);
     result
 }
 
@@ -222,37 +298,107 @@ pub fn status() -> String {
 mod tests {
     use super::*;
 
-    fn bits(t: f64) -> u64 {
-        t.to_bits()
+    /// Plays one player through `draws` the way [`draw_player`] does: each is
+    /// a frame's clock and whether he is drawn on it, and the same clock twice
+    /// in a row is one frame's two views.
+    /// Returns, per draw, whether he was held.
+    fn play(draws: &[(f64, bool)]) -> Vec<bool> {
+        let mut track = Track {
+            mark: NEVER,
+            last_drawn: NEVER,
+            last_held: NEVER,
+        };
+        let (mut frame, mut previous) = (NEVER, 0u64);
+        let mut held = Vec::new();
+        for &(now, drawn) in draws {
+            if frame != now.to_bits() {
+                previous = frame;
+                frame = now.to_bits();
+            }
+            if drawn {
+                held.push(track.draw(now, f64::from_bits(previous)));
+            }
+        }
+        held
+    }
+
+    fn drawn(clocks: &[f64]) -> Vec<(f64, bool)> {
+        clocks.iter().map(|&t| (t, true)).collect()
     }
 
     #[test]
-    fn a_frame_after_a_step_back_holds() {
-        assert!(should_hold(17.9281, 17.9295, bits(17.9295), NEVER));
+    fn a_frame_after_a_step_back_holds_and_the_next_one_on_draws() {
+        let held = play(&drawn(&[17.9270, 17.9295, 17.9281, 17.9342]));
+        assert_eq!(held, [false, false, true, false]);
     }
 
+    /// The 1/4-speed case (#927, `fps_max 239.5`): after the step back the
+    /// clock moves on about 1 ms a frame, so the next frames are still behind
+    /// the last one he was drawn on unheld. Each holds at that frame's origin,
+    /// until the clock passes it.
     #[test]
-    fn a_frame_moving_on_draws() {
-        assert!(!should_hold(17.9342, 17.9281, bits(17.9281), bits(17.9281)));
-    }
-
-    #[test]
-    fn a_player_not_drawn_last_frame_draws() {
-        assert!(!should_hold(17.9281, 17.9295, bits(17.5), NEVER));
-    }
-
-    #[test]
-    fn a_seek_back_draws() {
-        assert!(!should_hold(10.0, 17.9295, bits(17.9295), NEVER));
-    }
-
-    #[test]
-    fn a_second_view_of_a_held_frame_holds_too() {
-        assert!(should_hold(17.9281, 17.9295, bits(17.9281), bits(17.9281)));
+    fn every_frame_behind_the_mark_holds_at_quarter_speed() {
+        let held = play(&drawn(&[
+            17.9285, 17.9295, 17.9281, 17.9284, 17.9288, 17.9292, 17.9296, 17.9300,
+        ]));
+        assert_eq!(held, [false, false, true, true, true, true, false, false]);
     }
 
     #[test]
     fn two_steps_back_in_a_row_both_hold() {
-        assert!(should_hold(17.9270, 17.9281, bits(17.9281), bits(17.9281)));
+        let held = play(&drawn(&[17.9295, 17.9281, 17.9270, 17.9300]));
+        assert_eq!(held, [false, true, true, false]);
+    }
+
+    #[test]
+    fn a_seek_back_draws_at_once() {
+        let held = play(&drawn(&[17.9295, 10.0, 10.0042, 10.0084]));
+        assert_eq!(held, [false, false, false, false]);
+    }
+
+    #[test]
+    fn a_player_not_drawn_last_frame_draws() {
+        let held = play(&[(17.9295, true), (17.9300, false), (17.9281, true)]);
+        assert_eq!(held, [false, false]);
+    }
+
+    /// The spectator inset draws a frame twice: both views get one answer.
+    #[test]
+    fn a_frame_drawn_twice_gives_the_same_answer_both_times() {
+        let held = play(&drawn(&[
+            17.9295, 17.9295, 17.9281, 17.9281, 17.9288, 17.9288, 17.9300, 17.9300,
+        ]));
+        assert_eq!(held, [false, false, true, true, true, true, false, false]);
+    }
+
+    #[test]
+    fn nothing_holds_before_a_first_draw() {
+        assert!(!should_hold(
+            17.9281,
+            17.9295,
+            NEVER,
+            17.9295f64.to_bits(),
+            NEVER
+        ));
+    }
+
+    /// #927: the fix has its own switch, on by default, and
+    /// `ds_spec_match_pov` turns it neither on nor off.
+    #[test]
+    fn the_switch_is_its_own_and_on_by_default() {
+        // anim_fix's tests mutate LEVEL too; cargo runs tests in parallel.
+        let _statics = crate::anim_fix::tests::lock_statics();
+        let level = crate::anim_fix::LEVEL.load(Ordering::Relaxed);
+        assert!(CVAR.load(Ordering::Acquire).is_null());
+        assert!(enabled(), "on by default");
+        for match_pov in [0, 1] {
+            crate::anim_fix::LEVEL.store(match_pov, Ordering::Relaxed);
+            FIX_MODEL_FLICKER.store(true, Ordering::Relaxed);
+            assert!(enabled(), "match_pov {match_pov}");
+            FIX_MODEL_FLICKER.store(false, Ordering::Relaxed);
+            assert!(!enabled(), "match_pov {match_pov}");
+        }
+        FIX_MODEL_FLICKER.store(true, Ordering::Relaxed);
+        crate::anim_fix::LEVEL.store(level, Ordering::Relaxed);
     }
 }
