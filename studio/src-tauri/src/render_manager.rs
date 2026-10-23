@@ -368,17 +368,30 @@ impl RenderManager {
             .collect()
     }
 
-    /// The streams the jobs of `take_folder` render, as its render history
-    /// records them: whether the take's clip is finished is asked of these
-    /// (#644).
-    pub(crate) fn take_streams(&self, take_folder: &str) -> Vec<String> {
-        self.jobs
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|j| j.clip.take_folder == take_folder)
-            .map(|j| attempt_stream(&j.clip))
-            .collect()
+    /// The automatic take cleanup's (#644) `remove_take_rows`: refuses, under
+    /// the same lock the scheduler starts jobs under, while any row of the
+    /// take is queued or rendering, rather than dropping a queued row.
+    pub(crate) fn remove_idle_take_rows(
+        &self,
+        app: &AppHandle,
+        take_folder: &str,
+    ) -> Result<(), String> {
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            let statuses: Vec<&str> = jobs
+                .iter()
+                .filter(|j| j.clip.take_folder == take_folder)
+                .map(|j| j.status.as_str())
+                .collect();
+            if let Some(refusal) = crate::take_cleanup_manager::busy_refusal(take_folder, &statuses)
+            {
+                return Err(refusal);
+            }
+            jobs.retain(|j| j.clip.take_folder != take_folder);
+        }
+        clear_batch_state_if_empty(self);
+        emit_jobs_snapshot(app, &self.jobs);
+        Ok(())
     }
 
     /// Take folders with a job queued or rendering, as `folder_key`s: the

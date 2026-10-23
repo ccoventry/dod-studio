@@ -111,6 +111,22 @@ pub fn finished_at(
     Some(latest)
 }
 
+/// The streams a take folder holds, as its render history records them: what
+/// `finished_at` must find finished before the take may go. Read from the
+/// disk, not from the Render tab's rows, since a row the user removed leaves
+/// its stream unrendered but still in the folder.
+pub fn streams_on_disk(take_folder: &Path) -> Vec<String> {
+    let (clip_tx, clip_rx) = std::sync::mpsc::channel();
+    let (status_tx, _) = std::sync::mpsc::channel::<String>();
+    scan_folder_background(vec![take_folder.to_path_buf()], clip_tx, status_tx);
+    let key = folder_key(&take_folder.to_string_lossy());
+    clip_rx
+        .try_iter()
+        .filter(|clip| folder_key(&clip.take_folder) == key)
+        .map(|clip| attempt_stream(&clip))
+        .collect()
+}
+
 /// A take folder's path as a comparable key: the scanner and the Render tab
 /// can spell one folder with different case or slashes.
 pub fn folder_key(path: &str) -> String {
@@ -579,6 +595,28 @@ mod tests {
         let found = finished_takes(&dirs, &busy);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].take_folder, newer);
+    }
+
+    /// A HUD pair's take holds both halves on disk, so both must be finished
+    /// even when the Render tab only listed the main row.
+    #[test]
+    fn a_takes_streams_are_read_from_its_folder() {
+        let capture = Scratch::new("take_cleanup_streams_on_disk");
+        let take = take_with_history(&capture, "chain_01_b0", Vec::new());
+        assert_eq!(streams_on_disk(&take), streams(&["all"]));
+        for stream in ["hudcolor", "hudalpha"] {
+            std::fs::create_dir_all(take.join(stream)).unwrap();
+            std::fs::write(take.join(stream).join("00000.bmp"), b"b").unwrap();
+        }
+        let on_disk = streams_on_disk(&take);
+        assert_eq!(on_disk, streams(&["all", "hud:hudcolor"]));
+        let a = rendered(&capture, "a.mov");
+        let main_only = vec![attempt("all", 10, RenderOutcome::Finished, &a)];
+        assert_eq!(
+            finished_at(&main_only, &on_disk, |p| Path::new(p).is_file()),
+            None,
+            "the HUD half was never rendered"
+        );
     }
 
     fn need(capture: &Scratch, needed: u64) -> SpaceNeed {

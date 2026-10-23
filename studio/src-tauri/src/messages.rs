@@ -341,6 +341,10 @@ pub fn making_room_deleting(done: usize, total: usize) -> String {
     format!("Making room: deleting finished takes ({done} of {total})")
 }
 
+pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
+    format!("{take_folder} is queued or rendering, so it was not deleted")
+}
+
 pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
     "Capture cancelled while making room. Nothing was captured.";
 
