@@ -321,6 +321,7 @@ async fn scan_directory(
     paths: Vec<String>,
     known: Option<Vec<capture_manager::KnownDemo>>,
     workers: Option<usize>,
+    include_subfolders: Option<bool>,
 ) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
@@ -329,6 +330,8 @@ async fn scan_directory(
         paths,
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        // Missing: today's walk into every subfolder (#531).
+        include_subfolders.unwrap_or(true),
     )
     .await
 }

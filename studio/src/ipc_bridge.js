@@ -52,9 +52,10 @@ export async function filesExist(paths) {
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
  * disk and counts it in `unchanged` instead of parsing it again.
+ * `includeSubfolders` false reads only each folder's own demos (#531).
  */
-export async function scanDirectory(scanPaths, known = [], workers = undefined) {
-  return invoke("scan_directory", { paths: scanPaths, known, workers })
+export async function scanDirectory(scanPaths, known = [], workers = undefined, includeSubfolders = true) {
+  return invoke("scan_directory", { paths: scanPaths, known, workers, includeSubfolders })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');

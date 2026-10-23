@@ -99,6 +99,10 @@
               <div class="row-inputs">
                 <button id="add-files-btn" data-str="WORKSPACE.ADD_FILES_BUTTON">+ Add Demo Files</button>
                 <button id="add-folder-btn" data-str="WORKSPACE.ADD_FOLDER_BUTTON">+ Add Folder</button>
+                <label class="scan-subfolders" data-str-title="WORKSPACE.INCLUDE_SUBFOLDERS_TITLE" title="Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.">
+                  <input type="checkbox" id="scan-include-subfolders" checked />
+                  <span data-str="WORKSPACE.INCLUDE_SUBFOLDERS_LABEL">Include subfolders</span>
+                </label>
                 <button id="cancel-scan-btn" disabled data-str="WORKSPACE.CANCEL_SCAN_BUTTON" data-str-title="WORKSPACE.CANCEL_SCAN_TITLE">Cancel Scan</button>
               </div>
               <div class="scan-status-row">

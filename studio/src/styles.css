@@ -3857,7 +3857,7 @@ button.setup-skip:hover:not(:disabled) {
   opacity: 0.45;
 }
 
-.audit-all-drives {
+.audit-all-drives, .scan-subfolders {
   display: flex;
   gap: 3px;
   align-items: center;
