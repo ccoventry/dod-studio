@@ -98,3 +98,15 @@ test('a scan stopped by the depth cap says so in a toast (#531)', async ({ page 
   await page.evaluate(() => window.__added);
   await expect(page.locator('.toast', { hasText: 'folders more than 6 levels down were not read' })).toBeVisible();
 });
+
+test('dropped demos and folders scan together, and the folders go into Recent (#530)', async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate(() => { window.__added = window.__addDropped(['D:/a.dem'], ['D:/one', 'D:/two']); });
+  await page.waitForFunction(() => typeof window.__finishScan === 'function');
+  const scans = await page.evaluate(() => window.__mockInvocations.filter((c) => c.cmd === 'scan_directory'));
+  expect(scans[0].args.paths).toEqual(['D:/a.dem', 'D:/one', 'D:/two']);
+  await page.evaluate(() => window.__finishScan({ demos: [], unchanged: 0, copies: [], cancelled: false }));
+  await page.evaluate(() => window.__added);
+  // The first folder dropped ends up on top.
+  expect(await page.evaluate(() => window.__recent)).toEqual(['D:/one', 'D:/two']);
+});

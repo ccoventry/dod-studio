@@ -2444,6 +2444,7 @@ export const STRINGS = {
     hdMapListFailed: (err) => `Could not change hd_maps.txt: ${err}`,
     hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
+    dropError: (err) => `Could not read what was dropped: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
@@ -2779,6 +2780,15 @@ export const STRINGS = {
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  // Dropping demos and folders from Windows (#530): demo_drop.js.
+  DROP: {
+    skippedToast: (names) => {
+      const shown = names.slice(0, 5).join(', ');
+      const more = names.length > 5 ? ` and ${names.length - 5} more` : '';
+      return `Not a demo or a folder, so not added: ${shown}${more}`;
+    },
+    BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
   },
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {

@@ -129,6 +129,9 @@ export function createQueueScan({
   const includeSubfolders = () => subfoldersBox?.checked ?? true;
   subfoldersBox?.addEventListener('change', () => persistAppSettings());
 
+  // A scan is running: the buttons are disabled, and a drop waits (#530).
+  let scanning = false;
+
   // Cancel stopped the last scan before it added anything (e.g. while it
   // was still listing a whole drive's folders, #843).
   let lastScanAddedNothingCancelled = false;
@@ -147,6 +150,7 @@ export function createQueueScan({
   // than only skipped (#21).
   async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
+    scanning = true;
     lastScanAddedNothingCancelled = false;
     cancelling = false;
 
@@ -276,6 +280,7 @@ export function createQueueScan({
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
       return false;
     } finally {
+      scanning = false;
       if (addFilesBtn) addFilesBtn.disabled = false;
       if (addFolderBtn) addFolderBtn.disabled = false;
       if (cancelScanBtnInner) cancelScanBtnInner.disabled = true;
@@ -338,5 +343,16 @@ export function createQueueScan({
     });
   }
 
-  return { triggerAutoScan, addDemoFolder };
+  // Demos and folders dropped from Windows (#530): one scan, as + Add Demo
+  // Files and + Add Folder would. Dropped files count as picked by hand, so
+  // a copy of a queued demo is offered in its place (#477); the folders go
+  // into Recent like + Add Folder's.
+  async function addDroppedPaths(files, folders) {
+    const scanned = await triggerAutoScan([...files, ...folders], { pickedFiles: files.length > 0 });
+    if (!scanned || lastScanAddedNothingCancelled) return;
+    // Last to first, so the first folder dropped ends up on top of Recent.
+    for (const folder of [...folders].reverse()) await rememberRecentFolder(folder);
+  }
+
+  return { triggerAutoScan, addDemoFolder, addDroppedPaths, isScanning: () => scanning };
 }
