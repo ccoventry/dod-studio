@@ -13,7 +13,7 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
-//! - `ds_spec_match_pov`, one cvar over five modules, for making a
+//! - `ds_spec_match_pov`, one cvar over six modules, for making a
 //!   spectated first-person view look and sound like the player's own
 //!   recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -30,6 +30,8 @@
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
 //!     player's own would (sprint, jump, prone, ladder).
+//!   - `strafe_twitch`: player models hold still for the frame an HLTV
+//!     demo's clock steps back, which would turn a strafing model round.
 //! - `spectator_deathcam`: `ds_spec_deathcam`, the game's own death cam
 //!   when the watched player dies, as his recording shows it, instead of the
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
@@ -289,6 +291,7 @@ mod spectator_text;
 mod spray;
 mod spray_hltv;
 mod sprite_blend;
+mod strafe_twitch;
 mod streaks;
 mod studio_panel;
 mod tempent_fix;

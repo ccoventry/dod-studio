@@ -40,10 +40,11 @@
 //!
 //! ## One switch for the spectator's first-person view
 //!
-//! `ds_spec_match_pov` drives five modules at once: the viewmodel's
+//! `ds_spec_match_pov` drives six modules at once: the viewmodel's
 //! animations, the gunshots an HLTV demo lost, the spectator crosshair, the
-//! in-eye camera's height for a prone player, and the gun lowering off screen
-//! (`spectator_gun`). The first three used to
+//! in-eye camera's height for a prone player, the gun lowering off screen
+//! (`spectator_gun`), and the strafing models that would turn round for a
+//! frame (`strafe_twitch`). The first three used to
 //! have a cvar of their own
 //! (`dodstudio_hltv_show_viewmodel_animations`,
 //! `dodstudio_hltv_play_missing_gunshots`, `dodstudio_match_pov_crosshair`).
@@ -677,7 +678,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height, the gun lowering and steady strafing models, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -698,6 +699,7 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
+        lines.push(format!("strafe twitch: {}", crate::strafe_twitch::status()));
     }
     if let Some(deathcam) = crate::spectator_deathcam::status_line() {
         lines.push(deathcam);
