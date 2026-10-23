@@ -1,0 +1,51 @@
+<!doctype html>
+<!--
+  Harness for movie_copy_ui.js (#939), Setup's Make a movie copy dialog. The
+  three movie copy commands are mocked; the copy holds until the test calls
+  window.__finishCopy(outcome), so the progress and Cancel can be seen.
+  onDone is recorded on window.__calls. The themed confirm is the real one.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>movie copy test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 420px; padding: 20px;">
+      <h2 id="themed-confirm-title">Confirm</h2>
+      <p id="themed-confirm-message"></p>
+      <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <button id="themed-confirm-ok-btn">Confirm</button>
+        <button id="themed-confirm-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const GB = 1024 ** 3;
+    window.__calls = [];
+    window.__plan = {
+      files: 4422, bytes: 15 * GB, demo_files: 424, demo_bytes: 29 * GB,
+      free_bytes: 50 * GB, headroom_bytes: GB,
+      existing: ['dod', 'valve', 'hl.exe'], default_name: 'dod_movies',
+    };
+    window.__mockInvokeHandlers = {
+      movie_copy_plan: () => window.__plan,
+      start_movie_copy: () => new Promise((resolve, reject) => {
+        window.__finishCopy = (outcome) => (outcome instanceof Error ? reject(outcome.message) : resolve(outcome));
+      }),
+      cancel_movie_copy: () => null,
+    };
+    const { initThemedConfirm } = await import('/src/themed_confirm.js');
+    const { createMovieCopy } = await import('/src/movie_copy_ui.js');
+    initThemedConfirm();
+    window.__copy = createMovieCopy({
+      getHlPath: () => 'C:\\Games\\Half-Life\\hl.exe',
+      onDone: (folder) => { window.__calls.push(['onDone', folder]); },
+    });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
