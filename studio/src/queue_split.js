@@ -13,6 +13,8 @@ import { logFrontendEvent, splitDemoAuto } from './ipc_bridge.js';
 import { pickedMultiMapDemos } from './queue_multimap.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { splitProgressView } from './split_progress.js';
+import { SPLIT_SHARE, nest, placed, queueProgress } from './queue_progress.js';
+import { secondsText } from './progress_view.js';
 import { applyCarriedWork, carryReport, matchSplitHighlights } from './split_carry.js';
 import { renameUidsInTakeIndex } from './take_index.js';
 import { updateStreakVisuals } from './detail_pane.js';
@@ -30,15 +32,10 @@ import { STRINGS } from './strings.js';
  *   project_demos.js's missing/changed check.
  */
 export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, refreshQueue, pickedDemosPresent }) {
-  // The queue's status line (beside the scan spinner) says how the split is
-  // going whatever started it; `update(SplitProgress)`, when given, also
-  // feeds the row's own bar.
-  function showStatus(name, progress) {
-    const status = document.querySelector('#scan-status');
-    const spinner = document.querySelector('#scan-spinner');
-    if (status) status.textContent = progress ? STRINGS.MAIN.queueSplitStatus(name, splitProgressView(progress).text) : '';
-    if (spinner) spinner.style.display = progress ? 'inline-block' : 'none';
-  }
+  // The queue's line and bar (queue_progress.js) say how the splits are
+  // going whatever started them, the scan of the maps they write included
+  // (#951); `update(SplitProgress)`, when given, also feeds the row's own bar.
+  const progress = queueProgress();
 
   // The pieces are in the queue now: put the original's highlight work on
   // them, and say what didn't carry, in the activity log.
@@ -60,11 +57,18 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
   }
 
   // The file is kept; its row goes, and its highlights' work moves to the
-  // pieces. Resolves whether it split.
-  async function splitQueuedDemo(demo, { update } = {}) {
+  // pieces. Resolves whether it split. `within` and `head` are set when it
+  // is one of several splits (captureDemosReady): its share of their bar,
+  // and "Splitting 2 of 3: name.dem".
+  async function splitQueuedDemo(demo, { update, within = null, head = null } = {}) {
     const name = fileNameOf(demo.path);
+    const job = within ? null : progress.begin({ text: STRINGS.MAIN.queueSplitHead(name) });
+    const place = within ?? { job, range: [0, 100] };
+    const line = head ?? STRINGS.MAIN.queueSplitHead(name);
+    const splitPlace = nest(place, [0, SPLIT_SHARE]);
     const report = (p) => {
-      showStatus(name, p);
+      const view = splitProgressView(p);
+      progress.show(place.job, placed(splitPlace, { pct: view.pct, text: `${line}: ${view.text}`, indeterminate: false }));
       update?.(p);
     };
     report({ fraction: 0, stage: 'reading' });
@@ -76,15 +80,22 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
       written = await splitDemoAuto(demo.path, SHORT_MAP_SECONDS);
     } catch (err) {
       showToast(STRINGS.MAIN.queueSplitFailed(name, err), 'error', 8000);
+      progress.end(job, STRINGS.MAIN.queueSplitFailed(name, err));
       return false;
     } finally {
       unlisten();
-      showStatus(name, null);
     }
     removeDemo(demo);
     showToast(STRINGS.MAIN.queueSplitDone(name, written.map((w) => fileNameOf(w.path))), 'success', 6000);
-    await scan(written.map((w) => w.path), { pickedFiles: true });
-    carryWork(demo, written);
+    try {
+      await scan(written.map((w) => w.path), {
+        pickedFiles: true,
+        within: nest(place, [SPLIT_SHARE, 100], `${line}: ${STRINGS.MAIN.QUEUE_SPLIT_ADDING}`),
+      });
+      carryWork(demo, written);
+    } finally {
+      progress.end(job, STRINGS.MAIN.queueSplitDoneLine(secondsText(progress.ms(job)), 1));
+    }
     return true;
   }
 
@@ -104,7 +115,18 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
       footer: STRINGS.MAIN.MULTI_MAP_PICKED_QUESTION,
     });
     if (split) {
-      for (const d of multi) await splitQueuedDemo(d);
+      // One bar through every split, each demo an equal share (#951).
+      const job = progress.begin({ text: STRINGS.MAIN.queueSplitHead(fileNameOf(multi[0].path), 0, multi.length) });
+      let done = 0;
+      try {
+        for (const [i, d] of multi.entries()) {
+          const within = { job, range: [(100 * i) / multi.length, (100 * (i + 1)) / multi.length] };
+          const head = STRINGS.MAIN.queueSplitHead(fileNameOf(d.path), i, multi.length);
+          if (await splitQueuedDemo(d, { within, head })) done += 1;
+        }
+      } finally {
+        progress.end(job, STRINGS.MAIN.queueSplitDoneLine(secondsText(progress.ms(job)), done));
+      }
     }
     return 'handled';
   }

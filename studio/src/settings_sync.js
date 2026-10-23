@@ -19,6 +19,7 @@ import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
 import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
 import { getPickFolders, setPickFolders } from './pick_path.js';
+import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -142,6 +143,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       demo_rename_lowercase: getDemoRenameTemplates().lowercase,
       audit_look_in_zips: !!document.querySelector('#audit-look-in-zips')?.checked,
+      // On unless unticked, matching the backend default (#531).
+      scan_include_subfolders: document.querySelector('#scan-include-subfolders')?.checked ?? true,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -166,6 +169,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_video: finishCodecVideo,
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
+      pinned_folders_reviewed: getPinnedReviewed(),
       players: getPlayers(),
       hidden_installs: getHiddenInstalls(),
       pick_folders: getPickFolders(),
@@ -329,6 +333,9 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   );
   const lookInZipsEl = document.querySelector('#audit-look-in-zips');
   if (lookInZipsEl) lookInZipsEl.checked = settings.audit_look_in_zips === true;
+  setPinnedReviewed(settings.pinned_folders_reviewed);
+  const subfoldersEl = document.querySelector('#scan-include-subfolders');
+  if (subfoldersEl) subfoldersEl.checked = settings.scan_include_subfolders !== false;
   if (settings.record_start_lead != null) {
     const inputEl = document.querySelector('#config-record-start-lead');
     if (inputEl) inputEl.value = settings.record_start_lead;
