@@ -308,6 +308,60 @@ impl WorkPlan {
     }
 }
 
+/// What reading `demo_path` through the cache will take, from the stat and
+/// the first few hundred bytes of each candidate entry; the demo itself is
+/// never opened. `None` when the demo can't be read at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheState {
+    /// A current entry for the file as it is now ([`is_fresh`]).
+    Current,
+    /// An older entry a step upgrades ([`has_older_entry`]). The upgrade can
+    /// still ask for a re-parse, which only the whole entry shows.
+    Upgradable,
+    /// Neither, or the demo changed since: a full parse of this many bytes.
+    NeedsParse(u64),
+}
+
+pub fn cache_state(root: &Path, demo_path: &Path) -> Option<CacheState> {
+    let size = std::fs::metadata(demo_path).ok()?.len();
+    Some(if is_fresh(root, demo_path) {
+        CacheState::Current
+    } else if has_older_entry(root, demo_path) {
+        CacheState::Upgradable
+    } else {
+        CacheState::NeedsParse(size)
+    })
+}
+
+/// What a rescan of a list of demos has to do (#937): how many the cache has,
+/// how many it upgrades, and how many need a full parse, and their bytes. A
+/// demo that can't be read is in none of them: the scan skips it at once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct RescanEstimate {
+    pub cached: u32,
+    pub upgradable: u32,
+    pub to_parse: u32,
+    pub bytes_to_parse: u64,
+}
+
+impl RescanEstimate {
+    pub fn new<P: AsRef<Path>>(root: &Path, demos: &[P]) -> Self {
+        let mut estimate = Self::default();
+        for demo in demos {
+            match cache_state(root, demo.as_ref()) {
+                Some(CacheState::Current) => estimate.cached += 1,
+                Some(CacheState::Upgradable) => estimate.upgradable += 1,
+                Some(CacheState::NeedsParse(bytes)) => {
+                    estimate.to_parse += 1;
+                    estimate.bytes_to_parse += bytes;
+                }
+                None => {}
+            }
+        }
+        estimate
+    }
+}
+
 /// Saves `analysis` as `demo_path`'s entry, and returns where. Best-effort:
 /// `None` on any failure, which must never fail the caller.
 ///
@@ -740,6 +794,73 @@ mod tests {
         assert_eq!(plan.fresh, [false, true]);
         assert_eq!(plan.sizes, [21, 11]);
         assert_eq!(plan.order, [1, 0]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rescan_estimate_sorts_demos_by_what_the_cache_holds() {
+        let dir = scratch("estimate");
+        let root = dir.join("cache");
+        let [current, older, changed, never, unreadable_upgrade] =
+            ["current", "older", "changed", "never", "eight"].map(|n| dir.join(format!("{n}.dem")));
+        std::fs::write(&current, b"cached demo").unwrap();
+        std::fs::write(&older, b"cached by v7").unwrap();
+        std::fs::write(&changed, b"changed since").unwrap();
+        std::fs::write(&never, b"a demo never analysed").unwrap();
+        std::fs::write(&unreadable_upgrade, b"v8 never shipped").unwrap();
+        store(
+            &root,
+            &current,
+            &FileInfo::of(&current).unwrap(),
+            &Analysis::default(),
+        )
+        .unwrap();
+        write_old(&root, 7, &older, stamp(&older).unwrap(), &empty_v7());
+        // An entry for the file as it was: both folders miss it.
+        let was = stamp(&changed).unwrap();
+        write_old(&root, 7, &changed, (was.0 + 1, was.1), &empty_v7());
+        write_old(&root, SCHEMA_VERSION, &changed, (was.0 + 1, was.1), "{}");
+        // No step starts at v8, so its entry is a parse.
+        write_old(
+            &root,
+            8,
+            &unreadable_upgrade,
+            stamp(&unreadable_upgrade).unwrap(),
+            &empty_v7(),
+        );
+
+        assert_eq!(cache_state(&root, &current), Some(CacheState::Current));
+        assert_eq!(cache_state(&root, &older), Some(CacheState::Upgradable));
+        assert_eq!(
+            cache_state(&root, &changed),
+            Some(CacheState::NeedsParse(13))
+        );
+        assert_eq!(cache_state(&root, &dir.join("gone.dem")), None);
+
+        let estimate = RescanEstimate::new(
+            &root,
+            &[
+                &current,
+                &older,
+                &changed,
+                &never,
+                &unreadable_upgrade,
+                &dir.join("gone.dem"),
+            ],
+        );
+        assert_eq!(
+            estimate,
+            RescanEstimate {
+                cached: 1,
+                upgradable: 1,
+                to_parse: 3,
+                bytes_to_parse: 13 + 21 + 16,
+            }
+        );
+        assert_eq!(
+            RescanEstimate::new::<&Path>(&root, &[]),
+            RescanEstimate::default()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

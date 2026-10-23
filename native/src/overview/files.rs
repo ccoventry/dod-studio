@@ -53,42 +53,11 @@ pub enum Format {
     Bmp,
 }
 
-/// `<steam>/steamapps/common` folders: the one holding `hint` (an `hl.exe`
-/// or an install folder), Steam's default, and every library in
-/// `libraryfolders.vdf`.
-fn common_dirs(hint: Option<&Path>) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(hint) = hint {
-        for ancestor in hint.ancestors() {
-            if ancestor
-                .file_name()
-                .is_some_and(|n| n.eq_ignore_ascii_case("common"))
-            {
-                dirs.push(ancestor.to_path_buf());
-                break;
-            }
-        }
-    }
-    let steam = PathBuf::from(r"C:\Program Files (x86)\Steam");
-    dirs.push(steam.join("steamapps").join("common"));
-    if let Ok(vdf) = std::fs::read_to_string(steam.join("steamapps").join("libraryfolders.vdf")) {
-        for line in vdf.lines() {
-            let parts: Vec<&str> = line.split('"').collect();
-            if parts.len() >= 5 && parts[1].eq_ignore_ascii_case("path") {
-                let library = PathBuf::from(parts[3].replace("\\\\", "\\"));
-                dirs.push(library.join("steamapps").join("common"));
-            }
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    dirs.retain(|d| seen.insert(d.to_string_lossy().to_ascii_lowercase()));
-    dirs
-}
-
-/// Every Half-Life install with Day of Defeat in it.
+/// Every Half-Life install with Day of Defeat in it, in the Steam libraries
+/// [`crate::sys::installs::common_dirs`] finds.
 pub fn installs(hint: Option<&Path>) -> Vec<Install> {
     let mut out = Vec::new();
-    for common in common_dirs(hint) {
+    for common in crate::sys::installs::common_dirs(hint) {
         let Ok(entries) = std::fs::read_dir(&common) else {
             continue;
         };

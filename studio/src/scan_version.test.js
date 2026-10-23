@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('./themed_confirm.js', () => ({ themedConfirm: vi.fn() }));
+vi.mock('./themed_confirm.js', () => ({ themedConfirm: vi.fn(), setThemedConfirmMessage: vi.fn() }));
+vi.mock('./ipc_bridge.js', () => ({ estimateRescan: vi.fn(), logFrontendEvent: vi.fn() }));
 
 import { HIGHLIGHTS_VERSION, scanIsCurrent, outdatedDemos } from './scan_version.js';
-import { themedConfirm } from './themed_confirm.js';
+import { themedConfirm, setThemedConfirmMessage } from './themed_confirm.js';
 import { createProjectRescan } from './project_rescan.js';
 import { STRINGS } from './strings.js';
 
@@ -48,11 +49,13 @@ describe('which demos an older Studio scanned', () => {
 });
 
 describe('the rescan offer on opening a project', () => {
-  const setup = (demos, answer) => {
+  const setup = (demos, answer, timeLine = async () => 'About 3 s.') => {
     themedConfirm.mockReset();
-    themedConfirm.mockResolvedValue(answer);
+    setThemedConfirmMessage.mockReset();
+    if (answer instanceof Promise) themedConfirm.mockReturnValue(answer);
+    else themedConfirm.mockResolvedValue(answer);
     const scan = vi.fn(async () => true);
-    return { scan, offer: createProjectRescan({ getDemos: () => demos, scan }).offerRescan };
+    return { scan, offer: createProjectRescan({ getDemos: () => demos, scan, timeLine }).offerRescan };
   };
 
   it('counts and lists the older demos, Rescan first', async () => {
@@ -62,13 +65,50 @@ describe('the rescan offer on opening a project', () => {
     const [message, options] = themedConfirm.mock.calls[0];
     expect(message).toMatch(/^2\/3 demos in this project were scanned with an older DoD Studio\. Rescan them now\?/);
     expect(message).toContain('marks, notes, status and kill ranges are carried over');
-    expect(message).toContain('usually takes a few seconds; any demo that has to be read again in full takes longer, depending on the PC');
+    // The time line is worked out after the prompt opens (#937).
+    expect(message).toContain('carried over. Working out how long… Press “Not now”');
     // What "Not now" does sits with the question, above the long list.
     expect(message).toContain('Press “Not now” to leave them as they are');
     expect(options.footer).toBeUndefined();
     expect(options).toMatchObject({ confirmLabel: 'Rescan', cancelLabel: 'Not now', focusConfirm: true });
     expect(options.details.map((d) => d.primary)).toEqual(['b.dem', 'c.dem']);
     expect(scan).toHaveBeenCalledWith(['C:/d/b.dem', 'C:/d/c.dem']);
+  });
+
+  it('fills in the time once the estimate is in, without waiting for it', async () => {
+    let answer;
+    let estimated;
+    const timeLine = vi.fn(() => new Promise((resolve) => { estimated = resolve; }));
+    const { offer } = setup([current('a.dem', { highlights_version: 0 })], new Promise((r) => { answer = r; }), timeLine);
+    const offered = offer();
+    expect(themedConfirm).toHaveBeenCalledTimes(1);
+    expect(timeLine).toHaveBeenCalledWith(['a.dem']);
+    estimated('About 4 min: 120 need a full read.');
+    await vi.waitFor(() => expect(setThemedConfirmMessage).toHaveBeenCalledTimes(1));
+    expect(setThemedConfirmMessage.mock.calls[0][0])
+      .toContain('carried over. About 4 min: 120 need a full read. Press “Not now”');
+    answer(false);
+    expect(await offered).toBe(false);
+  });
+
+  it('a failed estimate leaves the time out', async () => {
+    let answer;
+    const { offer } = setup([current('a.dem', { highlights_version: 0 })], new Promise((r) => { answer = r; }), async () => null);
+    const offered = offer();
+    await vi.waitFor(() => expect(setThemedConfirmMessage).toHaveBeenCalledTimes(1));
+    expect(setThemedConfirmMessage.mock.calls[0][0]).toContain('carried over. Press “Not now”');
+    answer(false);
+    await offered;
+  });
+
+  it('an estimate after the prompt closed changes nothing', async () => {
+    let estimated;
+    const { offer } = setup([current('a.dem', { highlights_version: 0 })], false, () => new Promise((r) => { estimated = r; }));
+    expect(await offer()).toBe(false);
+    estimated('About 3 s.');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(setThemedConfirmMessage).not.toHaveBeenCalled();
   });
 
   it('says how many of the project\'s demos, or all of them', () => {

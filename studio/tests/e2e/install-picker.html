@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  Harness for install_picker.js (#931): Configuration > Paths' Half-Life
+  Executable as a list of the installs found. The backend's find_installs,
+  list_game_folders, check_running_game and close_running_game are
+  window.__mockInvokeHandlers; window.__persisted counts saves (a hide, or
+  the path field's change), window.__gameFolder() reads the setting.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>install_picker.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div class="input-row" style="width: 600px;">
+    <input type="text" id="hl-path-input" value="" hidden />
+    <input type="text" id="hl-install-choice" />
+    <button id="after">After</button>
+  </div>
+  <select id="config-game-folder"></select>
+  <div id="config-game-folder-warning" style="display: none;"></div>
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { createInstallPicker, setHiddenInstalls, getHiddenInstalls, prefillSingleInstall } from '/src/install_picker.js';
+    import { createGameFolderUi, getGameFolder, setGameFolder } from '/src/game_folder_ui.js';
+    initThemedConfirm();
+    window.__persisted = 0;
+    const persist = () => { window.__persisted += 1; };
+    const input = document.querySelector('#hl-path-input');
+    const folders = createGameFolderUi({ getHlPath: () => input.value.trim(), persist });
+    // config_wiring.js saves and re-lists the Game Folder on this event.
+    input.addEventListener('change', () => { persist(); folders.refresh(); });
+    window.__start = async ({ hlPath = '', hidden = [], gameFolder = 'dod' } = {}) => {
+      input.value = hlPath;
+      setHiddenInstalls(hidden);
+      setGameFolder(gameFolder);
+      const picker = createInstallPicker({ persist });
+      await picker.refresh();
+    };
+    window.__prefill = () => prefillSingleInstall();
+    window.__hlPath = () => input.value;
+    window.__gameFolder = () => getGameFolder();
+    window.__hidden = () => getHiddenInstalls();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

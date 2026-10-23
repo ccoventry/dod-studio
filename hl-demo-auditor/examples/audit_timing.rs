@@ -48,7 +48,7 @@ fn main() {
         .map(KeyCache::load)
         .unwrap_or_default();
     let audit = find_duplicates_cached(files, &cancel, &Some(tx), &mut cache);
-    cache.prune_unseen_under(&roots);
+    cache.prune_unseen_under(&roots, false);
     if let Some(file) = &cache_file {
         cache.save(file).expect("save the key cache");
     }
