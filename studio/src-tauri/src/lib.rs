@@ -314,6 +314,21 @@ async fn scan_directory(
     .await
 }
 
+/// What a rescan of `paths` has to do, for the rescan prompt's time line
+/// (#937): stats each demo and reads its cache entries' first bytes, opening
+/// no demo, so a few hundred take well under a second (longer on a slow or
+/// cloud drive, hence off the main thread).
+#[tauri::command]
+async fn estimate_rescan(paths: Vec<String>) -> Result<analysis::cache::RescanEstimate, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(analysis::cache::RescanEstimate::new(
+            &native::analyzer_cache_root(),
+            &paths,
+        ))
+    }))
+    .await
+}
+
 /// Total physical RAM in bytes, for the scan worker box's hint line (#246).
 #[tauri::command]
 async fn system_memory_bytes() -> Result<u64, String> {
@@ -875,6 +890,7 @@ pub fn run() {
             delete_orphaned_previews,
             cancel_capture_batch,
             scan_directory,
+            estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
             diagnose_capture_output_paths,
