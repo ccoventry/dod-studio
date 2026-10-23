@@ -11,6 +11,7 @@ mod demo_split_manager;
 mod dir_browser;
 mod hd_manager;
 mod hook_batch;
+mod hook_dll_list;
 mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
@@ -960,6 +961,7 @@ pub fn run() {
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,
+            hook_dll_list::list_hook_dlls,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

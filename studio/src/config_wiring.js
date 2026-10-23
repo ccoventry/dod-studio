@@ -17,6 +17,7 @@ import { STRINGS } from './strings.js';
 import { createGameFolderUi, getGameFolder } from './game_folder_ui.js';
 import { wireReviewSettings } from './review_settings.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
+import { initHookDllPicker, refreshHookDllPicker } from './hook_dll_picker.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -335,6 +336,7 @@ export async function linkHlaeToFfmpeg() {
  */
 export function initConfigWiring({ persistAppSettings }) {
   wireReviewSettings(persistAppSettings);
+  initHookDllPicker();
   // Game Folder (#402): its list comes from the folder holding hl.exe, so it
   // is re-read whenever that path changes.
   const gameFolderUi = createGameFolderUi({
@@ -534,6 +536,7 @@ export function initConfigWiring({ persistAppSettings }) {
           const inputEl = document.querySelector('#goldsrc-hooks-dll-path-input');
           if (inputEl) inputEl.value = path;
           await persistAppSettings();
+          await refreshHookDllPicker();
         }
       } catch (err) {
         console.error("Error selecting dodstudio_goldsrc_hooks.dll:", err);
