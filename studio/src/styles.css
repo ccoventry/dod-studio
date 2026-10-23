@@ -3836,6 +3836,7 @@ button.setup-skip:hover:not(:disabled) {
 
 .movie-copy-content {
   max-width: 520px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 10px;
