@@ -8,7 +8,7 @@
 // command line always make the same files.
 
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import {
   hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler, hdMisses, hdSaveStyle, hdRemoveStyle,
   hdPreview, hdSaveMapList, hdWorldCoverage,
@@ -1219,7 +1219,9 @@ export function initHdPane() {
   pythonPickBtn?.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({
+      picked = await pickPath({
+        field: 'hd.python',
+        current: lastStatus?.python?.using?.exe,
         title: STRINGS.HD.PYTHON_PICK_TITLE,
         multiple: false,
         directory: false,
@@ -1241,7 +1243,7 @@ export function initHdPane() {
   upscalerPickBtn?.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({ title: STRINGS.HD.UPSCALER_PICK_TITLE, directory: true, multiple: false });
+      picked = await pickPath({ field: 'hd.upscaler', current: lastStatus?.tools?.dir, title: STRINGS.HD.UPSCALER_PICK_TITLE, directory: true, multiple: false });
     } catch (err) {
       console.error('Upscaler folder picker failed:', err);
       return;

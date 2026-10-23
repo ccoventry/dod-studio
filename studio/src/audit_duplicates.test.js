@@ -3,6 +3,7 @@ import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
   deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
   withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy, elapsedText, auditFoldersKey,
+  isArchived, canDelete, copiesToDelete, revealPath,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -150,5 +151,59 @@ describe('audit_duplicates (#844)', () => {
       { groupIdx: 1, path: String.raw`\\?\F:\keep\b.dem`, already: true },
     ]);
     expect(keepPicksIn(groups, '')).toEqual([]);
+  });
+});
+
+describe('demos inside zips (#929)', () => {
+  const zipped = {
+    path: String.raw`\\?\D:\packs\lan.zip › hltv/m.dem`,
+    in_use: null,
+    archive: { zip: String.raw`\\?\D:\packs\lan.zip`, entry: 'hltv/m.dem' },
+  };
+  const loose = { path: String.raw`\\?\C:\demos\m.dem`, in_use: null };
+  const other = { path: String.raw`\\?\E:\m.dem`, in_use: null };
+  const group = { size: 10, header_hash: 1, files: [zipped, loose, other] };
+
+  it('never ticks or deletes a copy inside a zip', () => {
+    expect(isArchived(zipped)).toBe(true);
+    expect(isArchived(loose)).toBe(false);
+    expect(startsTicked(zipped, 1)).toBe(false);
+    expect(startsTicked(loose, 1)).toBe(true);
+    expect(canDelete(group, zipped)).toBe(false);
+    expect(canDelete(group, loose)).toBe(true);
+    // Another copy kept: the zip's copy is still not one to delete.
+    const { groups } = keepFile([group], 0, loose.path);
+    expect(canDelete(groups[0], zipped)).toBe(false);
+  });
+
+  it('sends the zip and entry when the kept copy is inside a zip', () => {
+    const ticked = new Set([loose.path, other.path, zipped.path]);
+    expect(copiesToDelete([group], ticked)).toEqual([
+      { path: loose.path, keep: zipped.path, keep_zip: zipped.archive },
+      { path: other.path, keep: zipped.path, keep_zip: zipped.archive },
+    ]);
+    // A loose copy kept: no zip to name, and the zip's copy isn't sent.
+    const { groups } = keepFile([group], 0, loose.path);
+    expect(copiesToDelete(groups, ticked)).toEqual([{ path: other.path, keep: loose.path }]);
+    expect(copiesToDelete([group], new Set())).toEqual([]);
+  });
+
+  it('counts only the loose copies as space a delete frees', () => {
+    expect(auditTotals([group])).toEqual({ copies: 2, wastedBytes: 20 });
+    const twoZips = { size: 10, files: [zipped, { ...zipped, path: 'x › y.dem', archive: { zip: 'x', entry: 'y.dem' } }] };
+    expect(auditTotals([twoZips])).toEqual({ copies: 0, wastedBytes: 0 });
+  });
+
+  it('opens the zip itself in Explorer', () => {
+    expect(revealPath(zipped)).toBe(String.raw`D:\packs\lan.zip`);
+    expect(revealPath(loose)).toBe(String.raw`C:\demos\m.dem`);
+  });
+
+  it('shows how many zips have been looked inside before the key pass', () => {
+    expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 1, total: 0, done: 0, current: String.raw`\\?\D:\a.zip` }))
+      .toEqual({ pct: 25, text: 'Looking inside zips: 1 / 4', current: String.raw`D:\a.zip`, indeterminate: false });
+    // The key pass takes over once it has a total.
+    expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 4, total: 10, done: 5 }).text)
+      .toBe('Comparing demos: 5 / 10');
   });
 });

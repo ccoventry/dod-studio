@@ -29,14 +29,16 @@ export function runningGameDetails(check) {
  *
  * `request`: launch settings not saved yet (see checkRunningGame).
  * `button`: disabled while the game closes.
+ * `switching`: asked by Configuration's install list (#931), which closes
+ * the game to switch installs rather than to start it again.
  */
-export async function closeGameWithOtherSettings(request = null, { button = null } = {}) {
+export async function closeGameWithOtherSettings(request = null, { button = null, switching = false } = {}) {
   const check = await checkRunningGame(request);
   if (!check || check.state !== 'mismatch') return true;
   const S = STRINGS.RUNNING_GAME;
-  const ok = await themedConfirm(S.message(check), {
-    title: S.TITLE,
-    confirmLabel: S.CLOSE_AND_RESTART,
+  const ok = await themedConfirm(switching ? S.switchMessage(check) : S.message(check), {
+    title: switching ? S.SWITCH_TITLE : S.TITLE,
+    confirmLabel: switching ? S.CLOSE_AND_SWITCH : S.CLOSE_AND_RESTART,
     cancelLabel: S.CANCEL,
     details: runningGameDetails(check),
   });
