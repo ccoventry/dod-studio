@@ -1574,7 +1574,7 @@ export const STRINGS = {
     outdatedDemosMessage: (n, total = n) => {
       const which = n < total ? `${n}/${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
       return `${which} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over. `
-        + 'It usually takes a few seconds; a demo that has to be read again in full takes about 2 seconds. '
+        + 'It usually takes a few seconds; any demo that has to be read again in full takes longer, depending on the PC. '
         + `Press “Not now” to leave ${n === 1 ? 'it' : 'them'} as ${n === 1 ? 'it is' : 'they are'}; you'll be asked again the next time you open the project.`;
     },
     OUTDATED_DEMOS_RESCAN: 'Rescan',
