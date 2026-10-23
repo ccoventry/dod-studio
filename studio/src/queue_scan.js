@@ -85,9 +85,9 @@ export function createQueueScan({
     }
     if (!active) return;
     if (p.listing) active.foldersSeen = Math.max(active.foldersSeen, p.folders ?? 0);
-    // While folders are being listed (#843) no parse has started, so the
-    // parse clock must not start either.
-    const timeLeft = p.listing ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
+    // While folders are being listed (#843) or their demos' keys read, no
+    // parse has started, so the parse clock must not start either.
+    const timeLeft = p.listing || p.keying ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
     const view = scanStepView(p, { expectedFolders: active.expectedFolders, timeLeft });
     if (!view) return;
     const shown = placed(nest(active.place, SCAN_STEPS[view.step]), view);
