@@ -85,9 +85,12 @@ export const STRINGS = {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
     ADD_FOLDER_BUTTON: '+ Add Folder',
+    // #531: beside + Add Folder; also what a dropped folder follows.
+    INCLUDE_SUBFOLDERS_LABEL: 'Include subfolders',
+    INCLUDE_SUBFOLDERS_TITLE: "Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.",
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     CANCEL_SCAN_TITLE: 'Cancel the running directory scan',
-    SCAN_STATUS_READY: 'Status: Ready',
+    SCAN_STATUS_READY: 'Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
     // #174: demos you can capture a player from (POV demos they recorded).
@@ -124,7 +127,7 @@ export const STRINGS = {
     GROUP_NO_DATE: 'Date not known',
     GROUP_NO_TYPE: 'Demo type not known',
     groupDateTitle: (day) => `Demo files last changed on ${day}`,
-    groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
+    groupingStatus: (done, total) => (total > 0 ? `Grouping by match: ${done} of ${total}` : 'Grouping by match…'),
     matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
     matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
     matchHalfCount: (half, count) => `${half ? `h${half}` : 'half unknown'}: ${count} demo${count === 1 ? '' : 's'}`,
@@ -537,7 +540,7 @@ export const STRINGS = {
     // #442: named sets of both command lists. Row laid out like Render
     // Output's preset row (#108).
     PROFILE_LABEL: 'Profile:',
-    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one.',
+    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one. Built-in profiles can be picked or duplicated, not changed.',
     PROFILE_NONE: '—',
     profileEditedOption: (name) => `${name} (edited)`,
     PROFILE_NAME_PLACEHOLDER: 'Name for these commands',
@@ -553,6 +556,16 @@ export const STRINGS = {
     profileAppliedToast: (name) => `Replaced both command lists with the "${name}" profile.`,
     profileDeletedToast: (name) => `Deleted the "${name}" profile.`,
     profileNameTakenToast: (name) => `There is already a profile named "${name}".`,
+    // Built-in profiles (#911): shipped with the app, kept up to date, locked.
+    PROFILE_BUILTIN_CHIP: 'Built-in',
+    PROFILE_BUILTIN_TITLE: "Comes with DoD Studio and stays up to date with it, so it can't be changed. Duplicate it to make your own copy.",
+    PROFILE_BUILTIN_LOCKED_TITLE: "Built-in profiles can't be changed. Duplicate it to make your own copy.",
+    profileBuiltinNameTitle: (name) => `"${name}" is a built-in profile. Type another name.`,
+    PROFILE_DUPLICATE_BUTTON: 'Duplicate',
+    PROFILE_DUPLICATE_TITLE: 'Make a copy of the picked profile that is yours to change.',
+    profileDuplicatedToast: (name) => `Made "${name}", your own copy. Save Changes now saves into it.`,
+    builtinProfileNotice: (names) => `Built-in profiles now stay up to date and can't be changed. You had changed your copy, so it's kept as ${names.map((n) => `"${n}"`).join(' and ')}.`,
+    PROFILE_NOTICE_OK: 'OK',
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
       "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",
@@ -972,7 +985,6 @@ export const STRINGS = {
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
-    elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
     zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
@@ -1133,6 +1145,9 @@ export const STRINGS = {
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',
     analyzingPct: (pct) => `Analyzing… ${pct}%`,
     analyzingDemoPct: (pct) => `Analyzing demo… ${pct}%`,
+    // A demo the analyzer cache has is read, not parsed (#958).
+    READING_CACHE: 'Reading from the analyzer cache…',
+    READING_CACHE_SHORT: 'Reading from the cache…',
     analyzeFailed: (err) => `Failed to analyze demo: ${err}`,
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
@@ -1674,7 +1689,10 @@ export const STRINGS = {
       notes && `Note: "${notes}"`,
     ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
-    queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
+    // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
+    queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
+    QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
+    queueSplitDoneLine: (seconds, demos) => `Done in ${seconds} s: split ${demos} demo${demos === 1 ? '' : 's'}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
     MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
@@ -1682,9 +1700,27 @@ export const STRINGS = {
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
-    cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
-    readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
-    // Appended to the two statuses above when the scan skipped demos (#23).
+    // The queue's progress line through a scan (#951): queue_progress.js.
+    SCAN_STARTING: 'Looking for demos…',
+    // Opening a project, on the queue's line (#958).
+    OPENING_PROJECT: 'Opening the project…',
+    CHECKING_PROJECT_DEMOS: "Checking the project's demos are where they were…",
+    lookingForMissingDemos: (n) => `Looking for ${n} missing demo${n === 1 ? '' : 's'}…`,
+    lookingLine: (folders, demos, last) => {
+      const n = (x) => Number(x || 0).toLocaleString('en-US');
+      const was = last > 0 ? ` (about ${n(last)} last time)` : '';
+      return `Looking for demos: ${n(folders)} folder${folders === 1 ? '' : 's'}${was}, ${n(demos)} demo${demos === 1 ? '' : 's'} found`;
+    },
+    scanDoneLine: (seconds, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
+      const parts = [
+        added > 0 && `${added} demo${added === 1 ? '' : 's'} added`,
+        rescanned > 0 && `${rescanned} rescanned`,
+        unchanged > 0 && `${unchanged} already in the queue`,
+      ].filter(Boolean);
+      return `Done in ${seconds} s: ${parts.length ? parts.join(', ') : 'no demos found'}`;
+    },
+    scanCancelledLine: (seconds, added) => `Cancelled after ${seconds} s: ${added > 0 ? `${added} demo${added === 1 ? '' : 's'} added` : 'nothing added'}`,
+    // Appended to the two lines above when the scan skipped demos (#23).
     skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
     // `skipped` is [{name, reason}]; names the first three, counts the rest.
     skippedDemosToast: (skipped) => {
@@ -1693,20 +1729,25 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
-    SCANNING_STATUS: 'Status: Scanning...',
-    SCANNING_TOAST: 'Scanning directories...',
+    SCAN_CANCELLING_STATUS: 'Cancelling…',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
     scanCompleteToast: (count, unchanged = 0) =>
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    // #531: the folder walk's bounds stopped it short; `cap` is the scan's.
+    scanCapToast: (cap) => {
+      const parts = [];
+      if (cap.depth) parts.push(`folders more than ${cap.max_depth} levels down were not read`);
+      if (cap.entries) parts.push(`the walk stopped after ${Number(cap.max_entries).toLocaleString('en-US')} files and folders`);
+      return `Some demos may be missing: ${parts.join(', and ')}. Add a folder further down to scan the rest.`;
+    },
     scanCancelledToast: (count) =>
       count > 0
         ? `Scan cancelled (${count} demo(s) added before cancel)`
         : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
-    scanErrorStatus: (err) => `Status: Error — ${err}`,
+    scanErrorStatus: (err) => `Could not scan: ${err}`,
 
     EXPORT_POOL_FREE_DEFAULT: 'Capture Output Free: 0.0 GB',
     exportPoolFree: (gb) => `Capture Output Free: ${gb} GB`,
@@ -1799,7 +1840,14 @@ export const STRINGS = {
     SCENE_LABEL: 'Build scene',
     RENDER_LABEL: 'Render',
     ENCODE_LABEL: 'Encode',
-    running: (label) => `${label}: running...`,
+    // What each step's line says until it has frames to count (#956).
+    STARTING: {
+      import: 'Importing the demo into Blender…',
+      scene: 'Building the scene…',
+      render: 'Rendering…',
+      encode: 'Encoding the MP4…',
+    },
+    soFar: (line, elapsed) => `${line} (${elapsed} so far)`,
     done: (label, elapsed) => `${label}: done in ${elapsed}.`,
     failed: (label) => `${label}: stopped with an error (see the message).`,
     CANCELLED: 'Stopped. A render keeps the frames it finished; Render again to carry on.',
@@ -1877,6 +1925,7 @@ export const STRINGS = {
     buildStep: (step, steps, style, type, elapsed) => `Step ${step} of ${steps}: ${style}, ${type} (${elapsed} so far)`,
     buildDone: (steps, elapsed, log) => `Done: ${steps} step${steps === 1 ? '' : 's'} in ${elapsed}. Every step's counts are in ${log}.`,
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
+    BUILD_STARTING: 'Starting the build…',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
@@ -1899,8 +1948,8 @@ export const STRINGS = {
     cfgGapsComment: (sentence) => `// ${sentence}`,
     // #426: which maps a style has map textures for, and the warning when
     // the maps being built include one it hasn't.
-    COVERAGE_CHECKING: 'Checking which maps each style has map textures for…',
-    coverageChecking: (done, total) => `Checking which maps each style has map textures for… (${done} of ${total} maps)`,
+    COVERAGE_CHECKING: 'Reading the maps…',
+    coverageChecking: (done, total) => `Reading the maps: ${done} of ${total}`,
     coverageFailed: (err) => `Could not check which maps are covered: ${err}`,
     coverageAll: (style, maps, listed) => `${style} has every map texture for ${maps === 1 ? 'the 1 map' : `all ${maps} maps`}${listed ? ' in your map list' : ''}.`,
     coverageCounts: (style, full, part, none, listed) => {
@@ -1957,8 +2006,9 @@ export const STRINGS = {
     modelsMissing: (styles) => `Missing models for: ${styles.join(', ')}.`,
     ALL_MODELS_PRESENT: 'All style models are present.',
     bytesOf: (done, total) => `${done} of ${total}`,
-    progressLine: (item, step, steps, done) => `${step} of ${steps}: ${item} (${done})`,
-    unpackingLine: (item, step, steps) => `${step} of ${steps}: unpacking ${item}...`,
+    SETUP_CHECKING: "Checking what's already installed…",
+    progressLine: (item, step, steps, done) => `Downloading ${item} (${step} of ${steps}): ${done}`,
+    unpackingLine: (item, step, steps) => `Unpacking ${item} (${step} of ${steps})…`,
     setupDone: (count) => count ? `Done: downloaded ${count} file${count === 1 ? '' : 's'}.` : 'Everything was already there.',
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
@@ -2169,6 +2219,29 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
     saved: (name) => `Saved ${name}.`,
     SHOW_FILE: 'Show',
+    // combine_progress.js: the step line under the bar (#955).
+    CHECKING_STEP: 'Checking the clips…',
+    checkingLine: (n, total) => `Checking the clips (${n} of ${total})…`,
+    joiningLine: (done, total) => `Joining clips: ${done} of ${total}`,
+    savedIn: (elapsed) => `Saved in ${elapsed}.`,
+    STOPPED: 'Cancelled. Nothing was saved.',
+    FAILED: 'Stopped with an error (see the message).',
+  },
+
+  // ── capture_precheck.js: the Capture footer's line while Start Capture
+  //    Batch checks everything before the batch starts (#953)
+  CAPTURE_PRECHECK: {
+    STARTING: 'Getting ready to capture…',
+    OBS: 'Checking OBS…',
+    DISK: 'Checking the disk space…',
+    DEMOS: 'Checking the picked demos are where they were…',
+    demosCounted: (done, total) => `Checking the picked demos are where they were (${done} of ${total})…`,
+    MAPS: 'Checking the maps and demos for known problems…',
+    PATHS: 'Checking the game and HLAE paths…',
+    GAME: 'Checking whether the game is already open…',
+    STEAM: 'Checking Steam…',
+    NOT_STARTED: 'Not started.',
+    GAME_OPEN: 'Not started yet: the game is already open.',
   },
 
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
@@ -2343,7 +2416,9 @@ export const STRINGS = {
       return `Some earlier edits don't fit this map any more and are kept aside: ${parts.join(', ')}.`;
     },
     building: (map, fraction) => `${map}: working out where players can go... ${Math.round(fraction * 100)}%`,
-    SAVING: 'Saving...',
+    // Its two steps (#958): drawing and writing each takes a moment.
+    SAVING: 'Saving the overview…',
+    SAVING_HD: 'Saving the high-quality copy…',
     // Where Save put things, short; the full paths are the line's tooltip.
     saved: (hd) => (hd
       ? 'Saved the overview in dod/overviews, and the high-quality copy and your edits in dod_addon/overviews.'
@@ -2438,6 +2513,7 @@ export const STRINGS = {
     hdMapListFailed: (err) => `Could not change hd_maps.txt: ${err}`,
     hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
+    dropError: (err) => `Could not read what was dropped: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
@@ -2557,6 +2633,11 @@ export const STRINGS = {
     },
   },
 
+  // ── progress_view.js: what every long job's progress line shares (#951)
+  PROGRESS: {
+    elapsedSuffix: (clock) => ` · ${clock}`,
+  },
+
   // ── scan_progress.js: what every scan reading demos one by one adds to
   //    its progress line (List Demos, Cache all, the Master Queue scan; #687)
   SCAN_PROGRESS: {
@@ -2611,6 +2692,14 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
+    // Rename and Undo's progress line (#958).
+    renamingStart: (count) => `Renaming ${count} demo${count === 1 ? '' : 's'}…`,
+    renaming: (done, total) => `Renaming ${done} of ${total}…`,
+    UNDO_STARTING: 'Putting back the last renames…',
+    puttingBack: (done, total) => `Putting back ${done} of ${total}…`,
+    renamedIn: (count, secs) => `Renamed ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    putBackIn: (count, secs) => `Put back ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    notRenamed: (count) => ` ${count} couldn't be renamed.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
     // Rename Demos' own meaning of a placeholder, where it isn't the one in
     // PLACEHOLDERS.DESCRIPTIONS.
@@ -2782,6 +2871,23 @@ export const STRINGS = {
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  // Dropping demos and folders from Windows (#530): demo_drop.js.
+  DROP: {
+    skippedToast: (names) => {
+      const shown = names.slice(0, 5).join(', ');
+      const more = names.length > 5 ? ` and ${names.length - 5} more` : '';
+      return `Not a demo or a folder, so not added: ${shown}${more}`;
+    },
+    BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+  },
+  // The one-time look at the pinned folders (#533): pinned_review.js.
+  PINNED_REVIEW: {
+    TITLE: 'Pinned folders',
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
+    SAVE_BUTTON: 'Save',
+    KEEP_ALL_BUTTON: 'Keep all',
   },
   SETUP: {
     MENU_ITEM: 'Setup…',
