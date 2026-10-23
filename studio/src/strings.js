@@ -1570,8 +1570,13 @@ export const STRINGS = {
     CHANGED_DEMOS_RESCAN: 'Rescan',
     // Opening a project with demos an older DoD Studio scanned (scan_version.js).
     OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
-    outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
-    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    // `n` of the project's `total` demos; "All 158" when it is every one.
+    outdatedDemosMessage: (n, total = n) => {
+      const which = n < total ? `${n}/${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
+      return `${which} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over. `
+        + 'It usually takes a few seconds; any demo that has to be read again in full takes longer, depending on the PC. '
+        + `Press “Not now” to leave ${n === 1 ? 'it' : 'them'} as ${n === 1 ? 'it is' : 'they are'}; you'll be asked again the next time you open the project.`;
+    },
     OUTDATED_DEMOS_RESCAN: 'Rescan',
     OUTDATED_DEMOS_NOT_NOW: 'Not now',
     // What a rescan did with the highlights' work (rescan_carry.js).
@@ -2064,6 +2069,22 @@ export const STRINGS = {
     PREVIEW_ANYWAY: 'Launch anyway',
   },
 
+  // ── camera_data.js: demos with no camera data (#920) ───────────────────
+  CAMERA_DATA: {
+    BADGE: 'no camera',
+    BADGE_TITLE: 'This demo has no camera data: none of its frames holds the recorder\'s view, so it plays as a frozen camera with no gun. '
+      + 'Kills and the scoreboard still read fine. It is usually a bad copy; if there is another copy of the demo, use that one.',
+    batchTitle: (count) => `${count} demo${count === 1 ? ' has' : 's have'} no camera data`,
+    batchMessage: (count) => `${count === 1 ? 'This demo has' : 'These demos have'} no camera data, so ${count === 1 ? 'its clips come' : 'their clips come'} out as a frozen camera with no gun. Start the batch anyway?`,
+    PREVIEW_TITLE: 'This demo has no camera data',
+    PREVIEW_MESSAGE: 'None of its frames holds the recorder\'s view, so it plays as a frozen camera with no gun. Launch it anyway?',
+    DETAIL: 'No camera data: plays as a frozen camera',
+    ANALYZER_NOTICE: 'No camera data: none of this demo\'s frames holds the recorder\'s view, so it plays and captures as a frozen camera with no gun. '
+      + 'The kills and scoreboard here are fine. It is usually a bad copy; if there is another copy of the demo, use that one.',
+    START_ANYWAY: 'Start anyway',
+    PREVIEW_ANYWAY: 'Launch anyway',
+  },
+
   // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
   COMBINE: {
     OPEN_BUTTON: 'Combine Clips…',
@@ -2471,6 +2492,12 @@ export const STRINGS = {
     fromCache: (cached) => ` (${cached} from the analyzer cache)`,
     CHECKING_CACHE: 'Checking the analyzer cache…',
     timeLeft: (seconds) => (seconds >= 90 ? ` · about ${Math.round(seconds / 60)} min left` : ` · about ${Math.max(1, seconds)} s left`),
+    // The Master Queue scan's start and end in the activity log, with its
+    // times, so how long a rescan takes can be measured (#926).
+    startLog: (paths) => `[scan] started: ${paths} path(s) to read`,
+    endLog: (outcome, seconds, read, unchanged) => `[scan] ${outcome} after ${seconds} s: ${read} demo(s) read, ${unchanged} unchanged`,
+    endLogSplit: (cached, notCached, seconds) => ` (${cached} from the analyzer cache, ${notCached} not${notCached > 0 ? `: those took ${seconds} s` : ''})`,
+    failedLog: (seconds, err) => `[scan] failed after ${seconds} s: ${err}`,
   },
 
   // #441: clip names, their template and its checks.

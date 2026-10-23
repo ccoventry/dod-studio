@@ -17,7 +17,7 @@ import { applyRescanWork, matchRescanHighlights, rescanReport } from './rescan_c
 import { updateStreakVisuals } from './detail_pane.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
-import { parseClock, timeLeftText } from './scan_progress.js';
+import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -156,6 +156,8 @@ export function createQueueScan({
     scanBarShown(true);
     if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
     scanParses.reset();
+    const startedAt = Date.now();
+    logFrontendEvent(STRINGS.SCAN_PROGRESS.startLog(pathsToScan.length));
     showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
 
     const masterTableBody = document.querySelector('#master-demo-table-body');
@@ -168,9 +170,10 @@ export function createQueueScan({
       const known = getDemos()
         .filter(scanIsCurrent)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
+      const outcome = await scanDirectory(pathsToScan, known, readScanWorkers());
       const {
         demos: scanned, unchanged, copies: unparsedCopies = [], cancelled = false,
-      } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      } = outcome;
       lastScanAddedNothingCancelled = cancelled && scanned.length === 0;
       // An identical copy under another name would be a second row for the
       // same demo, capturing every highlight twice (#21). The scan skips them
@@ -210,6 +213,13 @@ export function createQueueScan({
           getDemos().push(demo);
         }
       });
+      logFrontendEvent(scanEndLogLine({
+        cancelled,
+        ms: Date.now() - startedAt,
+        read: scanned.length,
+        unchanged,
+        outcome,
+      }));
       const carryReport = rescanReport(rescans);
       carryReport.log.forEach((line) => logFrontendEvent(line));
 
@@ -246,6 +256,7 @@ export function createQueueScan({
       return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
+      logFrontendEvent(scanFailedLogLine(Date.now() - startedAt, err));
       showToast(STRINGS.MAIN.scanErrorToast(err), 'error');
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
       return false;

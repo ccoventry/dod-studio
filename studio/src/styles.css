@@ -1518,8 +1518,9 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
-/* #207: a demo this install's game can't play. */
-.entity-limit-badge {
+/* #207: a demo this install's game can't play. #920: one with no camera data. */
+.entity-limit-badge,
+.no-camera-badge {
   flex-shrink: 0;
   font-size: 0.75em;
   font-weight: normal;
