@@ -4,7 +4,8 @@
 // owns the queue, the take index and the Teams list; they're reassigned
 // there, so they're reached through getters and setters rather than held.
 
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { invoke } from '@tauri-apps/api/core';
 import { defaultProjectsDir } from './ipc_bridge.js';
 import { updateStreakVisuals } from './detail_pane.js';
@@ -177,9 +178,11 @@ export function createProjectSession({
     }
     try {
       const projectsDir = await defaultProjectsDir();
-      const selected = await open({
+      const selected = await pickPath({
+        field: 'project.open',
+        current: currentSessionPath,
+        fallback: projectsDir,
         multiple: false,
-        ...(projectsDir ? { defaultPath: projectsDir } : {}),
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
       if (selected) {

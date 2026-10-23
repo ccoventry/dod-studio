@@ -4,7 +4,7 @@
 // space, demos) into one snapshot, redraws both from it, and runs their
 // actions against the same fields and lists Configuration edits, so the two
 // never hold separate copies of a setting.
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   calculateExportPoolSpace,
@@ -137,10 +137,19 @@ export function createSetup({
     return draw();
   }
 
+  // Configuration's own fields, so both Browse buttons share a start.
+  const EXE_FIELDS = {
+    '#hl-path-input': 'config.hl',
+    '#hlae-path-input': 'config.hlae',
+    '#ffmpeg-override-path-input': 'config.ffmpeg',
+  };
+
   async function pickExe(inputSel, title) {
     let selected = null;
     try {
-      selected = await open({
+      selected = await pickPath({
+        field: EXE_FIELDS[inputSel],
+        current: document.querySelector(inputSel)?.value?.trim(),
         multiple: false,
         filters: [{ name: STRINGS.MAIN.EXECUTABLE_FILTER_NAME, extensions: ['exe'] }],
         title,
@@ -166,9 +175,9 @@ export function createSetup({
     await refresh();
   }
 
-  async function pickFolder(title) {
+  async function pickFolder(field, title) {
     try {
-      const selected = await open({ directory: true, multiple: false, title });
+      const selected = await pickPath({ field, directory: true, multiple: false, title });
       return (Array.isArray(selected) ? selected[0] : selected) || null;
     } catch (err) {
       console.error('Error opening the folder picker:', err);
@@ -177,12 +186,12 @@ export function createSetup({
   }
 
   const folders = {
-    captures: { list: captureFolders, title: () => STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE },
-    renders: { list: renderFolders, title: () => STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE },
+    captures: { list: captureFolders, field: 'capture.output_folder', title: () => STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE },
+    renders: { list: renderFolders, field: 'render.export_folder', title: () => STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE },
   };
 
   async function addFolder(kind) {
-    const path = await pickFolder(folders[kind].title());
+    const path = await pickFolder(folders[kind].field, folders[kind].title());
     if (path) folders[kind].list.add(path);
     await refresh();
   }
@@ -193,7 +202,7 @@ export function createSetup({
   }
 
   async function pickAndScanDemos() {
-    const folder = await pickFolder(STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE);
+    const folder = await pickFolder('queue.add_folder', STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE);
     if (folder) await addDemoFolder(folder);
     await refresh();
   }
@@ -225,7 +234,7 @@ export function createSetup({
     openFfmpegPage: () => openUrl(STRINGS.SETUP.FFMPEG_URL).catch((err) => console.error('Error opening the FFmpeg page:', err)),
     addFolder,
     removeFolder,
-    pickDemoFolder: () => pickFolder(STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE),
+    pickDemoFolder: () => pickFolder('queue.add_folder', STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE),
     onSkip: async () => {
       setupDismissed = true;
       await persistAppSettings();
