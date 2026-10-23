@@ -8,7 +8,7 @@
 
 import { listGameFolders, gameFolderLanguageFile, revealInExplorer } from './ipc_bridge.js';
 import {
-  DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote, languageFileButton,
+  DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote, languageFileButton, isListedFolder,
 } from './game_folder.js';
 import { STRINGS } from './strings.js';
 
@@ -82,7 +82,7 @@ function render() {
     showWarning(S.GAME_FOLDER_NO_LIST);
     return;
   }
-  const missing = !found.some((f) => f.toLowerCase() === current.toLowerCase());
+  const missing = !isListedFolder(found, current);
   showWarning(missing ? S.gameFolderMissing(current) : '');
   if (!missing) checkLanguageFile();
 }
@@ -138,7 +138,7 @@ export function createGameFolderUi({ getHlPath, persist }) {
   });
   // Back from renaming the file in Explorer: look again, so the warning goes.
   window.addEventListener('focus', () => {
-    if (found.length > 0 && found.some((f) => f.toLowerCase() === current.toLowerCase())) checkLanguageFile();
+    if (isListedFolder(found, current)) checkLanguageFile();
   });
 
   render();

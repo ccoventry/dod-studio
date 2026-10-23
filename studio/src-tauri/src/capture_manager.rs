@@ -1678,6 +1678,9 @@ pub struct ScanOutcome {
     pub full_reads: u32,
     #[serde(default)]
     pub full_read_bytes: u64,
+    /// The folder walk's depth or entry bound stopped it short (#531).
+    #[serde(default)]
+    pub cap: ScanCap,
 }
 
 /// A scanned file with the same key as a queued demo at another path, or as
@@ -1811,16 +1814,38 @@ fn scan_worker_count(workers: usize, total: usize) -> usize {
 /// The scan status line: how many demos are done out of how many, how many
 /// of them the analyzer cache has (they go first, #687), and one demo still
 /// being parsed, when there is one. With several scan workers, "the current
-/// file" is one of the current files. Studio adds the time left.
+/// file" is one of the current files. Studio adds the time left, and shows
+/// the line as the Reading step of the queue's bar (#951).
 fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -> String {
-    let mut line = format!("Scanning {done} / {total}");
+    let mut line = format!("Reading demos: {done} of {total}");
     if cached > 0 {
         line += &format!(" ({cached} from the analyzer cache)");
     }
     if let Some(name) = current {
-        line += &format!(" — {name}");
+        line += &format!(", {name}");
     }
     line
+}
+
+/// The activity log's line when a folder scan hit its bounds (#531).
+fn scan_cap_log_line(cap: &ScanCap) -> String {
+    let mut parts = Vec::new();
+    if cap.depth {
+        parts.push(format!(
+            "folders more than {} levels down were not read",
+            cap.max_depth
+        ));
+    }
+    if cap.entries {
+        parts.push(format!(
+            "the folder walk stopped after {} files and folders",
+            cap.max_entries
+        ));
+    }
+    format!(
+        "Scan: some demos may be missing: {}. Pick a folder further down to scan the rest.",
+        parts.join("; ")
+    )
 }
 
 /// The scan's step line while it lists folders, before any demo is parsed.
@@ -1828,28 +1853,165 @@ fn listing_status_line(folders: u32, demos: u32) -> String {
     format!("Looking for demos: {folders} folders read, {demos} demos found")
 }
 
+/// How deep, and how many entries, a folder scan with "Include subfolders"
+/// walks (#531): the same bounds as the moved-demo search (#21), so a folder
+/// with a deep or huge tree under it cannot turn a scan into a hang. Hitting
+/// either is reported, never silent.
+const SCAN_MAX_DEPTH: usize = LOCATE_MAX_DEPTH;
+const SCAN_MAX_ENTRIES: usize = LOCATE_MAX_ENTRIES;
+
+/// Which of the folder scan's bounds stopped it short (#531).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanCap {
+    /// Folders deeper than [`SCAN_MAX_DEPTH`] levels were not read.
+    pub depth: bool,
+    /// The walk read [`SCAN_MAX_ENTRIES`] entries and stopped there.
+    pub entries: bool,
+    /// The two bounds, for the frontend's toast.
+    pub max_depth: u32,
+    pub max_entries: u32,
+}
+
+impl ScanCap {
+    pub fn hit(&self) -> bool {
+        self.depth || self.entries
+    }
+}
+
+/// A folder's key for "already walked": lower case, `/` separators, no
+/// trailing separator. Windows paths are case-insensitive.
+fn folder_key(path: &Path) -> String {
+    let mut key = path.to_string_lossy().replace('\\', "/").to_lowercase();
+    while key.len() > 1 && key.ends_with('/') {
+        key.pop();
+    }
+    key
+}
+
+/// The folders one scan has entered (#531), so none is walked twice: the
+/// same folder picked twice, under two spellings, or once directly and once
+/// through a junction to it. Each root is keyed by where it really is
+/// (`canonicalize`); a folder under it by the root's key plus its own path
+/// below the root. The walk enters no link, so that path below the root is
+/// real too.
+struct VisitedFolders {
+    /// Each root as the walk spells it, and its key.
+    roots: Vec<(PathBuf, String)>,
+    seen: std::collections::HashSet<String>,
+}
+
+impl VisitedFolders {
+    /// Keys `roots` by where they really are and drops a root already
+    /// listed; returns the roots left to walk.
+    fn new(roots: &[PathBuf]) -> (Self, Vec<PathBuf>) {
+        let keyed = roots
+            .iter()
+            .map(|r| {
+                let real = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
+                (r.clone(), folder_key(&real))
+            })
+            .collect();
+        Self::with_keys(keyed)
+    }
+
+    fn with_keys(keyed: Vec<(PathBuf, String)>) -> (Self, Vec<PathBuf>) {
+        let mut visited = Self {
+            roots: Vec::new(),
+            seen: std::collections::HashSet::new(),
+        };
+        let mut walk = Vec::new();
+        for (root, key) in keyed {
+            if visited.seen.insert(key.clone()) {
+                walk.push(root.clone());
+                visited.roots.push((root, key));
+            }
+        }
+        (visited, walk)
+    }
+
+    /// True the first time the walk reaches `dir`. A folder that is one of
+    /// the roots is false: it is walked as a root of its own.
+    fn first_visit(&mut self, dir: &Path) -> bool {
+        let under = self
+            .roots
+            .iter()
+            .filter_map(|(root, key)| Some((dir.strip_prefix(root).ok()?, key)))
+            .max_by_key(|(rest, _)| std::cmp::Reverse(rest.components().count()));
+        let key = match under {
+            Some((rest, root_key)) => {
+                let rest = folder_key(rest);
+                if rest.is_empty() {
+                    root_key.clone()
+                } else {
+                    format!("{root_key}/{rest}")
+                }
+            }
+            None => folder_key(dir),
+        };
+        self.seen.insert(key)
+    }
+}
+
+/// How Phase 1's folder listing ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Listing {
+    /// False when cancelled.
+    listed: bool,
+    cap: ScanCap,
+}
+
 /// Phase 1 of a queue scan: every `.dem` under `dirs` goes into `list`, kept
 /// in file-name order. A picked folder is read through even when it is a
 /// link; links inside it are not, so a junction back up the tree cannot
-/// loop. The Recycle Bin and System Volume Information are skipped (#843).
+/// loop, and no folder is read twice ([`VisitedFolders`]). The Recycle Bin
+/// and System Volume Information are skipped (#843). Without
+/// `include_subfolders` only each folder's own demos are listed (#531);
+/// with it, the walk stops at [`SCAN_MAX_DEPTH`] / [`SCAN_MAX_ENTRIES`] and
+/// says so in the result's `cap`.
 /// `progress(folders, demos)` is called as the counts grow (the caller
-/// throttles); `cancel` is checked at every entry. False when cancelled.
+/// throttles); `cancel` is checked at every entry.
 fn list_scan_demos(
     dirs: &[PathBuf],
+    include_subfolders: bool,
     list: &mut Vec<PathBuf>,
     cancel: &std::sync::atomic::AtomicBool,
     progress: &mut dyn FnMut(u32, u32),
-) -> bool {
+) -> Listing {
+    let (mut visited, dirs) = VisitedFolders::new(dirs);
+    let max_depth = if include_subfolders {
+        SCAN_MAX_DEPTH
+    } else {
+        1
+    };
+    let mut cap = ScanCap {
+        max_depth: SCAN_MAX_DEPTH as u32,
+        max_entries: SCAN_MAX_ENTRIES as u32,
+        ..ScanCap::default()
+    };
     let mut folders = dirs.len() as u32;
     progress(folders, list.len() as u32);
     let outcome = Walker::new()
         .skip_system_folders()
-        .walk_roots(dirs, &mut |found| {
+        .max_depth(max_depth)
+        .max_entries(SCAN_MAX_ENTRIES)
+        .walk_roots(&dirs, &mut |found| {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Step::Stop;
             }
             match found.kind {
-                Kind::Dir => folders += 1,
+                // Without subfolders, a folder is neither counted nor read.
+                Kind::Dir if !include_subfolders => return Step::Skip,
+                Kind::Dir => {
+                    if !visited.first_visit(&found.path) {
+                        return Step::Skip;
+                    }
+                    if found.depth >= max_depth {
+                        // The walker does not enter a folder this deep.
+                        cap.depth = true;
+                        return Step::Skip;
+                    }
+                    folders += 1;
+                }
                 Kind::File if found.is_demo() => {
                     let insert_idx = list
                         .binary_search_by(|p: &PathBuf| {
@@ -1865,7 +2027,12 @@ fn list_scan_demos(
             progress(folders, list.len() as u32);
             Step::Enter
         });
-    outcome.complete || !cancel.load(std::sync::atomic::Ordering::Relaxed)
+    let cancelled = cancel.load(std::sync::atomic::Ordering::Relaxed);
+    cap.entries = !outcome.complete && !cancelled;
+    Listing {
+        listed: outcome.complete || !cancelled,
+        cap,
+    }
 }
 
 /// True when a progress line may go out at `now_ms`: at most one per ~33 ms
@@ -1895,13 +2062,39 @@ fn demo_file_key(path: &Path) -> Option<String> {
 /// scanned: its key (size + first 64 KB) differs from the saved one. Their
 /// highlights are frame numbers in the old file, so they don't line up (#21).
 /// Missing files and demos with no saved key are left out.
-pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
-    demos
-        .iter()
-        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
-        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
-        .map(|d| d.path.clone())
-        .collect()
+///
+/// `checked(done, total)` runs after each demo, so Start Capture's line can
+/// count them (#953). Every call; the caller throttles.
+pub fn changed_demos_with_progress(
+    demos: &[KnownDemo],
+    mut checked: impl FnMut(usize, usize),
+) -> Vec<String> {
+    let mut changed = Vec::new();
+    for (i, d) in demos.iter().enumerate() {
+        if !d.file_key.is_empty()
+            && Path::new(&d.path).is_file()
+            && demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key)
+        {
+            changed.push(d.path.clone());
+        }
+        checked(i + 1, demos.len());
+    }
+    changed
+}
+
+/// Whether a `changed_demos_progress` event goes out: the last demo always
+/// (so the count ends on "12 of 12"), the others at most one per ~33 ms.
+pub(crate) fn changed_progress_due(
+    last_ms: &std::sync::atomic::AtomicU32,
+    now_ms: u32,
+    done: usize,
+    total: usize,
+) -> bool {
+    if done == total {
+        last_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+        return true;
+    }
+    progress_emit_due(last_ms, now_ms)
 }
 
 /// A project demo that is no longer at its saved path, and the file that
@@ -1931,14 +2124,23 @@ const LOCATE_MAX_ENTRIES: usize = 50_000;
 /// Suggests, never applies: the frontend asks before it moves anything. A
 /// demo with no saved key (a project from before #456) can only be reported
 /// missing.
-pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
-    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
+///
+/// `on_search(n)` is called once, before the walk, with the number of
+/// missing demos it looks for (those with a saved key), so the page can say
+/// so (#958); not at all when nothing needs looking for.
+pub fn locate_missing_demos(
+    demos: &[KnownDemo],
+    search_dirs: &[PathBuf],
+    on_search: &mut dyn FnMut(usize),
+) -> Vec<MissingDemo> {
+    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES, on_search)
 }
 
 fn locate_missing_demos_within(
     demos: &[KnownDemo],
     search_dirs: &[PathBuf],
     max_entries: usize,
+    on_search: &mut dyn FnMut(usize),
 ) -> Vec<MissingDemo> {
     let mut missing: Vec<MissingDemo> = demos
         .iter()
@@ -1960,6 +2162,7 @@ fn locate_missing_demos_within(
     if wanted.is_empty() {
         return missing;
     }
+    on_search(wanted.len());
 
     // A search folder listed twice, or inside another, is read once.
     let mut visited = std::collections::HashSet::new();
@@ -2167,6 +2370,7 @@ pub async fn scan_directory_impl(
     paths: Vec<String>,
     known: Vec<KnownDemo>,
     workers: usize,
+    include_subfolders: bool,
 ) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2199,8 +2403,7 @@ pub async fn scan_directory_impl(
             } else if path_buf.is_file()
                 && path_buf
                     .extension()
-                    .map(|ext| ext == "dem")
-                    .unwrap_or(false)
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
             {
                 let insert_idx = list
                     .binary_search_by(|p: &PathBuf| {
@@ -2217,8 +2420,9 @@ pub async fn scan_directory_impl(
         // it got, at most one line per ~33 ms, the first at once.
         let listing_started = std::time::Instant::now();
         let last_listing_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
-        let listed = list_scan_demos(
+        let listing = list_scan_demos(
             &dir_stack,
+            include_subfolders,
             &mut list,
             &cancel_token,
             &mut |folders, demos| {
@@ -2243,7 +2447,11 @@ pub async fn scan_directory_impl(
                 );
             },
         );
-        if !listed {
+        let cap = listing.cap;
+        if cap.hit() {
+            log_markdown(&scan_cap_log_line(&cap));
+        }
+        if !listing.listed {
             // Cancelled while listing: nothing is parsed, nothing added.
             let _ = app_handle.emit(
                 "scan_progress",
@@ -2266,6 +2474,7 @@ pub async fn scan_directory_impl(
                 not_cached_ms: 0,
                 full_reads: 0,
                 full_read_bytes: 0,
+                cap,
             });
         }
 
@@ -2499,6 +2708,7 @@ pub async fn scan_directory_impl(
                 .map_or(0, |t| t.elapsed().as_millis() as u64),
             full_reads: full_reads.load(std::sync::atomic::Ordering::Relaxed),
             full_read_bytes: full_read_bytes.load(std::sync::atomic::Ordering::Relaxed),
+            cap,
         })
     }))
     .await;
@@ -3424,12 +3634,12 @@ mod tests {
     fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
         assert_eq!(
             scan_status_line(0, 1, 0, Some("a.dem")),
-            "Scanning 0 / 1 — a.dem"
+            "Reading demos: 0 of 1, a.dem"
         );
-        assert_eq!(scan_status_line(1, 1, 0, None), "Scanning 1 / 1");
+        assert_eq!(scan_status_line(1, 1, 0, None), "Reading demos: 1 of 1");
         assert_eq!(
             scan_status_line(3, 10, 2, Some("a.dem")),
-            "Scanning 3 / 10 (2 from the analyzer cache) — a.dem"
+            "Reading demos: 3 of 10 (2 from the analyzer cache), a.dem"
         );
     }
 
@@ -3481,13 +3691,15 @@ mod tests {
         let root = drive_like(&scratch);
         let mut list = Vec::new();
         let mut last = (0, 0);
-        let listed = list_scan_demos(
+        let listing = list_scan_demos(
             std::slice::from_ref(&root),
+            true,
             &mut list,
             &std::sync::atomic::AtomicBool::new(false),
             &mut |folders, demos| last = (folders, demos),
         );
-        assert!(listed);
+        assert!(listing.listed);
+        assert!(!listing.cap.hit());
         assert_eq!(list, [root.join("games/dod/a.dem"), root.join("b.dem")]);
         // The root, games and games/dod; the two system folders not counted.
         assert_eq!(last, (3, 2));
@@ -3500,8 +3712,9 @@ mod tests {
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let mut list = Vec::new();
         let mut calls = 0;
-        let listed = list_scan_demos(
+        let listing = list_scan_demos(
             std::slice::from_ref(&root),
+            true,
             &mut list,
             &cancel,
             &mut |_, _| {
@@ -3512,18 +3725,138 @@ mod tests {
                 }
             },
         );
-        assert!(!listed);
+        assert!(!listing.listed);
+        assert!(!listing.cap.hit(), "a cancel is not a cap");
         assert_eq!(calls, 2, "nothing more is read once cancelled");
 
         // Cancelled before it starts: nothing is listed.
         let mut list = Vec::new();
-        assert!(!list_scan_demos(
-            std::slice::from_ref(&root),
-            &mut list,
-            &cancel,
-            &mut |_, _| {}
-        ));
+        assert!(
+            !list_scan_demos(
+                std::slice::from_ref(&root),
+                true,
+                &mut list,
+                &cancel,
+                &mut |_, _| {}
+            )
+            .listed
+        );
         assert!(list.is_empty());
+    }
+
+    /// Lists `dirs` with nothing cancelled; the demos relative to `root`.
+    fn list_rel(root: &Path, dirs: &[PathBuf], subfolders: bool) -> (Vec<String>, Listing) {
+        let mut list = Vec::new();
+        let listing = list_scan_demos(
+            dirs,
+            subfolders,
+            &mut list,
+            &std::sync::atomic::AtomicBool::new(false),
+            &mut |_, _| {},
+        );
+        let mut rel: Vec<String> = list
+            .iter()
+            .map(|p| {
+                p.strip_prefix(root)
+                    .unwrap_or(p)
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            })
+            .collect();
+        rel.sort();
+        (rel, listing)
+    }
+
+    #[test]
+    fn without_subfolders_only_the_folders_own_demos_are_listed() {
+        let scratch = Scratch::new("list_no_subfolders");
+        let root = drive_like(&scratch);
+        std::fs::write(root.join("UPPER.DEM"), b"").unwrap();
+        let (demos, listing) = list_rel(&root, std::slice::from_ref(&root), false);
+        assert_eq!(demos, ["UPPER.DEM", "b.dem"]);
+        assert!(listing.listed);
+        assert!(!listing.cap.hit(), "no subfolders is a choice, not a cap");
+    }
+
+    #[test]
+    fn an_upper_case_dem_is_listed() {
+        let scratch = Scratch::new("list_upper_dem");
+        let root = scratch.path().to_path_buf();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/MATCH.DEM"), b"").unwrap();
+        std::fs::write(root.join("Final.Dem"), b"").unwrap();
+        let (demos, _) = list_rel(&root, std::slice::from_ref(&root), true);
+        assert_eq!(demos, ["Final.Dem", "sub/MATCH.DEM"]);
+    }
+
+    #[test]
+    fn the_depth_cap_stops_the_walk_and_says_so() {
+        let scratch = Scratch::new("list_depth_cap");
+        let root = scratch.path().to_path_buf();
+        // d1/.../d6 is SCAN_MAX_DEPTH (6) levels down: its demo is not read.
+        let mut deep = root.clone();
+        for level in 1..=SCAN_MAX_DEPTH {
+            deep = deep.join(format!("d{level}"));
+            std::fs::create_dir_all(&deep).unwrap();
+            std::fs::write(deep.join(format!("at{level}.dem")), b"").unwrap();
+        }
+        let (demos, listing) = list_rel(&root, std::slice::from_ref(&root), true);
+        assert_eq!(demos.len(), SCAN_MAX_DEPTH - 1, "{demos:?}");
+        assert!(demos.iter().all(|d| !d.ends_with("at6.dem")));
+        assert!(listing.listed);
+        assert!(listing.cap.depth);
+        assert!(!listing.cap.entries);
+        assert_eq!(listing.cap.max_depth, 6);
+        assert_eq!(
+            scan_cap_log_line(&listing.cap),
+            "Scan: some demos may be missing: folders more than 6 levels down were not read. Pick a folder further down to scan the rest."
+        );
+    }
+
+    #[test]
+    fn a_folder_picked_twice_or_inside_another_is_listed_once() {
+        let scratch = Scratch::new("list_twice");
+        let root = drive_like(&scratch);
+        let dod = root.join("games/dod");
+        let upper = PathBuf::from(root.to_string_lossy().to_uppercase());
+        let (demos, _) = list_rel(&root, &[root.clone(), dod, upper], true);
+        assert_eq!(demos, ["b.dem", "games/dod/a.dem"]);
+    }
+
+    #[test]
+    fn visited_folders_key_each_folder_by_where_it_really_is() {
+        // `L:/link` is a junction to `D:/demos`: both roots key the same,
+        // so the second is not walked, and a folder below either is one.
+        let (mut visited, walk) = VisitedFolders::with_keys(vec![
+            (PathBuf::from("D:/demos"), "d:/demos".into()),
+            (PathBuf::from("L:/link"), "d:/demos".into()),
+            (PathBuf::from("D:/demos/sub"), "d:/demos/sub".into()),
+        ]);
+        assert_eq!(
+            walk,
+            [PathBuf::from("D:/demos"), PathBuf::from("D:/demos/sub")]
+        );
+        // Another root, met inside the first: walked as a root of its own.
+        assert!(!visited.first_visit(Path::new("D:/demos/sub")));
+        assert!(visited.first_visit(Path::new("D:/demos/sub/2024")));
+        assert!(!visited.first_visit(Path::new("D:/Demos/SUB/2024")));
+        assert!(visited.first_visit(Path::new("D:/demos/other")));
+        assert!(!visited.first_visit(Path::new("D:/demos/other/")));
+    }
+
+    /// A junction loop (`sub/loop` → the root) and the same folder picked
+    /// through a junction: every demo once, and the walk ends.
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_loop_or_a_junction_root_lists_every_demo_once() {
+        let scratch = Scratch::new("list_junction");
+        let root = drive_like(&scratch);
+        let link = root.join("games/loop");
+        native::sys::junction::create(&link, &root).unwrap();
+        let (demos, listing) = list_rel(&root, &[root.clone(), link.clone()], true);
+        let _ = native::sys::junction::remove(&link);
+        assert_eq!(demos, ["b.dem", "games/dod/a.dem"]);
+        assert!(!listing.cap.hit());
     }
 
     #[test]
@@ -3634,9 +3967,14 @@ mod tests {
                 file_key: demo_file_key(&kept).unwrap(),
             },
         ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
 
         assert_eq!(found.len(), 1, "only the missing demo is reported");
+        // The page is told once, before the walk, how many it looks for.
+        assert_eq!(searched, vec![1]);
         assert_eq!(found[0].path, moved.to_string_lossy());
         assert_eq!(
             found[0].candidate.as_deref(),
@@ -3672,7 +4010,7 @@ mod tests {
         }];
         // 30 entries: the big tree has 84, the project folder 1, then its
         // subfolder 1. Depth-first from `big` spent them all first.
-        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30, &mut |_| {});
         assert_eq!(
             found[0].candidate.as_deref(),
             Some(
@@ -3712,9 +4050,46 @@ mod tests {
         ];
         std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
         assert_eq!(
-            changed_demos(&demos),
+            changed_demos_with_progress(&demos, |_, _| {}),
             vec![replaced.to_string_lossy().into_owned()]
         );
+    }
+
+    #[test]
+    fn the_changed_demo_check_counts_every_demo_it_reads() {
+        let scratch = Scratch::new("changed_count");
+        let same = scratch.path().join("same.dem");
+        std::fs::write(&same, b"HLDEMO the scanned one").unwrap();
+        let demos = vec![
+            KnownDemo {
+                path: same.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&same).unwrap(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "1-00".into(),
+            },
+        ];
+        let mut seen = Vec::new();
+        let changed = changed_demos_with_progress(&demos, |done, total| seen.push((done, total)));
+        assert!(changed.is_empty());
+        assert_eq!(seen, vec![(1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn the_changed_demo_count_is_throttled_but_always_ends_on_the_last() {
+        use std::sync::atomic::AtomicU32;
+        let last = AtomicU32::new(u32::MAX);
+        assert!(changed_progress_due(&last, 0, 1, 10));
+        assert!(!changed_progress_due(&last, 10, 2, 10));
+        assert!(!changed_progress_due(&last, 32, 3, 10));
+        assert!(changed_progress_due(&last, 33, 4, 10));
+        // The last demo goes out however soon after the one before.
+        assert!(changed_progress_due(&last, 34, 10, 10));
     }
 
     #[test]
@@ -3736,9 +4111,31 @@ mod tests {
                 file_key: "999-0000000000000000".to_string(),
             },
         ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
         assert_eq!(found.len(), 2);
         assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
+        // Only the demo with a key can be looked for (#958).
+        assert_eq!(searched, vec![1]);
+    }
+
+    #[test]
+    fn nothing_missing_means_no_search_to_report() {
+        let scratch = Scratch::new("locate_present");
+        let here = scratch.path().join("here.dem");
+        std::fs::write(&here, b"HLDEMO here").unwrap();
+        let demos = vec![KnownDemo {
+            path: here.to_string_lossy().into_owned(),
+            file_key: demo_file_key(&here).unwrap(),
+        }];
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
+        assert!(found.is_empty());
+        assert!(searched.is_empty());
     }
 
     #[test]
