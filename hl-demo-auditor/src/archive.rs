@@ -118,6 +118,12 @@ impl ZipRef {
     pub fn display(&self) -> String {
         format!("{}{SEPARATOR}{}", self.zip.display(), self.entry)
     }
+
+    /// [`Self::display`] for a message: the archive's path through
+    /// [`crate::shown_path`].
+    pub fn shown(&self) -> String {
+        format!("{}{SEPARATOR}{}", crate::shown_path(&self.zip), self.entry)
+    }
 }
 
 /// A zip's `.dem` entry as its central directory lists it, plus what the

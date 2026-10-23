@@ -1051,15 +1051,22 @@ mod tests {
         let never = AtomicBool::new(false);
         let audit = find_duplicates_in(
             vec![loose],
-            vec![long_zip, zip],
+            vec![long_zip.clone(), zip.clone()],
             &never,
             &None,
             &mut KeyCache::default(),
         );
         assert_eq!(audit.groups.len(), 1);
         let g = &audit.groups[0];
+        // The two entries share a size and CRC-32, so only one is read and
+        // grouped; both are ordered here, as when each was read.
+        assert_eq!(g.archived.len(), 1);
+        let archived = [long_zip, zip].map(|zip| ZipRef {
+            zip,
+            entry: "match.dem".into(),
+        });
         let rules = KeepRules::new(std::slice::from_ref(&s.0), &[]);
-        let mut files = order_archived(&g.archived);
+        let mut files = order_archived(&archived);
         files.extend(order_for_keeping(g.files.clone(), &rules));
         assert!(
             files[0].path.ends_with("p.zip › match.dem"),

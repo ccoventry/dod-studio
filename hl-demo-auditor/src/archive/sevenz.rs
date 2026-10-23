@@ -20,9 +20,53 @@ use std::path::Path;
 /// and its Ultra preset uses 64 MiB.
 const MAX_DICTIONARY: u64 = 1536 << 20;
 
+/// `e` in plain words: `sevenz_rust2`'s `Display` prints its `Debug` form
+/// (`Other("next header offset out of range")`).
+fn error_text(e: &sevenz_rust2::Error) -> String {
+    use sevenz_rust2::Error as E;
+    match e {
+        E::BadSignature(_) => "it is not a 7z file".into(),
+        E::UnsupportedVersion { major, minor } => {
+            format!("its 7z version ({major}.{minor}) isn't supported")
+        }
+        E::ChecksumVerificationFailed | E::NextHeaderCrcMismatch => {
+            "it is damaged (a checksum doesn't match)".into()
+        }
+        E::Io(e, context) if context.is_empty() => io_error_text(e),
+        E::Io(e, context) => format!("{context}: {}", io_error_text(e)),
+        E::FileOpen(e, _) => format!("it couldn't be opened: {}", io_error_text(e)),
+        E::Other(why) => format!("it is damaged ({why})"),
+        E::BadTerminatedStreamsInfo(_)
+        | E::BadTerminatedUnpackInfo
+        | E::BadTerminatedPackInfo(_)
+        | E::BadTerminatedSubStreamsInfo
+        | E::BadTerminatedHeader(_) => "it is damaged (its header is malformed)".into(),
+        E::ExternalUnsupported => "it uses a compression method that isn't supported".into(),
+        E::UnsupportedCompressionMethod(method) => {
+            format!("it uses a compression method that isn't supported ({method})")
+        }
+        E::MaxMemLimited { .. } => "it needs more memory than allowed".into(),
+        E::PasswordRequired | E::MaybeBadPassword(_) => "it is encrypted (needs a password)".into(),
+        E::Unsupported(what) => format!("it uses something not supported ({what})"),
+        E::FileNotFound => "it is not in the archive".into(),
+    }
+}
+
+/// `e` in plain words, through [`error_text`] when it wraps a 7z error, as
+/// the block reader's checksum failure does.
+fn io_error_text(e: &std::io::Error) -> String {
+    match e
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<sevenz_rust2::Error>())
+    {
+        Some(inner) => error_text(inner),
+        None => e.to_string(),
+    }
+}
+
 fn open(path: &Path) -> Result<(BufReader<File>, Archive), String> {
     let mut file = BufReader::new(File::open(path).map_err(|e| e.to_string())?);
-    let archive = Archive::read(&mut file, &Password::empty()).map_err(|e| e.to_string())?;
+    let archive = Archive::read(&mut file, &Password::empty()).map_err(|e| error_text(&e))?;
     Ok((file, archive))
 }
 
@@ -168,7 +212,7 @@ fn for_each_named(
                 // Decompressed only to get past it.
                 None => {
                     if let Err(e) = std::io::copy(reader, &mut std::io::sink()) {
-                        failed = Some(e.to_string());
+                        failed = Some(io_error_text(&e));
                         return Ok(false);
                     }
                 }
@@ -176,7 +220,7 @@ fn for_each_named(
             Ok(left > 0)
         });
         let reason = match result {
-            Err(e) => Some(e.to_string()),
+            Err(e) => Some(error_text(&e)),
             Ok(_) => failed,
         };
         // Wanted entries of this block the walk never reached.
@@ -197,7 +241,7 @@ fn for_each_named(
 pub(super) fn hash_entries(path: &Path, names: &[String]) -> Vec<Result<ContentHashes, String>> {
     let mut found: Vec<Option<Result<ContentHashes, String>>> = vec![None; names.len()];
     let missing = for_each_named(path, names, |at, reader, size| {
-        let read = super::hashes_from_reader(reader, size).map_err(|e| e.to_string());
+        let read = super::hashes_from_reader(reader, size).map_err(|e| io_error_text(&e));
         let ok = read.is_ok();
         found[at] = Some(read);
         ok

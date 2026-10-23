@@ -192,6 +192,16 @@ pub fn comparable_path(path: &Path) -> String {
     text.trim_end_matches('\\').to_lowercase()
 }
 
+/// A path for a message: a canonical path's `\\?\` prefix dropped
+/// (`\\?\UNC\nas\d` is `\\nas\d`), as `audit_duplicates.js`'s `shownPath`.
+pub fn shown_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => text.strip_prefix(r"\\?\").unwrap_or(&text).to_string(),
+    }
+}
+
 /// The Windows folder as [`comparable_path`] writes it, from `%SystemRoot%`
 /// (what `GetWindowsDirectoryW` reports), so a PC that installed Windows
 /// somewhere other than `C:\Windows` is still matched. `None` off Windows.
@@ -725,7 +735,7 @@ fn list_zips(
         let path = &zips[i].0;
         match listing {
             None => {}
-            Some(Err(e)) => skipped.push(format!("{}: {e}", path.display())),
+            Some(Err(e)) => skipped.push(format!("{}: {e}", shown_path(path))),
             Some(Ok(entries)) => {
                 for entry in entries {
                     match &entry.error {
@@ -734,7 +744,7 @@ fn list_zips(
                                 zip: path.clone(),
                                 entry: entry.name.clone(),
                             };
-                            skipped.push(format!("{}: {e}", at.display()));
+                            skipped.push(format!("{}: {e}", at.shown()));
                         }
                         None => demos.push(ZipDemo { zip: i, entry }),
                     }
@@ -785,8 +795,9 @@ fn read_zip_demos(
 /// (#929). A demo in a zip groups with loose copies of it by the same key,
 /// tail and whole-file hash; it is decompressed only when another demo has
 /// its size, once per (size, CRC-32) pair, and what it held is remembered
-/// under the zip's path, size and modified time. A zip, or an entry, that
-/// can't be read is left out and named in [`Audit::skipped`].
+/// under the zip's path, size and modified time. Only entries read in full
+/// join a group: the others of their pair are left out. A zip, or an entry,
+/// that can't be read is left out and named in [`Audit::skipped`].
 pub fn find_duplicates_in(
     files: Vec<PathBuf>,
     zips: Vec<PathBuf>,
@@ -888,9 +899,11 @@ pub fn find_duplicates_in(
     }
 
     // A demo in an archive is read in full or not at all: deflate, LZMA and
-    // RAR can't seek to its last 64 KiB. Two entries of one size and CRC-32
-    // hold the same bytes, so one of them is read for both; when that read
-    // fails, the other is read too.
+    // RAR can't seek to its last 64 KiB. Of the entries sharing one size and
+    // CRC-32, one is read; when that read fails, the next is read. The others
+    // are left out of the groups rather than given its hashes: a size and
+    // CRC-32 in a header say nothing about the data behind them, so a damaged
+    // archive listing the same header would show as a good copy.
     let zip_hashing = |z: &ZipDemo| {
         let at = ZipRef {
             zip: zips[z.zip].0.clone(),
@@ -900,10 +913,11 @@ pub fn find_duplicates_in(
     };
     // An entry whose archive stores no CRC-32 has no twin: it is read itself.
     let twin = |e: &ZipDemoEntry| (!e.no_crc).then_some((e.size, e.crc32));
-    let mut by_crc: HashMap<(u64, u32), ContentHashes> = HashMap::new();
+    // The (size, CRC-32) pairs some entry was read for, this pass or before.
+    let mut read_pairs: HashSet<(u64, u32)> = HashSet::new();
     for z in &zip_demos {
-        if let (Some(h), Some(twin)) = (z.entry.hashes, twin(&z.entry)) {
-            by_crc.entry(twin).or_insert(h);
+        if let (Some(_), Some(twin)) = (z.entry.hashes, twin(&z.entry)) {
+            read_pairs.insert(twin);
         }
     }
     let mut needed = Vec::new();
@@ -914,8 +928,9 @@ pub fn find_duplicates_in(
             needed.push(j);
         }
     }
-    // Each round: a demo whose twin is known takes its hashes, and one demo
-    // per pair still unknown is read.
+    // Each round: a demo whose twin was read is dropped unread (its hashes
+    // stay unknown, so it joins no group), and one demo per pair still
+    // unknown is read.
     let mut pending = needed;
     let mut round = Vec::new();
     loop {
@@ -926,8 +941,7 @@ pub fn find_duplicates_in(
                 round.push(j);
                 return true;
             };
-            if let Some(h) = by_crc.get(&crc) {
-                zip_demos[j].entry.hashes = Some(*h);
+            if read_pairs.contains(&crc) {
                 zip_hashing(&zip_demos[j]);
                 false
             } else {
@@ -950,7 +964,7 @@ pub fn find_duplicates_in(
                 Ok(h) => {
                     zip_demos[j].entry.hashes = Some(h);
                     if let Some(twin) = twin(&zip_demos[j].entry) {
-                        by_crc.entry(twin).or_insert(h);
+                        read_pairs.insert(twin);
                     }
                 }
                 Err(e) => {
@@ -958,7 +972,7 @@ pub fn find_duplicates_in(
                         zip: path.clone(),
                         entry: zip_demos[j].entry.name.clone(),
                     };
-                    skipped.push(format!("{}: {e}", at.display()));
+                    skipped.push(format!("{}: {e}", at.shown()));
                     zip_demos[j].entry.error = Some(e);
                 }
             }
@@ -1815,10 +1829,11 @@ mod tests {
         assert_eq!(
             zip_group_names(&audit),
             [
+                // stored.zip's match.dem has the same size and CRC-32 but
+                // was never read: it is left out.
                 vec![
                     "match.dem".to_string(),
                     "deflated.zip › 2025/match.dem".into(),
-                    "stored.zip › match.dem".into()
                 ],
                 vec!["short.dem".into(), "deflated.zip › short.dem".into()],
             ]
@@ -1834,8 +1849,8 @@ mod tests {
             "{:?}",
             audit.skipped
         );
-        // The two match.dem entries share a size and CRC-32: one is read
-        // for both. other.dem shares short's size, so it is read too.
+        // The two match.dem entries share a size and CRC-32: one is read.
+        // other.dem shares short's size, so it is read too.
         assert_eq!(audit.reads.zips, 3);
         assert_eq!(audit.reads.zip_demos, 3);
 
@@ -1863,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_zip_is_read_again_and_two_zips_alone_still_group() {
+    fn a_changed_zip_is_read_again() {
         let d = Demos::new("zips_changed");
         let bytes = demo_of(5000, 9);
         let a = d.0.join("a.zip");
@@ -1872,12 +1887,10 @@ mod tests {
         write_zip(&b, &[("m.dem", &bytes, false)]);
         let mut cache = KeyCache::default();
         let (first, _) = zip_pass(&[], &[a.clone(), b.clone()], &mut cache);
-        // Nothing to delete, but the demo is kept twice.
-        assert_eq!(
-            zip_group_names(&first),
-            [["a.zip › m.dem", "b.zip › m.dem"]]
-        );
-        assert_eq!((first.copies, first.wasted_bytes), (0, 0));
+        // One read for the shared size and CRC-32; b.zip's entry, unread,
+        // joins no group, so there is none.
+        assert_eq!(first.reads.zip_demos, 1);
+        assert!(first.groups.is_empty());
 
         write_zip(&b, &[("m.dem", &demo_of(5000, 10), false)]);
         let later = std::time::SystemTime::now() + Duration::from_secs(5);
@@ -1889,6 +1902,7 @@ mod tests {
             .unwrap();
         let (second, _) = zip_pass(&[], &[a, b], &mut cache);
         assert_eq!(second.reads.zips, 1, "only the changed zip");
+        assert_eq!(second.reads.zip_demos, 1, "only its entry");
         assert!(second.groups.is_empty());
     }
 
@@ -1936,11 +1950,9 @@ mod tests {
         fs::write(&corrupt, b"7z\xbc\xaf\x27\x1c not a 7z at all").unwrap();
         let mut files = vec![loose];
         let mut archives = vec![solid, plain, corrupt];
-        let mut expected = vec![vec![
-            "match.dem".to_string(),
-            "plain.7z › match.dem".into(),
-            "solid.7z › x/match.dem".into(),
-        ]];
+        // solid.7z's x/match.dem shares plain's size and CRC-32 and is never
+        // read: it is left out.
+        let mut expected = vec![vec!["match.dem".to_string(), "plain.7z › match.dem".into()]];
         let rar = cfg!(all(windows, feature = "rar"));
         if rar {
             // archive::rar's fixture: match/a.dem, readme.txt, and an
@@ -1959,14 +1971,17 @@ mod tests {
         assert_eq!(audit.copies, if rar { 2 } else { 1 });
         let skipped = audit.skipped.join("\n");
         assert!(skipped.contains("corrupt.7z: "), "{skipped}");
+        // Plain words and paths: no Debug form, no verbatim prefix.
+        assert!(!skipped.contains("(\""), "{skipped}");
+        assert!(!skipped.contains(r"\\?\"), "{skipped}");
         assert_eq!(
             rar,
             skipped.contains("pack.rar › locked.dem: it is encrypted"),
             "{skipped}"
         );
         assert_eq!(audit.skipped.len(), if rar { 2 } else { 1 });
-        // The two 7z copies of match.dem share a size and CRC-32: one read
-        // for both. first.dem shares its size, so it is read as well.
+        // The two 7z copies of match.dem share a size and CRC-32: one is
+        // read. first.dem shares its size, so it is read as well.
         assert_eq!(audit.reads.zip_demos, if rar { 3 } else { 2 });
 
         // A second pass opens no archive and finds the same groups.
@@ -1986,6 +2001,7 @@ mod tests {
         let mut cache = KeyCache::default();
         let (shared, _) = zip_pass(&[], &[a.clone(), b.clone()], &mut cache);
         assert_eq!(shared.reads.zip_demos, 1, "same size and CRC-32: one read");
+        assert!(shared.groups.is_empty(), "the unread one joins no group");
         // The same listings, told their CRCs are unknown.
         let mut fresh = KeyCache::default();
         for zip in [&a, &b] {
@@ -1997,6 +2013,101 @@ mod tests {
         let (each, _) = zip_pass(&[], &[a, b], &mut fresh);
         assert_eq!(each.reads.zips, 0);
         assert_eq!(each.reads.zip_demos, 2, "no CRC: each is read itself");
-        assert_eq!(zip_group_names(&each), zip_group_names(&shared));
+        assert_eq!(zip_group_names(&each), [["a.zip › m.dem", "b.zip › m.dem"]]);
+    }
+
+    /// Two archives listing one entry with the same size and CRC-32, one of
+    /// them damaged, in both read orders and on a second (cached) pass: only
+    /// the good one's entry is in the group, whichever is read first.
+    fn a_damaged_twin_never_shows_as_a_copy(
+        ext: &str,
+        good: &[u8],
+        bad: &[u8],
+        entry: &str,
+        loose: &[u8],
+    ) {
+        for good_first in [true, false] {
+            let d = Demos::new(&format!("twin_{ext}_{good_first}"));
+            let (good_name, bad_name) = if good_first {
+                (format!("a_good.{ext}"), format!("b_bad.{ext}"))
+            } else {
+                (format!("b_good.{ext}"), format!("a_bad.{ext}"))
+            };
+            let archives = [d.file(&good_name, good), d.file(&bad_name, bad)];
+            let files = [d.file("loose.dem", loose)];
+            let mut cache = KeyCache::default();
+            for pass in ["first", "second"] {
+                let (audit, _) = zip_pass(&files, &archives, &mut cache);
+                assert_eq!(
+                    zip_group_names(&audit),
+                    [[
+                        "loose.dem".to_string(),
+                        format!("{good_name}{}{entry}", archive::SEPARATOR)
+                    ]],
+                    "{ext}, good first: {good_first}, {pass} pass"
+                );
+                assert_eq!(audit.copies, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn a_damaged_zip_with_the_same_header_never_shows_as_a_copy() {
+        let d = Demos::new("twin_zip_src");
+        let bytes = demo_of(3 * KEY_BYTES as usize + 500, 7);
+        let zip = d.0.join("src.zip");
+        write_zip(&zip, &[("m.dem", &bytes, false)]);
+        let good = fs::read(&zip).unwrap();
+        // Stored, so the middle of the file is the entry's data.
+        let mut bad = good.clone();
+        let mid = bad.len() / 2;
+        bad[mid] ^= 0xff;
+        a_damaged_twin_never_shows_as_a_copy("zip", &good, &bad, "m.dem", &bytes);
+    }
+
+    #[test]
+    fn a_damaged_7z_with_the_same_header_never_shows_as_a_copy() {
+        use archive::sevenz::tests::write_7z;
+        let d = Demos::new("twin_7z_src");
+        let bytes = demo_of(3 * KEY_BYTES as usize + 500, 8);
+        let path = d.0.join("src.7z");
+        write_7z(&path, &[("m.dem", &bytes)], false);
+        let good = fs::read(&path).unwrap();
+        // The packed data follows the 32-byte signature header; the header
+        // that lists the entry is at the end.
+        let mut bad = good.clone();
+        bad[40] ^= 0xff;
+        a_damaged_twin_never_shows_as_a_copy("7z", &good, &bad, "m.dem", &bytes);
+    }
+
+    /// The live check's case: `pack.rar` cut to 1500 bytes still lists
+    /// match/a.dem with the good one's size and CRC-32.
+    #[cfg(all(windows, feature = "rar"))]
+    #[test]
+    fn a_truncated_rar_with_the_same_header_never_shows_as_a_copy() {
+        let good = include_bytes!("archive/testdata/pack.rar");
+        let loose: Vec<u8> = (0..3000).map(|i| ((i * 31 + 5 * 7) % 251) as u8).collect();
+        a_damaged_twin_never_shows_as_a_copy("rar", good, &good[..1500], "match/a.dem", &loose);
+    }
+
+    #[test]
+    fn shown_paths_lose_the_verbatim_prefix_only() {
+        assert_eq!(
+            shown_path(Path::new(r"\\?\C:\Demos\A.dem")),
+            r"C:\Demos\A.dem"
+        );
+        assert_eq!(
+            shown_path(Path::new(r"\\?\UNC\nas\d\a.dem")),
+            r"\\nas\d\a.dem"
+        );
+        assert_eq!(shown_path(Path::new(r"D:\a.dem")), r"D:\a.dem");
+        let at = archive::ZipRef {
+            zip: PathBuf::from(r"\\?\C:\packs\p.7z"),
+            entry: "x/m.dem".into(),
+        };
+        assert_eq!(
+            at.shown(),
+            format!(r"C:\packs\p.7z{}x/m.dem", archive::SEPARATOR)
+        );
     }
 }
