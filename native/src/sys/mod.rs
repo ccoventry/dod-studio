@@ -12,6 +12,9 @@ pub mod folder_walk;
 pub mod foreground_lock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod game_remote;
+/// The Half-Life installs on this PC and their engine builds (#931).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod installs;
 /// Directory junctions, made and unlinked through Win32 (#376).
 #[cfg(windows)]
 pub mod junction;

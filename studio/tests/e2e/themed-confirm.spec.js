@@ -107,3 +107,15 @@ test.describe('themed_confirm details (#477)', () => {
     await expect(page.locator('#themed-confirm-cancel-btn')).toBeVisible();
   });
 });
+
+test.describe('themed_confirm message updates', () => {
+  test('rewrite the open dialog, and nothing once it has closed (#937)', async ({ page }) => {
+    await gotoHarness(page);
+    await page.locator('#trigger-default-btn').click();
+    await page.evaluate(() => window.__setMessage('Delete 3 files? About 3 s.'));
+    await expect(page.locator('#themed-confirm-message')).toHaveText('Delete 3 files? About 3 s.');
+    await page.locator('#themed-confirm-cancel-btn').click();
+    await page.evaluate(() => window.__setMessage('too late'));
+    await expect(page.locator('#themed-confirm-message')).toHaveText('Delete 3 files? About 3 s.');
+  });
+});

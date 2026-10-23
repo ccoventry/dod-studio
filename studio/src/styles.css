@@ -270,6 +270,67 @@ body {
   color: #e0e0e0;
 }
 
+/* File → Open Recent (#935): a submenu that opens beside its row on hover. */
+.menu-submenu {
+  position: relative;
+  cursor: default;
+}
+
+.menu-submenu-panel {
+  display: none;
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  width: max-content;
+  min-width: 220px;
+  max-width: 520px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 501;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.menu-submenu:hover .menu-submenu-panel,
+.menu-submenu:focus-within .menu-submenu-panel {
+  display: flex;
+}
+
+.menu-dropdown-item:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  background: transparent;
+}
+
+.recent-project-item {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.recent-project-folder {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-project-item:hover .recent-project-folder {
+  color: #e0e0e0;
+}
+
+/* A file that's gone: dimmed, still clickable to remove it. */
+.recent-project-item.missing .recent-project-name {
+  color: var(--text-muted);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-color);
+}
+
 .session-file-indicator {
   color: var(--text-muted);
   font-size: 11px;
@@ -637,6 +698,26 @@ input.search-select-input {
 
 .search-select-empty {
   color: var(--text-muted);
+}
+
+/* A row's own button (install_picker.js's Hide), at its end. */
+.search-select-option:has(.search-select-action) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-select-action {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  flex: none;
+}
+
+/* A row that does something rather than being picked. */
+.search-select-option.command {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 button {
@@ -3818,6 +3899,17 @@ button.setup-skip:hover:not(:disabled) {
   word-break: break-all;
 }
 
+/* A copy inside a zip (#929): kept, never deleted. */
+.audit-zip-chip {
+  font-size: 0.8em;
+  padding: 0 7px;
+  border: 1px solid #4a86c5;
+  border-radius: 10px;
+  color: #4a86c5;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .audit-table th:nth-child(1) { width: 32px; }
 .audit-table th:nth-child(2) { width: 210px; }
 .audit-table th:nth-child(3) { width: 90px; }
@@ -3845,4 +3937,41 @@ button.setup-skip:hover:not(:disabled) {
 .audit-status-current {
   font-size: 0.9em;
   word-break: break-all;
+}
+
+/* Setup's Make a movie copy dialog (#939), movie_copy_ui.js. Over the Setup
+   window, under a themed confirm. */
+#movie-copy-modal {
+  z-index: 1050;
+}
+
+.movie-copy-content {
+  max-width: 520px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+}
+
+.movie-copy-content h2 {
+  margin: 0;
+}
+
+.movie-copy-content .setup-footer {
+  padding: 10px 0 0;
+}
+
+.movie-copy-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.movie-copy-status {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-height: 1em;
 }

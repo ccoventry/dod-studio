@@ -68,6 +68,16 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Open Recent (#935).
+    OPEN_RECENT: 'Open Recent',
+    OPEN_RECENT_EMPTY: 'No recent sessions',
+    OPEN_RECENT_MISSING: '(missing)',
+    CLEAR_RECENT: 'Clear Recent',
+    CLEAR_RECENT_EMPTY_TITLE: 'Nothing to clear yet',
+    RECENT_MISSING_TITLE: 'Session file not found',
+    RECENT_MISSING_MESSAGE: "This session file isn't there any more. Remove it from Open Recent?",
+    RECENT_MISSING_REMOVE: 'Remove from list',
+    RECENT_MISSING_KEEP: 'Keep',
   },
 
   // ── Workspace Pane: Directory Scan & Master Demo Queue ──────────────────
@@ -275,6 +285,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // install_picker.js (#931): the Half-Life installs found on this PC.
+    INSTALL_BUILD: { anniversary: '25th Anniversary', pre_anniversary: 'pre-Anniversary' },
+    installOption: (name, build) => (build ? `${name} (${build})` : name),
+    installHiddenOption: (text) => `${text} · hidden`,
+    installOther: (path) => `Other: ${path}`,
+    INSTALL_NONE: 'No install picked',
+    INSTALL_NO_MATCH: 'No install matches',
+    INSTALL_HIDE: 'Hide',
+    INSTALL_HIDE_TITLE: 'Hide from this list. "Show hidden installs" at the end brings it back.',
+    INSTALL_UNHIDE: 'Show',
+    INSTALL_UNHIDE_TITLE: 'Put it back on the list',
+    showHiddenInstalls: (count) => `Show hidden installs (${count})`,
+    HIDE_HIDDEN_INSTALLS: 'Hide hidden installs again',
+    INSTALL_PICKER_TITLE: 'The Half-Life installs found in your Steam libraries. Picking one sets the Half-Life Executable and the Game Folder; nothing else changes.',
     // Game Folder (#402): game_folder_ui.js.
     GAME_FOLDER_LABEL: 'Game Folder:',
     GAME_FOLDER_TIP:
@@ -952,6 +976,11 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
+    // "Look inside .zip files" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
+    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
+    IN_ZIP_CHIP: 'in a zip',
+    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -963,6 +992,7 @@ export const STRINGS = {
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
@@ -1603,12 +1633,21 @@ export const STRINGS = {
     // Opening a project with demos an older DoD Studio scanned (scan_version.js).
     OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
     // `n` of the project's `total` demos; "All 158" when it is every one.
-    outdatedDemosMessage: (n, total = n) => {
+    // `time`: how long it takes (rescan_estimate.js), or nothing when that
+    // couldn't be worked out.
+    outdatedDemosMessage: (n, total = n, time = '') => {
       const which = n < total ? `${n}/${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
       return `${which} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over. `
-        + 'It usually takes a few seconds; any demo that has to be read again in full takes longer, depending on the PC. '
+        + (time ? `${time} ` : '')
         + `Press “Not now” to leave ${n === 1 ? 'it' : 'them'} as ${n === 1 ? 'it is' : 'they are'}; you'll be asked again the next time you open the project.`;
     },
+    // How long the rescan takes (#937): `duration` is "3 s", "4 min", "an hour".
+    rescanTimeLine: (duration, fullReads) => (fullReads > 0
+      ? `About ${duration}: ${fullReads} need${fullReads === 1 ? 's' : ''} a full read.`
+      : `About ${duration}.`),
+    RESCAN_TIME_PENDING: 'Working out how long…',
+    rescanEstimateFailedLog: (err) => `[rescan] could not work out how long the rescan takes: ${err}`,
+    scanReadRateLog: (measured, rate) => `[scan] full reads went at ${measured} MB/s; this PC's read rate for rescan estimates is now ${rate} MB/s`,
     OUTDATED_DEMOS_RESCAN: 'Rescan',
     OUTDATED_DEMOS_NOT_NOW: 'Not now',
     // What a rescan did with the highlights' work (rescan_carry.js).
@@ -2209,6 +2248,11 @@ export const STRINGS = {
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },
+    // Switching installs in Configuration > Paths while a game runs (#931).
+    SWITCH_TITLE: 'Day of Defeat is running',
+    CLOSE_AND_SWITCH: 'Close it and switch',
+    switchMessage: ({ running }) =>
+      `Day of Defeat is running from "${running.install}". Close it to switch installs? Nothing is switched if you cancel.`,
   },
   // ── overviews_pane.js: the Overviews page (#371) ────────────────────────
   OVERVIEWS: {
@@ -2798,13 +2842,46 @@ export const STRINGS = {
 
     // Step 1: Half-Life.
     HL_TITLE: 'Set up Day of Defeat for movies',
-    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. To make one, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, then in the copy's resource folder rename dod_english.txt to dod_movies_english.txt (your folder's name, and your language if Steam isn't in English), and pick the copy as the game folder below.",
+    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. Make a movie copy… below makes one for you. To make one by hand, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, then in the copy's resource folder rename dod_english.txt to dod_movies_english.txt (your folder's name, and your language if Steam isn't in English), and pick the copy as the game folder below.",
     HL_RECOMMEND: "DoD Studio supports both the 25th Anniversary and the pre-Anniversary build, but the 25th Anniversary build gives the best results: the game can use up to 4 GB of memory instead of 2 GB (room for HD textures), it has higher engine limits (some demos only play on it), and DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them).",
     HL_FIELD: 'Half-Life: hl.exe',
     GAME_FOLDER_FIELD: 'Game folder',
     GAME_FOLDER_NONE: 'Pick hl.exe first: the folders beside it are listed here.',
-    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), rename its resource\\dod_english.txt to match (dod_movies_english.txt), then pick it here.",
+    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), rename its resource\\dod_english.txt to match (dod_movies_english.txt), then pick it here. Or let Make a movie copy… above do it.",
     HL_FOUND: 'Found hl.exe.',
+    // Make a movie copy (#939), movie_copy.js and movie_copy_ui.js.
+    MOVIE_COPY: {
+      OPEN: 'Make a movie copy…',
+      OPEN_TITLE: 'Copies your dod folder to a new folder for movies, and picks it as the game folder',
+      TITLE: 'Make a movie copy of dod',
+      INTRO: "DoD Studio copies your dod folder to a new folder beside it and picks the copy as the game folder. Your dod folder isn't changed. Logs are left out, and so are demos unless you tick the box. The copy also gets the language files its in-game text needs.",
+      NAME_LABEL: 'Name of the copy',
+      DEMOS_LABEL: 'Also copy my demos',
+      NAME_EMPTY: 'Give the copy a name.',
+      NAME_BAD_CHAR: 'Letters, digits and _ only.',
+      NAME_RESERVED: "Windows doesn't allow a folder with that name.",
+      nameExists: (name) => `There's already a ${name} in your Half-Life folder: pick another name.`,
+      LOOKING: 'Measuring the dod folder…',
+      lookFailed: (why) => `Couldn't measure the dod folder: ${why}`,
+      size: (files, size) => `${files === 1 ? '1 file' : `${files} files`}, ${size} to copy.`,
+      demosAdd: (files, size) => `Demos: ${files === 1 ? '1 demo' : `${files} demos`}, ${size}.`,
+      free: (size) => `${size} free on this drive.`,
+      FREE_UNKNOWN: "Couldn't tell how much space this drive has free.",
+      noRoom: (need, free) => `Not enough space: the copy needs ${need} and this drive has ${free} free (DoD Studio leaves 1 GB spare). Free some space, or leave the demos out.`,
+      COPY: 'Copy',
+      CLOSE: 'Close',
+      CANCEL: 'Cancel',
+      STARTING: 'Starting the copy…',
+      progress: (done, total, file) => `Copied ${done} of ${total}: ${file}`,
+      CANCEL_ASK: 'Stop the copy? What it has copied so far is deleted. Your dod folder stays as it is.',
+      CANCEL_ASK_TITLE: 'Stop the movie copy?',
+      CANCEL_YES: 'Stop and delete the copy',
+      CANCEL_NO: 'Keep copying',
+      CANCELLING: 'Stopping and deleting the half-made copy…',
+      CANCELLED: 'Stopped. The half-made copy was deleted.',
+      failed: (why) => `The copy didn't finish: ${why}.`,
+      done: (name) => `Done: ${name} is ready and picked as the game folder.`,
+    },
     HL_BUILD: {
       anniversary: '25th Anniversary build',
       pre_anniversary: 'pre-Anniversary build',

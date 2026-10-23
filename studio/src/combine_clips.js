@@ -5,7 +5,8 @@
 // (native::hlcr::combine). The Rough Cut page idea (#585) builds on this.
 
 import { listen } from '@tauri-apps/api/event';
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { combinePlan, combineClips, combineCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -156,7 +157,8 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
   });
   $('#combine-add-files-btn')?.addEventListener('click', async () => {
     try {
-      const picked = await open({
+      const picked = await pickPath({
+        field: 'combine.add_files',
         multiple: true,
         title: STRINGS.COMBINE.ADD_FILES_TITLE,
         filters: [{ name: STRINGS.COMBINE.VIDEO_FILTER, extensions: VIDEO_EXTENSIONS }],
