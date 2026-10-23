@@ -77,17 +77,18 @@ impl BackupIndex {
     }
 
     /// Every archived copy of a loose demo with `key` and last-64-KiB hash
-    /// `tail`, sorted. They must match its size, first and last 64 KiB, as
-    /// copies in a duplicate group do. The whole-file hash decides only when
-    /// it is already known (`known_full`), or when the archived candidates
-    /// themselves differ in full; then `read_full` gives the loose demo's
-    /// (`None` when it can't be read: then nothing matches).
+    /// `tail`, sorted: same size, same first and last 64 KiB, and the same
+    /// whole-file hash (`full`, the loose demo's FNV-1a over every byte,
+    /// against the entry's over every decompressed byte). A user may delete
+    /// a loose demo on the strength of this, so the ends alone never match,
+    /// and neither does a header's CRC-32. `full` is asked for only when
+    /// some archived copy matches the ends; `None` (the demo can't be read)
+    /// matches nothing.
     pub fn copies_of(
         &self,
         key: &FileKey,
         tail: u64,
-        known_full: Option<u64>,
-        read_full: impl FnOnce() -> Option<u64>,
+        full: impl FnOnce() -> Option<u64>,
     ) -> Vec<ZipRef> {
         let candidates: Vec<&ArchivedCopy> = self
             .by_key
@@ -99,18 +100,12 @@ impl BackupIndex {
         if candidates.is_empty() {
             return Vec::new();
         }
-        let distinct: HashSet<u64> = candidates.iter().map(|c| c.hashes.full).collect();
-        let full = match known_full {
-            Some(full) => Some(full),
-            None if distinct.len() > 1 => match read_full() {
-                Some(full) => Some(full),
-                None => return Vec::new(),
-            },
-            None => None,
+        let Some(full) = full() else {
+            return Vec::new();
         };
         let mut copies: Vec<ZipRef> = candidates
             .into_iter()
-            .filter(|c| full.is_none_or(|f| c.hashes.full == f))
+            .filter(|c| c.hashes.full == full)
             .map(|c| c.at.clone())
             .collect();
         copies.sort();
@@ -158,28 +153,28 @@ mod tests {
         ]);
         assert!(index.has_size(100) && !index.has_size(99));
         assert!(index.has_key(&KEY));
-        let found = index.copies_of(&KEY, 2, None, || panic!("no read needed"));
+        let found = index.copies_of(&KEY, 2, || Some(3));
         assert_eq!(names(&found), ["a.7z:x/m.dem", "b.zip:m.dem"]);
-        assert!(index.copies_of(&KEY, 5, None, || None).is_empty());
+        // No archived copy with these ends: the demo isn't read.
+        assert!(
+            index
+                .copies_of(&KEY, 5, || panic!("no read needed"))
+                .is_empty()
+        );
     }
 
     #[test]
-    fn a_known_whole_file_hash_must_match() {
-        let index = BackupIndex::new([copy("a.zip", "m.dem", 1, 2, 3)]);
-        assert_eq!(index.copies_of(&KEY, 2, Some(3), || None).len(), 1);
-        assert!(index.copies_of(&KEY, 2, Some(4), || None).is_empty());
-    }
-
-    #[test]
-    fn archived_copies_that_differ_in_full_make_the_loose_demo_read() {
+    fn the_whole_file_hash_must_match_even_when_the_ends_do() {
         let index = BackupIndex::new([
             copy("a.zip", "m.dem", 1, 2, 3),
             copy("b.zip", "m.dem", 1, 2, 4),
         ]);
         assert_eq!(
-            names(&index.copies_of(&KEY, 2, None, || Some(4))),
+            names(&index.copies_of(&KEY, 2, || Some(4))),
             ["b.zip:m.dem"]
         );
-        assert!(index.copies_of(&KEY, 2, None, || None).is_empty());
+        assert!(index.copies_of(&KEY, 2, || Some(5)).is_empty());
+        // A demo that can't be read is backed up nowhere.
+        assert!(index.copies_of(&KEY, 2, || None).is_empty());
     }
 }

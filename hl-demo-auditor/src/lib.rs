@@ -996,11 +996,13 @@ pub fn find_duplicates_in(
                 break;
             }
             let (path, stamp) = &files[i];
+            // Read in full once, then remembered while its size and
+            // modified time hold.
             let known = stamp
                 .and_then(|s| cache.entry(path, s))
                 .and_then(|e| e.full);
-            let copies = index.copies_of(key, tail, known, || {
-                read_full(path, *stamp, cache, &mut reads)
+            let copies = index.copies_of(key, tail, || {
+                known.or_else(|| read_full(path, *stamp, cache, &mut reads))
             });
             if !copies.is_empty() {
                 backups.push(Backup {
@@ -1909,6 +1911,35 @@ mod tests {
         assert_eq!(audit.reads.zip_demos, 0, "no loose demo has its size");
         // Still listed as data: which archives hold which demos.
         assert!(audit.archives.iter().all(|a| a.demos.len() == 1));
+    }
+
+    /// "Backed up" is a whole-file match: the same size and the same first
+    /// and last 64 KiB are not enough, and the loose demo's full read is
+    /// remembered.
+    #[test]
+    fn a_loose_demo_that_differs_only_in_the_middle_is_not_backed_up() {
+        let d = Demos::new("zips_middle");
+        let same = d.file("same.dem", &long_demo(0));
+        let middle = d.file("middle.dem", &long_demo(1));
+        let zip = d.0.join("pack.zip");
+        write_zip(&zip, &[("m.dem", &long_demo(0), true)]);
+        let files = [same, middle];
+        let mut cache = KeyCache::default();
+        let (audit, _) = zip_pass(&files, std::slice::from_ref(&zip), &mut cache);
+        assert_eq!(
+            backup_names(&audit),
+            [backed_up("same.dem", &["pack.zip > m.dem"])]
+        );
+        assert_eq!(
+            audit.reads.fulls, 2,
+            "each loose candidate is read in full once"
+        );
+        // Their whole-file hashes, now known and different, split them, as
+        // the cache does once the delete's check has read two files.
+        assert!(audit.groups.is_empty(), "{:?}", audit.groups);
+        let (again, _) = zip_pass(&files, &[zip], &mut cache);
+        assert_eq!(again.reads, Reads::default());
+        assert_eq!(backup_names(&again), backup_names(&audit));
     }
 
     #[test]
