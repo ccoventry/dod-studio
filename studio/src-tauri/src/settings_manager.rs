@@ -52,6 +52,10 @@ pub struct AppSettings {
     /// first, at most 10 (`recent_projects.js` keeps the list).
     #[serde(default)]
     pub recent_projects: Vec<String>,
+    /// Where a `.dem` opened with DoD Studio from Explorer goes (#528):
+    /// `analyzer` (the Demo Analyzer) or `queue` (Studio's queue).
+    #[serde(default = "default_dem_open_target")]
+    pub dem_open_target: String,
     /// Gates the Demo Analyzer Explorer tree's per-subfolder "(N)" demo-count
     /// badge (Quick Links counts are always shown, matching dev — see
     /// docs/archive/tauri_parity_audit.md Area 1). Defaults to `false`, matching
@@ -436,6 +440,9 @@ fn default_finish_codec_obs() -> String {
 fn default_finish_codec_render_tab() -> String {
     "render_tab".to_string()
 }
+fn default_dem_open_target() -> String {
+    "analyzer".to_string()
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -448,6 +455,7 @@ impl Default for AppSettings {
             pinned_folders: Vec::new(),
             demo_folder_history: Vec::new(),
             recent_projects: Vec::new(),
+            dem_open_target: default_dem_open_target(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
             language: "en".to_string(),
@@ -809,6 +817,25 @@ mod tests {
         )
         .expect("a settings file");
         assert!(older.recent_projects.is_empty());
+    }
+
+    /// A `.dem` opened from Explorer goes to the Demo Analyzer unless the
+    /// user picked the queue, including for a file from before #528.
+    #[test]
+    fn dem_open_target_defaults_to_the_analyzer() {
+        let older: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert_eq!(older.dem_open_target, "analyzer");
+        let queue = AppSettings {
+            dem_open_target: "queue".into(),
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&queue).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.dem_open_target, "queue");
     }
 
     /// A file saved while Seek Between Clips was experimental (off by default)

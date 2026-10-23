@@ -575,6 +575,22 @@
                 <input type="number" id="config-scan-workers" value="2" min="1" max="8" style="width: 60px;" />
                 <span id="config-scan-workers-hint" class="text-muted"></span>
               </div>
+              <!-- .dem files in Explorer (#528): file_types_settings.js. The
+                   box shows the registry's state, not a saved setting. -->
+              <div class="inline-controls">
+                <div class="control-group">
+                  <input type="checkbox" id="config-dem-open-with" />
+                  <label for="config-dem-open-with" data-str="CAPTURE_CONFIG.DEM_OPEN_WITH_LABEL" data-str-title="CAPTURE_CONFIG.DEM_OPEN_WITH_TITLE">Show DoD Studio in Open With for .dem Files</label>
+                </div>
+              </div>
+              <div id="config-dem-open-with-note" class="path-warning" style="display: none;"></div>
+              <div class="input-row">
+                <label for="config-dem-open-target" data-str="CAPTURE_CONFIG.DEM_OPEN_TARGET_LABEL" data-str-title="CAPTURE_CONFIG.DEM_OPEN_TARGET_TITLE">Open .dem Files In:</label>
+                <select id="config-dem-open-target">
+                  <option value="analyzer" data-str="CAPTURE_CONFIG.DEM_OPEN_TARGET_ANALYZER">Demo Analyzer</option>
+                  <option value="queue" data-str="CAPTURE_CONFIG.DEM_OPEN_TARGET_QUEUE">Studio's Queue</option>
+                </select>
+              </div>
             </div>
 
             <!-- Tab Content: Initial + Scheduled Commands -->

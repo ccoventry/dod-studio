@@ -23,7 +23,9 @@ import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane } from './demo_rename_ui.js';
 import { initThemedConfirm } from './themed_confirm.js';
-import { initAnalyzerPane } from './analyzer_pane.js';
+import { initAnalyzerPane, openAnalyzerDemo } from './analyzer_pane.js';
+import { createLaunchFiles } from './launch_files.js';
+import { initFileTypeSettings, getDemOpenTarget } from './file_types_settings.js';
 import { initHdPane } from './hd_pane.js';
 import { initBlenderPane } from './blender_pane.js';
 import { initOverviewsPane } from './overviews_pane.js';
@@ -834,6 +836,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     dismissed: savedSetupDismissed,
   });
   setup.start();
+
+  // Projects and demos opened from Explorer (#528), once startup is done.
+  initFileTypeSettings({ onSettingsChange: () => persistAppSettings() });
+  createLaunchFiles({
+    openProject,
+    openDemoInAnalyzer: (path) => { switchNavTab('demo-analyzer'); return openAnalyzerDemo(path); },
+    addDemosToQueue: (paths) => { switchNavTab('workspace'); return triggerAutoScan(paths, { pickedFiles: true }); },
+    getDemTarget: getDemOpenTarget,
+  }).start();
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {

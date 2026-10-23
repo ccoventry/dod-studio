@@ -48,6 +48,37 @@ export async function filesExist(paths) {
     });
 }
 
+/** Files Windows asked Studio to open and not yet opened (#528,
+ *  launch_files.js), oldest first; each is handed out once. */
+export async function takeOpenFiles() {
+  return invoke("take_open_files")
+    .catch((err) => {
+      console.error("IPC Execution Error (take_open_files):", err);
+      return [];
+    });
+}
+
+/** Whether DoD Studio is in `.dem`'s Open With list (#528):
+ *  `{ registered, thisCopy, otherExe }`, or null when it couldn't be read. */
+export async function demOpenWithStatus() {
+  return invoke("dem_open_with_status")
+    .catch((err) => {
+      console.error("IPC Execution Error (dem_open_with_status):", err);
+      return null;
+    });
+}
+
+/** Adds DoD Studio to `.dem`'s Open With list, or removes it. Resolves the
+ *  new status; rejects with the backend's message when the registry write
+ *  failed, so the setting can say so. */
+export async function setDemOpenWith(enabled) {
+  return invoke("set_dem_open_with", { enabled })
+    .catch((err) => {
+      console.error("IPC Execution Error (set_dem_open_with):", err);
+      throw err;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on

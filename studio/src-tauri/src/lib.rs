@@ -4,6 +4,7 @@ mod blender_manager;
 mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
+mod dem_open_with;
 mod demo_cache_cmd;
 mod demo_links_manager;
 mod demo_rename_manager;
@@ -18,6 +19,7 @@ mod map_manager;
 mod match_group_cmd;
 mod messages;
 mod movie_copy_manager;
+mod open_files;
 mod overview_manager;
 mod packet_limit_manager;
 mod pick_paths;
@@ -808,6 +810,23 @@ async fn load_map_overview(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A project or demo Windows asked this copy to open (#528). When this
+    // exe is already running, that copy opens it instead and this one exits
+    // before anything else starts.
+    let launch_files = open_files::openable_paths(
+        std::env::args_os(),
+        &std::env::current_dir().unwrap_or_default(),
+    );
+    #[cfg(windows)]
+    let open_pipe = open_files::own_pipe_name();
+    #[cfg(windows)]
+    if let Some(pipe) = &open_pipe
+        && !launch_files.is_empty()
+        && open_files::forward_to_running(pipe, &launch_files)
+    {
+        return;
+    }
+
     // Before the builder, not in `.setup()`: `SettingsManager::new()` below is
     // a `.manage(..)` argument, so it is constructed -- and reads settings.json
     // -- before any setup hook runs. Migrating after that would read the new,
@@ -853,7 +872,8 @@ pub fn run() {
         .manage(hd_manager::HdManager::default())
         .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
-        .setup(|app| {
+        .manage(open_files::PendingOpenFiles::new(&launch_files))
+        .setup(move |app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
             // analysis::translate_key's own walk-up-from-exe search, since the
             // exe runs from inside the source tree. A packaged install runs from
@@ -868,6 +888,21 @@ pub fn run() {
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
+            // Files a later double-click hands this copy (#528): queued, then
+            // the page is told and the window comes to the front.
+            #[cfg(windows)]
+            if let Some(pipe) = open_pipe.clone() {
+                use tauri::Emitter;
+                let handle = app.handle().clone();
+                open_files::serve(pipe, move |files| {
+                    handle.state::<open_files::PendingOpenFiles>().push(&files);
+                    let _ = handle.emit(open_files::OPEN_FILES_EVENT, ());
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1020,6 +1055,9 @@ pub fn run() {
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,
             hook_dll_list::list_hook_dlls,
+            open_files::take_open_files,
+            dem_open_with::dem_open_with_status,
+            dem_open_with::set_dem_open_with,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

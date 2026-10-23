@@ -18,6 +18,7 @@ import { projectFolders } from './project_paths.js';
 import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
 
 /**
  * @param {object} app  What this needs from main.js:
@@ -126,11 +127,9 @@ export function createProjectSession({
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
       const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
-      const filePath = currentSessionPath || await save({
-        title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
-        filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
-      });
+      // A first save is `.dodstudio`; a project opened from `.json` keeps
+      // saving to that `.json` (#528, project_file_type.js).
+      const filePath = currentSessionPath || await save(projectSaveDialogOptions(projectsDir));
       if (!filePath) return false;
 
       // No HLAE or hl.exe path: those are this PC's settings, not the
@@ -188,7 +187,7 @@ export function createProjectSession({
         current: currentSessionPath,
         fallback: projectsDir,
         multiple: false,
-        filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
+        filters: PROJECT_OPEN_FILTERS,
       });
       if (selected) await loadProjectFile(selected);
     } catch (err) {

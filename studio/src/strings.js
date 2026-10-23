@@ -516,6 +516,16 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    // .dem files in Explorer (#528, file_types_settings.js).
+    DEM_OPEN_WITH_LABEL: 'Show DoD Studio in Open With for .dem Files',
+    DEM_OPEN_WITH_TITLE: "Adds DoD Studio to the Open With menu when you right-click a demo in Explorer. Whatever opens a demo when you double-click it stays as it is. Untick to take DoD Studio back out.",
+    DEM_OPEN_TARGET_LABEL: 'Open .dem Files In:',
+    DEM_OPEN_TARGET_TITLE: 'Where a demo you open with DoD Studio from Explorer goes.',
+    DEM_OPEN_TARGET_ANALYZER: 'Demo Analyzer',
+    DEM_OPEN_TARGET_QUEUE: "Studio's Queue",
+    demOpenWithOtherCopy: (exe) =>
+      `Open With opens another copy of DoD Studio: ${exe}. Untick and tick again to make it open this one.`,
+    demOpenWithFailed: (err) => `Couldn't change Open With for .dem files: ${err}`,
     SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
     SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
     scanWorkersHint: (totalGb) => totalGb
@@ -1547,6 +1557,7 @@ export const STRINGS = {
     SELECT_DEMO_FILES_TITLE: 'Select Demo Files (.dem)',
     SELECT_DEMO_FOLDER_TITLE: 'Select Demo Folder',
 
+    PROJECT_FILTER_NAME: 'DoD Studio Project',
     JSON_PROJECT_FILTER_NAME: 'JSON Project File',
     EXECUTABLE_FILTER_NAME: 'Executable',
     DLL_FILTER_NAME: 'DLL',

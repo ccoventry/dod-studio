@@ -19,6 +19,7 @@ import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
 import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
 import { getPickFolders, setPickFolders } from './pick_path.js';
+import { getDemOpenTarget, applyDemOpenTarget } from './file_types_settings.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -107,6 +108,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
       recent_projects: state.recentProjects || [],
+      dem_open_target: getDemOpenTarget(),
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",
@@ -323,6 +325,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
   const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
   if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+  applyDemOpenTarget(settings.dem_open_target);
   setClipNameTemplate(settings.clip_name_template);
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
