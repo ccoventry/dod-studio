@@ -49,6 +49,7 @@ import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
+import { createRescanRecent } from './rescan_recent.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
@@ -121,13 +122,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
-  const {
-    markProjectDirty,
-    saveProjectSession,
-    needsSavePrompt,
-    requestUnsavedChangesConfirmation,
-    openProject,
-  } = createProjectSession({
+  const projectSession = createProjectSession({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     loadDemos: (demos) => {
@@ -152,6 +147,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     setReviewSettings: (raw) => hltvPick.setState(raw),
     onProjectFile: (path) => recentProjects.remember(path),
   });
+  const { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
@@ -442,6 +438,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   const { offerRescan } = createProjectRescan({
     getDemos: () => currentScannedDemos,
     scan: (paths) => triggerAutoScan(paths),
+  });
+  // After an update, every recent session's outdated demos at once (#938).
+  const rescanRecent = createRescanRecent({
+    getRecent: () => recentProjects.list(),
+    session: projectSession,
+    getDemos: () => currentScannedDemos,
+    scan: (paths) => triggerAutoScan(paths),
+    persistAppSettings: () => persistAppSettings(),
   });
 
   async function updateExportPoolIndicator() {
@@ -834,6 +838,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     dismissed: savedSetupDismissed,
   });
   setup.start();
+  rescanRecent.offerAfterUpdate().catch((err) => console.error("Rescan recent sessions:", err));
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {
