@@ -157,7 +157,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
     onProjectFile: (path) => recentProjects.remember(path),
-    // A loaded .json project offers to switch to .dodstudio (#528).
     offerConvert: (path) => projectConvert.offerConvert(path),
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
