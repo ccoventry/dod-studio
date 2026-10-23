@@ -68,6 +68,15 @@ export function backupPath(path, date, n = 1) {
   return folder ? `${folder}${sep}${file}` : file;
 }
 
+/** The first of `tries` that `taken` (one boolean per name, or null when
+ *  the check failed) says is free. Null when none is, or when it can't tell:
+ *  the session then fails rather than overwrite an earlier backup, which may
+ *  be the only copy of how it was before any rescan. */
+export function freeBackupPath(tries, taken) {
+  if (!Array.isArray(taken)) return null;
+  return tries.find((_, k) => taken[k] === false) ?? null;
+}
+
 /**
  * The offer's rows, one per recent session: `state` is 'outdated' (with
  * `demoPaths`, its outdated demos that are on disk), 'missing' (no file) or
@@ -137,12 +146,13 @@ const secs = (ms) => (Math.max(0, ms) / 1000).toFixed(1);
  * stopped }`.
  * @param {object} deps  backup(path) resolves the backup's path; open(path),
  *   scan(paths) and save() resolve whether they worked; currentOutdated()
- *   the open session's outdated demo paths; exists(paths); log(line);
+ *   the open session's outdated demo paths; isOpen(path) whether that
+ *   session is still the open one, asked before saving; exists(paths); log(line);
  *   onStep(i, n, row, what, frac); shouldStop(); now().
  */
 export async function rescanSessions(rows, deps) {
   const S = STRINGS.RESCAN_RECENT;
-  const { log, onStep = () => {}, shouldStop = () => false, now = Date.now, exists = filesExist } = deps;
+  const { log, onStep = () => {}, shouldStop = () => false, now = Date.now, exists = filesExist, isOpen = () => true } = deps;
   (rows || []).forEach((r) => {
     if (r.state === 'missing') log(S.missingLog(r.path));
     else if (r.state === 'outdated' && r.skip) log(S.skippedLog(r.name));
@@ -176,6 +186,9 @@ export async function rescanSessions(rows, deps) {
       step(S.stepScan(paths.length), 0.05);
       if (!(await deps.scan(paths))) throw new Error(S.SCAN_FAILED);
       step(S.STEP_SAVE, 0.95);
+      // Save writes whatever session is open: one opened or cleared while
+      // this one scanned (Ctrl+O, Ctrl+N) would get its queue.
+      if (!isOpen(row.path)) throw new Error(S.SESSION_CHANGED);
       if (!(await deps.save())) throw new Error(S.SAVE_FAILED);
       log(S.doneLog(row.name, paths.length, secs(now() - startedAt), fileNameOf(backup)));
       result.done++;
@@ -195,7 +208,8 @@ export async function rescanSessions(rows, deps) {
  *   session, project_session.js's confirmReplaceProject(),
  *   loadProjectFile(path, opts), saveProjectSession(opts), newSession(opts)
  *   and currentPath(); getDemos() the queue; scan(paths) main.js's
- *   triggerAutoScan; persistAppSettings(), which saves the offer's stamp.
+ *   triggerAutoScan and isScanning() queue_scan.js's; isSetupOpen() the
+ *   Setup window; persistAppSettings(), which saves the offer's stamp.
  *   The IPC calls and the clock are swappable for tests.
  */
 export function createRescanRecent({
@@ -204,6 +218,8 @@ export function createRescanRecent({
   getDemos,
   scan,
   persistAppSettings,
+  isScanning = () => false,
+  isSetupOpen = () => false,
   exists = filesExist,
   read = readProjectFile,
   write = writeProjectFile,
@@ -359,10 +375,8 @@ export function createRescanRecent({
     const contents = await read(path);
     const date = localDate(new Date(now()));
     const tries = Array.from({ length: BACKUP_TRIES }, (_, k) => backupPath(path, date, k + 1));
-    const taken = await exists(tries);
-    // When the check fails, the first name: a same-day backup is the same
-    // session's earlier state, and the file being rescanned is never touched.
-    const target = Array.isArray(taken) ? (tries.find((_, k) => taken[k] === false) || tries[tries.length - 1]) : tries[0];
+    const target = freeBackupPath(tries, await exists(tries));
+    if (!target) throw new Error(S.NO_BACKUP_NAME);
     await write(target, contents);
     return target;
   }
@@ -385,6 +399,7 @@ export function createRescanRecent({
       backup,
       open: (path) => session.loadProjectFile(path, { quiet: true }),
       currentOutdated: () => outdatedDemos(getDemos()).map((d) => d.path),
+      isOpen: (path) => session.currentPath() === path,
       exists,
       scan: async (paths) => {
         scanning = { weights, i: currentIndex };
@@ -422,6 +437,12 @@ export function createRescanRecent({
       if (!startup) showToast(S.BUSY_TOAST, 'info');
       return null;
     }
+    // A queue scan under way would merge its demos into whichever session
+    // this opens, and that session would be saved with them.
+    if (isScanning()) {
+      if (!startup) showToast(S.SCAN_RUNNING_TOAST, 'info');
+      return null;
+    }
     const recent = getRecent() || [];
     if (recent.length === 0) {
       if (!startup) showToast(S.NONE_RECENT_TOAST, 'info');
@@ -443,6 +464,11 @@ export function createRescanRecent({
       // first, with the dialog out of the way.
       show(false);
       if (!(await session.confirmReplaceProject())) return null;
+      // Asked again: one may have started while the dialogs were up.
+      if (isScanning()) {
+        showToast(S.SCAN_RUNNING_TOAST, 'info');
+        return null;
+      }
       running = true;
       return await run(rows);
     } finally {
@@ -455,8 +481,10 @@ export function createRescanRecent({
 
   /** The start-up check: once per update (offerStamp), with two or more
    *  recent sessions. The stamp is saved before asking, so Not now isn't
-   *  asked again until the next update. */
+   *  asked again until the next update. Not over the Setup window or a
+   *  running scan: then it waits for the next start, stamp unspent. */
   async function offerAfterUpdate() {
+    if (isSetupOpen() || isScanning()) return null;
     const stamp = offerStamp(await appVersion());
     if (!stamp || stamp === offeredFor) return null;
     offeredFor = stamp;

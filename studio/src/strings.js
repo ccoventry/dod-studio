@@ -2662,6 +2662,9 @@ export const STRINGS = {
     OPEN_FAILED: "the session didn't open",
     SCAN_FAILED: 'the scan failed',
     SAVE_FAILED: "the session wasn't saved",
+    SESSION_CHANGED: 'another session was opened while it scanned',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
   // ── progress_view.js: what every long job's progress line shares (#951)

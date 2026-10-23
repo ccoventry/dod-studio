@@ -134,6 +134,27 @@ test('Cancel stops between sessions: the one under way is saved, the rest are le
   await expect(page.locator('#toast-container')).toContainText('Rescanned 1 of 2 sessions.');
 });
 
+test('a session swapped for another mid-scan (Ctrl+O) is not saved, and the end asks nothing', async ({ page }) => {
+  const other = project(old('D:/d/9.dem'));
+  await gotoHarness(page, { ...TWO, files: { ...TWO.files, 'D:/p/other.json': other } });
+  await page.evaluate(() => { window.__hold = true; });
+  await openFromMenu(page);
+  await page.locator('#rescan-recent-start-btn').click();
+  await expect(page.locator('#rescan-recent-step')).toContainText('wsod25.json (1 of 2): rescanning');
+  await page.evaluate(() => window.__release());
+  await expect(page.locator('#rescan-recent-step')).toContainText('monday.json (2 of 2): rescanning');
+  // The user opens another project while monday's scan runs.
+  await page.evaluate(() => window.__session.openProject('D:/p/other.json'));
+  await page.evaluate(() => window.__release());
+  await expect(page.locator('#rescan-recent-modal')).toBeHidden();
+  await expect(page.locator('#unsaved-changes-modal')).toBeHidden();
+  const after = await files(page);
+  expect(after['D:/p/other.json']).toBe(other);
+  expect(after['D:/p/monday.json']).toBe(TWO.files['D:/p/monday.json']);
+  await expect(page.locator('#session-file-indicator')).toHaveText('No session loaded');
+  await expect(page.locator('#toast-container')).toContainText('Rescanned 1 of 2 sessions; 1 failed');
+});
+
 test('a long run lets each session be skipped for now', async ({ page }) => {
   await gotoHarness(page, { ...TWO, toParse: 20 });
   await openFromMenu(page);

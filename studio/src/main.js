@@ -453,6 +453,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     session: projectSession,
     getDemos: () => currentScannedDemos,
     scan: (paths) => triggerAutoScan(paths),
+    isScanning: () => isScanning(),
+    isSetupOpen: () => !!setup?.isOpen(),
     persistAppSettings: () => persistAppSettings(),
   });
 

@@ -14,7 +14,7 @@ vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 const {
   offerStamp, rescanOfferSettings, applyRescanOfferSettings, localDate, backupPath, planRecent,
   sessionsToRescan, worthOfferingAtStartup, skipAllowed, overallFraction, rescanSessions,
-  createRescanRecent, SKIP_OVER_SECS,
+  createRescanRecent, SKIP_OVER_SECS, freeBackupPath,
 } = await import('./rescan_recent.js');
 const { HIGHLIGHTS_VERSION } = await import('./scan_version.js');
 const { STRINGS } = await import('./strings.js');
@@ -51,6 +51,13 @@ describe('backups', () => {
 
   it('count up for a second rescan the same day, so the first backup is kept', () => {
     expect(backupPath('D:/p/monday.json', '2026-10-23', 2)).toBe('D:/p/monday.before-rescan-2026-10-23-2.json');
+  });
+
+  it('never overwrite an earlier backup: no free name, or no way to tell, means no backup', () => {
+    const tries = ['a.1.json', 'a.2.json', 'a.3.json'];
+    expect(freeBackupPath(tries, [true, false, false])).toBe('a.2.json');
+    expect(freeBackupPath(tries, [true, true, true])).toBe(null);
+    expect(freeBackupPath(tries, null)).toBe(null);
   });
 
   it('dates in local time, zero-padded', () => {
@@ -176,6 +183,18 @@ describe('the run', () => {
     expect(d.lines).toContain(STRINGS.RESCAN_RECENT.failedLog('a.json', '0.0', STRINGS.RESCAN_RECENT.SCAN_FAILED));
   });
 
+  it('a session replaced while it scanned (Ctrl+O, Ctrl+N) is not saved: the save would write over another file', async () => {
+    let swapped = false;
+    const d = deps({
+      scan: async (paths) => { d.calls.push(['scan', paths]); swapped = paths[0] === 'D:/d/1.dem'; return true; },
+      isOpen: (path) => !(swapped && path === 'D:/p/a.json'),
+    });
+    const result = await rescanSessions(rows(), d);
+    expect(d.calls.filter((c) => c[0] === 'save')).toEqual([['save', 'D:/p/c.json']]);
+    expect(result).toMatchObject({ done: 1, failed: 1 });
+    expect(d.lines).toContain(STRINGS.RESCAN_RECENT.failedLog('a.json', '0.0', STRINGS.RESCAN_RECENT.SESSION_CHANGED));
+  });
+
   it('a backup that fails stops that session before it is opened', async () => {
     const d = deps({ backup: async () => { throw new Error('disk full'); } });
     const result = await rescanSessions(rows(), d);
@@ -219,6 +238,24 @@ describe('createRescanRecent', () => {
     const { app, reads, rr } = make();
     await rr.offerAfterUpdate();
     expect(reads).toEqual([]);
+    expect(app.persistAppSettings).not.toHaveBeenCalled();
+  });
+
+  it('waits while the Setup window is open, without using up the offer', async () => {
+    const { app, reads, rr } = make({ isSetupOpen: () => true });
+    await rr.offerAfterUpdate();
+    expect(reads).toEqual([]);
+    expect(app.persistAppSettings).not.toHaveBeenCalled();
+    expect(rescanOfferSettings()).toEqual({ rescan_offered_for: '' });
+  });
+
+  it('does not start while the queue is scanning: that scan would land in the session it opens', async () => {
+    const { reads, rr } = make({ isScanning: () => true });
+    expect(await rr.offer()).toBe(null);
+    expect(reads).toEqual([]);
+    const { reads: startupReads, rr: atStartup, app } = make({ isScanning: () => true });
+    await atStartup.offerAfterUpdate();
+    expect(startupReads).toEqual([]);
     expect(app.persistAppSettings).not.toHaveBeenCalled();
   });
 

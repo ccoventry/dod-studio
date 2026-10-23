@@ -294,10 +294,12 @@ export function createProjectSession({
   // in: no session file, no demos, no take index. Reuses main.js's
   // replaceScannedDemos for the demo-queue reset — same as Clear All — then
   // overrides the dirty flag it sets, since a brand new untitled session has
-  // nothing to prompt about saving. `quiet`: no toast and no tab switch, for
-  // Rescan Recent Sessions putting back the blank queue it started from (#938).
+  // nothing to prompt about saving. `quiet`: no toast, no tab switch and no
+  // unsaved-changes prompt, for Rescan Recent Sessions putting back the blank
+  // queue it started from (#938): it asked before it began, and what's open
+  // now is a session it chose not to save.
   async function newSession({ quiet = false } = {}) {
-    if (needsSavePrompt()) {
+    if (!quiet && needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();
       if (!outcome) return; // Cancel — abort, keep current state
     }
