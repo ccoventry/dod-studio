@@ -881,6 +881,15 @@ export async function revealInExplorer(path) {
     });
 }
 
+/** Opens Windows' Recycle Bin, where the Demo Auditor's deletes go. */
+export async function openRecycleBin() {
+  return invoke("open_recycle_bin")
+    .catch((err) => {
+      console.error("IPC Execution Error (open_recycle_bin):", err);
+      showToast(STRINGS.IPC.folderOpenFailed(err), 'error');
+    });
+}
+
 /** Sweeps `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (files
  *  that still carry their `.dodstudio_preview` sidecar) left behind by prior
  *  capture sessions. `gameDir` is the configured hl.exe path. */

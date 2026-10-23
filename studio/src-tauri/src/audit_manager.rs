@@ -219,6 +219,54 @@ fn key_cache_file() -> PathBuf {
     native::shared::paths::get_appdata_dir().join("audit_keys.json")
 }
 
+/// What one audit did, for its end line in the activity log.
+struct AuditTimes {
+    cancelled: bool,
+    walk_secs: f64,
+    key_secs: f64,
+    demos: usize,
+    groups: usize,
+    copies: usize,
+    wasted_bytes: u64,
+    reads: hl_demo_auditor::Reads,
+}
+
+/// The activity log's line when an audit ends: how long the folder walk and
+/// the key pass took, what it found, and how many files it had to open (the
+/// rest were remembered from an earlier scan, #888).
+fn audit_end_log(t: &AuditTimes) -> String {
+    let total = t.walk_secs + t.key_secs;
+    if t.cancelled {
+        return format!("[audit] cancelled after {total:.1} s");
+    }
+    format!(
+        "[audit] finished after {total:.1} s (walk {:.1} s, keys {:.1} s): {} demo(s) checked, \
+         {} group(s) with copies, {} copies, {:.2} GB; opened {} start(s), {} end(s), {} whole file(s), \
+         the rest remembered",
+        t.walk_secs,
+        t.key_secs,
+        t.demos,
+        t.groups,
+        t.copies,
+        t.wasted_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+        t.reads.heads,
+        t.reads.tails,
+        t.reads.fulls,
+    )
+}
+
+/// The activity log's line when an audit starts: what it walks.
+fn audit_start_log(folders: &[String], drives: &[String]) -> String {
+    let mut what: Vec<String> = Vec::new();
+    if !drives.is_empty() {
+        what.push(format!("all drives ({})", drives.join(" ")));
+    }
+    if !folders.is_empty() {
+        what.push(format!("{} folder(s)", folders.len()));
+    }
+    format!("[audit] started: {}", what.join(" and "))
+}
+
 /// Runs the audit off the main thread: lists every root's demos, keys them
 /// all in one pass and orders each group for keeping.
 pub async fn run_demo_audit_impl(
@@ -242,11 +290,14 @@ pub async fn run_demo_audit_impl(
         let roots = audit_roots(&folders, &drives);
         let missing: Vec<&PathBuf> = roots.iter().filter(|r| !r.is_dir()).collect();
         if roots.is_empty() || missing.len() == roots.len() {
-            return Err(match missing.first() {
+            let why = match missing.first() {
                 Some(root) => crate::messages::audit_folder_not_found(root),
                 None => crate::messages::NO_AUDIT_FOLDERS.to_string(),
-            });
+            };
+            native::log_markdown(&format!("[audit] failed: {why}"));
+            return Err(why);
         }
+        native::log_markdown(&audit_start_log(&folders, &drives));
         let (tx, rx) = mpsc::channel();
         let ah = app_handle.clone();
         // At most one event per ~33 ms, the first at once (CLAUDE.md).
@@ -276,13 +327,28 @@ pub async fn run_demo_audit_impl(
         });
 
         let walked: Vec<PathBuf> = roots.into_iter().filter(|r| r.is_dir()).collect();
+        let walk_started = Instant::now();
         let files = scan_roots(&walked, &cancel_token, &Some(tx.clone()));
+        let walk_secs = walk_started.elapsed().as_secs_f64();
+        let demos = files.len();
+        let key_started = Instant::now();
         let cache_file = key_cache_file();
         let mut cache = KeyCache::load(&cache_file);
-        let duplicate_groups =
-            find_duplicates_cached(files, &cancel_token, &Some(tx), &mut cache).groups;
+        let audit = find_duplicates_cached(files, &cancel_token, &Some(tx), &mut cache);
+        let key_secs = key_started.elapsed().as_secs_f64();
         let last = progress_handle.join().unwrap_or_default();
         let cancelled = cancel_token.load(Ordering::Relaxed);
+        native::log_markdown(&audit_end_log(&AuditTimes {
+            cancelled,
+            walk_secs,
+            key_secs,
+            demos,
+            groups: audit.groups.len(),
+            copies: audit.copies,
+            wasted_bytes: audit.wasted_bytes,
+            reads: audit.reads,
+        }));
+        let duplicate_groups = audit.groups;
         if !cancelled {
             cache.prune_unseen_under(&walked);
         }
@@ -590,6 +656,40 @@ pub fn reveal_in_explorer_impl(path: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_audit_log_lines_say_what_ran_how_long_and_what_was_read() {
+        assert_eq!(
+            audit_start_log(&[], &["C:/".into(), "D:/".into()]),
+            "[audit] started: all drives (C:/ D:/)"
+        );
+        assert_eq!(
+            audit_start_log(&["E:/demos".into()], &[]),
+            "[audit] started: 1 folder(s)"
+        );
+        let mut times = AuditTimes {
+            cancelled: false,
+            walk_secs: 5.04,
+            key_secs: 1.55,
+            demos: 3217,
+            groups: 1007,
+            copies: 1909,
+            wasted_bytes: 129 * 1024 * 1024 * 1024,
+            reads: hl_demo_auditor::Reads {
+                heads: 2930,
+                tails: 2919,
+                fulls: 0,
+            },
+        };
+        assert_eq!(
+            audit_end_log(&times),
+            "[audit] finished after 6.6 s (walk 5.0 s, keys 1.6 s): 3217 demo(s) checked, \
+             1007 group(s) with copies, 1909 copies, 129.00 GB; opened 2930 start(s), 2919 end(s), \
+             0 whole file(s), the rest remembered"
+        );
+        times.cancelled = true;
+        assert_eq!(audit_end_log(&times), "[audit] cancelled after 6.6 s");
+    }
 
     fn paths(list: &[&str]) -> Vec<PathBuf> {
         list.iter().map(PathBuf::from).collect()

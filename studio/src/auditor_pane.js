@@ -1,7 +1,7 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
 import { listen } from '@tauri-apps/api/event';
-import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer } from './ipc_bridge.js';
+import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer, openRecycleBin } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
@@ -37,6 +37,10 @@ export function initAuditorPane({ getDemos = () => [] } = {}) {
   const tbody = document.querySelector('#audit-results-body');
 
   const folders = createAuditFolders({ onChange: () => refreshStartButtonState() });
+
+  // To see or restore what a delete moved there.
+  document.querySelector('#open-recycle-bin-btn')
+    ?.addEventListener('click', () => { openRecycleBin(); });
 
   function setAuditFooterSummary(text) {
     if (footerEl) footerEl.textContent = text;

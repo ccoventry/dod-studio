@@ -904,6 +904,8 @@ export const STRINGS = {
     STATUS_READY: 'Status: Ready to audit',
     RESULTS_TITLE: 'Duplicate Groups Found',
     DELETE_SELECTED_BUTTON: 'Move to Recycle Bin',
+    OPEN_RECYCLE_BIN_BUTTON: 'Open Recycle Bin',
+    OPEN_RECYCLE_BIN_TITLE: 'Open Windows’ Recycle Bin, to see or restore the demos moved there',
     TABLE_HEADER_STATUS: 'Status',
     TABLE_HEADER_SIZE: 'Size',
     TABLE_HEADER_FILE_PATH: 'File Path',
