@@ -54,6 +54,11 @@ pub const MIGRATIONS: &[Migration] = &[
         to: 11,
         upgrade: v10_to_v11,
     },
+    Migration {
+        from: 11,
+        to: 12,
+        upgrade: v11_to_v12,
+    },
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
@@ -215,6 +220,34 @@ fn v10_to_v11(analysis: &mut Value) -> Upgrade {
     }
 }
 
+/// More frames than this per second of playback means the frame clock barely
+/// moves. Recorded demos run at a few hundred frames a second (457 for the CI
+/// fixture, 478 for a WSOD25 POV demo); both files found with no camera data
+/// (#920) ran 236,586 frames in 0.001 s.
+const STALLED_FRAMES_PER_SECOND: f64 = 20_000.0;
+
+const STALLED_CLOCK: &str = "its frame clock barely moves, as in a demo with no camera data";
+
+/// #920: `demo_info.no_camera_data`. Telling needs every frame's view, which
+/// the entry doesn't hold, but every demo found without one also has a frame
+/// clock that never moves, and the entry holds the clock: such a demo is
+/// read again, and any other is taken to have a camera.
+fn v11_to_v12(analysis: &mut Value) -> Upgrade {
+    let Some(info) = analysis.get_mut("demo_info").and_then(Value::as_object_mut) else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    let time = info.get("playback_time").and_then(Value::as_f64);
+    let frames = info.get("playback_frames").and_then(Value::as_f64);
+    let (Some(time), Some(frames)) = (time, frames) else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    if frames > time * STALLED_FRAMES_PER_SECOND {
+        return Upgrade::NeedsReparse(STALLED_CLOCK);
+    }
+    info.insert("no_camera_data".into(), false.into());
+    Upgrade::Done
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,14 +312,14 @@ mod tests {
     }
 
     #[test]
-    fn the_real_chain_goes_7_9_10_11_and_8_has_none() {
-        let hops: Vec<_> = chain(MIGRATIONS, 7, 11)
+    fn the_real_chain_goes_7_9_10_11_12_and_8_has_none() {
+        let hops: Vec<_> = chain(MIGRATIONS, 7, 12)
             .unwrap()
             .iter()
             .map(|m| (m.from, m.to))
             .collect();
-        assert_eq!(hops, [(7, 9), (9, 10), (10, 11)]);
-        assert!(upgrades_from(7) && upgrades_from(9) && upgrades_from(10));
+        assert_eq!(hops, [(7, 9), (9, 10), (10, 11), (11, 12)]);
+        assert!(upgrades_from(7) && upgrades_from(9) && upgrades_from(10) && upgrades_from(11));
         assert!(!upgrades_from(8) && !upgrades_from(6));
         assert!(!upgrades_from(super::super::SCHEMA_VERSION));
     }
@@ -484,6 +517,48 @@ mod tests {
             upgrade(10, &mut json!({"state": {}})),
             Upgrade::NeedsReparse(MALFORMED)
         );
+    }
+
+    #[test]
+    fn a_v11_entry_with_a_running_clock_loads_as_a_demo_with_a_camera() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let fresh = Analysis::try_from_bytes(&bytes).unwrap();
+        assert!(!fresh.demo_info.no_camera_data);
+        let mut old = serde_json::to_value(&fresh).unwrap();
+        old["demo_info"]
+            .as_object_mut()
+            .unwrap()
+            .remove("no_camera_data");
+        assert_eq!(upgrade(11, &mut old), Upgrade::Done);
+        let upgraded: Analysis = serde_json::from_value(old).unwrap();
+        assert_eq!(
+            serde_json::to_value(&upgraded).unwrap(),
+            serde_json::to_value(&fresh).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_v11_entry_whose_clock_never_moves_needs_the_demo() {
+        // The #920 file's directory: 236,586 frames lasting 0.001 s.
+        let mut value = json!({"demo_info": {"playback_time": 0.001, "playback_frames": 236_586}});
+        assert_eq!(v11_to_v12(&mut value), Upgrade::NeedsReparse(STALLED_CLOCK));
+        let mut value = json!({"demo_info": {"playback_time": 0.0, "playback_frames": 3}});
+        assert_eq!(v11_to_v12(&mut value), Upgrade::NeedsReparse(STALLED_CLOCK));
+        // No frames at all: nothing to read again.
+        let mut value = json!({"demo_info": {"playback_time": 0.0, "playback_frames": 0}});
+        assert_eq!(v11_to_v12(&mut value), Upgrade::Done);
+        assert_eq!(value["demo_info"]["no_camera_data"], json!(false));
+        for mut value in [
+            json!({}),
+            json!({"demo_info": {"playback_frames": 10}}),
+            json!({"demo_info": {"playback_time": "x", "playback_frames": 10}}),
+        ] {
+            assert_eq!(v11_to_v12(&mut value), Upgrade::NeedsReparse(MALFORMED));
+        }
     }
 
     #[test]

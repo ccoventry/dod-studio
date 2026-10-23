@@ -13,6 +13,12 @@
 //! against 49.24 s, 32.0 s against 31.58 s, and none on an HLTV demo whose
 //! LOADING frames all read 0. Left out, the load sat at 99% for the last
 //! quarter of a demo.
+//!
+//! The directory's time is only an estimate, though: the player's clock is
+//! `svc_time`, and viewdemo stops loading where that clock turns back at a
+//! map restart, so on such a demo the load ended at about half (#866).
+//! [`loaded_span`] reads the `svc_time` span the player will hold, on a
+//! background thread; the directory's figure stands until it answers.
 
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -153,15 +159,169 @@ fn sum_playback(entries: &[u8]) -> f32 {
         .sum()
 }
 
-/// How far a load is, 0 to 99: the playback the demo player has buffered
-/// (its span less the lead-in) over the playback length. Never 100 while
-/// loading, so "done" is only ever the player's own word.
-pub fn load_percent(buffered: f64, length: DemoLength) -> u32 {
-    if length.playback <= 0.0 || !buffered.is_finite() {
+/// How far a load is, 0 to 99. With `loaded` (the `svc_time` span the
+/// player will hold, [`loaded_span`]): the player's span over it, the same
+/// clock. Without it, the directory's estimate: the span less the lead-in
+/// over the playback length, which runs short on a demo with a map restart
+/// (#866). Never 100 while loading, so "done" is only ever the player's
+/// own word.
+pub fn load_percent(buffered: f64, length: DemoLength, loaded: Option<f32>) -> u32 {
+    if !buffered.is_finite() {
+        return 0;
+    }
+    if let Some(loaded) = loaded.filter(|s| s.is_finite() && *s > 0.0) {
+        return (buffered / loaded as f64 * 100.0).clamp(0.0, 99.0) as u32;
+    }
+    if length.playback <= 0.0 {
         return 0;
     }
     let read = buffered - length.lead_in as f64;
     (read / length.playback as f64 * 100.0).clamp(0.0, 99.0) as u32
+}
+
+/// The buffered file the frame walk reads.
+type Reader = std::io::BufReader<std::fs::File>;
+
+/// `svc_time`, the server's clock, first in nearly every network frame's
+/// message; the demo player's world clock is this one (#866).
+const SVC_TIME: u8 = 7;
+
+/// The `svc_time` span the demo player holds once it has read the demo: the
+/// first network frame's `svc_time` to the last one before the clock jumps
+/// back. A map restart inside the recording turns it back, and viewdemo
+/// stops loading there (it only plays a demo's first map), so a whole-file
+/// length runs long by everything after it. Reads every frame header, so
+/// it's for a background thread, never a game frame; `None` when the file
+/// isn't a demo or has no `svc_time`.
+pub fn loaded_span(path: &Path) -> Option<f32> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
+    let mut magic = [0u8; 8];
+    reader.read_exact(&mut magic).ok()?;
+    if &magic[..6] != b"HLDEMO" {
+        return None;
+    }
+    reader.seek(SeekFrom::Start(DIRECTORY_OFFSET_POS)).ok()?;
+    let directory = read_i32_from(&mut reader)?;
+    reader
+        .seek(SeekFrom::Start(u64::try_from(directory).ok()?))
+        .ok()?;
+    let count = read_i32_from(&mut reader)?;
+    if !(1..=MAX_ENTRIES).contains(&count) {
+        return None;
+    }
+    let mut entries = vec![0u8; count as usize * ENTRY_SIZE];
+    reader.read_exact(&mut entries).ok()?;
+    let mut clock = SvcClock::default();
+    for entry in entries.as_chunks::<ENTRY_SIZE>().0 {
+        let offset = u64::try_from(field_i32(entry, OFFSET_AT)).ok()?;
+        let length = u64::try_from(field_i32(entry, LENGTH_AT)).ok()?;
+        if walk_svc_times(&mut reader, offset, offset + length, &mut clock).is_none()
+            || clock.turned_back
+        {
+            break;
+        }
+    }
+    clock.span()
+}
+
+/// The `svc_time`s seen so far, up to the first that goes back.
+#[derive(Default)]
+struct SvcClock {
+    first: Option<f32>,
+    last: f32,
+    turned_back: bool,
+}
+
+impl SvcClock {
+    fn see(&mut self, t: f32) {
+        if self.turned_back || !t.is_finite() {
+            return;
+        }
+        match self.first {
+            None => {
+                self.first = Some(t);
+                self.last = t;
+            }
+            Some(_) if t < self.last => self.turned_back = true,
+            Some(_) => self.last = t,
+        }
+    }
+
+    fn span(&self) -> Option<f32> {
+        self.first
+            .map(|first| self.last - first)
+            .filter(|s| *s > 0.0)
+    }
+}
+
+/// Feeds every network frame's `svc_time` between `from` and `to` to
+/// `clock`, stopping once it turns back. `None` when a frame can't be read.
+fn walk_svc_times(reader: &mut Reader, from: u64, to: u64, clock: &mut SvcClock) -> Option<()> {
+    reader.seek(SeekFrom::Start(from)).ok()?;
+    let mut at = from;
+    while at + 9 <= to && !clock.turned_back {
+        let mut head = [0u8; 9];
+        reader.read_exact(&mut head).ok()?;
+        let body: u64 = match head[0] {
+            0 | 1 => {
+                // 464 bytes of view and sequence info, the message's size,
+                // then the message, which nearly always opens with svc_time.
+                let mut info = [0u8; 468];
+                reader.read_exact(&mut info).ok()?;
+                let size = u32::try_from(field_i32(&info, 464)).ok()?;
+                let mut opening = [0u8; 5];
+                let peek = size.min(5) as usize;
+                reader.read_exact(&mut opening[..peek]).ok()?;
+                if peek == 5 && opening[0] == SVC_TIME {
+                    clock.see(f32::from_le_bytes(
+                        opening[1..5].try_into().unwrap_or_default(),
+                    ));
+                }
+                reader.seek_relative(i64::from(size) - peek as i64).ok()?;
+                468 + u64::from(size)
+            }
+            2 => 0,
+            3 => skip(reader, 64)?,
+            4 => skip(reader, 32)?,
+            // NextSection ends the segment.
+            5 => return Some(()),
+            6 => skip(reader, 84)?,
+            7 => skip(reader, 8)?,
+            8 => {
+                // Channel, sized sample, then attenuation, volume, flags, pitch.
+                let mut lead = [0u8; 8];
+                reader.read_exact(&mut lead).ok()?;
+                let sample = u32::try_from(field_i32(&lead, 4)).ok()?;
+                skip(reader, u64::from(sample) + 16)?;
+                8 + u64::from(sample) + 16
+            }
+            9 => {
+                let mut size = [0u8; 4];
+                reader.read_exact(&mut size).ok()?;
+                let n = u32::try_from(i32::from_le_bytes(size)).ok()?;
+                skip(reader, u64::from(n))?;
+                4 + u64::from(n)
+            }
+            _ => return None,
+        };
+        at += 9 + body;
+    }
+    Some(())
+}
+
+/// Skips `n` bytes; `n` itself, for the caller's running offset.
+fn skip(reader: &mut Reader, n: u64) -> Option<u64> {
+    // seek_relative keeps the buffer; seek() would drop and refill it for
+    // every frame.
+    reader.seek_relative(i64::try_from(n).ok()?).ok()?;
+    Some(n)
+}
+
+fn read_i32_from<R: Read>(reader: &mut R) -> Option<i32> {
+    let mut bytes = [0u8; 4];
+    reader.read_exact(&mut bytes).ok()?;
+    Some(i32::from_le_bytes(bytes))
 }
 
 #[cfg(test)]
@@ -266,14 +426,14 @@ mod tests {
             playback: 400.0,
             lead_in: 0.0,
         };
-        assert_eq!(load_percent(0.0, plain), 0);
-        assert_eq!(load_percent(100.0, plain), 25);
-        assert_eq!(load_percent(500.0, plain), 99);
+        assert_eq!(load_percent(0.0, plain, None), 0);
+        assert_eq!(load_percent(100.0, plain, None), 25);
+        assert_eq!(load_percent(500.0, plain, None), 99);
         let empty = DemoLength {
             playback: 0.0,
             lead_in: 0.0,
         };
-        assert_eq!(load_percent(10.0, empty), 0);
+        assert_eq!(load_percent(10.0, empty, None), 0);
     }
 
     #[test]
@@ -283,9 +443,74 @@ mod tests {
             playback: 1251.4,
             lead_in: 350.3,
         };
-        assert_eq!(load_percent(350.3, length), 0);
-        assert_eq!(load_percent(350.3 + 625.7, length), 50);
-        assert_eq!(load_percent(1239.0, length), 71);
-        assert_eq!(load_percent(1601.7, length), 99);
+        assert_eq!(load_percent(350.3, length, None), 0);
+        assert_eq!(load_percent(350.3 + 625.7, length, None), 50);
+        assert_eq!(load_percent(1239.0, length, None), 71);
+        assert_eq!(load_percent(1601.7, length, None), 99);
+    }
+
+    #[test]
+    fn with_the_loaded_span_the_percent_is_the_players_span_over_it() {
+        let length = DemoLength {
+            playback: 2996.1,
+            lead_in: 349.5,
+        };
+        // solifotw-bewton (#866): the player holds 4.30 to 1956.38.
+        assert_eq!(load_percent(976.0, length, Some(1952.1)), 49);
+        assert_eq!(load_percent(1952.1, length, Some(1952.1)), 99);
+        // An unusable span falls back to the directory's estimate.
+        assert_eq!(load_percent(1952.1, length, Some(0.0)), 53);
+    }
+
+    /// A network frame whose message opens with `svc_time` = `svc`.
+    fn net(svc: f32) -> Vec<u8> {
+        let mut f = frame(1, 0.0, 464);
+        f.extend(5i32.to_le_bytes());
+        f.push(SVC_TIME);
+        f.extend(svc.to_le_bytes());
+        f
+    }
+
+    #[test]
+    fn the_loaded_span_ends_where_the_server_clock_turns_back() {
+        let dir = std::env::temp_dir().join(format!("demo_file_span_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("x.dem");
+        let loading = [net(4.3), frame(5, 0.0, 0)].concat();
+        let playback = [
+            net(4.5),
+            frame(3, 0.0, 64),
+            net(600.0),
+            net(1956.4),
+            // A map restart: the clock starts again, and viewdemo stops here.
+            net(4.4),
+            net(1395.0),
+            frame(5, 0.0, 0),
+        ]
+        .concat();
+        let mut bytes = vec![0u8; 544];
+        bytes[..8].copy_from_slice(b"HLDEMO\0\0");
+        let loading_at = 544i32;
+        let playback_at = loading_at + loading.len() as i32;
+        let directory_at = playback_at + playback.len() as i32;
+        bytes[540..544].copy_from_slice(&directory_at.to_le_bytes());
+        bytes.extend(&loading);
+        bytes.extend(&playback);
+        bytes.extend(2i32.to_le_bytes());
+        for (kind, at, len) in [
+            (0, loading_at, loading.len()),
+            (1, playback_at, playback.len()),
+        ] {
+            let mut e = entry(kind, 0.0);
+            e[OFFSET_AT..OFFSET_AT + 4].copy_from_slice(&at.to_le_bytes());
+            e[LENGTH_AT..LENGTH_AT + 4].copy_from_slice(&(len as i32).to_le_bytes());
+            bytes.extend(e);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        let span = loaded_span(&path).unwrap();
+        assert!((span - (1956.4 - 4.3)).abs() < 0.01, "{span}");
+        std::fs::write(&path, b"not a demo").unwrap();
+        assert_eq!(loaded_span(&path), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

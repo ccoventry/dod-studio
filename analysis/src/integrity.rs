@@ -15,8 +15,12 @@
 //! is enough to make it fire. Frame time is no substitute: it never steps
 //! backwards when frames are dropped, only forwards.
 //!
+//! [`check_demo_bytes`] also says when a demo has no camera data (#920,
+//! [`crate::camera_data`]): it decodes fine and still plays as a frozen view.
+//!
 //! Pure over a parsed [`Demo`], so it also builds for the wasm web analyzer.
 
+use crate::camera_data::{CameraFrames, camera_frames};
 use dem::bit::BitSliceCast;
 use dem::types::{Demo, EngineMessage, FrameData, MessageData, NetMessage};
 
@@ -60,11 +64,14 @@ pub struct IntegrityReport {
     pub broken: Vec<BrokenDelta>,
     /// [`BrokenDelta::time`] of the first broken delta.
     pub first_broken_time: Option<f32>,
+    /// The playback frames that carry a view (#920), counted by
+    /// [`check_demo_bytes`]; [`check_delta_continuity`] leaves it empty.
+    pub camera: CameraFrames,
 }
 
 impl IntegrityReport {
     pub fn is_ok(&self) -> bool {
-        self.broken.is_empty()
+        self.broken.is_empty() && !self.camera.is_missing()
     }
 
     fn push_broken(&mut self, broken: BrokenDelta) {
@@ -73,20 +80,32 @@ impl IntegrityReport {
     }
 
     /// One line for a person: "OK", or how many deltas are broken and where
-    /// the first one is on the viewdemo clock.
+    /// the first one is on the viewdemo clock, and whether the demo has no
+    /// camera data.
     pub fn verdict(&self) -> String {
+        let mut parts = Vec::new();
         let n = self.broken.len();
-        if n == 0 {
-            return "OK".to_string();
+        if n > 0 {
+            let what = if n == 1 {
+                "1 delta built on a frame the file doesn't have".to_string()
+            } else {
+                format!("{n} deltas built on frames the file doesn't have")
+            };
+            parts.push(match self.first_broken_time {
+                Some(t) => format!("{what}, first at {}", clock(t)),
+                None => what,
+            });
         }
-        let what = if n == 1 {
-            "1 delta built on a frame the file doesn't have".to_string()
+        if self.camera.is_missing() {
+            parts.push(format!(
+                "no camera data: none of its {} playback frames carries a view, so it plays as a frozen camera",
+                self.camera.network_frames
+            ));
+        }
+        if parts.is_empty() {
+            "OK".to_string()
         } else {
-            format!("{n} deltas built on frames the file doesn't have")
-        };
-        match self.first_broken_time {
-            Some(t) => format!("{what}, first at {}", clock(t)),
-            None => what,
+            parts.join("; ")
         }
     }
 }
@@ -220,8 +239,9 @@ pub fn check_delta_continuity(demo: &Demo) -> IntegrityReport {
     report
 }
 
-/// Parses a demo and runs [`check_delta_continuity`] on it. A demo that does
-/// not parse at all is a byte-level break, which this reports as the error.
+/// Parses a demo and runs [`check_delta_continuity`] on it, and counts its
+/// camera frames. A demo that does not parse at all is a byte-level break,
+/// which this reports as the error.
 pub fn check_demo_bytes(bytes: &[u8]) -> Result<IntegrityReport, String> {
     let demo = dem::open_demo_from_bytes(bytes).map_err(|e| {
         format!(
@@ -229,7 +249,8 @@ pub fn check_demo_bytes(bytes: &[u8]) -> Result<IntegrityReport, String> {
             parse_error_reason(&e.to_string())
         )
     })?;
-    let report = check_delta_continuity(&demo);
+    let mut report = check_delta_continuity(&demo);
+    report.camera = camera_frames(&demo);
     crate::release_frames(demo);
     Ok(report)
 }
@@ -330,6 +351,37 @@ mod tests {
             report.verdict(),
             "2 deltas built on frames the file doesn't have, first at 2:05"
         );
+    }
+
+    #[test]
+    fn a_demo_with_no_camera_data_is_not_ok_and_says_why() {
+        let mut report = IntegrityReport {
+            camera: CameraFrames {
+                hltv: false,
+                network_frames: 118_291,
+                with_view: 0,
+            },
+            ..Default::default()
+        };
+        assert!(!report.is_ok());
+        assert_eq!(
+            report.verdict(),
+            "no camera data: none of its 118291 playback frames carries a view, so it plays as a frozen camera"
+        );
+        report.first_broken_time = Some(1.0);
+        report.broken.push(BrokenDelta {
+            frame_index: 7,
+            time: 1.0,
+            kind: DeltaKind::ClientData,
+            incoming_seq: 10,
+            delta_seq: 8,
+        });
+        assert!(report.verdict().starts_with(
+            "1 delta built on a frame the file doesn't have, first at 0:01; no camera data"
+        ));
+        report.camera.with_view = 1;
+        report.broken.clear();
+        assert!(report.is_ok());
     }
 
     #[test]

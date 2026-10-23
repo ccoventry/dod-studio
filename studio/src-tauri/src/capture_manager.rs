@@ -1610,6 +1610,10 @@ pub struct SerializedDemo {
     /// demo from a project saved before it was counted.
     #[serde(default)]
     pub peak_packet_entities: Option<u32>,
+    /// No playback frame carries a view (#920): a capture of it is a frozen
+    /// camera. `None` for a demo from a project saved before it was checked.
+    #[serde(default)]
+    pub no_camera_data: Option<bool>,
     /// Who recorded this POV demo (#174): the analyzer's global id (a
     /// SteamID64 when the demo has one) and name. `None` for an HLTV demo,
     /// and for demos from a project saved before this existed, which the
@@ -1656,6 +1660,16 @@ pub struct ScanOutcome {
     /// none when it stopped while listing folders (#843).
     #[serde(default)]
     pub cancelled: bool,
+    /// How many of the demos read had a current analyzer cache entry, how
+    /// many didn't (read in full, or an older entry upgraded), and how long
+    /// those took, from the first starting to the scan's end: for the
+    /// activity log's timing line (#926, #937).
+    #[serde(default)]
+    pub cached: u32,
+    #[serde(default)]
+    pub not_cached: u32,
+    #[serde(default)]
+    pub not_cached_ms: u64,
 }
 
 /// A scanned file with the same key as a queued demo at another path, or as
@@ -1739,6 +1753,7 @@ fn serialized_demo(
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs()),
         peak_packet_entities: analysis.demo_info.peak_packet_entities,
+        no_camera_data: Some(analysis.demo_info.no_camera_data),
         recorder_id: recorder.as_ref().map(|p| p.id.clone()),
         recorder_name: recorder.map(|p| p.name),
         teams: ::analysis::team_tags(&analysis.state),
@@ -2238,6 +2253,9 @@ pub async fn scan_directory_impl(
                 unchanged: 0,
                 copies: Vec::new(),
                 cancelled: true,
+                cached: 0,
+                not_cached: 0,
+                not_cached_ms: 0,
             });
         }
 
@@ -2265,6 +2283,8 @@ pub async fn scan_directory_impl(
         let bytes_to_parse = plan.bytes_to_parse();
         let parsed = std::sync::atomic::AtomicU32::new(0);
         let bytes_parsed = std::sync::atomic::AtomicU64::new(0);
+        // When the first demo without a current cache entry started.
+        let first_parse: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         let slots: Mutex<Vec<Option<SerializedDemo>>> =
             Mutex::new((0..total).map(|_| None).collect());
         let next_index = std::sync::atomic::AtomicUsize::new(0);
@@ -2323,6 +2343,7 @@ pub async fn scan_directory_impl(
                 let plan = &plan;
                 let parsed = &parsed;
                 let bytes_parsed = &bytes_parsed;
+                let first_parse = &first_parse;
                 let file_name_at = move |i: usize| {
                     list[i]
                         .file_name()
@@ -2365,6 +2386,9 @@ pub async fn scan_directory_impl(
                             false,
                         );
 
+                        if !plan.fresh[idx] {
+                            first_parse.get_or_init(std::time::Instant::now);
+                        }
                         let scanned = scan_demo_for_highlights_with_analysis(file);
                         if let Err(reason) = &scanned {
                             log::warn!("Scan skipped {}: {}", file.display(), reason);
@@ -2445,6 +2469,11 @@ pub async fn scan_directory_impl(
             unchanged,
             copies,
             cancelled: was_cancelled,
+            cached,
+            not_cached: parsed.load(std::sync::atomic::Ordering::Relaxed),
+            not_cached_ms: first_parse
+                .get()
+                .map_or(0, |t| t.elapsed().as_millis() as u64),
         })
     }))
     .await;
