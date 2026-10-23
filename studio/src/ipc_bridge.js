@@ -704,8 +704,8 @@ export async function saveSettings(settings) {
 // Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
 // `allDrives`, in one key pass; copies in `queued` (the project's queue) or
 // the install's game folder are listed first, as the ones to keep.
-export async function runDemoAudit(paths, allDrives = false, queued = []) {
-  return invoke("run_demo_audit", { paths, allDrives, queued })
+export async function runDemoAudit(paths, allDrives = false, queued = [], lookInZips = false) {
+  return invoke("run_demo_audit", { paths, allDrives, queued, lookInZips })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');
