@@ -111,7 +111,8 @@ test('opening a project says so on the queue\'s line, then while it looks for mi
 
   await expect.poll(() => page.evaluate(() => typeof window.__release.search)).toBe('function');
   await page.evaluate(() => window.__release.search());
-  await expect(line).toHaveText('Ready');
+  // Not the line from before the open (a last scan's "Done in…").
+  await expect(line).toHaveText('Opened the project: 0 demos');
   await expect(bar).toHaveJSProperty('hidden', true);
   await expect(page.locator('#session-file-indicator')).toHaveText('monday.json');
 });
