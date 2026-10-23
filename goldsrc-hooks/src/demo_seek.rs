@@ -589,6 +589,11 @@ const GIVE_UP_SECONDS: f64 = 60.0;
 /// How far the clock may move back between two frames before it counts as
 /// the user moving it.
 const BACK_SLACK: f64 = 0.5;
+/// Frames after the seek is typed before a move of the clock counts: right
+/// after a second `viewdemo` the player still shows the last demo's clock,
+/// and the new one's jumps several seconds in its first frames (measured on
+/// PRE: 368.5 s, then 375.4 s a frame later).
+const SETTLE_FRAMES: u32 = 30;
 
 /// One frame of a waiting seek: `look` is the player now, `since_last` the
 /// seconds since the last look, `waited` since the seek was typed.
@@ -624,7 +629,9 @@ fn judge(w: &mut Watch, look: Option<Look>, since_last: f64, waited: f64) -> Ver
         }
         let moved = look.now - last.now;
         let played = 1.0 + 2.0 * since_last * f64::from(look.scale.max(0.0));
-        if moved < -BACK_SLACK || (moved > played && !look.before_frame) {
+        if w.frames > SETTLE_FRAMES
+            && (moved < -BACK_SLACK || (moved > played && !look.before_frame))
+        {
             return Verdict::Cancel("you moved the demo's clock");
         }
     }
@@ -1297,8 +1304,13 @@ mod tests {
 
     #[test]
     fn a_queued_seek_is_cancelled_by_what_the_user_does() {
+        // Settled: the first frames' jumps are let through.
         let loading = |w: &mut Watch| {
-            assert_eq!(judge(w, look(100.0, true), 0.01, 0.0), Verdict::Wait);
+            assert_eq!(judge(w, look(368.5, true), 0.01, 0.0), Verdict::Wait);
+            assert_eq!(judge(w, look(375.4, true), 0.01, 0.0), Verdict::Wait);
+            for _ in 0..SETTLE_FRAMES {
+                assert_eq!(judge(w, look(100.0, true), 0.01, 0.0), Verdict::Wait);
+            }
         };
         let mut w = Watch::default();
         loading(&mut w);
@@ -1343,7 +1355,9 @@ mod tests {
     #[test]
     fn a_gap_jump_does_not_cancel_a_queued_seek() {
         let mut w = Watch::default();
-        assert_eq!(judge(&mut w, look(8.5, true), 0.01, 0.0), Verdict::Wait);
+        for _ in 0..=SETTLE_FRAMES {
+            assert_eq!(judge(&mut w, look(8.5, true), 0.01, 0.0), Verdict::Wait);
+        }
         let jumped = look(71.378, true).map(|l| Look {
             before_frame: true,
             ..l
