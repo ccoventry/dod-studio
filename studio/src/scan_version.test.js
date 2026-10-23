@@ -60,7 +60,7 @@ describe('the rescan offer on opening a project', () => {
     const { scan, offer } = setup(demos, true);
     expect(await offer()).toBe(true);
     const [message, options] = themedConfirm.mock.calls[0];
-    expect(message).toMatch(/^2 of 3 demos in this project were scanned with an older DoD Studio\. Rescan them now\?/);
+    expect(message).toMatch(/^2\/3 demos in this project were scanned with an older DoD Studio\. Rescan them now\?/);
     expect(message).toContain('marks, notes, status and kill ranges are carried over');
     // What "Not now" does sits with the question, above the long list.
     expect(message).toContain('Press “Not now” to leave them as they are');
@@ -73,8 +73,8 @@ describe('the rescan offer on opening a project', () => {
   it('says how many of the project\'s demos, or all of them', () => {
     const say = STRINGS.MAIN.outdatedDemosMessage;
     expect(say(158, 158)).toMatch(/^All 158 demos in this project were scanned/);
-    expect(say(12, 158)).toMatch(/^12 of 158 demos in this project were scanned/);
-    expect(say(1, 158)).toMatch(/^1 of 158 demos in this project was scanned .* Rescan it now\?/);
+    expect(say(12, 158)).toMatch(/^12\/158 demos in this project were scanned/);
+    expect(say(1, 158)).toMatch(/^1\/158 demos in this project was scanned .* Rescan it now\?/);
     expect(say(1, 1)).toMatch(/^1 demo in this project was scanned .* leave it as it is;/);
   });
 

@@ -1572,7 +1572,7 @@ export const STRINGS = {
     OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
     // `n` of the project's `total` demos; "All 158" when it is every one.
     outdatedDemosMessage: (n, total = n) => {
-      const which = n < total ? `${n} of ${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
+      const which = n < total ? `${n}/${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
       return `${which} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over. `
         + `Press “Not now” to leave ${n === 1 ? 'it' : 'them'} as ${n === 1 ? 'it is' : 'they are'}; you'll be asked again the next time you open the project.`;
     },
