@@ -155,11 +155,30 @@ async fn locate_missing_demos(
     .await
 }
 
-/// Which demos are no longer the file they were scanned from (#21).
+/// Which demos are no longer the file they were scanned from (#21). Emits
+/// `changed_demos_progress` ({ done, total }, at most every ~33 ms and on
+/// the last demo) for Start Capture's line (#953).
 #[tauri::command]
-async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+async fn changed_demos(
+    app_handle: tauri::AppHandle,
+    demos: Vec<capture_manager::KnownDemo>,
+) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(capture_manager::changed_demos(&demos))
+        use tauri::Emitter;
+        let started = std::time::Instant::now();
+        let last_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        Ok(capture_manager::changed_demos_with_progress(
+            &demos,
+            |done, total| {
+                let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+                if capture_manager::changed_progress_due(&last_emit, now_ms, done, total) {
+                    let _ = app_handle.emit(
+                        "changed_demos_progress",
+                        serde_json::json!({ "done": done, "total": total }),
+                    );
+                }
+            },
+        ))
     }))
     .await
 }

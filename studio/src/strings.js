@@ -2198,6 +2198,22 @@ export const STRINGS = {
     FAILED: 'Stopped with an error (see the message).',
   },
 
+  // ── capture_precheck.js: the Capture footer's line while Start Capture
+  //    Batch checks everything before the batch starts (#953)
+  CAPTURE_PRECHECK: {
+    STARTING: 'Getting ready to capture…',
+    OBS: 'Checking OBS…',
+    DISK: 'Checking the disk space…',
+    DEMOS: 'Checking the picked demos are where they were…',
+    demosCounted: (done, total) => `Checking the picked demos are where they were (${done} of ${total})…`,
+    MAPS: 'Checking the maps and demos for known problems…',
+    PATHS: 'Checking the game and HLAE paths…',
+    GAME: 'Checking whether the game is already open…',
+    STEAM: 'Checking Steam…',
+    NOT_STARTED: 'Not started.',
+    GAME_OPEN: 'Not started yet: the game is already open.',
+  },
+
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
   COMMAND_SUGGEST: {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",

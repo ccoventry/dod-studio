@@ -92,12 +92,21 @@ export async function estimateRescan(paths) {
 // `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
 // Paths of the demos whose file no longer matches its saved key (#21).
 // Empty when the check itself fails, so a broken check never blocks a batch.
-export async function changedDemos(demos) {
-  return invoke("changed_demos", { demos })
-    .catch((err) => {
-      console.error("IPC Execution Error (changed_demos):", err);
-      return [];
-    });
+// `onProgress({ done, total })` gets `changed_demos_progress` while it reads
+// them (#953).
+export async function changedDemos(demos, onProgress = null) {
+  const unlisten = onProgress
+    ? await listen('changed_demos_progress', (event) => onProgress(event.payload)).catch(() => null)
+    : null;
+  try {
+    return await invoke("changed_demos", { demos })
+      .catch((err) => {
+        console.error("IPC Execution Error (changed_demos):", err);
+        return [];
+      });
+  } finally {
+    unlisten?.();
+  }
 }
 
 export async function locateMissingDemos(demos, searchDirs) {

@@ -2062,13 +2062,39 @@ fn demo_file_key(path: &Path) -> Option<String> {
 /// scanned: its key (size + first 64 KB) differs from the saved one. Their
 /// highlights are frame numbers in the old file, so they don't line up (#21).
 /// Missing files and demos with no saved key are left out.
-pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
-    demos
-        .iter()
-        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
-        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
-        .map(|d| d.path.clone())
-        .collect()
+///
+/// `checked(done, total)` runs after each demo, so Start Capture's line can
+/// count them (#953). Every call; the caller throttles.
+pub fn changed_demos_with_progress(
+    demos: &[KnownDemo],
+    mut checked: impl FnMut(usize, usize),
+) -> Vec<String> {
+    let mut changed = Vec::new();
+    for (i, d) in demos.iter().enumerate() {
+        if !d.file_key.is_empty()
+            && Path::new(&d.path).is_file()
+            && demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key)
+        {
+            changed.push(d.path.clone());
+        }
+        checked(i + 1, demos.len());
+    }
+    changed
+}
+
+/// Whether a `changed_demos_progress` event goes out: the last demo always
+/// (so the count ends on "12 of 12"), the others at most one per ~33 ms.
+pub(crate) fn changed_progress_due(
+    last_ms: &std::sync::atomic::AtomicU32,
+    now_ms: u32,
+    done: usize,
+    total: usize,
+) -> bool {
+    if done == total {
+        last_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+        return true;
+    }
+    progress_emit_due(last_ms, now_ms)
 }
 
 /// A project demo that is no longer at its saved path, and the file that
@@ -4009,9 +4035,46 @@ mod tests {
         ];
         std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
         assert_eq!(
-            changed_demos(&demos),
+            changed_demos_with_progress(&demos, |_, _| {}),
             vec![replaced.to_string_lossy().into_owned()]
         );
+    }
+
+    #[test]
+    fn the_changed_demo_check_counts_every_demo_it_reads() {
+        let scratch = Scratch::new("changed_count");
+        let same = scratch.path().join("same.dem");
+        std::fs::write(&same, b"HLDEMO the scanned one").unwrap();
+        let demos = vec![
+            KnownDemo {
+                path: same.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&same).unwrap(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "1-00".into(),
+            },
+        ];
+        let mut seen = Vec::new();
+        let changed = changed_demos_with_progress(&demos, |done, total| seen.push((done, total)));
+        assert!(changed.is_empty());
+        assert_eq!(seen, vec![(1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn the_changed_demo_count_is_throttled_but_always_ends_on_the_last() {
+        use std::sync::atomic::AtomicU32;
+        let last = AtomicU32::new(u32::MAX);
+        assert!(changed_progress_due(&last, 0, 1, 10));
+        assert!(!changed_progress_due(&last, 10, 2, 10));
+        assert!(!changed_progress_due(&last, 32, 3, 10));
+        assert!(changed_progress_due(&last, 33, 4, 10));
+        // The last demo goes out however soon after the one before.
+        assert!(changed_progress_due(&last, 34, 10, 10));
     }
 
     #[test]
