@@ -1853,6 +1853,12 @@ fn listing_status_line(folders: u32, demos: u32) -> String {
     format!("Looking for demos: {folders} folders read, {demos} demos found")
 }
 
+/// The scan's step line while it reads each listed demo's first 64 KB, to
+/// skip the ones already queued and identical copies before any parse.
+fn keying_status_line(done: u32, total: u32) -> String {
+    format!("Checking which demos are new: {done} of {total}")
+}
+
 /// How deep, and how many entries, a folder scan with "Include subfolders"
 /// walks (#531): the same bounds as the moved-demo search (#21), so a folder
 /// with a deep or huge tree under it cannot turn a scan into a hang. Hitting
@@ -2225,10 +2231,13 @@ fn same_path_key(path: &str) -> String {
 /// several new files that are one demo, the one with the shortest name is
 /// kept ("match.dem" over "match - Copy.dem" and "match (2).dem"), whatever
 /// order the scan found them in. Only the key (size + first 64 KB) is read
-/// for the rest, never the demo.
+/// for the rest, never the demo. That read still takes seconds over a
+/// folder of hundreds of demos on a cold disk, so `on_key(done, total)`
+/// reports each one.
 fn skip_known(
     list: Vec<PathBuf>,
     known: &[KnownDemo],
+    on_key: &mut dyn FnMut(u32, u32),
 ) -> (Vec<PathBuf>, Vec<Option<String>>, u32, Vec<ScanCopy>) {
     let known_by_path: std::collections::HashMap<String, &str> = known
         .iter()
@@ -2248,10 +2257,13 @@ fn skip_known(
         (name.chars().count(), name)
     };
 
+    let total = list.len() as u32;
     let entries: Vec<(PathBuf, Option<String>)> = list
         .into_iter()
-        .map(|path| {
+        .enumerate()
+        .map(|(i, path)| {
             let key = demo_file_key(&path);
+            on_key(i as u32 + 1, total);
             (path, key)
         })
         .collect();
@@ -2481,7 +2493,29 @@ pub async fn scan_directory_impl(
         // Demos already in the queue and unchanged on disk are not parsed
         // again: re-adding a folder to pick up one new demo used to re-parse
         // every demo in it, 5-10 s each.
-        let (list, file_keys, unchanged, copies) = skip_known(list, &known);
+        let keying_started = std::time::Instant::now();
+        let last_keying_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let (list, file_keys, unchanged, copies) = skip_known(list, &known, &mut |done, total| {
+            let now_ms = keying_started
+                .elapsed()
+                .as_millis()
+                .min(u32::MAX as u128 - 1) as u32;
+            if done < total && !progress_emit_due(&last_keying_emit, now_ms) {
+                return;
+            }
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": 0,
+                    "found": 0,
+                    "status": keying_status_line(done, total),
+                    "cancelled": false,
+                    "keying": true,
+                    "keyed": done,
+                    "total": total,
+                }),
+            );
+        });
 
         let total_files = list.len() as u32;
 
@@ -3883,8 +3917,15 @@ mod tests {
                 file_key: key_b_before,
             },
         ];
-        let (keep, keys, unchanged, copies) = skip_known(vec![a, b.clone(), c.clone()], &known);
+        let mut reported = Vec::new();
+        let (keep, keys, unchanged, copies) =
+            skip_known(vec![a, b.clone(), c.clone()], &known, &mut |done, total| {
+                reported.push((done, total))
+            });
 
+        // Each key read is reported, so the queue's line moves while a big
+        // folder's keys are read.
+        assert_eq!(reported, [(1, 3), (2, 3), (3, 3)]);
         assert_eq!(unchanged, 1);
         assert_eq!(keep, vec![b.clone(), c.clone()]);
         assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
@@ -3920,6 +3961,7 @@ mod tests {
                 queued.clone(),
             ],
             &known,
+            &mut |_, _| {},
         );
 
         assert_eq!(keep, vec![fresh.clone()]);
