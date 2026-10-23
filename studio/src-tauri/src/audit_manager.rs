@@ -893,10 +893,10 @@ mod tests {
     /// zip, stored or deflated, and the zip is left as it was (#929).
     #[test]
     fn a_copy_is_compared_with_the_entry_a_zip_keeps() {
-        let s = Scratch::new("zip_keep");
-        let copy = s.file("copy.dem", &demo_bytes(1));
-        let odd = s.file("odd.dem", &demo_bytes(2));
-        let zip = s.0.join("pack.zip");
+        let s = crate::test_support::Scratch::new("zip_keep");
+        let copy = scratch_file(&s, "copy.dem", &demo_bytes(1));
+        let odd = scratch_file(&s, "odd.dem", &demo_bytes(2));
+        let zip = s.path().join("pack.zip");
         write_zip(
             &zip,
             &[
@@ -918,7 +918,7 @@ mod tests {
             panic!("an entry no longer in the zip must be refused");
         };
         assert!(err.contains("no longer there"), "{err}");
-        let gone = s.0.join("gone.zip");
+        let gone = s.path().join("gone.zip");
         assert!(matches!(
             check_same_as_zip_entry(&copy, &zip_at(&gone, "s/keep.dem")),
             Err(Refusal::Other(_))
@@ -930,11 +930,11 @@ mod tests {
     /// copy in the game folder; the loose copies keep their own order.
     #[test]
     fn a_zips_copy_is_the_one_kept() {
-        let s = Scratch::new("zip_order");
+        let s = crate::test_support::Scratch::new("zip_order");
         let bytes = demo_bytes(4);
-        let loose = s.file("match.dem", &bytes);
-        let long_zip = s.0.join("a much longer archive name.zip");
-        let zip = s.0.join("p.zip");
+        let loose = scratch_file(&s, "match.dem", &bytes);
+        let long_zip = s.path().join("a much longer archive name.zip");
+        let zip = s.path().join("p.zip");
         write_zip(&long_zip, &[("match.dem", &bytes, true)]);
         write_zip(&zip, &[("match.dem", &bytes, false)]);
         let never = AtomicBool::new(false);
@@ -947,7 +947,7 @@ mod tests {
         );
         assert_eq!(audit.groups.len(), 1);
         let g = &audit.groups[0];
-        let rules = KeepRules::new(std::slice::from_ref(&s.0), &[]);
+        let rules = KeepRules::new(&[s.path().to_path_buf()], &[]);
         let mut files = order_archived(&g.archived);
         files.extend(order_for_keeping(g.files.clone(), &rules));
         assert!(
@@ -1202,6 +1202,7 @@ mod tests {
                 header_hash: 0,
             },
             files: vec![a.clone(), b],
+            archived: Vec::new(),
         }];
         let gone = dir.path().join("gone.dem");
         assert_eq!(singles_of(vec![a, one.clone(), gone], &groups), [(one, 5)]);
