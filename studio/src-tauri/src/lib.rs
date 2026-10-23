@@ -18,6 +18,7 @@ mod match_group_cmd;
 mod messages;
 mod overview_manager;
 mod packet_limit_manager;
+mod pick_paths;
 mod players_tab;
 mod preview_in_place;
 mod render_manager;
@@ -940,6 +941,8 @@ pub fn run() {
             open_recycle_bin,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
+            pick_paths::pick_path_states,
+            pick_paths::pick_user_folders,
             dir_browser::count_demo_files_in_folder,
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,

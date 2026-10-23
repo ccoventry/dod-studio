@@ -1,5 +1,6 @@
 use crate::capture_manager::CustomCommandPayload;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -276,6 +277,11 @@ pub struct AppSettings {
     pub review_fast_forward: bool,
     #[serde(default = "default_review_fast_forward_gap")]
     pub review_fast_forward_gap: i32,
+    /// The folder each Browse button last picked from, keyed by the field's
+    /// id in `studio/src/pick_path.js` (#936), so an empty field's dialog
+    /// starts there instead of wherever any other picker last was.
+    #[serde(default)]
+    pub pick_folders: BTreeMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -505,6 +511,7 @@ impl Default for AppSettings {
             review_tick_yes: true,
             review_fast_forward: true,
             review_fast_forward_gap: default_review_fast_forward_gap(),
+            pick_folders: BTreeMap::new(),
         }
     }
 }
@@ -949,6 +956,7 @@ mod tests {
             assert!(s.review_tick_yes);
             assert!(s.review_fast_forward);
             assert_eq!(s.review_fast_forward_gap, 8);
+            assert!(s.pick_folders.is_empty());
         }
 
         let saved: AppSettings = serde_json::from_str(

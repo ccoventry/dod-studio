@@ -1,4 +1,4 @@
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { themedConfirm } from './themed_confirm.js';
 import { listen } from '@tauri-apps/api/event';
 import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer, openRecycleBin } from './ipc_bridge.js';
@@ -105,7 +105,9 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
   if (browseFolderBtn) {
     browseFolderBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'auditor.target_folder',
+          current: targetFolderInput?.value?.trim(),
           directory: true,
           multiple: false,
           title: STRINGS.AUDITOR.SELECT_FOLDER_DIALOG_TITLE,
@@ -406,7 +408,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
   preferFolderBtn?.addEventListener('click', async () => {
     let folder;
     try {
-      folder = await open({ directory: true, multiple: false, title: STRINGS.AUDITOR.PREFER_FOLDER_DIALOG_TITLE });
+      folder = await pickPath({ field: 'auditor.keep_folder', directory: true, multiple: false, title: STRINGS.AUDITOR.PREFER_FOLDER_DIALOG_TITLE });
     } catch (err) {
       console.error('Error picking the folder to keep:', err);
       return;

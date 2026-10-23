@@ -6,7 +6,7 @@
 // through `getRequest()` when Start Audit is clicked. "Look inside .zip
 // files" (#929) is saved with the app settings (settings_sync.js), so
 // `onSettingsChange` runs when it is ticked.
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listFixedDrives } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 import { addFolders, allDrivesLabel, canStartAudit } from './audit_duplicates.js';
@@ -72,7 +72,7 @@ export function createAuditFolders({ onChange = () => {}, onSettingsChange = () 
 
   addBtn?.addEventListener('click', async () => {
     try {
-      const picked = await open({ directory: true, multiple: true, title: STRINGS.AUDITOR.ADD_FOLDER_DIALOG_TITLE });
+      const picked = await pickPath({ field: 'auditor.add_folder', directory: true, multiple: true, title: STRINGS.AUDITOR.ADD_FOLDER_DIALOG_TITLE });
       if (!picked) return;
       edited = true;
       folders = addFolders(folders, picked);
