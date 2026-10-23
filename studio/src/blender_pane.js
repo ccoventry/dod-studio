@@ -5,7 +5,7 @@
 // beside the .agr, so each finds the last one's output.
 
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { blenderStatus, blenderSetExe, blenderRun, blenderCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -66,6 +66,7 @@ export function initBlenderPane() {
   let assets = load(STORE_ASSETS);
   let busy = false;
   let haveBlender = false;
+  let blenderExe = null;
   let started = 0;
 
   function gamePath() {
@@ -101,6 +102,7 @@ export function initBlenderPane() {
       return; // already toasted
     }
     const b = status.blender;
+    blenderExe = b.exe || null;
     haveBlender = !!b.exe && !!b.scripts;
     if (!b.scripts) {
       statusText.textContent = STRINGS.BLENDER.NO_SCRIPTS;
@@ -184,7 +186,9 @@ export function initBlenderPane() {
   pickExeBtn.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({
+      picked = await pickPath({
+        field: 'blender.exe',
+        current: blenderExe,
         title: STRINGS.BLENDER.PICK_EXE_TITLE,
         multiple: false,
         directory: false,
@@ -215,7 +219,9 @@ export function initBlenderPane() {
   pickAgrBtn.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({
+      picked = await pickPath({
+        field: 'blender.agr',
+        current: agr,
         title: STRINGS.BLENDER.PICK_AGR_TITLE,
         multiple: false,
         directory: false,
@@ -235,7 +241,7 @@ export function initBlenderPane() {
   pickAssetsBtn.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({ title: STRINGS.BLENDER.PICK_ASSETS_TITLE, directory: true, multiple: false });
+      picked = await pickPath({ field: 'blender.assets', current: assets, title: STRINGS.BLENDER.PICK_ASSETS_TITLE, directory: true, multiple: false });
     } catch (err) {
       console.error('Assets picker failed:', err);
       return;

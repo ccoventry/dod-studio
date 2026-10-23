@@ -345,6 +345,11 @@ test('an upscaler found elsewhere is named and its styles can build; a chosen fo
     },
   };
   await loadHarness(page, { status: found, picked: dir });
+  // The chosen folder exists, so Browse starts in it (#936).
+  await page.evaluate((d) => {
+    window.__mockInvokeHandlers.pick_path_states = ({ paths }) =>
+      paths.map((p) => (p === d ? { path: p, is_file: false, exact: true, is_root: false } : null));
+  }, dir);
   await page.click('#hd-refresh-btn');
   const text = page.locator('#hd-tools-text');
   await expect(text).toContainText(`Upscaler: the folder you chose (${dir}).`);
@@ -358,6 +363,7 @@ test('an upscaler found elsewhere is named and its styles can build; a chosen fo
     window.__mockInvocations.find((c) => c.cmd === 'hd_set_upscaler')?.args)).toEqual({ path: dir });
   const picker = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'plugin:dialog|open')?.args);
   expect(picker.options.directory).toBe(true);
+  expect(picker.options.defaultPath).toBe(dir);
 
   await page.click('#hd-upscaler-reset-btn');
   await expect.poll(() => page.evaluate(() =>
