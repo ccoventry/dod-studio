@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
   deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
-  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
+  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy, elapsedText, auditFoldersKey,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -33,12 +33,31 @@ describe('audit_duplicates (#844)', () => {
   });
 
   it('says which step the audit is on, with a bar once there is a total', () => {
-    expect(auditProgressView(null)).toEqual({ pct: 0, text: 'Looking for demos: 0 folders read', current: '' });
+    expect(auditProgressView(null)).toEqual({
+      pct: 0, text: 'Looking for demos: 0 folders read', current: '', indeterminate: true,
+    });
     expect(auditProgressView({ folders: 1, total: 0, done: 0, current: '\\\\?\\C:\\x' }))
-      .toEqual({ pct: 0, text: 'Looking for demos: 1 folder read', current: 'C:\\x' });
+      .toEqual({ pct: 0, text: 'Looking for demos: 1 folder read', current: 'C:\\x', indeterminate: true });
     expect(auditProgressView({ folders: 9, total: 8, done: 2, current: 'C:\\a.dem' }))
-      .toEqual({ pct: 25, text: 'Comparing demos: 2 / 8', current: 'C:\\a.dem' });
+      .toEqual({ pct: 25, text: 'Comparing demos: 2 / 8', current: 'C:\\a.dem', indeterminate: false });
     expect(auditProgressView({ folders: 9, total: 8, done: 12 }).pct).toBe(100);
+  });
+
+  it('measures the folder walk against the last audit of the same folders', () => {
+    const view = auditProgressView({ folders: 93_000, total: 0 }, 186_000);
+    expect(view.pct).toBe(50);
+    expect(view.indeterminate).toBe(false);
+    expect(view.text).toBe('Looking for demos: 93000 folders read (about 186000 last time)');
+    // More folders than last time: the bar waits short of full.
+    expect(auditProgressView({ folders: 200_000, total: 0 }, 186_000).pct).toBe(95);
+  });
+
+  it('times the audit as m:ss, and keys the remembered count by its folders', () => {
+    expect(elapsedText(0)).toBe('0:00');
+    expect(elapsedText(6_800)).toBe('0:06');
+    expect(elapsedText(75_000)).toBe('1:15');
+    expect(auditFoldersKey(['D:\\b', 'C:\\A'], false)).toBe(auditFoldersKey(['c:\\a', 'd:\\B'], false));
+    expect(auditFoldersKey([], true)).not.toBe(auditFoldersKey([], false));
   });
 
   it('words the delete progress by where the files go', () => {

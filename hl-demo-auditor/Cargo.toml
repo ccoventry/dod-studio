@@ -15,6 +15,9 @@ path = "src/main.rs"
 # The delta-continuity check behind `--integrity` (#41).
 analysis = { path = "../analysis" }
 clap = { workspace = true, features = ["derive"] }
+# The key cache file (#888).
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

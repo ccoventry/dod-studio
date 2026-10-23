@@ -176,6 +176,17 @@ export async function listGameFolders(gamePath) {
     });
 }
 
+/** The language file a dod copy lacks (#925): `{ folder, language, needed,
+ *  rename_from }`, or null when it has it (or is dod). Best-effort: null on
+ *  error, which only leaves the warning out. */
+export async function gameFolderLanguageFile(gamePath, folder) {
+  return invoke('game_folder_language_file', { gamePath, folder })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_folder_language_file):", err);
+      return null;
+    });
+}
+
 /** The PNGs in the game install's logos folder, for Configuration >
  *  Players' spray column (#428). Empty when they can't be listed. */
 export async function listLogoPngs(gamePath, gameFolder) {
@@ -884,6 +895,15 @@ export async function revealInExplorer(path) {
     });
 }
 
+/** Opens Windows' Recycle Bin, where the Demo Auditor's deletes go. */
+export async function openRecycleBin() {
+  return invoke("open_recycle_bin")
+    .catch((err) => {
+      console.error("IPC Execution Error (open_recycle_bin):", err);
+      showToast(STRINGS.IPC.folderOpenFailed(err), 'error');
+    });
+}
+
 /** Sweeps `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (files
  *  that still carry their `.dodstudio_preview` sidecar) left behind by prior
  *  capture sessions. `gameDir` is the configured hl.exe path. */
@@ -1060,6 +1080,16 @@ export async function hookDllOverrideAllowed() {
   return invoke("hook_dll_override_allowed").catch((err) => {
     console.error("IPC Execution Error (hook_dll_override_allowed):", err);
     return false;
+  });
+}
+
+/** The test hook DLLs in the checkout's `local\` folder (hook_dll_list.rs):
+ *  `{ folder, checkout_build, dlls: [{ label, path, modified_unix_secs }] }`.
+ *  Best-effort: an empty list on error. */
+export async function listHookDlls() {
+  return invoke("list_hook_dlls").catch((err) => {
+    console.error("IPC Execution Error (list_hook_dlls):", err);
+    return { folder: null, checkout_build: null, dlls: [] };
   });
 }
 
