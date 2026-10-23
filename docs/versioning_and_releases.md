@@ -46,6 +46,16 @@ Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version
 
 Published as a **prerelease** named `DoD Studio <version> (experimental)`, with release notes covering the PRs merged since the **latest stable tag** (so they list what this build has that the stable channel lacks, not what an older stable already shipped), always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
 
+## No tests in the release job: CI's results instead
+
+Neither release workflow runs the tests. Every commit on `dev` and `main` arrives through a PR whose required checks passed, so rerunning them cost 2.5-10 minutes a release for nothing (#915). Instead, a "Require passing CI on this commit" step early in the job runs `.github/scripts/require_ci_passed.py`, which reads the required status checks of the branch's ruleset (`dev` for experimental, `main` for stable) and fails the release, naming each check, unless every one has a passing run by its exact job name:
+
+- **On the commit itself, or on a commit with the same tree.** A stable release builds main's `dev` → `main` merge commit, and CI never runs on main, so its CI is on the merge's second parent (`dev`'s tip) or the PR head. That counts because the rulesets require an up-to-date branch: the merge commit's tree equals the PR head's, and CI's pull_request run tested exactly that tree. A commit no CI run tested (an admin push, say) fails.
+- **The latest run per commit counts**, so a re-run replaces a failure. `success`, `neutral` and `skipped` pass, as in the rulesets.
+- **It waits** (up to 45 minutes) while a run is still going, e.g. dev's push CI right after a merge.
+
+Locally: `python .github/scripts/require_ci_passed.py --sha <commit> --branch main`.
+
 ## Release notes
 
 Both release workflows build their release body with `.github/scripts/release_notes.py` (a "Collect release notes" step early in the job, so a failure costs seconds, not a build) and pass it to `tauri-action` as `releaseBody`, with `generateReleaseNotes` off. GitHub's own generated notes (#165, #490) listed ~290 bare PR titles, mostly under "Other changes" because few PRs carry a label, and the experimental build compared from v0.1.3 instead of the last stable v0.1.4, so it relisted shipped PRs. `.github/release.yml` still groups GitHub's notes, but only for someone clicking "Generate release notes" on the release page.
