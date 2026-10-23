@@ -6,7 +6,8 @@
 //! the game's own `dod\resource\DemoPlayerDialog.res` is the user's, never
 //! written. So every launch copies the user's layout (or the stock `valve`
 //! one when `dod` has none) into `dod_addon\resource\`, which `-addons` puts
-//! ahead of `dod`, with the two controls added: [`PERCENT_LABEL`] (a `Label`)
+//! ahead of `dod`, with the two controls added (for another Game folder,
+//! `<folder>\resource` into `<folder>_addon`, #402): [`PERCENT_LABEL`] (a `Label`)
 //! and [`PROGRESS_BAR`] (a `ProgressBar`), both hidden until the hook shows
 //! them (`goldsrc-hooks/src/demo_bar_progress.rs`). They sit where
 //! `TimeLabel` is, since the time means nothing while loading.
@@ -172,61 +173,87 @@ fn tokens(line: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// The layout a launch reads: the user's `dod\resource` one, else the stock
-/// `valve\resource` one.
-fn source_in(game_dir: &Path) -> Option<PathBuf> {
-    ["dod", "valve"]
+/// The layout a launch reads: the user's own in the game folder's
+/// `resource` (`dod` unless the Game folder setting says otherwise, #402),
+/// else the stock `valve\resource` one.
+fn source_in(game_dir: &Path, game_folder: &str) -> Option<PathBuf> {
+    [game_folder, "valve"]
         .into_iter()
         .map(|folder| game_dir.join(folder).join("resource").join(FILE_NAME))
         .find(|path| path.is_file())
 }
 
-/// Where the launch writes it.
-fn target_in(game_dir: &Path) -> PathBuf {
-    game_dir.join("dod_addon").join("resource").join(FILE_NAME)
+/// Where the launch writes it: `<game folder>_addon`, the folder `-addons`
+/// searches for `-game <game folder>` (`shared::paths::addon_dir`).
+fn target_in(game_dir: &Path, game_folder: &str) -> PathBuf {
+    game_dir
+        .join(format!("{game_folder}_addon"))
+        .join("resource")
+        .join(FILE_NAME)
 }
 
-/// Writes `dod_addon\resource\DemoPlayerDialog.res` for the game at
-/// `game_dir` (the folder `hl.exe` is in). Nothing under `dod` or `valve` is
-/// ever written.
-pub fn install(game_dir: &Path) -> Result<Outcome, String> {
-    let source = source_in(game_dir).ok_or_else(|| {
+/// The file's bytes as one char each (Latin-1), so text that is not UTF-8
+/// comes back out unchanged: everything searched for and added is ASCII.
+fn bytes_as_text(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| char::from(b)).collect()
+}
+
+/// The inverse of [`bytes_as_text`]; every char it and the added blocks hold
+/// is below 256.
+fn text_as_bytes(text: &str) -> Vec<u8> {
+    text.chars()
+        .map(|c| u8::try_from(c).unwrap_or(b'?'))
+        .collect()
+}
+
+/// Writes `<game folder>_addon\resource\DemoPlayerDialog.res` for the game at
+/// `game_dir` (the folder `hl.exe` is in). Nothing in the game folder or
+/// `valve` is ever written.
+pub fn install(game_dir: &Path, game_folder: &str) -> Result<Outcome, String> {
+    let source = source_in(game_dir, game_folder).ok_or_else(|| {
         format!(
             "no {FILE_NAME} in {} or {}",
-            game_dir.join("dod").join("resource").display(),
+            game_dir.join(game_folder).join("resource").display(),
             game_dir.join("valve").join("resource").display()
         )
     })?;
     let bytes =
         std::fs::read(&source).map_err(|e| format!("could not read {}: {e}", source.display()))?;
-    let text = String::from_utf8_lossy(&bytes);
-    let with_controls = with_loading_controls(&text)
+    // ASCII blocks spliced into UTF-16 text would break the whole layout.
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+        return Err(format!(
+            "{} is UTF-16 text, which this can't add to",
+            source.display()
+        ));
+    }
+    let with_controls = with_loading_controls(&bytes_as_text(&bytes))
+        .map(|text| text_as_bytes(&text))
         .ok_or_else(|| format!("{} holds no layout to add to", source.display()))?;
-    let target = target_in(game_dir);
-    if std::fs::read(&target).is_ok_and(|now| now == with_controls.as_bytes()) {
+    let target = target_in(game_dir, game_folder);
+    if std::fs::read(&target).is_ok_and(|now| now == with_controls) {
         return Ok(Outcome::Unchanged);
     }
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
-    std::fs::write(&target, with_controls.as_bytes())
+    std::fs::write(&target, &with_controls)
         .map_err(|e| format!("could not write {}: {e}", target.display()))?;
     Ok(Outcome::Written { source, target })
 }
 
 /// What every launch does before the game starts: [`install`] for the game
-/// `hl_exe` belongs to, with one activity-log line when the layout was
-/// (re)written or could not be. An empty `hl_exe` (a config with no game
-/// yet) does nothing.
-pub fn prepare(hl_exe: &str) {
+/// `hl_exe` belongs to and the `-game` folder it starts, with one
+/// activity-log line when the layout was (re)written or could not be. An
+/// empty `hl_exe` (a config with no game yet) does nothing.
+pub fn prepare(hl_exe: &str, game_folder: &str) {
     let Some(game_dir) = Path::new(hl_exe)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
     else {
         return;
     };
-    match install(game_dir) {
+    match install(game_dir, game_folder) {
         Ok(Outcome::Written { source, target }) => crate::log_markdown(&format!(
             "- Demo bar layout: wrote {} from {} with the loading progress controls",
             target.display(),
@@ -346,19 +373,19 @@ mod tests {
     fn install_prefers_dod_over_valve_and_writes_once() {
         let dir = game_dir("prefers");
         std::fs::write(dir.join("valve").join("resource").join(FILE_NAME), STOCK).unwrap();
-        let target = target_in(&dir);
-        assert!(matches!(install(&dir), Ok(Outcome::Written { .. })));
+        let target = target_in(&dir, "dod");
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::Written { .. })));
         assert!(
             std::fs::read_to_string(&target)
                 .unwrap()
                 .contains(PROGRESS_BAR)
         );
-        assert_eq!(install(&dir), Ok(Outcome::Unchanged));
+        assert_eq!(install(&dir, "dod"), Ok(Outcome::Unchanged));
 
         std::fs::create_dir_all(dir.join("dod").join("resource")).unwrap();
         let users = STOCK.replace("\"284\"", "\"290\"");
         std::fs::write(dir.join("dod").join("resource").join(FILE_NAME), &users).unwrap();
-        match install(&dir) {
+        match install(&dir, "dod") {
             Ok(Outcome::Written { source, .. }) => assert!(source.starts_with(dir.join("dod"))),
             other => panic!("{other:?}"),
         }
@@ -382,15 +409,79 @@ mod tests {
     #[test]
     fn install_without_a_source_says_so() {
         let dir = game_dir("empty");
-        let why = install(&dir).unwrap_err();
+        let why = install(&dir, "dod").unwrap_err();
         assert!(why.contains(FILE_NAME), "{why}");
-        assert!(!target_in(&dir).exists());
+        assert!(!target_in(&dir, "dod").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn another_game_folder_reads_its_own_layout_and_writes_its_own_addon() {
+        // `-game dod_movies -addons` searches dod_movies_addon, then
+        // dod_movies: a copy in dod_addon would never load (#402).
+        let dir = game_dir("folder");
+        std::fs::write(dir.join("valve").join("resource").join(FILE_NAME), STOCK).unwrap();
+        std::fs::create_dir_all(dir.join("dod").join("resource")).unwrap();
+        std::fs::write(
+            dir.join("dod").join("resource").join(FILE_NAME),
+            STOCK.replace("\"284\"", "\"111\""),
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("dod_movies").join("resource")).unwrap();
+        std::fs::write(
+            dir.join("dod_movies").join("resource").join(FILE_NAME),
+            STOCK.replace("\"284\"", "\"222\""),
+        )
+        .unwrap();
+        match install(&dir, "dod_movies") {
+            Ok(Outcome::Written { source, target }) => {
+                assert!(source.starts_with(dir.join("dod_movies")));
+                assert_eq!(
+                    target,
+                    dir.join("dod_movies_addon")
+                        .join("resource")
+                        .join(FILE_NAME)
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        let written = std::fs::read_to_string(target_in(&dir, "dod_movies")).unwrap();
+        assert!(written.contains("\"222\""));
+        assert!(!dir.join("dod_addon").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bytes_that_are_not_utf8_are_kept() {
+        // A Windows-1252 label text ("Zurück", 0xfc) must not become U+FFFD.
+        let dir = game_dir("latin1");
+        let mut users = STOCK.as_bytes().to_vec();
+        let at = users.windows(4).position(|w| w == b"stop").unwrap();
+        users.splice(at..at + 4, b"Zur\xfcck".iter().copied());
+        std::fs::write(dir.join("valve").join("resource").join(FILE_NAME), &users).unwrap();
+        install(&dir, "dod").unwrap();
+        let written = std::fs::read(target_in(&dir, "dod")).unwrap();
+        let close = users.iter().rposition(|&b| b == b'}').unwrap();
+        assert!(written.starts_with(&users[..close]));
+        assert!(written.ends_with(&users[close..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_utf16_layout_is_refused_not_broken() {
+        let dir = game_dir("utf16");
+        let mut users = vec![0xff, 0xfe];
+        users.extend(STOCK.encode_utf16().flat_map(u16::to_le_bytes));
+        std::fs::write(dir.join("valve").join("resource").join(FILE_NAME), &users).unwrap();
+        let why = install(&dir, "dod").unwrap_err();
+        assert!(why.contains("UTF-16"), "{why}");
+        assert!(!target_in(&dir, "dod").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn prepare_does_nothing_for_no_game() {
-        prepare("");
-        prepare("hl.exe");
+        prepare("", "dod");
+        prepare("hl.exe", "dod");
     }
 }
