@@ -17,10 +17,11 @@ import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
+import { getPickFolders, setPickFolders } from './pick_path.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
- *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
+ *   form doesn't hold ({ scanPaths, demoFolderHistory, recentProjects, scanFoldersForDemos,
  *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
  *   setupDismissed }),
  *   and currentCaptureMode().
@@ -104,6 +105,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
+      recent_projects: state.recentProjects || [],
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",
@@ -163,6 +165,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
       players: getPlayers(),
+      pick_folders: getPickFolders(),
       ...readReviewSettings(),
       ...scanRateSettings(),
     };
@@ -203,6 +206,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
   setPlayers(settings.players);
+  // Each Browse button's last folder (#936).
+  setPickFolders(settings.pick_folders);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;

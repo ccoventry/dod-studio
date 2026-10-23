@@ -6,7 +6,7 @@
 // under a name the user gives, so it shows in the crosshair lists. The copy
 // itself is native/src/crosshair_import.rs.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { addCrosshairFile } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
@@ -66,7 +66,8 @@ export function createCrosshairImport({ getPaths, getSprites, onAdded }) {
     busy = true;
     refreshName();
     say('');
-    const picked = await open({
+    const picked = await pickPath({
+      field: 'players.crosshair',
       multiple: false,
       directory: false,
       title: S().CROSSHAIR_PICK_TITLE,
