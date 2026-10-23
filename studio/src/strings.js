@@ -914,6 +914,8 @@ export const STRINGS = {
     STATUS_READY: 'Status: Ready to audit',
     RESULTS_TITLE: 'Duplicate Groups Found',
     DELETE_SELECTED_BUTTON: 'Move to Recycle Bin',
+    OPEN_RECYCLE_BIN_BUTTON: 'Open Recycle Bin',
+    OPEN_RECYCLE_BIN_TITLE: 'Open Windows’ Recycle Bin, to see or restore the demos moved there',
     TABLE_HEADER_STATUS: 'Status',
     TABLE_HEADER_SIZE: 'Size',
     TABLE_HEADER_FILE_PATH: 'File Path',
@@ -940,12 +942,14 @@ export const STRINGS = {
     CANCELLED_ROW: 'The audit was cancelled before it finished, so no groups are listed.',
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
+    listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
+    elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups) => `Done: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
+    doneStatus: (demos, groups, seconds) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
