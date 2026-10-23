@@ -4,7 +4,7 @@
 // Moved out of main.js, which owns the queue. The queue array is reassigned
 // there, so it's reached through getDemos() rather than held.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { locateMissingDemos, changedDemos } from './ipc_bridge.js';
 import { renameDemoInTakeIndex } from './take_index.js';
 import { themedConfirm } from './themed_confirm.js';
@@ -281,7 +281,10 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
   // demo has a saved file key and the pick doesn't match it, ask first.
   async function locateDemoByHand(demo) {
     try {
-      const picked = await open({
+      const picked = await pickPath({
+        field: 'project.locate_demo',
+        // Missing, so the dialog starts in its nearest folder that's left.
+        current: demo.path,
         multiple: false,
         title: STRINGS.MAIN.LOCATE_DEMO_DIALOG_TITLE,
         filters: [{ name: 'Demo', extensions: ['dem'] }],
