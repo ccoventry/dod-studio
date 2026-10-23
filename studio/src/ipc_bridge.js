@@ -52,9 +52,23 @@ export async function filesExist(paths) {
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
  * disk and counts it in `unchanged` instead of parsing it again.
+ * `includeSubfolders` false reads only each folder's own demos (#531).
  */
-export async function scanDirectory(scanPaths, known = [], workers = undefined) {
-  return invoke("scan_directory", { paths: scanPaths, known, workers })
+/**
+ * Files and folders dropped from Windows (#530), sorted on disk: resolves
+ * `{ demos, folders, skipped }` (skipped: file names).
+ */
+export async function sortDroppedPaths(paths) {
+  return invoke("sort_dropped_paths", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (sort_dropped_paths):", err);
+      showToast(STRINGS.IPC.dropError(err), 'error');
+      throw err;
+    });
+}
+
+export async function scanDirectory(scanPaths, known = [], workers = undefined, includeSubfolders = true) {
+  return invoke("scan_directory", { paths: scanPaths, known, workers, includeSubfolders })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');

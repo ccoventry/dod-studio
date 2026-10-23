@@ -9,6 +9,7 @@ mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
+mod drop_paths;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
@@ -321,6 +322,7 @@ async fn scan_directory(
     paths: Vec<String>,
     known: Option<Vec<capture_manager::KnownDemo>>,
     workers: Option<usize>,
+    include_subfolders: Option<bool>,
 ) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
@@ -329,6 +331,8 @@ async fn scan_directory(
         paths,
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        // Missing: today's walk into every subfolder (#531).
+        include_subfolders.unwrap_or(true),
     )
     .await
 }
@@ -872,6 +876,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             demo_cache_cmd::cache_demos,
+            drop_paths::sort_dropped_paths,
             demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
