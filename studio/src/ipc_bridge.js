@@ -58,6 +58,27 @@ export async function takeOpenFiles() {
     });
 }
 
+/** The `.dodstudio` name a just-loaded `.json` project could switch to
+ *  (#528, project_convert.js), or null when there's nothing to offer or the
+ *  check failed. */
+export async function projectConvertOffer(path) {
+  return invoke("project_convert_offer", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (project_convert_offer):", err);
+      return null;
+    });
+}
+
+/** Renames a `.json` project to `.dodstudio`; resolves the new path, rejects
+ *  with the backend's message (say, the name is taken). */
+export async function convertProjectFile(path) {
+  return invoke("convert_project_file", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (convert_project_file):", err);
+      throw err;
+    });
+}
+
 /** Whether DoD Studio is in `.dem`'s Open With list (#528):
  *  `{ registered, thisCopy, otherExe }`, or null when it couldn't be read. */
 export async function demOpenWithStatus() {

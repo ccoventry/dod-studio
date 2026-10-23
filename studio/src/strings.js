@@ -1545,6 +1545,16 @@ export const STRINGS = {
       `<code>${name} ${have.toFixed(1)}s</code> — needs at least <code>${need.toFixed(1)}s</code> for ${binding}`,
   },
 
+  // After a .json project loads (#528, project_convert.js).
+  PROJECT_CONVERT: {
+    TITLE: 'Switch to .dodstudio?',
+    MESSAGE: 'Switch this project to the .dodstudio file type? It will open in DoD Studio when double-clicked. The file is renamed in its folder; nothing inside it changes.',
+    SWITCH: 'Switch to .dodstudio',
+    KEEP: 'Keep as .json',
+    switchedToast: (name) => `Project switched to ${name}.`,
+    failedToast: (err) => `The project stays as .json: ${err}`,
+  },
+
   MAIN: {
     SELECT_CAPTURE_OUTPUT_DIR_TITLE: 'Select Capture Output Directory',
     SELECT_RENDER_EXPORT_DIR_TITLE: 'Select Render Export Directory',

@@ -29,7 +29,10 @@ import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_t
  *   offerRescan() from project_rescan.js, and getReviewSettings()/
  *   setReviewSettings(raw), the Review box's HLTV pick (#828,
  *   review_hltv_picker.js), and onProjectFile(path), told each file opened
- *   or saved (File → Open Recent, #935).
+ *   or saved (File → Open Recent, #935). offerConvert(path) asks to switch a
+ *   loaded `.json` project to `.dodstudio` and resolves its new path or null
+ *   (project_convert.js, #528); onProjectRenamed(oldPath, newPath) is told
+ *   when it did.
  */
 export function createProjectSession({
   getDemos,
@@ -44,6 +47,8 @@ export function createProjectSession({
   getReviewSettings = () => undefined,
   setReviewSettings = () => {},
   onProjectFile = () => {},
+  offerConvert = async () => null,
+  onProjectRenamed = () => {},
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -264,7 +269,21 @@ export function createProjectSession({
       showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
       return false;
     }
+    await switchToDodstudio(selected);
     return true;
+  }
+
+  // Last, once the load and every prompt it brings (missing demos, the
+  // rescan offer) are done: the one-time offer to switch a `.json` project
+  // to `.dodstudio` (#528, project_convert.js). Changes made since the load
+  // (a relocated demo, a rescan) are saved into the renamed file.
+  async function switchToDodstudio(path) {
+    const renamed = await offerConvert(path);
+    if (!renamed) return;
+    currentSessionPath = renamed;
+    updateSessionFileIndicator();
+    onProjectRenamed(path, renamed);
+    if (hasUnsavedChanges) await saveProjectSession();
   }
 
   // New Session (#122/#149) — resets to the same blank state the app starts

@@ -55,6 +55,7 @@ import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
 import { createRecentProjects } from './recent_projects.js';
+import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
@@ -153,7 +154,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
     onProjectFile: (path) => recentProjects.remember(path),
+    // A loaded .json project offers to switch to .dodstudio (#528).
+    offerConvert: (path) => projectConvert.offerConvert(path),
+    onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
+  const projectConvert = createProjectConvert({ persist: () => persistAppSettings() });
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 

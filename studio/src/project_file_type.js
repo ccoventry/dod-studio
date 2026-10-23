@@ -3,7 +3,8 @@
 // Windows opens with DoD Studio. Projects saved as `.json` before that keep
 // loading, and saving one writes back to that same `.json`
 // (project_session.js keeps the loaded path), so nothing is renamed behind
-// the user's back. Only a project's first save picks the name, and it
+// the user's back: only when they take the offer to switch it, once it has
+// loaded (project_convert.js). A project's first save picks the name, and it
 // defaults to `.dodstudio`.
 
 import { STRINGS } from './strings.js';

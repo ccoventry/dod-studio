@@ -25,6 +25,7 @@ mod packet_limit_manager;
 mod pick_paths;
 mod players_tab;
 mod preview_in_place;
+mod project_convert;
 mod render_manager;
 mod review_manager;
 mod settings_manager;
@@ -1058,6 +1059,8 @@ pub fn run() {
             open_files::take_open_files,
             dem_open_with::dem_open_with_status,
             dem_open_with::set_dem_open_with,
+            project_convert::project_convert_offer,
+            project_convert::convert_project_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

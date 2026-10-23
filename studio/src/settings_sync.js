@@ -20,6 +20,7 @@ import { refreshHookDllRow } from './hook_dll_row.js';
 import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
 import { getPickFolders, setPickFolders } from './pick_path.js';
 import { getDemOpenTarget, applyDemOpenTarget } from './file_types_settings.js';
+import { getKeptJsonProjects, setKeptJsonProjects } from './project_convert.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -109,6 +110,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       demo_folder_history: state.demoFolderHistory,
       recent_projects: state.recentProjects || [],
       dem_open_target: getDemOpenTarget(),
+      kept_json_projects: getKeptJsonProjects(),
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",
@@ -326,6 +328,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
   if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
   applyDemOpenTarget(settings.dem_open_target);
+  setKeptJsonProjects(settings.kept_json_projects);
   setClipNameTemplate(settings.clip_name_template);
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,

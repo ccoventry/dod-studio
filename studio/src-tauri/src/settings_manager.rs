@@ -56,6 +56,10 @@ pub struct AppSettings {
     /// `analyzer` (the Demo Analyzer) or `queue` (Studio's queue).
     #[serde(default = "default_dem_open_target")]
     pub dem_open_target: String,
+    /// `.json` projects whose "switch to .dodstudio?" offer was answered
+    /// "Keep as .json" (#528, `project_convert.js`): never offered again.
+    #[serde(default)]
+    pub kept_json_projects: Vec<String>,
     /// Gates the Demo Analyzer Explorer tree's per-subfolder "(N)" demo-count
     /// badge (Quick Links counts are always shown, matching dev — see
     /// docs/archive/tauri_parity_audit.md Area 1). Defaults to `false`, matching
@@ -456,6 +460,7 @@ impl Default for AppSettings {
             demo_folder_history: Vec::new(),
             recent_projects: Vec::new(),
             dem_open_target: default_dem_open_target(),
+            kept_json_projects: Vec::new(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
             language: "en".to_string(),
@@ -829,13 +834,16 @@ mod tests {
         )
         .expect("a settings file");
         assert_eq!(older.dem_open_target, "analyzer");
+        assert!(older.kept_json_projects.is_empty());
         let queue = AppSettings {
             dem_open_target: "queue".into(),
+            kept_json_projects: vec!["D:/projects/old.json".into()],
             ..AppSettings::default()
         };
         let json = serde_json::to_string(&queue).expect("settings must serialize");
         let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
         assert_eq!(restored.dem_open_target, "queue");
+        assert_eq!(restored.kept_json_projects, ["D:/projects/old.json"]);
     }
 
     /// A file saved while Seek Between Clips was experimental (off by default)

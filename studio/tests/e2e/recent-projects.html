@@ -5,7 +5,7 @@
   main.js wires them, with Tauri's IPC mocked (vite.config.e2e.js).
   `window.__missing` lists the paths `files_exist` reports gone;
   `window.__recent` is the factory, `window.__markDirty()` gives the session
-  unsaved changes.
+  unsaved changes, `window.__order` lists the load's steps in order (#528).
 -->
 <html lang="en">
 <head>
@@ -50,6 +50,7 @@
     import { initThemedConfirm } from '/src/themed_confirm.js';
     import { createProjectSession } from '/src/project_session.js';
     import { createRecentProjects } from '/src/recent_projects.js';
+    import { createProjectConvert } from '/src/project_convert.js';
 
     window.__missing = [];
     window.__mockInvokeHandlers.files_exist = ({ paths }) => paths.map((p) => !window.__missing.includes(p));
@@ -59,6 +60,7 @@
     initAppMenu();
     let demos = [];
     window.__saved = [];
+    window.__order = [];
     const { openProject, markProjectDirty } = createProjectSession({
       getDemos: () => demos,
       replaceDemos: (d) => { demos = d; },
@@ -67,9 +69,14 @@
       setTakeIndex: () => {},
       getProjectTeams: () => ({}),
       setProjectTeams: () => {},
-      checkMissingDemos: async () => {},
+      checkMissingDemos: async () => { window.__order.push('missing'); },
+      offerRescan: async () => { window.__order.push('rescan'); return false; },
       onProjectFile: (path) => recent.remember(path),
+      // The .json -> .dodstudio offer (#528), with the real themed prompt.
+      offerConvert: (path) => { window.__order.push('convert'); return convert.offerConvert(path); },
+      onProjectRenamed: (oldPath, newPath) => recent.rename(oldPath, newPath),
     });
+    const convert = createProjectConvert({ persist: async () => { window.__saved.push(recent.list()); } });
     const recent = createRecentProjects({
       openProject,
       persistAppSettings: async () => { window.__saved.push(recent.list()); },
