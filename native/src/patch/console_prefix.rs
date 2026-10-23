@@ -98,7 +98,15 @@ mod tests {
     use super::*;
 
     /// Names the hook registers that never had a `dodstudio_` one.
-    const NEW_SINCE_555: &[&str] = &["debug_log_gun_lowered"];
+    const NEW_SINCE_555: &[&str] = &[
+        "debug_log_gun_lowered",
+        "debug_log_server_sounds",
+        "debug_log_view_bob",
+        "hud_hide_center_text",
+        "hud_overview_hide_speaker",
+        "sound_mute_win_and_capture",
+        "spec_hide_text",
+    ];
 
     #[test]
     fn an_old_name_becomes_the_name_in_the_table() {

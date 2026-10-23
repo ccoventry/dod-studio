@@ -38,16 +38,51 @@ export async function defaultProjectsDir() {
     });
 }
 
+/** One boolean per path: whether it is a file that's there (#935, Open
+ *  Recent's missing entries). `null` when the check itself failed. */
+export async function filesExist(paths) {
+  return invoke("files_exist", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (files_exist):", err);
+      return null;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
  * disk and counts it in `unchanged` instead of parsing it again.
+ * `includeSubfolders` false reads only each folder's own demos (#531).
  */
-export async function scanDirectory(scanPaths, known = [], workers = undefined) {
-  return invoke("scan_directory", { paths: scanPaths, known, workers })
+/**
+ * Files and folders dropped from Windows (#530), sorted on disk: resolves
+ * `{ demos, folders, skipped }` (skipped: file names).
+ */
+export async function sortDroppedPaths(paths) {
+  return invoke("sort_dropped_paths", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (sort_dropped_paths):", err);
+      showToast(STRINGS.IPC.dropError(err), 'error');
+      throw err;
+    });
+}
+
+export async function scanDirectory(scanPaths, known = [], workers = undefined, includeSubfolders = true) {
+  return invoke("scan_directory", { paths: scanPaths, known, workers, includeSubfolders })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');
+      throw err;
+    });
+}
+
+// What a rescan of `paths` has to do (#937): `{ cached, upgradable, to_parse,
+// bytes_to_parse }`, from the analyzer cache's file names and first bytes.
+// No toast on failure: the rescan prompt just leaves its time line out.
+export async function estimateRescan(paths) {
+  return invoke("estimate_rescan", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (estimate_rescan):", err);
       throw err;
     });
 }
@@ -57,12 +92,21 @@ export async function scanDirectory(scanPaths, known = [], workers = undefined) 
 // `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
 // Paths of the demos whose file no longer matches its saved key (#21).
 // Empty when the check itself fails, so a broken check never blocks a batch.
-export async function changedDemos(demos) {
-  return invoke("changed_demos", { demos })
-    .catch((err) => {
-      console.error("IPC Execution Error (changed_demos):", err);
-      return [];
-    });
+// `onProgress({ done, total })` gets `changed_demos_progress` while it reads
+// them (#953).
+export async function changedDemos(demos, onProgress = null) {
+  const unlisten = onProgress
+    ? await listen('changed_demos_progress', (event) => onProgress(event.payload)).catch(() => null)
+    : null;
+  try {
+    return await invoke("changed_demos", { demos })
+      .catch((err) => {
+        console.error("IPC Execution Error (changed_demos):", err);
+        return [];
+      });
+  } finally {
+    unlisten?.();
+  }
 }
 
 export async function locateMissingDemos(demos, searchDirs) {
@@ -80,6 +124,16 @@ export async function systemMemoryBytes() {
     .catch((err) => {
       console.error("IPC Execution Error (system_memory_bytes):", err);
       return null;
+    });
+}
+
+// The built-in command profiles (#911). On failure the Commands tab lists
+// only the user's own profiles.
+export async function builtinCommandProfiles() {
+  return invoke("builtin_command_profiles")
+    .catch((err) => {
+      console.error("IPC Execution Error (builtin_command_profiles):", err);
+      return [];
     });
 }
 
@@ -170,6 +224,48 @@ export async function listGameFolders(gamePath) {
     .catch((err) => {
       console.error("IPC Execution Error (list_game_folders):", err);
       throw err;
+    });
+}
+
+/** Setup's movie copy (#939): the sizes of the `dod` beside hl.exe (`files`,
+ *  `bytes` without demos, `demo_files`, `demo_bytes`), the drive's
+ *  `free_bytes` (null when unknown), `headroom_bytes`, the names `existing`
+ *  in the Half-Life folder and the `default_name`. */
+export async function movieCopyPlan(gamePath) {
+  return invoke('movie_copy_plan', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (movie_copy_plan):", err);
+      throw err;
+    });
+}
+
+/** Copies `dod` to `name`; resolves `{ state: 'done', folder, target, files,
+ *  bytes }` or `{ state: 'cancelled' }`. Progress comes as
+ *  `movie_copy_progress` events. */
+export async function startMovieCopy(gamePath, name, includeDemos) {
+  return invoke('start_movie_copy', { gamePath, name, includeDemos })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_movie_copy):", err);
+      throw err;
+    });
+}
+
+export async function cancelMovieCopy() {
+  return invoke('cancel_movie_copy')
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_movie_copy):", err);
+      throw err;
+    });
+}
+
+/** The language file a dod copy lacks (#925): `{ folder, language, needed,
+ *  rename_from }`, or null when it has it (or is dod). Best-effort: null on
+ *  error, which only leaves the warning out. */
+export async function gameFolderLanguageFile(gamePath, folder) {
+  return invoke('game_folder_language_file', { gamePath, folder })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_folder_language_file):", err);
+      return null;
     });
 }
 
@@ -433,18 +529,6 @@ export async function killEngineProcesses() {
     });
 }
 
-/** Patches every demo's highlights into its own `<stem>_preview.dem` (grouped
- *  server-side by source demo) without launching HLAE, skipping any demo that
- *  already has one. Resolves to the number of preview demos freshly generated
- *  this call. */
-export async function generateAllPreviews(hlaePath, gamePath, streaks) {
-  return invoke("generate_all_previews", { hlaePath, gamePath, streaks })
-    .catch((err) => {
-      console.error("IPC Execution Error (generate_all_previews):", err);
-      showToast(STRINGS.IPC.batchPreviewFailed(err), 'error');
-      throw err;
-    });
-}
 
 export async function cancelCaptureBatch() {
   return invoke("cancel_capture_batch")
@@ -705,8 +789,8 @@ export async function saveSettings(settings) {
 // Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
 // `allDrives`, in one key pass; copies in `queued` (the project's queue) or
 // the install's game folder are listed first, as the ones to keep.
-export async function runDemoAudit(paths, allDrives = false, queued = []) {
-  return invoke("run_demo_audit", { paths, allDrives, queued })
+export async function runDemoAudit(paths, allDrives = false, queued = [], lookInZips = false) {
+  return invoke("run_demo_audit", { paths, allDrives, queued, lookInZips })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');
@@ -893,6 +977,15 @@ export async function revealInExplorer(path) {
     });
 }
 
+/** Opens Windows' Recycle Bin, where the Demo Auditor's deletes go. */
+export async function openRecycleBin() {
+  return invoke("open_recycle_bin")
+    .catch((err) => {
+      console.error("IPC Execution Error (open_recycle_bin):", err);
+      showToast(STRINGS.IPC.folderOpenFailed(err), 'error');
+    });
+}
+
 /** Sweeps `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (files
  *  that still carry their `.dodstudio_preview` sidecar) left behind by prior
  *  capture sessions. `gameDir` is the configured hl.exe path. */
@@ -955,6 +1048,26 @@ export async function defaultBrowseDir() {
   return invoke("default_browse_dir")
     .catch((err) => {
       console.error("IPC Execution Error (default_browse_dir):", err);
+      return null;
+    });
+}
+
+/** Where a Browse dialog can start (#936): each path's state on disk, in
+ *  order ({ path, is_file, exact, is_root } or null). [] on failure, so the
+ *  dialog still opens, wherever Windows puts it. */
+export async function pickPathStates(paths) {
+  return invoke("pick_path_states", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_path_states):", err);
+      return [];
+    });
+}
+
+/** The user's Videos, Documents and Program Files folders (#936). */
+export async function pickUserFolders() {
+  return invoke("pick_user_folders")
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_user_folders):", err);
       return null;
     });
 }
@@ -1059,6 +1172,36 @@ export async function localGitBranch() {
   return invoke("local_git_branch").catch((err) => {
     console.error("IPC Execution Error (local_git_branch):", err);
     return null;
+  });
+}
+
+/** Whether this build uses Configuration's GoldSrc Hooks DLL override: a
+ *  debug build or one made on this PC. An installed release always runs its
+ *  bundled DLL. Best-effort: false on error, which only hides the row. */
+export async function hookDllOverrideAllowed() {
+  return invoke("hook_dll_override_allowed").catch((err) => {
+    console.error("IPC Execution Error (hook_dll_override_allowed):", err);
+    return false;
+  });
+}
+
+/** The test hook DLLs in the checkout's `local\` folder (hook_dll_list.rs):
+ *  `{ folder, checkout_build, dlls: [{ label, path, modified_unix_secs }] }`.
+ *  Best-effort: an empty list on error. */
+/** The Half-Life installs on this PC (#931): `[{ name, path, hl_exe, build }]`,
+ *  `build` 'anniversary', 'pre_anniversary' or null. `gamePath`, the hl.exe
+ *  set now, adds its own Steam library. An empty list on error. */
+export async function findInstalls(gamePath) {
+  return invoke("find_installs", { gamePath: gamePath || '' }).catch((err) => {
+    console.error("IPC Execution Error (find_installs):", err);
+    return [];
+  });
+}
+
+export async function listHookDlls() {
+  return invoke("list_hook_dlls").catch((err) => {
+    console.error("IPC Execution Error (list_hook_dlls):", err);
+    return { folder: null, checkout_build: null, dlls: [] };
   });
 }
 

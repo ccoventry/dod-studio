@@ -86,3 +86,9 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
   if (focusConfirm) okBtn?.focus();
   return new Promise((resolve) => { pendingResolve = resolve; });
 }
+
+/** Rewrites the open dialog's message, for a line worked out after it
+ *  opened (#937's rescan time). Does nothing once it has closed. */
+export function setThemedConfirmMessage(message) {
+  if (pendingResolve && messageEl) messageEl.textContent = message;
+}

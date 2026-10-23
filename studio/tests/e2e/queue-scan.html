@@ -4,31 +4,39 @@
   line and bar from index.html, with Tauri's IPC mocked (vite.config.e2e.js).
   `scan_directory` stays pending until a test calls
   `window.__finishScan(outcome)`; `window.__addDemoFolder(folder)` is + Add
-  Folder after its picker, and `window.__scanPaths` the remembered folders.
+  Folder after its picker, and `window.__recent` the Recent folders it fills
+  (#533). The scan's grouping step is the real queue_match_groups.js, whose
+  `queue_match_groups` stays pending until `window.__finishGrouping()` (#951).
 -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>queue_scan.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
   <button id="add-files-btn">+ Add Demo Files</button>
   <button id="add-folder-btn">+ Add Folder</button>
+  <input type="checkbox" id="scan-include-subfolders" checked />
   <button id="cancel-scan-btn" disabled>Cancel Scan</button>
   <span id="scan-spinner" style="display: none;"></span>
-  <p id="scan-status">Status: Ready</p>
-  <div id="scan-progress" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+  <p id="scan-status">Ready</p>
+  <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
   <table><tbody id="master-demo-table-body"></tbody></table>
 
   <script type="module">
     import { createQueueScan } from '/src/queue_scan.js';
+    import { createQueueMatchGroups } from '/src/queue_match_groups.js';
 
     window.__mockInvokeHandlers.scan_directory = () =>
       new Promise((resolve) => { window.__finishScan = resolve; });
+    window.__mockInvokeHandlers.queue_match_groups = () =>
+      new Promise((resolve) => { window.__finishGrouping = () => resolve({ demos: [], matches: [] }); });
 
     const demos = [];
-    window.__scanPaths = [];
-    const { addDemoFolder } = createQueueScan({
+    window.__recent = [];
+    const { regroup } = createQueueMatchGroups({ getDemos: () => demos, renderQueue: () => {} });
+    const { addDemoFolder, addDroppedPaths } = createQueueScan({
       getDemos: () => demos,
       setSelectedDemoIdx: () => {},
       selectDemoAndRenderDetail: () => {},
@@ -36,10 +44,12 @@
       markProjectDirty: () => {},
       readScanWorkers: () => 2,
       offerIdenticalCopies: async () => {},
-      getScanPaths: () => window.__scanPaths,
-      persistAppSettings: async () => {},
+      rememberRecentFolder: async (f) => { window.__recent.unshift(f); },
+      persistAppSettings: async () => { window.__saves = (window.__saves || 0) + 1; },
+      regroupMatches: (opts) => regroup(opts),
     });
     window.__addDemoFolder = addDemoFolder;
+    window.__addDropped = addDroppedPaths;
     window.__harnessReady = true;
   </script>
 </body>

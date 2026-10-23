@@ -318,7 +318,7 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
    `inject.exe` only delivers the DLL, it doesn't set environment variables
    for a process that's already running.
 4. `inject.exe <pid> path\to\dodstudio_goldsrc_hooks.dll`
-5. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log` for its own diagnostics (never pops a
+5. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_<YYYYMMDD>.log` for its own diagnostics (never pops a
    dialog -- this is meant to run inside an unattended capture pipeline).
 
 ## Scripted in-game tests
@@ -339,7 +339,9 @@ already running, and the install is one of the two movie installs. See the
 script's docstring for the steps and flags; `--check` runs only the refusal
 checks. `--at-launch` starts the demo from the launch command line, as a
 capture batch without the hook DLL starts its primer, which matters for
-first-demo bugs (#546).
+first-demo bugs (#546). Each `grab` closes the console window first
+(`hideconsole`) so a stray key can't cover the screenshot; `grab <name> keep`
+or `--keep-console` grabs it as it is (#894).
 
 ## Status
 
@@ -376,6 +378,12 @@ live play by writing the game's `tempdecal.wad` (with a backup).
 POV, the in-eye target's in HLTV) the table's sprite and tile, through the
 `SPR_Set`/`SPR_Draw*` hooks `src/hud_sprites.rs` already has in client.dll's
 `gEngfuncs` copy: no code patch, one table for every install.
+
+`src/demo_console_keys.rs` stops Alt (so Alt+Tab), Tab and every printable
+key opening the console in a POV demo, which the engine's `Key_Event` does
+there but not in an HLTV demo (#894): one byte, both builds
+(`tools/verify_demo_console_keys_offsets.py`). The console key still opens it.
+On by default; `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 
 ### Always-on crash guards
 

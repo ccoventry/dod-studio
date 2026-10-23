@@ -11,6 +11,11 @@
 //!
 //! Each line carries the demo player's clock under `viewdemo` (the same clock
 //! for a POV and an HLTV demo of one match), else the hook's own clock.
+//!
+//! **Limit:** the POV side is the client's own lowering sum while the demo
+//! plays, not the gun that is drawn, so it misses the lowering a POV demo
+//! shows on a jump or a crouch-jump. A POV-vs-HLTV difference it reports is
+//! a lead to check against the drawn frames, not a finding (#704).
 
 use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 

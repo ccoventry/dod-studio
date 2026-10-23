@@ -2,12 +2,13 @@ import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { themedConfirm } from './themed_confirm.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
+import { confirmNoCameraData } from './camera_data.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
@@ -19,14 +20,14 @@ import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
-import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { requestFinishClips, finishSummary } from './finish_clips.js';
-import { syncCommandProfileRow, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { syncCommandProfileRow, getAllCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
+import { createCapturePrecheck } from './capture_precheck.js';
 import { timeLeftSuffix } from './capture_time_left.js';
 import { refreshAfterTyping } from './input_refresh.js';
 
@@ -39,6 +40,9 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+// Start Capture's checks before the batch (#953): while they run,
+// refreshLaunchGuard() leaves Start greyed out too.
+let precheck = null;
 // The batch's time left (#643): the last estimate, the status line it goes
 // after, and the timer that counts it down between clip boundaries.
 let timeLeft = null;
@@ -136,8 +140,17 @@ export function renderTimingDiagram() {
   const initialDelay = numberField('#config-initial-delay', 0);
   const streak = TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS;
 
+  // Initial Delay only applies to patched demos: with Seek Between Clips on,
+  // the hook waits for the demo to load and moves to clip 1 straight away
+  // (native::patch::runtime_batch), so the field and its note are hidden.
+  const seeks = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
+  const delayGroup = document.querySelector('#config-initial-delay-group');
+  if (delayGroup) delayGroup.style.display = seeks ? 'none' : '';
   const note = document.querySelector('#timing-diagram-initial-delay-note');
-  if (note) note.textContent = STRINGS.CAPTURE_CONFIG.timingDiagramInitialDelayNote(initialDelay);
+  if (note) {
+    note.textContent = seeks ? '' : STRINGS.CAPTURE_CONFIG.timingDiagramInitialDelayNote(initialDelay);
+    note.style.display = seeks ? 'none' : '';
+  }
 
   const C = STRINGS.CAPTURE_CONFIG;
   const events = [
@@ -383,8 +396,8 @@ export async function refreshLaunchGuard(state) {
 
   const resolvedState = state || (currentGetState ? currentGetState() : null) || { targetDrives: [], currentScannedDemos: [] };
 
-  const preRollVal = numberField('#config-pre-roll', 2.0);
-  const postRollVal = numberField('#config-post-roll', 0.6);
+  const preRollVal = numberField('#config-pre-roll', 5.0);
+  const postRollVal = numberField('#config-post-roll', 1.0);
   const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
   const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
@@ -485,7 +498,7 @@ export async function refreshLaunchGuard(state) {
   const bannedCommandsPresent = bannedCount > 0;
   const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
 
-  if (!capturingInFlight) {
+  if (!capturingInFlight && !precheck?.isChecking()) {
     startBtn.disabled = blocked;
   }
   // Every change that can block Start comes through here, so the strip
@@ -584,7 +597,7 @@ function currentCaptureSetup() {
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
     // The same reading the Commands tab's profile row shows.
-    commandProfile: profileState(getCommandProfiles(), getActiveCommandProfile(), lists),
+    commandProfile: profileState(getAllCommandProfiles(), getActiveCommandProfile(), lists),
     scheduledCount: lists.custom_commands.length,
     bannedCount: bannedCommandCount(),
     decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
@@ -712,13 +725,9 @@ async function initStandaloneLaunchButton() {
   const btn = document.querySelector('#btn-launch-standalone-game');
   if (!btn) return;
 
-  // Only useful for iterating on the pipeline itself — most users never need
-  // to open HLAE+DoD with no demo loaded, so this stays hidden outside a
-  // local/debug build.
-  if (!(await isLocalOrDebugBuild())) {
-    btn.style.display = 'none';
-    return;
-  }
+  // Shown in every build: previews and reviews reuse a game Studio started,
+  // and one started with other settings is offered a restart (#666), so
+  // starting the game ahead of them is safe.
 
   async function performLaunch() {
     btn.disabled = true;
@@ -770,7 +779,8 @@ function initImportCfgButton() {
   if (!btn) return;
 
   btn.addEventListener('click', async () => {
-    const picked = await open({
+    const picked = await pickPath({
+      field: 'capture.import_cfg',
       title: STRINGS.MAIN.SELECT_MOVIE_CFG_TITLE,
       multiple: false,
       filters: [{ name: STRINGS.MAIN.CONFIG_FILTER_NAME, extensions: ['cfg'] }],
@@ -878,6 +888,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   };
 
   currentGetState = getState;
+  precheck = createCapturePrecheck({ startBtn, statusEl, progressContainer, refreshStart: () => refreshLaunchGuard() });
   initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
@@ -982,6 +993,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
    '#config-record-stop-trail', '#config-initial-delay'].forEach(selector => {
     document.querySelector(selector)?.addEventListener('input', renderTimingDiagram);
   });
+  // Seek Between Clips shows or hides Initial Delay.
+  document.querySelector('#config-hook-runs-batch')?.addEventListener('change', renderTimingDiagram);
   renderTimingDiagram();
   // Checkboxes read by persistAppSettings/buildCapturePayload but with no
   // change listener of their own — same missing-wiring bug as the Timing
@@ -1264,8 +1277,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
     // Empty is 0, "the same as Capture FPS" — resolved by the backend.
     const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRollVal = numberField('#config-pre-roll', 2.0);
-    const postRollVal = numberField('#config-post-roll', 0.6);
+    const preRollVal = numberField('#config-pre-roll', 5.0);
+    const postRollVal = numberField('#config-post-roll', 1.0);
     const recordStartLeadVal = numberField('#config-record-start-lead', 5.0);
     const recordStopTrailVal = numberField('#config-record-stop-trail', 5.0);
     const initialDelayVal = numberField('#config-initial-delay', 3.0);
@@ -1373,7 +1386,26 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
   if (startBtn) {
     startBtn.addEventListener('click', async () => {
+      if (precheck.isChecking()) return;
+      precheck.begin();
+      try {
+        await runChecksAndStart();
+      } finally {
+        // A check that threw, or returned without saying why.
+        precheck.stop();
+      }
+    });
+
+    // Start Capture Batch's checks, in order, each on the footer line (#953).
+    // A check that stops the batch calls precheck.stop() with the reason its
+    // toast gives; one that passes everything hands over to the batch.
+    const runChecksAndStart = async () => {
       const state = getState ? getState() : { scanPaths: [], targetDrives: [], currentScannedDemos: [] };
+      // Shows `text` as a toast and on the line, and brings Start back.
+      const stopWith = (text) => {
+        showToast(text, 'error');
+        precheck.stop(text);
+      };
 
       // OBS mode: verify live, right before committing to a batch, rather
       // than trusting whatever a check found minutes (or a whole session)
@@ -1384,9 +1416,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // it (much like HLAE doesn't need to already be open either) and wait
       // for it to come up before giving up.
       if (document.querySelector('#config-capture-mode')?.value === 'obs') {
+        precheck.step('obs');
         await runObsConnectionTest();
         if (!isObsConnected() && !(await launchObsAndRetry())) {
-          showToast(STRINGS.CAPTURE.OBS_NOT_CONNECTED_WARNING, 'error');
+          stopWith(STRINGS.CAPTURE.OBS_NOT_CONNECTED_WARNING);
           return;
         }
       }
@@ -1396,17 +1429,18 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // never let a capture start without sufficient disk space (this is
       // also what closes the old zero-drive bypass: `availableBytes === 0`
       // now blocks unconditionally instead of skipping the check).
+      precheck.step('disk');
       const guard = await refreshLaunchGuard(state);
       if (guard && guard.blocked) {
         // Ahead of the disk branches, and well ahead of the running-game check
         // below: "you haven't picked anything yet" is the answer the user needs,
         // and it should not arrive behind a modal about closing their game.
         if (guard.noHighlightsSelected) {
-          showToast(STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING, 'error');
+          stopWith(STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING);
         } else if (guard.availableBytes === 0) {
-          showToast(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE, 'error');
+          stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {
-          showToast(STRINGS.CAPTURE.insufficientDiskSpaceToast((guard.requiredBytes / 1e9).toFixed(2), (guard.availableBytes / 1e9).toFixed(2)), 'error');
+          stopWith(STRINGS.CAPTURE.insufficientDiskSpaceToast((guard.requiredBytes / 1e9).toFixed(2), (guard.availableBytes / 1e9).toFixed(2)));
         }
         return;
       }
@@ -1416,14 +1450,18 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // still missing after that stops the batch, since its highlights
       // cannot be captured. A picked demo with more than one map stops it
       // too (#217); main.js has said why then ('handled').
-      const demosReady = pickedDemosPresent ? await pickedDemosPresent() : true;
+      precheck.step('demos');
+      const demosReady = pickedDemosPresent
+        ? await pickedDemosPresent({ onProgress: (p) => precheck.step('demos', p?.done, p?.total) })
+        : true;
       if (demosReady !== true) {
-        if (demosReady === false) showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
+        if (demosReady === false) stopWith(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED);
         return;
       }
 
       // A map a session crashed on before, for a reason the demo file can't
       // show (#207): ask before patching.
+      precheck.step('maps');
       const pickedPaths = (state.currentScannedDemos || [])
         .filter((d) => (d.streaks || []).some((s) => s.selected === true))
         .map((d) => d.path);
@@ -1433,7 +1471,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));
       const hlPathNow = document.querySelector('#hl-path-input')?.value?.trim() || '';
       if (!(await confirmOverLimit(picked, hlPathNow))) return;
+      // One with no camera data captures a frozen view (#920).
+      if (!(await confirmNoCameraData(picked))) return;
 
+      precheck.step('paths');
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
 
@@ -1441,7 +1482,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         await validatePaths(activePayload.hlae_path, activePayload.game_path);
       } catch (err) {
         console.error("Executable path validation failed:", err);
-        showToast(String(err), 'error');
+        stopWith(String(err));
         return;
       }
 
@@ -1460,8 +1501,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         resolution_width: activePayload.resolution_width,
         resolution_height: activePayload.resolution_height,
       };
+      precheck.step('game');
       if (!(await closeGameWithOtherSettings(launchRequest, { button: startBtn }))) {
-        setStatusLine(statusEl, STRINGS.RUNNING_GAME.BATCH_NOT_STARTED_STATUS);
+        precheck.stop(STRINGS.RUNNING_GAME.BATCH_NOT_STARTED_STATUS);
         return;
       }
       let engineAlreadyRunning = false;
@@ -1473,6 +1515,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       }
 
       const runBatch = () => {
+        precheck.handOver();
         showToast(STRINGS.CAPTURE.INITIALIZING_CAPTURE_BATCH, "info");
         startBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = false;
@@ -1480,17 +1523,21 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       };
 
       if (engineAlreadyRunning) {
+        // Its window asks what to do and starts the batch itself; Start comes
+        // back behind it in case the answer is no.
+        precheck.stop(STRINGS.CAPTURE_PRECHECK.GAME_OPEN);
         requestProcessGuardedLaunch(runBatch, { forBatch: true });
         return;
       }
 
       // Before any patching: without Steam the game can't start.
+      precheck.step('steam');
       if (!(await ensureSteamReady())) {
-        setStatusLine(statusEl, STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
+        precheck.stop(STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
         return;
       }
       runBatch();
-    });
+    };
   }
 
   // Split out of the click handler so the process-conflict modal can park it

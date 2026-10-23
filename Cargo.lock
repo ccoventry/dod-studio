@@ -1008,6 +1008,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "url",
+ "zip",
 ]
 
 [[package]]
@@ -1841,6 +1842,10 @@ version = "0.10.0"
 dependencies = [
  "analysis",
  "clap",
+ "flate2",
+ "serde",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]

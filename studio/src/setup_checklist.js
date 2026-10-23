@@ -21,6 +21,16 @@ export function isSteamPlayInstall(hlPath) {
   return normalised.endsWith('/steamapps/common/half-life/hl.exe');
 }
 
+/**
+ * Whether Studio would launch Steam's own Half-Life with its own `dod`
+ * folder, the pair people play online with. A copy of the dod folder beside
+ * it (`dod_movies`, picked as the Game Folder) keeps movie files out of that
+ * game, so only this pair gets the "highly recommended" note.
+ */
+export function usesPlayFolder(hlPath, gameFolder) {
+  return isSteamPlayInstall(hlPath) && (gameFolder || 'dod').trim().toLowerCase() === 'dod';
+}
+
 /** The program each path must name: any other .exe (hlds.exe sits beside
  *  hl.exe in every install) passes the picker's filter but can't run. */
 export const EXE_NAMES = { hl: 'hl.exe', hlae: 'HLAE.exe' };
@@ -57,6 +67,8 @@ function foldersAreSet(folders) {
  *   hlPath, hlaePath: the two executables as typed.
  *   hlState, hlaeState: 'ok' | 'empty' | 'not_found' | 'not_a_file' | undefined.
  *   ffmpegUsable: whether HLAE can run FFmpeg (null while unknown).
+ *   appFfmpeg: the ffmpeg.exe DoD Studio itself renders with, '' when it
+ *     finds none (undefined while unknown).
  *   targetDrives, renderExportDirs: [{ path, freeBytes }].
  *   demoCount: demos in the Master Queue.
  *   pinnedFolders: the remembered demo folders.
@@ -68,7 +80,9 @@ export function setupChecklist(state = {}) {
   const done = {
     hl: pathIsSet(state.hlPath, state.hlState, EXE_NAMES.hl),
     hlae: pathIsSet(state.hlaePath, state.hlaeState, EXE_NAMES.hlae),
-    ffmpeg: state.ffmpegUsable === true,
+    // Both halves: HLAE for Video capture, DoD Studio for Render and Finish
+    // clips. HLAE's own bundled copy leaves Studio without one.
+    ffmpeg: state.ffmpegUsable === true && state.appFfmpeg !== '',
     captures: foldersAreSet(state.targetDrives),
     renders: foldersAreSet(state.renderExportDirs),
     demos: (state.demoCount || 0) > 0 || (state.pinnedFolders || []).length > 0,

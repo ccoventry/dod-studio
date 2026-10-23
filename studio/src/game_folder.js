@@ -43,3 +43,32 @@ export function gameFolderOptions(found, saved) {
   if (!match) options.unshift({ value: current, missing: true, selected: true });
   return options;
 }
+
+/** Whether `folder` is one of the game folders `found` beside hl.exe, any
+ *  case. Only a listed folder gets the language-file check (#925): a folder
+ *  that isn't there gets gameFolderMissing instead. */
+export function isListedFolder(found, folder) {
+  const want = (folder || DEFAULT_GAME_FOLDER).toLowerCase();
+  return (Array.isArray(found) ? found : []).some((f) => f.toLowerCase() === want);
+}
+
+/**
+ * What to tell the user when their dod copy lacks the language file its
+ * in-game text needs (#925), from `game_folder_language_file`'s answer; ''
+ * when it needs nothing.
+ */
+export function languageFileNote(missing) {
+  if (!missing?.needed) return '';
+  const S = STRINGS.CAPTURE_CONFIG;
+  return missing.rename_from
+    ? S.languageFileMissing(missing.folder, missing.needed, missing.rename_from)
+    : S.languageFileMissingNoSource(missing.folder, missing.needed, missing.language);
+}
+
+/** The label of the button that opens Explorer on `missing.show`: the file
+ *  to rename when there is one, else the folder; '' with nothing to show. */
+export function languageFileButton(missing) {
+  if (!missing?.show) return '';
+  const S = STRINGS.CAPTURE_CONFIG;
+  return missing.rename_from ? S.LANGUAGE_FILE_SHOW : S.LANGUAGE_FILE_OPEN_FOLDER;
+}

@@ -80,12 +80,21 @@ pub struct Outcome {
     pub entries: usize,
 }
 
-/// Folders Windows keeps at a drive's root that hold no demos of the user's:
+/// Folders that hold no demos of the user's, skipped by name at any depth:
 /// the Recycle Bin keeps a deleted file's extension (`$R1A2B3C.dem`), so a
-/// walk into it brings deleted demos back, and System Volume Information is
-/// usually unreadable (#843). `hl_demo_auditor` keeps its own copy, since
-/// `native` depends on it; a test below checks the two agree.
-pub const SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+/// walk into it brings deleted demos back, System Volume Information is
+/// usually unreadable (#843), and `node_modules`, `.git`, `__pycache__` and
+/// `site-packages` (Python's own) are tens of thousands of folders that
+/// never hold a demo (#888). `hl_demo_auditor` keeps its own copy, since it
+/// can't depend on `native`; a test below checks the two agree.
+pub const SYSTEM_FOLDERS: [&str; 6] = [
+    "$RECYCLE.BIN",
+    "System Volume Information",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    "site-packages",
+];
 
 /// True for a folder name in [`SYSTEM_FOLDERS`], in any case.
 pub fn is_system_folder(name: &std::ffi::OsStr) -> bool {
@@ -122,9 +131,11 @@ impl Walker {
         }
     }
 
-    /// Neither report nor enter a [`SYSTEM_FOLDERS`] folder at any depth.
-    /// A root that is one is still read: it is the folder the caller asked
-    /// for. Opt-in, so a walk that measures a folder still counts everything.
+    /// Neither report nor enter a [`SYSTEM_FOLDERS`] folder at any depth, nor
+    /// the Windows folder (`%SystemRoot%`, #888) when a walk from above it
+    /// (a drive root) finds it. A root that is one is still read: it is the
+    /// folder the caller asked for. Opt-in, so a walk that measures a folder
+    /// still counts everything.
     pub fn skip_system_folders(mut self) -> Self {
         self.skip_system_folders = true;
         self
@@ -204,14 +215,16 @@ impl Walker {
                 } else {
                     continue;
                 };
+                let path = entry.path();
                 if kind == Kind::Dir
                     && self.skip_system_folders
-                    && is_system_folder(&entry.file_name())
+                    && (is_system_folder(&entry.file_name())
+                        || hl_demo_auditor::is_windows_folder(&path))
                 {
                     continue;
                 }
                 let found = Found {
-                    path: entry.path(),
+                    path,
                     depth: depth + 1,
                     kind,
                 };
@@ -448,6 +461,40 @@ mod tests {
         assert!(is_system_folder(OsStr::new("SYSTEM VOLUME INFORMATION")));
         assert!(!is_system_folder(OsStr::new("$RECYCLE.BIN2")));
         assert!(!is_system_folder(OsStr::new("demos")));
+        assert!(is_system_folder(OsStr::new(".GIT")));
+        assert!(is_system_folder(OsStr::new("Node_Modules")));
+        assert!(!is_system_folder(OsStr::new(".github")));
+    }
+
+    /// The drive the Windows folder is on, listed one level deep: every
+    /// folder there but the Windows folder itself.
+    #[cfg(windows)]
+    #[test]
+    fn a_walk_from_the_drive_root_leaves_out_the_windows_folder() {
+        let windows = hl_demo_auditor::windows_folder().expect("SystemRoot is set");
+        let drive = Path::new(windows)
+            .parent()
+            .expect("the Windows folder has a parent");
+        let folders = |walker: Walker| {
+            let mut dirs = Vec::new();
+            walker.max_depth(1).walk(drive, &mut |found| {
+                if found.kind == Kind::Dir {
+                    dirs.push(found.path.clone());
+                }
+                Step::Skip
+            });
+            dirs
+        };
+        let all = folders(Walker::new());
+        let kept = folders(Walker::new().skip_system_folders());
+        let expected: Vec<PathBuf> = all
+            .iter()
+            .filter(|p| !hl_demo_auditor::is_windows_folder(p))
+            .filter(|p| !p.file_name().is_some_and(is_system_folder))
+            .cloned()
+            .collect();
+        assert!(all.len() > expected.len(), "{all:?}");
+        assert_eq!(kept, expected);
     }
 
     #[test]

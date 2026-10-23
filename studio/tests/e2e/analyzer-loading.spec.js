@@ -81,3 +81,44 @@ test('clicking a demo that is still analysing does not start it again', async ({
   await page.evaluate((p) => window.__finish[p](), A);
   await expect(page.locator('#analyzer-current-file')).toHaveText('slow.dem');
 });
+
+test('the loading view shows while the demo\'s folder is still being listed', async ({ page }) => {
+  const path = 'C:/other/slow.dem';
+  await page.evaluate(() => {
+    window.__listings = [];
+    window.__mockInvokeHandlers.browse_directory = ({ path: dir }) => new Promise((resolve) => {
+      const finish = () => resolve({ path: dir, dirs: [], demos: [] });
+      if (window.__listed) finish(); else window.__listings.push(finish);
+    });
+  });
+  const opened = page.evaluate((p) => window.__openDemo(p), path);
+  await page.waitForFunction(() => window.__listings.length > 0);
+  await expect(page.locator('#analyzer-tab-content')).toHaveText('Analyzing demo…');
+  await page.evaluate(() => { window.__listed = true; window.__listings.forEach((finish) => finish()); });
+  await page.waitForFunction((p) => !!window.__finish[p], path);
+  await page.evaluate((p) => window.__finish[p](), path);
+  await opened;
+});
+
+test('opening a demo shows a bar from its %, and a cached demo says so (#958)', async ({ page }) => {
+  page.evaluate((path) => window.__openDemo(path), A);
+  await page.waitForFunction((p) => !!window.__finish[p], A);
+  const content = page.locator('#analyzer-tab-content');
+  const bar = content.locator('.analyzer-loading-bar');
+  // Before the first %, the block slides.
+  await expect(content).toHaveText('Analyzing demo…');
+  await expect(bar).toHaveClass(/indeterminate/);
+  await progress(page, A, 40);
+  await expect(bar).not.toHaveClass(/indeterminate/);
+  await expect(bar.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 40%/);
+  await page.evaluate((p) => window.__finish[p](), A);
+
+  page.evaluate((path) => window.__openDemo(path), B);
+  await page.waitForFunction((p) => !!window.__finish[p], B);
+  await page.evaluate((path) => window.__mockEmit('analyzer_progress', { path, processed: 0, total: 0, cached: true }), B);
+  await expect(content).toHaveText('Reading from the analyzer cache…');
+  await expect(bar).toHaveClass(/indeterminate/);
+  await expect(page.locator('#analyzer-current-file')).toHaveText('Reading from the cache…');
+  await page.evaluate((p) => window.__finish[p](), B);
+  await expect(page.locator('#analyzer-current-file')).toHaveText('fast.dem');
+});

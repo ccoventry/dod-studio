@@ -6,16 +6,18 @@
 // AnalyzerState} payload from `analyze_demo_full` rather than the flattened
 // generic JSON used by the compact inline telemetry summary.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
+import { renderNoCameraDataBanner } from './camera_data.js';
 import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
 import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
+import { analyzerLoadingView, analyzerLoadingHtml } from './analyzer_loading.js';
 import { clockFloor as formatMMSS } from './time_format.js';
 import { initDemoCache } from './demo_cache.js';
 import { unloadedOpenNodes } from './tree_loads.js';
@@ -900,7 +902,7 @@ function initAnalyzerBrowser() {
   if (addPinBtn) {
     addPinBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({ directory: true, multiple: false, title: STRINGS.ANALYZER.ADD_PINNED_FOLDER_DIALOG_TITLE });
+        const selected = await pickPath({ field: 'analyzer.pin_folder', directory: true, multiple: false, title: STRINGS.ANALYZER.ADD_PINNED_FOLDER_DIALOG_TITLE });
         if (selected) {
           const folder = Array.isArray(selected) ? selected[0] : selected;
           await pinFolder(folder);
@@ -968,15 +970,20 @@ function initAnalyzerBrowser() {
 // throttling is needed on the receiving end.
 // Each event names its demo: an earlier click's analysis still running in
 // the background reports too, and mixing the two made the % jump around.
+// A cached demo's event says so (`cached`) and counts nothing.
 listen('analyzer_progress', (event) => {
-  const { processed, total, path } = event.payload || {};
-  if (!analyzerLoadingPath || path !== analyzerLoadingPath) return;
-  if (!total) return;
-  const pct = Math.min(100, Math.round((processed / total) * 100));
-  const container = document.querySelector('#analyzer-tab-content');
-  setAnalyzerFileIndicator(STRINGS.ANALYZER.analyzingPct(pct));
-  if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.analyzingDemoPct(pct)}</p>`;
+  const p = event.payload || {};
+  if (!analyzerLoadingPath || p.path !== analyzerLoadingPath) return;
+  if (!p.total && !p.cached) return;
+  showAnalyzerLoading(p);
 });
+
+function showAnalyzerLoading(p) {
+  const view = analyzerLoadingView(p);
+  const container = document.querySelector('#analyzer-tab-content');
+  setAnalyzerFileIndicator(view.short);
+  if (container) container.innerHTML = analyzerLoadingHtml(view);
+}
 
 // Explorer sidebar drag-to-resize — width persists to settings.json via
 // getAnalyzerExplorerWidth/setAnalyzerExplorerWidth (main.js), the same
@@ -1055,7 +1062,10 @@ export function initAnalyzerPane({
   if (browseBtn) {
     browseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'analyzer.demo',
+          // The folder the Explorer is showing.
+          current: currentDir,
           multiple: false,
           filters: [{ name: STRINGS.MAIN.DEMO_FILES_FILTER_NAME, extensions: ['dem'] }],
           title: STRINGS.ANALYZER.SELECT_DEMO_DIALOG_TITLE,
@@ -1082,16 +1092,23 @@ export function initAnalyzerPane({
   initAnalyzerBrowser();
 }
 
+// Redraws the Pinned/Recent/Local links after a change made outside the
+// pane, such as the start-up pinned-folders review unpinning folders (#533).
+export function refreshAnalyzerQuickLinks() {
+  renderQuickLinksSection();
+}
+
 // Entry point for cross-pane jumps (e.g. Workspace's "View Match Telemetry"
 // button) — points the Explorer sidebar at the demo's own folder first, so
 // the Demos table reliably highlights it instead of only coincidentally
-// matching whatever folder the sidebar was already browsing.
+// matching whatever folder the sidebar was already browsing. The folder's
+// listing runs beside the analysis, not before it: a big folder takes seconds
+// to list, and the tab stayed blank until it was done.
 export async function openAnalyzerDemo(path) {
   const parentDir = parentDirOf(path);
-  if (parentDir && parentDir !== currentDir) {
-    await setCurrentDir(parentDir);
-  }
-  await loadAnalyzerDemo(path);
+  const listing = parentDir && parentDir !== currentDir ? setCurrentDir(parentDir) : null;
+  browserSelectedDemo = path;
+  await Promise.all([listing, loadAnalyzerDemo(path)]);
 }
 
 async function loadAnalyzerDemo(path) {
@@ -1099,11 +1116,11 @@ async function loadAnalyzerDemo(path) {
   // the first one's progress.
   if (analyzerLoadingPath === path) return;
   const container = document.querySelector('#analyzer-tab-content');
-  if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
-  setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
+  showAnalyzerLoading(null);
   // The last demo's multi-map notice isn't about this one.
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   renderDamageBanner(document.querySelector('#analyzer-damage-banner'), null);
+  renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), null);
   const seq = ++analyzerLoadSeq;
   analyzerLoadingPath = path;
   try {
@@ -1118,6 +1135,7 @@ async function loadAnalyzerDemo(path) {
     renderActiveTab();
     renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, (update) => splitAnalyzedDemo(path, update));
     renderDamageBanner(document.querySelector('#analyzer-damage-banner'), report);
+    renderNoCameraDataBanner(document.querySelector('#analyzer-camera-banner'), report);
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {

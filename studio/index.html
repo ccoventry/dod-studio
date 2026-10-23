@@ -31,6 +31,11 @@
                 <button class="menu-dropdown-item" id="load-project-btn" data-str-title="NAV.LOAD_SESSION_TITLE">
                   <span data-str="NAV.LOAD_SESSION_BUTTON">Load Session</span><span class="menu-shortcut-hint">Ctrl+O</span>
                 </button>
+                <!-- #935: filled by recent_projects.js; opens on hover. -->
+                <div class="menu-dropdown-item menu-submenu" id="recent-projects-menu">
+                  <span data-str="NAV.OPEN_RECENT">Open Recent</span><span class="menu-shortcut-hint">▸</span>
+                  <div class="menu-submenu-panel" id="recent-projects-panel"></div>
+                </div>
                 <button class="menu-dropdown-item" id="save-project-btn" data-str-title="NAV.SAVE_SESSION_TITLE">
                   <span id="save-project-btn-label" data-str="NAV.SAVE_SESSION_BUTTON">Save Session</span><span class="menu-shortcut-hint">Ctrl+S</span>
                 </button>
@@ -86,7 +91,8 @@
 
         <!-- Left / Top Split Pane: Workspace Setup & Master Demo Queue -->
         <section id="pane-workspace" class="content-pane">
-          <div class="egui-panel">
+          <!-- #scan-panel and #master-pane take dropped demos and folders: demo_drop.js (#530) -->
+          <div id="scan-panel" class="egui-panel">
             <div class="panel-header">
               <h3 data-str="WORKSPACE.SCAN_PANEL_TITLE">Directory Scan & Management</h3>
             </div>
@@ -94,11 +100,15 @@
               <div class="row-inputs">
                 <button id="add-files-btn" data-str="WORKSPACE.ADD_FILES_BUTTON">+ Add Demo Files</button>
                 <button id="add-folder-btn" data-str="WORKSPACE.ADD_FOLDER_BUTTON">+ Add Folder</button>
+                <label class="scan-subfolders" data-str-title="WORKSPACE.INCLUDE_SUBFOLDERS_TITLE" title="Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.">
+                  <input type="checkbox" id="scan-include-subfolders" checked />
+                  <span data-str="WORKSPACE.INCLUDE_SUBFOLDERS_LABEL">Include subfolders</span>
+                </label>
                 <button id="cancel-scan-btn" disabled data-str="WORKSPACE.CANCEL_SCAN_BUTTON" data-str-title="WORKSPACE.CANCEL_SCAN_TITLE">Cancel Scan</button>
               </div>
               <div class="scan-status-row">
                 <span id="scan-spinner" class="spinner" style="display: none;"></span>
-                <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Status: Ready</p>
+                <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Ready</p>
               </div>
               <!-- queue_scan.js: demos done of the scan's total -->
               <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
@@ -229,11 +239,10 @@
               <div class="header-title-group" style="display: flex; gap: 8px; align-items: center;">
                 <h3 id="detail-demo-title" data-str="HIGHLIGHTS.DEFAULT_TITLE">Highlight Details</h3>
                 <button id="btn-launch-preview" disabled data-str="HIGHLIGHTS.LAUNCH_PREVIEW_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_PREVIEW_TITLE">Launch Preview</button>
+                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game</button>
               </div>
               <div class="header-controls" style="display: flex; gap: 8px; align-items: center;">
                 <button id="view-telemetry-btn" disabled data-str="HIGHLIGHTS.VIEW_TELEMETRY_BUTTON">View Match Telemetry</button>
-                <button id="btn-generate-all-previews" disabled data-str="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_BUTTON" data-str-title="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_TITLE">Generate All Previews</button>
-                <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game (HLAE)</button>
                 <div class="control-group">
                   <label for="input-min-kills" data-str="HIGHLIGHTS.MIN_KILLS_LABEL">Min Kills:</label>
                   <input type="number" id="input-min-kills" value="1" min="1" style="width: 50px;" />
@@ -274,7 +283,10 @@
                    consequence of the two rows above and belongs after them. -->
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HL_EXEC_LABEL">Half-Life Executable:</label>
-                <input type="text" id="hl-path-input" data-str-placeholder="CAPTURE_CONFIG.HL_EXEC_PLACEHOLDER" placeholder="Path to hl.exe" style="flex: 1;" />
+                <!-- The saved path; the install list sets it (install_picker.js, #931). -->
+                <input type="text" id="hl-path-input" data-str-placeholder="CAPTURE_CONFIG.HL_EXEC_PLACEHOLDER" placeholder="Path to hl.exe" hidden />
+                <input type="text" id="hl-install-choice" />
+                <!-- ^ a dropdown you can type into (searchable_select.js) -->
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
@@ -297,9 +309,16 @@
                 <button id="ffmpeg-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="ffmpeg-path-warning" class="path-warning" style="display: none;"></div>
-              <div class="input-row">
+              <!-- Shown in local and debug builds, or while a path is set
+                   (hook_dll_row.js). -->
+              <div class="input-row" id="goldsrc-hooks-dll-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
-                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
+                <!-- The saved path; the dropdown sets it (hook_dll_picker.js). -->
+                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" hidden />
+                <input type="text" id="goldsrc-hooks-dll-choice" />
+                <!-- ^ a dropdown you can type into (searchable_select.js) -->
+
+                <button id="goldsrc-hooks-refresh-btn" data-str="CAPTURE_CONFIG.HOOK_DLL_REFRESH" data-str-title="CAPTURE_CONFIG.HOOK_DLL_REFRESH_TITLE" title="List the test DLLs in local\ again">Refresh</button>
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="goldsrc-hooks-path-warning" class="path-warning" style="display: none;"></div>
@@ -455,7 +474,9 @@
                    Lead, Stop Trail, Post-roll follow in the order they occur
                    around a single clip. -->
               <div class="grid-controls">
-                <div class="control-group control-group-stacked">
+                <!-- Hidden while Seek Between Clips is on: the hook waits for
+                     the demo itself (renderTimingDiagram). -->
+                <div class="control-group control-group-stacked" id="config-initial-delay-group">
                   <div class="control-group">
                     <label for="config-initial-delay" data-str="CAPTURE_CONFIG.INITIAL_DELAY_LABEL">Initial Delay (s):</label>
                     <input type="number" step="0.1" id="config-initial-delay" value="3.0" style="width: 80px;" />
@@ -465,7 +486,7 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-pre-roll" data-str="CAPTURE_CONFIG.PRE_ROLL_LABEL">Pre-roll (s):</label>
-                    <input type="number" step="0.1" id="config-pre-roll" value="2.0" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-pre-roll" value="5.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between the game reaching the clip and capture starting.</p>
                 </div>
@@ -486,7 +507,7 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-post-roll" data-str="CAPTURE_CONFIG.POST_ROLL_LABEL">Post-roll (s):</label>
-                    <input type="number" step="0.1" id="config-post-roll" value="0.6" style="width: 80px;" />
+                    <input type="number" step="0.1" id="config-post-roll" value="1.0" style="width: 80px;" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>
@@ -567,11 +588,20 @@
               <div class="input-row" style="margin-bottom: 12px;">
                 <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
                 <select id="command-profile-select"><option value="">—</option></select>
+                <!-- #911: shown while a built-in profile is picked. -->
+                <span id="command-profile-builtin-chip" class="profile-builtin-chip" hidden data-str="CAPTURE_CONFIG.PROFILE_BUILTIN_CHIP" data-str-title="CAPTURE_CONFIG.PROFILE_BUILTIN_TITLE">Built-in</span>
                 <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
                 <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
                 <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
+                <button id="command-profile-duplicate" disabled data-str="CAPTURE_CONFIG.PROFILE_DUPLICATE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DUPLICATE_TITLE">Duplicate</button>
                 <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
                 <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
+              </div>
+              <!-- #911: once, for a changed copy of a built-in profile that was
+                   kept under a new name. -->
+              <div id="command-profile-notice" class="profile-notice" hidden>
+                <span data-notice-text></span>
+                <button data-notice-ok data-str="CAPTURE_CONFIG.PROFILE_NOTICE_OK">OK</button>
               </div>
               <div class="input-row">
                 <strong data-str="CAPTURE_CONFIG.INIT_COMMANDS_LABEL">Initial Commands (run once at demo load):</strong>
@@ -745,6 +775,7 @@
                 <button id="players-refresh-btn" data-str="PLAYERS.REFRESH_BUTTON" data-str-title="PLAYERS.REFRESH_TITLE">Refresh</button>
               </div>
               <div id="players-players-status" class="players-status"></div>
+              <div id="players-players-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               <div id="players-list" class="players-list"></div>
               <div id="players-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 12px;">
@@ -961,6 +992,10 @@
                     <input type="checkbox" id="audit-all-drives" />
                     <span id="audit-all-drives-label" data-str="AUDITOR.ALL_DRIVES_LABEL">All drives</span>
                   </label>
+                  <label class="audit-all-drives" data-str-title="AUDITOR.LOOK_IN_ZIPS_TITLE" title="Also check the demos inside .zip files">
+                    <input type="checkbox" id="audit-look-in-zips" />
+                    <span data-str="AUDITOR.LOOK_IN_ZIPS_LABEL">Look inside .zip files</span>
+                  </label>
                 </div>
                 <div class="row-inputs">
                   <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
@@ -979,6 +1014,7 @@
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
               <div class="row-inputs">
                 <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
+                <button id="open-recycle-bin-btn" data-str="AUDITOR.OPEN_RECYCLE_BIN_BUTTON" data-str-title="AUDITOR.OPEN_RECYCLE_BIN_TITLE">Open Recycle Bin</button>
                 <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
                 <!-- Hidden for 0.2.0, so every delete can be put back from the
                      Recycle Bin; remove `hidden` to offer it again. -->
@@ -1128,7 +1164,7 @@
                   <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
                   <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
                 </details>
-                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <div id="hd-style-maps-progress" class="progress-bar-container hd-style-maps-progress" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
@@ -1181,6 +1217,7 @@
                   <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-setup-progress" class="hd-hint"></p>
+                <div id="hd-setup-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               </div>
             </div>
 
@@ -1260,6 +1297,7 @@
                   <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-build-progress" class="hd-hint"></p>
+                <div id="hd-build-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="hd-build-line" class="hd-hint hd-mono"></p>
                 <details class="hd-details">
                   <summary data-str="HD.SCRIPTS_SUMMARY">Build from a Command Prompt instead</summary>
@@ -1410,6 +1448,7 @@
                   <button id="blender-cancel-btn" disabled data-str="BLENDER.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="blender-progress" class="hd-hint"></p>
+                <div id="blender-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="blender-line" class="hd-hint hd-mono"></p>
                 <ul id="blender-results" class="hd-hint hd-mono"></ul>
               </div>
@@ -1567,6 +1606,7 @@
                 <button id="ov-save-btn" class="primary" data-str="OVERVIEWS.SAVE_BUTTON">Save overview</button>
                 <button id="ov-reset-btn" data-str="OVERVIEWS.RESET_BUTTON">Start over</button>
                 <p id="ov-save-status" class="hd-hint"></p>
+                <div id="ov-save-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               </div>
             </div>
           </div>
@@ -1660,6 +1700,7 @@
               </div>
               <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
               <div id="analyzer-damage-banner" class="analyzer-warning-banner" hidden></div>
+              <div id="analyzer-camera-banner" class="analyzer-warning-banner" hidden></div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
                 <p class="analyzer-empty" data-str="ANALYZER.EMPTY_PICK_DEMO">Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".</p>
               </div>
@@ -1825,6 +1866,7 @@
         <ol id="combine-list" class="combine-list"></ol>
         <p id="combine-plan" class="combine-plan"></p>
         <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <p id="combine-status" class="combine-plan" aria-live="polite"></p>
         <div class="combine-actions">
           <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
           <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>

@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
   deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
-  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
+  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy, auditFoldersKey,
+  isArchived, canDelete, copiesToDelete, revealPath,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -33,12 +34,30 @@ describe('audit_duplicates (#844)', () => {
   });
 
   it('says which step the audit is on, with a bar once there is a total', () => {
-    expect(auditProgressView(null)).toEqual({ pct: 0, text: 'Looking for demos: 0 folders read', current: '' });
+    expect(auditProgressView(null)).toEqual({
+      pct: 0, text: 'Looking for demos: 0 folders read', current: '', indeterminate: true,
+    });
     expect(auditProgressView({ folders: 1, total: 0, done: 0, current: '\\\\?\\C:\\x' }))
-      .toEqual({ pct: 0, text: 'Looking for demos: 1 folder read', current: 'C:\\x' });
+      .toEqual({ pct: 0, text: 'Looking for demos: 1 folder read', current: 'C:\\x', indeterminate: true });
     expect(auditProgressView({ folders: 9, total: 8, done: 2, current: 'C:\\a.dem' }))
-      .toEqual({ pct: 25, text: 'Comparing demos: 2 / 8', current: 'C:\\a.dem' });
+      .toEqual({ pct: 25, text: 'Comparing demos: 2 / 8', current: 'C:\\a.dem', indeterminate: false });
     expect(auditProgressView({ folders: 9, total: 8, done: 12 }).pct).toBe(100);
+  });
+
+  it('measures the folder walk against the last audit of the same folders', () => {
+    const view = auditProgressView({ folders: 93_000, total: 0 }, 186_000);
+    expect(view.pct).toBe(50);
+    expect(view.indeterminate).toBe(false);
+    expect(view.text).toBe('Looking for demos: 93000 folders read (about 186000 last time)');
+    // More folders than last time: the bar waits short of full.
+    expect(auditProgressView({ folders: 200_000, total: 0 }, 186_000).pct).toBe(95);
+  });
+
+  it('keys the remembered count by its folders', () => {
+    // The key #901 stored counts under, so they still count after #951.
+    expect(auditFoldersKey(['D:\\b', 'C:\\A'], true)).toBe('audit_last_folders:all|c:\\a|d:\\b');
+    expect(auditFoldersKey(['D:\\b', 'C:\\A'], false)).toBe(auditFoldersKey(['c:\\a', 'd:\\B'], false));
+    expect(auditFoldersKey([], true)).not.toBe(auditFoldersKey([], false));
   });
 
   it('words the delete progress by where the files go', () => {
@@ -131,5 +150,59 @@ describe('audit_duplicates (#844)', () => {
       { groupIdx: 1, path: String.raw`\\?\F:\keep\b.dem`, already: true },
     ]);
     expect(keepPicksIn(groups, '')).toEqual([]);
+  });
+});
+
+describe('demos inside zips (#929)', () => {
+  const zipped = {
+    path: String.raw`\\?\D:\packs\lan.zip › hltv/m.dem`,
+    in_use: null,
+    archive: { zip: String.raw`\\?\D:\packs\lan.zip`, entry: 'hltv/m.dem' },
+  };
+  const loose = { path: String.raw`\\?\C:\demos\m.dem`, in_use: null };
+  const other = { path: String.raw`\\?\E:\m.dem`, in_use: null };
+  const group = { size: 10, header_hash: 1, files: [zipped, loose, other] };
+
+  it('never ticks or deletes a copy inside a zip', () => {
+    expect(isArchived(zipped)).toBe(true);
+    expect(isArchived(loose)).toBe(false);
+    expect(startsTicked(zipped, 1)).toBe(false);
+    expect(startsTicked(loose, 1)).toBe(true);
+    expect(canDelete(group, zipped)).toBe(false);
+    expect(canDelete(group, loose)).toBe(true);
+    // Another copy kept: the zip's copy is still not one to delete.
+    const { groups } = keepFile([group], 0, loose.path);
+    expect(canDelete(groups[0], zipped)).toBe(false);
+  });
+
+  it('sends the zip and entry when the kept copy is inside a zip', () => {
+    const ticked = new Set([loose.path, other.path, zipped.path]);
+    expect(copiesToDelete([group], ticked)).toEqual([
+      { path: loose.path, keep: zipped.path, keep_zip: zipped.archive },
+      { path: other.path, keep: zipped.path, keep_zip: zipped.archive },
+    ]);
+    // A loose copy kept: no zip to name, and the zip's copy isn't sent.
+    const { groups } = keepFile([group], 0, loose.path);
+    expect(copiesToDelete(groups, ticked)).toEqual([{ path: other.path, keep: loose.path }]);
+    expect(copiesToDelete([group], new Set())).toEqual([]);
+  });
+
+  it('counts only the loose copies as space a delete frees', () => {
+    expect(auditTotals([group])).toEqual({ copies: 2, wastedBytes: 20 });
+    const twoZips = { size: 10, files: [zipped, { ...zipped, path: 'x › y.dem', archive: { zip: 'x', entry: 'y.dem' } }] };
+    expect(auditTotals([twoZips])).toEqual({ copies: 0, wastedBytes: 0 });
+  });
+
+  it('opens the zip itself in Explorer', () => {
+    expect(revealPath(zipped)).toBe(String.raw`D:\packs\lan.zip`);
+    expect(revealPath(loose)).toBe(String.raw`C:\demos\m.dem`);
+  });
+
+  it('shows how many zips have been looked inside before the key pass', () => {
+    expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 1, total: 0, done: 0, current: String.raw`\\?\D:\a.zip` }))
+      .toEqual({ pct: 25, text: 'Looking inside zips: 1 / 4', current: String.raw`D:\a.zip`, indeterminate: false });
+    // The key pass takes over once it has a total.
+    expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 4, total: 10, done: 5 }).text)
+      .toBe('Comparing demos: 5 / 10');
   });
 });

@@ -1,6 +1,7 @@
 mod audit_manager;
 mod batch_eta;
 mod blender_manager;
+mod builtin_profiles;
 mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
@@ -9,14 +10,19 @@ mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
+mod drop_paths;
 mod hd_manager;
 mod hook_batch;
+mod hook_dll_list;
+mod installs_manager;
 mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
 mod messages;
+mod movie_copy_manager;
 mod overview_manager;
 mod packet_limit_manager;
+mod pick_paths;
 mod players_tab;
 mod preview_in_place;
 mod render_manager;
@@ -33,9 +39,9 @@ mod test_support;
 use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
 use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
-    generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
-    launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
-    send_preview_to_running_game, start_steam, steam_state,
+    kill_engine_processes, launch_demo_preview, launch_obs, launch_standalone_game,
+    read_cfg_commands, scan_orphaned_previews, send_preview_to_running_game, start_steam,
+    steam_state,
 };
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
@@ -104,6 +110,13 @@ async fn save_settings(
     .await
 }
 
+/// The built-in command profiles (#911), which the Commands tab lists locked
+/// beside the user's own. Never saved: every update replaces them.
+#[tauri::command]
+fn builtin_command_profiles() -> Vec<settings_manager::CommandProfile> {
+    builtin_profiles::builtin_command_profiles()
+}
+
 // ── Project Session IPC Commands ───────────────────────────────────────────────
 // File I/O for paths the user picked happens here in Rust (std::fs), same as
 // `save_settings`/`get_settings` above. Tauri's fs plugin was dropped: its
@@ -136,25 +149,57 @@ async fn default_projects_dir() -> Result<String, String> {
 }
 
 /// Which of a loaded project's demos are missing, and where each one moved,
-/// if a file with the same key turns up in `search_dirs` (#21).
+/// if a file with the same key turns up in `search_dirs` (#21). Emits
+/// `missing_demos_search` once, `{ missing }`, when the search for them
+/// starts (#958).
 #[tauri::command]
 async fn locate_missing_demos(
+    app_handle: tauri::AppHandle,
     demos: Vec<capture_manager::KnownDemo>,
     search_dirs: Vec<String>,
 ) -> Result<Vec<capture_manager::MissingDemo>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        use tauri::Emitter;
         let dirs: Vec<std::path::PathBuf> =
             search_dirs.iter().map(std::path::PathBuf::from).collect();
-        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+        Ok(capture_manager::locate_missing_demos(
+            &demos,
+            &dirs,
+            &mut |missing| {
+                let _ = app_handle.emit(
+                    "missing_demos_search",
+                    serde_json::json!({ "missing": missing }),
+                );
+            },
+        ))
     }))
     .await
 }
 
-/// Which demos are no longer the file they were scanned from (#21).
+/// Which demos are no longer the file they were scanned from (#21). Emits
+/// `changed_demos_progress` ({ done, total }, at most every ~33 ms and on
+/// the last demo) for Start Capture's line (#953).
 #[tauri::command]
-async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+async fn changed_demos(
+    app_handle: tauri::AppHandle,
+    demos: Vec<capture_manager::KnownDemo>,
+) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(capture_manager::changed_demos(&demos))
+        use tauri::Emitter;
+        let started = std::time::Instant::now();
+        let last_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        Ok(capture_manager::changed_demos_with_progress(
+            &demos,
+            |done, total| {
+                let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+                if capture_manager::changed_progress_due(&last_emit, now_ms, done, total) {
+                    let _ = app_handle.emit(
+                        "changed_demos_progress",
+                        serde_json::json!({ "done": done, "total": total }),
+                    );
+                }
+            },
+        ))
     }))
     .await
 }
@@ -163,6 +208,20 @@ async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<Str
 async fn load_project_session(path: String) -> Result<String, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         std::fs::read_to_string(&path).map_err(|e| messages::failed_to_read_file(&path, e))
+    }))
+    .await
+}
+
+/// One `true` per path that is a file that's there: File → Open Recent dims
+/// the rest (#935). Off the main thread, since a path on a sleeping network
+/// or cloud drive can take seconds to answer (#789).
+#[tauri::command]
+async fn files_exist(paths: Vec<String>) -> Result<Vec<bool>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(paths
+            .iter()
+            .map(|p| std::path::Path::new(p).is_file())
+            .collect())
     }))
     .await
 }
@@ -180,6 +239,7 @@ async fn run_demo_audit(
     paths: Vec<String>,
     all_drives: bool,
     queued: Vec<String>,
+    look_in_zips: Option<bool>,
 ) -> Result<AuditOutcome, String> {
     let hl_path = settings
         .inner
@@ -197,6 +257,7 @@ async fn run_demo_audit(
         Arc::clone(&state.cancel_token),
         paths,
         all_drives,
+        look_in_zips.unwrap_or(false),
         (game_folders, queued),
     )
     .await
@@ -234,6 +295,19 @@ fn cancel_audit(state: tauri::State<'_, AuditManager>) -> Result<(), String> {
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     audit_manager::reveal_in_explorer_impl(path)
+}
+
+/// Opens Windows' Recycle Bin (the Demo Auditor's deletes go there).
+#[tauri::command(async)]
+fn open_recycle_bin() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg("shell:RecycleBinFolder")
+            .spawn()
+            .map_err(crate::messages::failed_to_open_explorer)?;
+    }
+    Ok(())
 }
 
 // ── Tauri commands ─────────────────────────────────────────────────────────────
@@ -288,6 +362,7 @@ async fn scan_directory(
     paths: Vec<String>,
     known: Option<Vec<capture_manager::KnownDemo>>,
     workers: Option<usize>,
+    include_subfolders: Option<bool>,
 ) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
@@ -296,7 +371,24 @@ async fn scan_directory(
         paths,
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        // Missing: today's walk into every subfolder (#531).
+        include_subfolders.unwrap_or(true),
     )
+    .await
+}
+
+/// What a rescan of `paths` has to do, for the rescan prompt's time line
+/// (#937): stats each demo and reads its cache entries' first bytes, opening
+/// no demo, so a few hundred take well under a second (longer on a slow or
+/// cloud drive, hence off the main thread).
+#[tauri::command]
+async fn estimate_rescan(paths: Vec<String>) -> Result<analysis::cache::RescanEstimate, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(analysis::cache::RescanEstimate::new(
+            &native::analyzer_cache_root(),
+            &paths,
+        ))
+    }))
     .await
 }
 
@@ -471,9 +563,12 @@ fn hlae_ffmpeg_report(
     // produces `None`, so the check never ran and a typo'd override said
     // nothing at all. Failing to resolve is itself the problem worth reporting.
     let configured = ffmpeg_path.as_deref().unwrap_or("").trim().to_string();
+    // The frontend sends the bare default `ffmpeg` when no override is set, so
+    // that is "no override" too, not a file called ffmpeg that went missing.
+    let no_override = configured.is_empty() || configured.eq_ignore_ascii_case("ffmpeg");
     let app_ffmpeg_problem = match &app_ffmpeg {
         Some(p) => hf::verify_is_ffmpeg(p).err(),
-        None if configured.is_empty() => {
+        None if no_override => {
             Some("no ffmpeg.exe was found on PATH, and no override is set".to_string())
         }
         None => Some(format!("there is no file at \"{}\"", configured)),
@@ -649,6 +744,18 @@ async fn index_demo_players(
     .await
 }
 
+/// One `analyzer_progress` event. The path lets the page ignore an earlier
+/// click's analysis still running beside this one; `cached` says the demo
+/// is read from the analyzer cache, with no frames to count.
+fn analyzer_progress_payload(
+    path: &str,
+    processed: usize,
+    total: usize,
+    cached: bool,
+) -> serde_json::Value {
+    serde_json::json!({ "processed": processed, "total": total, "path": path, "cached": cached })
+}
+
 #[tauri::command]
 async fn analyze_demo_full(
     app_handle: tauri::AppHandle,
@@ -663,6 +770,15 @@ async fn analyze_demo_full(
             return Err(messages::demo_file_not_found(&demo_path));
         }
 
+        // A demo the analyzer cache has is read, not parsed: the page says so
+        // instead of a % that never comes (#958).
+        if analysis::cache::is_fresh(&native::analyzer_cache_root(), &path) {
+            let _ = app_handle.emit(
+                "analyzer_progress",
+                analyzer_progress_payload(&demo_path, 0, 0, true),
+            );
+        }
+
         // Throttled to ~30fps per CLAUDE.md's telemetry-throttling guardrail —
         // `try_from_bytes_with_progress` calls back every ~500 frames, which
         // can be 1000+ times for a large demo.
@@ -675,9 +791,7 @@ async fn analyze_demo_full(
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
-                    // The path lets the page ignore an earlier click's
-                    // analysis still running beside this one.
-                    serde_json::json!({ "processed": processed, "total": total, "path": demo_path }),
+                    analyzer_progress_payload(&demo_path, processed, total, false),
                 );
             }
         };
@@ -795,6 +909,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
@@ -820,6 +935,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             demo_cache_cmd::cache_demos,
+            drop_paths::sort_dropped_paths,
             demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
@@ -827,6 +943,10 @@ pub fn run() {
             check_hlae_ffmpeg,
             diagnose_executable_paths,
             settings_manager::list_game_folders,
+            settings_manager::game_folder_language_file,
+            movie_copy_manager::movie_copy_plan,
+            movie_copy_manager::start_movie_copy,
+            movie_copy_manager::cancel_movie_copy,
             players_tab::list_logo_pngs,
             players_tab::list_crosshair_sprites,
             players_tab::crosshair_sprite_image,
@@ -838,7 +958,6 @@ pub fn run() {
             load_map_overview,
             start_capture_batch,
             launch_demo_preview,
-            generate_all_previews,
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,
@@ -858,6 +977,7 @@ pub fn run() {
             delete_orphaned_previews,
             cancel_capture_batch,
             scan_directory,
+            estimate_rescan,
             cancel_scan,
             calculate_export_pool_space,
             diagnose_capture_output_paths,
@@ -884,8 +1004,10 @@ pub fn run() {
             get_render_jobs,
             get_settings,
             save_settings,
+            builtin_command_profiles,
             save_project_session,
             load_project_session,
+            files_exist,
             index_demo_players,
             default_projects_dir,
             locate_missing_demos,
@@ -907,6 +1029,7 @@ pub fn run() {
             demo_links_manager::add_demo_link,
             demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
+            installs_manager::find_installs,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,
@@ -918,8 +1041,11 @@ pub fn run() {
             match_group_cmd::queue_match_groups,
             match_group_cmd::queue_match_groups_cancel,
             reveal_in_explorer,
+            open_recycle_bin,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
+            pick_paths::pick_path_states,
+            pick_paths::pick_user_folders,
             dir_browser::count_demo_files_in_folder,
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
@@ -957,9 +1083,28 @@ pub fn run() {
             updater_manager::restart_app,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
+            updater_manager::hook_dll_override_allowed,
+            hook_dll_list::list_hook_dlls,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod analyzer_progress_tests {
+    use super::analyzer_progress_payload;
+
+    /// The fields analyzer_pane.js's `analyzer_progress` listener reads.
+    #[test]
+    fn a_cached_demo_is_said_to_be_cached() {
+        let cached = analyzer_progress_payload("D:/demos/a.dem", 0, 0, true);
+        assert_eq!(cached["path"], "D:/demos/a.dem");
+        assert_eq!(cached["cached"], true);
+        let parsing = analyzer_progress_payload("D:/demos/a.dem", 30, 100, false);
+        assert_eq!(parsing["processed"], 30);
+        assert_eq!(parsing["total"], 100);
+        assert_eq!(parsing["cached"], false);
+    }
 }
 
 #[cfg(test)]

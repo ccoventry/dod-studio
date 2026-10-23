@@ -9,6 +9,8 @@ import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { listen } from '@tauri-apps/api/event';
 import { STRINGS } from './strings.js';
+import { getGameFolder } from './game_folder_ui.js';
+import { showBar, hideBar } from './progress_view.js';
 import {
   overviewInstalls, overviewMaps, overviewScene, overviewLoadEdits,
   overviewSaveEdits, overviewResetEdits, overviewExport, overviewExportHd, overviewFlagIcons, overviewScreenHeight,
@@ -80,6 +82,9 @@ export function initOverviewsPane() {
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
   const saveStatus = pane.querySelector('#ov-save-status');
+  const saveBar = pane.querySelector('#ov-save-bar');
+  // Lets the line and bar paint before the drawing below holds the page.
+  const nextPaint = () => new Promise((resolve) => setTimeout(resolve, 0));
   const undoBtn = pane.querySelector('#ov-undo-btn');
   const showAreasBox = pane.querySelector('#ov-show-areas');
   const showAreasText = showAreasBox.parentElement.querySelector('span');
@@ -1020,7 +1025,10 @@ export function initOverviewsPane() {
     if (!scene) return;
     saveBtn.disabled = true;
     saveStatus.textContent = STRINGS.OVERVIEWS.SAVING;
+    // Neither step can be measured: the block slides.
+    showBar(saveBar, { indeterminate: true });
     try {
+      await nextPaint();
       const image = renderExport(scene, edits);
       const result = await overviewExport({
         install,
@@ -1039,6 +1047,8 @@ export function initOverviewsPane() {
       });
       const written = [...result.written];
       if (edits.hd !== false) {
+        saveStatus.textContent = STRINGS.OVERVIEWS.SAVING_HD;
+        await nextPaint();
         const hd = renderHd(scene, edits);
         const path = await overviewExportHd(
           { install, map: scene.map, width: hd.width, height: hd.height },
@@ -1046,8 +1056,8 @@ export function initOverviewsPane() {
         );
         written.push(path);
       }
-      const lines = [STRINGS.OVERVIEWS.saved(edits.hd !== false)];
-      if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.BACKED_UP);
+      const lines = [STRINGS.OVERVIEWS.saved(edits.hd !== false, getGameFolder())];
+      if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.backedUp(getGameFolder()));
       saveStatus.textContent = lines.join(' ');
       saveStatus.title = STRINGS.OVERVIEWS.savedPaths([...written, ...result.backed_up]);
       showToast(STRINGS.OVERVIEWS.savedToast(scene.map), 'success');
@@ -1060,6 +1070,7 @@ export function initOverviewsPane() {
       saveStatus.textContent = '';
       saveStatus.title = '';
     } finally {
+      hideBar(saveBar);
       saveBtn.disabled = false;
     }
   });

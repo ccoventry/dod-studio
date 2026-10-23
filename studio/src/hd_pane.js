@@ -8,7 +8,7 @@
 // command line always make the same files.
 
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import {
   hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler, hdMisses, hdSaveStyle, hdRemoveStyle,
   hdPreview, hdSaveMapList, hdWorldCoverage,
@@ -20,12 +20,10 @@ import {
   mostPerType, styleGaps, gapsSentence, mapCoverage, coverageSentence, uncoveredChosen, mapListWarning,
 } from './hd_coverage.js';
 import { glMaxSizeLine } from './hd_gl_max_size.js';
-
-function formatSize(bytes) {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
+import {
+  formatSize, setupStartView, setupView, buildStartView, buildView, coverageView,
+} from './hd_progress.js';
+import { drawBar } from './step_bar.js';
 
 // The order the build runs types in (quickest first), as build_all.py's TYPES.
 const BUILD_TYPES = ['sky', 'decals', 'sprites', 'models', 'detail', 'world'];
@@ -48,6 +46,7 @@ export function initHdPane() {
   const setupBtn = document.querySelector('#hd-setup-btn');
   const cancelBtn = document.querySelector('#hd-setup-cancel-btn');
   const progressText = document.querySelector('#hd-setup-progress');
+  const setupBar = document.querySelector('#hd-setup-bar');
   const buildStyles = document.querySelector('#hd-build-styles');
   const buildTypes = document.querySelector('#hd-build-types');
   const buildCap = document.querySelector('#hd-build-cap');
@@ -55,6 +54,7 @@ export function initHdPane() {
   const buildBtn = document.querySelector('#hd-build-btn');
   const buildCancelBtn = document.querySelector('#hd-build-cancel-btn');
   const buildProgress = document.querySelector('#hd-build-progress');
+  const buildBar = document.querySelector('#hd-build-bar');
   const buildLine = document.querySelector('#hd-build-line');
   const realesrganLine = document.querySelector('#hd-realesrgan-line');
   const footerSummary = document.querySelector('#footer-hd-summary');
@@ -197,9 +197,7 @@ export function initHdPane() {
     let warning = '';
     styleMapsGroups.replaceChildren();
     if (worldCoverageLoading) {
-      summary = worldCoverageProgress
-        ? STRINGS.HD.coverageChecking(worldCoverageProgress.done, worldCoverageProgress.total)
-        : STRINGS.HD.COVERAGE_CHECKING;
+      summary = coverageView(worldCoverageProgress).text;
     } else if (worldCoverageError) {
       summary = STRINGS.HD.coverageFailed(worldCoverageError);
     } else if (worldCoverage) {
@@ -253,11 +251,7 @@ export function initHdPane() {
     styleMapsSummary.textContent = summary;
     styleMapsSummary.title = styleMapsGroups.childElementCount ? STRINGS.HD.COVERAGE_SHOW : '';
     styleMaps.hidden = !summary;
-    if (styleMapsProgress) {
-      styleMapsProgress.hidden = !worldCoverageLoading || !worldCoverageProgress;
-      styleMapsProgress.max = worldCoverageProgress?.total || 1;
-      styleMapsProgress.value = worldCoverageProgress?.done || 0;
-    }
+    drawBar(styleMapsProgress, worldCoverageLoading ? coverageView(worldCoverageProgress).bar : null);
     if (styleMapWarning) {
       styleMapWarning.textContent = warning;
       styleMapWarning.hidden = !warning;
@@ -1124,16 +1118,14 @@ export function initHdPane() {
   copyBtn?.addEventListener('click', () => copyText(cfgLines.textContent));
   missesCopyBtn?.addEventListener('click', () => copyText(missesCommand.textContent));
 
+  const showView = (line, bar, view) => {
+    line.textContent = view.text;
+    drawBar(bar, view.bar);
+  };
+
+  let settingUp = false;
   listen('hd_setup_progress', (event) => {
-    const p = event.payload;
-    if (p.unpacking) {
-      progressText.textContent = STRINGS.HD.unpackingLine(p.item, p.step, p.steps);
-      return;
-    }
-    const done = p.bytes_total
-      ? STRINGS.HD.bytesOf(formatSize(p.bytes_done), formatSize(p.bytes_total))
-      : formatSize(p.bytes_done);
-    progressText.textContent = STRINGS.HD.progressLine(p.item, p.step, p.steps, done);
+    if (settingUp) showView(progressText, setupBar, setupView(event.payload));
   }).catch((err) => console.error('hd_setup_progress listener failed:', err));
 
   // The build only reports when build_all.py prints, which can be a minute
@@ -1147,7 +1139,7 @@ export function initHdPane() {
     const p = buildStep;
     const type = STRINGS.HD.TYPE_NAMES[p.asset_type] || p.asset_type;
     const secs = Math.max(p.elapsed_secs, Math.floor((Date.now() - buildStartedAt) / 1000));
-    buildProgress.textContent = STRINGS.HD.buildStep(p.step, p.steps, p.style, type, elapsedWords(secs));
+    showView(buildProgress, buildBar, buildView(p, secs, type));
   };
 
   listen('hd_coverage_progress', (event) => {
@@ -1166,13 +1158,16 @@ export function initHdPane() {
   setupBtn?.addEventListener('click', async () => {
     setBusy(true);
     cancelBtn.disabled = false;
-    progressText.textContent = '';
+    settingUp = true;
+    showView(progressText, setupBar, setupStartView());
     try {
       const outcome = await hdSetupTools();
       progressText.textContent = STRINGS.HD.setupDone(outcome.fetched.length);
     } catch (err) {
       progressText.textContent = err === 'cancelled' ? STRINGS.HD.SETUP_CANCELLED : STRINGS.IPC.hdSetupFailed(err);
     } finally {
+      settingUp = false;
+      drawBar(setupBar, null);
       setBusy(false);
       cancelBtn.disabled = true;
       refresh();
@@ -1188,7 +1183,7 @@ export function initHdPane() {
     const request = { styles: ticked(buildStyles), types: ticked(buildTypes), cap: cap() };
     setBusy(true);
     buildCancelBtn.disabled = false;
-    buildProgress.textContent = '';
+    showView(buildProgress, buildBar, buildStartView());
     buildLine.textContent = '';
     buildStep = null;
     buildStartedAt = Date.now();
@@ -1201,6 +1196,7 @@ export function initHdPane() {
     } finally {
       clearInterval(buildClock);
       buildStep = null;
+      drawBar(buildBar, null);
       setBusy(false);
       buildCancelBtn.disabled = true;
       refresh();
@@ -1219,7 +1215,9 @@ export function initHdPane() {
   pythonPickBtn?.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({
+      picked = await pickPath({
+        field: 'hd.python',
+        current: lastStatus?.python?.using?.exe,
         title: STRINGS.HD.PYTHON_PICK_TITLE,
         multiple: false,
         directory: false,
@@ -1241,7 +1239,7 @@ export function initHdPane() {
   upscalerPickBtn?.addEventListener('click', async () => {
     let picked;
     try {
-      picked = await open({ title: STRINGS.HD.UPSCALER_PICK_TITLE, directory: true, multiple: false });
+      picked = await pickPath({ field: 'hd.upscaler', current: lastStatus?.tools?.dir, title: STRINGS.HD.UPSCALER_PICK_TITLE, directory: true, multiple: false });
     } catch (err) {
       console.error('Upscaler folder picker failed:', err);
       return;

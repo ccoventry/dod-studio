@@ -54,7 +54,10 @@
 //!   icon on the overview map -- the game's own team, everyone, the other
 //!   team, only the player being watched, or nobody (issue #304).
 //! - `overview_marker`: `ds_hud_overview_team_marker`, which marks the
-//!   player being watched in HLTV with his team's camera icon (#304).
+//!   player being watched in HLTV with his team's camera icon (#304), or
+//!   leaves the camera icon off the map (`2`, #677).
+//! - `overview_speaker`: `ds_hud_overview_hide_speaker`, which leaves the
+//!   speaker icon off the players' overview map icons (#677).
 //! - `demo_scope`: `ds_hud_show_scope`, which draws the sniper scope
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `ds_capture_run_in_background`, full speed while
@@ -97,6 +100,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `spectator_chase_pvs`: an HLTV demo's chase cameras draw the players and
+//!   models around them, which the engine culled from the map's origin
+//!   (issue #918). On by default; `GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
 //! - `demo_list_folders`: the `ds_ui_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
@@ -140,6 +146,11 @@
 //!   folder (`-game dod_movies`), which the engine otherwise refuses with
 //!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
 //!   check, both builds; only when the game folder is not `dod`.
+//! - `demo_console_keys`: in a POV demo only the console key opens the
+//!   console; the engine otherwise opens it for Alt (so Alt+Tab), Tab and
+//!   every printable key, as it never does in an HLTV demo (#894). One byte in
+//!   `Key_Event`, both builds. On by default;
+//!   `GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS=0` turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -157,6 +168,11 @@
 //! - `clan_text`: the `ds_hud_hide_clan_text` cvar -- hide all of DoD's
 //!   clan-match text: the warm-up and ready rules, "Warmup Mode", the
 //!   countdown and "MATCH IS LIVE!" (issue #608).
+//! - `center_text`: the `ds_hud_hide_center_text` cvar -- drop every
+//!   `TextMsg` the server sends to the middle of the screen (#677).
+//! - `spectator_text`: the `ds_spec_hide_text` cvar -- hide the
+//!   camera mode's name and the green "Press DUCK for Spectator Menu" when
+//!   the view becomes a spectator camera (#677).
 //! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -188,6 +204,7 @@ mod anim_fix;
 mod batch;
 mod batch_end;
 mod behind_imports;
+mod center_text;
 mod clan_text;
 mod cmd_list;
 mod commands;
@@ -197,6 +214,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;
 mod demo_other_drives;
@@ -228,6 +246,7 @@ mod hudelement;
 mod hull_trace_guard;
 mod lightmap_gamma;
 mod list_panel;
+mod map_sounds;
 mod map_text;
 mod missing_shots;
 mod msglog;
@@ -238,6 +257,7 @@ mod overview_hd;
 mod overview_map;
 mod overview_marker;
 mod overview_players;
+mod overview_speaker;
 mod panic_log;
 mod particle_hide;
 mod patch;
@@ -259,6 +279,7 @@ mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_buttons;
+mod spectator_chase_pvs;
 mod spectator_crosshair;
 mod spectator_deathcam;
 mod spectator_eye;
@@ -266,6 +287,7 @@ mod spectator_follow;
 mod spectator_gun;
 mod spectator_hud;
 mod spectator_target;
+mod spectator_text;
 mod spray;
 mod spray_hltv;
 mod sprite_blend;
@@ -346,6 +368,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Only restores what a chase camera can see, so on unless asked not to.
+    spectator_chase_pvs::ENABLED
+        .store(env_flag("GOLDSRC_HOOKS_CHASE_PVS", true), Ordering::Relaxed);
     // Restores the pre-Anniversary behaviour on the Anniversary build and
     // does nothing on the pre-Anniversary one, so on unless asked not to.
     frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
@@ -364,6 +389,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // not to.
     sprite_blend::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Makes a POV demo's keys behave as an HLTV demo's already do, so on
+    // unless asked not to.
+    demo_console_keys::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMO_CONSOLE_KEYS", true),
         Ordering::Relaxed,
     );
     // Only this user's own processes can reach the pipe, and only a game
@@ -476,6 +507,8 @@ fn install_fixes() {
     sprite_blend::install();
     // Before the first demo's svc_serverinfo; does nothing in `dod`.
     game_dir_check::install();
+    // Before any demo plays; the console commands are registered by now.
+    demo_console_keys::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

@@ -270,6 +270,67 @@ body {
   color: #e0e0e0;
 }
 
+/* File → Open Recent (#935): a submenu that opens beside its row on hover. */
+.menu-submenu {
+  position: relative;
+  cursor: default;
+}
+
+.menu-submenu-panel {
+  display: none;
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  width: max-content;
+  min-width: 220px;
+  max-width: 520px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 501;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.menu-submenu:hover .menu-submenu-panel,
+.menu-submenu:focus-within .menu-submenu-panel {
+  display: flex;
+}
+
+.menu-dropdown-item:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  background: transparent;
+}
+
+.recent-project-item {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.recent-project-folder {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-project-item:hover .recent-project-folder {
+  color: #e0e0e0;
+}
+
+/* A file that's gone: dimmed, still clickable to remove it. */
+.recent-project-item.missing .recent-project-name {
+  color: var(--text-muted);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-color);
+}
+
 .session-file-indicator {
   color: var(--text-muted);
   font-size: 11px;
@@ -571,13 +632,92 @@ input[type="number"] {
 /* Custom dropdown chevron — the global `appearance: none` reset (top of this
    file) strips the native arrow with nothing to replace it, so every
    <select> otherwise looks indistinguishable from a plain text field. */
-select {
+select,
+input.search-select-input {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23aaaaaa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 10px 6px;
   padding-right: 26px;
   cursor: pointer;
+}
+
+/* searchable_select.js: a dropdown you can type into. The box looks like a
+   <select>; the list opens under it like the native one. */
+.search-select {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-select-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-select-input:focus {
+  cursor: text;
+}
+
+.search-select-panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.search-select-option,
+.search-select-empty {
+  padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-select-option {
+  cursor: pointer;
+  color: #ffffff;
+}
+
+.search-select-option.active {
+  background: var(--primary-accent);
+}
+
+.search-select-option.picked {
+  font-weight: 600;
+}
+
+.search-select-empty {
+  color: var(--text-muted);
+}
+
+/* A row's own button (install_picker.js's Hide), at its end. */
+.search-select-option:has(.search-select-action) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-select-action {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  flex: none;
+}
+
+/* A row that does something rather than being picked. */
+.search-select-option.command {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 button {
@@ -1042,6 +1182,44 @@ button.primary-btn:hover:not(:disabled) {
   transition: width 0.2s ease-in-out;
 }
 
+/* Working, with nothing to measure against yet (the Duplicates audit's
+   first folder walk): a short block slides across instead of a width. */
+.progress-bar-container.indeterminate .progress-bar-fill {
+  width: 30% !important;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(333%); }
+}
+
+/* A job's steps so far, with the block sliding over the running step's
+   share only (step_bar.js, #956). */
+.progress-bar-container.step-bar {
+  position: relative;
+}
+
+.progress-bar-step {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.progress-bar-step::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  background: var(--primary-accent);
+  opacity: 0.6;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {
@@ -1282,6 +1460,12 @@ button.primary-btn:hover:not(:disabled) {
   text-align: center;
 }
 
+/* Under "Analyzing demo… 40%" while a demo opens (analyzer_loading.js). */
+.analyzer-loading-bar {
+  max-width: 320px;
+  margin: -12px auto 0;
+}
+
 .analyzer-heading {
   font-size: 15px;
   color: #fff;
@@ -1459,8 +1643,9 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
-/* #207: a demo this install's game can't play. */
-.entity-limit-badge {
+/* #207: a demo this install's game can't play. #920: one with no camera data. */
+.entity-limit-badge,
+.no-camera-badge {
   flex-shrink: 0;
   font-size: 0.75em;
   font-weight: normal;
@@ -2194,6 +2379,13 @@ tr.keyboard-selected {
   padding-left: 2px;
   font-size: 0.85em;
   color: #ffa726;
+}
+
+/* A fix-it button at the end of a path warning (#925). */
+.path-warning-action {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.95em;
 }
 
 /* HD Textures page (#372). */
@@ -3297,8 +3489,14 @@ button.setup-skip:hover:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: 3px;
   padding: 5px 8px;
-  overflow-x: auto;
-  white-space: nowrap;
+  /* A long path wraps at its folder separators (setup_window.js adds a
+     <wbr> after each), never behind a scrollbar. */
+  overflow-wrap: anywhere;
+}
+
+.setup-path-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .setup-path.empty {
@@ -3350,6 +3548,11 @@ button.setup-skip:hover:not(:disabled) {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* A note's own buttons, on a row under its text (#925). */
+.setup-note-actions {
+  margin-top: 8px;
 }
 
 .setup-muted {
@@ -3685,7 +3888,19 @@ button.setup-skip:hover:not(:disabled) {
   opacity: 0.45;
 }
 
-.audit-all-drives {
+/* Dropping demos from Windows (#530): both zones show while dragging, the
+   one under the pointer more. */
+.drop-zone-active {
+  outline: 2px dashed rgba(100, 160, 255, 0.5);
+  outline-offset: -2px;
+}
+
+.drop-zone-hover {
+  outline: 2px solid #64a0ff;
+  background: rgba(100, 160, 255, 0.08);
+}
+
+.audit-all-drives, .scan-subfolders {
   display: flex;
   gap: 3px;
   align-items: center;
@@ -3706,6 +3921,17 @@ button.setup-skip:hover:not(:disabled) {
 
 .audit-table .audit-file-path {
   word-break: break-all;
+}
+
+/* A copy inside a zip (#929): kept, never deleted. */
+.audit-zip-chip {
+  font-size: 0.8em;
+  padding: 0 7px;
+  border: 1px solid #4a86c5;
+  border-radius: 10px;
+  color: #4a86c5;
+  white-space: nowrap;
+  cursor: help;
 }
 
 .audit-table th:nth-child(1) { width: 32px; }
@@ -3735,4 +3961,67 @@ button.setup-skip:hover:not(:disabled) {
 .audit-status-current {
   font-size: 0.9em;
   word-break: break-all;
+}
+
+/* Setup's Make a movie copy dialog (#939), movie_copy_ui.js. Over the Setup
+   window, under a themed confirm. */
+#movie-copy-modal {
+  z-index: 1050;
+}
+
+.movie-copy-content {
+  max-width: 520px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+}
+
+.movie-copy-content h2 {
+  margin: 0;
+}
+
+.movie-copy-content .setup-footer {
+  padding: 10px 0 0;
+}
+
+.movie-copy-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.movie-copy-status {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-height: 1em;
+}
+
+/* Command profiles (#911): a built-in profile's mark beside the picker, and
+   the one-time notice about a kept copy under the row. */
+.profile-builtin-chip {
+  font-size: 0.8em;
+  padding: 1px 8px;
+  border: 1px solid var(--border-accent);
+  border-radius: 10px;
+  color: var(--text-muted, #aaa);
+  cursor: help;
+}
+
+.profile-builtin-chip[hidden],
+.profile-notice[hidden] {
+  display: none;
+}
+
+.profile-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
 }

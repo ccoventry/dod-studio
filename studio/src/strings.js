@@ -68,6 +68,16 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Open Recent (#935).
+    OPEN_RECENT: 'Open Recent',
+    OPEN_RECENT_EMPTY: 'No recent sessions',
+    OPEN_RECENT_MISSING: '(missing)',
+    CLEAR_RECENT: 'Clear Recent',
+    CLEAR_RECENT_EMPTY_TITLE: 'Nothing to clear yet',
+    RECENT_MISSING_TITLE: 'Session file not found',
+    RECENT_MISSING_MESSAGE: "This session file isn't there any more. Remove it from Open Recent?",
+    RECENT_MISSING_REMOVE: 'Remove from list',
+    RECENT_MISSING_KEEP: 'Keep',
   },
 
   // ── Workspace Pane: Directory Scan & Master Demo Queue ──────────────────
@@ -75,9 +85,12 @@ export const STRINGS = {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
     ADD_FOLDER_BUTTON: '+ Add Folder',
+    // #531: beside + Add Folder; also what a dropped folder follows.
+    INCLUDE_SUBFOLDERS_LABEL: 'Include subfolders',
+    INCLUDE_SUBFOLDERS_TITLE: "Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.",
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
     CANCEL_SCAN_TITLE: 'Cancel the running directory scan',
-    SCAN_STATUS_READY: 'Status: Ready',
+    SCAN_STATUS_READY: 'Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
     // #174: demos you can capture a player from (POV demos they recorded).
@@ -114,7 +127,7 @@ export const STRINGS = {
     GROUP_NO_DATE: 'Date not known',
     GROUP_NO_TYPE: 'Demo type not known',
     groupDateTitle: (day) => `Demo files last changed on ${day}`,
-    groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
+    groupingStatus: (done, total) => (total > 0 ? `Grouping by match: ${done} of ${total}` : 'Grouping by match…'),
     matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
     matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
     matchHalfCount: (half, count) => `${half ? `h${half}` : 'half unknown'}: ${count} demo${count === 1 ? '' : 's'}`,
@@ -186,11 +199,8 @@ export const STRINGS = {
     LAUNCHING: 'Launching…',
     VIEW_TELEMETRY_BUTTON: 'View Match Telemetry',
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
-    GENERATE_ALL_PREVIEWS_BUTTON: 'Generate All Previews',
-    GENERATE_ALL_PREVIEWS_TITLE: 'Generates _preview.dem files with a BOOKMARK event for every highlight across all demos, skipping any demo that already has one.',
-    GENERATING: 'Generating…',
-    LAUNCH_STANDALONE_BUTTON: 'Launch Game (HLAE)',
-    LAUNCH_STANDALONE_TITLE: 'Boots HLAE against hl.exe directly with no demo loaded.',
+    LAUNCH_STANDALONE_BUTTON: 'Launch Game',
+    LAUNCH_STANDALONE_TITLE: "Starts the game with DoD Studio, no demo loaded. Previews, reviews and capture batches use this game while it's open. Only close it when Studio asks.",
     MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
@@ -238,9 +248,6 @@ export const STRINGS = {
     secondsSuffix: (n) => `${n}s`,
     HLAE_PATH_REQUIRED: 'Set the HLAE and Half-Life executable paths in Configuration → Paths before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
-    generatedPreviews: (count) => count === 0
-      ? 'Every demo already had a preview — nothing new to generate.'
-      : `Generated ${count} preview demo(s). Load them manually via HLAE.`,
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
     sentToRunningGame: (cmd) => `Sent "${cmd}" to the running game.`,
     COPY_VIEW_COMMAND_FAILED: 'Failed to copy the view command to clipboard.',
@@ -281,6 +288,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // install_picker.js (#931): the Half-Life installs found on this PC.
+    INSTALL_BUILD: { anniversary: '25th Anniversary', pre_anniversary: 'pre-Anniversary' },
+    installOption: (name, build) => (build ? `${name} (${build})` : name),
+    installHiddenOption: (text) => `${text} · hidden`,
+    installOther: (path) => `Other: ${path}`,
+    INSTALL_NONE: 'No install picked',
+    INSTALL_NO_MATCH: 'No install matches',
+    INSTALL_HIDE: 'Hide',
+    INSTALL_HIDE_TITLE: 'Hide from this list. "Show hidden installs" at the end brings it back.',
+    INSTALL_UNHIDE: 'Show',
+    INSTALL_UNHIDE_TITLE: 'Put it back on the list',
+    showHiddenInstalls: (count) => `Show hidden installs (${count})`,
+    HIDE_HIDDEN_INSTALLS: 'Hide hidden installs again',
+    INSTALL_PICKER_TITLE: 'The Half-Life installs found in your Steam libraries. Picking one sets the Half-Life Executable and the Game Folder; nothing else changes.',
     // Game Folder (#402): game_folder_ui.js.
     GAME_FOLDER_LABEL: 'Game Folder:',
     GAME_FOLDER_TIP:
@@ -295,6 +316,16 @@ export const STRINGS = {
     gameFolderMissing: (name) =>
         `There's no "${name}" folder beside hl.exe with a liblist.gam and a cl_dlls/client.dll, so the game can't start it. Pick one from the list.`,
     GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
+    // #925: a copy of dod lacks <folder>_<language>.txt, so VGUI2 text shows
+    // raw keys. Studio only says what to do; it never writes the folder.
+    languageFileMissing: (folder, needed, renameFrom) =>
+      `${folder} has no resource\\${needed}, so in-game text shows as codes like #Dod_Spec_Allies_Score. `
+      + `In ${folder}\\resource, rename ${renameFrom} to ${needed}.`,
+    languageFileMissingNoSource: (folder, needed, language) =>
+      `${folder} has no resource\\${needed}, so in-game text shows as codes like #Dod_Spec_Allies_Score. `
+      + `Copy dod\\resource\\dod_${language}.txt into ${folder}\\resource and name it ${needed}.`,
+    LANGUAGE_FILE_SHOW: 'Show me the file',
+    LANGUAGE_FILE_OPEN_FOLDER: 'Open the folder',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -391,9 +422,9 @@ export const STRINGS = {
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
     wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
-    // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
+    // #373. Shown under Half-Life Executable only; see usesPlayFolder.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended (made from the 25th Anniversary build): it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
+        "This is Steam's own Half-Life with its dod folder, the one you play online with. That works. A copy of the dod folder for movies (dod_movies, say, picked as the Game Folder below) is highly recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -429,6 +460,15 @@ export const STRINGS = {
     FFMPEG_OVERRIDE_PLACEHOLDER: 'Optional path to ffmpeg.exe',
     GOLDSRC_HOOKS_LABEL: 'GoldSrc Hooks DLL:',
     GOLDSRC_HOOKS_PLACEHOLDER: 'Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)',
+    // hook_dll_picker.js: the test builds in the checkout's local\ folder.
+    HOOK_DLL_BUNDLED: 'Bundled (none in a local dev build)',
+    HOOK_DLL_BUNDLED_TITLE: 'The DLL an installed DoD Studio ships with. A local dev build has none, so the game starts without the hook.',
+    HOOK_DLL_CHECKOUT: "This checkout's build (target\\…\\release)",
+    hookDllOther: (name) => `Other: ${name}`,
+    hookDllFolderHint: (folder) => `Test builds: put dodstudio_goldsrc_hooks_<name>.dll in ${folder}, or dodstudio_goldsrc_hooks.dll in its own folder under local\\. Then Refresh.`,
+    HOOK_DLL_NO_MATCH: 'No test DLL matches',
+    HOOK_DLL_REFRESH: 'Refresh',
+    HOOK_DLL_REFRESH_TITLE: 'List the test DLLs in local\\ again',
     BROWSE_BUTTON: 'Browse',
     WIDTH_LABEL: 'Width:',
     HEIGHT_LABEL: 'Height:',
@@ -500,7 +540,7 @@ export const STRINGS = {
     // #442: named sets of both command lists. Row laid out like Render
     // Output's preset row (#108).
     PROFILE_LABEL: 'Profile:',
-    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one.',
+    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one. Built-in profiles can be picked or duplicated, not changed.',
     PROFILE_NONE: '—',
     profileEditedOption: (name) => `${name} (edited)`,
     PROFILE_NAME_PLACEHOLDER: 'Name for these commands',
@@ -516,6 +556,16 @@ export const STRINGS = {
     profileAppliedToast: (name) => `Replaced both command lists with the "${name}" profile.`,
     profileDeletedToast: (name) => `Deleted the "${name}" profile.`,
     profileNameTakenToast: (name) => `There is already a profile named "${name}".`,
+    // Built-in profiles (#911): shipped with the app, kept up to date, locked.
+    PROFILE_BUILTIN_CHIP: 'Built-in',
+    PROFILE_BUILTIN_TITLE: "Comes with DoD Studio and stays up to date with it, so it can't be changed. Duplicate it to make your own copy.",
+    PROFILE_BUILTIN_LOCKED_TITLE: "Built-in profiles can't be changed. Duplicate it to make your own copy.",
+    profileBuiltinNameTitle: (name) => `"${name}" is a built-in profile. Type another name.`,
+    PROFILE_DUPLICATE_BUTTON: 'Duplicate',
+    PROFILE_DUPLICATE_TITLE: 'Make a copy of the picked profile that is yours to change.',
+    profileDuplicatedToast: (name) => `Made "${name}", your own copy. Save Changes now saves into it.`,
+    builtinProfileNotice: (names) => `Built-in profiles now stay up to date and can't be changed. You had changed your copy, so it's kept as ${names.map((n) => `"${n}"`).join(' and ')}.`,
+    PROFILE_NOTICE_OK: 'OK',
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
       "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",
@@ -901,6 +951,8 @@ export const STRINGS = {
     STATUS_READY: 'Status: Ready to audit',
     RESULTS_TITLE: 'Duplicate Groups Found',
     DELETE_SELECTED_BUTTON: 'Move to Recycle Bin',
+    OPEN_RECYCLE_BIN_BUTTON: 'Open Recycle Bin',
+    OPEN_RECYCLE_BIN_TITLE: 'Open Windows’ Recycle Bin, to see or restore the demos moved there',
     TABLE_HEADER_STATUS: 'Status',
     TABLE_HEADER_SIZE: 'Size',
     TABLE_HEADER_FILE_PATH: 'File Path',
@@ -919,6 +971,11 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
+    // "Look inside .zip files" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
+    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
+    IN_ZIP_CHIP: 'in a zip',
+    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -927,12 +984,14 @@ export const STRINGS = {
     CANCELLED_ROW: 'The audit was cancelled before it finished, so no groups are listed.',
     // The progress line (audit_duplicates.js): listing folders, then keying.
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
+    listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups) => `Done: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
+    doneStatus: (demos, groups, seconds) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
@@ -1086,6 +1145,9 @@ export const STRINGS = {
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',
     analyzingPct: (pct) => `Analyzing… ${pct}%`,
     analyzingDemoPct: (pct) => `Analyzing demo… ${pct}%`,
+    // A demo the analyzer cache has is read, not parsed (#958).
+    READING_CACHE: 'Reading from the analyzer cache…',
+    READING_CACHE_SHORT: 'Reading from the cache…',
     analyzeFailed: (err) => `Failed to analyze demo: ${err}`,
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
@@ -1567,8 +1629,22 @@ export const STRINGS = {
     CHANGED_DEMOS_RESCAN: 'Rescan',
     // Opening a project with demos an older DoD Studio scanned (scan_version.js).
     OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
-    outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
-    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    // `n` of the project's `total` demos; "All 158" when it is every one.
+    // `time`: how long it takes (rescan_estimate.js), or nothing when that
+    // couldn't be worked out.
+    outdatedDemosMessage: (n, total = n, time = '') => {
+      const which = n < total ? `${n}/${total} demos` : (n === 1 ? '1 demo' : `All ${n} demos`);
+      return `${which} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over. `
+        + (time ? `${time} ` : '')
+        + `Press “Not now” to leave ${n === 1 ? 'it' : 'them'} as ${n === 1 ? 'it is' : 'they are'}; you'll be asked again the next time you open the project.`;
+    },
+    // How long the rescan takes (#937): `duration` is "3 s", "4 min", "an hour".
+    rescanTimeLine: (duration, fullReads) => (fullReads > 0
+      ? `About ${duration}: ${fullReads} need${fullReads === 1 ? 's' : ''} a full read.`
+      : `About ${duration}.`),
+    RESCAN_TIME_PENDING: 'Working out how long…',
+    rescanEstimateFailedLog: (err) => `[rescan] could not work out how long the rescan takes: ${err}`,
+    scanReadRateLog: (measured, rate) => `[scan] full reads went at ${measured} MB/s; this PC's read rate for rescan estimates is now ${rate} MB/s`,
     OUTDATED_DEMOS_RESCAN: 'Rescan',
     OUTDATED_DEMOS_NOT_NOW: 'Not now',
     // What a rescan did with the highlights' work (rescan_carry.js).
@@ -1609,7 +1685,10 @@ export const STRINGS = {
       notes && `Note: "${notes}"`,
     ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
-    queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
+    // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
+    queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
+    QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
+    queueSplitDoneLine: (seconds, demos) => `Done in ${seconds} s: split ${demos} demo${demos === 1 ? '' : 's'}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
     MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
@@ -1617,9 +1696,34 @@ export const STRINGS = {
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
-    cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
-    readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
-    // Appended to the two statuses above when the scan skipped demos (#23).
+    // The queue's progress line through a scan (#951): queue_progress.js.
+    SCAN_STARTING: 'Looking for demos…',
+    // Opening a project, on the queue's line (#958).
+    OPENING_PROJECT: 'Opening the project…',
+    CHECKING_PROJECT_DEMOS: "Checking the project's demos are where they were…",
+    // The line once it has opened, so the last scan's "Done in…" doesn't come back.
+    projectOpenedLine: (n) => `Opened the project: ${n} demo${n === 1 ? '' : 's'}`,
+    lookingForMissingDemos: (n) => `Looking for ${n} missing demo${n === 1 ? '' : 's'}…`,
+    lookingLine: (folders, demos, last) => {
+      const n = (x) => Number(x || 0).toLocaleString('en-US');
+      const was = last > 0 ? ` (about ${n(last)} last time)` : '';
+      return `Looking for demos: ${n(folders)} folder${folders === 1 ? '' : 's'}${was}, ${n(demos)} demo${demos === 1 ? '' : 's'} found`;
+    },
+    // Then 64 KB of each, to skip demos already queued and identical copies.
+    keyingLine: (done, total) => {
+      const n = (x) => Number(x || 0).toLocaleString('en-US');
+      return `Checking which demos are new: ${n(done)} of ${n(total)}`;
+    },
+    scanDoneLine: (seconds, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
+      const parts = [
+        added > 0 && `${added} demo${added === 1 ? '' : 's'} added`,
+        rescanned > 0 && `${rescanned} rescanned`,
+        unchanged > 0 && `${unchanged} already in the queue`,
+      ].filter(Boolean);
+      return `Done in ${seconds} s: ${parts.length ? parts.join(', ') : 'no demos found'}`;
+    },
+    scanCancelledLine: (seconds, added) => `Cancelled after ${seconds} s: ${added > 0 ? `${added} demo${added === 1 ? '' : 's'} added` : 'nothing added'}`,
+    // Appended to the two lines above when the scan skipped demos (#23).
     skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
     // `skipped` is [{name, reason}]; names the first three, counts the rest.
     skippedDemosToast: (skipped) => {
@@ -1628,20 +1732,25 @@ export const STRINGS = {
       return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
     },
     statusGeneric: (status) => `Status: ${status}`,
-    SCAN_CANCELLING_STATUS: 'Status: Cancelling…',
-    SCANNING_STATUS: 'Status: Scanning...',
-    SCANNING_TOAST: 'Scanning directories...',
+    SCAN_CANCELLING_STATUS: 'Cancelling…',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
     scanCompleteToast: (count, unchanged = 0) =>
       unchanged > 0
         ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
+    // #531: the folder walk's bounds stopped it short; `cap` is the scan's.
+    scanCapToast: (cap) => {
+      const parts = [];
+      if (cap.depth) parts.push(`folders more than ${cap.max_depth} levels down were not read`);
+      if (cap.entries) parts.push(`the walk stopped after ${Number(cap.max_entries).toLocaleString('en-US')} files and folders`);
+      return `Some demos may be missing: ${parts.join(', and ')}. Add a folder further down to scan the rest.`;
+    },
     scanCancelledToast: (count) =>
       count > 0
         ? `Scan cancelled (${count} demo(s) added before cancel)`
         : 'Scan cancelled, nothing added',
     scanErrorToast: (err) => `Error: ${err}`,
-    scanErrorStatus: (err) => `Status: Error — ${err}`,
+    scanErrorStatus: (err) => `Could not scan: ${err}`,
 
     EXPORT_POOL_FREE_DEFAULT: 'Capture Output Free: 0.0 GB',
     exportPoolFree: (gb) => `Capture Output Free: ${gb} GB`,
@@ -1734,7 +1843,14 @@ export const STRINGS = {
     SCENE_LABEL: 'Build scene',
     RENDER_LABEL: 'Render',
     ENCODE_LABEL: 'Encode',
-    running: (label) => `${label}: running...`,
+    // What each step's line says until it has frames to count (#956).
+    STARTING: {
+      import: 'Importing the demo into Blender…',
+      scene: 'Building the scene…',
+      render: 'Rendering…',
+      encode: 'Encoding the MP4…',
+    },
+    soFar: (line, elapsed) => `${line} (${elapsed} so far)`,
     done: (label, elapsed) => `${label}: done in ${elapsed}.`,
     failed: (label) => `${label}: stopped with an error (see the message).`,
     CANCELLED: 'Stopped. A render keeps the frames it finished; Render again to carry on.',
@@ -1812,6 +1928,7 @@ export const STRINGS = {
     buildStep: (step, steps, style, type, elapsed) => `Step ${step} of ${steps}: ${style}, ${type} (${elapsed} so far)`,
     buildDone: (steps, elapsed, log) => `Done: ${steps} step${steps === 1 ? '' : 's'} in ${elapsed}. Every step's counts are in ${log}.`,
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
+    BUILD_STARTING: 'Starting the build…',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
@@ -1834,8 +1951,8 @@ export const STRINGS = {
     cfgGapsComment: (sentence) => `// ${sentence}`,
     // #426: which maps a style has map textures for, and the warning when
     // the maps being built include one it hasn't.
-    COVERAGE_CHECKING: 'Checking which maps each style has map textures for…',
-    coverageChecking: (done, total) => `Checking which maps each style has map textures for… (${done} of ${total} maps)`,
+    COVERAGE_CHECKING: 'Reading the maps…',
+    coverageChecking: (done, total) => `Reading the maps: ${done} of ${total}`,
     coverageFailed: (err) => `Could not check which maps are covered: ${err}`,
     coverageAll: (style, maps, listed) => `${style} has every map texture for ${maps === 1 ? 'the 1 map' : `all ${maps} maps`}${listed ? ' in your map list' : ''}.`,
     coverageCounts: (style, full, part, none, listed) => {
@@ -1892,8 +2009,9 @@ export const STRINGS = {
     modelsMissing: (styles) => `Missing models for: ${styles.join(', ')}.`,
     ALL_MODELS_PRESENT: 'All style models are present.',
     bytesOf: (done, total) => `${done} of ${total}`,
-    progressLine: (item, step, steps, done) => `${step} of ${steps}: ${item} (${done})`,
-    unpackingLine: (item, step, steps) => `${step} of ${steps}: unpacking ${item}...`,
+    SETUP_CHECKING: "Checking what's already installed…",
+    progressLine: (item, step, steps, done) => `Downloading ${item} (${step} of ${steps}): ${done}`,
+    unpackingLine: (item, step, steps) => `Unpacking ${item} (${step} of ${steps})…`,
     setupDone: (count) => count ? `Done: downloaded ${count} file${count === 1 ? '' : 's'}.` : 'Everything was already there.',
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
@@ -2061,6 +2179,22 @@ export const STRINGS = {
     PREVIEW_ANYWAY: 'Launch anyway',
   },
 
+  // ── camera_data.js: demos with no camera data (#920) ───────────────────
+  CAMERA_DATA: {
+    BADGE: 'no camera',
+    BADGE_TITLE: 'This demo has no camera data: none of its frames holds the recorder\'s view, so it plays as a frozen camera with no gun. '
+      + 'Kills and the scoreboard still read fine. It is usually a bad copy; if there is another copy of the demo, use that one.',
+    batchTitle: (count) => `${count} demo${count === 1 ? ' has' : 's have'} no camera data`,
+    batchMessage: (count) => `${count === 1 ? 'This demo has' : 'These demos have'} no camera data, so ${count === 1 ? 'its clips come' : 'their clips come'} out as a frozen camera with no gun. Start the batch anyway?`,
+    PREVIEW_TITLE: 'This demo has no camera data',
+    PREVIEW_MESSAGE: 'None of its frames holds the recorder\'s view, so it plays as a frozen camera with no gun. Launch it anyway?',
+    DETAIL: 'No camera data: plays as a frozen camera',
+    ANALYZER_NOTICE: 'No camera data: none of this demo\'s frames holds the recorder\'s view, so it plays and captures as a frozen camera with no gun. '
+      + 'The kills and scoreboard here are fine. It is usually a bad copy; if there is another copy of the demo, use that one.',
+    START_ANYWAY: 'Start anyway',
+    PREVIEW_ANYWAY: 'Launch anyway',
+  },
+
   // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
   COMBINE: {
     OPEN_BUTTON: 'Combine Clips…',
@@ -2088,6 +2222,29 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
     saved: (name) => `Saved ${name}.`,
     SHOW_FILE: 'Show',
+    // combine_progress.js: the step line under the bar (#955).
+    CHECKING_STEP: 'Checking the clips…',
+    checkingLine: (n, total) => `Checking the clips (${n} of ${total})…`,
+    joiningLine: (done, total) => `Joining clips: ${done} of ${total}`,
+    savedIn: (elapsed) => `Saved in ${elapsed}.`,
+    STOPPED: 'Cancelled. Nothing was saved.',
+    FAILED: 'Stopped with an error (see the message).',
+  },
+
+  // ── capture_precheck.js: the Capture footer's line while Start Capture
+  //    Batch checks everything before the batch starts (#953)
+  CAPTURE_PRECHECK: {
+    STARTING: 'Getting ready to capture…',
+    OBS: 'Checking OBS…',
+    DISK: 'Checking the disk space…',
+    DEMOS: 'Checking the picked demos are where they were…',
+    demosCounted: (done, total) => `Checking the picked demos are where they were (${done} of ${total})…`,
+    MAPS: 'Checking the maps and demos for known problems…',
+    PATHS: 'Checking the game and HLAE paths…',
+    GAME: 'Checking whether the game is already open…',
+    STEAM: 'Checking Steam…',
+    NOT_STARTED: 'Not started.',
+    GAME_OPEN: 'Not started yet: the game is already open.',
   },
 
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
@@ -2153,6 +2310,11 @@ export const STRINGS = {
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },
+    // Switching installs in Configuration > Paths while a game runs (#931).
+    SWITCH_TITLE: 'Day of Defeat is running',
+    CLOSE_AND_SWITCH: 'Close it and switch',
+    switchMessage: ({ running }) =>
+      `Day of Defeat is running from "${running.install}". Close it to switch installs? Nothing is switched if you cancel.`,
   },
   // ── overviews_pane.js: the Overviews page (#371) ────────────────────────
   OVERVIEWS: {
@@ -2257,12 +2419,15 @@ export const STRINGS = {
       return `Some earlier edits don't fit this map any more and are kept aside: ${parts.join(', ')}.`;
     },
     building: (map, fraction) => `${map}: working out where players can go... ${Math.round(fraction * 100)}%`,
-    SAVING: 'Saving...',
+    // Its two steps (#958): drawing and writing each takes a moment.
+    SAVING: 'Saving the overview…',
+    SAVING_HD: 'Saving the high-quality copy…',
     // Where Save put things, short; the full paths are the line's tooltip.
-    saved: (hd) => (hd
-      ? 'Saved the overview in dod/overviews, and the high-quality copy and your edits in dod_addon/overviews.'
-      : 'Saved the overview in dod/overviews, and your edits in dod_addon/overviews.'),
-    BACKED_UP: 'Your own overview was kept in dod/overviews/dodstudio_backup first.',
+    // `game` is the Game Folder setting (`dod`, or e.g. `dod_movies`).
+    saved: (hd, game = 'dod') => (hd
+      ? `Saved the overview in ${game}/overviews, and the high-quality copy and your edits in ${game}_addon/overviews.`
+      : `Saved the overview in ${game}/overviews, and your edits in ${game}_addon/overviews.`),
+    backedUp: (game = 'dod') => `Your own overview was kept in ${game}/overviews/dodstudio_backup first.`,
     savedPaths: (paths) => `Saved:\n${paths.join('\n')}`,
     savedToast: (map) => `${map} overview saved.`,
     BADGE_HAS_OVERVIEW: 'has one',
@@ -2352,6 +2517,7 @@ export const STRINGS = {
     hdMapListFailed: (err) => `Could not change hd_maps.txt: ${err}`,
     hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
+    dropError: (err) => `Could not read what was dropped: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
@@ -2360,7 +2526,6 @@ export const STRINGS = {
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,
     killEngineFailed: (err) => `Failed to close running engine processes: ${err}`,
-    batchPreviewFailed: (err) => `Batch preview generation failed: ${err}`,
     cancelScanError: (err) => `Cancel scan error: ${err}`,
     settingsLoadFailed: (err) => `Failed to load settings: ${err}`,
     settingsSaveFailed: (err) => `Failed to save settings: ${err}`,
@@ -2463,12 +2628,23 @@ export const STRINGS = {
     },
   },
 
+  // ── progress_view.js: what every long job's progress line shares (#951)
+  PROGRESS: {
+    elapsedSuffix: (clock) => ` · ${clock}`,
+  },
+
   // ── scan_progress.js: what every scan reading demos one by one adds to
   //    its progress line (List Demos, Cache all, the Master Queue scan; #687)
   SCAN_PROGRESS: {
     fromCache: (cached) => ` (${cached} from the analyzer cache)`,
     CHECKING_CACHE: 'Checking the analyzer cache…',
     timeLeft: (seconds) => (seconds >= 90 ? ` · about ${Math.round(seconds / 60)} min left` : ` · about ${Math.max(1, seconds)} s left`),
+    // The Master Queue scan's start and end in the activity log, with its
+    // times, so how long a rescan takes can be measured (#926).
+    startLog: (paths) => `[scan] started: ${paths} path(s) to read`,
+    endLog: (outcome, seconds, read, unchanged) => `[scan] ${outcome} after ${seconds} s: ${read} demo(s) read, ${unchanged} unchanged`,
+    endLogSplit: (cached, notCached, seconds) => ` (${cached} from the analyzer cache, ${notCached} not${notCached > 0 ? `: those took ${seconds} s` : ''})`,
+    failedLog: (seconds, err) => `[scan] failed after ${seconds} s: ${err}`,
   },
 
   // #441: clip names, their template and its checks.
@@ -2511,6 +2687,14 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
+    // Rename and Undo's progress line (#958).
+    renamingStart: (count) => `Renaming ${count} demo${count === 1 ? '' : 's'}…`,
+    renaming: (done, total) => `Renaming ${done} of ${total}…`,
+    UNDO_STARTING: 'Putting back the last renames…',
+    puttingBack: (done, total) => `Putting back ${done} of ${total}…`,
+    renamedIn: (count, secs) => `Renamed ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    putBackIn: (count, secs) => `Put back ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    notRenamed: (count) => ` ${count} couldn't be renamed.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
     // Rename Demos' own meaning of a placeholder, where it isn't the one in
     // PLACEHOLDERS.DESCRIPTIONS.
@@ -2683,6 +2867,23 @@ export const STRINGS = {
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
   },
+  // Dropping demos and folders from Windows (#530): demo_drop.js.
+  DROP: {
+    skippedToast: (names) => {
+      const shown = names.slice(0, 5).join(', ');
+      const more = names.length > 5 ? ` and ${names.length - 5} more` : '';
+      return `Not a demo or a folder, so not added: ${shown}${more}`;
+    },
+    BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+  },
+  // The one-time look at the pinned folders (#533): pinned_review.js.
+  PINNED_REVIEW: {
+    TITLE: 'Pinned folders',
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
+    SAVE_BUTTON: 'Save',
+    KEEP_ALL_BUTTON: 'Keep all',
+  },
   SETUP: {
     MENU_ITEM: 'Setup…',
     MENU_ITEM_TITLE: 'Walk through what DoD Studio needs: the game, HLAE, FFmpeg, output folders and demos',
@@ -2736,16 +2937,51 @@ export const STRINGS = {
     demosSummary: (count) => (count === 1 ? '1 demo in the queue' : `${count} demos in the queue`),
 
     // Step 1: Half-Life.
-    HL_TITLE: 'Set up a movie copy of Half-Life',
-    HL_INTRO: 'DoD Studio loads HLAE and its own add-on into the game. Do that in a separate copy of Half-Life used only for movies, never the one you play online with. To make one, copy your Half-Life folder somewhere else and pick the hl.exe inside the copy here.',
-    HL_RECOMMEND: 'Make the copy from the 25th Anniversary build. DoD Studio fixes the problems that build brought in (ESC closing the demo bar, textures glitching as you walk past them), and it is the build DoD Studio is developed on.',
-    HL_FIELD: 'Movie copy: hl.exe',
+    HL_TITLE: 'Set up Day of Defeat for movies',
+    HL_INTRO: "Pick your Half-Life's hl.exe, then the game folder DoD Studio starts. Highly recommended: make movies in a copy of your dod folder, so your movie configs, models and sprites stay out of the game you play online. Make a movie copy… below makes one for you. To make one by hand, open your Half-Life folder, copy the dod folder, rename the copy to something you'll recognise, like dod_movies, then in the copy's resource folder rename dod_english.txt to dod_movies_english.txt (your folder's name, and your language if Steam isn't in English), and pick the copy as the game folder below.",
+    HL_RECOMMEND: "DoD Studio supports both the 25th Anniversary and the pre-Anniversary build, but the 25th Anniversary build gives the best results: the game can use up to 4 GB of memory instead of 2 GB (room for HD textures), it has higher engine limits (some demos only play on it), and DoD Studio fixes the problems it brought in (ESC closing the demo bar, textures glitching as you walk past them).",
+    HL_FIELD: 'Half-Life: hl.exe',
+    GAME_FOLDER_FIELD: 'Game folder',
+    GAME_FOLDER_NONE: 'Pick hl.exe first: the folders beside it are listed here.',
+    HL_DOD_FOLDER: "This is dod, the folder you play online with. It works, but a copy for movies is highly recommended: copy the dod folder in your Half-Life folder, rename the copy (dod_movies, say), rename its resource\\dod_english.txt to match (dod_movies_english.txt), then pick it here. Or let Make a movie copy… above do it.",
     HL_FOUND: 'Found hl.exe.',
+    // Make a movie copy (#939), movie_copy.js and movie_copy_ui.js.
+    MOVIE_COPY: {
+      OPEN: 'Make a movie copy…',
+      OPEN_TITLE: 'Copies your dod folder to a new folder for movies, and picks it as the game folder',
+      TITLE: 'Make a movie copy of dod',
+      INTRO: "DoD Studio copies your dod folder to a new folder beside it and picks the copy as the game folder. Your dod folder isn't changed. Logs are left out, and so are demos unless you tick the box. The copy also gets the language files its in-game text needs.",
+      NAME_LABEL: 'Name of the copy',
+      DEMOS_LABEL: 'Also copy my demos',
+      NAME_EMPTY: 'Give the copy a name.',
+      NAME_BAD_CHAR: 'Letters, digits and _ only.',
+      NAME_RESERVED: "Windows doesn't allow a folder with that name.",
+      nameExists: (name) => `There's already a ${name} in your Half-Life folder: pick another name.`,
+      LOOKING: 'Measuring the dod folder…',
+      lookFailed: (why) => `Couldn't measure the dod folder: ${why}`,
+      size: (files, size) => `${files === 1 ? '1 file' : `${files} files`}, ${size} to copy.`,
+      demosAdd: (files, size) => `Demos: ${files === 1 ? '1 demo' : `${files} demos`}, ${size}.`,
+      free: (size) => `${size} free on this drive.`,
+      FREE_UNKNOWN: "Couldn't tell how much space this drive has free.",
+      noRoom: (need, free) => `Not enough space: the copy needs ${need} and this drive has ${free} free (DoD Studio leaves 1 GB spare). Free some space, or leave the demos out.`,
+      COPY: 'Copy',
+      CLOSE: 'Close',
+      CANCEL: 'Cancel',
+      STARTING: 'Starting the copy…',
+      progress: (done, total, file) => `Copied ${done} of ${total}: ${file}`,
+      CANCEL_ASK: 'Stop the copy? What it has copied so far is deleted. Your dod folder stays as it is.',
+      CANCEL_ASK_TITLE: 'Stop the movie copy?',
+      CANCEL_YES: 'Stop and delete the copy',
+      CANCEL_NO: 'Keep copying',
+      CANCELLING: 'Stopping and deleting the half-made copy…',
+      CANCELLED: 'Stopped. The half-made copy was deleted.',
+      failed: (why) => `The copy didn't finish: ${why}.`,
+      done: (name) => `Done: ${name} is ready and picked as the game folder.`,
+    },
     HL_BUILD: {
       anniversary: '25th Anniversary build',
       pre_anniversary: 'pre-Anniversary build',
     },
-    HL_PLAY_INSTALL: "This is Steam's own Half-Life, the one you play online with. Pick your movie copy instead: copy the Half-Life folder to a new folder and pick its hl.exe here.",
 
     // Step 2: HLAE.
     HLAE_TITLE: 'Point DoD Studio at HLAE',
@@ -2757,7 +2993,17 @@ export const STRINGS = {
 
     // Step 3: FFmpeg.
     FFMPEG_TITLE: 'FFmpeg (optional)',
-    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. HLAE looks for FFmpeg in its own folder; the button below points it at the one DoD Studio uses.',
+    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. Pick your ffmpeg.exe below (DoD Studio renders with it), then point HLAE at the same one.',
+    FFMPEG_GET: 'Get FFmpeg (ffmpeg.org)',
+    FFMPEG_URL: 'https://ffmpeg.org/download.html',
+    FFMPEG_FIELD: 'ffmpeg.exe',
+    FFMPEG_APP_FOUND: 'Found FFmpeg.',
+    FFMPEG_APP_MISSING: "Not found: it isn't on the Windows PATH. Pick your ffmpeg.exe.",
+    ffmpegAppProblem: (why) => `Can't use this one: ${why}.`,
+    FFMPEG_HLAE_LABEL: 'HLAE',
+    FFMPEG_USE_HLAE: "Use HLAE's FFmpeg",
+    ffmpegHlaeHasOne: (path) => `HLAE has its own FFmpeg (${path}). DoD Studio can render with it too.`,
+    FFMPEG_PICK_FIRST: 'Pick ffmpeg.exe above first, then point HLAE at it.',
     FFMPEG_CHECKING: 'Checking…',
     FFMPEG_MISSING: "HLAE can't find FFmpeg yet.",
     FFMPEG_LINK_NOTE: 'Windows may ask for permission if HLAE is in a protected folder.',

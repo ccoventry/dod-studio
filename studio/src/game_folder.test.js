@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions } from './game_folder.js';
+import {
+  DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote, languageFileButton,
+  isListedFolder,
+} from './game_folder.js';
+import { STRINGS } from './strings.js';
 
 describe('gameFolderProblem (#402)', () => {
   it('accepts plain folder names', () => {
@@ -47,5 +51,55 @@ describe('gameFolderOptions (#402)', () => {
       { value: DEFAULT_GAME_FOLDER, missing: true, selected: true },
     ]);
     expect(gameFolderOptions(undefined, undefined)[0].value).toBe('dod');
+  });
+});
+
+describe('isListedFolder', () => {
+  it('is true only for a folder found beside hl.exe, any case', () => {
+    expect(isListedFolder(['dod', 'dod_movies'], 'DOD_Movies')).toBe(true);
+    expect(isListedFolder(['dod'], undefined)).toBe(true);
+  });
+
+  // A switched install without the saved folder: Setup named a dod_movies that
+  // wasn't there in its language warning. No check runs for such a folder.
+  it('is false for a saved folder the install does not have, or with nothing listed', () => {
+    expect(isListedFolder(['dod'], 'dod_movies')).toBe(false);
+    expect(isListedFolder([], 'dod')).toBe(false);
+    expect(isListedFolder(null, 'dod')).toBe(false);
+  });
+});
+
+describe('languageFileNote (#925)', () => {
+  it('names the file to rename and its new name', () => {
+    const note = languageFileNote({
+      folder: 'dod_movies', language: 'english', needed: 'dod_movies_english.txt', rename_from: 'dod_english.txt',
+    });
+    expect(note).toContain('dod_movies has no resource');
+    expect(note).toContain('dod_movies_english.txt');
+    expect(note).toContain('rename dod_english.txt to dod_movies_english.txt');
+    expect(note).toContain('#Dod_Spec_Allies_Score');
+  });
+
+  it('says where to copy it from when the folder has nothing to rename', () => {
+    const note = languageFileNote({
+      folder: 'movies', language: 'french', needed: 'movies_french.txt', rename_from: null,
+    });
+    expect(note).toContain('dod_french.txt');
+    expect(note).toContain('name it movies_french.txt');
+  });
+
+  it('is empty when nothing is missing', () => {
+    expect(languageFileNote(null)).toBe('');
+    expect(languageFileNote(undefined)).toBe('');
+  });
+});
+
+describe('languageFileButton (#925)', () => {
+  it('shows the file when there is one to rename, else opens the folder', () => {
+    expect(languageFileButton({ show: 'C:/x/dod_english.txt', rename_from: 'dod_english.txt' }))
+      .toBe(STRINGS.CAPTURE_CONFIG.LANGUAGE_FILE_SHOW);
+    expect(languageFileButton({ show: 'C:/x/resource', rename_from: null }))
+      .toBe(STRINGS.CAPTURE_CONFIG.LANGUAGE_FILE_OPEN_FOLDER);
+    expect(languageFileButton(null)).toBe('');
   });
 });
