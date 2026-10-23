@@ -2124,14 +2124,23 @@ const LOCATE_MAX_ENTRIES: usize = 50_000;
 /// Suggests, never applies: the frontend asks before it moves anything. A
 /// demo with no saved key (a project from before #456) can only be reported
 /// missing.
-pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
-    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
+///
+/// `on_search(n)` is called once, before the walk, with the number of
+/// missing demos it looks for (those with a saved key), so the page can say
+/// so (#958); not at all when nothing needs looking for.
+pub fn locate_missing_demos(
+    demos: &[KnownDemo],
+    search_dirs: &[PathBuf],
+    on_search: &mut dyn FnMut(usize),
+) -> Vec<MissingDemo> {
+    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES, on_search)
 }
 
 fn locate_missing_demos_within(
     demos: &[KnownDemo],
     search_dirs: &[PathBuf],
     max_entries: usize,
+    on_search: &mut dyn FnMut(usize),
 ) -> Vec<MissingDemo> {
     let mut missing: Vec<MissingDemo> = demos
         .iter()
@@ -2153,6 +2162,7 @@ fn locate_missing_demos_within(
     if wanted.is_empty() {
         return missing;
     }
+    on_search(wanted.len());
 
     // A search folder listed twice, or inside another, is read once.
     let mut visited = std::collections::HashSet::new();
@@ -3957,9 +3967,14 @@ mod tests {
                 file_key: demo_file_key(&kept).unwrap(),
             },
         ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
 
         assert_eq!(found.len(), 1, "only the missing demo is reported");
+        // The page is told once, before the walk, how many it looks for.
+        assert_eq!(searched, vec![1]);
         assert_eq!(found[0].path, moved.to_string_lossy());
         assert_eq!(
             found[0].candidate.as_deref(),
@@ -3995,7 +4010,7 @@ mod tests {
         }];
         // 30 entries: the big tree has 84, the project folder 1, then its
         // subfolder 1. Depth-first from `big` spent them all first.
-        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30, &mut |_| {});
         assert_eq!(
             found[0].candidate.as_deref(),
             Some(
@@ -4096,9 +4111,31 @@ mod tests {
                 file_key: "999-0000000000000000".to_string(),
             },
         ];
-        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
         assert_eq!(found.len(), 2);
         assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
+        // Only the demo with a key can be looked for (#958).
+        assert_eq!(searched, vec![1]);
+    }
+
+    #[test]
+    fn nothing_missing_means_no_search_to_report() {
+        let scratch = Scratch::new("locate_present");
+        let here = scratch.path().join("here.dem");
+        std::fs::write(&here, b"HLDEMO here").unwrap();
+        let demos = vec![KnownDemo {
+            path: here.to_string_lossy().into_owned(),
+            file_key: demo_file_key(&here).unwrap(),
+        }];
+        let mut searched = Vec::new();
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()], &mut |n| {
+            searched.push(n)
+        });
+        assert!(found.is_empty());
+        assert!(searched.is_empty());
     }
 
     #[test]

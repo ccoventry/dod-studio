@@ -83,11 +83,14 @@ export function groupingStepView(p) {
   };
 }
 
-/// The line and bar. `begin()` takes them over and starts the clock; with
-/// `ifIdle`, it gives `null` while another job runs (a regroup started by
-/// the queue's Group by never takes the line from a scan). `show` ignores a
-/// job that no longer owns the line; `end` puts up the job's last line, or
-/// the line from before it when given none.
+/// The line and bar. `begin()` takes them over and starts the job's clock;
+/// with `ifIdle`, it gives `null` while another job runs (a regroup started
+/// by the queue's Group by never takes the line from a scan). A job that
+/// takes the line from another gives it back when it ends (#958: opening a
+/// project looks for its missing demos while its grouping runs): the job
+/// under it shows where it got to meanwhile, with its own clock. `end` puts
+/// up the job's last line when nothing is left running, else the last line
+/// of a job under it that ended meanwhile, else the line from before any.
 export function createQueueProgress({ doc = globalThis.document } = {}) {
   const els = () => ({
     text: doc?.querySelector('#scan-status'),
@@ -95,43 +98,62 @@ export function createQueueProgress({ doc = globalThis.document } = {}) {
     bar: doc?.querySelector('#scan-progress'),
   });
   let current = null;
-  let view = null;
   const draw = () => {
-    if (!current || !view) return;
+    if (!current) return;
     const { text, bar } = els();
-    if (text) text.textContent = view.text + clock.suffix();
-    showBar(bar, view);
+    if (text) text.textContent = current.view.text + current.clock.suffix();
+    showBar(bar, current.view);
   };
-  const clock = createClock({ redraw: draw });
 
   return {
     begin({ ifIdle = false, text = STRINGS.MAIN.SCAN_STARTING } = {}) {
       if (current && ifIdle) return null;
       const { text: textEl, spinner } = els();
-      const job = { before: current ? current.before : (textEl?.textContent ?? '') };
+      const job = {
+        before: current ? current.before : (textEl?.textContent ?? ''),
+        under: current,
+        view: { text, pct: 0, indeterminate: true },
+        ended: false,
+        endText: null,
+      };
+      job.clock = createClock({ redraw: () => { if (job === current) draw(); } });
       current = job;
-      view = { text, pct: 0, indeterminate: true };
-      clock.start();
+      job.clock.start();
       if (spinner) spinner.style.display = 'inline-block';
       draw();
       return job;
     },
     show(job, next) {
-      if (!job || job !== current) return;
-      view = { ...view, ...next };
-      draw();
+      if (!job || job.ended) return;
+      job.view = { ...job.view, ...next };
+      if (job === current) draw();
     },
     /** Milliseconds since `job` began, while it runs. */
     ms(job) {
-      return job && job === current ? clock.ms() : 0;
+      return job && !job.ended ? job.clock.ms() : 0;
     },
     end(job, text = null) {
-      if (!job || job !== current) return;
+      if (!job || job.ended) return;
+      job.ended = true;
+      job.endText = text;
+      job.clock.stop();
+      // A job under another one keeps its last line for when the line is
+      // given back.
+      if (job !== current) return;
+      let next = job.under;
+      let lastText = text;
+      while (next && next.ended) {
+        lastText ??= next.endText;
+        next = next.under;
+      }
+      if (next) {
+        current = next;
+        draw();
+        return;
+      }
       current = null;
-      view = null;
-      clock.stop();
       const { text: textEl, spinner, bar } = els();
-      if (textEl) textEl.textContent = text ?? job.before;
+      if (textEl) textEl.textContent = lastText ?? job.before;
       if (spinner) spinner.style.display = 'none';
       hideBar(bar);
     },
