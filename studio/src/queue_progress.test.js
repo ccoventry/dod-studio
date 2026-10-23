@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  SCAN_STEPS, inRange, nest, placed, scanStepView, groupingStepView, createQueueProgress,
+  SCAN_STEPS, inRange, nest, placed, scanStepView, groupingStepView, createQueueProgress, scanFoldersKey,
 } from './queue_progress.js';
+import { lastRunKey } from './progress_view.js';
 
 // The queue's line, spinner and bar, enough for createQueueProgress.
 function fakeDoc(line = 'Ready') {
@@ -35,6 +36,13 @@ function fakeDoc(line = 'Ready') {
 afterEach(() => vi.useRealTimers());
 
 describe('queue_progress (#951)', () => {
+  it('remembers the folder count apart for a scan without subfolders (#531)', () => {
+    const paths = ['C:\\demos'];
+    expect(scanFoldersKey(paths, true)).toBe(lastRunKey('queue_scan_last_folders', paths));
+    expect(scanFoldersKey(paths, false)).not.toBe(scanFoldersKey(paths, true));
+    expect(scanFoldersKey(paths)).toBe(scanFoldersKey(paths, true));
+  });
+
   it('places a step on its share of the bar, nested shares included', () => {
     expect(inRange([10, 90], 50)).toBe(50);
     expect(inRange([10, 90], 150)).toBe(90);
@@ -60,6 +68,15 @@ describe('queue_progress (#951)', () => {
     expect(again.text).toBe('Looking for demos: 620 folders (about 1,240 last time), 1 demo found');
     expect(again.pct).toBe(50);
     expect(again.indeterminate).toBe(false);
+  });
+
+  it('counts the demos checked for being new, between looking and reading', () => {
+    const view = scanStepView({ keying: true, keyed: 300, total: 1200, scanned: 0, status: 'x' });
+    expect(view).toEqual({ step: 'keying', text: 'Checking which demos are new: 300 of 1,200', pct: 25, indeterminate: false });
+    // After looking's share of the bar and before reading's, so it never goes back.
+    expect(placed(nest({ range: [0, 100] }, SCAN_STEPS.keying), view).pct).toBe(6.25);
+    expect(SCAN_STEPS.looking[1]).toBe(SCAN_STEPS.keying[0]);
+    expect(SCAN_STEPS.keying[1]).toBe(SCAN_STEPS.reading[0]);
   });
 
   it('shows reading demos as the backend words it, with the time left', () => {

@@ -19,8 +19,8 @@ import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
 import { learnFromScan } from './rescan_estimate.js';
-import { lastRunKey, readLastRun, rememberLastRun, secondsText } from './progress_view.js';
-import { SCAN_STEPS, nest, placed, queueProgress, scanStepView } from './queue_progress.js';
+import { readLastRun, rememberLastRun, secondsText } from './progress_view.js';
+import { SCAN_STEPS, nest, placed, queueProgress, scanFoldersKey, scanStepView } from './queue_progress.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -85,9 +85,9 @@ export function createQueueScan({
     }
     if (!active) return;
     if (p.listing) active.foldersSeen = Math.max(active.foldersSeen, p.folders ?? 0);
-    // While folders are being listed (#843) no parse has started, so the
-    // parse clock must not start either.
-    const timeLeft = p.listing ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
+    // While folders are being listed (#843) or their demos' keys read, no
+    // parse has started, so the parse clock must not start either.
+    const timeLeft = p.listing || p.keying ? '' : timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
     const view = scanStepView(p, { expectedFolders: active.expectedFolders, timeLeft });
     if (!view) return;
     const shown = placed(nest(active.place, SCAN_STEPS[view.step]), view);
@@ -163,7 +163,7 @@ export function createQueueScan({
     progress.show(place.job, placed(nest(place, SCAN_STEPS.looking), {
       text: STRINGS.MAIN.SCAN_STARTING, pct: 0, indeterminate: true,
     }));
-    const foldersKey = lastRunKey('queue_scan_last_folders', pathsToScan);
+    const foldersKey = scanFoldersKey(pathsToScan, includeSubfolders());
     active = { place, expectedFolders: readLastRun(foldersKey), foldersSeen: 0, skipped: 0 };
     // The line the scan ends on; `finally` puts it up if the scan didn't.
     let endLine = null;

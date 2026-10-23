@@ -9,6 +9,7 @@ import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { listen } from '@tauri-apps/api/event';
 import { STRINGS } from './strings.js';
+import { getGameFolder } from './game_folder_ui.js';
 import { showBar, hideBar } from './progress_view.js';
 import {
   overviewInstalls, overviewMaps, overviewScene, overviewLoadEdits,
@@ -1055,8 +1056,8 @@ export function initOverviewsPane() {
         );
         written.push(path);
       }
-      const lines = [STRINGS.OVERVIEWS.saved(edits.hd !== false)];
-      if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.BACKED_UP);
+      const lines = [STRINGS.OVERVIEWS.saved(edits.hd !== false, getGameFolder())];
+      if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.backedUp(getGameFolder()));
       saveStatus.textContent = lines.join(' ');
       saveStatus.title = STRINGS.OVERVIEWS.savedPaths([...written, ...result.backed_up]);
       showToast(STRINGS.OVERVIEWS.savedToast(scene.map), 'success');
