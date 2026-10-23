@@ -92,6 +92,32 @@
 //! (slot 28, "is the loader still connected") is the gate; the console prints
 //! `Demo file completely loaded.` when it clears.
 //!
+//! ## The gap before a POV demo's first frame (#893)
+//!
+//! A POV demo's LOADING segment holds the connection's sign-on, from when the
+//! recorder joined the server; its playback starts when they typed `record`,
+//! often minutes later (median 103 s over 469 POV demos). The player's clock
+//! starts at the LOADING frames, so the first stretch of it has no frames.
+//!
+//! The player means to jump such a gap: `RunClocks` (PRE `DemoPlayer.dll`
+//! `+0x42e0`, Anniversary `+0x3c40`) moves the clock to 0.01 s before the next
+//! frame when the frame after the last one sent is more than 2 s on. But it
+//! looks only from the last frame *sent*, and `WriteDatagram` sends the first
+//! frame at or after the clock. The LOADING frames span about 14 ms of server
+//! time, so an engine frame longer than that (a loading frame often is) steps
+//! the clock past them, sends the first playback frame straight away, and the
+//! check then compares that frame with the one after it: no gap. The clock
+//! then crawls through the whole gap at normal speed while `GetDemoViewInfo`
+//! interpolates the view from the LOADING frame's position to the first
+//! playback frame's: the view floats from where the recorder joined to where
+//! the recording starts, for as long as the gap.
+//!
+//! [`skip_gap`] does the jump the player missed: whenever the frame at or after
+//! the clock is the one already sent and more than [`GAP_SECONDS`] ahead of it,
+//! the clock goes to 0.01 s before that frame, as `RunClocks` would have put
+//! it. Never while paused (the player's clock doesn't run then either) or
+//! while a seek is on its way.
+//!
 //! ## Finding the player
 //!
 //! `DemoPlayer.dll` exports only `CreateInterface`, and `demoplayer001` is a
@@ -265,16 +291,98 @@ const FIELD_LAST_FRAME_SEQ_NR: usize = 0x3d8;
 /// `frame_t` fields: the server time as a float, then the sequence number.
 const FRAME_SEQ_NR: usize = 4;
 
-/// Parses a seek argument: seconds, fractional or negative.
-fn parse_seconds(raw: &str) -> Result<f64, String> {
-    let value: f64 = raw
-        .trim()
-        .parse()
-        .map_err(|_| format!("expected a number of seconds, got \"{raw}\""))?;
+/// What a seek's time may look like, for the refusal line.
+const TIME_FORMS: &str = "seconds (610), m:ss (10:10) or h:mm:ss (1:02:03)";
+
+/// Parses a seek's time (#928): seconds (`610`, `610.5`, `-30`), `m:ss`
+/// (`10:10`, `-0:30`) or `h:mm:ss` (`1:02:03`). The last field may have a
+/// fraction; a field after the first is below 60.
+fn parse_time(raw: &str) -> Result<f64, String> {
+    let refuse = || format!("expected {TIME_FORMS}, got \"{raw}\"");
+    let text = raw.trim();
+    let value = if !text.contains(':') {
+        text.parse::<f64>().map_err(|_| refuse())?
+    } else {
+        let (negative, body) = match text.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, text),
+        };
+        let fields: Vec<&str> = body.split(':').collect();
+        if fields.len() > 3 {
+            return Err(refuse());
+        }
+        let (last, whole) = fields.split_last().ok_or_else(refuse)?;
+        let mut total = 0.0;
+        for (i, field) in whole.iter().enumerate() {
+            if field.is_empty() || !field.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(refuse());
+            }
+            let n: f64 = field.parse().map_err(|_| refuse())?;
+            // Minutes under hours are below 60; the first field is any size.
+            if i > 0 && n >= 60.0 {
+                return Err(refuse());
+            }
+            total = total * 60.0 + n;
+        }
+        // Seconds: digits, then maybe a fraction; no sign, no exponent.
+        let (int, frac) = last.split_once('.').unwrap_or((last, "0"));
+        if int.is_empty()
+            || frac.is_empty()
+            || !int.bytes().all(|b| b.is_ascii_digit())
+            || !frac.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Err(refuse());
+        }
+        let seconds: f64 = last.parse().map_err(|_| refuse())?;
+        if seconds >= 60.0 {
+            return Err(refuse());
+        }
+        let total = total * 60.0 + seconds;
+        if negative { -total } else { total }
+    };
     if value.is_finite() {
         Ok(value)
     } else {
-        Err(format!("expected a number of seconds, got \"{raw}\""))
+        Err(refuse())
+    }
+}
+
+/// The time at the front of a seek's arguments, and the words after it. The
+/// console splits unquoted text at `:`, so `10:10` arrives as `10`, `:`, `10`
+/// and is joined back here; a quoted `"10:10"` arrives whole.
+fn split_time(words: &[String]) -> Option<(String, &[String])> {
+    let (first, mut rest) = words.split_first()?;
+    let mut time = first.clone();
+    while let [colon, field, after @ ..] = rest
+        && colon == ":"
+    {
+        time.push(':');
+        time.push_str(field);
+        rest = after;
+    }
+    Some((time, rest))
+}
+
+/// A time as the demo bar shows it: `m:ss`, `h:mm:ss` from an hour, with
+/// hundredths when it has them, and a minus when negative.
+fn clock_text(seconds: f64) -> String {
+    let sign = if seconds < 0.0 { "-" } else { "" };
+    let hundredths = (seconds.abs() * 100.0).round() as u64;
+    let (h, m, s, cs) = (
+        hundredths / 360_000,
+        hundredths / 6000 % 60,
+        hundredths / 100 % 60,
+        hundredths % 100,
+    );
+    let secs = if cs == 0 {
+        format!("{s:02}")
+    } else {
+        format!("{s:02}.{cs:02}")
+    };
+    if h > 0 {
+        format!("{sign}{h}:{m:02}:{secs}")
+    } else {
+        format!("{sign}{m}:{secs}")
     }
 }
 
@@ -298,7 +406,8 @@ fn skip_mark(last_sent_seq: u32, landing_seq: u32) -> Option<u32> {
 /// What the console command reads: the time, and the command to run once the
 /// seek lands, if one follows it.
 fn arguments(name: &str) -> Result<(String, Option<String>), String> {
-    let usage = || format!("usage: {name} <seconds> [command to run once there]");
+    let usage =
+        || format!("usage: {name} <time> [command to run once there]; the time is {TIME_FORMS}");
     let engfuncs = engine::engfuncs().ok_or_else(|| "the engine is not ready".to_string())?;
     // Cmd_Argc counts the command name itself.
     let argc = unsafe { (engfuncs.cmd_argc)() };
@@ -317,8 +426,8 @@ fn arguments(name: &str) -> Result<(String, Option<String>), String> {
                 .into_owned(),
         );
     }
-    let then = follow_up(&args[1..]);
-    Ok((args.swap_remove(0), then))
+    let (time, rest) = split_time(&args).ok_or_else(usage)?;
+    Ok((time, follow_up(rest)))
 }
 
 /// The words after the time, as one command line, or `None` when there are none.
@@ -326,10 +435,9 @@ fn follow_up(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-fn run(name: &str, relative: bool) {
+fn run(name: &'static str, relative: bool) {
     let result = arguments(name).and_then(|(raw, then)| {
-        parse_seconds(&raw)
-            .and_then(|seconds| player::seek(seconds, relative, skip_between(), then))
+        parse_time(&raw).and_then(|seconds| start(name, seconds, relative, then))
     });
     let line = match result {
         Ok(done) => format!("{name}: {done}"),
@@ -337,6 +445,251 @@ fn run(name: &str, relative: bool) {
     };
     console_print(&format!("{line}\n"));
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
+}
+
+/// Starts a typed seek: drops one still waiting for its demo, then waits
+/// with this one when it came on the same line as `viewdemo`, or runs it.
+fn start(
+    name: &'static str,
+    seconds: f64,
+    relative: bool,
+    then: Option<String>,
+) -> Result<String, String> {
+    cancel_queued("you started another seek");
+    match ARMED.load(Ordering::Relaxed) {
+        ARMED_VIEWDEMO => {
+            let line = format!(
+                "will seek {} {} once the demo has loaded",
+                if relative { "by" } else { "to" },
+                clock_text(seconds)
+            );
+            *QUEUED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Queued {
+                name,
+                seconds,
+                relative,
+                then,
+                watch: Watch::default(),
+                queued: std::time::Instant::now(),
+                last_look: std::time::Instant::now(),
+            });
+            Ok(line)
+        }
+        ARMED_PLAYDEMO => Err("not viewing a demo (works under viewdemo, not playdemo)".into()),
+        _ => player::seek(seconds, relative, skip_between(), then),
+    }
+}
+
+/// ## A seek typed with the demo (#928)
+///
+/// `viewdemo <demo>; ds_demo_seek_to 10:05` reaches the seek while the demo
+/// has only begun to load, which takes 10-25 s while it already plays. Such a
+/// seek waits ([`Queued`]) and runs once the demo has loaded. "Typed with the
+/// demo" is "on the same command line": `viewdemo`'s wrapper
+/// (`demo_reload.rs`) sets [`ARMED`] after the engine's handler returns, the
+/// rest of the line runs in the same `Cbuf_Execute`, and the next [`poll`]
+/// clears it. A seek typed later during loading is refused as before.
+///
+/// Anything the user does to the demo first cancels the wait, with a console
+/// line: another seek, loading or closing a demo, pausing, a speed change, or
+/// a move of the clock that playback doesn't explain (a demo-bar click or
+/// drag). Only the last queued seek counts.
+const ARMED_NONE: u8 = 0;
+const ARMED_VIEWDEMO: u8 = 1;
+const ARMED_PLAYDEMO: u8 = 2;
+static ARMED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(ARMED_NONE);
+
+/// Which demo command just ran, for [`demo_started`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemoCommand {
+    Viewdemo,
+    Playdemo,
+}
+
+/// Called by the `viewdemo` / `playdemo` wrappers once the engine's handler
+/// has run with a demo name: a seek waiting for the last demo is dropped, and
+/// a seek later on this line waits for this one.
+pub fn demo_started(command: DemoCommand) {
+    cancel_queued("you loaded another demo");
+    let armed = match command {
+        DemoCommand::Viewdemo => ARMED_VIEWDEMO,
+        DemoCommand::Playdemo => ARMED_PLAYDEMO,
+    };
+    ARMED.store(armed, Ordering::Relaxed);
+}
+
+struct Queued {
+    name: &'static str,
+    seconds: f64,
+    relative: bool,
+    then: Option<String>,
+    watch: Watch,
+    queued: std::time::Instant,
+    last_look: std::time::Instant,
+}
+
+static QUEUED: std::sync::Mutex<Option<Queued>> = std::sync::Mutex::new(None);
+
+/// Drops a waiting seek, saying why.
+fn cancel_queued(why: &str) {
+    let queued = QUEUED.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(q) = queued {
+        say(&cancelled_line(&q, why));
+    }
+}
+
+fn cancelled_line(q: &Queued, why: &str) -> String {
+    format!(
+        "{}: cancelled the seek {} {} ({why})",
+        q.name,
+        if q.relative { "by" } else { "to" },
+        clock_text(q.seconds)
+    )
+}
+
+fn say(line: &str) {
+    console_print(&format!("{line}\n"));
+    unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
+}
+
+/// What a waiting seek sees of the player on one frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Look {
+    active: bool,
+    loading: bool,
+    paused: bool,
+    now: f64,
+    scale: f32,
+    /// The clock sits just before a frame, where the player's own gap jump
+    /// (`RunClocks`) and [`skip_gap`] put it.
+    before_frame: bool,
+}
+
+#[derive(Debug, Default)]
+struct Watch {
+    /// The new demo has been seen loading; until then the player may still
+    /// hold the last one.
+    seen_loading: bool,
+    frames: u32,
+    last: Option<Look>,
+}
+
+#[derive(Debug, PartialEq)]
+enum Verdict {
+    Wait,
+    Fire,
+    Cancel(&'static str),
+}
+
+/// Frames after which a demo never seen loading counts as loaded: a small
+/// one can be read between two looks (as in `review.rs`).
+const UNSEEN_LOAD_FRAMES: u32 = 300;
+/// How long a seek waits for a demo player that never becomes active (a
+/// demo that failed to open).
+const GIVE_UP_SECONDS: f64 = 60.0;
+/// How far the clock may move back between two frames before it counts as
+/// the user moving it.
+const BACK_SLACK: f64 = 0.5;
+/// Frames after the seek is typed before a move of the clock counts: right
+/// after a second `viewdemo` the player still shows the last demo's clock,
+/// and the new one's jumps several seconds in its first frames (measured on
+/// PRE: 368.5 s, then 375.4 s a frame later).
+const SETTLE_FRAMES: u32 = 30;
+
+/// One frame of a waiting seek: `look` is the player now, `since_last` the
+/// seconds since the last look, `waited` since the seek was typed.
+fn judge(w: &mut Watch, look: Option<Look>, since_last: f64, waited: f64) -> Verdict {
+    w.frames = w.frames.saturating_add(1);
+    let Some(look) = look.filter(|l| l.active) else {
+        if w.seen_loading {
+            return Verdict::Cancel("you closed the demo");
+        }
+        if waited > GIVE_UP_SECONDS {
+            return Verdict::Cancel("the demo never started");
+        }
+        return Verdict::Wait;
+    };
+    if !w.seen_loading {
+        if look.loading {
+            w.seen_loading = true;
+            w.last = Some(look);
+            return Verdict::Wait;
+        }
+        return if w.frames > UNSEEN_LOAD_FRAMES {
+            Verdict::Fire
+        } else {
+            Verdict::Wait
+        };
+    }
+    if let Some(last) = w.last {
+        if look.paused && !last.paused {
+            return Verdict::Cancel("you paused");
+        }
+        if look.scale != last.scale {
+            return Verdict::Cancel("you changed the speed");
+        }
+        let moved = look.now - last.now;
+        let played = 1.0 + 2.0 * since_last * f64::from(look.scale.max(0.0));
+        if w.frames > SETTLE_FRAMES
+            && (moved < -BACK_SLACK || (moved > played && !look.before_frame))
+        {
+            return Verdict::Cancel("you moved the demo's clock");
+        }
+    }
+    w.last = Some(look);
+    if look.loading {
+        Verdict::Wait
+    } else {
+        Verdict::Fire
+    }
+}
+
+fn look() -> Option<Look> {
+    #[cfg(target_arch = "x86")]
+    return player::look();
+    #[cfg(not(target_arch = "x86"))]
+    None
+}
+
+/// One frame of a seek waiting for its demo: watches, cancels or runs it.
+fn poll_queued() {
+    let Ok(mut queued) = QUEUED.try_lock() else {
+        return;
+    };
+    let Some(q) = queued.as_mut() else {
+        return;
+    };
+    let since_last = q.last_look.elapsed().as_secs_f64();
+    q.last_look = std::time::Instant::now();
+    let verdict = judge(
+        &mut q.watch,
+        look(),
+        since_last,
+        q.queued.elapsed().as_secs_f64(),
+    );
+    match verdict {
+        Verdict::Wait => {}
+        Verdict::Cancel(why) => {
+            let line = cancelled_line(q, why);
+            *queued = None;
+            drop(queued);
+            say(&line);
+        }
+        Verdict::Fire => {
+            let Some(q) = queued.take() else { return };
+            drop(queued);
+            let what = format!(
+                "the demo has loaded; seeking {} {}",
+                if q.relative { "by" } else { "to" },
+                clock_text(q.seconds)
+            );
+            say(&format!("{}: {what}", q.name));
+            let line = match player::seek(q.seconds, q.relative, skip_between(), q.then) {
+                Ok(done) => format!("{}: {done}", q.name),
+                Err(why) => format!("{}: {why}", q.name),
+            };
+            say(&line);
+        }
+    }
 }
 
 /// While a `viewdemo` demo is still being read (#465): how many seconds of
@@ -348,13 +701,23 @@ pub fn buffered_while_loading() -> Option<f64> {
     None
 }
 
-/// Steps a long forward seek on by one frame, and runs a landed seek's
-/// follow-up command. Called every frame; one uncontended lock when idle.
+/// Steps a long forward seek on by one frame, runs a landed seek's
+/// follow-up command, and watches a seek waiting for its demo to load.
+/// Called every frame; two uncontended locks when idle.
 pub fn poll() {
+    poll_pending();
+    poll_queued();
+    // The command line that ran viewdemo has run whole by now (see `start`).
+    ARMED.store(ARMED_NONE, Ordering::Relaxed);
+}
+
+fn poll_pending() {
     let Ok(mut pending) = PENDING.try_lock() else {
         return;
     };
     let Some(seek) = pending.as_mut() else {
+        drop(pending);
+        skip_gap();
         return;
     };
     // A stepped seek drops the console commands each step replays: the
@@ -396,6 +759,35 @@ pub fn poll() {
     };
     *pending = None;
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
+}
+
+/// The demo player's own gap threshold (`RunClocks`): a stretch longer than
+/// this with no frames is jumped.
+const GAP_SECONDS: f64 = 2.0;
+/// Where `RunClocks` puts the clock ahead of the frame after a gap.
+const GAP_LANDING_BEFORE: f32 = 0.01;
+
+/// Where the clock should go when it sits in a gap the player failed to jump
+/// (see the module doc): `frame` is the frame at or after the clock, `sent`
+/// the last frame the player sent.
+fn gap_landing(now: f64, frame_time: f32, frame_seq: u32, sent_seq: u32) -> Option<f64> {
+    (frame_seq == sent_seq && f64::from(frame_time) - now > GAP_SECONDS)
+        .then(|| f64::from(frame_time - GAP_LANDING_BEFORE))
+}
+
+/// Jumps the clock over a gap the demo player missed (#893). Only once
+/// `Core.dll` is in: `viewdemo` loads it, and the player's world is null
+/// before.
+fn skip_gap() {
+    #[cfg(target_arch = "x86")]
+    if let Some((from, to)) = player::skip_gap() {
+        unsafe {
+            crate::debug::report(&format!(
+                "demo_seek: jumped {:.1} s with no frames ({from:.2} -> {to:.2} s), the gap the demo player meant to skip (#893)",
+                to - from
+            ))
+        };
+    }
 }
 
 /// Whether a seek is still on its way (a stepped one, or one waiting to land),
@@ -471,6 +863,7 @@ pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
 /// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
 /// landed, as `ds_demo_seek_to <seconds> <command>` does.
 pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
+    cancel_queued("you started another seek");
     #[cfg(target_arch = "x86")]
     return player::seek(seconds, false, skip_between(), then);
     #[cfg(not(target_arch = "x86"))]
@@ -596,6 +989,73 @@ mod player {
                 end: get_end(player),
                 time_scale: get_scale(player),
             })
+        }
+    }
+
+    /// What a waiting seek watches (#928): the clock, and whether it sits
+    /// just before a frame, where a gap jump lands it.
+    pub(super) fn look() -> Option<Look> {
+        let c = clock()?;
+        let mut before_frame = false;
+        if let Ok((player, _)) = find() {
+            // Safety: the field and slot `skip_gap` reads, checked against
+            // both builds by tools/verify_demo_seek_offsets.py.
+            unsafe {
+                let world = *((player as *const u8).add(FIELD_WORLD) as *const *mut c_void);
+                if !world.is_null() {
+                    let frame_by_time: FrameByTimeFn = slot(world, WORLD_SLOT_GET_FRAME_BY_TIME);
+                    let frame = frame_by_time(world, c.now);
+                    if !frame.is_null() {
+                        let ahead = f64::from((frame as *const f32).read_unaligned()) - c.now;
+                        before_frame = (0.0..=0.02).contains(&ahead);
+                    }
+                }
+            }
+        }
+        Some(Look {
+            active: c.active,
+            loading: c.loading,
+            paused: c.paused,
+            now: c.now,
+            scale: c.time_scale,
+            before_frame,
+        })
+    }
+
+    /// [`super::skip_gap`]'s look and jump: the clock before and after.
+    pub(super) fn skip_gap() -> Option<(f64, f64)> {
+        // Safety: a plain lookup of a loaded module by name.
+        if unsafe { GetModuleHandleA(c"Core.dll".as_ptr() as *const u8) }.is_null() {
+            return None;
+        }
+        let (player, _) = find().ok()?;
+        // Safety: the slots and fields `seek` uses, checked against both
+        // builds by tools/verify_demo_seek_offsets.py.
+        unsafe {
+            let is_active: ByteFn = slot(player, SLOT_IS_ACTIVE);
+            let is_paused: ByteFn = slot(player, SLOT_IS_PAUSED);
+            if !is_set(is_active(player)) || is_set(is_paused(player)) {
+                return None;
+            }
+            let world = *((player as *const u8).add(FIELD_WORLD) as *const *mut c_void);
+            if world.is_null() {
+                return None;
+            }
+            let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
+            let now = get_now(player);
+            let frame_by_time: FrameByTimeFn = slot(world, WORLD_SLOT_GET_FRAME_BY_TIME);
+            let frame = frame_by_time(world, now);
+            if frame.is_null() {
+                return None;
+            }
+            let frame_time = (frame as *const f32).read_unaligned();
+            let frame_seq = (frame.add(FRAME_SEQ_NR) as *const u32).read_unaligned();
+            let sent_seq =
+                ((player as *const u8).add(FIELD_LAST_FRAME_SEQ_NR) as *const u32).read_unaligned();
+            let to = gap_landing(now, frame_time, frame_seq, sent_seq)?;
+            let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
+            set_world_time(player, to, 0);
+            Some((now, to))
         }
     }
 
@@ -760,12 +1220,165 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seconds_parse_as_numbers_and_nothing_else() {
-        assert_eq!(parse_seconds("1234.5"), Ok(1234.5));
-        assert_eq!(parse_seconds(" -30 "), Ok(-30.0));
-        assert!(parse_seconds("1:30").is_err());
-        assert!(parse_seconds("inf").is_err());
-        assert!(parse_seconds("NaN").is_err());
+    fn seconds_parse_as_numbers() {
+        assert_eq!(parse_time("610"), Ok(610.0));
+        assert_eq!(parse_time("1234.5"), Ok(1234.5));
+        assert_eq!(parse_time(" -30 "), Ok(-30.0));
+        assert!(parse_time("inf").is_err());
+        assert!(parse_time("NaN").is_err());
+        assert!(parse_time("").is_err());
+    }
+
+    #[test]
+    fn minutes_and_hours_parse_as_the_demo_bar_shows_them() {
+        assert_eq!(parse_time("10:10"), Ok(610.0));
+        assert_eq!(parse_time("0:30"), Ok(30.0));
+        assert_eq!(parse_time("-0:30"), Ok(-30.0));
+        assert_eq!(parse_time("75:00"), Ok(4500.0));
+        assert_eq!(parse_time("10:05.5"), Ok(605.5));
+        assert_eq!(parse_time("1:02:03"), Ok(3723.0));
+        assert_eq!(parse_time("0:00:05"), Ok(5.0));
+    }
+
+    #[test]
+    fn malformed_times_are_refused_with_the_forms_expected() {
+        for bad in [
+            "10:", ":10", "10:60", "1:60:00", "1:2:3:4", "a:10", "10:b", "1e1:00", "10:1e1",
+            "10:-5", "--1:00", "+1:00", "10::10", "10:05.", "1.5:00",
+        ] {
+            let err = parse_time(bad).expect_err(bad);
+            assert!(err.contains("m:ss (10:10)"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_console_s_split_at_colons_is_joined_back() {
+        let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let unquoted = words(&["10", ":", "10"]);
+        assert_eq!(split_time(&unquoted), Some(("10:10".to_string(), &[][..])));
+        let hours = words(&["1", ":", "02", ":", "03", "ds_spec_target", "13"]);
+        let (time, rest) = split_time(&hours).unwrap();
+        assert_eq!(time, "1:02:03");
+        assert_eq!(follow_up(rest), Some("ds_spec_target 13".to_string()));
+        let quoted = words(&["10:10"]);
+        assert_eq!(split_time(&quoted).unwrap().0, "10:10");
+        let plain = words(&["610", "ds_spec_target", "13"]);
+        assert_eq!(split_time(&plain).unwrap().0, "610");
+        // A trailing colon has nothing to join: it is left for the parser.
+        let dangling = words(&["10", ":"]);
+        assert_eq!(split_time(&dangling).unwrap().0, "10");
+        assert_eq!(split_time(&[]), None);
+    }
+
+    #[test]
+    fn times_print_as_the_demo_bar_shows_them() {
+        assert_eq!(clock_text(605.0), "10:05");
+        assert_eq!(clock_text(-30.0), "-0:30");
+        assert_eq!(clock_text(605.5), "10:05.50");
+        assert_eq!(clock_text(3723.0), "1:02:03");
+        assert_eq!(clock_text(59.999), "1:00");
+    }
+
+    fn look(now: f64, loading: bool) -> Option<Look> {
+        Some(Look {
+            active: true,
+            loading,
+            paused: false,
+            now,
+            scale: 1.0,
+            before_frame: false,
+        })
+    }
+
+    #[test]
+    fn a_queued_seek_waits_for_the_load_then_fires() {
+        let mut w = Watch::default();
+        // The player not up yet, then loading while it plays.
+        assert_eq!(judge(&mut w, None, 0.01, 0.0), Verdict::Wait);
+        assert_eq!(judge(&mut w, look(726.0, true), 0.01, 0.1), Verdict::Wait);
+        assert_eq!(judge(&mut w, look(726.02, true), 0.02, 0.2), Verdict::Wait);
+        // A long frame lets the clock run on further.
+        assert_eq!(judge(&mut w, look(727.5, true), 1.0, 1.2), Verdict::Wait);
+        assert_eq!(judge(&mut w, look(727.52, false), 0.02, 1.3), Verdict::Fire);
+    }
+
+    #[test]
+    fn a_queued_seek_is_cancelled_by_what_the_user_does() {
+        // Settled: the first frames' jumps are let through.
+        let loading = |w: &mut Watch| {
+            assert_eq!(judge(w, look(368.5, true), 0.01, 0.0), Verdict::Wait);
+            assert_eq!(judge(w, look(375.4, true), 0.01, 0.0), Verdict::Wait);
+            for _ in 0..SETTLE_FRAMES {
+                assert_eq!(judge(w, look(100.0, true), 0.01, 0.0), Verdict::Wait);
+            }
+        };
+        let mut w = Watch::default();
+        loading(&mut w);
+        let paused = look(100.01, true).map(|l| Look { paused: true, ..l });
+        assert_eq!(
+            judge(&mut w, paused, 0.01, 0.1),
+            Verdict::Cancel("you paused")
+        );
+
+        let mut w = Watch::default();
+        loading(&mut w);
+        let faster = look(100.01, true).map(|l| Look { scale: 2.0, ..l });
+        assert_eq!(
+            judge(&mut w, faster, 0.01, 0.1),
+            Verdict::Cancel("you changed the speed")
+        );
+
+        let mut w = Watch::default();
+        loading(&mut w);
+        assert_eq!(
+            judge(&mut w, look(40.0, true), 0.01, 0.1),
+            Verdict::Cancel("you moved the demo's clock")
+        );
+
+        let mut w = Watch::default();
+        loading(&mut w);
+        assert_eq!(
+            judge(&mut w, look(160.0, true), 0.01, 0.1),
+            Verdict::Cancel("you moved the demo's clock")
+        );
+
+        let mut w = Watch::default();
+        loading(&mut w);
+        assert_eq!(
+            judge(&mut w, None, 0.01, 0.1),
+            Verdict::Cancel("you closed the demo")
+        );
+    }
+
+    /// The player's own gap jump and `skip_gap` land just before a frame;
+    /// neither is the user.
+    #[test]
+    fn a_gap_jump_does_not_cancel_a_queued_seek() {
+        let mut w = Watch::default();
+        for _ in 0..=SETTLE_FRAMES {
+            assert_eq!(judge(&mut w, look(8.5, true), 0.01, 0.0), Verdict::Wait);
+        }
+        let jumped = look(71.378, true).map(|l| Look {
+            before_frame: true,
+            ..l
+        });
+        assert_eq!(judge(&mut w, jumped, 0.01, 0.1), Verdict::Wait);
+    }
+
+    #[test]
+    fn a_demo_that_never_starts_or_loads_unseen_is_not_waited_on_forever() {
+        let mut w = Watch::default();
+        assert_eq!(judge(&mut w, None, 0.01, 10.0), Verdict::Wait);
+        assert_eq!(
+            judge(&mut w, None, 0.01, GIVE_UP_SECONDS + 1.0),
+            Verdict::Cancel("the demo never started")
+        );
+        // Loaded between two looks: never seen loading, then fires.
+        let mut w = Watch::default();
+        for _ in 0..UNSEEN_LOAD_FRAMES {
+            assert_eq!(judge(&mut w, look(50.0, false), 0.01, 0.1), Verdict::Wait);
+        }
+        assert_eq!(judge(&mut w, look(50.0, false), 0.01, 3.0), Verdict::Fire);
     }
 
     #[test]
@@ -826,6 +1439,20 @@ mod tests {
             !stepped(90.0, 1335.3, true),
             "the skip jumps at once on purpose"
         );
+    }
+
+    /// The float of #893 on `ktps8w1-m00cat_soul_lenn_h2` (Anniversary): the
+    /// clock at 8.52 s, the first playback frame (71.388 s) already sent.
+    #[test]
+    fn a_clock_stuck_behind_a_sent_frame_jumps_to_just_before_it() {
+        let to = gap_landing(8.522, 71.388, 3, 3).expect("a gap");
+        assert!((to - 71.378).abs() < 1e-3, "{to}");
+        // Not sent yet: the player's own check still has its chance.
+        assert_eq!(gap_landing(8.522, 71.388, 3, 2), None);
+        // Normal playback: the next frame is a few milliseconds on.
+        assert_eq!(gap_landing(226.663, 226.664, 14075, 14075), None);
+        // A short gap the player plays through.
+        assert_eq!(gap_landing(100.0, 101.5, 7, 7), None);
     }
 
     #[test]

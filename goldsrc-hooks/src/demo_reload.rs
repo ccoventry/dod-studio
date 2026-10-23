@@ -112,7 +112,11 @@ fn try_wrap() -> bool {
 
 unsafe extern "C" fn wrapped_playdemo() {
     remember("playdemo");
+    let named = !crate::cmd_list::args().is_empty();
     unsafe { call_real(&REAL_PLAYDEMO) };
+    if named {
+        crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Playdemo);
+    }
 }
 
 unsafe extern "C" fn wrapped_viewdemo() {
@@ -127,6 +131,8 @@ unsafe extern "C" fn wrapped_viewdemo() {
     }
     remember("viewdemo");
     unsafe { call_real(&REAL_VIEWDEMO) };
+    // A seek later on this command line waits for this demo to load (#928).
+    crate::demo_seek::demo_started(crate::demo_seek::DemoCommand::Viewdemo);
     // ds_ui_viewdemo_in_panel: the DoD Studio window stands in for the bar.
     crate::studio_panel::after_viewdemo();
 }

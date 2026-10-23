@@ -305,6 +305,19 @@ row's bottom edge that the `spec_pip` layout reads, stays unscaled.
 
 Re-check the sites with `goldsrc-hooks/tools/verify_objicons_scale_offsets.py`.
 
+**The player count (#943).** `pfnDrawCharacter` draws through the engine's
+vgui2 surface (`ISurface::DrawUnicodeChar`): a quad per glyph, cut from a
+font page where the glyphs sit side by side, sampled nearest-texel, with its
+corners on whole pixels. Zoomed with the row about `anchor + 0.5`, those
+corners land on pixel centres at every even scale; the glyph's edge column
+then samples exactly its cell boundary and can get the neighbouring glyph's
+last column, a one-pixel line the height of the digits between the `2` and
+the `/` (measured: POST at scale 2, 4, 6 and 8, PRE at 6, never at an odd
+scale). So the count has its own transform: its top-left point goes where
+the row's zoom puts it, rounded to a whole pixel, and the text is drawn
+`count_scale` times its size from there (`count_scale` follows `scale`
+unless set).
+
 ## What is not proven
 
 - **`+0x195e40`**, the predicate `+0x228e0` calls. It is a `.data` function
