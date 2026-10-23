@@ -2189,6 +2189,13 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
     saved: (name) => `Saved ${name}.`,
     SHOW_FILE: 'Show',
+    // combine_progress.js: the step line under the bar (#955).
+    CHECKING_STEP: 'Checking the clips…',
+    checkingLine: (n, total) => `Checking the clips (${n} of ${total})…`,
+    joiningLine: (done, total) => `Joining clips: ${done} of ${total}`,
+    savedIn: (elapsed) => `Saved in ${elapsed}.`,
+    STOPPED: 'Cancelled. Nothing was saved.',
+    FAILED: 'Stopped with an error (see the message).',
   },
 
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
