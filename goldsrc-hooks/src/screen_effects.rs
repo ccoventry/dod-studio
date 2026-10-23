@@ -306,6 +306,12 @@ pub(crate) fn unshake(live: &View, view: &mut View, gun: &mut [f32; 3]) {
         }
         [0.0; 2]
     };
+    // Spectating a teammate in first person (`g_iUser1`): the recorded eye is
+    // theirs while `simorg` is still the recorder's body, so neither the bob
+    // nor a shake can be measured from it (as `pov_live_bob::decide`).
+    if crate::spectator_target::mode().is_some_and(|mode| mode != 0) {
+        return;
+    }
     if !in_window(window, now) {
         for (slot, value) in BOB_SUMS.iter().zip(learn(sums, live, view)) {
             slot.store(value.to_bits(), Ordering::Relaxed);
@@ -488,6 +494,12 @@ mod tests {
             idealpitch: 0.0,
             cl_viewangles: [10.0, 90.0, 0.0],
             health: 100,
+            crosshairangle: [0.0; 3],
+            viewsize: 120.0,
+            punchangle: [0.0; 3],
+            maxclients: 32,
+            viewentity: 3,
+            playernum: 2,
         }
     }
 

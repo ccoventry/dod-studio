@@ -1715,6 +1715,9 @@ pub fn install() {
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
         crate::pov_live_bob::set_cvar(bob);
     }
+    if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
+        crate::pov_live_bob::set_log_cvar(log);
+    }
     // Off unless Studio turns it on: a game not started from Studio keeps
     // its own sprays and crosshair (#428).
     if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
@@ -1892,6 +1895,7 @@ mod tests {
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
+            crate::pov_live_bob::LOG_NAME,
             crate::screen_effects::FLASH_NAME,
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,

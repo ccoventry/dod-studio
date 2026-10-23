@@ -15,6 +15,12 @@ binaries can prove:
 
 Patterns and offsets are read out of `pov_live_bob.rs` rather than restated.
 
+It also checks the numbers `pov_live_bob.rs` copies out of `client.dll`'s
+`V_CalcNormalRefdef` (#889), in each install's `dod/cl_dlls/client.dll`:
+`V_CalcBob`'s -7..+4 clamp, the gun moved by `0.4 * bob` along `forward`, its
+`0.3` / `0.5` / `1` pitch / yaw / roll tilt, and no vertical bob on the gun
+(the Half-Life SDK has one, DoD doesn't).
+
 Usage:
     python goldsrc-hooks/tools/verify_pov_live_bob_offsets.py [hw.dll ...]
 
@@ -128,6 +134,54 @@ def check(path, all_sites):
     return ok
 
 
+# client.dll (the same file in both installs): (rva, expected bytes, what).
+# A `None` byte is a wildcard; an `(op, kind)` pair after the bytes names the
+# constant the instruction's absolute address operand points at.
+CLIENT_CODE = [
+    (0x4ed10, "57 8b 7c 24 08 83 7f 50 ff", "V_CalcBob: onground == -1 returns the last bob"),
+    (0x4ee05, "d8 1d", "V_CalcBob: bob < -7 is clamped", ("f32", -7.0)),
+    (0x4ede0, "d8 1d", "V_CalcBob: bob > 4 is clamped", ("f32", 4.0)),
+    (0x4f49c, "e8", "V_CalcNormalRefdef calls V_CalcBob", ("call", 0x4ed10)),
+    # for i: view->origin[i] += forward[i] * bob * 0.4
+    (0x4f850, "d9 01 d8 4c 24 10", "gun origin += forward * bob ..."),
+    (0x4f85d, "dc 0d", "... * 0.4", ("f64", 0.4)),
+    # view->angles[YAW] -= bob * 0.5; [ROLL] -= bob; [PITCH] -= bob * 0.3
+    (0x4f86b, "d9 87 58 0b 00 00 d9 44 24 10 dc 0d", "gun yaw -= bob * ...", ("f64", 0.5)),
+    (0x4f883, "d9 87 5c 0b 00 00 d8 64 24 10 d9 9f 5c 0b 00 00", "gun roll -= bob"),
+    (0x4f893, "d9 03 d9 44 24 10 dc 0d", "gun pitch -= bob * ...", ("f64", 0.3)),
+    (0x4f8a1, "d9 1b 8b 4e 54", "then waterlevel: nothing else adds bob to the gun"),
+]
+
+
+def check_client(path):
+    pe = pefile.PE(str(path), fast_load=True)
+    image = pe.get_memory_mapped_image()
+    base = pe.OPTIONAL_HEADER.ImageBase
+    ok = True
+    for entry in CLIENT_CODE:
+        rva, expected, what = entry[:3]
+        want = bytes.fromhex(expected)
+        got = image[rva:rva + len(want)]
+        good = got == want
+        if good and len(entry) > 3:
+            kind, value = entry[3]
+            at = rva + len(want)
+            if kind == "call":
+                good = at + 4 + struct.unpack("<i", image[at:at + 4])[0] == value
+            else:
+                address = struct.unpack("<I", image[at:at + 4])[0] - base
+                fmt, size = ("<f", 4) if kind == "f32" else ("<d", 8)
+                good = abs(struct.unpack(fmt, image[address:address + size])[0] - value) < 1e-9
+        print(f"  {'ok  ' if good else 'FAIL'} client.dll +{rva:#x}: {what}")
+        ok &= good
+    # The vertical gun bob the Half-Life SDK has (`view->origin[2] += bob`)
+    # would store to view->origin[2] ([edi+0xb50]) inside the bob block.
+    if b"\x9f\x50\x0b\x00\x00" in image[0x4f84b:0x4f8a3]:
+        print("  FAIL client.dll: the gun's bob block writes origin[2]")
+        ok = False
+    return ok
+
+
 def main():
     dlls = [Path(p) for p in sys.argv[1:]] or DEFAULT_DLLS
     all_sites = sites()
@@ -135,6 +189,9 @@ def main():
     for path in dlls:
         print(path)
         ok &= check(path, all_sites)
+        client = path.parent / "dod" / "cl_dlls" / "client.dll"
+        if client.is_file():
+            ok &= check_client(client)
     sys.exit(0 if ok else 1)
 
 

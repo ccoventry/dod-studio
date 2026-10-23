@@ -48,7 +48,8 @@ the death cam).
 | `ds_spec_deathcam` | `0` | HLTV demos: when the player being watched in first person dies, the view becomes the death cam their own recording shows, the camera 64 units behind their body pulling back and turning to the killer, with no gun, for 2.4 s; then it is the game's own view from their eyes again until they respawn. Without it the game rolls the dead player's eye view 80° and the dropped weapon fills the clip. A switch of its own, not part of `ds_spec_match_pov`: a movie wants it, a shoutcast following the fight does not. Stands down in a POV demo (`goldsrc-hooks/src/spectator_deathcam.rs`) | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `ds_hud_overview_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. Applies where the game draws the overview map, which today means HLTV demos only: a POV demo shows no overview at all, alive or dead (#897) | `goldsrc-hooks/src/overview_players.rs` |
 | `ds_player_overrides` | `0` | sprays and crosshairs in demos follow Studio's Players table (Configuration > Players, #428); 0 leaves both to the game. Studio sets it from the tab's "Use in the game" box when it starts the game, a review or a batch, and sends it to a running game when the box changes. A flip reaches the crosshair on the next frame, and sprays loaded after it: a spray already on a wall keeps its texture, so reload the demo to compare | `goldsrc-hooks/src/player_overrides.rs`, `player_crosshair.rs`, `spray.rs` |
-| `ds_view_use_cl_bob` | `0` | a POV demo bobs the view and the gun by the `cl_bob` (and `cl_bobcycle`, `cl_bobup`) set now (#359). At `0` a POV demo shows the bob it recorded, the recording player's own settings (some recorders had none), because the engine replaces the view `client.dll` works out live with the recorded one (HLTV demos already follow the cvars). At `1` the recorded bob is swapped for the live one and keeps the rest of the recorded view. The gun's bob tilt stays out, as in every POV demo | `goldsrc-hooks/src/pov_live_bob.rs` |
+| `ds_view_use_cl_bob` | `0` | a POV demo bobs the view and the gun by the `cl_bob` (and `cl_bobcycle`, `cl_bobup`) set now, as live play and an HLTV demo watched in first person do (#359, #889). At `0` a POV demo shows the bob it recorded, the recording player's own settings (DoD's default `cl_bob` is `0.005`; some recorders had `0`), because the engine replaces the view `client.dll` works out live with the recorded one (HLTV demos already follow the cvars). At `1` the recorded bob is swapped for the live one the way DoD bobs: the view sideways, the gun forward and tilted (pitch, yaw and roll), never up; the rest of the recorded view stays. While the recording player is dead or spectating someone, the recorded view is left alone | `goldsrc-hooks/src/pov_live_bob.rs` |
+| `ds_debug_log_view_bob` | `0` | logs `ds_view_use_cl_bob`'s numbers every frame: in a POV demo the live and the recorded bob, why a frame was left alone, and the gun's place relative to the camera; in an HLTV demo watched in first person the same for the live view, to compare | `goldsrc-hooks/src/pov_live_bob.rs` |
 | `ds_capture_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
 | `ds_capture_stay_behind` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording. A minimised game records black frames (its window owns no pixels), so while this is on a minimise parks the game off-screen instead: restored without being activated and moved left of the whole desktop, same size, taskbar button kept (#723). Activating it (its taskbar button, alt-tab) or turning this off moves it back where it was. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
 | `ds_hud_overview_team_marker` | `0` | which camera icon marks the player being watched on the overview map: `0` the game's own, `1` their team's in HLTV too, `2` none. `1` uses `allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr` instead of `spec_camera.spr`, by the watched player's team (#907), and keeps `spec_camera.spr` while the camera follows nobody (roaming, free overview); DoD Studio's bordered ones go in `dod_addon/sprites`. `2` works in POV and HLTV, so `spec_camera.spr` needs no blanking, and the player icons stay (#677). In demo playback the game draws the overview map only in HLTV demos today (#897) | `goldsrc-hooks/src/overview_marker.rs` |
@@ -161,11 +162,23 @@ See [`goldsrc_decals.md`](goldsrc_decals.md).
 
 ### `ds_demo_seek_to` / `ds_demo_seek_by`
 
-`ds_demo_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
-clock the editor's events list shows); `ds_demo_seek_by <seconds>` jumps
-from where playback is, back when negative. Neither pauses, and both refuse
-while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
-Anniversary `DemoPlayer.dll`.
+`ds_demo_seek_to <time>` jumps `viewdemo` playback to a world time (the
+clock the editor's events list shows); `ds_demo_seek_by <time>` jumps
+from where playback is, back when negative. The time is seconds (`610`,
+`610.5`), `m:ss` (`10:10`) or `h:mm:ss` (`1:02:03`), quoted or not, with a
+minus for going back (`ds_demo_seek_by -0:30`); anything else is refused with
+a line saying which forms it takes (#928). Neither pauses, and both refuse
+under `playdemo`. Pre-Anniversary and 25th Anniversary `DemoPlayer.dll`.
+
+While the demo is still loading, a seek typed on the same line as the
+`viewdemo` (`viewdemo mydemo; ds_demo_seek_to 10:05`) waits:
+`will seek to 10:05 once the demo has loaded`, then
+`the demo has loaded; seeking to 10:05` when it runs. Only the last one
+counts, and anything done to the demo first cancels it, with
+`cancelled the seek to 10:05 (you <did what>)`: another seek, pausing, a
+speed change, moving the clock (a demo-bar click or drag), or loading or
+closing a demo. A seek typed later while the demo is still loading is
+refused, as before.
 
 A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
@@ -279,6 +292,7 @@ draws them bigger for high resolutions. The game draws both ~117px lower at
 | `ds_hud_objectives xoffset <x>` | x the icon row starts at |
 | `ds_hud_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
 | `ds_hud_objectives scale <1..8>` | draw the icons (with their capture bars and player counts) and the timer that many times bigger, from the next frame (#891); each grows from its top-left corner, so `offset`, `xoffset` and `timer` still place that corner, and the game's own icon x scales with the timer so the row stays clear of it. `scale 1` or `scale default` is the game's own size. Not on the full overview map (`_cl_minimap 1`), where the icons sit at map positions |
+| `ds_hud_objectives count_scale <1..8>` | draw the `1/2`-style player count under a flag that many times its size, whatever `scale` is (#943): it keeps the game's place, its top-left corner 4 px in from its icon's left and 4 px under it (both times `scale`), and grows from there. `count_scale default` (the default) draws it at `scale`, as big as the icons |
 | `ds_hud_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
 
 ### `ds_debug_hd_misses`

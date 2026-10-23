@@ -465,7 +465,7 @@ pub struct ClEntityS {
     /// Where the entity is drawn this frame. For the viewmodel,
     /// `V_CalcRefdef` sets it and the renderer reads it next.
     pub origin: Vec3,
-    angles: Vec3,
+    pub angles: Vec3,
     attachment: [Vec3; 4],
     trivial_accept: i32,
     pub model: *mut ModelSPartial,
@@ -1410,6 +1410,7 @@ unsafe extern "C" fn tramp_draw_transparent_triangles() {
         return;
     }
     crate::demo_scope::before_transparent_triangles();
+    crate::pov_live_bob::before_view_model();
     let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
     // Safety: the client's own export, called on the engine's thread.
     crate::demo_scope::with_black_fill(|| unsafe { real() });

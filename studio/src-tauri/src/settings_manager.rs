@@ -704,6 +704,23 @@ pub async fn list_game_folders(game_path: String) -> Result<Vec<String>, String>
     .await
 }
 
+/// Whether the game folder `folder` beside `hl.exe` lacks the
+/// `resource\<folder>_<language>.txt` its in-game text needs, in the language
+/// Steam runs in (#925); `None` when it has it, or it is `dod`.
+#[tauri::command]
+pub async fn game_folder_language_file(
+    game_path: String,
+    folder: String,
+) -> Result<Option<native::shared::paths::MissingLanguageFile>, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let language = native::sys::steam::steam_language().unwrap_or_else(|| "english".into());
+        Ok(std::path::Path::new(&game_path).parent().and_then(|root| {
+            native::shared::paths::missing_language_file(root, &folder, &language)
+        }))
+    }))
+    .await
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
