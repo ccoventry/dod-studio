@@ -5,7 +5,9 @@
   main.js wires them, with Tauri's IPC mocked (vite.config.e2e.js).
   `window.__missing` lists the paths `files_exist` reports gone;
   `window.__recent` is the factory, `window.__markDirty()` gives the session
-  unsaved changes.
+  unsaved changes. `window.__hold = true` makes the file read and the
+  missing-demo check wait for `window.__release.load()` / `.search()`, for
+  the queue's line while a project opens (#958).
 -->
 <html lang="en">
 <head>
@@ -32,6 +34,10 @@
     <span id="session-file-indicator">No session loaded</span>
   </header>
 
+  <span id="scan-spinner" style="display: none;"></span>
+  <span id="scan-status">Ready</span>
+  <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+
   <div id="unsaved-changes-modal" class="modal" style="display: none;">
     <button id="unsaved-changes-save-btn">Save & Close</button>
     <button id="unsaved-changes-discard-btn">Close Without Saving</button>
@@ -53,7 +59,11 @@
 
     window.__missing = [];
     window.__mockInvokeHandlers.files_exist = ({ paths }) => paths.map((p) => !window.__missing.includes(p));
-    window.__mockInvokeHandlers.load_project_session = () => JSON.stringify({ version: '0.12.0', demos: [] });
+    window.__release = {};
+    const held = (name, value) => (window.__hold
+      ? new Promise((resolve) => { window.__release[name] = () => resolve(value); })
+      : value);
+    window.__mockInvokeHandlers.load_project_session = () => held('load', JSON.stringify({ version: '0.12.0', demos: [] }));
 
     initThemedConfirm();
     initAppMenu();
@@ -67,7 +77,10 @@
       setTakeIndex: () => {},
       getProjectTeams: () => ({}),
       setProjectTeams: () => {},
-      checkMissingDemos: async () => {},
+      checkMissingDemos: async (path, scanPaths, { onSearched } = {}) => {
+        await held('search', null);
+        onSearched?.();
+      },
       onProjectFile: (path) => recent.remember(path),
     });
     const recent = createRecentProjects({

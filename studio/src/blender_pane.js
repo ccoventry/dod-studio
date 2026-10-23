@@ -10,6 +10,8 @@ import { blenderStatus, blenderSetExe, blenderRun, blenderCancel, revealInExplor
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { elapsedWords } from './time_format.js';
+import { blenderStartView, blenderFramesView } from './blender_progress.js';
+import { drawBar } from './step_bar.js';
 
 // Per-viewer conveniences only: the last take and assets folder picked.
 const STORE_AGR = 'dodstudio.blender.agr';
@@ -59,6 +61,7 @@ export function initBlenderPane() {
   const encodeBtn = $('blender-encode-btn');
   const cancelBtn = $('blender-cancel-btn');
   const progressText = $('blender-progress');
+  const progressBar = $('blender-bar');
   const lineText = $('blender-line');
   const resultsList = $('blender-results');
 
@@ -68,6 +71,19 @@ export function initBlenderPane() {
   let haveBlender = false;
   let blenderExe = null;
   let started = 0;
+  // The running step's kind, and its last frame count once it has one.
+  let runningKind = null;
+  let lastFrames = null;
+  let clock = null;
+
+  function showProgress() {
+    const secs = Math.round((Date.now() - started) / 1000);
+    const view = lastFrames
+      ? blenderFramesView(lastFrames, lastFrames.elapsed_secs ?? secs)
+      : blenderStartView(runningKind, secs);
+    progressText.textContent = view.text;
+    drawBar(progressBar, view.bar);
+  }
 
   function gamePath() {
     return document.querySelector('#hl-path-input')?.value?.trim() || '';
@@ -149,7 +165,11 @@ export function initBlenderPane() {
     if (busy) return;
     busy = true;
     started = Date.now();
-    progressText.textContent = STRINGS.BLENDER.running(label);
+    runningKind = step.kind;
+    lastFrames = null;
+    showProgress();
+    // Until frames are counted, the line's clock moves by itself.
+    clock = setInterval(() => { if (!lastFrames) showProgress(); }, 1000);
     lineText.textContent = '';
     render();
     try {
@@ -166,6 +186,10 @@ export function initBlenderPane() {
     } catch (err) {
       progressText.textContent = err === 'cancelled' ? STRINGS.BLENDER.CANCELLED : STRINGS.BLENDER.failed(label);
     } finally {
+      clearInterval(clock);
+      runningKind = null;
+      lastFrames = null;
+      drawBar(progressBar, null);
       busy = false;
       render();
     }
@@ -174,9 +198,9 @@ export function initBlenderPane() {
   listen('blender_progress', (event) => {
     const p = event.payload;
     if (!busy) return;
-    const elapsed = elapsedWords(p.elapsed_secs ?? Math.round((Date.now() - started) / 1000));
     if (p.total) {
-      progressText.textContent = STRINGS.BLENDER.frames(p.done, p.total, p.frame_secs, elapsed);
+      lastFrames = p;
+      showProgress();
     }
     if (p.line) lineText.textContent = p.line;
   });
