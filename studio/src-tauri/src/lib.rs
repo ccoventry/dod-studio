@@ -169,6 +169,20 @@ async fn load_project_session(path: String) -> Result<String, String> {
     .await
 }
 
+/// One `true` per path that is a file that's there: File → Open Recent dims
+/// the rest (#935). Off the main thread, since a path on a sleeping network
+/// or cloud drive can take seconds to answer (#789).
+#[tauri::command]
+async fn files_exist(paths: Vec<String>) -> Result<Vec<bool>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(paths
+            .iter()
+            .map(|p| std::path::Path::new(p).is_file())
+            .collect())
+    }))
+    .await
+}
+
 // ── Auditor IPC Commands ───────────────────────────────────────────────────────
 
 /// `paths` plus every fixed drive when `all_drives`, in one key pass (#844).
@@ -904,6 +918,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            files_exist,
             index_demo_players,
             default_projects_dir,
             locate_missing_demos,
