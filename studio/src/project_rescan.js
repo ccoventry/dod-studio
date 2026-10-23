@@ -24,7 +24,6 @@ export function createProjectRescan({ getDemos, scan }) {
       confirmLabel: STRINGS.MAIN.OUTDATED_DEMOS_RESCAN,
       cancelLabel: STRINGS.MAIN.OUTDATED_DEMOS_NOT_NOW,
       details: outdated.map((d) => ({ primary: fileNameOf(d.path), secondary: shortFolder(folderOf(d.path)), title: d.path })),
-      footer: STRINGS.MAIN.OUTDATED_DEMOS_FOOTER,
       focusConfirm: true,
     });
     if (!ok) return false;

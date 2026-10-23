@@ -61,6 +61,9 @@ describe('the rescan offer on opening a project', () => {
     const [message, options] = themedConfirm.mock.calls[0];
     expect(message).toMatch(/^2 demos in this project were scanned with an older DoD Studio\. Rescan them now\?/);
     expect(message).toContain('marks, notes, status and kill ranges are carried over');
+    // What "Not now" does sits with the question, above the long list.
+    expect(message).toContain('Press “Not now” to leave them as they are');
+    expect(options.footer).toBeUndefined();
     expect(options).toMatchObject({ confirmLabel: 'Rescan', cancelLabel: 'Not now', focusConfirm: true });
     expect(options.details.map((d) => d.primary)).toEqual(['b.dem', 'c.dem']);
     expect(scan).toHaveBeenCalledWith(['C:/d/b.dem', 'C:/d/c.dem']);
