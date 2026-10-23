@@ -11,6 +11,9 @@
 import { listen } from '@tauri-apps/api/event';
 import { takeOpenFiles } from './ipc_bridge.js';
 import { isProjectFile, isDemoFile } from './project_file_type.js';
+import { fileNameOf } from './path_display.js';
+import { showToast } from './toast.js';
+import { STRINGS } from './strings.js';
 
 export const DEM_TARGETS = ['analyzer', 'queue'];
 
@@ -32,16 +35,19 @@ export function normalizeDemTarget(raw) {
 /**
  * @param {object} app  What this needs from main.js: openProject(path) from
  *   project_session.js, openDemoInAnalyzer(path), addDemosToQueue(paths)
- *   (queue_scan.js's triggerAutoScan), and getDemTarget(), the setting.
- *   `take` and `listenFor` are swappable for tests.
+ *   (queue_scan.js's triggerAutoScan), getDemTarget(), the setting, and
+ *   isScanning() (queue_scan.js). `take`, `listenFor` and `toast` are
+ *   swappable for tests.
  */
 export function createLaunchFiles({
   openProject,
   openDemoInAnalyzer,
   addDemosToQueue,
   getDemTarget,
+  isScanning = () => false,
   take = takeOpenFiles,
   listenFor = listen,
+  toast = showToast,
 }) {
   // One batch at a time: a second double-click while the unsaved-changes
   // prompt of the first is open waits for it.
@@ -52,6 +58,12 @@ export function createLaunchFiles({
     if (project) await openProject(project);
     if (demos.length === 0) return;
     if (normalizeDemTarget(getDemTarget()) === 'queue') {
+      // A second scan beside a running one is refused, as a drop's is
+      // (demo_drop.js): both would write the queue at once.
+      if (isScanning()) {
+        toast(STRINGS.DROP.openedWhileScanningToast(demos.map((p) => fileNameOf(p) || p)), 'warning', 8000);
+        return;
+      }
       await addDemosToQueue(demos);
     } else {
       // The Analyzer shows one demo: the last one opened.

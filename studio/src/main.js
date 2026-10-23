@@ -861,7 +861,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     openProject,
     openDemoInAnalyzer: (path) => { switchNavTab('demo-analyzer'); return openAnalyzerDemo(path); },
     addDemosToQueue: (paths) => { switchNavTab('workspace'); return triggerAutoScan(paths, { pickedFiles: true }); },
-    getDemTarget: getDemOpenTarget,
+    getDemTarget: getDemOpenTarget, isScanning,
   }).start();
 
   // Context-Aware Shortcut Dispatcher

@@ -2888,6 +2888,12 @@ export const STRINGS = {
       return `Not a demo or a folder, so not added: ${shown}${more}`;
     },
     BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+    // A demo opened from Explorer into the queue during a scan (#528).
+    openedWhileScanningToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `A scan is running, so ${shown}${more} was not added. Open it again when the scan has finished.`;
+    },
   },
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {

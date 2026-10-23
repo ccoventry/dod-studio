@@ -27,13 +27,15 @@ describe('normalizeDemTarget', () => {
   });
 });
 
-function harness({ files, target = 'analyzer' }) {
+function harness({ files, target = 'analyzer', scanning = false }) {
   const batches = [...files];
   const app = {
     openProject: vi.fn(async () => true),
     openDemoInAnalyzer: vi.fn(async () => {}),
     addDemosToQueue: vi.fn(async () => true),
     getDemTarget: () => target,
+    isScanning: () => scanning,
+    toast: vi.fn(),
     take: vi.fn(async () => batches.shift() || []),
     listenFor: vi.fn(async (event, cb) => { app.fire = cb; }),
   };
@@ -62,6 +64,15 @@ describe('createLaunchFiles', () => {
     await launch.start();
     expect(app.addDemosToQueue).toHaveBeenCalledWith(['D:\\demos\\a.dem', 'D:\\demos\\b.dem']);
     expect(app.openDemoInAnalyzer).not.toHaveBeenCalled();
+  });
+
+  // A second scan beside a running one is what a drop refuses too (#530,
+  // demo_drop.js): the queue would take both scans' results at once.
+  it('a demo opened while a queue scan runs is not scanned beside it, and says so', async () => {
+    const { app, launch } = harness({ files: [['D:\\demos\\a.dem']], target: 'queue', scanning: true });
+    await launch.start();
+    expect(app.addDemosToQueue).not.toHaveBeenCalled();
+    expect(app.toast).toHaveBeenCalledWith(expect.stringContaining('a.dem'), 'warning', expect.any(Number));
   });
 
   it('a later double-click is opened when the backend says it arrived', async () => {
