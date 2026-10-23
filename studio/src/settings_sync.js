@@ -16,6 +16,7 @@ import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
+import { getPickFolders, setPickFolders } from './pick_path.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -162,6 +163,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
       players: getPlayers(),
+      pick_folders: getPickFolders(),
       ...readReviewSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -201,6 +203,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
   setPlayers(settings.players);
+  // Each Browse button's last folder (#936).
+  setPickFolders(settings.pick_folders);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;

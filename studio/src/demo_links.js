@@ -6,7 +6,7 @@
 // the folder alone. The rules (what is refused, the link's name) live in
 // native::demo_links; the backend also writes the activity-log lines.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listDemoLinks, addDemoLink, removeDemoLink } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -14,7 +14,7 @@ import { STRINGS } from './strings.js';
 const S = STRINGS.DEMO_LINKS;
 
 async function pickDemoFolder() {
-  const picked = await open({ directory: true, multiple: false, title: S.PICK_TITLE });
+  const picked = await pickPath({ field: 'demo_links.folder', directory: true, multiple: false, title: S.PICK_TITLE });
   return Array.isArray(picked) ? picked[0] : picked;
 }
 
