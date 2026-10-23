@@ -79,8 +79,39 @@ pub(super) unsafe fn update(vgui: &Vgui) {
 pub(super) fn demo_percent() -> Option<u32> {
     crate::demo_seek::buffered_while_loading().and_then(|buffered| {
         let length = length_of_current_demo()?;
-        Some(crate::demo_file::load_percent(buffered, length))
+        Some(crate::demo_file::load_percent(
+            buffered,
+            length,
+            loaded_span_of_current_demo(),
+        ))
     })
+}
+
+/// The demo whose loaded span is being worked out, and the span once known
+/// (#866). A background thread walks the file; until it answers, the
+/// directory's estimate stands. `try_lock` only: this runs every frame.
+static SPAN: std::sync::Mutex<Option<(String, Option<f32>)>> = std::sync::Mutex::new(None);
+
+fn loaded_span_of_current_demo() -> Option<f32> {
+    let name = crate::demo_reload::current_demo()?;
+    let mut known = SPAN.try_lock().ok()?;
+    match known.as_ref() {
+        Some((demo, span)) if *demo == name => return *span,
+        _ => {}
+    }
+    *known = Some((name.clone(), None));
+    drop(known);
+    let path = crate::streaks::demo_path(&dod_dir(), &name);
+    std::thread::spawn(move || {
+        let span = crate::demo_file::loaded_span(&path);
+        let mut known = SPAN.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((demo, slot)) = known.as_mut()
+            && *demo == name
+        {
+            *slot = span;
+        }
+    });
+    None
 }
 
 /// The playing demo's playback length, read once per demo.

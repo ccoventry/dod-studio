@@ -47,7 +47,7 @@ async function runAudit(page) {
   await page.fill('#audit-target-folder-input', 'C:\\Demos');
   await page.click('#run-audit-btn');
   await page.evaluate(() => window.__finishAudit());
-  await expect(page.locator('#audit-status-text')).toHaveText('Done: 5 demos checked, 2 with copies.');
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in \d+\.\d s: 5 demos checked, 2 with copies\.$/);
 }
 
 test('the folder list holds the Target Folder and picked folders, once each', async ({ page }) => {
@@ -110,12 +110,16 @@ test('a running audit shows its step and a bar, and locks its controls', async (
   // The harness has no CSS, so the empty bar has no size to be "visible".
   await expect(page.locator('#audit-progress')).not.toHaveAttribute('hidden');
 
+  // The first audit of these folders has no count to measure the walk by:
+  // the bar moves without a width. A clock follows the step line.
   await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 12, total: 0, done: 0, current: '\\\\?\\C:\\Demos\\x' }));
-  await expect(page.locator('#audit-status-text')).toHaveText('Looking for demos: 12 folders read');
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking for demos: 12 folders read · 0:0\d$/);
   await expect(page.locator('#audit-status-current')).toHaveText('C:\\Demos\\x');
+  await expect(page.locator('#audit-progress')).toHaveClass(/indeterminate/);
   await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 12, total: 4, done: 1, current: 'C:\\Demos\\a.dem' }));
-  await expect(page.locator('#audit-status-text')).toHaveText('Comparing demos: 1 / 4');
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Comparing demos: 1 \/ 4 · 0:0\d$/);
   await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await expect(page.locator('#audit-progress')).not.toHaveClass(/indeterminate/);
 
   await page.click('#cancel-audit-btn');
   expect(await calls(page, 'cancel_audit')).toHaveLength(1);
@@ -124,6 +128,21 @@ test('a running audit shows its step and a bar, and locks its controls', async (
   await expect(page.locator('#audit-results-body')).toContainText('cancelled before it finished');
   await expect(page.locator('#audit-progress')).toHaveAttribute('hidden');
   await expect(page.locator('#run-audit-btn')).toBeEnabled();
+});
+
+test('the next audit of the same folders measures its walk against the last one', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 40, total: 0, done: 0 }));
+  await page.evaluate(() => window.__finishAudit());
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in /);
+
+  await page.click('#run-audit-btn');
+  await page.evaluate(() => window.__mockEmit('audit_progress', { folders: 10, total: 0, done: 0 }));
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking for demos: 10 folders read \(about 40 last time\) · /);
+  await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
+  await expect(page.locator('#audit-progress')).not.toHaveClass(/indeterminate/);
 });
 
 test('the kept copy comes first and copies in use start unticked', async ({ page }) => {
