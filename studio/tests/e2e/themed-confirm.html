@@ -31,7 +31,7 @@
   <div id="result"></div>
 
   <script type="module">
-    import { initThemedConfirm, themedConfirm } from '/src/themed_confirm.js';
+    import { initThemedConfirm, themedConfirm, setThemedConfirmMessage } from '/src/themed_confirm.js';
 
     initThemedConfirm();
 
@@ -63,6 +63,9 @@
       const result = await themedConfirm('These demos moved.', { details, footer: 'Use the new locations?' });
       document.querySelector('#result').textContent = String(result);
     });
+
+    // A line worked out after the dialog opened (#937's rescan time).
+    window.__setMessage = setThemedConfirmMessage;
 
     window.__harnessReady = true;
   </script>

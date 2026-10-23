@@ -25,6 +25,14 @@ export function getGameFolder() {
   return current;
 }
 
+// The last createGameFolderUi's re-list.
+let refreshList = async () => {};
+
+/** Re-lists the folders beside hl.exe, for a folder made since (#939). */
+export function refreshGameFolderList() {
+  return refreshList();
+}
+
 /** Sets the field from saved settings. */
 export function setGameFolder(name) {
   current = typeof name === 'string' && name.trim() && !gameFolderProblem(name.trim())
@@ -121,6 +129,7 @@ export function createGameFolderUi({ getHlPath, persist }) {
     found = Array.isArray(listed) ? listed : [];
     render();
   }
+  refreshList = refresh;
 
   selectEl()?.addEventListener('change', (e) => {
     current = e.target.value || DEFAULT_GAME_FOLDER;
