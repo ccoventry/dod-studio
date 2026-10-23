@@ -1713,6 +1713,11 @@ export const STRINGS = {
       const was = last > 0 ? ` (about ${n(last)} last time)` : '';
       return `Looking for demos: ${n(folders)} folder${folders === 1 ? '' : 's'}${was}, ${n(demos)} demo${demos === 1 ? '' : 's'} found`;
     },
+    // Then 64 KB of each, to skip demos already queued and identical copies.
+    keyingLine: (done, total) => {
+      const n = (x) => Number(x || 0).toLocaleString('en-US');
+      return `Checking which demos are new: ${n(done)} of ${n(total)}`;
+    },
     scanDoneLine: (seconds, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
       const parts = [
         added > 0 && `${added} demo${added === 1 ? '' : 's'} added`,
