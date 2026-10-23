@@ -55,7 +55,8 @@ export function allDrivesLabel(roots) {
 /// width (`indeterminate`).
 export function auditProgressView(p, expectedFolders = 0) {
   const current = p?.current ? shownPath(p.current) : '';
-  // Between the walk and the key pass, with "Look inside archives" (#929).
+  // Between the walk and the key pass, with "Show demos backed up in
+  // archives" (#929).
   if (!p?.total && p?.zips_total > 0) {
     const done = Math.min(p.zips_done ?? 0, p.zips_total);
     return {
@@ -102,44 +103,51 @@ export function deleteProgressView(p, permanent) {
   };
 }
 
-/// Whether `file` is a demo inside an archive (.zip, .7z, .rar; #929): it
-/// can be kept, never deleted, since an archive is never changed. The wire
-/// names still say zip (`archive.zip`, `keep_zip`) for all three.
-export function isArchived(file) {
-  return !!file?.archive;
-}
-
 /// Ticked for deletion when the audit lists it: every copy but the kept
-/// one (the first), except copies the game folder or the project uses and
-/// copies inside archives.
+/// one (the first), except copies the game folder or the project uses. An
+/// archive holding the demo changes nothing here (#929): it is a backup.
 export function startsTicked(file, index) {
-  return index > 0 && !file.in_use && !isArchived(file);
+  return index > 0 && !file.in_use;
 }
 
-/// Whether `file` can be ticked to delete: a copy (not group's kept one),
-/// not marked as another demo, and not inside an archive.
+/// Whether `file` can be ticked to delete: a copy (not group's kept one)
+/// and not marked as another demo.
 export function canDelete(group, file) {
-  return group.files[0]?.path !== file.path && !isNotCopy(group, file.path) && !isArchived(file);
+  return group.files[0]?.path !== file.path && !isNotCopy(group, file.path);
 }
 
 /// What the delete is sent: each ticked copy that can be deleted, with the
-/// copy its group keeps, which it must match byte for byte. A kept copy
-/// inside an archive also names the archive and entry, so the backend compares with
-/// the entry's bytes (#929).
+/// copy its group keeps, which it must match byte for byte.
 export function copiesToDelete(groups, ticked) {
   return groups.flatMap((g) => {
     const kept = g.files[0];
     return g.files.slice(1)
       .filter((f) => ticked.has(f.path) && canDelete(g, f))
-      .map((f) => (kept.archive
-        ? { path: f.path, keep: kept.path, keep_zip: kept.archive }
-        : { path: f.path, keep: kept.path }));
+      .map((f) => ({ path: f.path, keep: kept.path }));
   });
 }
 
-/// The path Open Folder shows in Explorer: the archive, for a demo inside one.
-export function revealPath(file) {
-  return shownPath(file.archive ? file.archive.zip : file.path);
+/// The last part of an archive's path: `pack.7z`.
+function archiveName(zip) {
+  return shownPath(zip).split(/[\\/]/).pop();
+}
+
+/// The chip of a loose demo an archive holds a copy of (#929), or `null`:
+/// its text names the archive, or how many when there are several, and its
+/// tooltip lists every archive and entry. The wire name `zip` holds any of
+/// .zip, .7z and .rar.
+export function backupChip(file) {
+  const backups = file?.backups ?? [];
+  if (!backups.length) return null;
+  const archives = [...new Set(backups.map((b) => b.zip))].map(archiveName);
+  const entries = backups.map((b) => `${shownPath(b.zip)} › ${b.entry}`);
+  return { text: STRINGS.AUDITOR.backedUpChip(archives), title: STRINGS.AUDITOR.backedUpTitle(entries) };
+}
+
+/// The backed-up demos (#929) still on disk after a delete.
+export function backedUpWithout(backedUp, deleted) {
+  const gone = new Set(deleted);
+  return (backedUp ?? []).filter((f) => !gone.has(f.path));
 }
 
 /// The audit's groups, each remembering the audit's own pick (`auditPick`)
@@ -231,8 +239,7 @@ export function auditTotals(groups) {
   let copies = 0;
   let wastedBytes = 0;
   for (const g of groups) {
-    // A copy inside an archive can't be deleted, so it frees nothing (#929).
-    const n = g.files.slice(1).filter((f) => !isNotCopy(g, f.path) && !isArchived(f)).length;
+    const n = g.files.slice(1).filter((f) => !isNotCopy(g, f.path)).length;
     copies += n;
     wastedBytes += g.size * n;
   }

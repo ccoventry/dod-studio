@@ -1,8 +1,10 @@
 //! Demos inside `.zip`, `.7z` and `.rar` files (#929), read and never
 //! changed: nothing is extracted to disk, and an archive is never written or
-//! deleted. A demo in an archive counts as a copy, so the Duplicates audit
-//! groups it with loose copies of the same demo, and keeps it, since one
-//! entry can't be removed without rewriting the whole archive.
+//! deleted. An archive is a backup: the Duplicates audit marks a loose demo
+//! it holds as backed up ([`crate::backup`]) and never groups the two, so no
+//! loose demo is offered for deletion because of it. [`with_archive_entry`]
+//! streams an entry out for a byte-for-byte check (#983 checks the backups
+//! it writes with it).
 //!
 //! Only `.dem` entries count. An archive inside an archive is not opened.
 //! The types and functions keep the `zip` names they had when zip was the
@@ -135,7 +137,7 @@ pub struct ZipDemoEntry {
     pub crc32: u32,
     /// Set when the archive stores no CRC-32 for the entry (a 7z entry
     /// without one, a rar entry hashed with BLAKE2 instead): `crc32` is then
-    /// meaningless and the entry never shares another's read.
+    /// meaningless, and only reading the entry says what it holds.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_crc: bool,
     /// Once the entry was read in full: its key, tail and whole-file hash.

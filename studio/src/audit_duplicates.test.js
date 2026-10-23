@@ -3,7 +3,7 @@ import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
   deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
   withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy, auditFoldersKey,
-  isArchived, canDelete, copiesToDelete, revealPath,
+  canDelete, copiesToDelete, backupChip, backedUpWithout,
 } from './audit_duplicates.js';
 
 describe('audit_duplicates (#844)', () => {
@@ -153,49 +153,37 @@ describe('audit_duplicates (#844)', () => {
   });
 });
 
-describe('demos inside zips (#929)', () => {
-  const zipped = {
-    path: String.raw`\\?\D:\packs\lan.zip › hltv/m.dem`,
-    in_use: null,
-    archive: { zip: String.raw`\\?\D:\packs\lan.zip`, entry: 'hltv/m.dem' },
-  };
-  const loose = { path: String.raw`\\?\C:\demos\m.dem`, in_use: null };
-  const other = { path: String.raw`\\?\E:\m.dem`, in_use: null };
-  const group = { size: 10, header_hash: 1, files: [zipped, loose, other] };
+describe('demos backed up in archives (#929)', () => {
+  const one = { zip: String.raw`\\?\D:\packs\lan.zip`, entry: 'hltv/m.dem' };
+  const two = { zip: String.raw`\\?\E:\old\2022.7z`, entry: 'm.dem' };
+  const backedUp = { path: String.raw`\\?\C:\demos\m.dem`, in_use: null, backups: [one] };
+  const copy = { path: String.raw`\\?\E:\m.dem`, in_use: null, backups: [one, two] };
+  const group = { size: 10, header_hash: 1, files: [backedUp, copy] };
 
-  it('never ticks or deletes a copy inside a zip', () => {
-    expect(isArchived(zipped)).toBe(true);
-    expect(isArchived(loose)).toBe(false);
-    expect(startsTicked(zipped, 1)).toBe(false);
-    expect(startsTicked(loose, 1)).toBe(true);
-    expect(canDelete(group, zipped)).toBe(false);
-    expect(canDelete(group, loose)).toBe(true);
-    // Another copy kept: the zip's copy is still not one to delete.
-    const { groups } = keepFile([group], 0, loose.path);
-    expect(canDelete(groups[0], zipped)).toBe(false);
+  it('ticks and deletes a backed-up copy as any other: an archive is a backup', () => {
+    expect(startsTicked(copy, 1)).toBe(true);
+    expect(canDelete(group, copy)).toBe(true);
+    expect(canDelete(group, backedUp)).toBe(false);
+    expect(copiesToDelete([group], new Set([copy.path]))).toEqual([{ path: copy.path, keep: backedUp.path }]);
+    expect(auditTotals([group])).toEqual({ copies: 1, wastedBytes: 10 });
   });
 
-  it('sends the zip and entry when the kept copy is inside a zip', () => {
-    const ticked = new Set([loose.path, other.path, zipped.path]);
-    expect(copiesToDelete([group], ticked)).toEqual([
-      { path: loose.path, keep: zipped.path, keep_zip: zipped.archive },
-      { path: other.path, keep: zipped.path, keep_zip: zipped.archive },
-    ]);
-    // A loose copy kept: no zip to name, and the zip's copy isn't sent.
-    const { groups } = keepFile([group], 0, loose.path);
-    expect(copiesToDelete(groups, ticked)).toEqual([{ path: other.path, keep: loose.path }]);
-    expect(copiesToDelete([group], new Set())).toEqual([]);
+  it('names the archive, or how many, and lists every entry in the tooltip', () => {
+    expect(backupChip(backedUp).text).toBe('backed up in lan.zip');
+    expect(backupChip(copy).text).toBe('backed up in 2 archives');
+    const { title } = backupChip(copy);
+    expect(title).toContain(String.raw`D:\packs\lan.zip › hltv/m.dem`);
+    expect(title).toContain(String.raw`E:\old\2022.7z › m.dem`);
+    // Two entries of one archive count it once.
+    const twice = { backups: [one, { ...one, entry: 'copy/m.dem' }] };
+    expect(backupChip(twice).text).toBe('backed up in lan.zip');
+    expect(backupChip({ path: 'x', backups: [] })).toBeNull();
+    expect(backupChip({ path: 'x' })).toBeNull();
   });
 
-  it('counts only the loose copies as space a delete frees', () => {
-    expect(auditTotals([group])).toEqual({ copies: 2, wastedBytes: 20 });
-    const twoZips = { size: 10, files: [zipped, { ...zipped, path: 'x › y.dem', archive: { zip: 'x', entry: 'y.dem' } }] };
-    expect(auditTotals([twoZips])).toEqual({ copies: 0, wastedBytes: 0 });
-  });
-
-  it('opens the zip itself in Explorer', () => {
-    expect(revealPath(zipped)).toBe(String.raw`D:\packs\lan.zip`);
-    expect(revealPath(loose)).toBe(String.raw`C:\demos\m.dem`);
+  it('drops deleted demos from the backed-up list', () => {
+    expect(backedUpWithout([backedUp, copy], [copy.path])).toEqual([backedUp]);
+    expect(backedUpWithout(undefined, [])).toEqual([]);
   });
 
   it('shows how many archives have been looked inside before the key pass', () => {

@@ -4,7 +4,7 @@ DoD Studio's own code is MIT (`LICENSE`); `dem-patch/` is LGPL-3.0. Almost every
 
 ## UnRAR (RARLAB)
 
-**Used for:** reading the `.dem` files inside `.rar` archives in Demo Auditor › Duplicates, with "Look inside archives" ticked (#929). Read only: entries are decompressed in UnRAR's test mode and never written to disk, and no archive is ever created or changed.
+**Used for:** reading the `.dem` files inside `.rar` archives in Demo Auditor › Duplicates, with "Show demos backed up in archives" ticked (#929). Read only: entries are decompressed in UnRAR's test mode and never written to disk, and no archive is ever created or changed.
 
 **How it gets in:** the `unrar_sys` crate (MIT or Apache-2.0) vendors RARLAB's UnRAR C++ source, with its own small patches, and builds it into a static library; `hl-demo-auditor/src/archive/rar.rs` calls its C API. Only on Windows, and only with `hl-demo-auditor`'s `rar` feature (on by default). `cargo build --no-default-features -p hl-demo-auditor` leaves it out, and `.rar` files are then not looked inside.
 

@@ -4,7 +4,7 @@
 //! valid while its size and modified time are unchanged, the way the
 //! analyzer cache is, so a second scan opens only new or changed demos.
 //!
-//! With "Look inside archives" (#929) it also remembers each archive's
+//! With "Show demos backed up in archives" (#929) it also remembers each archive's
 //! (`.zip`, `.7z`, `.rar`) demo entries and their hashes, under the
 //! archive's path, size and modified time, so an unchanged one is not
 //! opened again.
@@ -249,7 +249,7 @@ impl KeyCache {
     /// Drops every entry under one of `roots` that this run's walk did not
     /// find: it was deleted, moved or renamed. Call only after a walk that
     /// finished. Zips are dropped only when the walk `listed_zips` (#929):
-    /// a scan without "Look inside archives" keeps what the last one with
+    /// a scan without "Show demos backed up in archives" keeps what the last one with
     /// it learned.
     pub fn prune_unseen_under(&mut self, roots: &[PathBuf], listed_zips: bool) {
         let roots: Vec<PathBuf> = roots

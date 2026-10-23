@@ -47,8 +47,6 @@ sysinfo = { workspace = true }
 # Small zips for the Duplicates audit's zip tests (#929); the same build
 # hl-demo-auditor reads them with.
 zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2"] }
-# And small 7z archives, solid and not, written as hl-demo-auditor reads them.
-sevenz-rust2 = { version = "0.24.1", default-features = false, features = ["compress"] }
 
 # No [profile.release] here on purpose. Cargo ignores profiles on non-root
 # workspace packages and prints a warning for every command in the workspace

@@ -999,7 +999,6 @@ dependencies = [
  "native",
  "serde",
  "serde_json",
- "sevenz-rust2",
  "sysinfo",
  "tauri",
  "tauri-build",
