@@ -1092,16 +1092,23 @@ export function initAnalyzerPane({
   initAnalyzerBrowser();
 }
 
+// Redraws the Pinned/Recent/Local links after a change made outside the
+// pane, such as the start-up pinned-folders review unpinning folders (#533).
+export function refreshAnalyzerQuickLinks() {
+  renderQuickLinksSection();
+}
+
 // Entry point for cross-pane jumps (e.g. Workspace's "View Match Telemetry"
 // button) — points the Explorer sidebar at the demo's own folder first, so
 // the Demos table reliably highlights it instead of only coincidentally
-// matching whatever folder the sidebar was already browsing.
+// matching whatever folder the sidebar was already browsing. The folder's
+// listing runs beside the analysis, not before it: a big folder takes seconds
+// to list, and the tab stayed blank until it was done.
 export async function openAnalyzerDemo(path) {
   const parentDir = parentDirOf(path);
-  if (parentDir && parentDir !== currentDir) {
-    await setCurrentDir(parentDir);
-  }
-  await loadAnalyzerDemo(path);
+  const listing = parentDir && parentDir !== currentDir ? setCurrentDir(parentDir) : null;
+  browserSelectedDemo = path;
+  await Promise.all([listing, loadAnalyzerDemo(path)]);
 }
 
 async function loadAnalyzerDemo(path) {
