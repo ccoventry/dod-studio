@@ -91,9 +91,11 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
   return new Promise((resolve) => { pendingResolve = resolve; });
 }
 
-/** Replaces the open dialog's message, for a wait that counts down. */
+/** Rewrites the open dialog's message, for a line worked out after it
+ *  opened (#937's rescan time) or a wait that counts down. Does nothing
+ *  once it has closed. */
 export function setThemedConfirmMessage(message) {
-  if (messageEl) messageEl.textContent = message;
+  if (pendingResolve && messageEl) messageEl.textContent = message;
 }
 
 /** Closes the open dialog from code, answering it with `result`: for a

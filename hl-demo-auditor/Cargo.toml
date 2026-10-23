@@ -18,6 +18,10 @@ clap = { workspace = true, features = ["derive"] }
 # The key cache file (#888).
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Demos inside .zip files (#929), read only. The same build of zip as
+# `native`'s: DEFLATE through flate2's pure-Rust backend, and STORE.
+zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2"] }
+flate2 = "1.1"
 
 [lints]
 workspace = true

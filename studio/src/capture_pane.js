@@ -2,7 +2,7 @@ import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { themedConfirm } from './themed_confirm.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
@@ -775,7 +775,8 @@ function initImportCfgButton() {
   if (!btn) return;
 
   btn.addEventListener('click', async () => {
-    const picked = await open({
+    const picked = await pickPath({
+      field: 'capture.import_cfg',
       title: STRINGS.MAIN.SELECT_MOVIE_CFG_TITLE,
       multiple: false,
       filters: [{ name: STRINGS.MAIN.CONFIG_FILTER_NAME, extensions: ['cfg'] }],

@@ -5,7 +5,7 @@
 // owns the queue, the selection and the pinned-folder list; they're reached
 // through the getters and setters below.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
 import { scanDirectory, cancelScan, logFrontendEvent } from './ipc_bridge.js';
 import { renderMasterList } from './master_pane.js';
@@ -18,6 +18,7 @@ import { updateStreakVisuals } from './detail_pane.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
+import { learnFromScan } from './rescan_estimate.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -220,6 +221,12 @@ export function createQueueScan({
         unchanged,
         outcome,
       }));
+      // This PC's full-read rate, for the rescan prompt's estimate (#937).
+      const rateLog = learnFromScan(outcome);
+      if (rateLog) {
+        logFrontendEvent(rateLog);
+        persistAppSettings();
+      }
       const carryReport = rescanReport(rescans);
       carryReport.log.forEach((line) => logFrontendEvent(line));
 
@@ -274,7 +281,8 @@ export function createQueueScan({
   if (addFilesBtn) {
     addFilesBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'queue.add_files',
           multiple: true,
           filters: [{ name: STRINGS.MAIN.DEMO_FILES_FILTER_NAME, extensions: ['dem'] }],
           title: STRINGS.MAIN.SELECT_DEMO_FILES_TITLE
@@ -314,7 +322,8 @@ export function createQueueScan({
   if (addFolderBtn) {
     addFolderBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'queue.add_folder',
           directory: true,
           multiple: false,
           title: STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE
