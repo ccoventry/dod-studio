@@ -1,16 +1,104 @@
-//! Demos inside `.zip` files (#929), read and never changed: nothing is
-//! extracted to disk, and an archive is never written or deleted. A demo in
-//! a zip counts as a copy, so the Duplicates audit groups it with loose
-//! copies of the same demo, and keeps it, since one entry can't be removed
-//! without rewriting the whole archive.
+//! Demos inside `.zip`, `.7z` and `.rar` files (#929), read and never
+//! changed: nothing is extracted to disk, and an archive is never written or
+//! deleted. A demo in an archive counts as a copy, so the Duplicates audit
+//! groups it with loose copies of the same demo, and keeps it, since one
+//! entry can't be removed without rewriting the whole archive.
 //!
-//! Only `.dem` entries count. A zip inside a zip is not opened. 7z and rar
-//! are not read.
+//! Only `.dem` entries count. An archive inside an archive is not opened.
+//! The types and functions keep the `zip` names they had when zip was the
+//! only kind (`ZipRef`, `ZipDemoEntry`): they hold any of the three.
 
 use crate::{ContentHashes, Fnv1a, KEY_BYTES};
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+
+#[cfg(all(windows, feature = "rar"))]
+mod rar;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod sevenz;
+
+/// The kinds of archive this build reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Zip,
+    #[cfg(not(target_arch = "wasm32"))]
+    SevenZ,
+    #[cfg(all(windows, feature = "rar"))]
+    Rar,
+}
+
+fn kind(path: &Path) -> Option<Kind> {
+    let ext = path.extension()?.to_str()?;
+    if ext.eq_ignore_ascii_case("zip") {
+        return Some(Kind::Zip);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if ext.eq_ignore_ascii_case("7z") {
+        return Some(Kind::SevenZ);
+    }
+    #[cfg(all(windows, feature = "rar"))]
+    if ext.eq_ignore_ascii_case("rar") {
+        return Some(Kind::Rar);
+    }
+    None
+}
+
+/// Whether `path` names an archive this build looks inside: `.zip`, `.7z`
+/// and (on Windows, with the `rar` feature) `.rar`.
+pub fn is_archive(path: &Path) -> bool {
+    kind(path).is_some()
+}
+
+/// The `.dem` entries `archive` lists; nothing is decompressed. An error
+/// when it can't be read as the archive its extension names. An entry named
+/// twice is listed once; one that can't be read (encrypted, split across
+/// volumes) carries an error.
+pub fn list_archive_demos(archive: &Path) -> Result<Vec<ZipDemoEntry>, String> {
+    match kind(archive) {
+        Some(Kind::Zip) => list_zip_demos(archive),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(Kind::SevenZ) => sevenz::list(archive),
+        #[cfg(all(windows, feature = "rar"))]
+        Some(Kind::Rar) => rar::list(archive),
+        None => Err(NOT_READ.to_string()),
+    }
+}
+
+const NOT_READ: &str = "it is not an archive this build reads";
+
+/// Each of `names` in `archive` read in full, opening the archive once.
+pub fn hash_archive_entries(
+    archive: &Path,
+    names: &[String],
+) -> Vec<Result<ContentHashes, String>> {
+    match kind(archive) {
+        Some(Kind::Zip) => hash_zip_entries(archive, names),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(Kind::SevenZ) => sevenz::hash_entries(archive, names),
+        #[cfg(all(windows, feature = "rar"))]
+        Some(Kind::Rar) => rar::hash_entries(archive, names),
+        None => names.iter().map(|_| Err(NOT_READ.to_string())).collect(),
+    }
+}
+
+/// `f` with entry `name` of `archive` opened for reading, decompressed as it
+/// is read, and the size the archive gives it. Reading it to its end also
+/// checks its CRC where the archive stores one: a corrupt entry fails there.
+pub fn with_archive_entry<T>(
+    archive: &Path,
+    name: &str,
+    f: impl FnOnce(&mut dyn Read, u64) -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    match kind(archive) {
+        Some(Kind::Zip) => with_zip_entry(archive, name, f),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(Kind::SevenZ) => sevenz::with_entry(archive, name, f),
+        #[cfg(all(windows, feature = "rar"))]
+        Some(Kind::Rar) => rar::with_entry(archive, name, f),
+        None => Err(std::io::Error::other(NOT_READ)),
+    }
+}
 
 /// Between an archive's path and an entry's name wherever one is shown,
 /// e.g. `C:\demos\pack.zip › match/a.dem`.
@@ -39,6 +127,11 @@ pub struct ZipDemoEntry {
     pub name: String,
     pub size: u64,
     pub crc32: u32,
+    /// Set when the archive stores no CRC-32 for the entry (a 7z entry
+    /// without one, a rar entry hashed with BLAKE2 instead): `crc32` is then
+    /// meaningless and the entry never shares another's read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_crc: bool,
     /// Once the entry was read in full: its key, tail and whole-file hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hashes: Option<ContentHashes>,
@@ -62,7 +155,7 @@ fn open(zip: &Path) -> Result<zip::ZipArchive<BufReader<fs::File>>, String> {
 /// entry's local header; nothing is decompressed. An error when it isn't a
 /// zip that can be read. An entry named twice is listed once; an encrypted
 /// one carries an error.
-pub fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
+fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
     let mut archive = open(zip)?;
     let mut demos: Vec<ZipDemoEntry> = Vec::new();
     for i in 0..archive.len() {
@@ -77,6 +170,7 @@ pub fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
             Ok(file) => ZipDemoEntry {
                 size: file.size(),
                 crc32: file.crc32(),
+                no_crc: false,
                 hashes: None,
                 error: file
                     .encrypted()
@@ -86,6 +180,7 @@ pub fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
             Err(e) => ZipDemoEntry {
                 size: 0,
                 crc32: 0,
+                no_crc: false,
                 hashes: None,
                 error: Some(e.to_string()),
                 name,
@@ -99,7 +194,7 @@ pub fn list_zip_demos(zip: &Path) -> Result<Vec<ZipDemoEntry>, String> {
 /// `f` with entry `name` of `zip` opened for reading, decompressed as it is
 /// read, and the size the archive gives it. Reading it to its end also checks
 /// its CRC-32: a corrupt entry fails there.
-pub fn with_zip_entry<T>(
+fn with_zip_entry<T>(
     zip: &Path,
     name: &str,
     f: impl FnOnce(&mut dyn Read, u64) -> std::io::Result<T>,
@@ -110,49 +205,90 @@ pub fn with_zip_entry<T>(
     f(&mut file, size)
 }
 
+/// [`ContentHashes`] built up from an entry's bytes as they arrive, for
+/// readers that hand over chunks rather than a [`Read`] (rar).
+pub(crate) struct ContentHasher {
+    size: u64,
+    head_end: u64,
+    tail_start: u64,
+    offset: u64,
+    head: Fnv1a,
+    tail: Fnv1a,
+    full: Fnv1a,
+}
+
+impl ContentHasher {
+    /// For an entry of `size` bytes.
+    pub(crate) fn new(size: u64) -> Self {
+        ContentHasher {
+            size,
+            head_end: size.min(KEY_BYTES),
+            tail_start: if size > KEY_BYTES {
+                size - KEY_BYTES
+            } else {
+                u64::MAX
+            },
+            offset: 0,
+            head: Fnv1a::new(),
+            tail: Fnv1a::new(),
+            full: Fnv1a::new(),
+        }
+    }
+
+    pub(crate) fn update(&mut self, chunk: &[u8]) {
+        let offset = self.offset;
+        let end = offset + chunk.len() as u64;
+        if offset < self.head_end {
+            self.head
+                .update(&chunk[..(self.head_end.min(end) - offset) as usize]);
+        }
+        if end > self.tail_start {
+            self.tail
+                .update(&chunk[(self.tail_start.saturating_sub(offset)) as usize..]);
+        }
+        self.full.update(chunk);
+        self.offset = end;
+    }
+
+    /// The hashes, or an error when the entry gave more or fewer bytes than
+    /// its size.
+    pub(crate) fn finish(self) -> std::io::Result<ContentHashes> {
+        if self.offset != self.size {
+            return Err(std::io::Error::other(format!(
+                "it holds {} bytes, not the {} it should",
+                self.offset, self.size
+            )));
+        }
+        Ok(ContentHashes {
+            size: self.size,
+            head: self.head.finish(),
+            tail: if self.size > KEY_BYTES {
+                self.tail.finish()
+            } else {
+                0
+            },
+            full: self.full.finish(),
+        })
+    }
+}
+
 /// [`ContentHashes`] of everything `reader` gives, which must be `size`
 /// bytes: the same hashes [`crate::content_hashes`] finds in a file.
 pub fn hashes_from_reader(reader: &mut dyn Read, size: u64) -> std::io::Result<ContentHashes> {
-    let head_end = size.min(KEY_BYTES);
-    let tail_start = if size > KEY_BYTES {
-        size - KEY_BYTES
-    } else {
-        u64::MAX
-    };
-    let (mut head, mut tail, mut full) = (Fnv1a::new(), Fnv1a::new(), Fnv1a::new());
+    let mut hasher = ContentHasher::new(size);
     let mut buf = vec![0u8; 1 << 20];
-    let mut offset = 0u64;
     loop {
         let n = reader.read(&mut buf)?;
         if n == 0 {
             break;
         }
-        let chunk = &buf[..n];
-        let end = offset + n as u64;
-        if offset < head_end {
-            head.update(&chunk[..(head_end.min(end) - offset) as usize]);
-        }
-        if end > tail_start {
-            tail.update(&chunk[(tail_start.saturating_sub(offset)) as usize..]);
-        }
-        full.update(chunk);
-        offset = end;
+        hasher.update(&buf[..n]);
     }
-    if offset != size {
-        return Err(std::io::Error::other(format!(
-            "it holds {offset} bytes, not the {size} it should"
-        )));
-    }
-    Ok(ContentHashes {
-        size,
-        head: head.finish(),
-        tail: if size > KEY_BYTES { tail.finish() } else { 0 },
-        full: full.finish(),
-    })
+    hasher.finish()
 }
 
 /// Each of `names` in `zip` read in full, opening the archive once.
-pub fn hash_zip_entries(zip: &Path, names: &[String]) -> Vec<Result<ContentHashes, String>> {
+fn hash_zip_entries(zip: &Path, names: &[String]) -> Vec<Result<ContentHashes, String>> {
     let mut archive = match open(zip) {
         Ok(archive) => archive,
         Err(e) => return names.iter().map(|_| Err(e.clone())).collect(),

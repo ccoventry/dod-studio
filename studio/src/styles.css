@@ -3880,7 +3880,7 @@ button.setup-skip:hover:not(:disabled) {
   word-break: break-all;
 }
 
-/* A copy inside a zip (#929): kept, never deleted. */
+/* A copy inside an archive (.zip, .7z, .rar; #929): kept, never deleted. */
 .audit-zip-chip {
   font-size: 0.8em;
   padding: 0 7px;

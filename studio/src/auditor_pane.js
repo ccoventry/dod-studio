@@ -15,7 +15,7 @@ import {
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
 /// copies in it are kept first and never start ticked. `onSettingsChange`
-/// saves the app settings when "Look inside .zip files" changes (#929).
+/// saves the app settings when "Look inside archives" changes (#929).
 export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => {} } = {}) {
   let currentAuditResults = [];
   // Groups default to expanded; this tracks the exceptions. Reset on every
@@ -290,7 +290,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         cb.className = 'audit-row-cb';
         cb.dataset.file = file.path;
         if (archived) {
-          cb.disabled = true; // Zips are never changed (#929), kept or not.
+          cb.disabled = true; // Archives are never changed (#929), kept or not.
           cb.title = STRINGS.AUDITOR.IN_ZIP_TITLE;
         } else if (fileIdx === 0) {
           cb.disabled = true; // The kept copy is never deleted.

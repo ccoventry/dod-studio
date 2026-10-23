@@ -43,6 +43,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
+- [third_party_notices.md](third_party_notices.md) — the libraries whose licences ask for more than a licence file, or aren't open source (UnRAR, for reading .rar files).
 
 ## Folders
 - [wiki/](wiki/) — source for the GitHub wiki, published when `main` changes.

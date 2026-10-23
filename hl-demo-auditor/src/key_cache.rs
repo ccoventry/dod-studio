@@ -4,9 +4,10 @@
 //! valid while its size and modified time are unchanged, the way the
 //! analyzer cache is, so a second scan opens only new or changed demos.
 //!
-//! With "Look inside .zip files" (#929) it also remembers each zip's demo
-//! entries and their hashes, under the zip's path, size and modified time,
-//! so an unchanged zip is not opened again.
+//! With "Look inside archives" (#929) it also remembers each archive's
+//! (`.zip`, `.7z`, `.rar`) demo entries and their hashes, under the
+//! archive's path, size and modified time, so an unchanged one is not
+//! opened again.
 //!
 //! Studio keeps it in `audit_keys.json` in the app data folder. It is only a
 //! cache: a file that is missing, unreadable or from another version starts
@@ -248,7 +249,7 @@ impl KeyCache {
     /// Drops every entry under one of `roots` that this run's walk did not
     /// find: it was deleted, moved or renamed. Call only after a walk that
     /// finished. Zips are dropped only when the walk `listed_zips` (#929):
-    /// a scan without "Look inside .zip files" keeps what the last one with
+    /// a scan without "Look inside archives" keeps what the last one with
     /// it learned.
     pub fn prune_unseen_under(&mut self, roots: &[PathBuf], listed_zips: bool) {
         let roots: Vec<PathBuf> = roots
@@ -485,6 +486,7 @@ mod tests {
             name: "a.dem".into(),
             size: 10,
             crc32: 5,
+            no_crc: false,
             hashes: None,
             error: None,
         }]

@@ -199,9 +199,9 @@ describe('demos inside zips (#929)', () => {
     expect(revealPath(loose)).toBe(String.raw`C:\demos\m.dem`);
   });
 
-  it('shows how many zips have been looked inside before the key pass', () => {
-    expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 1, total: 0, done: 0, current: String.raw`\\?\D:\a.zip` }))
-      .toEqual({ pct: 25, text: 'Looking inside zips: 1 / 4', current: String.raw`D:\a.zip`, indeterminate: false });
+  it('shows how many archives have been looked inside before the key pass', () => {
+    expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 1, total: 0, done: 0, current: String.raw`\\?\D:\a.7z` }))
+      .toEqual({ pct: 25, text: 'Looking inside archives: 1 / 4', current: String.raw`D:\a.7z`, indeterminate: false });
     // The key pass takes over once it has a total.
     expect(auditProgressView({ folders: 9, zips_total: 4, zips_done: 4, total: 10, done: 5 }).text)
       .toBe('Comparing demos: 5 / 10');

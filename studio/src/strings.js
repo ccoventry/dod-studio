@@ -958,11 +958,11 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
-    // "Look inside .zip files" (#929).
-    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
-    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
-    IN_ZIP_CHIP: 'in a zip',
-    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
+    // "Look inside archives" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Look inside archives (.zip, .7z, .rar)',
+    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip, .7z and .rar files. Archives are only read, never changed: a demo in an archive is always the copy kept, and loose copies of it can be deleted. Only .dem files count, an archive inside an archive isn't opened, and encrypted or damaged ones are skipped (the activity log names them). The first audit of big archives takes longer, solid .7z and .rar ones most; later audits remember them until they change.",
+    IN_ZIP_CHIP: 'in an archive',
+    IN_ZIP_TITLE: "This copy is inside an archive (.zip, .7z or .rar). Archives are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -974,7 +974,7 @@ export const STRINGS = {
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     elapsedSuffix: (clock) => ` · ${clock}`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
-    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside archives: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`

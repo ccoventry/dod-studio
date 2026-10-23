@@ -54,7 +54,7 @@ export function allDrivesLabel(roots) {
 /// width (`indeterminate`).
 export function auditProgressView(p, expectedFolders = 0) {
   const current = p?.current ? shownPath(p.current) : '';
-  // Between the walk and the key pass, with "Look inside .zip files" (#929).
+  // Between the walk and the key pass, with "Look inside archives" (#929).
   if (!p?.total && p?.zips_total > 0) {
     const done = Math.min(p.zips_done ?? 0, p.zips_total);
     return {
@@ -112,28 +112,29 @@ export function deleteProgressView(p, permanent) {
   };
 }
 
-/// Whether `file` is a demo inside a zip (#929): it can be kept, never
-/// deleted, since a zip is never changed.
+/// Whether `file` is a demo inside an archive (.zip, .7z, .rar; #929): it
+/// can be kept, never deleted, since an archive is never changed. The wire
+/// names still say zip (`archive.zip`, `keep_zip`) for all three.
 export function isArchived(file) {
   return !!file?.archive;
 }
 
 /// Ticked for deletion when the audit lists it: every copy but the kept
 /// one (the first), except copies the game folder or the project uses and
-/// copies inside zips.
+/// copies inside archives.
 export function startsTicked(file, index) {
   return index > 0 && !file.in_use && !isArchived(file);
 }
 
 /// Whether `file` can be ticked to delete: a copy (not group's kept one),
-/// not marked as another demo, and not inside a zip.
+/// not marked as another demo, and not inside an archive.
 export function canDelete(group, file) {
   return group.files[0]?.path !== file.path && !isNotCopy(group, file.path) && !isArchived(file);
 }
 
 /// What the delete is sent: each ticked copy that can be deleted, with the
 /// copy its group keeps, which it must match byte for byte. A kept copy
-/// inside a zip also names the zip and entry, so the backend compares with
+/// inside an archive also names the archive and entry, so the backend compares with
 /// the entry's bytes (#929).
 export function copiesToDelete(groups, ticked) {
   return groups.flatMap((g) => {
@@ -146,7 +147,7 @@ export function copiesToDelete(groups, ticked) {
   });
 }
 
-/// The path Open Folder shows in Explorer: the zip, for a demo inside one.
+/// The path Open Folder shows in Explorer: the archive, for a demo inside one.
 export function revealPath(file) {
   return shownPath(file.archive ? file.archive.zip : file.path);
 }
@@ -240,7 +241,7 @@ export function auditTotals(groups) {
   let copies = 0;
   let wastedBytes = 0;
   for (const g of groups) {
-    // A copy inside a zip can't be deleted, so it frees nothing (#929).
+    // A copy inside an archive can't be deleted, so it frees nothing (#929).
     const n = g.files.slice(1).filter((f) => !isNotCopy(g, f.path) && !isArchived(f)).length;
     copies += n;
     wastedBytes += g.size * n;

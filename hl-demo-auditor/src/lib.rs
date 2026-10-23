@@ -264,8 +264,8 @@ fn has_extension(path: &Path, wanted: &str) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case(wanted))
 }
 
-/// One folder's listing: its demos into `demos`, its `.zip` files into
-/// `zips` when given, the folders to walk next into `subdirs`.
+/// One folder's listing: its demos into `demos`, its archives (`.zip`,
+/// `.7z`, `.rar`) into `zips` when given, the folders to walk next into `subdirs`.
 #[allow(clippy::too_many_arguments)]
 fn list_dir(
     dir: &Path,
@@ -295,7 +295,7 @@ fn list_dir(
         } else if has_extension(&path, "dem") {
             demos.push(path);
         } else if let Some(zips) = zips.as_deref_mut()
-            && has_extension(&path, "zip")
+            && archive::is_archive(&path)
         {
             zips.push(path);
         }
@@ -314,8 +314,8 @@ pub fn scan_roots(
     scan_roots_with(roots, worker_threads(), windows_folder(), cancel, progress)
 }
 
-/// [`scan_roots`] that also lists every `.zip` file it passes (#929): the
-/// demos, then the zips.
+/// [`scan_roots`] that also lists every archive it passes (`.zip`, `.7z`,
+/// `.rar`, #929): the demos, then the archives.
 pub fn scan_roots_and_zips(
     roots: &[PathBuf],
     cancel: &AtomicBool,
@@ -707,7 +707,7 @@ fn list_zips(
     }
     let read = par_map(&to_read, threads, cancel, |&i| {
         let path = &zips[i].0;
-        let listing = archive::list_zip_demos(path);
+        let listing = archive::list_archive_demos(path);
         reading(path);
         listing
     });
@@ -766,7 +766,7 @@ fn read_zip_demos(
             .iter()
             .map(|&j| demos[j].entry.name.clone())
             .collect();
-        let found = archive::hash_zip_entries(&zips[*zip].0, &names);
+        let found = archive::hash_archive_entries(&zips[*zip].0, &names);
         if let Some(tx) = progress {
             for name in names {
                 let at = ZipRef {
@@ -887,10 +887,10 @@ pub fn find_duplicates_in(
         });
     }
 
-    // A demo in a zip is read in full or not at all: deflate can't seek to
-    // its last 64 KiB. Two entries of one size and CRC-32 hold the same
-    // bytes, so one of them is read for both; when that read fails, the
-    // other is read too.
+    // A demo in an archive is read in full or not at all: deflate, LZMA and
+    // RAR can't seek to its last 64 KiB. Two entries of one size and CRC-32
+    // hold the same bytes, so one of them is read for both; when that read
+    // fails, the other is read too.
     let zip_hashing = |z: &ZipDemo| {
         let at = ZipRef {
             zip: zips[z.zip].0.clone(),
@@ -898,10 +898,12 @@ pub fn find_duplicates_in(
         };
         send(AuditProgress::Hashing(at.display()));
     };
+    // An entry whose archive stores no CRC-32 has no twin: it is read itself.
+    let twin = |e: &ZipDemoEntry| (!e.no_crc).then_some((e.size, e.crc32));
     let mut by_crc: HashMap<(u64, u32), ContentHashes> = HashMap::new();
     for z in &zip_demos {
-        if let Some(h) = z.entry.hashes {
-            by_crc.entry((z.entry.size, z.entry.crc32)).or_insert(h);
+        if let (Some(h), Some(twin)) = (z.entry.hashes, twin(&z.entry)) {
+            by_crc.entry(twin).or_insert(h);
         }
     }
     let mut needed = Vec::new();
@@ -920,7 +922,10 @@ pub fn find_duplicates_in(
         round.clear();
         let mut picked: HashSet<(u64, u32)> = HashSet::new();
         pending.retain(|&j| {
-            let crc = (zip_demos[j].entry.size, zip_demos[j].entry.crc32);
+            let Some(crc) = twin(&zip_demos[j].entry) else {
+                round.push(j);
+                return true;
+            };
             if let Some(h) = by_crc.get(&crc) {
                 zip_demos[j].entry.hashes = Some(*h);
                 zip_hashing(&zip_demos[j]);
@@ -944,9 +949,9 @@ pub fn find_duplicates_in(
             match read {
                 Ok(h) => {
                     zip_demos[j].entry.hashes = Some(h);
-                    by_crc
-                        .entry((zip_demos[j].entry.size, zip_demos[j].entry.crc32))
-                        .or_insert(h);
+                    if let Some(twin) = twin(&zip_demos[j].entry) {
+                        by_crc.entry(twin).or_insert(h);
+                    }
                 }
                 Err(e) => {
                     let at = ZipRef {
@@ -1892,11 +1897,106 @@ mod tests {
         let d = Demos::new("zips_walk");
         d.file("a.dem", b"x");
         d.file("pack.ZIP", b"y");
+        d.file("pack.7z", b"y");
+        d.file("pack.rar", b"y");
+        d.file("pack.tar", b"never");
         let cancel = AtomicBool::new(false);
         let roots = [d.0.clone()];
-        let (demos, zips) = walk_roots(&roots, 2, None, true, &cancel, &None);
-        assert_eq!((demos.len(), zips.len()), (1, 1));
-        assert!(zips[0].ends_with("pack.ZIP"));
+        let (demos, mut zips) = walk_roots(&roots, 2, None, true, &cancel, &None);
+        zips.sort();
+        let names: Vec<_> = zips.iter().map(|z| z.file_name().unwrap()).collect();
+        let rar = cfg!(all(windows, feature = "rar"));
+        let expected: &[&str] = if rar {
+            &["pack.7z", "pack.ZIP", "pack.rar"]
+        } else {
+            &["pack.7z", "pack.ZIP"]
+        };
+        assert_eq!(demos.len(), 1);
+        assert_eq!(names, expected);
         assert_eq!(scan_roots_with(&roots, 2, None, &cancel, &None).len(), 1);
+    }
+
+    #[test]
+    fn demos_inside_7z_and_rar_files_group_with_their_loose_copies() {
+        use archive::sevenz::tests::write_7z;
+        let d = Demos::new("7z_rar_group");
+        let long = demo_of(3 * KEY_BYTES as usize + 500, 4);
+        // The same size, other bytes: read too, and grouped with nothing.
+        let other = demo_of(3 * KEY_BYTES as usize + 500, 5);
+        let loose = d.file("match.dem", &long);
+        let solid = d.0.join("solid.7z");
+        write_7z(
+            &solid,
+            &[("first.dem", &other), ("x/match.dem", &long)],
+            true,
+        );
+        let plain = d.0.join("plain.7z");
+        write_7z(&plain, &[("match.dem", &long)], false);
+        let corrupt = d.0.join("corrupt.7z");
+        fs::write(&corrupt, b"7z\xbc\xaf\x27\x1c not a 7z at all").unwrap();
+        let mut files = vec![loose];
+        let mut archives = vec![solid, plain, corrupt];
+        let mut expected = vec![vec![
+            "match.dem".to_string(),
+            "plain.7z › match.dem".into(),
+            "solid.7z › x/match.dem".into(),
+        ]];
+        let rar = cfg!(all(windows, feature = "rar"));
+        if rar {
+            // archive::rar's fixture: match/a.dem, readme.txt, and an
+            // encrypted locked.dem.
+            let pack = d.file("pack.rar", include_bytes!("archive/testdata/pack.rar"));
+            let bytes: Vec<u8> = (0..3000).map(|i| ((i * 31 + 5 * 7) % 251) as u8).collect();
+            files.push(d.file("a.dem", &bytes));
+            archives.push(pack);
+            expected.insert(0, vec!["a.dem".into(), "pack.rar › match/a.dem".into()]);
+        }
+
+        let mut cache = KeyCache::default();
+        let (audit, _) = zip_pass(&files, &archives, &mut cache);
+        assert_eq!(zip_group_names(&audit), expected);
+        // The loose copies are the copies: the archive's copy is kept.
+        assert_eq!(audit.copies, if rar { 2 } else { 1 });
+        let skipped = audit.skipped.join("\n");
+        assert!(skipped.contains("corrupt.7z: "), "{skipped}");
+        assert_eq!(
+            rar,
+            skipped.contains("pack.rar › locked.dem: it is encrypted"),
+            "{skipped}"
+        );
+        assert_eq!(audit.skipped.len(), if rar { 2 } else { 1 });
+        // The two 7z copies of match.dem share a size and CRC-32: one read
+        // for both. first.dem shares its size, so it is read as well.
+        assert_eq!(audit.reads.zip_demos, if rar { 3 } else { 2 });
+
+        // A second pass opens no archive and finds the same groups.
+        let (again, _) = zip_pass(&files, &archives, &mut cache);
+        assert_eq!(again.reads, Reads::default());
+        assert_eq!(zip_group_names(&again), zip_group_names(&audit));
+    }
+
+    #[test]
+    fn entries_without_a_crc_never_share_a_read() {
+        let d = Demos::new("no_crc");
+        let bytes = demo_of(4000, 6);
+        let a = d.0.join("a.zip");
+        let b = d.0.join("b.zip");
+        write_zip(&a, &[("m.dem", &bytes, true)]);
+        write_zip(&b, &[("m.dem", &bytes, false)]);
+        let mut cache = KeyCache::default();
+        let (shared, _) = zip_pass(&[], &[a.clone(), b.clone()], &mut cache);
+        assert_eq!(shared.reads.zip_demos, 1, "same size and CRC-32: one read");
+        // The same listings, told their CRCs are unknown.
+        let mut fresh = KeyCache::default();
+        for zip in [&a, &b] {
+            let canonical = fs::canonicalize(zip).unwrap();
+            let mut listing = archive::list_archive_demos(zip).unwrap();
+            listing[0].no_crc = true;
+            fresh.put_archive(&canonical, stamp(&canonical).unwrap(), Ok(listing));
+        }
+        let (each, _) = zip_pass(&[], &[a, b], &mut fresh);
+        assert_eq!(each.reads.zips, 0);
+        assert_eq!(each.reads.zip_demos, 2, "no CRC: each is read itself");
+        assert_eq!(zip_group_names(&each), zip_group_names(&shared));
     }
 }

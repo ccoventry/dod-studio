@@ -323,8 +323,9 @@ test('a file that fails to delete stays listed and is reported', async ({ page }
   await expect(page.locator('#audit-results-body .audit-file-path')).toContainText(['E:\\old\\a.dem']);
 });
 
-// "Look inside .zip files" (#929): a demo inside a zip is the copy kept,
-// shown as `archive.zip › inner/path.dem` with a chip, and never deleted.
+// "Look inside archives" (#929): a demo inside a .zip, .7z or .rar is the
+// copy kept, shown as `archive.zip › inner/path.dem` with a chip, and never
+// deleted.
 const ZIP_GROUPS = [
   {
     size: 1024 * 1024,
@@ -340,8 +341,9 @@ const ZIP_GROUPS = [
   },
 ];
 
-test('Look inside .zip files is sent, saved, and its zips show in the progress line', async ({ page }) => {
+test('Look inside archives is sent, saved, and its archives show in the progress line', async ({ page }) => {
   await loadHarness(page);
+  await expect(page.locator('label:has(#audit-look-in-zips)')).toHaveText('Look inside archives (.zip, .7z, .rar)');
   await expect(page.locator('#audit-look-in-zips')).not.toBeChecked();
   await page.check('#audit-look-in-zips');
   expect(await page.evaluate(() => window.__settingsSaves)).toBe(1);
@@ -353,7 +355,7 @@ test('Look inside .zip files is sent, saved, and its zips show in the progress l
   await page.evaluate(() => window.__mockEmit('audit_progress', {
     folders: 12, zips_total: 4, zips_done: 1, total: 0, done: 0, current: '\\\\?\\D:\\packs\\lan.zip',
   }));
-  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking inside zips: 1 \/ 4 · 0:0\d$/);
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking inside archives: 1 \/ 4 · 0:0\d$/);
   await expect(page.locator('#audit-status-current')).toHaveText('D:\\packs\\lan.zip');
   await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
   await page.evaluate((groups) => window.__finishAudit({ groups, demos: 2, cancelled: false }), ZIP_GROUPS);
@@ -367,7 +369,7 @@ test('a copy inside a zip is kept, marked, never ticked, and loose copies are ch
   await page.evaluate((groups) => window.__finishAudit({ groups, demos: 2, cancelled: false }), ZIP_GROUPS);
 
   const rows = page.locator('#audit-results-body tr.audit-file-row');
-  await expect(rows.locator('.audit-file-path')).toHaveText(['D:\\packs\\lan.zip › hltv/m.dem in a zip', 'C:\\demos\\m.dem']);
+  await expect(rows.locator('.audit-file-path')).toHaveText(['D:\\packs\\lan.zip › hltv/m.dem in an archive', 'C:\\demos\\m.dem']);
   await expect(rows.nth(0).locator('.audit-zip-chip')).toHaveAttribute('title', /never changed/);
   await expect(rows.nth(0).locator('.audit-file-status')).toHaveText('Kept');
   await expect(rows.nth(0).locator('input.audit-row-cb')).toBeDisabled();
@@ -397,4 +399,32 @@ test('a copy inside a zip is kept, marked, never ticked, and loose copies are ch
     keep: '\\\\?\\D:\\packs\\lan.zip › hltv/m.dem',
     keep_zip: { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' },
   }]);
+});
+
+test('a copy inside a .7z or .rar shows and is kept like one in a zip', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  const groups = ['pack.7z', 'pack.rar'].map((name, i) => ({
+    size: 1024 * 1024 + i,
+    header_hash: 0x456 + i,
+    files: [
+      {
+        path: `\\\\?\\D:\\packs\\${name} › m${i}.dem`,
+        in_use: null,
+        archive: { zip: `\\\\?\\D:\\packs\\${name}`, entry: `m${i}.dem` },
+      },
+      { path: `\\\\?\\C:\\demos\\m${i}.dem`, in_use: null },
+    ],
+  }));
+  await page.evaluate((groups) => window.__finishAudit({ groups, demos: 4, cancelled: false }), groups);
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.locator('.audit-file-path')).toHaveText([
+    'D:\\packs\\pack.7z › m0.dem in an archive', 'C:\\demos\\m0.dem',
+    'D:\\packs\\pack.rar › m1.dem in an archive', 'C:\\demos\\m1.dem',
+  ]);
+  await expect(rows.nth(2).locator('.audit-zip-chip')).toHaveAttribute('title', /\.7z or \.rar/);
+  await expect(rows.nth(2).locator('input.audit-row-cb')).toBeDisabled();
+  await expect(rows.nth(3).locator('input.audit-row-cb')).toBeChecked();
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 2 | Wasted Space: 2.0 MB');
 });

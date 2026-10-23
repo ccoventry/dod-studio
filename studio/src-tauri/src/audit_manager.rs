@@ -10,10 +10,12 @@
 //! A copy the delete finds different has its whole-file hash remembered
 //! there too, and later scans no longer group it with the kept copy.
 //!
-//! "Look inside .zip files" (#929) adds the demos inside zips: one of those
-//! is always the copy kept, since an archive is never changed, and the loose
-//! copies are offered for deletion as usual, each compared byte for byte
-//! with the zip's entry first.
+//! "Look inside archives" (#929) adds the demos inside `.zip`, `.7z` and
+//! `.rar` files: one of those is always the copy kept, since an archive is
+//! never changed, and the loose copies are offered for deletion as usual,
+//! each compared byte for byte with the archive's entry first. The names
+//! here still say `zip` (`ZipAt`, `keep_zip`, `lookInZips`) for any of the
+//! three: they are the wire and settings names zip support shipped with.
 
 use hl_demo_auditor::{
     AuditProgress, KeyCache, ZipRef, find_duplicates_in, scan_roots, scan_roots_and_zips,
@@ -309,8 +311,8 @@ fn audit_end_log(t: &AuditTimes) -> String {
     }
     let zips = match t.zips {
         Some((zips, demos)) => format!(
-            "; looked inside {zips} zip(s) holding {demos} demo(s), opened {} zip(s) and read {} \
-             demo(s) in them in full, the rest remembered",
+            "; looked inside {zips} archive(s) holding {demos} demo(s), opened {} archive(s) and \
+             read {} demo(s) in them in full, the rest remembered",
             t.reads.zips, t.reads.zip_demos,
         ),
         None => String::new(),
@@ -345,7 +347,7 @@ fn skipped_log(skipped: &[String]) -> Vec<String> {
         .collect();
     if skipped.len() > SKIPPED_LINES {
         lines.push(format!(
-            "[audit] skipped {} more zip(s) or zipped demo(s) that couldn't be read",
+            "[audit] skipped {} more archive(s) or archived demo(s) that couldn't be read",
             skipped.len() - SKIPPED_LINES
         ));
     }
@@ -362,7 +364,7 @@ fn audit_start_log(folders: &[String], drives: &[String], look_in_zips: bool) ->
         what.push(format!("{} folder(s)", folders.len()));
     }
     let zips = if look_in_zips {
-        ", looking inside .zip files"
+        ", looking inside archives (.zip, .7z, .rar)"
     } else {
         ""
     };
@@ -624,7 +626,7 @@ fn check_same_as_zip_entry(copy: &Path, keep: &ZipAt) -> Result<(), Refusal> {
     let shown = keep.shown();
     let zip = Path::new(&keep.zip);
     let in_zip = zip.symlink_metadata().is_ok_and(|m| m.is_file())
-        && hl_demo_auditor::archive::list_zip_demos(zip)
+        && hl_demo_auditor::archive::list_archive_demos(zip)
             .is_ok_and(|demos| demos.iter().any(|d| d.name == keep.entry));
     if !in_zip {
         return Err(Refusal::Other(crate::messages::kept_copy_missing(
@@ -635,14 +637,15 @@ fn check_same_as_zip_entry(copy: &Path, keep: &ZipAt) -> Result<(), Refusal> {
         |e: std::io::Error| Refusal::Other(crate::messages::copy_compare_failed(copy, &shown, e));
     let mut a = std::fs::File::open(copy).map_err(unreadable)?;
     let len_a = a.metadata().map_err(unreadable)?.len();
-    let compared = hl_demo_auditor::archive::with_zip_entry(zip, &keep.entry, |entry, len_b| {
-        Ok(compare_readers(
-            copy,
-            &shown,
-            (&mut a, len_a),
-            (entry, len_b),
-        ))
-    });
+    let compared =
+        hl_demo_auditor::archive::with_archive_entry(zip, &keep.entry, |entry, len_b| {
+            Ok(compare_readers(
+                copy,
+                &shown,
+                (&mut a, len_a),
+                (entry, len_b),
+            ))
+        });
     match compared {
         Ok(result) => result,
         Err(e) => Err(unreadable(e)),
@@ -856,7 +859,7 @@ mod tests {
         );
         assert_eq!(
             audit_start_log(&["E:/demos".into()], &[], true),
-            "[audit] started: 1 folder(s), looking inside .zip files"
+            "[audit] started: 1 folder(s), looking inside archives (.zip, .7z, .rar)"
         );
         let mut times = AuditTimes {
             cancelled: false,
@@ -884,8 +887,8 @@ mod tests {
         times.zips = Some((40, 120));
         assert!(
             audit_end_log(&times).ends_with(
-                "the rest remembered; looked inside 40 zip(s) holding 120 demo(s), opened 3 zip(s) \
-                 and read 2 demo(s) in them in full, the rest remembered"
+                "the rest remembered; looked inside 40 archive(s) holding 120 demo(s), opened 3 \
+                 archive(s) and read 2 demo(s) in them in full, the rest remembered"
             ),
             "{}",
             audit_end_log(&times)
@@ -903,7 +906,7 @@ mod tests {
         assert_eq!(lines.len(), SKIPPED_LINES + 1);
         assert_eq!(
             lines.last().unwrap(),
-            "[audit] skipped 5 more zip(s) or zipped demo(s) that couldn't be read"
+            "[audit] skipped 5 more archive(s) or archived demo(s) that couldn't be read"
         );
     }
 
@@ -966,6 +969,72 @@ mod tests {
             Err(Refusal::Other(_))
         ));
         assert_eq!(std::fs::read(&zip).unwrap(), before, "the zip is unchanged");
+    }
+
+    /// The same check against an entry of a 7z, solid or not, and of a rar,
+    /// streamed out of the archive as it is compared (#929).
+    #[test]
+    fn a_copy_is_compared_with_the_entry_a_7z_or_rar_keeps() {
+        use sevenz_rust2::{ArchiveEntry, ArchiveWriter, SourceReader};
+        let s = Scratch::new("7z_rar_keep");
+        let copy = s.file("copy.dem", &demo_bytes(1));
+        let odd = s.file("odd.dem", &demo_bytes(2));
+        for solid in [false, true] {
+            let pack = s.0.join(format!("pack_{solid}.7z"));
+            let mut writer = ArchiveWriter::create(&pack).unwrap();
+            let names = ["first.dem", "x/keep.dem"];
+            let bytes = [demo_bytes(3), demo_bytes(1)];
+            if solid {
+                let entries = names.iter().map(|n| ArchiveEntry::new_file(n)).collect();
+                let readers = bytes.iter().map(|b| SourceReader::new(&b[..])).collect();
+                writer.push_archive_entries(entries, readers).unwrap();
+            } else {
+                for (name, b) in names.iter().zip(&bytes) {
+                    writer
+                        .push_archive_entry(ArchiveEntry::new_file(name), Some(&b[..]))
+                        .unwrap();
+                }
+            }
+            writer.finish().unwrap();
+            let before = std::fs::read(&pack).unwrap();
+            let keep = zip_at(&pack, "x/keep.dem");
+            assert_eq!(check_same_as_zip_entry(&copy, &keep), Ok(()));
+            assert!(matches!(
+                check_same_as_zip_entry(&odd, &keep),
+                Err(Refusal::NotACopy(_))
+            ));
+            assert!(matches!(
+                check_same_as_zip_entry(&copy, &zip_at(&pack, "gone.dem")),
+                Err(Refusal::Other(_))
+            ));
+            assert_eq!(std::fs::read(&pack).unwrap(), before, "the 7z is unchanged");
+        }
+        if cfg!(windows) {
+            // hl-demo-auditor's rar fixture: match/a.dem is 3000 bytes.
+            let rar = s.0.join("pack.rar");
+            let fixture = include_bytes!("../../../hl-demo-auditor/src/archive/testdata/pack.rar");
+            std::fs::write(&rar, fixture).unwrap();
+            let bytes: Vec<u8> = (0..3000).map(|i| ((i * 31 + 5 * 7) % 251) as u8).collect();
+            let same = s.file("a.dem", &bytes);
+            let keep = zip_at(&rar, "match/a.dem");
+            assert_eq!(check_same_as_zip_entry(&same, &keep), Ok(()));
+            assert!(matches!(
+                check_same_as_zip_entry(&copy, &keep),
+                Err(Refusal::NotACopy(_))
+            ));
+            // Its encrypted entry can't be read, so even its own bytes are
+            // refused rather than taken for a copy.
+            let plain = s.file("locked.dem", &(0u8..16).collect::<Vec<_>>());
+            assert!(matches!(
+                check_same_as_zip_entry(&plain, &zip_at(&rar, "locked.dem")),
+                Err(Refusal::Other(_))
+            ));
+            assert_eq!(
+                std::fs::read(&rar).unwrap(),
+                fixture,
+                "the rar is unchanged"
+            );
+        }
     }
 
     /// The copy a zip holds comes first, so it is the one kept, ahead of a
