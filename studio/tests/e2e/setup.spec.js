@@ -93,6 +93,20 @@ test("the Half-Life step picks a copy of the dod folder, and the note goes once 
   await expect(page.locator('#setup-game-folder')).toHaveValue('dod_movies');
 });
 
+test('a saved Game Folder this install lacks is named as missing, with no language warning', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    Object.assign(window.__snapshot, { gameFolder: 'dod_movies', gameFolders: ['dod'], gameFolderLanguage: null });
+    window.__win.open(0);
+  });
+  await expect(page.locator('#setup-hl-folder-missing')).toContainText('no "dod_movies" folder beside hl.exe');
+  await expect(page.locator('#setup-game-folder')).toHaveValue('dod_movies');
+  await expect(page.locator('#setup-game-folder option:checked')).toHaveText('dod_movies (not found beside hl.exe)');
+  await expect(page.locator('#setup-hl-language-warning')).toHaveCount(0);
+  await page.locator('#setup-game-folder').selectOption('dod');
+  expect(await calls(page)).toContainEqual(['setGameFolder', 'dod']);
+});
+
 test('the FFmpeg step lets a fresh install pick ffmpeg.exe before pointing HLAE at it', async ({ page }) => {
   await loadHarness(page);
   // A fresh install: the bare `ffmpeg` is on no PATH folder, HLAE has no ini.

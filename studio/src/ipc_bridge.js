@@ -52,9 +52,23 @@ export async function filesExist(paths) {
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
  * disk and counts it in `unchanged` instead of parsing it again.
+ * `includeSubfolders` false reads only each folder's own demos (#531).
  */
-export async function scanDirectory(scanPaths, known = [], workers = undefined) {
-  return invoke("scan_directory", { paths: scanPaths, known, workers })
+/**
+ * Files and folders dropped from Windows (#530), sorted on disk: resolves
+ * `{ demos, folders, skipped }` (skipped: file names).
+ */
+export async function sortDroppedPaths(paths) {
+  return invoke("sort_dropped_paths", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (sort_dropped_paths):", err);
+      showToast(STRINGS.IPC.dropError(err), 'error');
+      throw err;
+    });
+}
+
+export async function scanDirectory(scanPaths, known = [], workers = undefined, includeSubfolders = true) {
+  return invoke("scan_directory", { paths: scanPaths, known, workers, includeSubfolders })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');
@@ -78,12 +92,21 @@ export async function estimateRescan(paths) {
 // `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
 // Paths of the demos whose file no longer matches its saved key (#21).
 // Empty when the check itself fails, so a broken check never blocks a batch.
-export async function changedDemos(demos) {
-  return invoke("changed_demos", { demos })
-    .catch((err) => {
-      console.error("IPC Execution Error (changed_demos):", err);
-      return [];
-    });
+// `onProgress({ done, total })` gets `changed_demos_progress` while it reads
+// them (#953).
+export async function changedDemos(demos, onProgress = null) {
+  const unlisten = onProgress
+    ? await listen('changed_demos_progress', (event) => onProgress(event.payload)).catch(() => null)
+    : null;
+  try {
+    return await invoke("changed_demos", { demos })
+      .catch((err) => {
+        console.error("IPC Execution Error (changed_demos):", err);
+        return [];
+      });
+  } finally {
+    unlisten?.();
+  }
 }
 
 export async function locateMissingDemos(demos, searchDirs) {
@@ -101,6 +124,16 @@ export async function systemMemoryBytes() {
     .catch((err) => {
       console.error("IPC Execution Error (system_memory_bytes):", err);
       return null;
+    });
+}
+
+// The built-in command profiles (#911). On failure the Commands tab lists
+// only the user's own profiles.
+export async function builtinCommandProfiles() {
+  return invoke("builtin_command_profiles")
+    .catch((err) => {
+      console.error("IPC Execution Error (builtin_command_profiles):", err);
+      return [];
     });
 }
 

@@ -16,6 +16,7 @@ import {
   revealInExplorer,
 } from './ipc_bridge.js';
 import { getGameFolder, refreshGameFolderList } from './game_folder_ui.js';
+import { isListedFolder } from './game_folder.js';
 import { createMovieCopy } from './movie_copy_ui.js';
 import { refreshPathWarnings, refreshHlaeFfmpegStatus, linkHlaeToFfmpeg } from './config_wiring.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
@@ -85,8 +86,11 @@ export function createSetup({
       } catch {
         // Logged by the bridge; the step says to pick hl.exe first.
       }
-      // A dod copy without its <folder>_<language>.txt (#925).
-      gameFolderLanguage = await gameFolderLanguageFile(hlPath, getGameFolder());
+      // A dod copy without its <folder>_<language>.txt (#925), checked only
+      // when the folder is there: a missing one gets gameFolderMissing.
+      if (isListedFolder(gameFolders, getGameFolder())) {
+        gameFolderLanguage = await gameFolderLanguageFile(hlPath, getGameFolder());
+      }
     }
     let ffmpegUsable = null;
     let ffmpegCanLink = false;
@@ -302,5 +306,5 @@ export function createSetup({
     if (shouldOpenSetupAtLaunch(checklist, setupDismissed)) openWindow(prefilled ? stepIndex('hl') : checklist.nextIndex);
   }
 
-  return { refresh, start, isDismissed: () => setupDismissed };
+  return { refresh, start, isDismissed: () => setupDismissed, isOpen: () => win.isOpen() };
 }

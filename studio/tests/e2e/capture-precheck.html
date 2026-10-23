@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<!--
+  Harness for Start Capture Batch's checks (#953): capture_pane.js'
+  initCaptureUI with the Capture footer copied from index.html and the two
+  path fields. The queue is one demo with a picked highlight
+  (window.__state); pickedDemosPresent is a promise the test settles with
+  window.__demosDone(result), and window.__demosProgress(p) is the
+  changed-demo count it would pass on.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>capture precheck test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="hlae-path-input" value="C:\HLAE\hlae.exe" />
+  <input id="hl-path-input" value="C:\Games\Half-Life\hl.exe" />
+  <div id="init-commands-list"></div>
+  <div id="custom-commands-list"></div>
+  <button id="start-capture-btn" class="primary-btn">Start Capture Batch</button>
+  <button id="cancel-batch-btn" disabled>Cancel Batch</button>
+  <p id="batch-status" class="status-text">Status: Waiting...</p>
+  <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
+    <div id="capture-progress-bar" class="progress-bar-fill"></div>
+  </div>
+
+  <script type="module">
+    import { initCaptureUI } from '/src/capture_pane.js';
+
+    window.__state = {
+      scanPaths: [],
+      targetDrives: ['D:\\captures'],
+      currentScannedDemos: [{ path: 'C:\\demos\\anzio.dem', streaks: [{ selected: true, start_index: 0, end_index: 0, kills: [], viewdemo_times: [10] }] }],
+    };
+    window.__demosCalls = 0;
+    initCaptureUI(
+      () => window.__state,
+      () => {},
+      () => {},
+      () => null,
+      () => {},
+      ({ onProgress } = {}) => new Promise((resolve) => {
+        window.__demosCalls += 1;
+        window.__demosProgress = onProgress;
+        window.__demosDone = resolve;
+      }),
+    );
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
