@@ -68,6 +68,16 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Open Recent (#935).
+    OPEN_RECENT: 'Open Recent',
+    OPEN_RECENT_EMPTY: 'No recent sessions',
+    OPEN_RECENT_MISSING: '(missing)',
+    CLEAR_RECENT: 'Clear Recent',
+    CLEAR_RECENT_EMPTY_TITLE: 'Nothing to clear yet',
+    RECENT_MISSING_TITLE: 'Session file not found',
+    RECENT_MISSING_MESSAGE: "This session file isn't there any more. Remove it from Open Recent?",
+    RECENT_MISSING_REMOVE: 'Remove from list',
+    RECENT_MISSING_KEEP: 'Keep',
   },
 
   // ── Workspace Pane: Directory Scan & Master Demo Queue ──────────────────

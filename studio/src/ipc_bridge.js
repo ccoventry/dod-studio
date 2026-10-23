@@ -38,6 +38,16 @@ export async function defaultProjectsDir() {
     });
 }
 
+/** One boolean per path: whether it is a file that's there (#935, Open
+ *  Recent's missing entries). `null` when the check itself failed. */
+export async function filesExist(paths) {
+  return invoke("files_exist", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (files_exist):", err);
+      return null;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
