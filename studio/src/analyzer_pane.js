@@ -6,7 +6,7 @@
 // AnalyzerState} payload from `analyze_demo_full` rather than the flattened
 // generic JSON used by the compact inline telemetry summary.
 
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
@@ -901,7 +901,7 @@ function initAnalyzerBrowser() {
   if (addPinBtn) {
     addPinBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({ directory: true, multiple: false, title: STRINGS.ANALYZER.ADD_PINNED_FOLDER_DIALOG_TITLE });
+        const selected = await pickPath({ field: 'analyzer.pin_folder', directory: true, multiple: false, title: STRINGS.ANALYZER.ADD_PINNED_FOLDER_DIALOG_TITLE });
         if (selected) {
           const folder = Array.isArray(selected) ? selected[0] : selected;
           await pinFolder(folder);
@@ -1056,7 +1056,10 @@ export function initAnalyzerPane({
   if (browseBtn) {
     browseBtn.addEventListener('click', async () => {
       try {
-        const selected = await open({
+        const selected = await pickPath({
+          field: 'analyzer.demo',
+          // The folder the Explorer is showing.
+          current: currentDir,
           multiple: false,
           filters: [{ name: STRINGS.MAIN.DEMO_FILES_FILTER_NAME, extensions: ['dem'] }],
           title: STRINGS.ANALYZER.SELECT_DEMO_DIALOG_TITLE,

@@ -4,7 +4,7 @@
 // the one place folders are picked here: it starts from the Target Folder,
 // and follows it until a folder is added or removed. auditor_pane.js reads it
 // through `getRequest()` when Start Audit is clicked.
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath } from './pick_path.js';
 import { listFixedDrives } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 import { addFolders, allDrivesLabel, canStartAudit } from './audit_duplicates.js';
@@ -68,7 +68,7 @@ export function createAuditFolders({ onChange = () => {} } = {}) {
 
   addBtn?.addEventListener('click', async () => {
     try {
-      const picked = await open({ directory: true, multiple: true, title: STRINGS.AUDITOR.ADD_FOLDER_DIALOG_TITLE });
+      const picked = await pickPath({ field: 'auditor.add_folder', directory: true, multiple: true, title: STRINGS.AUDITOR.ADD_FOLDER_DIALOG_TITLE });
       if (!picked) return;
       edited = true;
       folders = addFolders(folders, picked);
