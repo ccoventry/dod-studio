@@ -38,6 +38,16 @@ export async function defaultProjectsDir() {
     });
 }
 
+/** One boolean per path: whether it is a file that's there (#935, Open
+ *  Recent's missing entries). `null` when the check itself failed. */
+export async function filesExist(paths) {
+  return invoke("files_exist", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (files_exist):", err);
+      return null;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
@@ -48,6 +58,17 @@ export async function scanDirectory(scanPaths, known = [], workers = undefined) 
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');
+      throw err;
+    });
+}
+
+// What a rescan of `paths` has to do (#937): `{ cached, upgradable, to_parse,
+// bytes_to_parse }`, from the analyzer cache's file names and first bytes.
+// No toast on failure: the rescan prompt just leaves its time line out.
+export async function estimateRescan(paths) {
+  return invoke("estimate_rescan", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (estimate_rescan):", err);
       throw err;
     });
 }
@@ -169,6 +190,37 @@ export async function listGameFolders(gamePath) {
   return await invoke('list_game_folders', { gamePath })
     .catch((err) => {
       console.error("IPC Execution Error (list_game_folders):", err);
+      throw err;
+    });
+}
+
+/** Setup's movie copy (#939): the sizes of the `dod` beside hl.exe (`files`,
+ *  `bytes` without demos, `demo_files`, `demo_bytes`), the drive's
+ *  `free_bytes` (null when unknown), `headroom_bytes`, the names `existing`
+ *  in the Half-Life folder and the `default_name`. */
+export async function movieCopyPlan(gamePath) {
+  return invoke('movie_copy_plan', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (movie_copy_plan):", err);
+      throw err;
+    });
+}
+
+/** Copies `dod` to `name`; resolves `{ state: 'done', folder, target, files,
+ *  bytes }` or `{ state: 'cancelled' }`. Progress comes as
+ *  `movie_copy_progress` events. */
+export async function startMovieCopy(gamePath, name, includeDemos) {
+  return invoke('start_movie_copy', { gamePath, name, includeDemos })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_movie_copy):", err);
+      throw err;
+    });
+}
+
+export async function cancelMovieCopy() {
+  return invoke('cancel_movie_copy')
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_movie_copy):", err);
       throw err;
     });
 }
@@ -726,8 +778,8 @@ export async function saveSettings(settings) {
 // Demo Auditor › Duplicates (#844): `paths` plus every fixed drive when
 // `allDrives`, in one key pass; copies in `queued` (the project's queue) or
 // the install's game folder are listed first, as the ones to keep.
-export async function runDemoAudit(paths, allDrives = false, queued = []) {
-  return invoke("run_demo_audit", { paths, allDrives, queued })
+export async function runDemoAudit(paths, allDrives = false, queued = [], lookInZips = false) {
+  return invoke("run_demo_audit", { paths, allDrives, queued, lookInZips })
     .catch((err) => {
       console.error("IPC Execution Error (run_demo_audit):", err);
       showToast(STRINGS.IPC.auditFailed(err), 'error');
@@ -989,6 +1041,26 @@ export async function defaultBrowseDir() {
     });
 }
 
+/** Where a Browse dialog can start (#936): each path's state on disk, in
+ *  order ({ path, is_file, exact, is_root } or null). [] on failure, so the
+ *  dialog still opens, wherever Windows puts it. */
+export async function pickPathStates(paths) {
+  return invoke("pick_path_states", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_path_states):", err);
+      return [];
+    });
+}
+
+/** The user's Videos, Documents and Program Files folders (#936). */
+export async function pickUserFolders() {
+  return invoke("pick_user_folders")
+    .catch((err) => {
+      console.error("IPC Execution Error (pick_user_folders):", err);
+      return null;
+    });
+}
+
 /** Non-recursive `.dem` count for a single folder — used by the Explorer
  *  sidebar's Quick Links rows (Pinned/Recent/Local). */
 export async function countDemoFiles(path) {
@@ -1105,6 +1177,16 @@ export async function hookDllOverrideAllowed() {
 /** The test hook DLLs in the checkout's `local\` folder (hook_dll_list.rs):
  *  `{ folder, checkout_build, dlls: [{ label, path, modified_unix_secs }] }`.
  *  Best-effort: an empty list on error. */
+/** The Half-Life installs on this PC (#931): `[{ name, path, hl_exe, build }]`,
+ *  `build` 'anniversary', 'pre_anniversary' or null. `gamePath`, the hl.exe
+ *  set now, adds its own Steam library. An empty list on error. */
+export async function findInstalls(gamePath) {
+  return invoke("find_installs", { gamePath: gamePath || '' }).catch((err) => {
+    console.error("IPC Execution Error (find_installs):", err);
+    return [];
+  });
+}
+
 export async function listHookDlls() {
   return invoke("list_hook_dlls").catch((err) => {
     console.error("IPC Execution Error (list_hook_dlls):", err);

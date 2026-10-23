@@ -1,4 +1,4 @@
-import { open } from '@tauri-apps/plugin-dialog';
+import { pickPath, configurePickPath } from './pick_path.js';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   calculateExportPoolSpace,
@@ -52,6 +52,7 @@ import { createProjectRescan } from './project_rescan.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
+import { createRecentProjects } from './recent_projects.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
@@ -134,6 +135,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     needsSavePrompt,
     requestUnsavedChangesConfirmation,
     hasProjectFile,
+    openProject,
   } = createProjectSession({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
@@ -158,13 +160,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerRescan: () => offerRescan(),
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
+    onProjectFile: (path) => recentProjects.remember(path),
   });
   // Every change also reaches the review library.
   const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); };
+  // File → Open Recent (#935), saved in the settings file.
+  const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane({ getDemos: () => currentScannedDemos });
+  initAuditorPane({ getDemos: () => currentScannedDemos, onSettingsChange: () => persistAppSettings() });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({
@@ -193,7 +198,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function pickTargetDrive() {
     try {
-      return await open({ directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
+      return await pickPath({ field: 'capture.output_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
     } catch (err) {
       console.error("Error opening capture output directory dialog:", err);
       return null;
@@ -202,7 +207,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function pickRenderExportDir() {
     try {
-      return await open({ directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
+      return await pickPath({ field: 'render.export_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
     } catch (err) {
       console.error("Error opening render export directory dialog:", err);
       return null;
@@ -262,6 +267,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getState: () => ({
       scanPaths,
       demoFolderHistory,
+      recentProjects: recentProjects.list(),
       scanFoldersForDemos,
       analyzerExplorerWidth,
       targetDrives,
@@ -272,6 +278,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       setupDismissed: setup ? setup.isDismissed() : savedSetupDismissed,
     }),
     currentCaptureMode,
+  });
+  // Where each Browse dialog starts (#936): the game paths, and saving a
+  // newly remembered folder.
+  configurePickPath({
+    getContext: () => ({ hlPath: document.querySelector('#hl-path-input')?.value?.trim() || '', gameFolder: getGameFolder() }),
+    persist: () => persistAppSettings(),
   });
 
   // Load persistent settings on startup
@@ -290,6 +302,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (Array.isArray(settings.demo_folder_history) && settings.demo_folder_history.length > 0) {
         demoFolderHistory = [...settings.demo_folder_history];
       }
+      recentProjects.load(settings.recent_projects);
       scanFoldersForDemos = !!settings.scan_folders_for_demos;
       savedSetupDismissed = !!settings.setup_dismissed;
       if (settings.analyzer_explorer_width) {
