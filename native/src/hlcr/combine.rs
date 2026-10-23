@@ -180,15 +180,47 @@ pub fn can_stream_copy(clips: &[ClipInfo]) -> bool {
 
 /// Probes every clip and says how they would be joined.
 pub async fn plan(ffmpeg: &Path, clips: &[PathBuf]) -> Result<CombinePlan, String> {
+    plan_with_progress(ffmpeg, clips, |_, _| {}).await
+}
+
+/// `plan`, calling `checked(done, total)` before the first clip is read and
+/// after each one, so the window can say "Checking the clips (3 of 8)" (#955).
+/// One call per clip: each is an FFmpeg run, far longer than 33 ms.
+pub async fn plan_with_progress(
+    ffmpeg: &Path,
+    clips: &[PathBuf],
+    mut checked: impl FnMut(usize, usize),
+) -> Result<CombinePlan, String> {
     let mut infos = Vec::with_capacity(clips.len());
+    checked(0, clips.len());
     for clip in clips {
         infos.push(probe(ffmpeg, clip).await?);
+        checked(infos.len(), clips.len());
     }
     Ok(CombinePlan {
         stream_copy: can_stream_copy(&infos),
         total_secs: infos.iter().map(|c| c.duration_secs).sum(),
         clips: infos,
     })
+}
+
+/// One `combine_progress` event: the clips being re-read, then FFmpeg
+/// joining them (`fraction` of the total length written, 0..1).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(tag = "step", rename_all = "snake_case")]
+pub enum CombineProgress {
+    Checking { done: usize, total: usize },
+    Joining { fraction: f64 },
+}
+
+/// Whether `err` is what `combine` returns when it was cancelled.
+pub fn is_cancelled(err: &str) -> bool {
+    err == crate::messages::COMBINE_CANCELLED
+}
+
+/// The error `combine` returns when it was cancelled.
+pub fn cancelled_error() -> String {
+    crate::messages::COMBINE_CANCELLED.to_string()
 }
 
 /// The concat demuxer's list file. Forward slashes, single quotes escaped
@@ -323,7 +355,7 @@ pub async fn combine(
             let _ = child.kill().await;
             let _ = std::fs::remove_file(output);
             let _ = std::fs::remove_file(&list);
-            return Err(crate::messages::COMBINE_CANCELLED.to_string());
+            return Err(cancelled_error());
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -360,6 +392,35 @@ mod tests {
   Duration: 00:01:02.50, start: 0.000000, bitrate: 220000 kb/s
   Stream #0:0[0x1]: Video: prores (HQ) (apch / 0x68637061), yuv422p10le(progressive), 1280x720, 219000 kb/s, 29.97 fps, 29.97 tbr, 30k tbn (default)
 ";
+
+    #[test]
+    fn progress_events_name_their_step() {
+        let checking =
+            serde_json::to_value(CombineProgress::Checking { done: 3, total: 8 }).unwrap();
+        assert_eq!(
+            checking,
+            serde_json::json!({ "step": "checking", "done": 3, "total": 8 })
+        );
+        let joining = serde_json::to_value(CombineProgress::Joining { fraction: 0.5 }).unwrap();
+        assert_eq!(
+            joining,
+            serde_json::json!({ "step": "joining", "fraction": 0.5 })
+        );
+    }
+
+    #[tokio::test]
+    async fn checking_counts_from_zero_and_stops_at_a_bad_clip() {
+        // No FFmpeg at this path: the first clip fails, after the 0-of-N call.
+        let mut seen = Vec::new();
+        let result = plan_with_progress(
+            Path::new("Z:/no/such/ffmpeg.exe"),
+            &[PathBuf::from("a.mp4"), PathBuf::from("b.mp4")],
+            |done, total| seen.push((done, total)),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(seen, vec![(0, 2)]);
+    }
 
     #[test]
     fn reads_an_ffmpeg_report() {
