@@ -36,6 +36,11 @@ describe('fresh-install defaults', () => {
     expect(html).toMatch(/id="config-capture-mode"[^>]*>\s*<option value="frame_sequence"/);
   });
 
+  it('Include subfolders on, as + Add Folder always walked them (#531)', () => {
+    expect(checked('scan-include-subfolders')).toBe(true);
+    expect(rustDefault('default_scan_include_subfolders')).toBe('true');
+  });
+
   it('Auto-clear Temp Demos on', () => {
     expect(checked('config-auto-clear-temp-demos')).toBe(true);
     expect(rustDefault('default_auto_clear_temp_demos')).toBe('true');
