@@ -27,6 +27,29 @@ export function timeLeftText({
   return STRINGS.SCAN_PROGRESS.timeLeft(Math.round(msLeft / 1000));
 }
 
+/** Seconds to one decimal. */
+const secs = (ms) => (Math.max(0, ms) / 1000).toFixed(1);
+
+/**
+ * The activity log's line for a finished or cancelled scan: how long it
+ * took, how many demos it read and how many it skipped as unchanged, and,
+ * when the last progress event said, how many came from the analyzer cache
+ * and how long the parses took.
+ */
+export function scanEndLogLine({
+  cancelled = false, ms = 0, read = 0, unchanged = 0, progress = null, parseMs = 0,
+} = {}) {
+  const S = STRINGS.SCAN_PROGRESS;
+  const line = S.endLog(cancelled ? 'cancelled' : 'finished', secs(ms), read, unchanged);
+  if (!progress || !(progress.total > 0)) return line;
+  return line + S.endLogSplit(progress.cached || 0, progress.parsed || 0, secs(parseMs));
+}
+
+/** The activity log's line for a scan that failed. */
+export function scanFailedLogLine(ms, err) {
+  return STRINGS.SCAN_PROGRESS.failedLog(secs(ms), err);
+}
+
 /**
  * Times the parses, which start once the cached demos are done. `elapsed`
  * takes each event's done and cached counts and returns the milliseconds

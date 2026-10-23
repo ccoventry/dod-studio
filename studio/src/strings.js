@@ -2491,6 +2491,12 @@ export const STRINGS = {
     fromCache: (cached) => ` (${cached} from the analyzer cache)`,
     CHECKING_CACHE: 'Checking the analyzer cache…',
     timeLeft: (seconds) => (seconds >= 90 ? ` · about ${Math.round(seconds / 60)} min left` : ` · about ${Math.max(1, seconds)} s left`),
+    // The Master Queue scan's start and end in the activity log, with its
+    // times, so how long a rescan takes can be measured (#926).
+    startLog: (paths) => `[scan] started: ${paths} path(s) to read`,
+    endLog: (outcome, seconds, read, unchanged) => `[scan] ${outcome} after ${seconds} s: ${read} demo(s) read, ${unchanged} unchanged`,
+    endLogSplit: (cached, parsed, parseSeconds) => ` (${cached} from the analyzer cache, ${parsed} parsed${parsed > 0 ? ` in ${parseSeconds} s` : ''})`,
+    failedLog: (seconds, err) => `[scan] failed after ${seconds} s: ${err}`,
   },
 
   // #441: clip names, their template and its checks.

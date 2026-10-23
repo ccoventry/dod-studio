@@ -17,7 +17,7 @@ import { applyRescanWork, matchRescanHighlights, rescanReport } from './rescan_c
 import { updateStreakVisuals } from './detail_pane.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
-import { parseClock, timeLeftText } from './scan_progress.js';
+import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -55,8 +55,12 @@ export function createQueueScan({
   // line says so instead of a toast, so it isn't followed a moment later by
   // the cancelled one (#843).
   let cancelling = false;
+  // The scan's latest progress event, for the cached/parsed split its end
+  // line in the activity log gives (#926).
+  let lastProgress = null;
   listen('scan_progress', (event) => {
     const p = event.payload || {};
+    lastProgress = p;
     const scanStatusEl = document.querySelector('#scan-status');
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
     showScanBar(p);
@@ -156,6 +160,9 @@ export function createQueueScan({
     scanBarShown(true);
     if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
     scanParses.reset();
+    lastProgress = null;
+    const startedAt = Date.now();
+    logFrontendEvent(STRINGS.SCAN_PROGRESS.startLog(pathsToScan.length));
     showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
 
     const masterTableBody = document.querySelector('#master-demo-table-body');
@@ -210,6 +217,14 @@ export function createQueueScan({
           getDemos().push(demo);
         }
       });
+      logFrontendEvent(scanEndLogLine({
+        cancelled,
+        ms: Date.now() - startedAt,
+        read: scanned.length,
+        unchanged,
+        progress: lastProgress,
+        parseMs: lastProgress ? scanParses.elapsed(lastProgress.scanned, lastProgress.cached) : 0,
+      }));
       const carryReport = rescanReport(rescans);
       carryReport.log.forEach((line) => logFrontendEvent(line));
 
@@ -246,6 +261,7 @@ export function createQueueScan({
       return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
+      logFrontendEvent(scanFailedLogLine(Date.now() - startedAt, err));
       showToast(STRINGS.MAIN.scanErrorToast(err), 'error');
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
       return false;
