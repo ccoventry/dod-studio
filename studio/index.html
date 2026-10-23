@@ -1149,7 +1149,7 @@
                   <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
                   <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
                 </details>
-                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <div id="hd-style-maps-progress" class="progress-bar-container hd-style-maps-progress" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
@@ -1202,6 +1202,7 @@
                   <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-setup-progress" class="hd-hint"></p>
+                <div id="hd-setup-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               </div>
             </div>
 
@@ -1281,6 +1282,7 @@
                   <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-build-progress" class="hd-hint"></p>
+                <div id="hd-build-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="hd-build-line" class="hd-hint hd-mono"></p>
                 <details class="hd-details">
                   <summary data-str="HD.SCRIPTS_SUMMARY">Build from a Command Prompt instead</summary>
@@ -1431,6 +1433,7 @@
                   <button id="blender-cancel-btn" disabled data-str="BLENDER.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="blender-progress" class="hd-hint"></p>
+                <div id="blender-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="blender-line" class="hd-hint hd-mono"></p>
                 <ul id="blender-results" class="hd-hint hd-mono"></ul>
               </div>
