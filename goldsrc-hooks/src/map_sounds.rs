@@ -1,6 +1,13 @@
-//! `ds_sound_mute_win_and_capture`: silences the round-end music and the
-//! point-captured sound a map plays (#284), without touching the game's
-//! `.wav` files or the demo.
+//! Two settings that silence sounds a map plays (#284), without touching the
+//! game's `.wav` files or the demo:
+//!
+//! - `ds_sound_mute_victory_music`: the music a map plays to everyone when a
+//!   team wins the round.
+//! - `ds_sound_mute_flag_capture`: the point-captured announcements, and the
+//!   objective-secured ones a few maps play the same way (dod_escape's
+//!   `usobjectivesecure`).
+//!
+//! Each is on its own, so a clip can keep one and lose the other.
 //!
 //! ## Where the sounds come from
 //!
@@ -8,7 +15,7 @@
 //! server messages, and neither goes through `EV_PlaySound` (which `voice.rs`
 //! and `fire_sounds.rs` hook):
 //!
-//! - **The round-end music** is an `ambient_generic` the round-end wiring
+//! - **The victory music** is an `ambient_generic` the round-end wiring
 //!   fires (`targetname` `allies` / `axis` / `no_winner`, or a `dod_score_ent`
 //!   like dod_vicenza's `allies_win`). It arrives as `svc_spawnstaticsound`;
 //!   a trigger sends a start and a `SND_STOP`.
@@ -24,8 +31,9 @@
 //! attenuation, flags, pitch)`), at three call sites per build: `svc_sound`'s
 //! two (static when the channel is `CHAN_STATIC`, else dynamic) and
 //! `svc_spawnstaticsound`'s one. Each call is redirected to [`start_static`]
-//! or [`start_dynamic`], which drop a sound in [`NAMES`] while the setting is
-//! on and call the engine's function for everything else.
+//! or [`start_dynamic`], which drop a sound in [`VICTORY_MUSIC`] or
+//! [`FLAG_CAPTURE`] while that list's setting is on and call the engine's
+//! function for everything else.
 //!
 //! Why the call sites rather than a function:
 //!
@@ -33,7 +41,7 @@
 //!   there is a path its play-time callers handle. The mixer
 //!   (pre-Anniversary `hw.dll+0x8e5c0`) also calls it for every playing
 //!   channel on every paint and reads the result without a NULL test, so a
-//!   sound already playing when the setting went on would crash it.
+//!   sound already playing when a setting went on would crash it.
 //! - **Not `S_StartDynamicSound`'s prologue**: HLAE detours it there while it
 //!   records sound (`docs/goldsrc_hw_dll_survey.md` §12.3). A redirected call
 //!   still calls the function's own address, so it goes through HLAE's detour
@@ -42,23 +50,24 @@
 //!   (gunshot events, footsteps the client predicts, voice commands) never
 //!   does, and a map's own ambience only does when the server sends it.
 //!
-//! A `SND_STOP` always goes through, so turning the setting on while the
-//! music plays still lets its stop arrive. Turning it on or off acts on the
-//! next sound the server sends; a sound already playing finishes.
+//! A `SND_STOP` always goes through, so turning a setting on while the music
+//! plays still lets its stop arrive. Turning one on or off acts on the next
+//! sound the server sends; a sound already playing finishes.
 //!
 //! ## Which names
 //!
-//! A fixed list, because this DLL has no BSP reader: the union over the 250
-//! maps in both movie installs of what `native::patch::map_sounds` picks out
-//! of each map's entities (`native/examples/map_sound_table.rs` prints it).
-//! Matching on a word like "win" instead would silence `ambience/windy.wav`
-//! on 28 maps. Three names in the list are also placed as an
-//! `ambient_generic` elsewhere, and both are the same kind of sound:
-//! dod_vicenza fires `uswin` / `germanwin` as its round-end music through a
-//! `dod_score_ent`, and dod_escape plays `usobjectivesecure` when a mortar
-//! objective is destroyed. A map not in the survey with its own file names
-//! keeps its sounds; `ds_debug_log_server_sounds 1` logs every name that
-//! passes, to add one.
+//! Two fixed lists, because this DLL has no BSP reader: the union over the
+//! 250 maps in both movie installs of what `native::patch::map_sounds` picks
+//! out of each map's entities, `round_win` for [`VICTORY_MUSIC`] and
+//! `capture` for [`FLAG_CAPTURE`] (`native/examples/map_sound_table.rs`
+//! prints both). No name is in both. Matching on a word like "win" instead
+//! would silence `ambience/windy.wav` on 28 maps. Three names are also placed
+//! as an `ambient_generic` elsewhere, and each is the same kind of sound
+//! there, so it keeps its list: dod_vicenza fires `uswin` / `germanwin` as
+//! its victory music through a `dod_score_ent`, and dod_escape plays
+//! `usobjectivesecure` when a mortar objective is destroyed. A map not in the
+//! survey with its own file names keeps its sounds;
+//! `ds_debug_log_server_sounds 1` logs every name that passes, to add one.
 //!
 //! `tools/verify_map_sounds_offsets.py` checks the call sites in both builds.
 
@@ -68,7 +77,8 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("sound_mute_win_and_capture");
+pub const VICTORY_MUSIC_NAME: &str = console_name!("sound_mute_victory_music");
+pub const FLAG_CAPTURE_NAME: &str = console_name!("sound_mute_flag_capture");
 pub const LOG_NAME: &str = console_name!("debug_log_server_sounds");
 
 /// `SND_STOP` in the sound flags (`common/const.h`).
@@ -166,56 +176,76 @@ const BUILDS: [Build; 2] = [
     },
 ];
 
-/// The round-end music and capture sounds, lowercase with forward slashes,
-/// sorted for [`is_listed`]'s binary search.
+/// The victory music ([`VICTORY_MUSIC_NAME`]): what each map's round-end
+/// wiring fires. Lowercase with forward slashes, sorted for [`listed_in`]'s
+/// binary search.
 #[rustfmt::skip]
-const NAMES: &[&str] = &[
-    "ambience/action1ak.wav",
+const VICTORY_MUSIC: &[&str] = &[
     "ambience/adrenaxis.wav",
     "ambience/adrenbrit.wav",
-    "ambience/alliescap.wav",
     "ambience/alliesscore.wav",
-    "ambience/axiscap.wav",
     "ambience/axisscore.wav",
     "ambience/bluffallieswin.wav",
     "ambience/bluffaxiswin.wav",
-    "ambience/boualliesscore.wav",
-    "ambience/bouaxisscore.wav",
     "ambience/bouleallie.wav",
     "ambience/bouleaxis.wav",
-    "ambience/britareasecure.wav",
-    "ambience/britobjectivesecure.wav",
-    "ambience/britpointcaptured.wav",
     "ambience/britwin.wav",
     "ambience/brwin.wav",
     "ambience/bsl/alliesscore.wav",
     "ambience/bsl/axisscore.wav",
     "ambience/darkside.wav",
     "ambience/derka.wav",
-    "ambience/ger_areacaptured.wav",
-    "ambience/gerareasecure.wav",
     "ambience/germanwin.wav",
-    "ambience/gerobjectivesecure.wav",
-    "ambience/gerpointcaptured.wav",
     "ambience/littlegeorf.wav",
-    "ambience/merderet-bridgeallie.wav",
-    "ambience/merderet-bridgeaxis.wav",
-    "ambience/midcap2.wav",
-    "ambience/mkfate.wav",
     "ambience/no_winner.wav",
     "ambience/plexallieswin.wav",
     "ambience/ramelle-alliesscore.wav",
     "ambience/ramelle-axisscore.wav",
     "ambience/shermanaxis.wav",
+    "ambience/uswin.wav",
+    "blitzkrieg_snow/ramelle-alliesscore.wav",
+    "blitzkrieg_snow/ramelle-axisscore.wav",
+    "eric_the_pixie/etp_axis_win.wav",
+    "joe_dirt/parents.wav",
+    "legos/allieswin.wav",
+    "legos/axiswin.wav",
+    "library/vicallies.wav",
+    "library/vicaxis.wav",
+    "mapsounds/boogie.wav",
+    "mapsounds/panzerlied.wav",
+    "mapsounds/ramelle-alliesscore.wav",
+    "mapsounds/ramelle-axisscore.wav",
+    "sponge/dotoday.wav",
+    "sponge/weenie.wav",
+    "uswin.wav",
+];
+
+/// The point-captured and objective-secured announcements
+/// ([`FLAG_CAPTURE_NAME`]): each map's capture entities' sound keyvalues.
+/// Spelled and sorted as [`VICTORY_MUSIC`] is.
+#[rustfmt::skip]
+const FLAG_CAPTURE: &[&str] = &[
+    "ambience/action1ak.wav",
+    "ambience/alliescap.wav",
+    "ambience/axiscap.wav",
+    "ambience/boualliesscore.wav",
+    "ambience/bouaxisscore.wav",
+    "ambience/britareasecure.wav",
+    "ambience/britobjectivesecure.wav",
+    "ambience/britpointcaptured.wav",
+    "ambience/ger_areacaptured.wav",
+    "ambience/gerareasecure.wav",
+    "ambience/gerobjectivesecure.wav",
+    "ambience/gerpointcaptured.wav",
+    "ambience/merderet-bridgeallie.wav",
+    "ambience/merderet-bridgeaxis.wav",
+    "ambience/midcap2.wav",
+    "ambience/mkfate.wav",
     "ambience/tankcap.wav",
     "ambience/us_areasecure.wav",
     "ambience/usareasecure.wav",
     "ambience/usobjectivesecure.wav",
     "ambience/uspointcaptured.wav",
-    "ambience/uswin.wav",
-    "blitzkrieg_snow/ramelle-alliesscore.wav",
-    "blitzkrieg_snow/ramelle-axisscore.wav",
-    "eric_the_pixie/etp_axis_win.wav",
     "gsg5/gerpointcaptured.wav",
     "gsg5/uspointcaptured.wav",
     "joe_dirt/bowl.wav",
@@ -226,15 +256,12 @@ const NAMES: &[&str] = &[
     "joe_dirt/here.wav",
     "joe_dirt/hot.wav",
     "joe_dirt/nuts_frozen.wav",
-    "joe_dirt/parents.wav",
     "joe_dirt/piglicker.wav",
     "joe_dirt/scream.wav",
     "joe_dirt/sister.wav",
     "joe_dirt/song.wav",
     "joe_dirt/sucks.wav",
     "joe_dirt/wig.wav",
-    "legos/allieswin.wav",
-    "legos/axiswin.wav",
     "legos/capture_carosel.wav",
     "legos/capture_chess.wav",
     "legos/capture_drop.wav",
@@ -242,37 +269,29 @@ const NAMES: &[&str] = &[
     "legos/capture_love.wav",
     "legos/capture_rocket.wav",
     "legos/capture_sky.wav",
-    "library/vicallies.wav",
-    "library/vicaxis.wav",
     "mapsounds/alliescap.wav",
     "mapsounds/axiscap.wav",
-    "mapsounds/boogie.wav",
     "mapsounds/gerpointcaptured.wav",
-    "mapsounds/panzerlied.wav",
-    "mapsounds/ramelle-alliesscore.wav",
-    "mapsounds/ramelle-axisscore.wav",
     "mapsounds/uspointcaptured.wav",
     "sponge/46853.wav",
     "sponge/airisnot.wav",
     "sponge/aprilfools_drinks.wav",
     "sponge/coolest.wav",
-    "sponge/dotoday.wav",
     "sponge/finland.wav",
     "sponge/fire.wav",
     "sponge/heartonstick.wav",
     "sponge/living.wav",
     "sponge/ripped.wav",
     "sponge/sedan.wav",
-    "sponge/weenie.wav",
     "u-boatb3/morse.wav",
     "u-boatb3/uboatsound.wav",
     "uboat/morse.wav",
-    "uswin.wav",
 ];
 
 type StartSoundFn = unsafe extern "C" fn(i32, i32, *const u8, *const f32, f32, f32, i32, i32);
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static VICTORY_MUSIC_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static FLAG_CAPTURE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static LOG_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 /// `S_StartStaticSound` and `S_StartDynamicSound`, once the calls are
 /// redirected; 0 before.
@@ -283,8 +302,46 @@ static REDIRECTED: AtomicUsize = AtomicUsize::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
 static MUTED: AtomicU32 = AtomicU32::new(0);
 
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
+/// The two kinds of map sound, each with its own list and setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Family {
+    VictoryMusic,
+    FlagCapture,
+}
+
+impl Family {
+    pub const ALL: [Family; 2] = [Family::VictoryMusic, Family::FlagCapture];
+
+    /// The setting that mutes this family.
+    pub fn setting(self) -> &'static str {
+        match self {
+            Family::VictoryMusic => VICTORY_MUSIC_NAME,
+            Family::FlagCapture => FLAG_CAPTURE_NAME,
+        }
+    }
+
+    fn names(self) -> &'static [&'static str] {
+        match self {
+            Family::VictoryMusic => VICTORY_MUSIC,
+            Family::FlagCapture => FLAG_CAPTURE,
+        }
+    }
+
+    fn cvar(self) -> &'static AtomicPtr<CvarSPartial> {
+        match self {
+            Family::VictoryMusic => &VICTORY_MUSIC_CVAR,
+            Family::FlagCapture => &FLAG_CAPTURE_CVAR,
+        }
+    }
+
+    pub fn set_cvar(self, cvar: *mut CvarSPartial) {
+        self.cvar().store(cvar, Ordering::Release);
+    }
+
+    /// Whether this family's setting is on.
+    pub fn on(self) -> bool {
+        cvar_on(self.cvar())
+    }
 }
 
 pub fn set_log_cvar(cvar: *mut CvarSPartial) {
@@ -297,8 +354,8 @@ fn cvar_on(cvar: &AtomicPtr<CvarSPartial>) -> bool {
     !cvar.is_null() && unsafe { (*cvar).value } != 0.0
 }
 
-pub fn on() -> bool {
-    cvar_on(&CVAR)
+fn any_on() -> bool {
+    Family::ALL.into_iter().any(Family::on)
 }
 
 fn logging() -> bool {
@@ -319,18 +376,21 @@ fn normalize<'a>(raw: &[u8], out: &'a mut [u8; MAX_NAME]) -> &'a [u8] {
     &out[..len]
 }
 
-fn is_listed(name: &[u8]) -> bool {
-    NAMES.binary_search_by(|n| n.as_bytes().cmp(name)).is_ok()
+fn listed_in(names: &[&str], name: &[u8]) -> bool {
+    names.binary_search_by(|n| n.as_bytes().cmp(name)).is_ok()
 }
 
-/// Whether a sound named `raw` with these flags is dropped while the setting
-/// is on.
-fn mutes(raw: &[u8], flags: i32) -> bool {
+/// The family whose setting drops a sound named `raw` with these flags, when
+/// `on` says which settings are on; `None` plays it.
+fn muted_by(raw: &[u8], flags: i32, on: impl Fn(Family) -> bool) -> Option<Family> {
     if flags & SND_STOP != 0 {
-        return false;
+        return None;
     }
     let mut buf = [0u8; MAX_NAME];
-    is_listed(normalize(raw, &mut buf))
+    let name = normalize(raw, &mut buf);
+    Family::ALL
+        .into_iter()
+        .find(|&family| on(family) && listed_in(family.names(), name))
 }
 
 /// The name an `sfx` argument carries: an `sfx_t`, whose `name[64]` comes
@@ -364,18 +424,21 @@ unsafe fn start(
 ) {
     // Safety: the engine passes an sfx_t or its 64-byte sentence buffer.
     let name = unsafe { name_of(sfx) };
-    let mute = on() && mutes(name, flags);
+    let muted = muted_by(name, flags, Family::on);
     if logging() {
+        let outcome = match muted {
+            Some(family) => format!("muted by {}", family.setting()),
+            None => "played".into(),
+        };
         let line = format!(
-            "{LOG_NAME}: {} ent {entnum} chan {channel} \"{}\" flags {flags:#x} vol {volume:.2} attn {attenuation:.2} -> {}",
+            "{LOG_NAME}: {} ent {entnum} chan {channel} \"{}\" flags {flags:#x} vol {volume:.2} attn {attenuation:.2} -> {outcome}",
             kind.word(),
             String::from_utf8_lossy(name),
-            if mute { "muted" } else { "played" },
         );
         // Safety: plain file append; the log cvar is a diagnostic.
         unsafe { crate::debug::report(&line) };
     }
-    if mute {
+    if muted.is_some() {
         MUTED.fetch_add(1, Ordering::Relaxed);
         return;
     }
@@ -524,20 +587,20 @@ fn redirect() -> Result<&'static str, String> {
     ))
 }
 
-/// Redirects the calls the first time this setting or its log is on. Every
+/// Redirects the calls the first time either setting or the log is on. Every
 /// frame, from `commands::poll`.
 pub fn poll() {
     if REDIRECTED.load(Ordering::Acquire) != 0
         || GAVE_UP.load(Ordering::Relaxed)
-        || !(on() || logging())
+        || !(any_on() || logging())
     {
         return;
     }
     let line = match redirect() {
-        Ok(build) => format!("{NAME}: svc sound calls redirected ({build} hw.dll)"),
+        Ok(build) => format!("map sound mutes: svc sound calls redirected ({build} hw.dll)"),
         Err(why) => {
             GAVE_UP.store(true, Ordering::Relaxed);
-            format!("{NAME}: {why}")
+            format!("map sound mutes: {why}")
         }
     };
     unsafe { crate::debug::report(&line) };
@@ -562,33 +625,85 @@ pub fn status() -> String {
 mod tests {
     use super::*;
 
+    use Family::{FlagCapture, VictoryMusic};
+
+    /// Whether `name` is muted with every setting on.
+    fn mutes(name: &[u8], flags: i32) -> bool {
+        muted_by(name, flags, |_| true).is_some()
+    }
+
+    /// Who mutes `name` with only `family`'s setting on.
+    fn with_only(family: Family, name: &str) -> Option<Family> {
+        muted_by(name.as_bytes(), 0, |f| f == family)
+    }
+
+    const VICTORY_SAMPLES: [&str; 6] = [
+        "ambience/uswin.wav",
+        "ambience/germanwin.wav",
+        "ambience/britwin.wav",
+        "ambience/alliesscore.wav",
+        "ambience/axisscore.wav",
+        "ambience/no_winner.wav",
+    ];
+
+    const CAPTURE_SAMPLES: [&str; 8] = [
+        "ambience/uspointcaptured.wav",
+        "ambience/gerpointcaptured.wav",
+        "ambience/usareasecure.wav",
+        "ambience/gerareasecure.wav",
+        "ambience/alliescap.wav",
+        "ambience/axiscap.wav",
+        // dod_escape also places it as an ambient_generic, for a mortar
+        // objective destroyed: still an announcement, so still here.
+        "ambience/usobjectivesecure.wav",
+        "ambience/gerobjectivesecure.wav",
+    ];
+
     #[test]
     fn the_names_are_sorted_lowercase_and_unique() {
-        for pair in NAMES.windows(2) {
-            assert!(pair[0] < pair[1], "{} then {}", pair[0], pair[1]);
-        }
-        for name in NAMES {
-            assert_eq!(*name, name.to_ascii_lowercase());
-            assert!(!name.contains('\\') && name.ends_with(".wav"), "{name}");
-            assert!(name.len() < MAX_NAME, "{name}");
+        for family in Family::ALL {
+            for pair in family.names().windows(2) {
+                assert!(pair[0] < pair[1], "{} then {}", pair[0], pair[1]);
+            }
+            for name in family.names() {
+                assert_eq!(*name, name.to_ascii_lowercase());
+                assert!(!name.contains('\\') && name.ends_with(".wav"), "{name}");
+                assert!(name.len() < MAX_NAME, "{name}");
+            }
         }
     }
 
     #[test]
-    fn the_round_end_music_and_the_capture_sounds_are_muted() {
-        for name in [
-            "ambience/uswin.wav",
-            "ambience/germanwin.wav",
-            "ambience/britwin.wav",
-            "ambience/no_winner.wav",
-            "ambience/uspointcaptured.wav",
-            "ambience/gerpointcaptured.wav",
-            "ambience/usareasecure.wav",
-            "ambience/gerareasecure.wav",
-            "ambience/alliescap.wav",
-            "ambience/axiscap.wav",
-        ] {
-            assert!(mutes(name.as_bytes(), 0), "{name}");
+    fn no_name_is_in_both_lists_and_the_survey_found_98() {
+        for name in VICTORY_MUSIC {
+            assert!(!FLAG_CAPTURE.contains(name), "{name}");
+        }
+        assert_eq!(VICTORY_MUSIC.len(), 37);
+        assert_eq!(FLAG_CAPTURE.len(), 61);
+    }
+
+    #[test]
+    fn victory_music_is_muted_only_by_its_own_setting() {
+        for name in VICTORY_SAMPLES {
+            assert_eq!(with_only(VictoryMusic, name), Some(VictoryMusic), "{name}");
+            assert_eq!(with_only(FlagCapture, name), None, "{name}");
+        }
+        // dod_vicenza fires these through a dod_score_ent.
+        assert_eq!(with_only(VictoryMusic, "uswin.wav"), Some(VictoryMusic));
+    }
+
+    #[test]
+    fn capture_announcements_are_muted_only_by_their_own_setting() {
+        for name in CAPTURE_SAMPLES {
+            assert_eq!(with_only(FlagCapture, name), Some(FlagCapture), "{name}");
+            assert_eq!(with_only(VictoryMusic, name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn with_both_settings_off_everything_plays() {
+        for name in VICTORY_SAMPLES.iter().chain(&CAPTURE_SAMPLES) {
+            assert_eq!(muted_by(name.as_bytes(), 0, |_| false), None, "{name}");
         }
     }
 
@@ -597,6 +712,42 @@ mod tests {
         assert!(mutes(b"Ambience/USwin.wav", 0));
         assert!(mutes(b"ambience\\gerpointcaptured.wav", 0));
         assert!(mutes(b"*ambience/uswin.wav", 0));
+    }
+
+    /// The console's autocomplete swaps a name that is the whole start of
+    /// another for the longer one on space.
+    #[test]
+    fn neither_setting_is_the_start_of_another_name() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for part in text.split("console_name!(\"").skip(1) {
+                        let name = part.split('"').next().unwrap();
+                        // `console_name!("")` is the bare prefix.
+                        if !name.is_empty() {
+                            out.push(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let mut all = Vec::new();
+        walk(std::path::Path::new("src"), &mut all);
+        assert!(all.len() > 50, "found only {} names", all.len());
+        for ours in ["sound_mute_victory_music", "sound_mute_flag_capture"] {
+            assert!(all.iter().any(|n| n == ours), "{ours}");
+            for other in all.iter().filter(|n| *n != ours) {
+                assert!(!other.starts_with(ours), "{ours} is the start of {other}");
+                assert!(
+                    !ours.starts_with(other.as_str()),
+                    "{other} is the start of {ours}"
+                );
+            }
+        }
     }
 
     #[test]
