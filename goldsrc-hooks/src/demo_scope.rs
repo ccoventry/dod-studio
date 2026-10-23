@@ -398,6 +398,15 @@ fn point_operands(
 /// player's FOV from the `HLTV` message while the client data keeps the
 /// spectator's 90, so the two never meet and the scope never drew (the user,
 /// 2026-10-11, POST). Returns whether it wrote.
+///
+/// A POV demo keeps the test. There `in_fov` is the FOV the frame is drawn
+/// with, and for the first frame or so of a scope-in (one frame at 60 fps)
+/// the HUD already has the zoom (`SetFOV`) while the frame is still drawn at
+/// 90: without the test the scope, sized for the zoom, came out tiny, and
+/// the black fill blacked out the rest of the screen (#933). The camera's in-eye mode is no
+/// guide to which kind of demo plays: a POV demo can carry a stale
+/// `g_iUser1` of 4 (`2021draft-rd1-harrington-axis`), so [`skips_settle_check`]
+/// asks the engine.
 fn skip_settle_check(skip: bool) -> Result<bool, String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
     let at = if SETTLE_SCANNED_BASE.load(Ordering::Acquire) == base
@@ -443,6 +452,12 @@ fn skip_settle_check(skip: bool) -> Result<bool, String> {
         return Err("could not make the scope's zoom-settled test writable".into());
     }
     Ok(true)
+}
+
+/// Whether the zoom-settled test comes out: only in-eye in an HLTV demo,
+/// where it can never pass. See [`skip_settle_check`].
+fn skips_settle_check(in_demo: bool, pov_demo: bool, in_eye: bool) -> bool {
+    in_demo && !pov_demo && in_eye
 }
 
 /// The start of [`ORIGIN_PATTERN`] in the loaded `client.dll`.
@@ -509,8 +524,12 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         "the scope's origin reads",
     )?;
     let view = view || angles || origin;
-    let in_eye = in_demo && crate::spectator_target::in_eye_target().is_some();
-    let settle = skip_settle_check(in_eye)?;
+    let skip_settle = skips_settle_check(
+        in_demo,
+        in_demo && crate::anim_fix::pov_demo_playing(),
+        crate::spectator_target::in_eye_target().is_some(),
+    );
+    let settle = skip_settle_check(skip_settle)?;
     let view = view || settle;
     let id = if on {
         watched_scope_id()
@@ -752,6 +771,16 @@ mod tests {
                 "{p} {y} {r} -> {p2} {y2} {r2}"
             );
         }
+    }
+
+    #[test]
+    fn only_hltv_in_eye_skips_the_zoom_settled_test() {
+        assert!(skips_settle_check(true, false, true), "HLTV, in-eye");
+        assert!(!skips_settle_check(true, false, false), "HLTV, free camera");
+        // #933: a POV demo whose g_iUser1 still says in-eye keeps the test.
+        assert!(!skips_settle_check(true, true, true), "POV, stale in-eye");
+        assert!(!skips_settle_check(true, true, false), "POV");
+        assert!(!skips_settle_check(false, false, true), "live play");
     }
 
     #[test]

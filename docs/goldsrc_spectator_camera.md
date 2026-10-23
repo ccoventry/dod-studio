@@ -5,7 +5,9 @@ demo, all part of the `ds_spec_match_pov` / `spec_lock` / `spec_target`
 family in the hook DLL: which player the camera is on (#206, first section),
 how high the in-eye camera is when that player goes prone (#329, second), and
 what it shows when he dies (#709, third). The first two were
-`goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`.
+`goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`. A fourth,
+always on, makes the chase cameras draw the players around them (#918, last
+section).
 
 ---
 
@@ -269,3 +271,52 @@ v_lastAngles` before its `V_SmoothInterpolateAngles` call, checked against the
   from 64 behind his body.
 - POV-only effects are not reproduced: the red screen of a head hit (#606)
   and the "killed by" centre text have no HLTV messages.
+
+---
+
+## Chase cameras draw the players around them (#918)
+
+In locked or free chase the watched player, everyone else and most models
+went missing while the world still drew, and came back in first person.
+Stock behaviour: HLAE alone, with no hook DLL, loses them too (PRE,
+`dod_clinic`, chase after free roaming).
+
+### Why they went missing
+
+In an HLTV demo both engine builds drop every entity outside the PVS of
+`cl.simorg`, not of the camera:
+
+- `CL_EmitEntities` marks the leaves visible from `cl.simorg` before it links
+  the frame's entities, and re-marks the camera's leaves after (POST
+  `hw+0x19d764` and `hw+0x19d82f`).
+- `CL_AddVisibleEntity` (PRE `hw+0xbae0`, POST `hw+0x1969b0`) asks
+  `HUD_AddEntity` first, then drops an entity whose box is in no marked leaf.
+  Measured on POST: the watched player reaches `HUD_AddEntity` every frame and
+  `StudioDrawPlayer` never.
+
+The engine copies `ref_params_s::simorg` back into `cl.simorg` after
+`V_CalcRefdef` (POST `hw+0x231df2`). DoD's `V_CalcRefdef` writes it in first
+person (`V_GetInEyePos`) and free roaming flies the camera from it; the two
+chase modes leave it where it was, which is the map's origin after first
+person (`0 0 0` on every chase frame) or the roaming camera's last spot. How
+much is lost depends on that point: on `dod_harrington` nearly every player,
+whatever the route into chase; on `dod_clinic` nobody after first person
+(probably because its origin is inside a wall, and the engine sees everything
+from a solid leaf), but players after free roaming.
+
+### What the fix does
+
+`goldsrc-hooks/src/spectator_chase_pvs.rs` runs after the client's own
+`V_CalcRefdef`. In a chase mode of an HLTV demo, on the main view (not a
+picture-in-picture inset), it writes the camera's position into `simorg`, so
+entities are culled from the camera, as the world is. No code is patched and
+`hw.dll` is not touched, so there is no per-build table. On by default;
+`GOLDSRC_HOOKS_CHASE_PVS=0` turns it off.
+
+Checked on PRE and POST (2026-10-22): `wsod25-po_r4_up_ko_f-soul_under_harr_h2`
+(`dod_harrington`) from first person into locked chase, two target switches
+and free chase, and `ktps9qf-dice_clinic_m1_armory_h1_hltv` (PRE) and
+`hltv-2508021304-dod_solitude_b2` (POST) through free roaming into both chase
+modes: the watched player and the players near him draw in every chase shot
+but one, a target switch on `dod_solitude` after which the spectator bar named
+no player either.

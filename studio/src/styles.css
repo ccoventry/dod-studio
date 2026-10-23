@@ -571,13 +571,72 @@ input[type="number"] {
 /* Custom dropdown chevron — the global `appearance: none` reset (top of this
    file) strips the native arrow with nothing to replace it, so every
    <select> otherwise looks indistinguishable from a plain text field. */
-select {
+select,
+input.search-select-input {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23aaaaaa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 10px 6px;
   padding-right: 26px;
   cursor: pointer;
+}
+
+/* searchable_select.js: a dropdown you can type into. The box looks like a
+   <select>; the list opens under it like the native one. */
+.search-select {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-select-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-select-input:focus {
+  cursor: text;
+}
+
+.search-select-panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.search-select-option,
+.search-select-empty {
+  padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-select-option {
+  cursor: pointer;
+  color: #ffffff;
+}
+
+.search-select-option.active {
+  background: var(--primary-accent);
+}
+
+.search-select-option.picked {
+  font-weight: 600;
+}
+
+.search-select-empty {
+  color: var(--text-muted);
 }
 
 button {
@@ -1042,6 +1101,19 @@ button.primary-btn:hover:not(:disabled) {
   transition: width 0.2s ease-in-out;
 }
 
+/* Working, with nothing to measure against yet (the Duplicates audit's
+   first folder walk): a short block slides across instead of a width. */
+.progress-bar-container.indeterminate .progress-bar-fill {
+  width: 30% !important;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(333%); }
+}
+
 /* Shared editable row-list widget (list_editor.js) — Capture Output,
    Render Folders, Export Drives, Init Commands, and Custom Commands. */
 .list-editor-list {
@@ -1459,8 +1531,9 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
-/* #207: a demo this install's game can't play. */
-.entity-limit-badge {
+/* #207: a demo this install's game can't play. #920: one with no camera data. */
+.entity-limit-badge,
+.no-camera-badge {
   flex-shrink: 0;
   font-size: 0.75em;
   font-weight: normal;
@@ -2194,6 +2267,13 @@ tr.keyboard-selected {
   padding-left: 2px;
   font-size: 0.85em;
   color: #ffa726;
+}
+
+/* A fix-it button at the end of a path warning (#925). */
+.path-warning-action {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.95em;
 }
 
 /* HD Textures page (#372). */
@@ -3375,6 +3455,11 @@ button.setup-skip:hover:not(:disabled) {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* A note's own buttons, on a row under its text (#925). */
+.setup-note-actions {
+  margin-top: 8px;
 }
 
 .setup-muted {
