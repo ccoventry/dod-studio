@@ -281,6 +281,11 @@ pub struct AppSettings {
     pub review_fast_forward: bool,
     #[serde(default = "default_review_fast_forward_gap")]
     pub review_fast_forward_gap: i32,
+    /// This PC's full-read rate in bytes per second, learned from its own
+    /// scans (`studio/src/rescan_estimate.js`, #937); 0 until a scan has read
+    /// a demo in full, and the rescan prompt then assumes 3 s per demo.
+    #[serde(default)]
+    pub scan_read_bytes_per_sec: f64,
     /// The folder each Browse button last picked from, keyed by the field's
     /// id in `studio/src/pick_path.js` (#936), so an empty field's dialog
     /// starts there instead of wherever any other picker last was.
@@ -516,6 +521,7 @@ impl Default for AppSettings {
             review_tick_yes: true,
             review_fast_forward: true,
             review_fast_forward_gap: default_review_fast_forward_gap(),
+            scan_read_bytes_per_sec: 0.0,
             pick_folders: BTreeMap::new(),
         }
     }
@@ -1006,6 +1012,19 @@ mod tests {
         assert!(saved.notify_patching && saved.notify_demo_loading && saved.notify_between_clips);
         assert!(!saved.review_tick_yes);
         assert_eq!(saved.review_fast_forward_gap, 20);
+        // Saved before #937: no read rate measured yet.
+        assert_eq!(saved.scan_read_bytes_per_sec, 0.0);
+    }
+
+    #[test]
+    fn the_scan_read_rate_roundtrips() {
+        let original = AppSettings {
+            scan_read_bytes_per_sec: 140e6,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.scan_read_bytes_per_sec, 140e6);
     }
 
     #[test]

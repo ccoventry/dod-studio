@@ -62,6 +62,17 @@ export async function scanDirectory(scanPaths, known = [], workers = undefined) 
     });
 }
 
+// What a rescan of `paths` has to do (#937): `{ cached, upgradable, to_parse,
+// bytes_to_parse }`, from the analyzer cache's file names and first bytes.
+// No toast on failure: the rescan prompt just leaves its time line out.
+export async function estimateRescan(paths) {
+  return invoke("estimate_rescan", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (estimate_rescan):", err);
+      throw err;
+    });
+}
+
 // Which of a loaded project's demos are missing, and a moved copy of each if
 // one with the same file key turns up in `searchDirs` (#21). Resolves
 // `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
