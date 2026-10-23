@@ -47,6 +47,31 @@
 //!   edge instead (anchor x 0), which keeps the row clear of a timer scaled
 //!   by the same S.
 //!
+//! ## The player count (#943)
+//!
+//! `pfnDrawCharacter` draws each character through the engine's vgui2
+//! surface (`ISurface::DrawUnicodeChar`, from PRE `hw+0x6b20`, POST
+//! `+0x230c70`): one textured quad per glyph, cut from a font page where the
+//! glyphs sit side by side, sampled nearest-texel (a glyph at scale 4 comes
+//! out in 4-pixel blocks), with its corners on whole pixels. Under the row's
+//! zoom about `anchor + 0.5` a corner at `v` lands on
+//! `anchor + 0.5 + S * (v - anchor - 0.5)`: half a pixel off the grid
+//! whenever S is even. The glyph's left (and top) edge then runs through a
+//! column of pixel centres, those pixels sample the texture exactly at the
+//! glyph's cell boundary, and the rounding takes the texel before it: the
+//! last column of the neighbouring glyph in the font page, a one-pixel line
+//! the height of the digits beside the `/` at scale 2, 4, 6 and 8, never at
+//! an odd scale, where every corner lands on the grid.
+//!
+//! So the count gets its own transform: its top-left point `(x, y)`, where
+//! the game draws it (4 px in from its icon's left, 4 px under it), goes
+//! where the row's zoom puts it, rounded to a whole pixel, and the text is
+//! drawn [`count_scale`] times its size from there ([`count_origin`]). With
+//! whole-pixel corners and a whole-number scale no pixel centre sits on a
+//! glyph's edge; for a fractional scale [`edge_offset`] keeps them off it.
+//! `count_scale` follows `scale` until set, which is the size #891 drew the
+//! count at; set smaller, the count keeps that corner under its icon.
+//!
 //! With `_cl_minimap 1` the loop draws each icon *on the overview map*, at
 //! the objective's map position; those draws stay the game's. The mode is
 //! `CHud::OverviewMapMode` (`+0x228e0`, `thiscall`), which `Draw` calls once
@@ -84,8 +109,9 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-/// The subcommand's name.
+/// The subcommands' names: the whole element's scale, and the player count's.
 pub(super) const SUBCOMMAND: &str = "scale";
+pub(super) const COUNT_SUBCOMMAND: &str = "count_scale";
 
 /// The scale range, as the kill feed's: 1 is the game's own; below it a
 /// texture with no mipmaps would shimmer.
@@ -147,6 +173,22 @@ fn scale() -> f32 {
     f32::from_bits(SCALE_BITS.load(Ordering::Relaxed))
 }
 
+/// What `count_scale` is set to, as `f32` bits; [`FOLLOW`] for "the icons'
+/// scale", the default.
+static COUNT_SCALE_BITS: AtomicU32 = AtomicU32::new(FOLLOW);
+const FOLLOW: u32 = 0;
+
+/// The count's own scale, or `None` while it follows the icons'.
+fn count_scale_set() -> Option<f32> {
+    let bits = COUNT_SCALE_BITS.load(Ordering::Relaxed);
+    (bits != FOLLOW).then(|| f32::from_bits(bits))
+}
+
+/// The scale the player count is drawn at: its own, else the icons'.
+fn count_scale() -> f32 {
+    count_scale_set().unwrap_or_else(scale)
+}
+
 /// Whether `s` means "the game's own": exactly 1.
 fn is_unity(s: f32) -> bool {
     s == 1.0
@@ -186,6 +228,36 @@ fn zoomed(anchor: (i32, i32), s: f32, p: (i32, i32)) -> (f32, f32) {
     )
 }
 
+/// How far off the pixel grid the count is put for its scale `c`, so that no
+/// glyph edge (the origin plus `c` times a whole number of game pixels) runs
+/// through a column or row of pixel centres (`n + 0.5`). A whole `c` needs
+/// nothing: every edge is on the grid. A fraction p/q puts the edges at
+/// multiples of 1/q: with q odd none is a half, with q even an offset of
+/// 1/(2q) puts every one between two. A scale with no denominator up to 64
+/// gets 0: its edges fall on no fixed set of fractions, and the rasterizer's
+/// 1/256-pixel grid could not hold a smaller offset anyway.
+fn edge_offset(c: f32) -> f32 {
+    for q in 1..=64u32 {
+        let scaled = c * q as f32;
+        if (scaled - scaled.round()).abs() < 1e-3 {
+            return if q % 2 == 0 { 0.5 / q as f32 } else { 0.0 };
+        }
+    }
+    0.0
+}
+
+/// Where the count's top-left point `p` (the game's) goes on screen: where
+/// the row's zoom about `anchor` at `s` puts it, rounded to a whole pixel,
+/// plus [`edge_offset`] for the count's own scale `c`.
+fn count_origin(anchor: (i32, i32), s: f32, p: (i32, i32), c: f32) -> (f32, f32) {
+    let (fx, fy) = fixed_point(anchor);
+    let d = edge_offset(c);
+    (
+        (fx + s * (p.0 as f32 - fx)).round() + d,
+        (fy + s * (p.1 as f32 - fy)).round() + d,
+    )
+}
+
 /// A scale as the console shows it: `2`, `1.5`, never `2.0`.
 fn format_scale(s: f32) -> String {
     if s.fract() == 0.0 {
@@ -195,16 +267,16 @@ fn format_scale(s: f32) -> String {
     }
 }
 
-/// The argument after `scale`: a number in [`MIN_SCALE`]`..=`[`MAX_SCALE`],
-/// or `default` (1).
-pub(super) fn parse_args(rest: &[String]) -> Result<f32, String> {
+/// The argument after `scale` or `count_scale`: a number in
+/// [`MIN_SCALE`]`..=`[`MAX_SCALE`], or `default` (`None`).
+fn parse_number(rest: &[String], default_is: &str) -> Result<Option<f32>, String> {
     let [arg] = rest else {
         return Err(format!(
-            "need one number, {MIN_SCALE}..={MAX_SCALE} (1 is the game's own), or default"
+            "need one number, {MIN_SCALE}..={MAX_SCALE}, or default ({default_is})"
         ));
     };
     if arg.eq_ignore_ascii_case("default") {
-        return Ok(1.0);
+        return Ok(None);
     }
     let s: f32 = arg
         .parse()
@@ -212,12 +284,26 @@ pub(super) fn parse_args(rest: &[String]) -> Result<f32, String> {
     if !s.is_finite() || !(MIN_SCALE..=MAX_SCALE).contains(&s) {
         return Err(format!("expected {MIN_SCALE}..={MAX_SCALE}, got {arg}"));
     }
-    Ok(s)
+    Ok(Some(s))
 }
 
-/// What `status` says about the scale.
+/// The argument after `scale`; `default` is 1, the game's own.
+pub(super) fn parse_args(rest: &[String]) -> Result<f32, String> {
+    Ok(parse_number(rest, "1, the game's own")?.unwrap_or(1.0))
+}
+
+/// The argument after `count_scale`; `default` (`None`) follows `scale`.
+pub(super) fn parse_count_args(rest: &[String]) -> Result<Option<f32>, String> {
+    parse_number(rest, "the same as scale")
+}
+
+/// What `status` says about the scales.
 pub(super) fn describe() -> String {
-    format!("scale = {}", format_scale(scale()))
+    let count = match count_scale_set() {
+        Some(c) => format_scale(c),
+        None => format!("{} (as scale)", format_scale(scale())),
+    };
+    format!("scale = {}, count_scale = {count}", format_scale(scale()))
 }
 
 /// The reply for a scale now in force.
@@ -230,6 +316,21 @@ fn applied(s: f32) -> String {
             format_scale(s),
             format_scale(s)
         )
+    }
+}
+
+/// The reply for a count scale now in force, `None` following `scale`.
+fn applied_count(c: Option<f32>) -> String {
+    match c {
+        None => format!(
+            "count_scale follows scale ({}): the player count under a flag is drawn as big as the icons",
+            format_scale(scale())
+        ),
+        Some(c) => format!(
+            "count_scale = {}: the player count under a flag {} times its size, from the next frame, whatever the icons' scale. `count_scale default` makes it follow scale again.",
+            format_scale(c),
+            format_scale(c)
+        ),
     }
 }
 
@@ -364,7 +465,9 @@ mod hook {
         }
     }
 
-    /// The `"%d/%d"` player count under a flag, about the row's corner.
+    /// The `"%d/%d"` player count under a flag: its top-left corner where
+    /// the row's zoom puts it, on a whole pixel, and the text `count_scale`
+    /// times its size from there (see the module's "The player count").
     #[allow(clippy::too_many_arguments)]
     unsafe extern "thiscall" fn row_text(
         this: *mut c_void,
@@ -384,9 +487,16 @@ mod hook {
         let original: TextFn = unsafe { std::mem::transmute(f) };
         let out = std::cell::Cell::new(x);
         let draw = || out.set(unsafe { original(this, x, y, max_x, text, r, g, b) });
+        let (s, c) = (scale(), count_scale());
         match row_now() {
-            Some(anchor) => draw_about(anchor, draw),
-            None => draw(),
+            Some(anchor) if !(is_unity(s) && is_unity(c)) => {
+                let to = count_origin(anchor, s, (x, y), c);
+                // Safety: inside `Draw`, on the engine's thread.
+                if !unsafe { crate::gl_zoom::mapped((x as f32, y as f32), to, c, draw) } {
+                    draw();
+                }
+            }
+            _ => draw(),
         }
         out.get()
     }
@@ -561,19 +671,34 @@ mod hook {
         Ok(())
     }
 
-    /// Makes `s` the scale. The reply is what the console prints.
-    pub(super) fn apply(s: f32) -> Result<String, String> {
-        if is_unity(s) && INSTALLED_BASE.load(Ordering::Acquire) == 0 {
-            SCALE_BITS.store(s.to_bits(), Ordering::Release);
-            return Ok(applied(s));
+    /// Puts the calls through the hook (again, should `client.dll` have been
+    /// loaded afresh) once anything is scaled, for icons at `s` and a count
+    /// at `c`. Nothing to do while both are 1 and nothing was installed.
+    fn ensure(s: f32, c: f32) -> Result<(), String> {
+        let scaled = !is_unity(s) || !is_unity(c);
+        if !scaled && INSTALLED_BASE.load(Ordering::Acquire) == 0 {
+            return Ok(());
         }
         let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
         install(base)?;
-        if !is_unity(s) {
+        if scaled {
             crate::gl_zoom::ready().map_err(|why| format!("cannot scale: {why}"))?;
         }
+        Ok(())
+    }
+
+    /// Makes `s` the scale. The reply is what the console prints.
+    pub(super) fn apply(s: f32) -> Result<String, String> {
+        ensure(s, count_scale_set().unwrap_or(s))?;
         SCALE_BITS.store(s.to_bits(), Ordering::Release);
         Ok(applied(s))
+    }
+
+    /// Makes `c` the count's scale, `None` to follow the icons'.
+    pub(super) fn apply_count(c: Option<f32>) -> Result<String, String> {
+        ensure(scale(), c.unwrap_or_else(scale))?;
+        COUNT_SCALE_BITS.store(c.map_or(FOLLOW, f32::to_bits), Ordering::Release);
+        Ok(applied_count(c))
     }
 }
 
@@ -587,6 +712,20 @@ pub(super) fn apply(s: f32) -> Result<String, String> {
     #[cfg(not(target_arch = "x86"))]
     {
         let _ = s;
+        Err("only in the 32-bit game".to_string())
+    }
+}
+
+/// Makes `c` the player count's scale, `None` to follow the icons'. The
+/// reply is what the console prints.
+pub(super) fn apply_count(c: Option<f32>) -> Result<String, String> {
+    #[cfg(target_arch = "x86")]
+    {
+        hook::apply_count(c)
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        let _ = c;
         Err("only in the 32-bit game".to_string())
     }
 }
@@ -680,9 +819,105 @@ mod tests {
         assert!(parse_args(&argv(&["2", "3"])).is_err());
     }
 
+    /// Distance from `v` to the nearest column of pixel centres (`n + 0.5`).
+    fn off_centre(v: f32) -> f32 {
+        let f = v.rem_euclid(1.0);
+        (f - 0.5).abs()
+    }
+
+    #[test]
+    fn under_the_row_zoom_a_glyph_edge_runs_through_pixel_centres_at_even_scales() {
+        // The cause of #943's line: the engine's glyph corners are whole
+        // pixels, and the zoom about `anchor + 0.5` puts them on `n + 0.5`
+        // at an even scale, never at an odd one.
+        let (fx, _) = fixed_point((0, 5));
+        for v in [4, 30, 57] {
+            let at = |s: f32| fx + s * (v as f32 - fx);
+            for s in [2.0f32, 4.0, 6.0, 8.0] {
+                assert_eq!(off_centre(at(s)), 0.0, "scale {s}, corner {v}");
+            }
+            for s in [1.0f32, 3.0, 5.0, 7.0] {
+                assert_eq!(off_centre(at(s)), 0.5, "scale {s}, corner {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_count_glyph_edge_sits_on_a_pixel_centre_at_any_scale() {
+        let scales = [
+            1.0f32, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0, 7.5, 8.0, 1.2,
+            1.3, 2.7,
+        ];
+        for anchor in [(0, 5), (82, 40), (300, -40), (417, 122)] {
+            for s in scales {
+                for c in scales {
+                    let p = (anchor.0 + 86, anchor.1 + 36);
+                    let (ox, oy) = count_origin(anchor, s, p, c);
+                    // Every glyph corner is a whole number of game pixels
+                    // from the text's corner.
+                    for k in 0..300 {
+                        let k = k as f32;
+                        for edge in [ox + c * k, oy + c * k] {
+                            assert!(
+                                off_centre(edge) >= 1.0 / 256.0,
+                                "scale {s}, count {c}, anchor {anchor:?}: an edge at {edge}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_edge_offset_is_nothing_for_a_whole_scale() {
+        for c in 1..=8 {
+            assert_eq!(edge_offset(c as f32), 0.0);
+        }
+        assert_eq!(edge_offset(1.5), 0.25);
+        assert_eq!(edge_offset(2.5), 0.25);
+        assert_eq!(edge_offset(1.25), 0.125);
+    }
+
+    #[test]
+    fn at_the_icons_scale_the_count_stays_where_the_row_zoom_drew_it() {
+        // `count_scale` following `scale` is #891's size and place, give or
+        // take the rounding to a whole pixel.
+        for anchor in [(0, 5), (82, 40), (300, -40)] {
+            for s in [1.0f32, 1.5, 2.0, 3.0, 4.0, 8.0] {
+                let p = (anchor.0 + 86, anchor.1 + 36);
+                let (ox, oy) = count_origin(anchor, s, p, s);
+                let (fx, fy) = fixed_point(anchor);
+                let (gx, gy) = (fx + s * (p.0 as f32 - fx), fy + s * (p.1 as f32 - fy));
+                assert!((ox - gx).abs() <= 0.75 && (oy - gy).abs() <= 0.75);
+            }
+        }
+        // A smaller count keeps that corner: 4 px in from its icon's left
+        // and 4 px under its bottom, both times the icons' scale.
+        let anchor = (0, 5);
+        let icon = (82, 5);
+        let (ox, oy) = count_origin(anchor, 4.0, (icon.0 + 4, icon.1 + 32 + 4), 2.0);
+        let (fx, fy) = fixed_point(anchor);
+        assert_eq!(ox, (fx + 4.0 * (86.0 - fx)).round());
+        assert_eq!(oy, (fy + 4.0 * (41.0 - fy)).round());
+    }
+
+    #[test]
+    fn count_scale_arguments_parse_as_typed() {
+        assert_eq!(parse_count_args(&argv(&["2"])), Ok(Some(2.0)));
+        assert_eq!(parse_count_args(&argv(&["1"])), Ok(Some(1.0)));
+        assert_eq!(parse_count_args(&argv(&["default"])), Ok(None));
+        assert_eq!(parse_count_args(&argv(&["DEFAULT"])), Ok(None));
+        assert!(parse_count_args(&argv(&["0.5"])).is_err());
+        assert!(parse_count_args(&argv(&["9"])).is_err());
+        assert!(parse_count_args(&argv(&[])).is_err());
+        assert!(applied_count(Some(2.0)).starts_with("count_scale = 2:"));
+        assert!(applied_count(None).starts_with("count_scale follows scale"));
+    }
+
     #[test]
     fn the_status_and_replies_name_the_scale() {
-        assert_eq!(describe(), "scale = 1");
+        assert_eq!(describe(), "scale = 1, count_scale = 1 (as scale)");
         assert_eq!(format_scale(1.5), "1.5");
         assert!(applied(2.0).starts_with("scale = 2:"));
         assert_eq!(applied(1.0), "scale = 1, the game's own");

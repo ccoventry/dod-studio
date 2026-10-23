@@ -34,7 +34,7 @@ HUD
   ds_hud_deathmsg
       Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
   ds_hud_objectives
-      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>. The bare command shows the options.
+      Move the objective icons and the objective timer, or draw them bigger: scale <1..8>, and count_scale <1..8> for the player count under a flag. The bare command shows the options.
   ds_hud_overview_layout
       Move or resize the overview map.
   ds_hud_overview_players 0-4
