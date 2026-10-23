@@ -2770,6 +2770,14 @@ export const STRINGS = {
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
   },
+  // The one-time look at the pinned folders (#533): pinned_review.js.
+  PINNED_REVIEW: {
+    TITLE: 'Pinned folders',
+    MESSAGE: "These may have been pinned automatically by + Add Folder. It now puts the folders it scans under Recent instead, and pinning is up to you. Untick any folder you don't want pinned.",
+    KEEP_TITLE: 'Ticked: stays pinned. Unticked: unpinned (the folder and its demos stay where they are).',
+    SAVE_BUTTON: 'Save',
+    KEEP_ALL_BUTTON: 'Keep all',
+  },
   SETUP: {
     MENU_ITEM: 'Setup…',
     MENU_ITEM_TITLE: 'Walk through what DoD Studio needs: the game, HLAE, FFmpeg, output folders and demos',

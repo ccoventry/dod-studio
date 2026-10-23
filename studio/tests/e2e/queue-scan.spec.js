@@ -55,17 +55,17 @@ test('listing a drive shows its progress, and Cancel while listing adds nothing'
   await expect(page.locator('.toast', { hasText: 'Scan complete' })).toHaveCount(0);
   await expect(page.locator('.toast', { hasText: 'cancellation requested' })).toHaveCount(0);
   // A drive the user gave up on is not remembered.
-  expect(await page.evaluate(() => window.__scanPaths)).toEqual([]);
+  expect(await page.evaluate(() => window.__recent)).toEqual([]);
   await expect(page.locator('#add-folder-btn')).toBeEnabled();
   await expect(cancel).toBeDisabled();
   await expect(page.locator('#scan-progress')).toHaveAttribute('hidden');
 });
 
-test('a folder whose scan finishes is remembered', async ({ page }) => {
+test('a folder whose scan finishes goes into Recent (#533)', async ({ page }) => {
   await gotoHarness(page);
   await startAddFolder(page, 'D:/demos');
   await page.evaluate(() => window.__finishScan({ demos: [], unchanged: 0, copies: [], cancelled: false }));
   await page.evaluate(() => window.__added);
   await expect(page.locator('.toast', { hasText: 'Scan complete (0 demo(s) found)' })).toBeVisible();
-  expect(await page.evaluate(() => window.__scanPaths)).toEqual(['D:/demos']);
+  expect(await page.evaluate(() => window.__recent)).toEqual(['D:/demos']);
 });
