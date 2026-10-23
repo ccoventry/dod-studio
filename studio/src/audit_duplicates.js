@@ -3,6 +3,7 @@
 // which copies start ticked for deletion, and how a delete's result updates
 // the groups. auditor_pane.js and audit_folders.js do the DOM.
 import { STRINGS } from './strings.js';
+import { againstLastRun, lastRunKey } from './progress_view.js';
 
 const comparable = (p) => p.trim().replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 
@@ -66,15 +67,11 @@ export function auditProgressView(p, expectedFolders = 0) {
   }
   if (!p?.total) {
     const folders = p?.folders ?? 0;
-    if (expectedFolders > 0) {
-      return {
-        pct: Math.min(95, Math.round((folders / expectedFolders) * 100)),
-        text: STRINGS.AUDITOR.listingLineOf(folders, expectedFolders),
-        current,
-        indeterminate: false,
-      };
-    }
-    return { pct: 0, text: STRINGS.AUDITOR.listingLine(folders), current, indeterminate: true };
+    const bar = againstLastRun(folders, expectedFolders);
+    const text = expectedFolders > 0
+      ? STRINGS.AUDITOR.listingLineOf(folders, expectedFolders)
+      : STRINGS.AUDITOR.listingLine(folders);
+    return { ...bar, text, current };
   }
   const done = Math.min(p.done ?? 0, p.total);
   return {
@@ -85,17 +82,10 @@ export function auditProgressView(p, expectedFolders = 0) {
   };
 }
 
-/// `m:ss` for an audit's running time.
-export function elapsedText(ms) {
-  const secs = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
-  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-}
-
 /// The key the last audit's folder count is remembered under: the same
 /// folders, in any order, or All drives.
 export function auditFoldersKey(paths, allDrives) {
-  const sorted = [...(paths || [])].map((p) => String(p).toLowerCase()).sort();
-  return `audit_last_folders:${allDrives ? 'all|' : ''}${sorted.join('|')}`;
+  return lastRunKey('audit_last_folders', paths, allDrives ? 'all' : '');
 }
 
 /// `audit_delete_progress` → the same bar, while copies are compared with

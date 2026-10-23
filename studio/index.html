@@ -91,7 +91,8 @@
 
         <!-- Left / Top Split Pane: Workspace Setup & Master Demo Queue -->
         <section id="pane-workspace" class="content-pane">
-          <div class="egui-panel">
+          <!-- #scan-panel and #master-pane take dropped demos and folders: demo_drop.js (#530) -->
+          <div id="scan-panel" class="egui-panel">
             <div class="panel-header">
               <h3 data-str="WORKSPACE.SCAN_PANEL_TITLE">Directory Scan & Management</h3>
             </div>
@@ -99,11 +100,15 @@
               <div class="row-inputs">
                 <button id="add-files-btn" data-str="WORKSPACE.ADD_FILES_BUTTON">+ Add Demo Files</button>
                 <button id="add-folder-btn" data-str="WORKSPACE.ADD_FOLDER_BUTTON">+ Add Folder</button>
+                <label class="scan-subfolders" data-str-title="WORKSPACE.INCLUDE_SUBFOLDERS_TITLE" title="Ticked: + Add Folder also reads the demos in the folder's subfolders, up to 6 levels down. Unticked: only the demos directly in the folder.">
+                  <input type="checkbox" id="scan-include-subfolders" checked />
+                  <span data-str="WORKSPACE.INCLUDE_SUBFOLDERS_LABEL">Include subfolders</span>
+                </label>
                 <button id="cancel-scan-btn" disabled data-str="WORKSPACE.CANCEL_SCAN_BUTTON" data-str-title="WORKSPACE.CANCEL_SCAN_TITLE">Cancel Scan</button>
               </div>
               <div class="scan-status-row">
                 <span id="scan-spinner" class="spinner" style="display: none;"></span>
-                <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Status: Ready</p>
+                <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Ready</p>
               </div>
               <!-- queue_scan.js: demos done of the scan's total -->
               <div id="scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
@@ -1856,6 +1861,7 @@
         <ol id="combine-list" class="combine-list"></ol>
         <p id="combine-plan" class="combine-plan"></p>
         <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <p id="combine-status" class="combine-plan" aria-live="polite"></p>
         <div class="combine-actions">
           <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
           <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>

@@ -10,6 +10,7 @@ mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
+mod drop_paths;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
@@ -162,11 +163,30 @@ async fn locate_missing_demos(
     .await
 }
 
-/// Which demos are no longer the file they were scanned from (#21).
+/// Which demos are no longer the file they were scanned from (#21). Emits
+/// `changed_demos_progress` ({ done, total }, at most every ~33 ms and on
+/// the last demo) for Start Capture's line (#953).
 #[tauri::command]
-async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+async fn changed_demos(
+    app_handle: tauri::AppHandle,
+    demos: Vec<capture_manager::KnownDemo>,
+) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(capture_manager::changed_demos(&demos))
+        use tauri::Emitter;
+        let started = std::time::Instant::now();
+        let last_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        Ok(capture_manager::changed_demos_with_progress(
+            &demos,
+            |done, total| {
+                let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+                if capture_manager::changed_progress_due(&last_emit, now_ms, done, total) {
+                    let _ = app_handle.emit(
+                        "changed_demos_progress",
+                        serde_json::json!({ "done": done, "total": total }),
+                    );
+                }
+            },
+        ))
     }))
     .await
 }
@@ -329,6 +349,7 @@ async fn scan_directory(
     paths: Vec<String>,
     known: Option<Vec<capture_manager::KnownDemo>>,
     workers: Option<usize>,
+    include_subfolders: Option<bool>,
 ) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
@@ -337,6 +358,8 @@ async fn scan_directory(
         paths,
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        // Missing: today's walk into every subfolder (#531).
+        include_subfolders.unwrap_or(true),
     )
     .await
 }
@@ -880,6 +903,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             demo_cache_cmd::cache_demos,
+            drop_paths::sort_dropped_paths,
             demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,

@@ -45,7 +45,8 @@ pub struct AppSettings {
     pub pinned_folders: Vec<String>,
     /// Analyzer sidebar's "Recent" quick-links tier — most-recent-first,
     /// capped at 10, pushed whenever a folder selection yields a non-empty
-    /// demo listing. Mirrors dev's `settings.demo_folder_history`.
+    /// demo listing, and by + Add Folder's scans (#533). Mirrors dev's
+    /// `settings.demo_folder_history`.
     #[serde(default)]
     pub demo_folder_history: Vec<String>,
     /// File → Open Recent (#935): project files opened or saved, newest
@@ -267,6 +268,15 @@ pub struct AppSettings {
     /// goes missing later opens the window again.
     #[serde(default)]
     pub setup_dismissed: bool,
+    /// The one-time look at the pinned folders ran (#533): older builds
+    /// pinned every folder + Add Folder scanned, and Studio lists them once
+    /// so the user can unpin the ones they never chose.
+    #[serde(default)]
+    pub pinned_folders_reviewed: bool,
+    /// "Include subfolders" beside + Add Folder (#531): a folder scan also
+    /// reads its subfolders' demos. On by default, today's behaviour.
+    #[serde(default = "default_scan_include_subfolders")]
+    pub scan_include_subfolders: bool,
     /// Configuration > Players (#428): the spray and crosshair each player
     /// gets in a demo, what everyone else gets, and whether the game uses it.
     /// Mirrored for the hook DLL by `players_tab::mirror_table` on load and
@@ -431,6 +441,9 @@ fn default_demo_rename_hltv_template() -> String {
 fn default_auto_check_updates() -> bool {
     true
 }
+fn default_scan_include_subfolders() -> bool {
+    true
+}
 pub(crate) fn default_keep_game_behind() -> bool {
     true
 }
@@ -526,6 +539,8 @@ impl Default for AppSettings {
             demo_rename_lowercase: false,
             audit_look_in_zips: false,
             setup_dismissed: false,
+            pinned_folders_reviewed: false,
+            scan_include_subfolders: default_scan_include_subfolders(),
             players: native::player_overrides::PlayerTable::default(),
             hidden_installs: Vec::new(),
             review_covers: default_review_covers(),
@@ -743,6 +758,10 @@ mod tests {
         );
         // Settings saved before #599 still open Setup when a path is missing.
         assert!(!settings.setup_dismissed);
+        // Settings saved before #533 get the pinned-folder look once.
+        assert!(!settings.pinned_folders_reviewed);
+        // Settings saved before #531 keep walking into subfolders.
+        assert!(settings.scan_include_subfolders);
     }
 
     #[test]
