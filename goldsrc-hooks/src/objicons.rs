@@ -570,6 +570,8 @@ fn usage() -> String {
          \x20 {COMMAND} xoffset <x>        x the icon row starts at\n\
          \x20 {COMMAND} timer <y>          y the objective timer beside them is drawn at\n\
          \x20 {COMMAND} scale <1..8>       draw the icons and the timer that many times bigger\n\
+         \x20 {COMMAND} count_scale <1..8> the player count under a flag that many times its\n\
+         \x20                                   size (default: as scale)\n\
          \x20 {COMMAND} <any> default      hand that one back to the default layout\n\
          \x20 All are absolute screen positions, and mean the same thing in a POV\n\
          \x20 demo and while spectating -- which the game's own values do not. The\n\
@@ -605,6 +607,12 @@ fn dispatch(argv: &[String]) -> String {
     let sub = sub.to_ascii_lowercase();
     if sub == scale::SUBCOMMAND {
         return match scale::parse_args(&argv[2..]).and_then(scale::apply) {
+            Ok(reply) => format!("{COMMAND}: {reply}\n"),
+            Err(why) => format!("{COMMAND} {sub}: {why}\n"),
+        };
+    }
+    if sub == scale::COUNT_SUBCOMMAND {
+        return match scale::parse_count_args(&argv[2..]).and_then(scale::apply_count) {
             Ok(reply) => format!("{COMMAND}: {reply}\n"),
             Err(why) => format!("{COMMAND} {sub}: {why}\n"),
         };
@@ -837,7 +845,11 @@ mod tests {
     #[test]
     fn every_subcommand_is_in_the_usage_text() {
         let text = usage();
-        for (name, _, _) in SUBCOMMANDS {
+        for name in SUBCOMMANDS
+            .iter()
+            .map(|(name, _, _)| name)
+            .chain([&scale::SUBCOMMAND, &scale::COUNT_SUBCOMMAND])
+        {
             assert!(
                 text.contains(name),
                 "{name} missing from the usage text:\n{text}"
