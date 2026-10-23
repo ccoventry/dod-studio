@@ -1571,7 +1571,7 @@ export const STRINGS = {
     // Opening a project with demos an older DoD Studio scanned (scan_version.js).
     OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
     outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
-    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    OUTDATED_DEMOS_FOOTER: "Press “Not now” to leave them as they are. You'll be asked again the next time you open the project.",
     OUTDATED_DEMOS_RESCAN: 'Rescan',
     OUTDATED_DEMOS_NOT_NOW: 'Not now',
     // What a rescan did with the highlights' work (rescan_carry.js).
