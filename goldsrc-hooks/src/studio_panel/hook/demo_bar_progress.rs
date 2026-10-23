@@ -6,13 +6,15 @@
 //! 0`). See `crate::demo_bar_progress`.
 
 use std::ffi::{CString, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use super::*;
 use crate::demo_bar_progress::{PERCENT_LABEL, PROGRESS_BAR, SETTING, percent_text, worth_logging};
 
-/// The percent last shown (`None` while hidden).
-static SHOWN: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+/// The percent last shown, [`HIDDEN`] while hidden. An atomic, not a
+/// mutex: this runs every frame.
+static SHOWN: AtomicU32 = AtomicU32::new(HIDDEN);
+const HIDDEN: u32 = u32::MAX;
 /// Whether a bar without the controls has been reported, once a session.
 static MISSING_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -21,13 +23,17 @@ type SetProgressFn = unsafe extern "thiscall" fn(*mut c_void, f32);
 /// Runs every frame, with or without our window: a few reads until a
 /// demo is loading and the stock bar is the one in use.
 pub(super) fn update() {
-    let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+    let shown = match SHOWN.load(Ordering::Relaxed) {
+        HIDDEN => None,
+        p => Some(p),
+    };
+    let store = |p: Option<u32>| SHOWN.store(p.unwrap_or(HIDDEN), Ordering::Relaxed);
     let percent = if SETTING.on() && !viewdemo_in_panel() {
         super::load_progress::demo_percent()
     } else {
         None
     };
-    if *shown == percent {
+    if shown == percent {
         return;
     }
     let Ok(vgui) = Vgui::get() else { return };
@@ -35,7 +41,7 @@ pub(super) fn update() {
     // the window's code uses them.
     unsafe {
         let Some(bar) = vgui.bar() else {
-            *shown = None;
+            store(None);
             return;
         };
         let (label, progress) = (
@@ -50,16 +56,16 @@ pub(super) fn update() {
                      or without -addons, so it shows no loading progress"
                 ));
             }
-            *shown = None;
+            store(None);
             return;
         }
-        if worth_logging(*shown, percent) {
+        if worth_logging(shown, percent) {
             crate::debug::report(&match percent {
                 Some(p) => format!("demo_bar_progress: loading the demo, {p}%"),
                 None => "demo_bar_progress: the demo is loaded".to_string(),
             });
         }
-        *shown = percent;
+        store(percent);
         for vp in [label, progress].into_iter().flatten() {
             vgui.set_visible(vp, percent.is_some());
         }
