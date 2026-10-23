@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { fromCacheText, timeLeftText, parseClock, cacheRunView } from './scan_progress.js';
+import {
+  fromCacheText, timeLeftText, parseClock, cacheRunView, scanEndLogLine, scanFailedLogLine,
+} from './scan_progress.js';
 
 describe('fromCacheText', () => {
   it('names the cached demos only when there are some', () => {
@@ -79,5 +81,24 @@ describe('cacheRunView', () => {
     }, parseClock(() => 0));
     expect(view.text).toBe('Caching 900 / 1486 (800 upgraded, 100 already cached)');
     expect([view.value, view.max]).toEqual([900, 1486]);
+  });
+});
+
+describe('scan log lines (#926)', () => {
+  it('says how long the scan took and what it read, cached and not apart', () => {
+    expect(scanEndLogLine({
+      ms: 18_420, read: 158, unchanged: 0, outcome: { cached: 152, not_cached: 6, not_cached_ms: 12_100 },
+    })).toBe('[scan] finished after 18.4 s: 158 demo(s) read, 0 unchanged (152 from the analyzer cache, 6 not: those took 12.1 s)');
+  });
+
+  it('leaves out the time with everything cached, and the split when the scan gave no counts', () => {
+    expect(scanEndLogLine({ ms: 900, read: 3, unchanged: 2, outcome: { cached: 3, not_cached: 0, not_cached_ms: 0 } }))
+      .toBe('[scan] finished after 0.9 s: 3 demo(s) read, 2 unchanged (3 from the analyzer cache, 0 not)');
+    expect(scanEndLogLine({ cancelled: true, ms: 2_000, read: 0, unchanged: 0 }))
+      .toBe('[scan] cancelled after 2.0 s: 0 demo(s) read, 0 unchanged');
+  });
+
+  it('says how long a failed scan ran', () => {
+    expect(scanFailedLogLine(1_234, 'no such folder')).toBe('[scan] failed after 1.2 s: no such folder');
   });
 });

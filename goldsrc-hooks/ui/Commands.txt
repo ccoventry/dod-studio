@@ -48,7 +48,7 @@ HUD
 
 VIEW (POV demos: the recording player's own view)
   ds_view_use_cl_bob 0/1
-      POV demos: the view and gun bob by your cl_bob, cl_bobcycle and cl_bobup (0: the bob the demo recorded, the recording player's own).
+      POV demos: the view and gun bob by your cl_bob, cl_bobcycle and cl_bobup, as in live play (0: the bob the demo recorded, the recording player's own).
   ds_view_hide_headshot_red_screen 0/1
       No red screen when the player is hit in the head.
   ds_view_hide_screen_shake 0/1
@@ -143,6 +143,8 @@ DEBUG
       Log who the spectator camera follows.
   ds_debug_log_texture_loads 0/1
       Log every HD texture load.
+  ds_debug_log_view_bob 0/1
+      Log the live and recorded bob every frame (ds_view_use_cl_bob).
   ds_debug_keep_detail_cache 0/1
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
   ds_debug_cloak_instead 0/1
