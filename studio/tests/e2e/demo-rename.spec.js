@@ -148,7 +148,8 @@ test('Rename confirms, sends only the renames, follows them, and Undo puts them 
   await expect(page.locator('#rename-body tr td:nth-child(2)')).toHaveText(
     ['krod_31k_v_dicE_anzio.dem', 'dicE_v_gskiLL_anzio_2026-09-28.dem', 'broken.dem']);
   await expect(newNames(page).nth(0)).toHaveText('already named this way');
-  await expect(page.locator('#rename-status')).toHaveText('3 demos, 0 to rename.');
+  // #958: the line says how many were renamed and how long it took.
+  await expect(page.locator('#rename-status')).toHaveText(/^Renamed 2 demos in \d+\.\d s\.$/);
   await expect(page.locator('#rename-undo-btn')).toBeEnabled();
 
   await page.click('#rename-undo-btn');
@@ -176,5 +177,51 @@ test('List Demos shows a bar from the first moment, counting cached demos first'
   await expect(page.locator('#rename-status')).toHaveText('Reading demos: 5 / 6 (5 from the analyzer cache)');
   await expect(bar.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 83%/);
   await page.evaluate(() => window.__finishList([]));
+  await expect(bar).toHaveJSProperty('hidden', true);
+});
+
+test('Rename and Undo count the files on a bar, and end with how many and how long (#958)', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.demo_rename_apply = ({ renames }) => new Promise((resolve) => {
+      window.__finishApply = () => {
+        window.__undoable = { log: 'x', count: renames.length, created_unix_secs: 1 };
+        resolve({ renamed: renames, failed: [], log: 'x' });
+      };
+    });
+  });
+  await page.click('#rename-list-btn');
+  await page.click('#rename-apply-btn');
+  await page.click('#themed-confirm-ok-btn');
+  const bar = page.locator('#rename-progress');
+  // The harness has no stylesheet, so the bar has no height: check hidden.
+  await expect(bar).toHaveJSProperty('hidden', false);
+  await expect(page.locator('#rename-status')).toHaveText('Renaming 2 demos…');
+  await expect(bar).toHaveClass(/indeterminate/);
+  await expect(page.locator('#rename-apply-btn')).toBeDisabled();
+
+  await page.evaluate(() => window.__mockEmit('demo_rename_apply_progress', { done: 1, total: 2 }));
+  await expect(page.locator('#rename-status')).toHaveText('Renaming 1 of 2…');
+  await expect(bar).not.toHaveClass(/indeterminate/);
+  await expect(bar.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 50%/);
+
+  await page.evaluate(() => window.__finishApply());
+  await expect(page.locator('#rename-status')).toHaveText(/^Renamed 2 demos in \d+\.\d s\.$/);
+  await expect(bar).toHaveJSProperty('hidden', true);
+
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.demo_rename_undo = () => new Promise((resolve) => {
+      window.__finishUndo = () => {
+        window.__undoable = null;
+        resolve({ renamed: [{ from: 'C:\\demos\\krod_31k_v_dicE_anzio.dem', to: 'C:\\demos\\pov1.dem' }], failed: [], log: 'x' });
+      };
+    });
+  });
+  await page.click('#rename-undo-btn');
+  await expect(page.locator('#rename-status')).toHaveText('Putting back the last renames…');
+  await page.evaluate(() => window.__mockEmit('demo_rename_apply_progress', { done: 1, total: 2 }));
+  await expect(page.locator('#rename-status')).toHaveText('Putting back 1 of 2…');
+  await page.evaluate(() => window.__finishUndo());
+  await expect(page.locator('#rename-status')).toHaveText(/^Put back 1 demo in \d+\.\d s\.$/);
   await expect(bar).toHaveJSProperty('hidden', true);
 });

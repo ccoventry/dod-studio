@@ -226,3 +226,11 @@ export function missingSprites(table, listed) {
   ].filter(Boolean);
   return [...new Set(named)].filter((n) => !have.has(n.toLowerCase()));
 }
+
+/** The bar under "Reading the queue's players… 12 of 40 demos" (#958), as
+ *  progress_view.js's `showBar` takes it: the block slides until the first
+ *  demo is read. */
+export function playersBarView(seen, wanted) {
+  if (!wanted || !seen) return { pct: 0, indeterminate: true };
+  return { pct: Math.min(100, (100 * seen) / wanted), indeterminate: false };
+}

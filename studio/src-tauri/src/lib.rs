@@ -3,6 +3,7 @@ mod batch_catch_up;
 mod batch_close;
 mod batch_eta;
 mod blender_manager;
+mod builtin_profiles;
 mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
@@ -11,6 +12,7 @@ mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
+mod drop_paths;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
@@ -110,6 +112,13 @@ async fn save_settings(
     .await
 }
 
+/// The built-in command profiles (#911), which the Commands tab lists locked
+/// beside the user's own. Never saved: every update replaces them.
+#[tauri::command]
+fn builtin_command_profiles() -> Vec<settings_manager::CommandProfile> {
+    builtin_profiles::builtin_command_profiles()
+}
+
 // ── Project Session IPC Commands ───────────────────────────────────────────────
 // File I/O for paths the user picked happens here in Rust (std::fs), same as
 // `save_settings`/`get_settings` above. Tauri's fs plugin was dropped: its
@@ -142,25 +151,57 @@ async fn default_projects_dir() -> Result<String, String> {
 }
 
 /// Which of a loaded project's demos are missing, and where each one moved,
-/// if a file with the same key turns up in `search_dirs` (#21).
+/// if a file with the same key turns up in `search_dirs` (#21). Emits
+/// `missing_demos_search` once, `{ missing }`, when the search for them
+/// starts (#958).
 #[tauri::command]
 async fn locate_missing_demos(
+    app_handle: tauri::AppHandle,
     demos: Vec<capture_manager::KnownDemo>,
     search_dirs: Vec<String>,
 ) -> Result<Vec<capture_manager::MissingDemo>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        use tauri::Emitter;
         let dirs: Vec<std::path::PathBuf> =
             search_dirs.iter().map(std::path::PathBuf::from).collect();
-        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+        Ok(capture_manager::locate_missing_demos(
+            &demos,
+            &dirs,
+            &mut |missing| {
+                let _ = app_handle.emit(
+                    "missing_demos_search",
+                    serde_json::json!({ "missing": missing }),
+                );
+            },
+        ))
     }))
     .await
 }
 
-/// Which demos are no longer the file they were scanned from (#21).
+/// Which demos are no longer the file they were scanned from (#21). Emits
+/// `changed_demos_progress` ({ done, total }, at most every ~33 ms and on
+/// the last demo) for Start Capture's line (#953).
 #[tauri::command]
-async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+async fn changed_demos(
+    app_handle: tauri::AppHandle,
+    demos: Vec<capture_manager::KnownDemo>,
+) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(capture_manager::changed_demos(&demos))
+        use tauri::Emitter;
+        let started = std::time::Instant::now();
+        let last_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
+        Ok(capture_manager::changed_demos_with_progress(
+            &demos,
+            |done, total| {
+                let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+                if capture_manager::changed_progress_due(&last_emit, now_ms, done, total) {
+                    let _ = app_handle.emit(
+                        "changed_demos_progress",
+                        serde_json::json!({ "done": done, "total": total }),
+                    );
+                }
+            },
+        ))
     }))
     .await
 }
@@ -323,6 +364,7 @@ async fn scan_directory(
     paths: Vec<String>,
     known: Option<Vec<capture_manager::KnownDemo>>,
     workers: Option<usize>,
+    include_subfolders: Option<bool>,
 ) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
@@ -331,6 +373,8 @@ async fn scan_directory(
         paths,
         known.unwrap_or_default(),
         workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        // Missing: today's walk into every subfolder (#531).
+        include_subfolders.unwrap_or(true),
     )
     .await
 }
@@ -702,6 +746,18 @@ async fn index_demo_players(
     .await
 }
 
+/// One `analyzer_progress` event. The path lets the page ignore an earlier
+/// click's analysis still running beside this one; `cached` says the demo
+/// is read from the analyzer cache, with no frames to count.
+fn analyzer_progress_payload(
+    path: &str,
+    processed: usize,
+    total: usize,
+    cached: bool,
+) -> serde_json::Value {
+    serde_json::json!({ "processed": processed, "total": total, "path": path, "cached": cached })
+}
+
 #[tauri::command]
 async fn analyze_demo_full(
     app_handle: tauri::AppHandle,
@@ -716,6 +772,15 @@ async fn analyze_demo_full(
             return Err(messages::demo_file_not_found(&demo_path));
         }
 
+        // A demo the analyzer cache has is read, not parsed: the page says so
+        // instead of a % that never comes (#958).
+        if analysis::cache::is_fresh(&native::analyzer_cache_root(), &path) {
+            let _ = app_handle.emit(
+                "analyzer_progress",
+                analyzer_progress_payload(&demo_path, 0, 0, true),
+            );
+        }
+
         // Throttled to ~30fps per CLAUDE.md's telemetry-throttling guardrail —
         // `try_from_bytes_with_progress` calls back every ~500 frames, which
         // can be 1000+ times for a large demo.
@@ -728,9 +793,7 @@ async fn analyze_demo_full(
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
-                    // The path lets the page ignore an earlier click's
-                    // analysis still running beside this one.
-                    serde_json::json!({ "processed": processed, "total": total, "path": demo_path }),
+                    analyzer_progress_payload(&demo_path, processed, total, false),
                 );
             }
         };
@@ -874,6 +937,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             demo_cache_cmd::cache_demos,
+            drop_paths::sort_dropped_paths,
             demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
@@ -944,6 +1008,7 @@ pub fn run() {
             get_render_jobs,
             get_settings,
             save_settings,
+            builtin_command_profiles,
             save_project_session,
             load_project_session,
             files_exist,
@@ -1027,6 +1092,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod analyzer_progress_tests {
+    use super::analyzer_progress_payload;
+
+    /// The fields analyzer_pane.js's `analyzer_progress` listener reads.
+    #[test]
+    fn a_cached_demo_is_said_to_be_cached() {
+        let cached = analyzer_progress_payload("D:/demos/a.dem", 0, 0, true);
+        assert_eq!(cached["path"], "D:/demos/a.dem");
+        assert_eq!(cached["cached"], true);
+        let parsing = analyzer_progress_payload("D:/demos/a.dem", 30, 100, false);
+        assert_eq!(parsing["processed"], 30);
+        assert_eq!(parsing["total"], 100);
+        assert_eq!(parsing["cached"], false);
+    }
 }
 
 #[cfg(test)]

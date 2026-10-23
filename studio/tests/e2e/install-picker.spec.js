@@ -74,6 +74,26 @@ test('Hide takes an install off the list and Show hidden installs brings it back
   expect(await page.evaluate(() => window.__hlPath())).toBe(PRE.hl_exe);
 });
 
+test('the list is the short one again when it is opened after Show hidden installs', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(([p, h]) => window.__start({ hlPath: p, hidden: [h] }), [PRE.hl_exe, STOCK.path]);
+  await box(page).click();
+  await options(page).last().click();
+  await expect(options(page)).toHaveCount(4);
+  await expect(options(page).first()).toHaveText(/· hiddenShow$/);
+  // Closed and opened again: hidden ones are out of the list again.
+  await page.locator('#after').click();
+  await expect(page.locator('.search-select-panel')).toBeHidden();
+  await box(page).click();
+  await expect(options(page)).toHaveCount(3);
+  await expect(options(page).last()).toHaveText('Show hidden installs (1)');
+  // Picking a hidden install while they show keeps it picked and listed.
+  await options(page).last().click();
+  await options(page).first().click();
+  await expect.poll(() => page.evaluate(() => window.__hlPath())).toBe(STOCK.hl_exe);
+  await expect(box(page)).toHaveValue('Half-Life (25th Anniversary) · hidden');
+});
+
 test('a browsed hl.exe that is no install shows as its own row', async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(() => window.__start({ hlPath: 'D:\\Games\\HL copy\\hl.exe' }));

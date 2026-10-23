@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<!--
+  Harness for pinned_review.js (#533): the one-time list of pinned folders.
+  `window.__start(pinned)` offers it; `window.__unpinned` is what the user
+  unticked, `window.__saves` how many times the settings were saved, and
+  `window.__done` resolves when the look has finished.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>pinned_review.js test harness</title>
+</head>
+<body>
+  <script type="module">
+    import { offerPinnedReview, getPinnedReviewed, setPinnedReviewed } from '/src/pinned_review.js';
+
+    window.__start = (pinned) => {
+      setPinnedReviewed(false);
+      window.__unpinned = null;
+      window.__saves = 0;
+      window.__done = offerPinnedReview({
+        getPinned: () => pinned,
+        unpin: async (drop) => { window.__unpinned = drop; window.__saves += 1; },
+        persist: async () => { window.__saves += 1; },
+      });
+    };
+    window.__reviewed = () => getPinnedReviewed();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

@@ -31,8 +31,10 @@ export function moveIndex(index, step, count) {
  * options as `{ value, text, title }` rows, and the value to show as picked.
  * A row may also carry `action: { label, title, run }`, a button at its end,
  * or `command()`, which a pick runs instead of picking the row.
+ * `onOpen()` runs as the list opens, before it draws, so the caller can
+ * `setOptions` for a fresh list.
  */
-export function createSearchableSelect(input, { onPick, noMatch = 'No match' }) {
+export function createSearchableSelect(input, { onPick, onOpen = () => {}, noMatch = 'No match' }) {
   let options = [];
   let value = '';
   let shown = [];
@@ -106,6 +108,7 @@ export function createSearchableSelect(input, { onPick, noMatch = 'No match' }) 
 
   function open() {
     if (!panel.hidden) return;
+    onOpen();
     typed = false;
     active = options.findIndex((o) => o.value === value);
     panel.hidden = false;
