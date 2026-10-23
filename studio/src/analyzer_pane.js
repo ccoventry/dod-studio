@@ -17,6 +17,7 @@ import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
+import { analyzerLoadingView, analyzerLoadingHtml } from './analyzer_loading.js';
 import { clockFloor as formatMMSS } from './time_format.js';
 import { initDemoCache } from './demo_cache.js';
 import { unloadedOpenNodes } from './tree_loads.js';
@@ -969,15 +970,20 @@ function initAnalyzerBrowser() {
 // throttling is needed on the receiving end.
 // Each event names its demo: an earlier click's analysis still running in
 // the background reports too, and mixing the two made the % jump around.
+// A cached demo's event says so (`cached`) and counts nothing.
 listen('analyzer_progress', (event) => {
-  const { processed, total, path } = event.payload || {};
-  if (!analyzerLoadingPath || path !== analyzerLoadingPath) return;
-  if (!total) return;
-  const pct = Math.min(100, Math.round((processed / total) * 100));
-  const container = document.querySelector('#analyzer-tab-content');
-  setAnalyzerFileIndicator(STRINGS.ANALYZER.analyzingPct(pct));
-  if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.analyzingDemoPct(pct)}</p>`;
+  const p = event.payload || {};
+  if (!analyzerLoadingPath || p.path !== analyzerLoadingPath) return;
+  if (!p.total && !p.cached) return;
+  showAnalyzerLoading(p);
 });
+
+function showAnalyzerLoading(p) {
+  const view = analyzerLoadingView(p);
+  const container = document.querySelector('#analyzer-tab-content');
+  setAnalyzerFileIndicator(view.short);
+  if (container) container.innerHTML = analyzerLoadingHtml(view);
+}
 
 // Explorer sidebar drag-to-resize — width persists to settings.json via
 // getAnalyzerExplorerWidth/setAnalyzerExplorerWidth (main.js), the same
@@ -1103,8 +1109,7 @@ async function loadAnalyzerDemo(path) {
   // the first one's progress.
   if (analyzerLoadingPath === path) return;
   const container = document.querySelector('#analyzer-tab-content');
-  if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
-  setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
+  showAnalyzerLoading(null);
   // The last demo's multi-map notice isn't about this one.
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   renderDamageBanner(document.querySelector('#analyzer-damage-banner'), null);

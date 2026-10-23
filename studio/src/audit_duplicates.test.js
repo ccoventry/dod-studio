@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   shownPath, addFolders, auditFolders, canStartAudit, allDrivesLabel, auditProgressView,
   deleteProgressView, startsTicked, withoutDeleted, auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
-  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy, elapsedText, auditFoldersKey,
+  withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy, auditFoldersKey,
   isArchived, canDelete, copiesToDelete, revealPath,
 } from './audit_duplicates.js';
 
@@ -53,10 +53,9 @@ describe('audit_duplicates (#844)', () => {
     expect(auditProgressView({ folders: 200_000, total: 0 }, 186_000).pct).toBe(95);
   });
 
-  it('times the audit as m:ss, and keys the remembered count by its folders', () => {
-    expect(elapsedText(0)).toBe('0:00');
-    expect(elapsedText(6_800)).toBe('0:06');
-    expect(elapsedText(75_000)).toBe('1:15');
+  it('keys the remembered count by its folders', () => {
+    // The key #901 stored counts under, so they still count after #951.
+    expect(auditFoldersKey(['D:\\b', 'C:\\A'], true)).toBe('audit_last_folders:all|c:\\a|d:\\b');
     expect(auditFoldersKey(['D:\\b', 'C:\\A'], false)).toBe(auditFoldersKey(['c:\\a', 'd:\\B'], false));
     expect(auditFoldersKey([], true)).not.toBe(auditFoldersKey([], false));
   });

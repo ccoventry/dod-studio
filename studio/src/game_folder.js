@@ -44,6 +44,14 @@ export function gameFolderOptions(found, saved) {
   return options;
 }
 
+/** Whether `folder` is one of the game folders `found` beside hl.exe, any
+ *  case. Only a listed folder gets the language-file check (#925): a folder
+ *  that isn't there gets gameFolderMissing instead. */
+export function isListedFolder(found, folder) {
+  const want = (folder || DEFAULT_GAME_FOLDER).toLowerCase();
+  return (Array.isArray(found) ? found : []).some((f) => f.toLowerCase() === want);
+}
+
 /**
  * What to tell the user when their dod copy lacks the language file its
  * in-game text needs (#925), from `game_folder_language_file`'s answer; ''

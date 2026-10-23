@@ -607,6 +607,7 @@ pub fn poll() {
     crate::demo_scope::poll();
     crate::run_in_background::poll();
     crate::pov_live_bob::poll();
+    crate::map_sounds::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();
@@ -672,6 +673,12 @@ fn status_text() -> String {
             "{VOICE_NAME} = {} -- {}",
             bit(voice::muted()),
             voice::status()
+        ),
+        format!(
+            "{} = {} -- {}",
+            crate::map_sounds::NAME,
+            bit(crate::map_sounds::on()),
+            crate::map_sounds::status()
         ),
         format!(
             "{CROSSHAIR_NAME} = {} -- {}",
@@ -1722,6 +1729,12 @@ pub fn install() {
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
         crate::pov_live_bob::set_log_cvar(log);
     }
+    if let Some(mute) = register(crate::map_sounds::NAME, "0") {
+        crate::map_sounds::set_cvar(mute);
+    }
+    if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
+        crate::map_sounds::set_log_cvar(log);
+    }
     // Off unless Studio turns it on: a game not started from Studio keeps
     // its own sprays and crosshair (#428).
     if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
@@ -1900,6 +1913,8 @@ mod tests {
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
+            crate::map_sounds::NAME,
+            crate::map_sounds::LOG_NAME,
             crate::screen_effects::FLASH_NAME,
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,
