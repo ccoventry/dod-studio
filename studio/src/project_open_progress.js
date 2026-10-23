@@ -32,9 +32,10 @@ export function createProjectOpenProgress({ progress = queueProgress(), listenFn
     opening() {
       opening = progress.begin({ text: STRINGS.MAIN.OPENING_PROJECT });
     },
-    /** The file is applied: the line goes back (or to the grouping). */
-    opened() {
-      progress.end(opening);
+    /** The file is applied: the line says `text` (or the line from before),
+     *  and the grouping the demos start puts it back when it ends. */
+    opened(text = null) {
+      progress.end(opening, text);
       opening = null;
     },
     /** The check for demos that moved starts. */
