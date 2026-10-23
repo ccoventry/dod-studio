@@ -6,8 +6,10 @@
 // (no hl.exe set yet, a path with no file, an unreadable folder) it is
 // disabled on the saved value and says why. settings_sync.js saves getGameFolder().
 
-import { listGameFolders, gameFolderLanguageFile } from './ipc_bridge.js';
-import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote } from './game_folder.js';
+import { listGameFolders, gameFolderLanguageFile, revealInExplorer } from './ipc_bridge.js';
+import {
+  DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote, languageFileButton,
+} from './game_folder.js';
 import { STRINGS } from './strings.js';
 
 // The setting as last chosen or loaded. The form shows it.
@@ -31,10 +33,21 @@ export function setGameFolder(name) {
   render();
 }
 
-function showWarning(message) {
+/** Shows `message` under the field, or hides it; `reveal`, a path, adds a
+ *  button labelled `label` that opens Explorer on it (#925). */
+function showWarning(message, reveal = '', label = '') {
   const el = warningEl();
   if (!el) return;
-  el.textContent = message;
+  el.replaceChildren(document.createTextNode(message));
+  if (message && reveal) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'path-warning-action';
+    btn.textContent = label;
+    btn.title = reveal;
+    btn.addEventListener('click', () => revealInExplorer(reveal).catch(() => {}));
+    el.append(' ', btn);
+  }
   el.style.display = message ? '' : 'none';
 }
 
@@ -76,9 +89,9 @@ async function checkLanguageFile() {
   const folder = current;
   const hlPath = readHlPath();
   if (!hlPath) return;
-  const note = languageFileNote(await gameFolderLanguageFile(hlPath, folder));
+  const missing = await gameFolderLanguageFile(hlPath, folder);
   if (mine !== languageCheck || folder !== current) return;
-  showWarning(note);
+  showWarning(languageFileNote(missing), missing?.show || '', languageFileButton(missing));
 }
 
 /**
@@ -113,6 +126,10 @@ export function createGameFolderUi({ getHlPath, persist }) {
     current = e.target.value || DEFAULT_GAME_FOLDER;
     render();
     persist();
+  });
+  // Back from renaming the file in Explorer: look again, so the warning goes.
+  window.addEventListener('focus', () => {
+    if (found.length > 0 && found.some((f) => f.toLowerCase() === current.toLowerCase())) checkLanguageFile();
   });
 
   render();

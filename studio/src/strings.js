@@ -297,6 +297,8 @@ export const STRINGS = {
     languageFileMissingNoSource: (folder, needed, language) =>
       `${folder} has no resource\\${needed}, so in-game text shows as codes like #Dod_Spec_Allies_Score. `
       + `Copy dod\\resource\\dod_${language}.txt into ${folder}\\resource and name it ${needed}.`,
+    LANGUAGE_FILE_SHOW: 'Show me the file',
+    LANGUAGE_FILE_OPEN_FOLDER: 'Open the folder',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',

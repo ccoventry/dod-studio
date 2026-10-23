@@ -6,7 +6,7 @@
 // it never copies anything itself.
 import { STRINGS } from './strings.js';
 import { escapeHtml } from './html.js';
-import { languageFileNote } from './game_folder.js';
+import { languageFileNote, languageFileButton } from './game_folder.js';
 import {
   SETUP_STEPS,
   defaultDemoFolder,
@@ -25,6 +25,8 @@ import {
  *   pickHl(), pickHlae(), linkFfmpeg(), openHlaePage(): step actions.
  *   pickFfmpeg(), useHlaeFfmpeg(), openFfmpegPage(): the FFmpeg step's own.
  *   setGameFolder(name): the Half-Life step's game folder pick.
+ *   showLanguageFile(): opens Explorer on the language file a dod copy
+ *   needs renamed (#925).
  *   addFolder(kind), removeFolder(kind, path): kind is 'captures' | 'renders'.
  *   pickDemoFolder(): resolves to a folder or null.
  *   onSkip(): "Skip setup for now". onFinish(demoFolder): the last step's
@@ -91,8 +93,11 @@ export function createSetupWindow(deps) {
     const playWarn = usesPlayFolder(snap.hlPath, snap.gameFolder)
       ? `<div class="setup-note warn" id="setup-hl-play-warning">${escapeHtml(S.HL_DOD_FOLDER)}</div>` : '';
     const languageNote = languageFileNote(snap.gameFolderLanguage);
+    const languageButton = languageFileButton(snap.gameFolderLanguage);
     const languageWarn = languageNote
-      ? `<div class="setup-note warn" id="setup-hl-language-warning">${escapeHtml(languageNote)}</div>` : '';
+      ? `<div class="setup-note warn" id="setup-hl-language-warning">${escapeHtml(languageNote)}${languageButton
+        ? ` <button type="button" id="setup-hl-language-show" class="path-warning-action">${escapeHtml(languageButton)}</button>` : ''}</div>`
+      : '';
     return `<p>${escapeHtml(S.HL_INTRO)}</p>
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
       <div class="setup-field">
@@ -228,6 +233,7 @@ export function createSetupWindow(deps) {
     on('setup-hl-browse', () => deps.pickHl());
     contentEl.querySelector('#setup-game-folder')
       ?.addEventListener('change', (e) => deps.setGameFolder(e.target.value));
+    on('setup-hl-language-show', () => deps.showLanguageFile());
     on('setup-hlae-browse', () => deps.pickHlae());
     on('setup-hlae-get', () => deps.openHlaePage());
     on('setup-ffmpeg-get', () => deps.openFfmpegPage());

@@ -56,3 +56,11 @@ export function languageFileNote(missing) {
     ? S.languageFileMissing(missing.folder, missing.needed, missing.rename_from)
     : S.languageFileMissingNoSource(missing.folder, missing.needed, missing.language);
 }
+
+/** The label of the button that opens Explorer on `missing.show`: the file
+ *  to rename when there is one, else the folder; '' with nothing to show. */
+export function languageFileButton(missing) {
+  if (!missing?.show) return '';
+  const S = STRINGS.CAPTURE_CONFIG;
+  return missing.rename_from ? S.LANGUAGE_FILE_SHOW : S.LANGUAGE_FILE_OPEN_FOLDER;
+}

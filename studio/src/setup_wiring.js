@@ -13,6 +13,7 @@ import {
   enginePacketEntityLimit,
   gameFolderLanguageFile,
   listGameFolders,
+  revealInExplorer,
 } from './ipc_bridge.js';
 import { getGameFolder } from './game_folder_ui.js';
 import { refreshPathWarnings, refreshHlaeFfmpegStatus, linkHlaeToFfmpeg } from './config_wiring.js';
@@ -216,6 +217,10 @@ export function createSetup({
       }
       await refreshPathWarnings();
       await refresh();
+    },
+    showLanguageFile: () => {
+      const path = snapshot?.gameFolderLanguage?.show;
+      if (path) revealInExplorer(path).catch(() => {});
     },
     openFfmpegPage: () => openUrl(STRINGS.SETUP.FFMPEG_URL).catch((err) => console.error('Error opening the FFmpeg page:', err)),
     addFolder,

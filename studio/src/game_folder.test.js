@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote } from './game_folder.js';
+import {
+  DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote, languageFileButton,
+} from './game_folder.js';
+import { STRINGS } from './strings.js';
 
 describe('gameFolderProblem (#402)', () => {
   it('accepts plain folder names', () => {
@@ -72,5 +75,15 @@ describe('languageFileNote (#925)', () => {
   it('is empty when nothing is missing', () => {
     expect(languageFileNote(null)).toBe('');
     expect(languageFileNote(undefined)).toBe('');
+  });
+});
+
+describe('languageFileButton (#925)', () => {
+  it('shows the file when there is one to rename, else opens the folder', () => {
+    expect(languageFileButton({ show: 'C:/x/dod_english.txt', rename_from: 'dod_english.txt' }))
+      .toBe(STRINGS.CAPTURE_CONFIG.LANGUAGE_FILE_SHOW);
+    expect(languageFileButton({ show: 'C:/x/resource', rename_from: null }))
+      .toBe(STRINGS.CAPTURE_CONFIG.LANGUAGE_FILE_OPEN_FOLDER);
+    expect(languageFileButton(null)).toBe('');
   });
 });

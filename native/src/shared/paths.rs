@@ -405,6 +405,9 @@ pub struct MissingLanguageFile {
     /// `dod_<language>.txt`, else its `dod_english.txt`. `None` when it has
     /// neither, and the file has to come from the `dod` folder.
     pub rename_from: Option<String>,
+    /// What Explorer opens on for the user to fix it: the file to rename,
+    /// selected in `resource\`; else `resource\` itself; else the folder.
+    pub show: String,
 }
 
 /// What a copy of the `dod` folder needs so its in-game text isn't raw
@@ -432,11 +435,17 @@ pub fn missing_language_file(
     ]
     .into_iter()
     .find(|name| resource.join(name).is_file());
+    let show = match &rename_from {
+        Some(name) => resource.join(name),
+        None if resource.is_dir() => resource.clone(),
+        None => game_root.join(folder),
+    };
     Some(MissingLanguageFile {
         folder: folder.to_string(),
         language: language.to_string(),
         needed,
         rename_from,
+        show: show.display().to_string(),
     })
 }
 
@@ -657,6 +666,10 @@ mod tests {
         let missing = missing_language_file(root.path(), "dod_movies", "english").unwrap();
         assert_eq!(missing.needed, "dod_movies_english.txt");
         assert_eq!(missing.rename_from.as_deref(), Some("dod_english.txt"));
+        assert_eq!(
+            std::path::PathBuf::from(&missing.show),
+            resource.join("dod_english.txt")
+        );
         // A French Steam: its own dod_french.txt first, else the English one.
         let french = missing_language_file(root.path(), "dod_movies", "french").unwrap();
         assert_eq!(french.needed, "dod_movies_french.txt");
@@ -678,6 +691,10 @@ mod tests {
         // Nothing to rename: the file has to come from dod.
         let other = missing_language_file(root.path(), "dod_other", "english").unwrap();
         assert_eq!(other.rename_from, None);
+        assert_eq!(
+            std::path::PathBuf::from(&other.show),
+            root.path().join("dod_other")
+        );
     }
 
     #[test]

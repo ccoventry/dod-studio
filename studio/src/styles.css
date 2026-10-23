@@ -2256,6 +2256,13 @@ tr.keyboard-selected {
   color: #ffa726;
 }
 
+/* A fix-it button at the end of a path warning (#925). */
+.path-warning-action {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.95em;
+}
+
 /* HD Textures page (#372). */
 .hd-pane-column {
   display: flex;
