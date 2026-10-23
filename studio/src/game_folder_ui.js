@@ -6,8 +6,8 @@
 // (no hl.exe set yet, a path with no file, an unreadable folder) it is
 // disabled on the saved value and says why. settings_sync.js saves getGameFolder().
 
-import { listGameFolders } from './ipc_bridge.js';
-import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions } from './game_folder.js';
+import { listGameFolders, gameFolderLanguageFile } from './ipc_bridge.js';
+import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote } from './game_folder.js';
 import { STRINGS } from './strings.js';
 
 // The setting as last chosen or loaded. The form shows it.
@@ -63,6 +63,22 @@ function render() {
   }
   const missing = !found.some((f) => f.toLowerCase() === current.toLowerCase());
   showWarning(missing ? S.gameFolderMissing(current) : '');
+  if (!missing) checkLanguageFile();
+}
+
+// A copy of dod needs resource\<folder>_<language>.txt for its in-game text
+// (#925): say which file to rename when it's missing. Only the newest check
+// draws, and only while the folder it checked is still the one picked.
+let languageCheck = 0;
+let readHlPath = () => '';
+async function checkLanguageFile() {
+  const mine = ++languageCheck;
+  const folder = current;
+  const hlPath = readHlPath();
+  if (!hlPath) return;
+  const note = languageFileNote(await gameFolderLanguageFile(hlPath, folder));
+  if (mine !== languageCheck || folder !== current) return;
+  showWarning(note);
 }
 
 /**
@@ -72,6 +88,7 @@ function render() {
  *   when the hl.exe path changes
  */
 export function createGameFolderUi({ getHlPath, persist }) {
+  readHlPath = getHlPath;
   // A path change can start a refresh while the last is still listing; only
   // the newest one draws.
   let generation = 0;

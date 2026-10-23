@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions } from './game_folder.js';
+import { DEFAULT_GAME_FOLDER, gameFolderProblem, gameFolderOptions, languageFileNote } from './game_folder.js';
 
 describe('gameFolderProblem (#402)', () => {
   it('accepts plain folder names', () => {
@@ -47,5 +47,30 @@ describe('gameFolderOptions (#402)', () => {
       { value: DEFAULT_GAME_FOLDER, missing: true, selected: true },
     ]);
     expect(gameFolderOptions(undefined, undefined)[0].value).toBe('dod');
+  });
+});
+
+describe('languageFileNote (#925)', () => {
+  it('names the file to rename and its new name', () => {
+    const note = languageFileNote({
+      folder: 'dod_movies', language: 'english', needed: 'dod_movies_english.txt', rename_from: 'dod_english.txt',
+    });
+    expect(note).toContain('dod_movies has no resource');
+    expect(note).toContain('dod_movies_english.txt');
+    expect(note).toContain('rename dod_english.txt to dod_movies_english.txt');
+    expect(note).toContain('#Dod_Spec_Allies_Score');
+  });
+
+  it('says where to copy it from when the folder has nothing to rename', () => {
+    const note = languageFileNote({
+      folder: 'movies', language: 'french', needed: 'movies_french.txt', rename_from: null,
+    });
+    expect(note).toContain('dod_french.txt');
+    expect(note).toContain('name it movies_french.txt');
+  });
+
+  it('is empty when nothing is missing', () => {
+    expect(languageFileNote(null)).toBe('');
+    expect(languageFileNote(undefined)).toBe('');
   });
 });

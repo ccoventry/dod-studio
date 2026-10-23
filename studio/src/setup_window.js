@@ -6,6 +6,7 @@
 // it never copies anything itself.
 import { STRINGS } from './strings.js';
 import { escapeHtml } from './html.js';
+import { languageFileNote } from './game_folder.js';
 import {
   SETUP_STEPS,
   defaultDemoFolder,
@@ -89,13 +90,16 @@ export function createSetupWindow(deps) {
     const build = snap.hlBuild && !wrongExeName(snap.hlPath, EXE_NAMES.hl) ?`<span class="setup-chip ${snap.hlBuild === 'anniversary' ? 'ok' : 'info'}">${escapeHtml(S.HL_BUILD[snap.hlBuild])}</span>` : '';
     const playWarn = usesPlayFolder(snap.hlPath, snap.gameFolder)
       ? `<div class="setup-note warn" id="setup-hl-play-warning">${escapeHtml(S.HL_DOD_FOLDER)}</div>` : '';
+    const languageNote = languageFileNote(snap.gameFolderLanguage);
+    const languageWarn = languageNote
+      ? `<div class="setup-note warn" id="setup-hl-language-warning">${escapeHtml(languageNote)}</div>` : '';
     return `<p>${escapeHtml(S.HL_INTRO)}</p>
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
       <div class="setup-field">
         <div class="setup-field-label">${escapeHtml(S.HL_FIELD)} ${exeStatus(snap.hlPath, snap.hlState, S.HL_FOUND, EXE_NAMES.hl)} ${build}</div>
         ${pathRow(snap.hlPath, 'setup-hl-browse', S.BROWSE)}
       </div>
-      ${gameFolderField(snap)}${playWarn}`;
+      ${gameFolderField(snap)}${playWarn}${languageWarn}`;
   }
 
   // The same setting as Configuration > Paths > Game Folder: the folders

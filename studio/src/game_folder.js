@@ -43,3 +43,16 @@ export function gameFolderOptions(found, saved) {
   if (!match) options.unshift({ value: current, missing: true, selected: true });
   return options;
 }
+
+/**
+ * What to tell the user when their dod copy lacks the language file its
+ * in-game text needs (#925), from `game_folder_language_file`'s answer; ''
+ * when it needs nothing.
+ */
+export function languageFileNote(missing) {
+  if (!missing?.needed) return '';
+  const S = STRINGS.CAPTURE_CONFIG;
+  return missing.rename_from
+    ? S.languageFileMissing(missing.folder, missing.needed, missing.rename_from)
+    : S.languageFileMissingNoSource(missing.folder, missing.needed, missing.language);
+}

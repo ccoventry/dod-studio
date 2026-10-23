@@ -394,6 +394,52 @@ pub fn list_game_folders(game_root: &Path) -> Vec<String> {
     names
 }
 
+/// A game folder copy that lacks the text file VGUI2 needs (#925).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MissingLanguageFile {
+    pub folder: String,
+    pub language: String,
+    /// `<folder>_<language>.txt`, the file `resource\` needs.
+    pub needed: String,
+    /// The file in the folder's own `resource\` to rename to `needed`: its
+    /// `dod_<language>.txt`, else its `dod_english.txt`. `None` when it has
+    /// neither, and the file has to come from the `dod` folder.
+    pub rename_from: Option<String>,
+}
+
+/// What a copy of the `dod` folder needs so its in-game text isn't raw
+/// `#Dod_…` keys: VGUI2 loads `resource\<game folder>_<language>.txt`, and a
+/// copy only has `dod_<language>.txt` (#925). `None` for `dod` itself and for
+/// a folder that already has the file. Only looks; Studio never writes the
+/// user's folder.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn missing_language_file(
+    game_root: &Path,
+    folder: &str,
+    language: &str,
+) -> Option<MissingLanguageFile> {
+    if folder.eq_ignore_ascii_case(DEFAULT_GAME_FOLDER) {
+        return None;
+    }
+    let resource = game_root.join(folder).join("resource");
+    let needed = format!("{folder}_{language}.txt");
+    if resource.join(&needed).is_file() {
+        return None;
+    }
+    let rename_from = [
+        format!("{DEFAULT_GAME_FOLDER}_{language}.txt"),
+        format!("{DEFAULT_GAME_FOLDER}_english.txt"),
+    ]
+    .into_iter()
+    .find(|name| resource.join(name).is_file());
+    Some(MissingLanguageFile {
+        folder: folder.to_string(),
+        language: language.to_string(),
+        needed,
+        rename_from,
+    })
+}
+
 /// Deletes the engine's `qconsole.log`.
 ///
 /// `-condebug` writes it to `hl.exe`'s own folder, not the mod folder, so
@@ -600,6 +646,38 @@ mod tests {
     #[test]
     fn test_take_key_none_without_a_parent_component() {
         assert_eq!(take_key(Path::new("")), None);
+    }
+
+    #[test]
+    fn a_dod_copy_without_its_language_file_says_which_to_rename() {
+        let root = Scratch::new("language_file");
+        let resource = root.path().join("dod_movies").join("resource");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::write(resource.join("dod_english.txt"), b"x").unwrap();
+        let missing = missing_language_file(root.path(), "dod_movies", "english").unwrap();
+        assert_eq!(missing.needed, "dod_movies_english.txt");
+        assert_eq!(missing.rename_from.as_deref(), Some("dod_english.txt"));
+        // A French Steam: its own dod_french.txt first, else the English one.
+        let french = missing_language_file(root.path(), "dod_movies", "french").unwrap();
+        assert_eq!(french.needed, "dod_movies_french.txt");
+        assert_eq!(french.rename_from.as_deref(), Some("dod_english.txt"));
+        std::fs::write(resource.join("dod_french.txt"), b"x").unwrap();
+        let french = missing_language_file(root.path(), "dod_movies", "french").unwrap();
+        assert_eq!(french.rename_from.as_deref(), Some("dod_french.txt"));
+    }
+
+    #[test]
+    fn dod_itself_or_a_copy_with_its_file_needs_nothing() {
+        let root = Scratch::new("language_file_ok");
+        let resource = root.path().join("dod_movies").join("resource");
+        std::fs::create_dir_all(&resource).unwrap();
+        assert!(missing_language_file(root.path(), "dod", "english").is_none());
+        assert!(missing_language_file(root.path(), "DOD", "english").is_none());
+        std::fs::write(resource.join("dod_movies_english.txt"), b"x").unwrap();
+        assert!(missing_language_file(root.path(), "dod_movies", "english").is_none());
+        // Nothing to rename: the file has to come from dod.
+        let other = missing_language_file(root.path(), "dod_other", "english").unwrap();
+        assert_eq!(other.rename_from, None);
     }
 
     #[test]

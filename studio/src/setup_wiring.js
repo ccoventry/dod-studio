@@ -11,6 +11,7 @@ import {
   checkHlaeFfmpeg,
   diagnoseExecutablePaths,
   enginePacketEntityLimit,
+  gameFolderLanguageFile,
   listGameFolders,
 } from './ipc_bridge.js';
 import { getGameFolder } from './game_folder_ui.js';
@@ -74,12 +75,15 @@ export function createSetup({
     const [hlState, hlaeState] = states;
     const hlBuild = hlPath && hlState === 'ok' ? engineBuild(await enginePacketEntityLimit(hlPath)) : null;
     let gameFolders = [];
+    let gameFolderLanguage = null;
     if (hlPath && hlState === 'ok') {
       try {
         gameFolders = (await listGameFolders(hlPath)) || [];
       } catch {
         // Logged by the bridge; the step says to pick hl.exe first.
       }
+      // A dod copy without its <folder>_<language>.txt (#925).
+      gameFolderLanguage = await gameFolderLanguageFile(hlPath, getGameFolder());
     }
     let ffmpegUsable = null;
     let ffmpegCanLink = false;
@@ -104,7 +108,7 @@ export function createSetup({
     ]);
     return {
       hlPath, hlState, hlaePath, hlaeState, hlBuild, ffmpegUsable, ffmpegCanLink,
-      gameFolder: getGameFolder(), gameFolders,
+      gameFolder: getGameFolder(), gameFolders, gameFolderLanguage,
       appFfmpeg, appFfmpegProblem, hlaeBundledFfmpeg,
       targetDrives, renderExportDirs,
       demoCount: (getDemos() || []).length,
