@@ -73,6 +73,8 @@ MAP
 SOUND
   ds_sound_mute_voice_commands 0/1
       Silence voice commands ('fire in the hole!' and the rest).
+  ds_sound_mute_win_and_capture 0/1
+      Silence the map's round-end music and point-captured sounds.
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>
@@ -148,6 +150,8 @@ DEBUG
       Log every HD texture load.
   ds_debug_log_view_bob 0/1
       Log the live and recorded bob every frame (ds_view_use_cl_bob).
+  ds_debug_log_server_sounds 0/1
+      Log every sound the server sends, and whether ds_sound_mute_win_and_capture muted it.
   ds_debug_keep_detail_cache 0/1
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
   ds_debug_cloak_instead 0/1

@@ -653,9 +653,9 @@ fn short_folder(folder: &str) -> String {
     }
 }
 
-/// Studio's demo folders, from its settings file: the Capture page's demo
-/// folder list (`pinned_folders`, what its Add Folder button grows) and the
-/// folders it scanned lately (`demo_folder_history`), as listing paths,
+/// Studio's demo folders, from its settings file: the pinned folders
+/// (`pinned_folders`) and the folders it scanned or browsed lately
+/// (`demo_folder_history`, what its + Add Folder button grows, #533), as listing paths,
 /// each once, those still on disk.
 pub fn studio_folders() -> Vec<String> {
     let Some(appdata) = std::env::var_os("APPDATA") else {

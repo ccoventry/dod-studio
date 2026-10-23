@@ -17,6 +17,7 @@ import {
   indexDemoPlayers,
 } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { showBar, hideBar } from './progress_view.js';
 import { createCrosshairImport } from './crosshair_import_ui.js';
 import {
   normalizePlayers,
@@ -28,6 +29,7 @@ import {
   playerLabel,
   tileRect,
   missingPngs,
+  playersBarView,
   missingSprites,
   canPreviewSprites,
   OWN_SPRAY,
@@ -368,6 +370,10 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
     const refreshBtn = $('#players-refresh-btn');
     const busy = playersSeen < playersWanted;
     if (refreshBtn) refreshBtn.disabled = busy;
+    // #958: a bar for the count, the block sliding until the first demo.
+    const bar = $('#players-players-bar');
+    if (busy) showBar(bar, playersBarView(playersSeen, playersWanted));
+    else hideBar(bar);
     if (!status) return;
     status.textContent = busy
       ? S().readingPlayers(playersSeen, playersWanted)
