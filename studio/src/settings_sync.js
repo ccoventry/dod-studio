@@ -12,7 +12,7 @@ import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
-import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
@@ -151,6 +151,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       custom_commands,
       command_profiles: getCommandProfiles(),
       command_profile_active: getActiveCommandProfile(),
+      builtin_profile_notice: getBuiltinProfileNotice(),
       save_local_patched_copy: saveLocalPatchedCopy,
       hook_runs_batch: hookRunsBatch,
       keep_game_behind: keepGameBehind,

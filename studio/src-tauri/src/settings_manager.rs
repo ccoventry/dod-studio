@@ -164,6 +164,12 @@ pub struct AppSettings {
     /// "(edited)" mark survives a restart. Empty when there is none.
     #[serde(default)]
     pub command_profile_active: String,
+    /// The user's changed copies of a built-in profile that were renamed at
+    /// load (`builtin_profiles::separate_builtin_copies`), e.g. "Clean clips
+    /// (mine)", until the Commands tab has said so once (#911). The frontend
+    /// empties it when the notice is closed.
+    #[serde(default)]
+    pub builtin_profile_notice: Vec<String>,
     #[serde(default)]
     pub save_local_patched_copy: bool,
     /// `PatcherConfig::hook_runs_batch` (#434): Seek Between Clips, the
@@ -487,8 +493,9 @@ impl Default for AppSettings {
             // flush follows.
             init_commands: vec!["r_decals 256".to_string(), "mirv_fov 90".to_string()],
             custom_commands: Vec::new(),
-            command_profiles: vec![clean_clips_profile()],
+            command_profiles: Vec::new(),
             command_profile_active: String::new(),
+            builtin_profile_notice: Vec::new(),
             save_local_patched_copy: false,
             hook_runs_batch: native::patch::types::default_hook_runs_batch(),
             settings_migrations: MIGRATIONS,
@@ -537,52 +544,6 @@ pub fn settings_path() -> PathBuf {
     // the activity log. It used to be spelled out again here, which is how the
     // two could have disagreed after #257 renamed the folder.
     native::shared::paths::get_appdata_dir().join("settings.json")
-}
-
-/// The built-in command profile's name. Users can rename or delete it like
-/// any profile; the migration below only adds it where no profile has it.
-pub const CLEAN_CLIPS_PROFILE: &str = "Clean clips";
-
-/// A starter profile for clips without the clutter a recording carries
-/// (scoreboard, voice menus, HLTV messages and bars). Every clip-look hook
-/// setting is set, even where the value is the hook's own default, so applying
-/// it gives the same clip whatever was changed elsewhere. Settings Studio
-/// sends itself, the in-game window's `ds_ui_*` and `ds_debug_*` are left out.
-/// `r_decals 256` and `mirv_fov 90` lead it because applying a profile
-/// replaces Initial Commands, and those two are the first-run lines the
-/// pipeline reads back.
-pub fn clean_clips_profile() -> CommandProfile {
-    let init_commands = [
-        "r_decals 256",
-        "mirv_fov 90",
-        "ds_spec_match_pov 1",
-        "ds_spec_hide_hltv_messages 1",
-        "ds_spec_hide_bars 1",
-        "ds_spec_deathcam 0",
-        "ds_spec_hide_text 1",
-        "ds_hud_hide_scoreboard 1",
-        "ds_hud_hide_voice_menus 1",
-        "ds_hud_hide_crosshair 0",
-        "ds_hud_hide_map_text 1",
-        "ds_hud_hide_clan_text 1",
-        "ds_hud_hide_center_text 1",
-        "ds_hud_show_scope 1",
-        "ds_hud_overview_players 0",
-        "ds_hud_overview_team_marker 0",
-        "ds_hud_overview_hide_speaker 0",
-        // 1 once #904 (DoD's own bob model) is in.
-        "ds_view_use_cl_bob 0",
-        "ds_view_hide_headshot_red_screen 1",
-        "ds_view_hide_screen_shake 1",
-        "ds_player_hide_hand_signals 0",
-        "ds_sound_mute_voice_commands 0",
-        "ds_map_allow_shaders 0",
-    ];
-    CommandProfile {
-        name: CLEAN_CLIPS_PROFILE.to_string(),
-        init_commands: init_commands.iter().map(|c| c.to_string()).collect(),
-        custom_commands: Vec::new(),
-    }
 }
 
 /// How many one-time changes to saved values exist; `migrate` runs the ones
@@ -645,16 +606,19 @@ impl AppSettings {
             // (#434). Turning it off again after this sticks.
             self.hook_runs_batch = true;
         }
-        if self.settings_migrations < 2
-            && !self
-                .command_profiles
-                .iter()
-                .any(|p| p.name.trim().eq_ignore_ascii_case(CLEAN_CLIPS_PROFILE))
-        {
-            // The built-in profile reaches an existing install once. A
-            // profile of the same name is the user's and is kept; deleting
-            // the built-in one afterwards sticks.
-            self.command_profiles.push(clean_clips_profile());
+        // Migration 2 added Clean clips as an editable profile (#898). It is
+        // built in now (#911), so 2 has nothing left to do, and the copies it
+        // made are sorted out below with every other profile that has a
+        // built-in's name. That runs at every load rather than once, so a
+        // built-in added later takes its name the same way.
+        let kept = crate::builtin_profiles::separate_builtin_copies(
+            &mut self.command_profiles,
+            &mut self.command_profile_active,
+        );
+        for name in kept {
+            if !self.builtin_profile_notice.contains(&name) {
+                self.builtin_profile_notice.push(name);
+            }
         }
         self.settings_migrations = MIGRATIONS;
     }
@@ -1052,33 +1016,22 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_install_has_the_clean_clips_profile() {
+    fn a_fresh_install_saves_no_profiles() {
+        // Clean clips is built in (#911): the Commands tab lists it from
+        // `builtin_profiles`, never from the settings file.
         let fresh = AppSettings::default();
-        assert_eq!(fresh.command_profiles.len(), 1);
-        let profile = &fresh.command_profiles[0];
-        assert_eq!(profile.name, CLEAN_CLIPS_PROFILE);
-        assert!(profile.custom_commands.is_empty());
-        // Starts with the first-run lines, since applying it replaces the list.
-        assert_eq!(profile.init_commands[..2], fresh.init_commands[..]);
-        assert!(
-            profile
-                .init_commands
-                .contains(&"ds_spec_match_pov 1".to_string())
-        );
-        // Nothing in it is refused, a no-op at demo load, or renamed. (The
-        // mid-demo list doesn't apply: these run once, at demo load.)
-        let commands = &profile.init_commands;
-        assert!(native::patch::cfg_scan::banned_commands(commands).is_empty());
-        assert!(native::patch::cfg_scan::noop_commands_in_init(commands).is_empty());
-        assert!(native::patch::cfg_scan::renamed_commands(commands).is_empty());
-        // Nothing for the migration to do on a fresh install.
+        assert!(fresh.command_profiles.is_empty());
         let mut again = fresh.clone();
         again.migrate();
-        assert_eq!(again.command_profiles.len(), 1);
+        assert!(again.command_profiles.is_empty());
+        assert!(again.builtin_profile_notice.is_empty());
     }
 
+    /// #911: settings migration 2 copied Clean clips into the file as an
+    /// editable profile. An unchanged copy goes (the built-in one replaces
+    /// it); a changed one stays as "Clean clips (mine)", with the notice.
     #[test]
-    fn the_clean_clips_profile_is_added_once_and_never_replaces_theirs() {
+    fn a_clean_clips_copy_from_migration_2_is_dropped_or_kept_as_mine() {
         let file = |extra: &str| -> AppSettings {
             serde_json::from_str(&format!(
                 r#"{{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
@@ -1086,38 +1039,64 @@ mod tests {
             ))
             .expect("a settings file")
         };
+        // Clean clips as #898 first added it (dbfcaa64), before 0.2.0 changed it.
+        let shipped = r#"["r_decals 256", "mirv_fov 90", "ds_spec_match_pov 1",
+            "ds_spec_hide_hltv_messages 1", "ds_spec_hide_bars 1", "ds_spec_deathcam 0",
+            "ds_hud_hide_scoreboard 1", "ds_hud_hide_voice_menus 1", "ds_hud_hide_crosshair 0",
+            "ds_hud_hide_map_text 0", "ds_hud_hide_clan_text 1", "ds_hud_show_scope 1",
+            "ds_hud_overview_players 0", "ds_hud_overview_team_marker 0", "ds_view_use_cl_bob 0",
+            "ds_view_hide_headshot_red_screen 0", "ds_view_hide_screen_shake 0",
+            "ds_player_hide_hand_signals 0", "ds_sound_mute_voice_commands 0",
+            "ds_map_allow_shaders 0"]"#;
 
-        // An install from before it existed gets it, beside its own profiles.
+        // Unchanged: dropped, silently, and the active name stays on it.
+        let mut unchanged = file(&format!(
+            r#", "settings_migrations": 2, "command_profile_active": "Clean clips",
+               "command_profiles": [{{"name": "FOTW", "init_commands": ["mirv_fov 100"]}},
+                                    {{"name": "Clean clips", "init_commands": {shipped}}}]"#
+        ));
+        unchanged.migrate();
+        let names: Vec<_> = unchanged
+            .command_profiles
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, ["FOTW"]);
+        assert_eq!(unchanged.command_profile_active, "Clean clips");
+        assert!(unchanged.builtin_profile_notice.is_empty());
+
+        // Changed (one line added): kept under its new name, which the
+        // active name follows, and the notice is due.
+        let changed_lines = shipped.replacen('[', r#"["host_framerate 60", "#, 1);
+        let mut changed = file(&format!(
+            r#", "settings_migrations": 2, "command_profile_active": "Clean clips",
+               "command_profiles": [{{"name": "Clean clips", "init_commands": {changed_lines}}}]"#
+        ));
+        changed.migrate();
+        assert_eq!(changed.command_profiles.len(), 1);
+        assert_eq!(changed.command_profiles[0].name, "Clean clips (mine)");
+        assert_eq!(
+            changed.command_profiles[0].init_commands[0],
+            "host_framerate 60"
+        );
+        assert_eq!(changed.command_profile_active, "Clean clips (mine)");
+        assert_eq!(changed.builtin_profile_notice, ["Clean clips (mine)"]);
+
+        // The notice is not added twice, and survives a save until the
+        // frontend empties it.
+        changed.migrate();
+        assert_eq!(changed.builtin_profile_notice, ["Clean clips (mine)"]);
+        let json = serde_json::to_string(&changed).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.builtin_profile_notice, ["Clean clips (mine)"]);
+
+        // From before migration 2: nothing is added any more.
         let mut older = file(
             r#", "settings_migrations": 1,
                "command_profiles": [{"name": "FOTW", "init_commands": ["mirv_fov 100"]}]"#,
         );
         older.migrate();
-        let names: Vec<_> = older
-            .command_profiles
-            .iter()
-            .map(|p| p.name.as_str())
-            .collect();
-        assert_eq!(names, ["FOTW", CLEAN_CLIPS_PROFILE]);
-        assert_eq!(older.command_profiles[0].init_commands, ["mirv_fov 100"]);
-        older.migrate();
-        assert_eq!(older.command_profiles.len(), 2, "added once");
-
-        // A profile of that name is the user's, whatever its case.
-        let mut theirs = file(
-            r#", "settings_migrations": 1,
-               "command_profiles": [{"name": "clean clips", "init_commands": ["ds_hud_hide_crosshair 1"]}]"#,
-        );
-        theirs.migrate();
-        assert_eq!(theirs.command_profiles.len(), 1);
-        assert_eq!(
-            theirs.command_profiles[0].init_commands,
-            ["ds_hud_hide_crosshair 1"]
-        );
-
-        // Deleted after the migration ran: it stays deleted.
-        let mut deleted = file(r#", "settings_migrations": 2, "command_profiles": []"#);
-        deleted.migrate();
-        assert!(deleted.command_profiles.is_empty());
+        assert_eq!(older.command_profiles.len(), 1);
+        assert_eq!(older.settings_migrations, MIGRATIONS);
     }
 }

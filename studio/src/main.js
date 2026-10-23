@@ -4,7 +4,8 @@ import {
   calculateExportPoolSpace,
   getSettings,
   openActivityLog,
-  systemMemoryBytes
+  systemMemoryBytes,
+  builtinCommandProfiles
 } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -308,7 +309,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         refreshRenderButtons();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
-      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active,
+        { builtins: await builtinCommandProfiles(), notice: settings.builtin_profile_notice });
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();

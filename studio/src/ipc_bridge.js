@@ -104,6 +104,16 @@ export async function systemMemoryBytes() {
     });
 }
 
+// The built-in command profiles (#911). On failure the Commands tab lists
+// only the user's own profiles.
+export async function builtinCommandProfiles() {
+  return invoke("builtin_command_profiles")
+    .catch((err) => {
+      console.error("IPC Execution Error (builtin_command_profiles):", err);
+      return [];
+    });
+}
+
 // Map library checks. Deliberately quiet on failure: a demo whose map cannot be
 // checked is still a demo the user can work with, so this reports and returns
 // nothing rather than interrupting a scan that otherwise succeeded.
