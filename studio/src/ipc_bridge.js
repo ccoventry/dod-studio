@@ -1083,6 +1083,16 @@ export async function hookDllOverrideAllowed() {
 /** The test hook DLLs in the checkout's `local\` folder (hook_dll_list.rs):
  *  `{ folder, checkout_build, dlls: [{ label, path, modified_unix_secs }] }`.
  *  Best-effort: an empty list on error. */
+/** The Half-Life installs on this PC (#931): `[{ name, path, hl_exe, build }]`,
+ *  `build` 'anniversary', 'pre_anniversary' or null. `gamePath`, the hl.exe
+ *  set now, adds its own Steam library. An empty list on error. */
+export async function findInstalls(gamePath) {
+  return invoke("find_installs", { gamePath: gamePath || '' }).catch((err) => {
+    console.error("IPC Execution Error (find_installs):", err);
+    return [];
+  });
+}
+
 export async function listHookDlls() {
   return invoke("list_hook_dlls").catch((err) => {
     console.error("IPC Execution Error (list_hook_dlls):", err);

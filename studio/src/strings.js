@@ -275,6 +275,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // install_picker.js (#931): the Half-Life installs found on this PC.
+    INSTALL_BUILD: { anniversary: '25th Anniversary', pre_anniversary: 'pre-Anniversary' },
+    installOption: (name, build) => (build ? `${name} (${build})` : name),
+    installHiddenOption: (text) => `${text} · hidden`,
+    installOther: (path) => `Other: ${path}`,
+    INSTALL_NONE: 'No install picked',
+    INSTALL_NO_MATCH: 'No install matches',
+    INSTALL_HIDE: 'Hide',
+    INSTALL_HIDE_TITLE: 'Hide from this list. "Show hidden installs" at the end brings it back.',
+    INSTALL_UNHIDE: 'Show',
+    INSTALL_UNHIDE_TITLE: 'Put it back on the list',
+    showHiddenInstalls: (count) => `Show hidden installs (${count})`,
+    HIDE_HIDDEN_INSTALLS: 'Hide hidden installs again',
+    INSTALL_PICKER_TITLE: 'The Half-Life installs found in your Steam libraries. Picking one sets the Half-Life Executable and the Game Folder; nothing else changes.',
     // Game Folder (#402): game_folder_ui.js.
     GAME_FOLDER_LABEL: 'Game Folder:',
     GAME_FOLDER_TIP:
@@ -2191,6 +2205,11 @@ export const STRINGS = {
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },
+    // Switching installs in Configuration > Paths while a game runs (#931).
+    SWITCH_TITLE: 'Day of Defeat is running',
+    CLOSE_AND_SWITCH: 'Close it and switch',
+    switchMessage: ({ running }) =>
+      `Day of Defeat is running from "${running.install}". Close it to switch installs? Nothing is switched if you cancel.`,
   },
   // ── overviews_pane.js: the Overviews page (#371) ────────────────────────
   OVERVIEWS: {

@@ -258,6 +258,10 @@ pub struct AppSettings {
     /// on every save.
     #[serde(default)]
     pub players: native::player_overrides::PlayerTable,
+    /// Configuration > Paths' install list (#931): the folders of installs
+    /// "Hide from this list" took off it. Only the list reads it.
+    #[serde(default)]
+    pub hidden_installs: Vec<String>,
     /// The Capture page's Review controls (#623, #661, #665), kept across
     /// restarts (`studio/src/review_settings.js`): which Review marks a
     /// review plays, the order, whether Yes also ticks the highlight for
@@ -495,6 +499,7 @@ impl Default for AppSettings {
             demo_rename_lowercase: false,
             setup_dismissed: false,
             players: native::player_overrides::PlayerTable::default(),
+            hidden_installs: Vec::new(),
             review_covers: default_review_covers(),
             review_order: default_review_order(),
             review_tick_yes: true,
@@ -789,6 +794,25 @@ mod tests {
         let mut older = file("");
         older.migrate();
         assert!(older.hook_runs_batch);
+    }
+
+    /// Hidden installs (#931) round-trip; a file from before them hides none.
+    #[test]
+    fn hidden_installs_roundtrip() {
+        let legacy: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "capture_fps": 300, "pre_roll_seconds": 2.0,
+                "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert!(legacy.hidden_installs.is_empty());
+        let original = AppSettings {
+            hidden_installs: vec!["D:/Steam/steamapps/common/Half-Life".to_string()],
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.hidden_installs, original.hidden_installs);
     }
 
     #[test]

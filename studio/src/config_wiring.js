@@ -18,6 +18,7 @@ import { createGameFolderUi, getGameFolder } from './game_folder_ui.js';
 import { wireReviewSettings } from './review_settings.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
 import { initHookDllPicker, refreshHookDllPicker } from './hook_dll_picker.js';
+import { createInstallPicker } from './install_picker.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -346,6 +347,10 @@ export function initConfigWiring({ persistAppSettings }) {
   gameFolderUi.refresh();
   document.querySelector('#hl-path-input')
     ?.addEventListener('change', () => { gameFolderUi.refresh(); });
+  // The Half-Life Executable's install list (#931); it re-lists on the
+  // field's change event itself.
+  const installPicker = createInstallPicker({ persist: persistAppSettings });
+  installPicker.refresh();
   // The Half-Life Executable's movie-copy note depends on the game folder too.
   document.querySelector('#config-game-folder')
     ?.addEventListener('change', () => { refreshPathWarnings(); });
@@ -489,6 +494,7 @@ export function initConfigWiring({ persistAppSettings }) {
           await persistAppSettings();
           await refreshPathWarnings();
           await gameFolderUi.refresh();
+          await installPicker.refresh();
         }
       } catch (err) {
         console.error("Error selecting Half-Life executable:", err);
