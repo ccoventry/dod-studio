@@ -2256,6 +2256,13 @@ tr.keyboard-selected {
   color: #ffa726;
 }
 
+/* A fix-it button at the end of a path warning (#925). */
+.path-warning-action {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 0.95em;
+}
+
 /* HD Textures page (#372). */
 .hd-pane-column {
   display: flex;
@@ -3416,6 +3423,11 @@ button.setup-skip:hover:not(:disabled) {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* A note's own buttons, on a row under its text (#925). */
+.setup-note-actions {
+  margin-top: 8px;
 }
 
 .setup-muted {
