@@ -51,14 +51,16 @@ const CLEAN_CLIPS: &[&str] = &[
     "ds_view_hide_screen_shake 1",
     "ds_player_hide_hand_signals 0",
     "ds_sound_mute_voice_commands 0",
-    "ds_sound_mute_win_and_capture 0",
+    "ds_sound_mute_victory_music 0",
+    "ds_sound_mute_flag_capture 0",
     "ds_map_allow_shaders 0",
 ];
 
 /// Every earlier version of Clean clips that settings migration 2 could have
 /// copied into a settings file, oldest first (from git history: #898 in
 /// dbfcaa64, b2b638f0, then b1d05fcb's, the last one migration 2 added; #284 then added
-/// `ds_sound_mute_win_and_capture 0` to the current one). A copy equal to any of
+/// `ds_sound_mute_victory_music 0` and `ds_sound_mute_flag_capture 0` to the
+/// current one). A copy equal to any of
 /// these was never changed by the user.
 const CLEAN_CLIPS_SHIPPED: &[&[&str]] = &[
     &[

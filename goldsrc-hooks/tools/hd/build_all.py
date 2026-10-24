@@ -9,7 +9,8 @@ Progress goes to dodstudio_hd/build_all.log and the console.
   models   every .mdl under dod/models, the Half-Life models DoD falls back
            to (valve_models.txt), and the models folders of --also installs
            and --extra-models folders
-  sprites  every world sprite of the game and of --also installs
+  sprites  every sprite of the game and of --also installs, then the
+           kill-feed icons rendered from the weapon models (#841)
   decals   every decal in dod/decals.wad and valve/decals.wad
   detail   every gfx/detail/*.tga
   sky      every sky in dod/gfx/env, plus the Half-Life ones maps name
@@ -167,6 +168,8 @@ def main():
         C.clear_partial(out)
         t, made = time.time(), 0
         for name in sorted(os.listdir(a_dir)):
+            if not name.lower().endswith(".tga"):
+                continue  # a sheet's .bak from before its kill-feed icons (#841)
             dst, src_b = os.path.join(out, name), os.path.join(b_dir, name)
             if os.path.exists(dst) or not os.path.exists(src_b):
                 continue

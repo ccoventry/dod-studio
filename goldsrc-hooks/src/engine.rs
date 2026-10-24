@@ -666,6 +666,14 @@ pub struct EngineStudioApiPartial {
     pub get_view_info: unsafe extern "C" fn(*mut f32, *mut f32, *mut f32, *mut f32),
 }
 
+impl EngineStudioApiPartial {
+    /// GetCurrentEntity, PlayerInfo, GetPlayerState, GetViewEntity, GetTimes,
+    /// GetCvar, in that order, untyped.
+    pub fn slots_before_view_info(&self) -> &[*mut c_void; 6] {
+        &self._slots_before_view_info
+    }
+}
+
 /// Partial, offset-accurate mirror of `cl_enginefuncs_s` (see
 /// `advancedfx/halflife`'s `engine/cdll_int.h`, whose `k_engdstNull` macro
 /// lists every field of the real struct in declaration order -- confirmed
@@ -1434,7 +1442,13 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
         return 0;
     }
     let real: GetStudioModelInterfaceFn = unsafe { std::mem::transmute(real) };
-    unsafe { real(version, ppinterface, pstudio) }
+    let result = unsafe { real(version, ppinterface, pstudio) };
+    if result != 0 && !ppinterface.is_null() {
+        // Safety: the client just filled it with its renderer interface,
+        // a static that lives as long as client.dll.
+        unsafe { crate::strafe_twitch::install(*ppinterface as *mut *mut c_void) };
+    }
+    result
 }
 
 /// Runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's

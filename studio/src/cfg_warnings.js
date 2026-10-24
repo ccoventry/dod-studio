@@ -33,6 +33,8 @@ const EMPTY = {
   noopInit: [],
   filteredInit: [],
   filteredScheduled: [],
+  filterApplies: false,
+  missingExec: [],
   fatalCvars: [],
   renamed: [],
   configCfgWritable: false,
@@ -99,6 +101,8 @@ function describeSource(v, cvar) {
   switch (v.kind) {
     case 'config':
       return STRINGS.CFG.sourceConfig(v.file, v.line);
+    case 'exec':
+      return STRINGS.CFG.sourceExec(v.file, v.line);
     case 'initial':
       return STRINGS.CFG.SOURCE_INITIAL;
     case 'app':
@@ -205,6 +209,7 @@ function render() {
   const noopInit = report?.noopInit ?? [];
   const filteredInit = report?.filteredInit ?? [];
   const filteredScheduled = report?.filteredScheduled ?? [];
+  const missingExec = report?.missingExec ?? [];
   const fatalCvars = report?.fatalCvars ?? [];
   const configCfgWritable = report?.configCfgWritable ?? false;
   const renamed = report?.renamed ?? [];
@@ -257,6 +262,11 @@ function render() {
   // A command the user typed never runs, and nothing in the game says so.
   if (filteredInit.length > 0) {
     initParts.push(filteredSection(filteredInit));
+  }
+  // Same outcome: an exec of a file the game can't find runs nothing.
+  if (missingExec.length > 0) {
+    const rows = missingExec.map((c) => `<li><code>${escapeHtml(c)}</code></li>`).join('');
+    initParts.push(section(STRINGS.CFG.MISSING_EXEC_TITLE, STRINGS.CFG.MISSING_EXEC_ADVICE, rows, '#ff8a5c'));
   }
   // Same: the game no longer knows an old dodstudio_ name (#555).
   if (renamedInit.length > 0) {

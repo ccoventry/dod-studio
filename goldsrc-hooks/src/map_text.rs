@@ -133,55 +133,46 @@ fn entity_lump_bounds(header: &[u8]) -> Option<(u64, usize)> {
     (len > 0 && len <= MAX_ENTITY_LUMP).then_some((offset, len))
 }
 
-/// Every entity in an entity lump, as its `"key" "value"` pairs in order.
-/// Anything malformed just yields less: an unterminated quote ends the parse.
-fn parse_entities(text: &[u8]) -> Vec<Vec<(&[u8], &[u8])>> {
-    let mut entities = Vec::new();
-    let mut current: Option<Vec<(&[u8], &[u8])>> = None;
-    let mut key: Option<&[u8]> = None;
-    let mut i = 0;
-    while i < text.len() {
-        match text[i] {
-            b'{' => {
-                current = Some(Vec::new());
-                key = None;
-            }
-            b'}' => {
-                if let Some(pairs) = current.take() {
-                    entities.push(pairs);
-                }
-                key = None;
-            }
-            b'"' => {
-                let Some(close) = text[i + 1..].iter().position(|&b| b == b'"') else {
-                    break;
-                };
-                let token = &text[i + 1..i + 1 + close];
-                i += close + 1;
-                if let Some(pairs) = current.as_mut() {
-                    match key.take() {
-                        None => key = Some(token),
-                        Some(k) => pairs.push((k, token)),
-                    }
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    entities
+/// One entity's `(key, value)` pairs, in the lump's order.
+type Pairs = Vec<(Vec<u8>, Vec<u8>)>;
+
+/// Every entity in an entity lump (up to its NUL), as its `"key" "value"`
+/// pairs in order, byte for byte.
+///
+/// The parsing is `dod::map_entities`', the one `map_sounds` and the patcher
+/// use, so it skips `//` comments where the engine's `COM_Parse` does: a
+/// commented-out line holding a lone `"` (dod_beachassault2_mtek's wad list)
+/// would otherwise pair every later key with the wrong value. The bytes go in
+/// as Latin-1 and come back out the same way, so a high byte in a literal
+/// sentence still matches the `HudText` payload byte for byte. An unterminated
+/// string is an error, as it is there.
+fn parse_entities(lump: &[u8]) -> Result<Vec<Pairs>, String> {
+    let end = lump.iter().position(|&b| b == 0).unwrap_or(lump.len());
+    let text: String = lump[..end].iter().map(|&b| char::from(b)).collect();
+    // Every char came from one byte, so it fits back in one.
+    let bytes = |s: &str| -> Vec<u8> { s.chars().map(|c| c as u8).collect() };
+    Ok(dod::map_entities::parse_entity_text(&text)?
+        .iter()
+        .map(|entity| {
+            entity
+                .pairs
+                .iter()
+                .map(|(k, v)| (bytes(k), bytes(v)))
+                .collect()
+        })
+        .collect())
 }
 
 /// Every on-screen string an entity lump declares: the `message` of each
 /// entity whose classname is in [`TEXT_CLASSES`].
-fn declared_text(lump: &[u8]) -> BTreeSet<Vec<u8>> {
+fn declared_text(lump: &[u8]) -> Result<BTreeSet<Vec<u8>>, String> {
     let mut out = BTreeSet::new();
-    for pairs in parse_entities(lump) {
+    for pairs in parse_entities(lump)? {
         let get = |name: &[u8]| {
             pairs
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .map(|&(_, v)| trim(v))
+                .map(|(_, v)| trim(v))
         };
         let Some(class) = get(b"classname") else {
             continue;
@@ -193,7 +184,7 @@ fn declared_text(lump: &[u8]) -> BTreeSet<Vec<u8>> {
             out.insert(message.to_vec());
         }
     }
-    out
+    Ok(out)
 }
 
 /// The token a `HudText` payload carries: its first string, up to the NUL.
@@ -233,7 +224,7 @@ fn same_text(declared: &[u8], sent: &[u8]) -> bool {
 }
 
 /// `maps/dod_anzio.bsp` -> `dod_anzio`.
-fn short_name(level: &str) -> &str {
+pub(crate) fn short_name(level: &str) -> &str {
     let base = level.rsplit(['/', '\\']).next().unwrap_or(level);
     base.strip_suffix(".bsp")
         .or_else(|| base.strip_suffix(".BSP"))
@@ -290,12 +281,19 @@ fn load(level: &str) {
     ];
     let map = short_name(level).to_ascii_lowercase();
     let lump = candidates.iter().find_map(|p| read_entity_lump(p).ok());
-    let strings = lump.as_deref().map(declared_text).unwrap_or_default();
-    let report = match &lump {
+    let parsed = lump.as_deref().map(declared_text);
+    let strings = match &parsed {
+        Some(Ok(strings)) => strings.clone(),
+        _ => BTreeSet::new(),
+    };
+    let report = match &parsed {
         None => format!(
             "map_text: could not read the entity lump of {level} -- nothing will be hidden on {map}"
         ),
-        Some(_) => format!(
+        Some(Err(why)) => format!(
+            "map_text: could not parse the entity lump of {level} ({why}) -- nothing will be hidden on {map}"
+        ),
+        Some(Ok(_)) => format!(
             "map_text: {map} declares {} on-screen string(s){}",
             strings.len(),
             if strings.is_empty() {
@@ -496,25 +494,85 @@ mod tests {
         out
     }
 
+    fn declared(lump: &[u8]) -> BTreeSet<Vec<u8>> {
+        declared_text(lump).expect("lump parses")
+    }
+
     #[test]
     fn parses_every_entity_and_its_pairs_in_order() {
-        let entities = parse_entities(ANZIO);
+        let entities = parse_entities(ANZIO).expect("anzio parses");
         assert_eq!(entities.len(), 5);
+        let pair = |k: &str, v: &str| (k.as_bytes().to_vec(), v.as_bytes().to_vec());
         assert_eq!(
             entities[3],
             vec![
-                (&b"classname"[..], &b"env_message"[..]),
-                (b"targetname", b"msg_leave_axis"),
-                (b"message", b"MAP_SPAWN_WARNING"),
-                (b"spawnflags", b"16"),
+                pair("classname", "env_message"),
+                pair("targetname", "msg_leave_axis"),
+                pair("message", "MAP_SPAWN_WARNING"),
+                pair("spawnflags", "16"),
             ]
+        );
+    }
+
+    /// dod_beachassault2_mtek's worldspawn, shortened, and its two round
+    /// results as the map has them (classname last): a wad list commented out
+    /// by hand ends in a lone `"` the engine never reads. Counting that quote
+    /// paired every later key with the wrong value and found no text at all.
+    const BEACHASSAULT2: &[u8] = br#"{
+"wad" "\sierra\half-life\valve\halflife.wad;\sierra\half-life\firearms\firearms.wad"
+
+//\sierra\half-life\valve\ed_terrain.wad;\sierra\half-life\valve\aircraft.wad;"
+"mapversion" "220"
+"message" "beachassault2"
+"classname" "worldspawn"
+}
+// ===== CONTROL =====
+{
+"message" "ambience/germanwin.wav"
+"targetname" "axis_win"
+"classname" "ambient_generic"
+}
+{
+"score_nextmapdelay" "3"
+"message" "MAP_AXIS_VICTORY1"
+"team" "2"
+"targetname" "axis_win"
+"classname" "dod_score_ent"
+}
+{
+"targetname" "allies_win"
+"message" "MAP_ALLIED_VICTORY1"
+"team" "1"
+"classname" "dod_score_ent"
+}
+"#;
+
+    #[test]
+    fn a_commented_out_line_with_a_stray_quote_is_skipped() {
+        assert_eq!(
+            declared(BEACHASSAULT2),
+            set(&["MAP_ALLIED_VICTORY1", "MAP_AXIS_VICTORY1"])
+        );
+        let entities = parse_entities(BEACHASSAULT2).expect("beachassault2 parses");
+        assert_eq!(entities.len(), 4);
+        assert_eq!(entities[0][1], (b"mapversion".to_vec(), b"220".to_vec()));
+    }
+
+    /// A high byte in a literal sentence survives the parse as the same
+    /// byte, so it still matches the `HudText` payload.
+    #[test]
+    fn a_high_byte_in_a_sentence_matches_byte_for_byte() {
+        let lump = b"{ \"classname\" \"env_message\" \"message\" \"Br\xfccke gesprengt\" }\0junk";
+        assert_eq!(
+            declared(lump),
+            BTreeSet::from([b"Br\xfccke gesprengt".to_vec()])
         );
     }
 
     #[test]
     fn collects_round_results_and_hints() {
         assert_eq!(
-            declared_text(ANZIO),
+            declared(ANZIO),
             set(&[
                 "MAP_ALLIED_VICTORY2",
                 "MAP_AXIS_VICTORY2",
@@ -527,7 +585,7 @@ mod tests {
     /// keeps a sound out of the list.
     #[test]
     fn an_ambient_generics_message_is_not_on_screen_text() {
-        assert!(!declared_text(ANZIO).contains(&b"ambience/uswin.wav"[..]));
+        assert!(!declared(ANZIO).contains(&b"ambience/uswin.wav"[..]));
     }
 
     /// A custom map that skips the token and writes the sentence straight
@@ -537,20 +595,22 @@ mod tests {
         let lump =
             br#"{ "classname" "dod_score_ent" "message" "Allies take control over the village!" }"#;
         assert_eq!(
-            declared_text(lump),
+            declared(lump),
             set(&["Allies take control over the village!"])
         );
     }
 
     #[test]
     fn an_empty_message_is_not_a_string_to_hide() {
-        assert!(declared_text(br#"{ "classname" "env_message" "message" "" }"#).is_empty());
+        assert!(declared(br#"{ "classname" "env_message" "message" "" }"#).is_empty());
     }
 
+    /// A string that never closes fails the whole lump, as it does for
+    /// `dod::map_entities`: nothing is hidden on a map that unreadable.
     #[test]
-    fn a_truncated_lump_yields_what_came_before_it() {
+    fn a_truncated_lump_is_an_error() {
         let lump = br#"{ "classname" "env_message" "message" "MAP_SPAWN_WARNING" } { "classname" "env_message" "mess"#;
-        assert_eq!(declared_text(lump), set(&["MAP_SPAWN_WARNING"]));
+        assert!(declared_text(lump).is_err());
     }
 
     #[test]
@@ -565,7 +625,7 @@ mod tests {
 
     #[test]
     fn the_maps_own_text_is_hidden() {
-        let declared = declared_text(ANZIO);
+        let declared = declared(ANZIO);
         assert!(is_declared(&declared, &hud_text("MAP_SPAWN_WARNING")));
         assert!(is_declared(&declared, &hud_text("MAP_ALLIED_VICTORY2")));
     }
@@ -574,7 +634,7 @@ mod tests {
     /// This is the test that says they get through on purpose.
     #[test]
     fn dods_own_prompts_pass_through() {
-        let declared = declared_text(ANZIO);
+        let declared = declared(ANZIO);
         assert!(!is_declared(&declared, &hud_text("#Clan_allies_ready")));
         assert!(!is_declared(&declared, &hud_text("#Clan_axis_ready")));
     }
@@ -583,14 +643,14 @@ mod tests {
     /// one is a different message.
     #[test]
     fn matching_is_case_sensitive() {
-        let declared = declared_text(ANZIO);
+        let declared = declared(ANZIO);
         assert!(!is_declared(&declared, &hud_text("map_spawn_warning")));
     }
 
     #[test]
     fn an_empty_payload_is_never_hidden() {
         assert!(!is_declared(&set(&[""]), b""));
-        assert!(!is_declared(&declared_text(ANZIO), &[0, 1]));
+        assert!(!is_declared(&declared(ANZIO), &[0, 1]));
     }
 
     #[test]

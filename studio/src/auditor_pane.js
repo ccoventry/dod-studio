@@ -10,15 +10,20 @@ import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
   auditTotals, wastedSizeText, fileStatus, keepFile, keepPicksIn,
   withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
-  auditFoldersKey, isArchived, canDelete, copiesToDelete, revealPath,
+  auditFoldersKey, canDelete, copiesToDelete, backupChip, backedUpWithout,
 } from './audit_duplicates.js';
 import { createClock, readLastRun, rememberLastRun, secondsText, showBar } from './progress_view.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
 /// copies in it are kept first and never start ticked. `onSettingsChange`
-/// saves the app settings when "Look inside .zip files" changes (#929).
+/// saves the app settings when "Show demos backed up in archives" changes
+/// (#929).
 export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => {} } = {}) {
   let currentAuditResults = [];
+  // Every loose demo an archive holds a copy of (#929), in a group or not:
+  // listed in a section of its own below the groups.
+  let backedUp = [];
+  let backedUpExpanded = true;
   // Groups default to expanded; this tracks the exceptions. Reset on every
   // new audit run so a fresh result set always starts fully expanded.
   let collapsedGroups = new Set();
@@ -127,6 +132,8 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       running = true;
       collapsedGroups = new Set();
       currentAuditResults = [];
+      backedUp = [];
+      backedUpExpanded = true;
       refreshStartButtonState();
       folders.setLocked(true);
       if (cancelAuditBtn) cancelAuditBtn.disabled = false;
@@ -142,11 +149,12 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         const outcome = await runDemoAudit(paths, allDrives, queued, lookInZips);
         const seconds = secondsText(clock.ms());
         currentAuditResults = withAuditOrder(outcome?.groups);
+        backedUp = outcome?.cancelled ? [] : (outcome?.backed_up ?? []);
         renderAuditResults({ resetTicks: true });
         if (!outcome?.cancelled) rememberLastRun(foldersKey, foldersSeen);
         setStatus(outcome?.cancelled
           ? STRINGS.AUDITOR.CANCELLED_STATUS
-          : STRINGS.AUDITOR.doneStatus(outcome?.demos ?? 0, currentAuditResults.length, seconds));
+          : STRINGS.AUDITOR.doneStatus(outcome?.demos ?? 0, currentAuditResults.length, seconds, outcome?.archive_demos ?? 0));
         if (outcome?.cancelled && tbody) {
           tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.CANCELLED_ROW}</td></tr>`;
         }
@@ -204,10 +212,12 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
   function renderAuditResults({ resetTicks = false } = {}) {
     if (!tbody) return;
 
+    const backedUpNote = backedUp.length ? STRINGS.AUDITOR.footerBackedUp(backedUp.length) : '';
     if (currentAuditResults.length === 0) {
       tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.NO_DUPLICATES_ROW}</td></tr>`;
+      renderBackedUp();
       setDeleteButtons(0);
-      setAuditFooterSummary(STRINGS.AUDITOR.FOOTER_DEFAULT);
+      setAuditFooterSummary(STRINGS.AUDITOR.FOOTER_DEFAULT + backedUpNote);
       return;
     }
     if (resetTicks) {
@@ -255,7 +265,6 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       shownFiles(group).forEach(({ file, kept }) => {
         const fileIdx = kept ? 0 : 1;
         const notCopy = !kept && isNotCopy(group, file.path);
-        const archived = isArchived(file);
         const tr = document.createElement('tr');
         tr.className = kept ? 'audit-file-row audit-kept' : 'audit-file-row';
         // The kept copy stands out where it is: rows don't move when
@@ -267,10 +276,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         cb.type = 'checkbox';
         cb.className = 'audit-row-cb';
         cb.dataset.file = file.path;
-        if (archived) {
-          cb.disabled = true; // Zips are never changed (#929), kept or not.
-          cb.title = STRINGS.AUDITOR.IN_ZIP_TITLE;
-        } else if (fileIdx === 0) {
+        if (fileIdx === 0) {
           cb.disabled = true; // The kept copy is never deleted.
           cb.title = STRINGS.AUDITOR.ORIGINAL_FILE_TITLE;
         } else if (notCopy) {
@@ -309,16 +315,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         tdSize.textContent = STRINGS.AUDITOR.megabytesLabel(sizeMb);
 
         const displayPath = shownPath(file.path);
-        const tdPath = document.createElement('td');
-        tdPath.className = 'audit-file-path';
-        tdPath.textContent = displayPath;
-        if (archived) {
-          const chip = document.createElement('span');
-          chip.className = 'audit-zip-chip';
-          chip.textContent = STRINGS.AUDITOR.IN_ZIP_CHIP;
-          chip.title = STRINGS.AUDITOR.IN_ZIP_TITLE;
-          tdPath.append(' ', chip);
-        }
+        const tdPath = pathCell(file);
         if (notCopy) {
           tdPath.style.color = '#f0c060';
         } else if (fileIdx > 0) {
@@ -330,41 +327,92 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
           keepLabel.style.fontWeight = 'bold';
         }
 
-        const tdAction = document.createElement('td');
-        const copyBtn = document.createElement('button');
-        copyBtn.type = 'button';
-        copyBtn.textContent = STRINGS.AUDITOR.COPY_PATH_BUTTON;
-        copyBtn.addEventListener('click', async () => {
-          try {
-            await navigator.clipboard.writeText(displayPath);
-            showToast(STRINGS.AUDITOR.PATH_COPIED_TOAST, 'info');
-          } catch (err) {
-            console.error('Clipboard write failed:', err);
-            showToast(STRINGS.AUDITOR.COPY_PATH_FAILED_TOAST, 'error');
-          }
-        });
-        const openBtn = document.createElement('button');
-        openBtn.type = 'button';
-        openBtn.textContent = STRINGS.AUDITOR.OPEN_FOLDER_BUTTON;
-        openBtn.addEventListener('click', () => {
-          revealInExplorer(revealPath(file)).catch(() => {});
-        });
-        tdAction.appendChild(copyBtn);
-        tdAction.appendChild(openBtn);
-
         tr.appendChild(tdCb);
         tr.appendChild(tdStatus);
         tr.appendChild(tdSize);
         tr.appendChild(tdPath);
-        tr.appendChild(tdAction);
+        tr.appendChild(actionCell(displayPath));
         tbody.appendChild(tr);
       });
     });
+    renderBackedUp();
 
     const { copies, wastedBytes } = auditTotals(currentAuditResults);
-    setAuditFooterSummary(STRINGS.AUDITOR.footerSummary(copies, wastedSizeText(wastedBytes)));
+    setAuditFooterSummary(STRINGS.AUDITOR.footerSummary(copies, wastedSizeText(wastedBytes)) + backedUpNote);
 
     updateDeleteButtonState();
+  }
+
+  /// A row's File Path cell: the path, and the backed-up chip when an
+  /// archive holds a copy (#929).
+  function pathCell(file) {
+    const td = document.createElement('td');
+    td.className = 'audit-file-path';
+    td.textContent = shownPath(file.path);
+    const chip = backupChip(file);
+    if (chip) {
+      const span = document.createElement('span');
+      span.className = 'audit-backup-chip';
+      span.textContent = chip.text;
+      span.title = chip.title;
+      td.append(' ', span);
+    }
+    return td;
+  }
+
+  /// A row's Action cell: Copy Path and Open Folder.
+  function actionCell(displayPath) {
+    const td = document.createElement('td');
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = STRINGS.AUDITOR.COPY_PATH_BUTTON;
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(displayPath);
+        showToast(STRINGS.AUDITOR.PATH_COPIED_TOAST, 'info');
+      } catch (err) {
+        console.error('Clipboard write failed:', err);
+        showToast(STRINGS.AUDITOR.COPY_PATH_FAILED_TOAST, 'error');
+      }
+    });
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.textContent = STRINGS.AUDITOR.OPEN_FOLDER_BUTTON;
+    openBtn.addEventListener('click', () => {
+      revealInExplorer(displayPath).catch(() => {});
+    });
+    td.append(copyBtn, openBtn);
+    return td;
+  }
+
+  /// Below the groups: every loose demo an archive holds a copy of (#929),
+  /// with or without loose copies, so a demo in no group still shows it is
+  /// backed up. Nothing here can be ticked.
+  function renderBackedUp() {
+    if (!tbody || !backedUp.length) return;
+    const head = document.createElement('tr');
+    head.className = 'audit-group-row audit-backed-up-row';
+    head.innerHTML = '<td></td><td><button class="group-toggle-btn" type="button"></button></td><td>-</td><td class="text-muted"></td><td></td>';
+    const toggle = head.querySelector('.group-toggle-btn');
+    toggle.textContent = STRINGS.AUDITOR.backedUpSectionLabel(backedUpExpanded, backedUp.length);
+    toggle.addEventListener('click', () => {
+      backedUpExpanded = !backedUpExpanded;
+      renderAuditResults();
+    });
+    head.children[3].textContent = STRINGS.AUDITOR.BACKED_UP_SECTION_NOTE;
+    tbody.appendChild(head);
+    if (!backedUpExpanded) return;
+    backedUp.forEach((file) => {
+      const tr = document.createElement('tr');
+      tr.className = 'audit-file-row audit-backed-up-file';
+      const tdStatus = document.createElement('td');
+      tdStatus.className = 'audit-file-status';
+      if (file.in_use) tdStatus.textContent = STRINGS.AUDITOR.IN_USE[file.in_use];
+      const tdSize = document.createElement('td');
+      tdSize.textContent = '-';
+      tr.append(document.createElement('td'), tdStatus, tdSize, pathCell(file), actionCell(shownPath(file.path)));
+      tbody.appendChild(tr);
+    });
   }
 
   /// Keeps `path` instead of group `groupIdx`'s current pick.
@@ -465,6 +513,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       }
       deleted.forEach((p) => ticked.delete(p));
       currentAuditResults = withoutDeleted(currentAuditResults, deleted);
+      backedUp = backedUpWithout(backedUp, deleted);
       // A copy with other bytes is a different demo: marked, never ticked again.
       const notCopies = failed.filter((f) => f.not_a_copy).map((f) => f.path);
       notCopies.forEach((p) => ticked.delete(p));

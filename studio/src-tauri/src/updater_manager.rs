@@ -1,5 +1,7 @@
+use crate::download_progress::DownloadMeter;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -83,6 +85,13 @@ pub async fn check_for_update(
     }
 }
 
+/// The update a check found, left in place: a failed download re-enables
+/// Download & Install (`updater_pane.js`), and a retry needs it still there.
+/// Taking it out made every retry fail with "no update available".
+fn pending_update<T: Clone>(slot: &Mutex<Option<T>>) -> Option<T> {
+    slot.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
 #[tauri::command]
 pub async fn download_and_install_update(
     app: AppHandle,
@@ -94,33 +103,31 @@ pub async fn download_and_install_update(
     if cfg!(debug_assertions) {
         return Err(crate::messages::LOCAL_BUILD_CANNOT_INSTALL_UPDATE.to_string());
     }
-    let pending = Arc::clone(&state.pending);
-    let update = pending
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .take()
-        .ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
+    let update =
+        pending_update(&state.pending).ok_or(crate::messages::NO_UPDATE_AVAILABLE_TO_INSTALL)?;
 
-    let progress_app = app.clone();
-    let mut downloaded: u64 = 0;
-    update
-        .download_and_install(
-            move |chunk_length, content_length| {
-                downloaded += chunk_length as u64;
-                let _ = progress_app.emit(
-                    "update_download_progress",
-                    serde_json::json!({
-                        "downloaded": downloaded,
-                        "total": content_length,
-                    }),
-                );
+    // Download, then install, rather than `download_and_install`: its
+    // download-finished callback fires before the signature check and the
+    // install, too early for "Installing" or "Ready" (#957).
+    let mut meter = DownloadMeter::default();
+    let bytes = update
+        .download(
+            |chunk_length, content_length| {
+                if let Some(p) = meter.chunk(chunk_length as u64, content_length, Instant::now()) {
+                    let _ = app.emit("update_download_progress", p);
+                }
             },
-            move || {
-                let _ = app.emit("update_ready", ());
-            },
+            || {},
         )
         .await
         .map_err(|e| e.to_string())?;
+    // The throttle may have held back the last chunk: the bar ends full.
+    let _ = app.emit("update_download_progress", meter.progress());
+    let _ = app.emit("update_installing", ());
+    // On Windows this starts the installer and quits Studio, so nothing after
+    // it runs there.
+    update.install(bytes).map_err(|e| e.to_string())?;
+    let _ = app.emit("update_ready", ());
 
     Ok(())
 }
@@ -271,4 +278,19 @@ mod git_branch_tests {
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
+}
+
+#[cfg(test)]
+mod pending_update_tests {
+    use super::pending_update;
+    use std::sync::Mutex;
+
+    /// A download that fails leaves the update for Download & Install's retry.
+    #[test]
+    fn reading_the_pending_update_leaves_it_for_a_retry() {
+        let slot = Mutex::new(Some("v0.3.0"));
+        assert_eq!(pending_update(&slot), Some("v0.3.0"));
+        assert_eq!(pending_update(&slot), Some("v0.3.0"));
+        assert_eq!(pending_update(&Mutex::new(None::<&str>)), None);
+    }
 }
