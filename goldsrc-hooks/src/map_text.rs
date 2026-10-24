@@ -208,7 +208,7 @@ fn is_declared(declared: &BTreeSet<Vec<u8>>, payload: &[u8]) -> bool {
 }
 
 /// `maps/dod_anzio.bsp` -> `dod_anzio`.
-fn short_name(level: &str) -> &str {
+pub(crate) fn short_name(level: &str) -> &str {
     let base = level.rsplit(['/', '\\']).next().unwrap_or(level);
     base.strip_suffix(".bsp")
         .or_else(|| base.strip_suffix(".BSP"))

@@ -10,7 +10,9 @@
 // Grouped by map rather than by demo: twenty demos short of one map is one
 // download, and a list of twenty rows saying the same thing is not a list.
 
+import { listen } from '@tauri-apps/api/event';
 import { checkDemoMaps, downloadMap } from './ipc_bridge.js';
+import { mapDownloadLine, showBytes, showSliding } from './download_progress.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -132,6 +134,20 @@ export function initMapWarnings(getGamePath) {
   const el = bannerEl();
   if (!el) return;
 
+  // The map being downloaded, for the banner's step line and bar (#957).
+  let active = null;
+  const showStep = (event) => {
+    const line = el.querySelector('#map-download-line');
+    const bar = el.querySelector('#map-download-bar');
+    if (!active || !line) return;
+    line.textContent = mapDownloadLine(active.map, active.index, active.count, event);
+    if (event?.step === 'downloading' && event.total) showBytes(bar, event.downloaded, event.total);
+    else showSliding(bar);
+  };
+  listen('map_download_progress', (event) => {
+    if (active && event.payload?.map === active.map) showStep(event.payload);
+  }).catch((err) => console.error('Failed to listen for map_download_progress:', err));
+
   el.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -162,9 +178,19 @@ export function initMapWarnings(getGamePath) {
     const previous = target.textContent;
     target.textContent = STRINGS.MAPS.DOWNLOADING;
 
-    for (const mapName of wanted) {
+    el.insertAdjacentHTML(
+      'beforeend',
+      `<div id="map-download-status" style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+        <span id="map-download-line" style="flex:1"></span>
+        <progress id="map-download-bar" style="width:160px;"></progress>
+      </div>`
+    );
+
+    for (const [i, mapName] of wanted.entries()) {
       const problem = problems.get(mapName);
       if (!problem) continue;
+      active = { map: mapName, index: i + 1, count: wanted.length };
+      showStep(null);
       try {
         const result = await downloadMap(mapName, problem.expectedChecksum, gamePath);
         problems.delete(mapName);
@@ -182,6 +208,7 @@ export function initMapWarnings(getGamePath) {
       }
     }
 
+    active = null;
     target.textContent = previous;
     render();
   });

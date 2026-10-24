@@ -24,9 +24,8 @@ import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane } from './demo_rename_ui.js';
 import { initThemedConfirm } from './themed_confirm.js';
-import { initAnalyzerPane, openAnalyzerDemo, refreshAnalyzerQuickLinks } from './analyzer_pane.js';
-import { createLaunchFiles } from './launch_files.js';
-import { initFileTypeSettings, getDemOpenTarget } from './file_types_settings.js';
+import { initAnalyzerPane, refreshAnalyzerQuickLinks } from './analyzer_pane.js';
+import { startOpenFromExplorer } from './open_from_explorer.js';
 import { initHdPane } from './hd_pane.js';
 import { initBlenderPane } from './blender_pane.js';
 import { initOverviewsPane } from './overviews_pane.js';
@@ -52,6 +51,7 @@ import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
+import { createRescanRecent } from './rescan_recent.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
@@ -127,13 +127,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
-  const {
-    markProjectDirty,
-    saveProjectSession,
-    needsSavePrompt,
-    requestUnsavedChangesConfirmation,
-    openProject,
-  } = createProjectSession({
+  const projectSession = createProjectSession({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     loadDemos: (demos) => {
@@ -157,10 +151,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
     onProjectFile: (path) => recentProjects.remember(path),
-    offerConvert: (path) => projectConvert.offerConvert(path),
+    offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
-  const projectConvert = createProjectConvert({ persist: () => persistAppSettings() });
+  const { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
@@ -456,6 +450,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   const { offerRescan } = createProjectRescan({
     getDemos: () => currentScannedDemos,
     scan: (paths) => triggerAutoScan(paths),
+  });
+  // After an update, every recent session's outdated demos at once (#938).
+  const rescanRecent = createRescanRecent({
+    getRecent: () => recentProjects.list(),
+    session: projectSession,
+    getDemos: () => currentScannedDemos,
+    scan: (paths) => triggerAutoScan(paths),
+    isScanning: () => isScanning(),
+    isSetupOpen: () => !!setup?.isOpen(),
+    persistAppSettings: () => persistAppSettings(),
   });
 
   async function updateExportPoolIndicator() {
@@ -853,16 +857,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     unpin: (drop) => { scanPaths = scanPaths.filter((f) => !drop.includes(f)); refreshAnalyzerQuickLinks(); return persistAppSettings(); },
     isSetupOpen: () => setup.isOpen(),
     persist: () => persistAppSettings(),
-  }));
+  }))
+    // One startup prompt at a time: the rescan offer (#938) waits for the pins review.
+    .finally(() => rescanRecent.offerAfterUpdate().catch((err) => console.error("Rescan recent sessions:", err)));
 
-  // Projects and demos opened from Explorer (#528), once startup is done.
-  initFileTypeSettings({ onSettingsChange: () => persistAppSettings() });
-  createLaunchFiles({
-    openProject,
-    openDemoInAnalyzer: openAnalyzerDemo,
-    addDemosToQueue: (paths) => triggerAutoScan(paths, { pickedFiles: true }),
-    getDemTarget: getDemOpenTarget, isScanning,
-  }).start();
+  startOpenFromExplorer({ openProject, isScanning, persist: () => persistAppSettings(),
+    addDemosToQueue: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {

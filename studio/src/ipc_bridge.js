@@ -79,6 +79,16 @@ export async function convertProjectFile(path) {
     });
 }
 
+/** A project file's text, for Rescan Recent Sessions' count and backup
+ *  (#938). Rejects with the backend's message, which names the file. */
+export async function readProjectFile(path) {
+  return invoke("load_project_session", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (load_project_session):", err);
+      throw err;
+    });
+}
+
 /** Whether DoD Studio is in `.dem`'s Open With list (#528):
  *  `{ registered, thisCopy, otherExe }`, or null when it couldn't be read. */
 export async function demOpenWithStatus() {
@@ -96,6 +106,16 @@ export async function setDemOpenWith(enabled) {
   return invoke("set_dem_open_with", { enabled })
     .catch((err) => {
       console.error("IPC Execution Error (set_dem_open_with):", err);
+      throw err;
+    });
+}
+
+/** Writes `contents` to `path` (a project backup, #938). Rejects with the
+ *  backend's message, which names the file. */
+export async function writeProjectFile(path, contents) {
+  return invoke("save_project_session", { path, contents })
+    .catch((err) => {
+      console.error("IPC Execution Error (save_project_session):", err);
       throw err;
     });
 }
@@ -1192,8 +1212,9 @@ export async function checkForUpdate(channel) {
 
 /** Downloads and installs whatever update the last checkForUpdate() call
  *  found — throws if none is pending. Progress arrives via the
- *  `update_download_progress`/`update_ready` events, not this call's
- *  return value. */
+ *  `update_download_progress`, `update_installing` and `update_ready`
+ *  events, not this call's return value. On Windows the installer closes
+ *  Studio, so it never returns there. */
 export async function downloadAndInstallUpdate() {
   return invoke("download_and_install_update")
     .catch((err) => {

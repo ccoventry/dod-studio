@@ -8,6 +8,7 @@ import { saveSettings } from './ipc_bridge.js';
 import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
 import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
+import { rescanOfferSettings, applyRescanOfferSettings } from './rescan_recent.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -180,6 +181,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       pick_folders: getPickFolders(),
       ...readReviewSettings(),
       ...scanRateSettings(),
+      ...rescanOfferSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -386,6 +388,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setRenderPresets(settings.render_presets);
   applyReviewSettings(settings);
   applyScanRateSettings(settings);
+  applyRescanOfferSettings(settings);
   if (settings.scan_workers) {
     const inputEl = document.querySelector('#config-scan-workers');
     if (inputEl) inputEl.value = settings.scan_workers;
