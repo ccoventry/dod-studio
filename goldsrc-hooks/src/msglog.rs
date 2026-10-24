@@ -11,9 +11,10 @@
 //!
 //! The same one `deathmsg`'s `block`/`fake` already rely on:
 //! `pfnHookUserMsg` **prepends** a fresh record rather than overwriting the
-//! existing one, so the engine's by-name dispatcher stops at the newest
-//! entry and the game's own handler stays reachable by calling its thunk
-//! directly. **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
+//! existing one, so the engine's by-number dispatcher -- the one every
+//! message from the server goes through -- stops at the newest entry and the
+//! game's own handler stays reachable by calling its thunk directly.
+//! **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
 //!
 //! One handler, [`hooked_msg`], is registered for every message DoD's
 //! `client.dll` hooks -- the full 71-entry name/thunk table below, derived
@@ -143,7 +144,7 @@ static MESSAGES: &[(&str, usize)] = &[
     ("YouDied", 0x20be0),
 ];
 
-fn find_thunk(name: &str) -> Option<usize> {
+pub(crate) fn find_thunk(name: &str) -> Option<usize> {
     MESSAGES
         .iter()
         .find(|(n, _)| n.eq_ignore_ascii_case(name))
@@ -257,6 +258,17 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             &[]
         };
         if crate::map_text::hide(payload) {
+            return 1;
+        }
+    }
+    // And ds_hud_hide_menus' VGUIMenu and MOTD (#677).
+    if let Some(n) = name_str.as_deref() {
+        let payload: &[u8] = if size > 0 && !buf.is_null() {
+            unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }
+        } else {
+            &[]
+        };
+        if crate::vgui_menus::hide(n, payload) {
             return 1;
         }
     }
