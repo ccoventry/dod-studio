@@ -138,8 +138,11 @@ pub struct AuditOutcome {
     /// Every loose demo an archive holds a copy of (#929), by path, whether
     /// or not it is in a group.
     pub backed_up: Vec<AuditFile>,
-    /// Demos keyed.
+    /// Loose demos keyed.
     pub demos: usize,
+    /// Demos inside archives, counted apart so the done line doesn't add
+    /// them to the loose ones.
+    pub archive_demos: usize,
     /// Cancelled before the key pass ended: `groups` is empty, since a
     /// partial pass would list originals whose copies it never reached.
     pub cancelled: bool,
@@ -467,7 +470,8 @@ pub async fn run_demo_audit_impl(
         let cache_file = key_cache_file();
         let mut cache = KeyCache::load(&cache_file);
         let audit = find_duplicates_in(files, zips, &cancel_token, &Some(tx), &mut cache);
-        let demos = loose_demos + audit.zip_demos;
+        let archive_demos = audit.zip_demos;
+        let demos = loose_demos + archive_demos;
         let key_secs = key_started.elapsed().as_secs_f64();
         let last = progress_handle.join().unwrap_or_default();
         let cancelled = cancel_token.load(Ordering::Relaxed);
@@ -514,7 +518,8 @@ pub async fn run_demo_audit_impl(
         Ok(AuditOutcome {
             groups,
             backed_up,
-            demos: last.done,
+            demos: last.done.saturating_sub(archive_demos),
+            archive_demos,
             cancelled,
         })
     }))

@@ -154,7 +154,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         if (!outcome?.cancelled) rememberLastRun(foldersKey, foldersSeen);
         setStatus(outcome?.cancelled
           ? STRINGS.AUDITOR.CANCELLED_STATUS
-          : STRINGS.AUDITOR.doneStatus(outcome?.demos ?? 0, currentAuditResults.length, seconds));
+          : STRINGS.AUDITOR.doneStatus(outcome?.demos ?? 0, currentAuditResults.length, seconds, outcome?.archive_demos ?? 0));
         if (outcome?.cancelled && tbody) {
           tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.CANCELLED_ROW}</td></tr>`;
         }

@@ -367,8 +367,9 @@ test('a backed-up demo is marked, and its loose copies are offered as without ar
   await loadHarness(page);
   await page.fill('#audit-target-folder-input', 'C:\\Demos');
   await page.click('#run-audit-btn');
-  await page.evaluate(([groups, backedUp]) => window.__finishAudit({ groups, backed_up: backedUp, demos: 3, cancelled: false }),
+  await page.evaluate(([groups, backedUp]) => window.__finishAudit({ groups, backed_up: backedUp, demos: 3, archive_demos: 4, cancelled: false }),
     [BACKED_UP_GROUPS, BACKED_UP]);
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in \d+\.\d s: 3 demos checked and 4 inside archives, \d+ with copies\.$/);
 
   const rows = page.locator('#audit-results-body tr.audit-file-row');
   await expect(rows.locator('.audit-file-path')).toHaveText([
