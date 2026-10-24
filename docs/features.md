@@ -293,6 +293,8 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 **In-game window.** `ds_ui_panel` opens DoD Studio's own window inside the game, with Playback, Demos, Highlights, Console, Settings, Commands, Studio and Review tabs. It reads the analyzer cache for the Highlights tab, and every tab shows how far the demo and its highlights have loaded (#804). The Demos tab browses every drive, and with the hook DLL `viewdemo "D:/folder/demo"` plays a demo from any drive with no link or copy (`ds_demo_other_drives`, #778, #780). The game launches with `-addons` so the hook's own main menu can load from `dod_addon`. See `docs/dodstudio_commands.md`.
 
+**Menu size on the 25th Anniversary engine (#985).** That engine draws the menus, Options, the console and the in-game window bigger at higher resolutions (screen height / 720, so 2x at 1440p). Configuration › Paths › *Size the Game's Menus Like the Pre-Anniversary Engine* (off by default, shown only for an Anniversary install) writes a copy of the game's `TrackerScheme.res` (the game folder's own, else `valve`'s) with `ProportionalBaseWidthHD`/`HeightHD` raised to 7680x4320 into `<game>_addon\resource\`; the engine clamps that base to the screen, so the menus draw at 1x, as on the pre-Anniversary engine. It needs `-addons` (Studio's launches pass it). Unticking removes the copy; a `TrackerScheme.res` there that isn't Studio's is never touched, nor are the game's own files. The copy is refreshed from the game's scheme each time Studio reads the setting.
+
 ### 5.2 Console commands
 
 The DLL is how the app and a person reach into a running game: kill-feed, HUD and spectator controls, HD textures, demo seeking, and Studio's own in-game window. Every name starts `ds_` and none is saved into `config.cfg`. The names, defaults and what each does are in [`docs/dodstudio_commands.md`](dodstudio_commands.md), which is what the code registers on `dev`. Which of them work on which game build is in section 10.
@@ -400,6 +402,7 @@ A highlight is one life's kills by one player, at least one kill, for every conn
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |
+| Menu size (#985) | `<install>\dod_addon\resource\TrackerScheme.res`, Anniversary installs only, while the setting is on |
 | Overview edits | `%APPDATA%\dod-studio\overviews\<map>.json` |
 | Saved overviews | `<install>\dod_addon\overviews\` or `<install>\dod\overviews\`; a user's own copied to `overviews\dodstudio_backup\` first |
 | HLAE FFmpeg link | `<HLAE>\ffmpeg\ffmpeg.ini` |

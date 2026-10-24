@@ -20,6 +20,7 @@ mod installs_manager;
 mod manifest_file;
 mod map_manager;
 mod match_group_cmd;
+mod menu_scale_manager;
 mod messages;
 mod movie_copy_manager;
 mod open_files;
@@ -1066,6 +1067,8 @@ pub fn run() {
             demo_links_manager::add_demo_link,
             demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
+            menu_scale_manager::menu_scale_status,
+            menu_scale_manager::set_menu_scale,
             installs_manager::find_installs,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
