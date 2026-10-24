@@ -678,9 +678,14 @@ fn status_text() -> String {
         ),
         format!(
             "{} = {} -- {}",
-            crate::map_sounds::NAME,
-            bit(crate::map_sounds::on()),
+            crate::map_sounds::VICTORY_MUSIC_NAME,
+            bit(crate::map_sounds::Family::VictoryMusic.on()),
             crate::map_sounds::status()
+        ),
+        format!(
+            "{} = {} -- the same svc sound calls",
+            crate::map_sounds::FLAG_CAPTURE_NAME,
+            bit(crate::map_sounds::Family::FlagCapture.on()),
         ),
         format!(
             "{CROSSHAIR_NAME} = {} -- {}",
@@ -1753,8 +1758,10 @@ pub fn install() {
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
         crate::pov_live_bob::set_log_cvar(log);
     }
-    if let Some(mute) = register(crate::map_sounds::NAME, "0") {
-        crate::map_sounds::set_cvar(mute);
+    for family in crate::map_sounds::Family::ALL {
+        if let Some(mute) = register(family.setting(), "0") {
+            family.set_cvar(mute);
+        }
     }
     if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
         crate::map_sounds::set_log_cvar(log);
@@ -1939,7 +1946,8 @@ mod tests {
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
-            crate::map_sounds::NAME,
+            crate::map_sounds::VICTORY_MUSIC_NAME,
+            crate::map_sounds::FLAG_CAPTURE_NAME,
             crate::map_sounds::LOG_NAME,
             crate::screen_effects::FLASH_NAME,
             crate::screen_effects::SHAKE_NAME,

@@ -85,6 +85,14 @@ is the complete list):
   hole!" and the rest, without overwriting the game's own `player/us*.wav`,
   `player/brit*.wav` and `player/ger*.wav`. Subtitles and speaker icons still
   show -- see `docs/goldsrc_hud_suppression.md`.
+- **Victory music and capture announcements** (`ds_sound_mute_victory_music 1`,
+  `ds_sound_mute_flag_capture 1`, each on its own): silence the music a map
+  plays when a team wins the round, and the point-captured announcements
+  (also the objective-secured ones, like dod_escape's). Both are map sounds
+  the server sends, so three `svc_` call sites into `S_Start*Sound` are
+  redirected and a sound is dropped by name, from two lists surveyed over the
+  installed maps (`native/examples/map_sound_table.rs`). See the module doc in
+  `src/map_sounds.rs` (#284).
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
