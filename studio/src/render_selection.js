@@ -62,7 +62,9 @@ export function finishedTakeFolders(allJobs, { minAgeMs = 0, nowMs = Date.now() 
   const out = new Set();
   for (const [folder, takeJobs] of byTake) {
     const at = takeFinishedAt(takeJobs);
-    if (at !== null && nowMs - at >= minAgeMs) out.add(folder);
+    // No age asked: a start time ahead of this clock (another PC's, or
+    // before the clock was set back) still counts.
+    if (at !== null && (minAgeMs <= 0 || nowMs - at >= minAgeMs)) out.add(folder);
   }
   return out;
 }

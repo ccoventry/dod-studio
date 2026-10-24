@@ -146,6 +146,13 @@ describe('finished takes (#644)', () => {
     expect([...finishedTakeFolders(all, { nowMs: NOW, minAgeMs: 30 * DAY })]).toEqual([]);
   });
 
+  it('"of any age" keeps a take rendered by a clock ahead of this one', () => {
+    // Rendered on another PC, or before this clock was set back.
+    const all = [job({ status: 'Finished', take_folder: 'D:/a', history: [done(NOW + DAY)] })];
+    expect([...finishedTakeFolders(all, { nowMs: NOW })]).toEqual(['D:/a']);
+    expect([...finishedTakeFolders(all, { nowMs: NOW, minAgeMs: DAY })]).toEqual([]);
+  });
+
   it('Select finished ticks every row of each finished take and nothing else', () => {
     const rows = [
       job({ id: '0', status: 'Finished', take_folder: TAKE, history: [done(NOW - 2 * DAY)] }),
