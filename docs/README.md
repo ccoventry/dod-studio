@@ -24,7 +24,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [dodstudio_commands.md](dodstudio_commands.md) — every `ds_*` cvar and command. Also the source of the wiki's Commands page.
 - [goldsrc_client_dll_internals.md](goldsrc_client_dll_internals.md) — how DoD's `client.dll` is wired and how the hook reaches it.
 - [goldsrc_client_dll_survey.md](goldsrc_client_dll_survey.md) — what in `client.dll` can be controlled.
-- [goldsrc_hw_dll_survey.md](goldsrc_hw_dll_survey.md) — what in `hw.dll` HLAE already owns, and what is left.
+- [goldsrc_hw_dll_survey.md](goldsrc_hw_dll_survey.md) — what in `hw.dll` HLAE already owns, how the engine reads a `playdemo` demo, and what is left.
 - [goldsrc_viewdemo.md](goldsrc_viewdemo.md) — how `viewdemo` plays and seeks a demo.
 
 ### Per feature
