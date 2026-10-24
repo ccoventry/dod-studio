@@ -1150,6 +1150,10 @@ export const STRINGS = {
     THIS_PC_LABEL: '💻 This PC',
     PICK_FOLDER_FROM_SIDEBAR: 'Pick a folder from the Explorer sidebar.',
     NO_DEMOS_IN_FOLDER: 'No demos found in this folder.',
+    // A folder's file names are on their way; a cloud drive can take a while.
+    READING_FOLDER: 'Reading this folder…',
+    // The Map cell until the start of the demo is read.
+    MAP_READING: '…',
     NO_DEMOS_MATCH_FILTERS: 'No demos match the current filters.',
     ANALYZING_ELLIPSIS: 'Analyzing…',
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',

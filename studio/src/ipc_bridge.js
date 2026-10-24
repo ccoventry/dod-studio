@@ -1096,6 +1096,16 @@ export async function browseDirectory(path) {
     });
 }
 
+/** The map and type from the start of each demo, `[{ path, map_name,
+ *  demo_type }]`; a listing from browseDirectory leaves them out. */
+export async function readDemoHeads(paths) {
+  return invoke("read_demo_heads", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (read_demo_heads):", err);
+      return [];
+    });
+}
+
 export async function defaultBrowseDir() {
   return invoke("default_browse_dir")
     .catch((err) => {

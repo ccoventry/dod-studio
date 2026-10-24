@@ -1079,6 +1079,7 @@ pub fn run() {
             reveal_in_explorer,
             open_recycle_bin,
             dir_browser::browse_directory,
+            dir_browser::read_demo_heads,
             dir_browser::default_browse_dir,
             pick_paths::pick_path_states,
             pick_paths::pick_user_folders,
