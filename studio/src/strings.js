@@ -594,7 +594,7 @@ export const STRINGS = {
     START_CAPTURE_BUTTON: 'Start Capture Batch',
     CANCEL_BATCH_BUTTON: 'Cancel Batch',
     STATUS_WAITING: 'Status: Waiting...',
-    INIT_COMMAND_PLACEHOLDER: 'e.g. mirv_streams add all',
+    INIT_COMMAND_PLACEHOLDER: 'e.g. mirv_fx_wh_enable 1',
     CUSTOM_COMMAND_PLACEHOLDER: 'Command',
     CUSTOM_COMMAND_RELATION_OPTIONS: ['Before', 'After'],
     footerRequiredSpace: (gb) => `Required: ${gb} GB`,
