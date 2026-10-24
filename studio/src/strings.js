@@ -68,6 +68,9 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Rescan Recent Sessions (#938): rescan_recent.js.
+    RESCAN_RECENT: 'Rescan Recent Sessions…',
+    RESCAN_RECENT_TITLE: 'Rescan the demos an older DoD Studio scanned, in every recent session',
     // File → Open Recent (#935).
     OPEN_RECENT: 'Open Recent',
     OPEN_RECENT_EMPTY: 'No recent sessions',
@@ -971,11 +974,17 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
-    // "Look inside .zip files" (#929).
-    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
-    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
-    IN_ZIP_CHIP: 'in a zip',
-    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
+    // "Show demos backed up in archives" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Show demos backed up in archives (.zip, .7z, .rar)',
+    LOOK_IN_ZIPS_TITLE: "Also read the demos inside .zip, .7z and .rar files, and mark each loose demo that an archive already holds as backed up, with every archive that holds it. An archive is a backup: a loose demo is never offered for deletion because an archive holds it, and archives are only read, never changed. Only .dem files count, an archive inside an archive isn't opened, and encrypted or damaged ones are skipped (the activity log names them). The first audit of big archives takes longer, solid .7z and .rar ones most; later audits remember them until they change.",
+    // A loose demo an archive holds a copy of (#929).
+    backedUpChip: (archives) => (archives.length === 1
+      ? `backed up in ${archives[0]}`
+      : `backed up in ${archives.length} archives`),
+    backedUpTitle: (entries) => `A copy of this demo is in:\n${entries.join('\n')}\n\nArchives are only read, never changed.`,
+    backedUpSectionLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Backed up in archives (${count} demo${count === 1 ? '' : 's'})`,
+    BACKED_UP_SECTION_NOTE: 'Each of these demos has a copy in an archive. Nothing here is deleted.',
+    footerBackedUp: (count) => ` | Backed up in archives: ${count}`,
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -986,12 +995,12 @@ export const STRINGS = {
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
-    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside archives: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups, seconds) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
+    doneStatus: (demos, groups, seconds, archiveDemos = 0) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked${archiveDemos > 0 ? ` and ${archiveDemos} inside archives` : ''}, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
@@ -2639,6 +2648,50 @@ export const STRINGS = {
       const onThisDemo = `Fast-forwarding to clip ${clipIndex} of ${clipCountThisDemo}`;
       return totalBatchClips ? `${onThisDemo} · ${clipsSoFar} of ${totalBatchClips} clips total` : onThisDemo;
     },
+  },
+
+  // ── rescan_recent.js: every recent session's outdated demos in one go (#938)
+  RESCAN_RECENT: {
+    TITLE: 'Rescan recent sessions',
+    MESSAGE: 'These sessions have demos an older DoD Studio scanned. Rescan them all now? Each session is backed up first (a .before-rescan copy beside it), then rescanned and saved. Marks, notes, status and kill ranges are carried over.',
+    SKIP_HINT: 'This takes a while: “Skip for now” leaves a session until you next open it.',
+    RESCAN_ALL: 'Rescan all',
+    NOT_NOW: 'Not now',
+    CANCEL: 'Cancel',
+    SKIP: 'Skip for now',
+    SKIPPED: 'Skipped',
+    TIME_PENDING: 'working out how long…',
+    ALL_CURRENT_TOAST: 'Every recent session is up to date.',
+    NONE_RECENT_TOAST: 'No recent sessions to rescan.',
+    BUSY_TOAST: 'Recent sessions are already being rescanned.',
+    READING: 'Reading recent sessions…',
+    demos: (n) => `${n} demo${n === 1 ? '' : 's'}`,
+    MISSING: 'file not found, skipped',
+    UNREADABLE: "couldn't be read, skipped",
+    total: (duration) => `Total: about ${duration}.`,
+    // The progress line: which session, which step.
+    step: (i, n, name, what) => `${name} (${i} of ${n}): ${what}`,
+    STEP_BACKUP: 'backing up…',
+    STEP_OPEN: 'opening…',
+    stepScan: (n) => `rescanning ${n} demo${n === 1 ? '' : 's'}…`,
+    STEP_SAVE: 'saving…',
+    STEP_REOPEN: 'Reopening the session you had open…',
+    STOPPING: 'stopping after this session…',
+    doneToast: (done, total, failed) => `Rescanned ${done} of ${total} session${total === 1 ? '' : 's'}`
+      + (failed > 0 ? `; ${failed} failed (see View Logs).` : '.'),
+    // Activity log, one line per session, like #926's [scan] lines.
+    doneLog: (name, demos, seconds, backup) => `[rescan] ${name}: ${demos} demo(s) rescanned in ${seconds} s and saved (backup: ${backup})`,
+    failedLog: (name, seconds, err) => `[rescan] ${name}: failed after ${seconds} s, not saved: ${err}`,
+    skippedLog: (name) => `[rescan] ${name}: skipped for now`,
+    missingLog: (path) => `[rescan] ${path}: file not found, skipped`,
+    noDemosLog: (name) => `[rescan] ${name}: none of its outdated demos are on disk, nothing to rescan`,
+    stoppedLog: (left) => `[rescan] stopped by Cancel; ${left} session(s) left as they were`,
+    OPEN_FAILED: "the session didn't open",
+    SCAN_FAILED: 'the scan failed',
+    SAVE_FAILED: "the session wasn't saved",
+    SESSION_CHANGED: 'another session was opened while it scanned',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
   // ── progress_view.js: what every long job's progress line shares (#951)

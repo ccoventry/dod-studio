@@ -114,9 +114,11 @@ export function createProjectSession({
   // Session First" action, so it lives here as a plain function rather than
   // only inline in the button's click handler. Returns whether it actually
   // wrote a file (false on "nothing to save" or a cancelled Save-As dialog).
-  async function saveProjectSession() {
+  // `quiet`: no toasts and no move to the top of Open Recent, for Rescan
+  // Recent Sessions saving each one in turn (#938).
+  async function saveProjectSession({ quiet = false } = {}) {
     if (!hasSavableProject()) {
-      showToast(STRINGS.MAIN.NOTHING_TO_SAVE, 'info');
+      if (!quiet) showToast(STRINGS.MAIN.NOTHING_TO_SAVE, 'info');
       return false;
     }
     // Already matches what's on disk — skip the write and the misleading
@@ -124,7 +126,7 @@ export function createProjectSession({
     // return value (Clear All's Save-First, the close-window prompt) treat
     // this the same as an actual save rather than a failure.
     if (!hasUnsavedChanges) {
-      showToast(STRINGS.MAIN.ALREADY_SAVED, 'info');
+      if (!quiet) showToast(STRINGS.MAIN.ALREADY_SAVED, 'info');
       return true;
     }
     try {
@@ -161,12 +163,14 @@ export function createProjectSession({
       currentSessionPath = filePath;
       hasUnsavedChanges = false;
       updateSessionFileIndicator();
-      showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
-      onProjectFile(filePath);
+      if (!quiet) {
+        showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
+        onProjectFile(filePath);
+      }
       return true;
     } catch (err) {
       console.error("Save project error:", err);
-      showToast(STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
+      if (!quiet) showToast(STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
       return false;
     }
   }
@@ -211,8 +215,11 @@ export function createProjectSession({
   }
 
   // Reads and applies a project file: the half of Load Session after the
-  // picker. Resolves whether it loaded.
-  async function loadProjectFile(selected) {
+  // picker. Resolves whether it loaded. `quiet`, for Rescan Recent Sessions
+  // working through each one (#938): no toasts, no move to the top of Open
+  // Recent, no missing-demo search and no rescan offer (it rescans them
+  // itself). `rescanOffer: false` leaves out only the offer.
+  async function loadProjectFile(selected, { quiet = false, rescanOffer = !quiet } = {}) {
     openProgress.opening();
     try {
       const content = await invoke('load_project_session', { path: selected });
@@ -221,7 +228,7 @@ export function createProjectSession({
       currentSessionPath = selected;
       hasUnsavedChanges = false;
       updateSessionFileIndicator();
-      onProjectFile(selected);
+      if (!quiet) onProjectFile(selected);
       // Load Session is reachable from any tab (#122) — jump to Studio
       // so the loaded project is actually visible, same cross-tab-jump
       // pattern as detail_pane.js's "View Match Telemetry" button.
@@ -261,18 +268,20 @@ export function createProjectSession({
         // Before the demos load: the grouping they start takes the line.
         openProgress.opened(STRINGS.MAIN.projectOpenedLine(data.demos.length));
         loadDemos(data.demos);
-        showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
-        openProgress.searching();
-        await checkMissingDemos(selected, data.scanPaths || [], { onSearched: () => openProgress.searched() });
-        openProgress.searched();
+        if (!quiet) {
+          showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
+          openProgress.searching();
+          await checkMissingDemos(selected, data.scanPaths || [], { onSearched: () => openProgress.searched() });
+          openProgress.searched();
+        }
         // After the missing check: a demo it relocates can be rescanned,
         // one still missing can't.
-        await offerRescan();
+        if (rescanOffer) await offerRescan();
       }
       refreshTeamsPane();
     } catch (err) {
       console.error("Load project error:", err);
-      showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
+      if (!quiet) showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
       return false;
     } finally {
       openProgress.opened();
@@ -285,9 +294,12 @@ export function createProjectSession({
   // in: no session file, no demos, no take index. Reuses main.js's
   // replaceScannedDemos for the demo-queue reset — same as Clear All — then
   // overrides the dirty flag it sets, since a brand new untitled session has
-  // nothing to prompt about saving.
-  async function newSession() {
-    if (needsSavePrompt()) {
+  // nothing to prompt about saving. `quiet`: no toast, no tab switch and no
+  // unsaved-changes prompt, for Rescan Recent Sessions putting back the blank
+  // queue it started from (#938): it asked before it began, and what's open
+  // now is a session it chose not to save.
+  async function newSession({ quiet = false } = {}) {
+    if (!quiet && needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();
       if (!outcome) return; // Cancel — abort, keep current state
     }
@@ -299,6 +311,7 @@ export function createProjectSession({
     refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();
+    if (quiet) return;
     switchNavTab('workspace');
     showToast(STRINGS.MAIN.NEW_SESSION_TOAST, 'success');
   }
@@ -338,5 +351,16 @@ export function createProjectSession({
     });
   }
 
-  return { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject };
+  return {
+    markProjectDirty,
+    saveProjectSession,
+    needsSavePrompt,
+    requestUnsavedChangesConfirmation,
+    openProject,
+    confirmReplaceProject,
+    loadProjectFile,
+    newSession,
+    /** The open session's file, or null when none is. */
+    currentPath: () => currentSessionPath,
+  };
 }

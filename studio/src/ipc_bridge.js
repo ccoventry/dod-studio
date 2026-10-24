@@ -48,6 +48,26 @@ export async function filesExist(paths) {
     });
 }
 
+/** A project file's text, for Rescan Recent Sessions' count and backup
+ *  (#938). Rejects with the backend's message, which names the file. */
+export async function readProjectFile(path) {
+  return invoke("load_project_session", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (load_project_session):", err);
+      throw err;
+    });
+}
+
+/** Writes `contents` to `path` (a project backup, #938). Rejects with the
+ *  backend's message, which names the file. */
+export async function writeProjectFile(path, contents) {
+  return invoke("save_project_session", { path, contents })
+    .catch((err) => {
+      console.error("IPC Execution Error (save_project_session):", err);
+      throw err;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<!--
+  Harness for rescan_recent.js (#938): the File menu item and the dialog
+  from index.html, wired to the real project_session.js the way main.js
+  wires them, with Tauri's IPC mocked (vite.config.e2e.js).
+  `window.__files` is the disk: path -> project JSON (save_project_session
+  writes into it); `window.__gone` lists paths `files_exist` reports missing;
+  `window.__toParse` is how many full reads `estimate_rescan` reports per demo.
+  The queue's scan is faked: it records its paths in `window.__scans`, waits
+  while `window.__hold` is set (until `window.__release()`), then turns the
+  scanned demos current. `window.__recent` is the Open Recent list.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>rescan_recent.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <header id="top-navbar">
+    <nav class="nav-menubar">
+      <div class="menu-dropdown" data-menu="file">
+        <button class="menu-dropdown-btn" id="file-menu-btn">File</button>
+        <div class="menu-dropdown-panel" id="file-menu-panel">
+          <button class="menu-dropdown-item" id="new-session-btn"><span>New Session</span></button>
+          <button class="menu-dropdown-item" id="save-project-btn"><span>Save Session</span></button>
+          <button class="menu-dropdown-item" id="rescan-recent-btn">Rescan Recent Sessions…</button>
+        </div>
+      </div>
+    </nav>
+    <span id="session-file-indicator">No session loaded</span>
+  </header>
+
+  <div id="unsaved-changes-modal" class="modal" style="display: none;">
+    <button id="unsaved-changes-save-btn">Save & Close</button>
+    <button id="unsaved-changes-discard-btn">Close Without Saving</button>
+    <button id="unsaved-changes-cancel-btn">Cancel</button>
+  </div>
+
+  <div id="rescan-recent-modal" class="modal" style="display: none;">
+    <div class="modal-content rescan-recent-content">
+      <h2>Rescan recent sessions</h2>
+      <p id="rescan-recent-message"></p>
+      <ul id="rescan-recent-list" class="rescan-recent-list"></ul>
+      <p id="rescan-recent-total" class="rescan-recent-total"></p>
+      <div id="rescan-recent-progress" hidden>
+        <p id="rescan-recent-step" class="rescan-recent-step"></p>
+        <div class="progress-bar-container"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+      </div>
+      <div class="rescan-recent-actions">
+        <button id="rescan-recent-start-btn" class="primary-btn">Rescan all</button>
+        <button id="rescan-recent-cancel-btn">Not now</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initAppMenu } from '/src/app_menu.js';
+    import { createProjectSession } from '/src/project_session.js';
+    import { createRescanRecent } from '/src/rescan_recent.js';
+    import { HIGHLIGHTS_VERSION } from '/src/scan_version.js';
+
+    const current = (path) => ({
+      path, name: path.split('/').pop(), file_key: '1-abc', map_name: 'dod_anzio', teams: [],
+      signon_maps: ['dod_anzio'], no_camera_data: false, highlights_version: HIGHLIGHTS_VERSION, streaks: [],
+    });
+    window.__current = current;
+    window.__files = {};
+    window.__gone = [];
+    window.__toParse = 1;
+    window.__scans = [];
+    window.__hold = false;
+    window.__mockInvokeHandlers.files_exist = ({ paths }) =>
+      paths.map((p) => !window.__gone.includes(p) && (!p.endsWith('.json') || p in window.__files));
+    window.__mockInvokeHandlers.load_project_session = ({ path }) => {
+      if (!(path in window.__files)) throw new Error(`no file ${path}`);
+      return window.__files[path];
+    };
+    window.__mockInvokeHandlers.save_project_session = ({ path, contents }) => { window.__files[path] = contents; };
+    window.__mockInvokeHandlers.estimate_rescan = ({ paths }) =>
+      ({ cached: 0, upgradable: 0, to_parse: paths.length * window.__toParse, bytes_to_parse: 0 });
+
+    initAppMenu();
+    let demos = [];
+    window.__getDemos = () => demos;
+    window.__rescanOffers = 0;
+    const session = createProjectSession({
+      getDemos: () => demos,
+      replaceDemos: (d) => { demos = d; },
+      loadDemos: (d) => { demos = d; },
+      getTakeIndex: () => ({}),
+      setTakeIndex: () => {},
+      getProjectTeams: () => ({}),
+      setProjectTeams: () => {},
+      checkMissingDemos: async () => {},
+      offerRescan: async () => { window.__rescanOffers++; return false; },
+    });
+    window.__session = session;
+    window.__recent = [];
+    const rescan = createRescanRecent({
+      getRecent: () => window.__recent,
+      session,
+      getDemos: () => demos,
+      scan: async (paths) => {
+        window.__scans.push(paths);
+        window.__mockEmit('scan_progress', { scanned: 0, total: paths.length });
+        if (window.__hold) await new Promise((r) => { window.__release = r; });
+        window.__mockEmit('scan_progress', { scanned: paths.length, total: paths.length });
+        demos = demos.map((d) => (paths.includes(d.path) ? current(d.path) : d));
+        session.markProjectDirty();
+        return true;
+      },
+      persistAppSettings: async () => {},
+    });
+    window.__rescan = rescan;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
