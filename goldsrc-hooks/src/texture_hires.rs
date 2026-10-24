@@ -196,7 +196,9 @@
 //! clean box reduction, and a scaled draw (the scopes, a bigger kill feed)
 //! gets the finer levels; a LOD bias of -1, set right after the upload
 //! (`upload_then_bias`, `hud_sprite_lod.rs`, #841), makes a scale-2 or -3
-//! kill feed read the full-size level. Read on both builds: the `mipmap` test is at
+//! kill feed read the full-size level, and the kill feed's `weapons<N>` sheets
+//! keep their file's soft alpha instead of the cut-out below
+//! (`hud_sprite_edges.rs`). Read on both builds: the `mipmap` test is at
 //! `hw+0x3e492` / `hw+0x23d473`, the single-level filter at `hw+0x3e4bf` /
 //! `hw+0x23d4a4`, the mip loop at `hw+0x3e580` / `hw+0x23d573`. The atlases
 //! are 256x256 (the `weapons*` ones 512x512), so at 4x they need
@@ -2258,8 +2260,10 @@ fn pot_floor(max: f32) -> u32 {
     1 << (31 - max.leading_zeros())
 }
 
-/// Loads, fits and prepares the replacement at `path`.
-fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, String> {
+/// Loads, fits and prepares the replacement at `path`. `soft` keeps the
+/// file's alpha for a kill-feed sheet (`hud_sprite_edges.rs`, #841) instead
+/// of cutting it.
+fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3], soft: bool) -> Result<Rgba, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let mut img = decode_tga(&bytes)?;
     let cap = replacement_cap();
@@ -2271,7 +2275,16 @@ fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, Str
     // and checked at install; the table is 256 bytes of hw.dll's .data.
     let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
     let dither = unsafe { *(DITHER_VALUE.load(Ordering::Acquire) as *const f32) } != 0.0;
-    match_engine_expansion(&mut img.pixels, gamma, i_type, dither, tint);
+    if soft {
+        crate::hud_sprite_edges::prepare_soft_alpha(
+            &mut img.pixels,
+            img.width as usize,
+            img.height as usize,
+            gamma,
+        );
+    } else {
+        match_engine_expansion(&mut img.pixels, gamma, i_type, dither, tint);
+    }
     Ok(img)
 }
 
@@ -2636,7 +2649,11 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let name = real_name.unwrap_or(name);
 
     let tint = [pal[765], pal[766], pal[767]];
-    let img = match load_replacement(path, i_type, tint) {
+    // A kill-feed sheet keeps its soft alpha and draws blended (#841).
+    let soft_sheet = (texture_type == GLT_HUDSPRITE && i_type == TEX_TYPE_ALPHA)
+        .then(|| crate::hud_sprite_edges::sheet_of_frame(&name))
+        .flatten();
+    let img = match load_replacement(path, i_type, tint, soft_sheet.is_some()) {
         Ok(img) => img,
         Err(why) => {
             unsafe {
@@ -2668,6 +2685,9 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     );
     PENDING_TYPE.store(texture_type, Ordering::Release);
     drop(owned);
+    if let Some(sheet) = soft_sheet {
+        crate::hud_sprite_edges::mark_soft(sheet);
+    }
 
     replaced.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut last) = LAST_REPLACED.lock() {
@@ -3769,11 +3789,26 @@ pub fn status() -> String {
     );
     // Same folder as the world sprites, so no file count of its own.
     let hud = format!(
-        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps; LOD bias {} on {})",
+        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps; LOD bias {} on {}; soft kill-feed edges: {})",
         HUD_REPLACED.load(Ordering::Relaxed),
         HUD_SEEN.load(Ordering::Relaxed),
         crate::hud_sprite_lod::HUD_LOD_BIAS,
         HUD_BIASED.load(Ordering::Relaxed),
+        match (
+            crate::hud_sprite_edges::describe_soft(),
+            crate::hud_sprite_edges::describe_draws(),
+        ) {
+            (soft, _) if soft.is_empty() => "none".to_string(),
+            (soft, draws) => format!(
+                "{soft}, {} icon(s) without the rows the icon below owns{}",
+                crate::hud_sprite_edges::trim_count(),
+                if draws.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {draws}")
+                }
+            ),
+        },
     );
     let decals = format!(
         "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Players table says",
