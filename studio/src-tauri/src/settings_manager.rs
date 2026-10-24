@@ -53,6 +53,14 @@ pub struct AppSettings {
     /// first, at most 10 (`recent_projects.js` keeps the list).
     #[serde(default)]
     pub recent_projects: Vec<String>,
+    /// Where a `.dem` opened with DoD Studio from Explorer goes (#528):
+    /// `analyzer` (the Demo Analyzer) or `queue` (Studio's queue).
+    #[serde(default = "default_dem_open_target")]
+    pub dem_open_target: String,
+    /// `.json` projects whose "switch to .dodstudio?" offer was answered
+    /// "Keep as .json" (#528, `project_convert.js`): never offered again.
+    #[serde(default)]
+    pub kept_json_projects: Vec<String>,
     /// Gates the Demo Analyzer Explorer tree's per-subfolder "(N)" demo-count
     /// badge (Quick Links counts are always shown, matching dev — see
     /// docs/archive/tauri_parity_audit.md Area 1). Defaults to `false`, matching
@@ -276,8 +284,10 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
-    /// Demo Auditor > Duplicates' "Look inside .zip files" (#929): off by
-    /// default, since a first scan of big zips reads every demo in them.
+    /// Demo Auditor > Duplicates' "Show demos backed up in archives" (#929,
+    /// .zip, .7z and .rar): off by default, since a first scan of big
+    /// archives decompresses the demos in them that a loose demo shares a
+    /// size with.
     #[serde(default)]
     pub audit_look_in_zips: bool,
     /// "Skip setup for now" in the Setup window (#599): it stops opening by
@@ -328,6 +338,11 @@ pub struct AppSettings {
     /// starts there instead of wherever any other picker last was.
     #[serde(default)]
     pub pick_folders: BTreeMap<String, String>,
+    /// The update Rescan Recent Sessions' start-up offer last ran for
+    /// (`studio/src/rescan_recent.js`'s `offerStamp`, #938): the app version
+    /// plus the highlight detection version. Empty until it has run once.
+    #[serde(default)]
+    pub rescan_offered_for: String,
 }
 
 fn default_true() -> bool {
@@ -475,6 +490,9 @@ fn default_finish_codec_render_tab() -> String {
 fn default_take_after_finish() -> String {
     "keep".to_string()
 }
+fn default_dem_open_target() -> String {
+    "analyzer".to_string()
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -487,6 +505,8 @@ impl Default for AppSettings {
             pinned_folders: Vec::new(),
             demo_folder_history: Vec::new(),
             recent_projects: Vec::new(),
+            dem_open_target: default_dem_open_target(),
+            kept_json_projects: Vec::new(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
             language: "en".to_string(),
@@ -573,6 +593,7 @@ impl Default for AppSettings {
             review_fast_forward_gap: default_review_fast_forward_gap(),
             scan_read_bytes_per_sec: 0.0,
             pick_folders: BTreeMap::new(),
+            rescan_offered_for: String::new(),
         }
     }
 }
@@ -822,6 +843,28 @@ mod tests {
         assert!(older.recent_projects.is_empty());
     }
 
+    /// A `.dem` opened from Explorer goes to the Demo Analyzer unless the
+    /// user picked the queue, including for a file from before #528.
+    #[test]
+    fn dem_open_target_defaults_to_the_analyzer() {
+        let older: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert_eq!(older.dem_open_target, "analyzer");
+        assert!(older.kept_json_projects.is_empty());
+        let queue = AppSettings {
+            dem_open_target: "queue".into(),
+            kept_json_projects: vec!["D:/projects/old.json".into()],
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&queue).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.dem_open_target, "queue");
+        assert_eq!(restored.kept_json_projects, ["D:/projects/old.json"]);
+    }
+
     /// A file saved while Seek Between Clips was experimental (off by default)
     /// gets the new default once; a later choice sticks (#434).
     #[test]
@@ -1060,6 +1103,23 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let restored: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.scan_read_bytes_per_sec, 140e6);
+    }
+
+    #[test]
+    fn the_rescan_offer_stamp_roundtrips_and_an_older_file_has_none() {
+        let original = AppSettings {
+            rescan_offered_for: "0.2.1+h1".into(),
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.rescan_offered_for, "0.2.1+h1");
+        let older: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert_eq!(older.rescan_offered_for, "");
     }
 
     #[test]

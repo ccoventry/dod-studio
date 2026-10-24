@@ -73,7 +73,7 @@ let currentOnStatusChange = null;
 // gets serialized on Save Session. Null until main.js wires one up.
 let currentGetTakeIndex = null;
 // Fired once per batch when capture_status reports it's no longer running
-// (finished, cancelled, or errored) — main.js's updateExportPoolIndicator,
+// (finished, cancelled, or errored) — folder_pools.js's updateExportPoolIndicator,
 // so the footer's "Capture Output Free" figure reflects what the batch just
 // wrote. Previously only refreshLaunchGuard() ran here, which reads its own
 // separate availableBytes for the launch-guard banner and never touched the
@@ -184,6 +184,12 @@ export function renderTimingDiagram() {
  * the hl.exe path changes, by the command editors on every edit, and by the
  * settings below that the pipeline turns into commands of its own.
  */
+/** Seek Between Clips (Pipeline tab): the hook runs both command lists, past
+ *  the game's demo filter. Off, a patched demo carries them through it. */
+function seeksBetweenClips() {
+  return document.querySelector('#config-hook-runs-batch')?.checked ?? true;
+}
+
 export async function refreshInitCommandWarnings() {
   const gamePath = document.querySelector('#hl-path-input')?.value?.trim() || '';
   await refreshCfgWarnings(
@@ -202,6 +208,8 @@ export async function refreshInitCommandWarnings() {
     {
       captureFps: parseInt(document.querySelector('#config-capture-fps')?.value, 10) || null,
       decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
+      // Decides whether the game's demo filter applies to these commands.
+      hookRunsBatch: seeksBetweenClips(),
     }
   );
   // A banned command appearing or disappearing has to reach Start Capture
@@ -571,7 +579,8 @@ export async function refreshLaunchGuard(state) {
 
 // ── Custom Engine Commands (Init / Before-After) ──────────────────────────────
 // Local to the Batch Capture Config panel — nothing else in the app reads
-// these, unlike scanPaths/targetDrives which main.js owns for cross-pane use.
+// these, unlike the pinned folders and capture folders (demo_folders.js,
+// folder_pools.js), which other panes read too.
 
 let initCommands = [];
 let customCommands = [];
@@ -915,7 +924,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     getItems: () => initCommands,
     fields: [{
       key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER,
-      enhance: (input) => attachCommandSuggest(input, { scheduled: false }),
+      enhance: (input) => attachCommandSuggest(input, { scheduled: false, seeks: seeksBetweenClips }),
     }],
     onChange: () => {
       // Before the save, so a profile this list now matches is saved as the
@@ -934,7 +943,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     fields: [
       {
         key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER,
-        enhance: (input) => attachCommandSuggest(input, { scheduled: true }),
+        enhance: (input) => attachCommandSuggest(input, { scheduled: true, seeks: seeksBetweenClips }),
       },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
@@ -1008,8 +1017,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
    '#config-record-stop-trail', '#config-initial-delay'].forEach(selector => {
     document.querySelector(selector)?.addEventListener('input', renderTimingDiagram);
   });
-  // Seek Between Clips shows or hides Initial Delay.
-  document.querySelector('#config-hook-runs-batch')?.addEventListener('change', renderTimingDiagram);
+  // Seek Between Clips shows or hides Initial Delay, and decides whether the
+  // game's demo filter drops any of the commands.
+  document.querySelector('#config-hook-runs-batch')?.addEventListener('change', () => {
+    renderTimingDiagram();
+    refreshInitCommandWarnings();
+  });
   renderTimingDiagram();
   // Checkboxes read by persistAppSettings/buildCapturePayload but with no
   // change listener of their own — same missing-wiring bug as the Timing

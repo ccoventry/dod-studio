@@ -1,67 +1,63 @@
-import { pickPath, configurePickPath } from './pick_path.js';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import {
-  calculateExportPoolSpace,
-  getSettings,
-  openActivityLog,
-  systemMemoryBytes,
-  builtinCommandProfiles
-} from './ipc_bridge.js';
+import { configurePickPath } from './pick_path.js';
+import { getSettings, openActivityLog, builtinCommandProfiles } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
-import { initMapWarnings, resetMapWarnings } from './map_warnings.js';
+import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, isCaptureRunning } from './capture_pane.js';
-import { confirmCloseDuringBatch } from './batch_close_prompt.js';
-import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs, refreshRenderButtons } from './render_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
+import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
 import { initTakeCleanup } from './take_cleanup.js';
 import { initRenderWhileCapturing } from './render_while_capturing.js';
 import { initAuditorPane } from './auditor_pane.js';
-import { refreshPacketEntityLimit } from './packet_entity_limit.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane } from './demo_rename_ui.js';
 import { initThemedConfirm } from './themed_confirm.js';
-import { initAnalyzerPane } from './analyzer_pane.js';
+import { startOpenFromExplorer } from './open_from_explorer.js';
 import { initHdPane } from './hd_pane.js';
 import { initBlenderPane } from './blender_pane.js';
 import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
-import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
 import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks, getVisibleDemos, getQueueRecorders, queueRecorderOf } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
-import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
 import { initInfoTooltips } from './info_tooltip.js';
 import { initOsNotifications, updateNotificationSettings } from './os_notifications.js';
-import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
+import { initUpdater } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
-import { numberField } from './number_field.js';
 import { initClipNameSettings, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { initCommandProfiles, setCommandProfiles } from './command_profiles_ui.js';
 import { renderCaptureSummary } from './capture_summary_ui.js';
 import { initRenderPresets } from './render_presets_ui.js';
-import { pinnedFoldersOnly } from './project_paths.js';
+import { createFolderPools } from './folder_pools.js';
+import { readScanWorkers, startScanWorkers } from './scan_workers.js';
+import { createDemoFolders } from './demo_folders.js';
+import { startNavTabs } from './nav_tabs.js';
+import { startCloseGuard } from './close_guard.js';
+import { readHlPath, startHlPathWatch } from './hl_path_watch.js';
+import { renderQueueFooter } from './queue_footer.js';
+import { startAppShortcuts } from './app_shortcuts.js';
 import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
+import { createRescanRecent } from './rescan_recent.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
 import { createRecentProjects } from './recent_projects.js';
+import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
-import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
+import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 import { createHltvPicker } from './review_hltv_picker.js';
-import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
 import { offerPinnedReview } from './pinned_review.js';
 import { createDemoDrop } from './demo_drop.js';
@@ -85,23 +81,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   // no-ops silently until permission is granted.
   initOsNotifications();
 
-  let scanPaths = [];
+  // Pinned folders (Capture Studio's scan paths), the Explorer's Recent tier
+  // and its toggles: demo_folders.js.
+  const demoFolders = createDemoFolders({ persist: () => persistAppSettings() });
   // Set when the saved pinned list held single demo files (older builds), so
   // the cleaned list is written back once after settings load.
   let pinnedListCleaned = false;
-  // Analyzer Explorer sidebar's "Recent" quick-links tier — most-recent-first,
-  // capped at 10, pushed via recordDemoFolderVisit() below whenever browsing
-  // into a folder yields a non-empty demo listing. Mirrors dev's
-  // `settings.demo_folder_history` (see docs/archive/tauri_parity_audit.md Area 3).
-  let demoFolderHistory = [];
-  // Gates the Analyzer Explorer tree's per-subfolder demo-count badge.
-  // Mirrors dev's `settings.scan_folders_for_demos`, default false.
-  let scanFoldersForDemos = false;
-  // Analyzer Explorer sidebar's drag-to-resize width (analyzer_pane.js).
-  let analyzerExplorerWidth = 260;
-  // Doubles as Render Studio's scan-input locations — see initRenderUI below.
-  let targetDrives = [];
-  let renderExportDirs = []; // JIT multi-drive export pool for Render Studio
   let currentScannedDemos = [];
   // The Setup window and the Capture page's checklist (#599): setup_wiring.js,
   // created once everything it reads is wired, near the end of startup.
@@ -126,13 +111,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
-  const {
-    markProjectDirty,
-    saveProjectSession,
-    needsSavePrompt,
-    requestUnsavedChangesConfirmation,
-    openProject,
-  } = createProjectSession({
+  const projectSession = createProjectSession({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     loadDemos: (demos) => {
@@ -156,7 +135,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
     onProjectFile: (path) => recentProjects.remember(path),
+    offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
+    onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
+  const { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
@@ -189,82 +171,22 @@ window.addEventListener("DOMContentLoaded", async () => {
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
 
-  async function pickTargetDrive() {
-    try {
-      return await pickPath({ field: 'capture.output_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_CAPTURE_OUTPUT_DIR_TITLE });
-    } catch (err) {
-      console.error("Error opening capture output directory dialog:", err);
-      return null;
-    }
-  }
-
-  async function pickRenderExportDir() {
-    try {
-      return await pickPath({ field: 'render.export_folder', directory: true, multiple: false, title: STRINGS.MAIN.SELECT_RENDER_EXPORT_DIR_TITLE });
-    } catch (err) {
-      console.error("Error opening render export directory dialog:", err);
-      return null;
-    }
-  }
-
-  // Shared editable-list widget (list_editor.js) for the two folder/drive
-  // pools — Capture Locations (doubles as Render Studio's scan input) and
-  // Render Studio's Export Drives — get add/edit/remove/reorder/browse from
-  // one implementation.
-  const driveOverridesEditor = createListEditor({
-    container: document.querySelector('#target-drive-list'),
-    getItems: () => targetDrives,
-    fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.OUTPUT_DIR_PLACEHOLDER }],
-    unique: true,
-    browse: pickTargetDrive,
-    onChange: () => {
-      updateExportPoolIndicator();
-      persistAppSettings();
-      refreshLaunchGuard({ targetDrives, currentScannedDemos });
-      setup?.refresh();
-    },
+  // Capture Locations (doubles as Render Studio's scan input) and Render
+  // Studio's Export Drives: folder_pools.js.
+  const folderPools = createFolderPools({
+    getDemos: () => currentScannedDemos,
+    persist: () => persistAppSettings(),
+    refreshSetup: () => setup?.refresh(),
   });
-
-  const renderExportDirsEditor = createListEditor({
-    container: document.querySelector('#render-export-dir-list'),
-    getItems: () => renderExportDirs,
-    fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.RENDER.EXPORT_DIR_ROW_PLACEHOLDER }],
-    unique: true,
-    browse: pickRenderExportDir,
-    onChange: () => { persistAppSettings(); setup?.refresh(); refreshSameDriveWarning(renderExportDirs, 'clips'); refreshRenderButtons(); },
-  });
-
-  // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
-  // holds a whole analysis, so the hint puts the memory next to the number.
-  // Deliberately no clamp to the machine's RAM.
-  function readScanWorkers() {
-    return Math.min(8, Math.max(1, numberField('#config-scan-workers', 2, { integer: true, positive: true })));
-  }
-  let totalMemoryGb = null;
-  function updateScanWorkersHint() {
-    const hint = document.querySelector('#config-scan-workers-hint');
-    if (hint) hint.textContent = STRINGS.CAPTURE_CONFIG.scanWorkersHint(totalMemoryGb);
-  }
-  systemMemoryBytes().then((bytes) => {
-    if (bytes) totalMemoryGb = Math.round(bytes / 1024 ** 3);
-    updateScanWorkersHint();
-  });
-  const scanWorkersInput = document.querySelector('#config-scan-workers');
-  scanWorkersInput?.addEventListener('change', () => {
-    scanWorkersInput.value = readScanWorkers();
-    persistAppSettings();
-  });
+  startScanWorkers({ persist: () => persistAppSettings() });
 
   // Saving the settings file from the form: settings_sync.js.
   const { persistAppSettings } = createSettingsSync({
     getState: () => ({
-      scanPaths,
-      demoFolderHistory,
+      ...demoFolders.settingsState(),
       recentProjects: recentProjects.list(),
-      scanFoldersForDemos,
-      analyzerExplorerWidth,
-      targetDrives,
-      renderExportDirs,
+      targetDrives: folderPools.targetDrives(),
+      renderExportDirs: folderPools.renderExportDirs(),
       scanWorkers: readScanWorkers(),
       // Read from the file until setup_wiring.js exists, so a save made
       // earlier in startup keeps it.
@@ -275,7 +197,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Where each Browse dialog starts (#936): the game paths, and saving a
   // newly remembered folder.
   configurePickPath({
-    getContext: () => ({ hlPath: document.querySelector('#hl-path-input')?.value?.trim() || '', gameFolder: getGameFolder() }),
+    getContext: () => ({ hlPath: readHlPath(), gameFolder: getGameFolder() }),
     persist: () => persistAppSettings(),
   });
 
@@ -286,32 +208,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (settings) {
       updateNotificationSettings(settings);
       applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCaptureModeUI });
-      if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
-        // Folders only: older builds added every file picked with
-        // + Add Demo Files, one path per demo. Cleaned up once, here.
-        scanPaths = pinnedFoldersOnly(settings.pinned_folders);
-        if (scanPaths.length !== settings.pinned_folders.length) pinnedListCleaned = true;
-      }
-      if (Array.isArray(settings.demo_folder_history) && settings.demo_folder_history.length > 0) {
-        demoFolderHistory = [...settings.demo_folder_history];
-      }
+      pinnedListCleaned = demoFolders.load(settings);
       recentProjects.load(settings.recent_projects);
-      scanFoldersForDemos = !!settings.scan_folders_for_demos;
       savedSetupDismissed = !!settings.setup_dismissed;
-      if (settings.analyzer_explorer_width) {
-        analyzerExplorerWidth = settings.analyzer_explorer_width;
-      }
-      if (Array.isArray(settings.target_drives) && settings.target_drives.length > 0) {
-        targetDrives = [...settings.target_drives];
-        driveOverridesEditor.render();
-        updateExportPoolIndicator();
-      }
-      if (Array.isArray(settings.render_export_dirs) && settings.render_export_dirs.length > 0) {
-        renderExportDirs = [...settings.render_export_dirs];
-        renderExportDirsEditor.render();
-        refreshSameDriveWarning(renderExportDirs, 'clips');
-        refreshRenderButtons();
-      }
+      folderPools.load(settings);
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
       setCommandProfiles(settings.command_profiles, settings.command_profile_active,
         { builtins: await builtinCommandProfiles(), notice: settings.builtin_profile_notice });
@@ -353,8 +253,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   } = createProjectDemos({
     getDemos: () => currentScannedDemos,
     getTakeIndex: () => takeIndex,
-    // Pinned and Recent: + Add Folder fills Recent, not the pins (#533).
-    getScanPaths: () => [...scanPaths, ...demoFolderHistory],
+    getScanPaths: demoFolders.all,
     refreshQueue: refreshAfterRelocation,
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
@@ -375,7 +274,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Configuration > Players (#428): players_ui.js.
   createPlayersUi({
     getDemos: () => currentScannedDemos,
-    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    getHlPath: readHlPath,
     getGameFolder,
     persist: () => persistAppSettings(),
   }).refresh();
@@ -393,20 +292,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // ── Demo list footer helper ────────────────────────────────────────────────
   function updateDemoFooter(demos) {
-    const footerEl = document.querySelector('#demo-list-footer');
-    if (footerEl) {
-      // The same highlights the Highlights column counts (M2).
-      const totalHighlights = (demos || []).reduce((sum, d) => sum + listedStreaks(d).length, 0);
-      footerEl.textContent = STRINGS.WORKSPACE.demoListFooter((demos || []).length, totalHighlights);
-    }
-    // Clear Untracked/Clear All only make sense with something in the
-    // queue — Clear Selected already gates on its own checkbox state
-    // (master_pane.js), this is the same idea for the other two.
-    const isEmpty = !demos || demos.length === 0;
-    const clearUntrackedBtnEl = document.querySelector('#clear-untracked-btn');
-    if (clearUntrackedBtnEl) clearUntrackedBtnEl.disabled = isEmpty;
-    const clearAllBtnEl = document.querySelector('#clear-all-btn');
-    if (clearAllBtnEl) clearAllBtnEl.disabled = isEmpty;
+    renderQueueFooter(demos);
     setup?.refresh();
     // The HLTV pick's lists follow the queue: filled while it was empty they
     // are disabled, and a disabled list never opens to refill itself.
@@ -438,7 +324,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     markProjectDirty: () => markProjectDirty(),
     readScanWorkers: () => readScanWorkers(),
     offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
-    rememberRecentFolder: (folder) => recordDemoFolderVisit(folder),
+    rememberRecentFolder: (folder) => demoFolders.recordVisit(folder),
     persistAppSettings: () => persistAppSettings(),
     regroupMatches: (opts) => regroupMatches(opts),
     getTakeIndex: () => takeIndex,
@@ -453,105 +339,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     getDemos: () => currentScannedDemos,
     scan: (paths) => triggerAutoScan(paths),
   });
-
-  async function updateExportPoolIndicator() {
-    const indicator = document.querySelector('#export-pool-free-indicator');
-    refreshSameDriveWarning(targetDrives);
-    if (!indicator) return;
-    if (targetDrives.length === 0) {
-      indicator.textContent = STRINGS.MAIN.EXPORT_POOL_FREE_DEFAULT;
-      return;
-    }
-    try {
-      const bytes = await calculateExportPoolSpace(targetDrives);
-      const gb = bytes / (1024 * 1024 * 1024);
-      indicator.textContent = STRINGS.MAIN.exportPoolFree(gb.toFixed(1));
-    } catch (err) {
-      console.error("Error calculating export pool space:", err);
-      indicator.textContent = STRINGS.MAIN.EXPORT_POOL_ERROR;
-    }
-  }
-
-  // Target drives management
-  document.querySelector('#add-drive-btn').addEventListener('click', () => {
-    const driveEl = document.querySelector('#drive-path-input');
-    const drivePath = driveEl.value.trim();
-    if (drivePath && driveOverridesEditor.addItem(drivePath)) {
-      driveEl.value = "";
-    }
+  // After an update, every recent session's outdated demos at once (#938).
+  const rescanRecent = createRescanRecent({
+    getRecent: () => recentProjects.list(),
+    session: projectSession,
+    getDemos: () => currentScannedDemos,
+    scan: (paths) => triggerAutoScan(paths),
+    isScanning: () => isScanning(),
+    isSetupOpen: () => !!setup?.isOpen(),
+    persistAppSettings: () => persistAppSettings(),
   });
 
-  const browseDriveBtn = document.querySelector('#browse-drive-btn');
-  if (browseDriveBtn) {
-    browseDriveBtn.addEventListener('click', async () => {
-      const selected = await pickTargetDrive();
-      if (selected) driveOverridesEditor.addItem(selected);
-    });
-  }
-
-  // JIT multi-drive export pool for Render Studio
-  const addRenderExportDirBtn = document.querySelector('#add-render-export-dir-btn');
-  if (addRenderExportDirBtn) {
-    addRenderExportDirBtn.addEventListener('click', () => {
-      const inputEl = document.querySelector('#render-export-dir-input');
-      const path = inputEl?.value?.trim();
-      if (path && renderExportDirsEditor.addItem(path) && inputEl) {
-        inputEl.value = '';
-      }
-    });
-  }
-
-  const browseRenderExportBtn = document.querySelector('#browse-render-export-btn');
-  if (browseRenderExportBtn) {
-    browseRenderExportBtn.addEventListener('click', async () => {
-      const selected = await pickRenderExportDir();
-      if (selected) renderExportDirsEditor.addItem(selected);
-    });
-  }
-
-  // Export Configuration tab switching
-  const tabBtns = document.querySelectorAll('.config-tab-btn');
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabBtns.forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.config-tab-content').forEach(content => {
-        content.style.display = 'none';
-      });
-      btn.classList.add('active');
-      const targetId = btn.getAttribute('data-tab');
-      const targetEl = document.getElementById(targetId);
-      if (targetEl) targetEl.style.display = 'block';
-      refreshCommandWarningsIfShown();
-    });
-  });
-
-  // The game's config files change outside the app: the read-only flag on
-  // config.cfg (#478), or lines in config.cfg/movie.cfg. The Commands tab's
-  // warnings are only as fresh as their last check, so it runs again whenever
-  // that tab comes into view: opening it, returning to Configuration on it,
-  // or coming back to this window (from Explorer or an editor) while it shows.
-  function refreshCommandWarningsIfShown() {
-    const tab = document.getElementById('tab-custom-commands');
-    if (tab && tab.offsetParent !== null) refreshInitCommandWarnings();
-  }
-  window.addEventListener('focus', refreshCommandWarningsIfShown);
-
-  // Top nav bar view routing (shared with detail_pane.js — see nav.js)
-  switchNavTab('workspace');
-
-  const navTabBtns = document.querySelectorAll('.nav-tab-btn');
-  navTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      switchNavTab(btn.getAttribute('data-nav'));
-      refreshCommandWarningsIfShown();
-    });
-  });
-
-  // Capture Studio in-workflow phase switch (Highlights <-> Configuration) —
-  // replaces the old "Batch Capture Config" top-level nav tab, see nav.js.
-  document.querySelectorAll('.capture-detail-subtab-btn').forEach((btn) => {
-    btn.addEventListener('click', () => setCaptureDetailSubtab(btn.dataset.captureSubtab));
-  });
+  // Top nav, Configuration tabs and Capture Studio subtabs: nav_tabs.js.
+  startNavTabs();
 
   // Initialize Capture Batch UI
   // Shared by both auto-status paths (a verified capture, a finished render):
@@ -577,10 +377,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   initCaptureUI(() => ({
-    scanPaths,
-    targetDrives,
+    scanPaths: demoFolders.pinned(),
+    targetDrives: folderPools.targetDrives(),
     currentScannedDemos
-  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
+  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, folderPools.updateExportPoolIndicator, captureDemosReady);
   // Saving, renaming or deleting a profile changes its name in the capture
   // summary strip without touching a field the strip listens to.
   initCommandProfiles({
@@ -590,13 +390,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
-  // locations — see the driveOverridesEditor/targetDrives comment above.
+  // locations (folder_pools.js).
   initRenderPresets({ onChange: persistAppSettings });
   initCombineClips({
     finishedRenders: () => finishedRenderOutputs(),
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
   });
-  initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
+  initRenderUI(folderPools.targetDrives, folderPools.renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,
@@ -606,7 +406,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // "When a batch finishes" (#440): queues a verified batch's takes into the
   // Render tab's own queue. capture_pane.js hands it each verified batch.
   initFinishClips({
-    getExportDirs: () => renderExportDirs,
+    getExportDirs: folderPools.renderExportDirs,
     getClipNames: (exportDirs) => clipNamesForTakes(
       takeIndex, currentScannedDemos, getClipNameTemplate(),
       { maxLength: maxNameLength(exportDirs), projectTeams },
@@ -628,45 +428,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   checkObsOrphanOnStartup();
 
-  // Flush any not-yet-persisted settings edit before the window actually
-  // closes. list_editor.js (Init/Custom Commands, numeric fields) only
-  // writes to disk on 'change' (blur/Enter), not every keystroke — closing
-  // the app while a field still has focus (never blurred) would otherwise
-  // silently drop that edit even though it's already reflected in the
-  // in-memory state persistAppSettings() reads from (a real, reproducible
-  // data-loss case).
-  const appWindow = getCurrentWindow();
-  appWindow.onCloseRequested(async (event) => {
-    event.preventDefault();
-    // A running batch first: closing leaves it unwatched (#545).
-    if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning, isLocalBuild: isLocalOrDebugBuild }))) return;
-    // Capture Studio project state (scanned demos, takeIndex, scanPaths)
-    // changed since the last save — offer to save, discard, or cancel the
-    // close before losing it (project_session.js's needsSavePrompt says
-    // when). See markProjectDirty() call sites above.
-    if (needsSavePrompt()) {
-      const outcome = await requestUnsavedChangesConfirmation();
-      if (!outcome) return; // Cancel — leave the window open
-      // 'save' already wrote the file inside the modal's Save button
-      // handler; 'discard' falls through to close as-is either way.
-    }
-    await persistAppSettings();
-    await appWindow.destroy();
-  });
-
-  // Page-level reload (F5, Ctrl+R, or any other in-place navigation) doesn't
-  // go through Tauri's onCloseRequested above at all — it's a WebView2
-  // navigation, not a window close — so it needs its own guard. Unlike the
-  // themed modal above, beforeunload's confirmation dialog is browser-native
-  // and cannot be styled or given custom button text (a deliberate web
-  // platform restriction against sites faking dialogs); setting returnValue
-  // is what triggers it, and its own text is what's shown, not this string.
-  window.addEventListener('beforeunload', (event) => {
-    if (needsSavePrompt()) {
-      event.preventDefault();
-      event.returnValue = '';
-    }
-  });
+  // Window close and page reload with a batch running or unsaved work: close_guard.js.
+  startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation, persistAppSettings });
 
   // Delete callback: remove a demo from the active scan list and re-render.
   // Called by master_pane.js when the 🗑 button is clicked on a row. Returns
@@ -728,25 +491,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
-  // Read at click time, not captured: the hl.exe path can be set after a scan
-  // has already run and left the banner up.
-  initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
-  initDemoLinks(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
   // capture_pane.js owns the Scheduled Command list, so the floor check reads
   // it from there rather than keeping a second copy.
   initRollFloors(() => getCommandsState().custom_commands);
-  // Scanned once the persisted hl.exe path is in the DOM, and again whenever it
-  // changes — a config file the app cannot see is exactly what this warns about.
-  const hlPathInput = document.querySelector('#hl-path-input');
-  if (hlPathInput) {
-    refreshInitCommandWarnings();
-    hlPathInput.addEventListener('change', () => refreshInitCommandWarnings());
-    // Which engine it is decides which demos the Master Queue marks (#207).
-    const markDemosOverLimit = () => refreshPacketEntityLimit(hlPathInput.value.trim())
-      .then(() => renderMasterList(currentScannedDemos, selectedDemoIdx));
-    markDemosOverLimit();
-    hlPathInput.addEventListener('change', markDemosOverLimit);
-  }
+  // Map warnings, demo links and the checks that follow the hl.exe path: hl_path_watch.js.
+  startHlPathWatch({ renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx) });
   // #441: the preview uses the selected demo's first checked highlight (its
   // first highlight when none is checked); a settled template change is
   // saved and redraws the automatic names in Highlight Details.
@@ -757,7 +506,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const streak = own.find((s) => s.selected) || own[0];
       return streak ? { demo, streak } : null;
     },
-    getExportDirList: () => renderExportDirs,
+    getExportDirList: folderPools.renderExportDirs,
     getProjectTeams: () => projectTeams,
     onChange: () => {
       persistAppSettings();
@@ -774,7 +523,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // moves the Master Queue's Highlights/Pending/Captured/Rendered columns
     // (renderMasterList), both cheap enough to just always re-derive here.
     // Must NOT mark the project dirty — see onDirty below for that.
-    refreshLaunchGuard({ targetDrives, currentScannedDemos });
+    refreshLaunchGuard({ targetDrives: folderPools.targetDrives(), currentScannedDemos });
     renderMasterList(currentScannedDemos, selectedDemoIdx);
     refreshClipNamePreview();
   }, () => {
@@ -784,108 +533,33 @@ window.addEventListener("DOMContentLoaded", async () => {
     markProjectDirty();
   }, { getProjectTeams: () => projectTeams });
 
-  // Demo Analyzer's Explorer sidebar Pinned tier shares the same
-  // pinned_folders/scanPaths state as Capture Studio (matches dev's real
-  // design — its own pinned_folders field is app-wide, not analyzer-scoped).
-  // Pinning/unpinning here doesn't trigger Capture Studio's heavier
-  // highlight-scan pipeline, just persists the path.
-  async function pinAnalyzerFolder(folder) {
-    if (!scanPaths.includes(folder)) {
-      scanPaths.push(folder);
-      await persistAppSettings();
-    }
-  }
-  async function unpinAnalyzerFolder(folder) {
-    scanPaths = scanPaths.filter((f) => f !== folder);
-    await persistAppSettings();
-  }
-  // Recent tier: most-recent-first, capped at 10, deduped — mirrors dev's
-  // `demo_folder_history` push-front/truncate logic exactly.
-  async function recordDemoFolderVisit(folder) {
-    demoFolderHistory = demoFolderHistory.filter((f) => f !== folder);
-    demoFolderHistory.unshift(folder);
-    if (demoFolderHistory.length > 10) demoFolderHistory.length = 10;
-    await persistAppSettings();
-  }
-  // A pinned/recent folder that no longer exists on disk is silently
-  // dropped from history when clicked, matching dev's Quick Links behavior.
-  async function forgetDemoFolderVisit(folder) {
-    if (demoFolderHistory.includes(folder)) {
-      demoFolderHistory = demoFolderHistory.filter((f) => f !== folder);
-      await persistAppSettings();
-    }
-  }
-  async function setScanFoldersForDemos(enabled) {
-    scanFoldersForDemos = enabled;
-    await persistAppSettings();
-  }
-  async function setAnalyzerExplorerWidth(px) {
-    analyzerExplorerWidth = px;
-    await persistAppSettings();
-  }
-  initAnalyzerPane({
-    getPinnedFolders: () => scanPaths,
-    pinFolder: pinAnalyzerFolder,
-    unpinFolder: unpinAnalyzerFolder,
-    getDemoFolderHistory: () => demoFolderHistory,
-    recordDemoFolderVisit,
-    forgetDemoFolderVisit,
-    getScanFoldersForDemos: () => scanFoldersForDemos,
-    setScanFoldersForDemos,
-    getAnalyzerExplorerWidth: () => analyzerExplorerWidth,
-    setAnalyzerExplorerWidth,
-  });
+  // The Demo Analyzer's Explorer shares the pinned folders with Capture Studio.
+  demoFolders.startAnalyzerPane();
 
   setup = createSetup({
     getDemos: () => currentScannedDemos,
-    getScanPaths: () => [...scanPaths, ...demoFolderHistory],
-    getTargetDrives: () => targetDrives,
-    getRenderExportDirs: () => renderExportDirs,
-    captureFolders: { add: (p) => driveOverridesEditor.addItem(p), remove: (p) => driveOverridesEditor.removeItem(p) },
-    renderFolders: { add: (p) => renderExportDirsEditor.addItem(p), remove: (p) => renderExportDirsEditor.removeItem(p) },
+    getScanPaths: demoFolders.all,
+    getTargetDrives: folderPools.targetDrives,
+    getRenderExportDirs: folderPools.renderExportDirs,
+    captureFolders: folderPools.captureFolders,
+    renderFolders: folderPools.renderFolders,
     addDemoFolder: (folder) => addDemoFolder(folder),
     persistAppSettings: () => persistAppSettings(),
     dismissed: savedSetupDismissed,
   });
   // The one-time look at the pins older builds' + Add Folder made (#533).
   setup.start().finally(() => offerPinnedReview({
-    getPinned: () => scanPaths,
-    unpin: (drop) => { scanPaths = scanPaths.filter((f) => !drop.includes(f)); return persistAppSettings(); },
+    getPinned: demoFolders.pinned,
+    unpin: demoFolders.unpin,
     isSetupOpen: () => setup.isOpen(),
     persist: () => persistAppSettings(),
-  }));
+  }))
+    // One startup prompt at a time: the rescan offer (#938) waits for the pins review.
+    .finally(() => rescanRecent.offerAfterUpdate().catch((err) => console.error("Rescan recent sessions:", err)));
 
-  // Context-Aware Shortcut Dispatcher
-  window.addEventListener('keydown', (e) => {
-    const isCtrlO = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o';
-    const isCtrlS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
-    const isCtrlN = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n';
-    const isCtrlW = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w';
-    // WebView2 keeps the browser's reload shortcuts live by default — a
-    // desktop app has no "refresh the page" affordance at all, so these are
-    // swallowed unconditionally rather than routed through the dirty-state
-    // check the beforeunload listener below does for any other reload path
-    // (e.g. devtools once opened — the context menu's own Reload entry is
-    // gone entirely, see the contextmenu listener further down).
-    const isReload = e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r');
+  startOpenFromExplorer({ openProject, isScanning, persist: () => persistAppSettings(),
+    addDemosToQueue: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
 
-    if (isCtrlO || isCtrlS || isCtrlN || isCtrlW || isReload) {
-      e.preventDefault();
-    }
-
-    // New/Save/Load Session work from any tab (#122) — previously gated to
-    // `activeTab === 'workspace'` because the buttons themselves only
-    // existed in the Studio nav-actions area; now that they live in the
-    // always-visible File menu, the shortcuts aren't tab-scoped either.
-    if (isCtrlN) document.querySelector('#new-session-btn')?.click();
-    if (isCtrlO) document.querySelector('#load-project-btn')?.click();
-    if (isCtrlS) document.querySelector('#save-project-btn')?.click();
-  });
-
-  // WebView2's native right-click menu (Reload/Inspect/browser Cut-Copy-
-  // Paste) reads as a web page, not an app — suppressed entirely. Doesn't
-  // affect actual clipboard functionality: Ctrl+C/X/V are OS-level keyboard
-  // bindings that don't route through this menu, so text fields keep normal
-  // copy/paste with no menu at all.
-  window.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Ctrl+N/O/S, swallowed reload keys, no browser context menu: app_shortcuts.js.
+  startAppShortcuts();
 });

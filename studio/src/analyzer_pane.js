@@ -8,7 +8,8 @@
 
 import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, readDemoHeads, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
+import { readDemoHeadsInto, mapCellText } from './demo_heads.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
@@ -95,6 +96,12 @@ let localFoldersScanTriggered = false;
 const quickLinkCountCache = new Map(); // path -> demo_count
 
 let currentFolderDemos = []; // DemoFileEntry[] for currentDir only
+// The folder whose file names are still being read: the Demos table says so
+// instead of showing the last folder's demos.
+let listingDir = null;
+// The folder the tree scrolls to once its row is drawn (its ancestors are
+// read after the folder is picked, so the row can arrive later).
+let revealTreePath = null;
 let browserSelectedDemo = null;
 // Arrow-key cursor, separate from browserSelectedDemo (the actually-loaded
 // demo) — mirrors master_pane.js's keyboard-selected/table-row-selected
@@ -300,7 +307,9 @@ function startPlayerIndex(demos) {
   playerIndexTotal = demos.length;
   refreshPlayerOptions();
   renderPlayerStatus();
-  if (demos.length > 0) indexDemoPlayers(demos.map((d) => d.path), playerIndexRequest, 'analyzer');
+  // Sent for no demos too: the new request id stops the last folder's reads,
+  // which on a cloud drive fetch whole demos.
+  indexDemoPlayers(demos.map((d) => d.path), playerIndexRequest, 'analyzer');
 }
 
 listen('demo_players', (event) => {
@@ -532,6 +541,7 @@ async function renderExplorerTree() {
     ${thisPcOpen ? `<div class="tree-children">${driveRoots.map(treeRowHtml).join('')}</div>` : ''}
   </div>`;
 
+  if (revealTreePath && scrollTreeRowIntoView(revealTreePath)) revealTreePath = null;
   loadUnloadedOpenNodes();
 
   const thisPcToggle = container.querySelector('#tree-this-pc-toggle');
@@ -598,10 +608,13 @@ async function closeTreeNode(path) {
   renderExplorerTree();
 }
 
+/** Whether the folder's row was there to scroll to. */
 function scrollTreeRowIntoView(path) {
   const container = document.querySelector('#analyzer-tree');
-  if (!container || !path) return;
-  container.querySelector(`.tree-label[data-path="${CSS.escape(path)}"]`)?.closest('.tree-row')?.scrollIntoView({ block: 'nearest' });
+  if (!container || !path) return false;
+  const row = container.querySelector(`.tree-label[data-path="${CSS.escape(path)}"]`)?.closest('.tree-row');
+  row?.scrollIntoView({ block: 'nearest' });
+  return !!row;
 }
 
 // Instant select, no separate cursor: browse_directory is a cheap
@@ -666,14 +679,20 @@ async function setCurrentDir(path) {
   currentDir = path;
   browserSelectedDemo = null;
   browserCursorPath = null;
+  browserError = null;
+  // The last folder's demos aren't this one's: the table says it is reading
+  // until this folder's names arrive.
+  currentFolderDemos = [];
+  listingDir = path;
+  revealTreePath = path;
+  startPlayerIndex([]);
 
-  const ancestors = ancestorChain(path);
-  ancestors.slice(0, -1).forEach((a) => openTreeNodes.add(a));
-  await Promise.all(ancestors.slice(0, -1).map(async (a) => {
-    if (!dirCache.has(a)) {
-      try { dirCache.set(a, await browseDirectory(a)); } catch { /* leaf render shows a loading placeholder */ }
-    }
-  }));
+  // The tree reads the ancestors it opens (loadUnloadedOpenNodes) beside
+  // this folder's own listing; the table waited for all of them first.
+  ancestorChain(path).slice(0, -1).forEach((a) => openTreeNodes.add(a));
+  renderQuickLinksSection();
+  renderExplorerTree();
+  renderDemoTable();
 
   let listing;
   try {
@@ -682,6 +701,7 @@ async function setCurrentDir(path) {
     // A slow read can finish after the user has moved on (#789): only the
     // folder still open may set the table.
     if (currentDir !== path) return;
+    listingDir = null;
     browserError = String(err);
     currentFolderDemos = [];
     await forgetInvalidFolder(path);
@@ -693,13 +713,20 @@ async function setCurrentDir(path) {
 
   dirCache.set(path, listing);
   if (currentDir !== path) return;
+  listingDir = null;
   browserError = null;
-  currentFolderDemos = listing.demos;
-  startPlayerIndex(listing.demos);
+  const demos = listing.demos;
+  currentFolderDemos = demos;
+  startPlayerIndex(demos);
+  readDemoHeadsInto(demos, {
+    read: readDemoHeads,
+    stillWanted: () => currentFolderDemos === demos,
+    onRead: renderDemoTable,
+  });
 
+  renderDemoTable();
   renderQuickLinksSection();
   await renderExplorerTree();
-  renderDemoTable();
 
   if (listing.demos.length > 0) {
     await recordDemoFolderVisit(path);
@@ -786,6 +813,10 @@ function renderDemoTable() {
     tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${STRINGS.ANALYZER.PICK_FOLDER_FROM_SIDEBAR}</td></tr>`;
     return;
   }
+  if (listingDir === currentDir) {
+    tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${STRINGS.ANALYZER.READING_FOLDER}</td></tr>`;
+    return;
+  }
   if (currentFolderDemos.length === 0) {
     tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${STRINGS.ANALYZER.NO_DEMOS_IN_FOLDER}</td></tr>`;
     return;
@@ -805,7 +836,7 @@ function renderDemoTable() {
     return `<tr class="${classes}" data-path="${esc(entry.path)}" title="${esc(entry.path)}">
       <td>${esc(entry.name)}</td>
       <td>${esc(demoTypeOf(entry) + role)}</td>
-      <td>${esc(entry.map_name || STRINGS.ANALYZER.EMPTY_DASH)}</td>
+      <td>${esc(mapCellText(entry, { reading: STRINGS.ANALYZER.MAP_READING, dash: STRINGS.ANALYZER.EMPTY_DASH }))}</td>
       <td>${esc(demoDateDisplay(entry))}</td>
     </tr>`;
   }).join('');
@@ -1092,16 +1123,28 @@ export function initAnalyzerPane({
   initAnalyzerBrowser();
 }
 
+// Redraws the Pinned/Recent/Local links after a change made outside the
+// pane, such as the start-up pinned-folders review unpinning folders (#533).
+export function refreshAnalyzerQuickLinks() {
+  renderQuickLinksSection();
+}
+
 // Entry point for cross-pane jumps (e.g. Workspace's "View Match Telemetry"
 // button) — points the Explorer sidebar at the demo's own folder first, so
 // the Demos table reliably highlights it instead of only coincidentally
-// matching whatever folder the sidebar was already browsing.
+// matching whatever folder the sidebar was already browsing. The folder's
+// listing runs beside the analysis, not before it: a big folder takes seconds
+// to list, and the tab stayed blank until it was done.
 export async function openAnalyzerDemo(path) {
   const parentDir = parentDirOf(path);
-  if (parentDir && parentDir !== currentDir) {
-    await setCurrentDir(parentDir);
-  }
-  await loadAnalyzerDemo(path);
+  const listing = parentDir && parentDir !== currentDir ? setCurrentDir(parentDir) : Promise.resolve();
+  browserSelectedDemo = path;
+  renderDemoTable();
+  await Promise.all([listing.then(() => scrollDemoRowIntoView(path)), loadAnalyzerDemo(path)]);
+}
+
+function scrollDemoRowIntoView(path) {
+  document.querySelector(`#analyzer-demo-tbody tr[data-path="${CSS.escape(path)}"]`)?.scrollIntoView({ block: 'nearest' });
 }
 
 async function loadAnalyzerDemo(path) {

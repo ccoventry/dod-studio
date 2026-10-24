@@ -29,6 +29,14 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": ["dodstudio"],
+        "name": "DoDStudio.Project",
+        "description": "DoD Studio project",
+        "role": "Editor"
+      }
+    ],
     "windows": {
       "nsis": {
         "installerHooks": "./windows/installer_hooks.nsh"

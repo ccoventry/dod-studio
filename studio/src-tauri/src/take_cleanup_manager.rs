@@ -237,8 +237,19 @@ impl Progress {
     }
 }
 
+/// Why a take's rows keep it: one queued or rendering. Delete Take's own
+/// check lets a queued row go with the rest, which is right for a click but
+/// not here: a row queued again (Retry) after this cleanup looked is the
+/// user asking for that take, so it stays.
+pub(crate) fn busy_refusal(take_folder: &str, statuses: &[&str]) -> Option<String> {
+    statuses
+        .iter()
+        .any(|s| *s == "Queued" || *s == "Rendering")
+        .then(|| crate::messages::take_is_queued_or_rendering(take_folder))
+}
+
 /// Takes the rows of a take out of the Render tab before its folder goes, so a
-/// Reset can't start a render of a folder that's gone. `remove_take_rows`
+/// Reset can't start a render of a folder that's gone. `remove_idle_take_rows`
 /// re-checks under the job lock that none is queued or rendering. A take
 /// that isn't listed has nothing to remove.
 fn take_out_of_list(
@@ -248,7 +259,7 @@ fn take_out_of_list(
 ) -> Result<(), String> {
     let key = folder_key(&take_folder.to_string_lossy());
     match render.listed_take_folder(&key) {
-        Some(listed) => render.remove_take_rows(app, &[listed]),
+        Some(listed) => render.remove_idle_take_rows(app, &listed),
         None => Ok(()),
     }
 }
@@ -297,7 +308,7 @@ fn remove_finished(app: &AppHandle, finished_takes: Vec<String>, report: bool) {
                 continue;
             }
             let history = native::hlcr::take_meta::read_history(path);
-            let streams = render.take_streams(folder);
+            let streams = native::hlcr::take_cleanup::streams_on_disk(path);
             if finished_at(&history, &streams, |p| Path::new(p).is_file()).is_none() {
                 log_markdown(&format!(
                     "[take-cleanup] {} stays: its render history doesn't show every stream finished with the clip file still there.",
@@ -463,6 +474,15 @@ mod tests {
         assert!(!all_jobs_finished(&s(&["Finished", "Cancelled"])));
         assert!(!all_jobs_finished(&s(&["Finished", "Queued"])));
         assert!(!all_jobs_finished(&s(&["Rendering"])));
+    }
+
+    #[test]
+    fn a_queued_or_rendering_row_keeps_its_take() {
+        assert!(busy_refusal("t", &["Finished"]).is_none());
+        assert!(busy_refusal("t", &["Finished", "Error"]).is_none());
+        assert!(busy_refusal("t", &[]).is_none(), "not listed");
+        assert!(busy_refusal("t", &["Finished", "Queued"]).is_some());
+        assert!(busy_refusal("t", &["Rendering"]).is_some());
     }
 
     #[test]

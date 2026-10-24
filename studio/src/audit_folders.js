@@ -3,8 +3,8 @@
 // choice. The page's Target Folder row is hidden on this tab, so the list is
 // the one place folders are picked here: it starts from the Target Folder,
 // and follows it until a folder is added or removed. auditor_pane.js reads it
-// through `getRequest()` when Start Audit is clicked. "Look inside .zip
-// files" (#929) is saved with the app settings (settings_sync.js), so
+// through `getRequest()` when Start Audit is clicked. "Show demos backed up
+// in archives" (#929) is saved with the app settings (settings_sync.js), so
 // `onSettingsChange` runs when it is ticked.
 import { pickPath } from './pick_path.js';
 import { listFixedDrives } from './ipc_bridge.js';
