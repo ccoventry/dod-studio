@@ -484,6 +484,27 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(label_vt + 4 * set_text) - ui.base)
     check(got == "ret 4", f"Label's slot {set_text} (SetText(const char *)) returns with {got!r}")
 
+    # #781: the Player list's hovered row is read through Label::GetText(char
+    # *, int), which hands on to its TextImage; the char version converts the
+    # wide text through the localizer (its slot +0x14), with `ret 8`. Only a
+    # child with MenuItem's own vftable is read, and MenuItem inherits it.
+    get_label = vwl.rust_usize(src, "LABEL_SLOT_GET_TEXT")
+    item_vt = ui.vftable("MenuItem@vgui2")
+    check(item_vt == build["menu_item_vftable"],
+          f"MenuItem's vftable is menu_item_vftable +{(item_vt or 0):#x}")
+    label_get = ui.u32(label_vt + 4 * get_label) - ui.base
+    hop = [x for x in ui.body(label_get, 0x20) if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
+    image_vt = ui.vftable("TextImage@vgui2")
+    converts = False
+    if hop and image_vt:
+        image_fn = ui.u32(image_vt + int(hop[0].split("+ ")[1].rstrip("]"), 16)) - ui.base
+        image_body = ui.body(image_fn, 0x40)
+        converts = (any(x == "call dword ptr [edx + 0x14]" for x in image_body)
+                    and ui.last_ret(image_fn) == "ret 8")
+    check(converts and item_vt and ui.u32(item_vt + 4 * get_label) == ui.u32(label_vt + 4 * get_label),
+          f"Label slot {get_label} is GetText(char *, int) (its TextImage converts to ANSI, ret 8), "
+          f"and MenuItem inherits it: {hop}")
+
     # 18: the Commands tab's RichText::SetText, which RichText's own
     # ApplySettings (slot 80) calls with a .res "text".
     rich_vt = ui.vftable("RichText@vgui2")
