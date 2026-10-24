@@ -4,6 +4,7 @@ mod blender_manager;
 mod builtin_profiles;
 mod capture_manager;
 mod combine_manager;
+mod consolidate_manager;
 mod crash_maps_manager;
 mod dem_open_with;
 mod demo_cache_cmd;
@@ -933,6 +934,7 @@ pub fn run() {
         .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
+        .manage(consolidate_manager::ConsolidateManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(blender_manager::BlenderManager::default())
@@ -1060,6 +1062,11 @@ pub fn run() {
             delete_audit_files,
             list_fixed_drives,
             cancel_audit,
+            consolidate_manager::consolidate_plan,
+            consolidate_manager::consolidate_run,
+            consolidate_manager::consolidate_undo,
+            consolidate_manager::consolidate_undoable,
+            consolidate_manager::consolidate_cancel,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
             demo_links_manager::list_demo_links,

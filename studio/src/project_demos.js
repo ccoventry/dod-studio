@@ -324,11 +324,26 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
     }
   }
 
+  // The Demo Auditor's Consolidate (and its Undo) moved demos (#872): each
+  // queued one follows its file. Resolves to how many queue rows moved.
+  function relocateMovedDemos(pairs) {
+    let moved = 0;
+    for (const { from, to } of pairs ?? []) {
+      const demo = getDemos().find((d) => samePath(d.path, from));
+      if (!demo) continue;
+      relocateDemo(demo, to);
+      moved += 1;
+    }
+    if (moved > 0) refreshQueue(true);
+    return moved;
+  }
+
   return {
     checkMissingDemos,
     pickedDemosPresent,
     useFoundCopies,
     offerIdenticalCopies,
     locateDemoByHand,
+    relocateMovedDemos,
   };
 }

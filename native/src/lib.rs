@@ -49,6 +49,15 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
+/// Whether a duplicate is a true copy of the one kept, byte for byte:
+/// checked before the Duplicates delete or Consolidate recycles it.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_compare;
+/// The Demo Auditor's Consolidate: every demo into one folder, copies
+/// recycled on the way, with an undo log (#872).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_consolidate;
+
 /// Linking a demo folder on another drive into the game folder, so
 /// `viewdemo` can play from it in place (#376).
 #[cfg(windows)]

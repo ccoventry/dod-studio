@@ -327,6 +327,104 @@ pub fn rename_bad_name(name: &str) -> String {
     format!("`{name}` isn't a usable demo name")
 }
 
+// ── demo_consolidate.rs (#872) ────────────────────────────────────────────
+
+pub const CONSOLIDATE_NO_DESTINATION: &str = "choose the folder to move the demos into first";
+pub const CONSOLIDATE_SOURCE_GONE: &str = "the demo is no longer there";
+pub const CONSOLIDATE_TARGET_EXISTS: &str = "a file with that name is already there";
+
+pub fn consolidate_destination_bad(dest: &std::path::Path) -> String {
+    format!(
+        "{} can't hold the demos: it isn't a folder, or a folder can't be made there",
+        dest.display()
+    )
+}
+
+pub fn consolidate_not_enough_space(needed: u64, free: u64, dest: &std::path::Path) -> String {
+    let gb = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
+    format!(
+        "not enough free space on the drive of {}: the demos copied from other drives need {:.1} GB and {:.1} GB is free",
+        dest.display(),
+        gb(needed),
+        gb(free)
+    )
+}
+
+pub fn consolidate_copy_mismatch(to: &std::path::Path) -> String {
+    format!(
+        "the copy at {} doesn't match the original's size, so the original was kept",
+        to.display()
+    )
+}
+
+/// A failure names the demo, since the toast shows only the first one.
+pub fn consolidate_not_moved(from: &std::path::Path, err: &str) -> String {
+    format!("Not moved: {}: {}", shown(from), err)
+}
+
+pub fn consolidate_not_recycled(path: &std::path::Path, err: &str) -> String {
+    format!("Not recycled: {}: {}", shown(path), err)
+}
+
+pub fn consolidate_not_put_back(at: &std::path::Path, err: &str) -> String {
+    format!("Not put back: {}: {}", shown(at), err)
+}
+
+// ── demo_compare.rs (#871, #872) ─────────────────────────────────────────
+
+/// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`
+/// (or `\\?\UNC\`) prefix, which the Duplicates table hides too.
+pub fn shown(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        text
+    }
+}
+
+/// A copy kept because it isn't byte for byte the copy its group keeps:
+/// the audit's key reads only the first 64 KiB.
+pub fn copy_differs_from_kept(
+    copy: &std::path::Path,
+    keep: &std::path::Path,
+    offset: u64,
+) -> String {
+    format!(
+        "Not deleted: {} is not an exact copy of {} (they differ from byte {}), so it may be a different demo",
+        shown(copy),
+        shown(keep),
+        offset
+    )
+}
+
+pub fn kept_copy_missing(copy: &std::path::Path, keep: &std::path::Path) -> String {
+    format!(
+        "Not deleted: {} could not be checked against the copy being kept, {}, which is no longer there",
+        shown(copy),
+        shown(keep)
+    )
+}
+
+pub fn copy_is_the_kept_copy(copy: &std::path::Path) -> String {
+    format!("Not deleted: {} is the copy being kept", shown(copy))
+}
+
+pub fn copy_compare_failed(
+    copy: &std::path::Path,
+    keep: &std::path::Path,
+    err: impl Display,
+) -> String {
+    format!(
+        "Not deleted: {} could not be compared with {}: {}",
+        shown(copy),
+        shown(keep),
+        err
+    )
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any

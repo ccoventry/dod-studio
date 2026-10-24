@@ -5,6 +5,8 @@ import { runDemoAudit, deleteAuditFiles, cancelAudit, revealInExplorer, openRecy
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { createAuditFolders } from './audit_folders.js';
+import { createAuditConsolidate } from './audit_consolidate_ui.js';
+import { singlesAfterDelete } from './audit_consolidate.js';
 import { setAuditorFooter } from './auditor_footer.js';
 import {
   shownPath, auditProgressView, deleteProgressView, startsTicked, withoutDeleted,
@@ -15,11 +17,17 @@ import {
 import { createClock, readLastRun, rememberLastRun, secondsText, showBar } from './progress_view.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
-/// copies in it are kept first and never start ticked. `onSettingsChange`
-/// saves the app settings when "Show demos backed up in archives" changes
-/// (#929).
-export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => {} } = {}) {
+/// copies in it are kept first and never start ticked. `relocateMoved(pairs)`
+/// points queued demos at the files Consolidate moved (#872).
+/// `onSettingsChange` saves the app settings when "Show demos backed up in
+/// archives" changes (#929).
+export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0, onSettingsChange = () => {} } = {}) {
   let currentAuditResults = [];
+  // Demos without copies and the folders walked, for Consolidate (#872).
+  let currentSingles = [];
+  let currentRoots = [];
+  let consolidating = false;
+  let consolidate = null;
   // Every loose demo an archive holds a copy of (#929), in a group or not:
   // listed in a section of its own below the groups.
   let backedUp = [];
@@ -57,7 +65,8 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
 
   function refreshStartButtonState() {
     if (!runAuditBtn) return;
-    runAuditBtn.disabled = running || !!deleting || !folders.canStart();
+    runAuditBtn.disabled = running || !!deleting || consolidating || !folders.canStart();
+    consolidate?.refreshButtons();
   }
   refreshStartButtonState();
 
@@ -132,6 +141,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       running = true;
       collapsedGroups = new Set();
       currentAuditResults = [];
+      currentSingles = [];
       backedUp = [];
       backedUpExpanded = true;
       refreshStartButtonState();
@@ -149,6 +159,8 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         const outcome = await runDemoAudit(paths, allDrives, queued, lookInZips);
         const seconds = secondsText(clock.ms());
         currentAuditResults = withAuditOrder(outcome?.groups);
+        currentSingles = outcome?.singles ?? [];
+        currentRoots = outcome?.roots ?? [];
         backedUp = outcome?.cancelled ? [] : (outcome?.backed_up ?? []);
         renderAuditResults({ resetTicks: true });
         if (!outcome?.cancelled) rememberLastRun(foldersKey, foldersSeen);
@@ -179,6 +191,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         if (cancelAuditBtn) cancelAuditBtn.disabled = true;
         refreshStartButtonState();
         updateDeleteButtonState();
+        consolidate?.resultsChanged();
       }
     });
   }
@@ -427,6 +440,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
   function keepInstead(groupIdx, path) {
     applyKeep(groupIdx, path);
     renderAuditResults();
+    consolidate?.resultsChanged();
   }
 
   // Keep the copies in one folder, over every group at once: a long list
@@ -448,6 +462,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       if (!already && applyKeep(groupIdx, path)) changed += 1;
     });
     renderAuditResults();
+    consolidate?.resultsChanged();
     showToast(STRINGS.AUDITOR.preferFolderToast(found, changed, folder), found ? 'success' : 'info');
   });
 
@@ -462,7 +477,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
   }
 
   function setDeleteButtons(n) {
-    const busy = running || !!deleting;
+    const busy = running || !!deleting || consolidating;
     if (preferFolderBtn) preferFolderBtn.disabled = busy || currentAuditResults.length === 0;
     if (deleteBtn) {
       deleteBtn.disabled = busy || n === 0;
@@ -512,6 +527,8 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         showToast(STRINGS.AUDITOR.someNotDeletedToast(failed.length, failed[0].error), 'error');
       }
       deleted.forEach((p) => ticked.delete(p));
+      // A group left with one file has no copies now: Consolidate moves it.
+      currentSingles = [...currentSingles, ...singlesAfterDelete(currentAuditResults, deleted)];
       currentAuditResults = withoutDeleted(currentAuditResults, deleted);
       backedUp = backedUpWithout(backedUp, deleted);
       // A copy with other bytes is a different demo: marked, never ticked again.
@@ -528,9 +545,39 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
       if (progressEl) progressEl.hidden = true;
       renderAuditResults();
       refreshStartButtonState();
+      consolidate?.resultsChanged();
     }
   }
 
   deleteBtn?.addEventListener('click', () => deleteTicked(false));
   deletePermanentBtn?.addEventListener('click', () => deleteTicked(true));
+
+  // Consolidate… (#872): audit_consolidate_ui.js.
+  consolidate = createAuditConsolidate({
+    getAudit: () => ({ groups: currentAuditResults, singles: currentSingles, roots: currentRoots }),
+    isBusy: () => running || !!deleting,
+    setBusy: (on) => {
+      consolidating = on;
+      folders.setLocked(on);
+      refreshStartButtonState();
+      updateDeleteButtonState();
+    },
+    showProgress,
+    hideProgress,
+    setStatus: (text) => setStatus(text),
+    relocateMoved,
+    markNotCopies: (paths) => {
+      paths.forEach((p) => ticked.delete(p));
+      currentAuditResults = markNotCopies(currentAuditResults, paths);
+      renderAuditResults();
+    },
+    // The list names files that have moved: it's stale until the next audit.
+    onMoved: () => {
+      currentAuditResults = [];
+      currentSingles = [];
+      ticked = new Set();
+      renderAuditResults();
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${STRINGS.AUDITOR.CONSOLIDATED_ROW}</td></tr>`;
+    },
+  });
 }

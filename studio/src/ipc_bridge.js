@@ -900,6 +900,50 @@ export async function cancelAudit() {
     });
 }
 
+// Demo Auditor › Consolidate (#872). The preview's plan: no toast, since the
+// preview line shows the error itself.
+export async function consolidatePlan(request) {
+  return invoke("consolidate_plan", { request })
+    .catch((err) => {
+      console.error("IPC Execution Error (consolidate_plan):", err);
+      throw err;
+    });
+}
+
+export async function consolidateRun(request) {
+  return invoke("consolidate_run", { request })
+    .catch((err) => {
+      console.error("IPC Execution Error (consolidate_run):", err);
+      showToast(STRINGS.IPC.consolidateFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function consolidateUndo() {
+  return invoke("consolidate_undo")
+    .catch((err) => {
+      console.error("IPC Execution Error (consolidate_undo):", err);
+      showToast(STRINGS.IPC.consolidateFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function consolidateUndoable() {
+  return invoke("consolidate_undoable")
+    .catch((err) => {
+      console.error("IPC Execution Error (consolidate_undoable):", err);
+      throw err;
+    });
+}
+
+export async function consolidateCancel() {
+  return invoke("consolidate_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (consolidate_cancel):", err);
+      throw err;
+    });
+}
+
 // ── Demo Auditor: Rename Demos (#469) ──────────────────────────────────────
 
 export async function demoRenameList(folder) {

@@ -1018,7 +1018,7 @@ export const STRINGS = {
     KEEP_THIS_TITLE: 'Keep this copy instead. The one kept now becomes a copy you can delete.',
     KEEP_CHANGED_NOTE: 'Kept copy changed by you',
     NOT_A_COPY_LABEL: '   ≠ Not an exact copy',
-    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy when you deleted, and it's different: another demo that only starts the same way. It isn't deleted or counted as a copy.",
+    NOT_A_COPY_TITLE: "Compared byte for byte with the kept copy, and it's different: another demo that only starts the same way. It isn't deleted, recycled or counted as a copy.",
     KEEP_RESET_BUTTON: 'Reset',
     keepResetTitle: (path) => `Keep the copy the audit picked again: ${path}`,
     PREFER_FOLDER_BUTTON: 'Keep copies already in a folder…',
@@ -1050,6 +1050,68 @@ export const STRINGS = {
       `${permanent ? 'Deleted' : 'Moved to the Recycle Bin'}: ${deleted}${failed ? `, ${failed} not deleted` : ''}.`,
     deletionFailedToast: (e) => `Deletion failed: ${e}`,
     megabytesLabel: (mb) => `${mb} MB`,
+
+    // Consolidate (#872): audit_consolidate.js and audit_consolidate_ui.js.
+    CONSOLIDATE_BUTTON: 'Consolidate…',
+    CONSOLIDATE_TITLE: 'Move every demo the audit found into one folder. Only the kept copy of each group moves; the other copies go to the Recycle Bin once each matches it byte for byte.',
+    CONSOLIDATE_DEST_LABEL: 'Move every demo into:',
+    CONSOLIDATE_DEST_PLACEHOLDER: 'Choose a folder…',
+    CONSOLIDATE_BROWSE_BUTTON: 'Choose…',
+    CONSOLIDATE_DIALOG_TITLE: 'Folder to move every demo into',
+    CONSOLIDATE_LAYOUT_FLAT: 'All in one folder',
+    CONSOLIDATE_LAYOUT_SUBFOLDERS: 'Keep their subfolders',
+    CONSOLIDATE_LAYOUT_SUBFOLDERS_TITLE: 'Each demo keeps the folders it was in below the folder the audit checked, recreated under the destination.',
+    CONSOLIDATE_GAME_FOLDERS: 'Also move demos in game folders',
+    CONSOLIDATE_GAME_FOLDERS_TITLE: "Demos inside an install's dod folder stay there unless this is ticked, because the game plays demos from there. Ticked, their copies elsewhere can be recycled too.",
+    CONSOLIDATE_START_BUTTON: 'Move Demos',
+    CONSOLIDATE_CANCEL_BUTTON: 'Cancel',
+    CONSOLIDATE_UNDO_BUTTON: 'Undo Last Consolidate',
+    consolidateUndoTitle: (n, dest) => `Put the ${n} demo${n === 1 ? '' : 's'} moved into ${dest} back where they were. Copies sent to the Recycle Bin stay there.`,
+    CONSOLIDATE_NEEDS_AUDIT: 'Run an audit first: Consolidate moves the demos it found.',
+    CONSOLIDATE_NEEDS_DEST: 'Choose the folder to move the demos into.',
+    CONSOLIDATE_PLANNING: 'Working out what moves…',
+    consolidatePlanFailed: (e) => `Can't consolidate: ${e}`,
+    consolidatePreview: (p, size) => {
+      const parts = [`Move ${p.moves.length} demo${p.moves.length === 1 ? '' : 's'} (${size}) into ${p.destination}`];
+      if (p.recycle.length) {
+        const n = p.recycle.length;
+        parts.push(`recycle ${n} cop${n === 1 ? 'y' : 'ies'} (each first checked byte for byte against the demo kept)`);
+      }
+      if (p.renamed) parts.push(`rename ${p.renamed}`);
+      let text = parts.join(', ') + '.';
+      if (p.already_there) text += ` ${p.already_there} already there.`;
+      const inGame = p.stay_in_game_folders + p.copies_in_game_folders;
+      if (inGame) text += ` ${inGame} in game folders left where they are.`;
+      return text;
+    },
+    NOTHING_TO_CONSOLIDATE: 'Nothing to move: every demo is already there or in a game folder.',
+    consolidateNoSpace: (need, free) => `Not enough space: the demos copied from other drives need ${need} and ${free} is free.`,
+    CONSOLIDATE_CONFIRM_TITLE: 'Consolidate Demos',
+    CONSOLIDATE_CONFIRM_FOOTER: 'Undo puts the moved demos back. Copies in the Recycle Bin can be restored from there. Other project files that list a moved demo will ask you to locate it.',
+    consolidateConfirmLabel: (n) => `Move ${n} Demo${n === 1 ? '' : 's'}`,
+    movingLine: (done, total, bytes, totalBytes) => `Moving demos: ${done} / ${total} (${bytes} of ${totalBytes})`,
+    recyclingLine: (done, total) => `Moving copies to the Recycle Bin: ${done} / ${total}`,
+    undoingLine: (done, total, bytes, totalBytes) => `Putting demos back: ${done} / ${total} (${bytes} of ${totalBytes})`,
+    CONSOLIDATE_CANCELLING: 'Cancelling after the current demo…',
+    consolidatedStatus: (o, queued) => {
+      let text = `Moved ${o.moved.length} demo${o.moved.length === 1 ? '' : 's'}`;
+      if (o.recycled.length) text += `, recycled ${o.recycled.length} cop${o.recycled.length === 1 ? 'y' : 'ies'}`;
+      text += '.';
+      if (o.cancelled) text += ' Cancelled: the rest stayed where they were, and no copies were recycled.';
+      const notCopies = o.recycle_failed.filter((f) => f.not_a_copy).length;
+      if (notCopies) text += ` ${notCopies} cop${notCopies === 1 ? 'y was' : 'ies were'} kept: not an exact copy of the demo kept.`;
+      const failed = o.failed.length + o.recycle_failed.length - notCopies;
+      if (failed) text += ` ${failed} failed.`;
+      if (queued) text += ` ${queued} in this project's queue updated.`;
+      return text;
+    },
+    undoneStatus: (o, queued) => `Put back ${o.moved.length} demo${o.moved.length === 1 ? '' : 's'}.`
+      + (o.cancelled ? ' Cancelled: Undo again to put back the rest.' : '')
+      + (o.failed.length ? ` ${o.failed.length} could not be put back.` : '')
+      + (queued ? ` ${queued} in this project's queue updated.` : ''),
+    consolidateFailedToast: (n, first) => `${n} demo${n === 1 ? ' was' : 's were'} not moved or recycled. ${first}`,
+    CONSOLIDATE_UNDO_CONFIRM: 'Put the demos from the last Consolidate back where they were?',
+    CONSOLIDATED_ROW: 'Demos moved. Run the audit again to check the folder.',
   },
 
   // ── Clear Previews modal ─────────────────────────────────────────────────
@@ -2578,6 +2640,7 @@ export const STRINGS = {
     matchGroupsFailed: (err) => `Grouping the demos by match failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
+    consolidateFailed: (err) => `Moving the demos failed: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
     previewScanFailed: (err) => `Preview scan failed: ${err}`,
     previewDeletionFailed: (err) => `Preview deletion failed: ${err}`,

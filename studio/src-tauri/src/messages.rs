@@ -348,53 +348,12 @@ pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
-/// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`
-/// (or `\\?\UNC\`) prefix, which the Duplicates table hides too.
-fn shown(path: &Path) -> String {
-    let text = path.display().to_string();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        rest.to_string()
-    } else {
-        text
-    }
-}
+// The path as Explorer shows it; the copy-compare messages live with the
+// compare in `native::demo_compare`.
+use native::demo_compare::shown;
 
 pub fn failed_to_delete_audit_file(path: &Path, err: impl Display) -> String {
     format!("Failed to delete {}: {}", shown(path), err)
-}
-
-/// A copy kept because it isn't byte for byte the copy its group keeps:
-/// the audit's key reads only the first 64 KiB.
-pub fn copy_differs_from_kept(copy: &Path, keep: &Path, offset: u64) -> String {
-    format!(
-        "Not deleted: {} is not an exact copy of {} (they differ from byte {}), so it may be a different demo",
-        shown(copy),
-        shown(keep),
-        offset
-    )
-}
-
-pub fn kept_copy_missing(copy: &Path, keep: &Path) -> String {
-    format!(
-        "Not deleted: {} could not be checked against the copy being kept, {}, which is no longer there",
-        shown(copy),
-        shown(keep)
-    )
-}
-
-pub fn copy_is_the_kept_copy(copy: &Path) -> String {
-    format!("Not deleted: {} is the copy being kept", shown(copy))
-}
-
-pub fn copy_compare_failed(copy: &Path, keep: &Path, err: impl Display) -> String {
-    format!(
-        "Not deleted: {} could not be compared with {}: {}",
-        shown(copy),
-        shown(keep),
-        err
-    )
 }
 
 /// The Duplicates delete only removes `.dem` files (#844).
@@ -410,6 +369,8 @@ pub fn audit_folder_not_found(path: &Path) -> String {
 }
 
 pub const NO_AUDIT_FOLDERS: &str = "Add a folder to check, or choose All drives.";
+pub const CONSOLIDATE_ALREADY_RUNNING: &str =
+    "Demos are already being moved. Wait for that to finish, or cancel it.";
 
 pub fn path_no_longer_exists(path: &str) -> String {
     format!("Path no longer exists: {}", path)
@@ -708,8 +669,8 @@ mod tests {
         );
         // The audit's canonical paths show without their `\\?\` prefix.
         assert_eq!(
-            copy_is_the_kept_copy(Path::new(r"\\?\C:\d\a.dem")),
-            r"Not deleted: C:\d\a.dem is the copy being kept"
+            failed_to_delete_audit_file(Path::new(r"\\?\C:\d\a.dem"), "in use"),
+            r"Failed to delete C:\d\a.dem: in use"
         );
         assert_eq!(
             not_a_demo_file(Path::new(r"\\?\UNC\server\share\a.dem")),
