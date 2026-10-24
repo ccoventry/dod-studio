@@ -211,6 +211,28 @@ class GeometryTest(unittest.TestCase):
         _, _, _, oy = K.place_barrel(tris, basis, fit, alpha, box, 3, cut=False)
         self.assertAlmostEqual(oy - 5.0, 3, delta=0.6)
 
+    def test_place_barrel_shrink_keeps_the_row_and_fits_the_magazine(self):
+        tris, basis, box = self.magazine_gun(), np.eye(3), (0, 0, 100, 40)
+        fit = K.fit_transform(tris, basis, box)
+        alpha = K.silhouette(tris, basis, *fit, 100, 40, ss=1)
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, shrink=True)
+        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)  # the barrel stays on its row
+        self.assertLessEqual(oy + ky * 6, 40 + 1e-6)  # the whole magazine inside
+        self.assertLess(kx, 5.0)  # ...by drawing the gun smaller
+        self.assertAlmostEqual(ox + kx * 10, 50)  # still centred across
+        # shrink wins over cut
+        self.assertEqual(K.place_barrel(tris, basis, fit, alpha, box, 10, cut=True, shrink=True), (kx, ky, ox, oy))
+        # a gun that already fits keeps the box's width
+        kx2, *_ = K.place_barrel(tris, basis, fit, alpha, (0, 0, 100, 400), 10, shrink=True)
+        self.assertAlmostEqual(kx2, 5.0)
+
+    def test_no_icon_shrinks_by_default(self):
+        # the MP44's shrink is one of the two options the user picks between
+        self.assertEqual({n for n, i in K.ICONS.items() if i.shrink_below}, set())
+        for name, icon in K.ICONS.items():
+            if icon.shrink_below:
+                self.assertIsNotNone(icon.barrel_top, f"{name}: shrink_below needs barrel_top")
+
     def test_see_through_mask_takes_the_dark_region_round_the_seed(self):
         ind = np.ones((8, 8), np.uint8)  # index 1: grey metal
         ind[2:5, 2:5] = 0  # a black hole
