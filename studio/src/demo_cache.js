@@ -82,4 +82,5 @@ export function initDemoCache({ getDemoPaths }) {
       showBar(view.value, view.max);
     }
   });
+  return api;
 }

@@ -35,11 +35,12 @@ pub fn label_is_streaming_drive(label: &str) -> bool {
     label.trim().eq_ignore_ascii_case("Google Drive")
 }
 
-/// Answers "is this file in the cloud" for many files, asking each volume
-/// for its label once.
+/// Answers "is this file in the cloud" for many files, asking each folder
+/// for its volume and each volume for its label once.
 #[derive(Default)]
 pub struct CloudCheck {
     streaming_volumes: HashMap<PathBuf, bool>,
+    streaming_folders: HashMap<PathBuf, bool>,
 }
 
 impl CloudCheck {
@@ -53,15 +54,22 @@ impl CloudCheck {
         if win::attributes(path).is_some_and(attributes_say_online_only) {
             return true;
         }
-        let Some(root) = win::volume_root(path) else {
-            return false;
-        };
-        *self
-            .streaming_volumes
-            .entry(root)
-            .or_insert_with_key(|root| {
-                win::volume_label(root).is_some_and(|l| label_is_streaming_drive(&l))
-            })
+        // A folder's demos share a volume: one volume lookup per folder, not
+        // per demo.
+        let folder = path.parent().unwrap_or(path).to_path_buf();
+        if let Some(&streaming) = self.streaming_folders.get(&folder) {
+            return streaming;
+        }
+        let streaming = win::volume_root(path).is_some_and(|root| {
+            *self
+                .streaming_volumes
+                .entry(root)
+                .or_insert_with_key(|root| {
+                    win::volume_label(root).is_some_and(|l| label_is_streaming_drive(&l))
+                })
+        });
+        self.streaming_folders.insert(folder, streaming);
+        streaming
     }
 }
 
@@ -185,6 +193,8 @@ mod tests {
         assert!(!check.is_online_only(&file));
         // A path that doesn't exist reads as local too: the walk reports its error.
         assert!(!check.is_online_only(&dir.join("missing.dem")));
+        // Both share a folder: its volume was looked up once.
+        assert_eq!(check.streaming_folders.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
