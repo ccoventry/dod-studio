@@ -47,6 +47,27 @@ test('boots and wires settings into the folder pools', async ({ page }) => {
   expect(errors.filter((m) => /before initialization|is not defined|is not a function/.test(m))).toEqual([]);
 });
 
+test("+ Add Folder's folder shows in the Explorer's Recent list straight away", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.assign(window.__mockInvokeHandlers, {
+      'plugin:dialog|open': () => 'H:/added',
+      scan_directory: () => ({ demos: [], unchanged: 0, copies: [], cancelled: false }),
+      queue_match_groups: () => ({ demos: [], matches: [] }),
+      // The Explorer's Local tier; unmocked, the quick links can't redraw.
+      scan_demo_folders: () => [],
+    });
+  });
+  await page.goto('/index.html');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
+  const quickLinks = page.locator('#analyzer-quick-links');
+  await expect(quickLinks.locator('.quicklink-row[data-path="D:/demos"]')).toHaveCount(1);
+  await expect(quickLinks.locator('.quicklink-row[data-path="H:/added"]')).toHaveCount(0);
+
+  await page.evaluate(() => document.querySelector('#add-folder-btn').click());
+  await expect(quickLinks.locator('.quicklink-row[data-path="H:/added"]')).toHaveCount(1);
+  await expect(quickLinks).toContainText('Recent');
+});
+
 test('swallows reload and session shortcuts and the browser context menu', async ({ page }) => {
   await page.goto('/index.html');
   await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');

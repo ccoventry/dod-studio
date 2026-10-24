@@ -82,7 +82,16 @@ export function createDemoFolders({ persist }) {
     pinned: () => pinned,
     // Pinned and Recent: + Add Folder fills Recent, not the pins (#533).
     all: () => [...pinned, ...history],
-    recordVisit,
+    /**
+     * Puts a folder on top of Recent from outside the Explorer (+ Add Folder,
+     * dropped folders) and redraws the Explorer's Recent list, which was
+     * already drawn and otherwise stays stale until something else redraws
+     * it. The Explorer's own visits redraw it themselves.
+     */
+    recordVisit: async (folder) => {
+      await recordVisit(folder);
+      refreshAnalyzerQuickLinks();
+    },
     /** Drops `drop` from the pins (the pinned review, #533) and saves. */
     unpin: (drop) => { pinned = pinned.filter((f) => !drop.includes(f)); refreshAnalyzerQuickLinks(); return persist(); },
     /** The fields settings_sync.js writes. */
