@@ -66,7 +66,8 @@
 //! it `SupportsFeature(2)`, which both `hw.dll` builds do, and the PRE
 //! `EngineFont`'s own shadow shows the renderer honours it. Neither build's
 //! font manager knows an outline bit (0x200), and only the scheme loader of
-//! a later vgui2 does, so `outline` is accepted and said to do nothing.
+//! a later vgui2 does, so `outline` is accepted and said to do nothing; the
+//! `outline` subcommand draws one by hand (`backdrop.rs`).
 
 // The patching runs only in the 32-bit DLL; a host build (workspace clippy,
 // tests) keeps the tables and helpers for the unit tests alone.
@@ -346,6 +347,9 @@ static FONT_TALL: AtomicI32 = AtomicI32::new(0);
 /// `0x00rrggbb`, or -1 once a draw has used it (the engine resets to
 /// `con_color` after each string).
 static COLOR: AtomicI32 = AtomicI32::new(-1);
+/// The same colour as the game passed it, as `f32` bits, so the engine's
+/// own font can be given it again exactly after the outline's passes.
+static COLOR_F: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
 /// Whether a failure has been logged, so the per-frame check says it once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// The `client.dll` the sites were rewritten in, 0 before.
@@ -359,6 +363,15 @@ static ENGINE_TALL: AtomicI32 = AtomicI32::new(0);
 /// the step uses.
 pub(super) fn tall() -> i32 {
     FONT_TALL.load(Ordering::Relaxed)
+}
+
+/// The names' height: our font's, or the engine font's as its length call
+/// last reported it (0 before the first line).
+pub(super) fn text_tall() -> i32 {
+    match FONT_TALL.load(Ordering::Relaxed) {
+        0 => ENGINE_TALL.load(Ordering::Relaxed),
+        tall => tall,
+    }
 }
 
 /// What `status` says about the font.
@@ -494,9 +507,13 @@ mod hook {
         } else {
             unsafe { *height }
         };
-        let margin = super::super::scale::right_margin(screen_width(), tall);
+        let screen = screen_width();
+        // An outline or a box reaches past the name: keep that clear too.
+        let margin =
+            super::super::scale::right_margin(screen, tall) + super::super::backdrop::edge_extra();
         // Safety: the caller's out-parameter, which `string_len` just wrote.
         unsafe { *width += margin };
+        super::super::backdrop::line_started(screen - margin);
     }
 
     /// `con_color` as (r, g, b), the colour a string gets with none set.
@@ -528,15 +545,58 @@ mod hook {
     /// centred on the line by [`super::super::scale::name_draw_y`], which
     /// leaves `y` alone at scale 1 with no font.
     unsafe extern "C" fn draw_string(x: i32, y: i32, text: *const c_char) -> i32 {
+        use super::super::{backdrop, scale};
+
         let font = FONT.load(Ordering::Acquire);
-        if font == 0 {
-            let y = super::super::scale::name_draw_y(y, ENGINE_TALL.load(Ordering::Relaxed));
-            return match engine::engfuncs() {
-                Some(e) => unsafe { (e.pfn_draw_console_string)(x, y, text) },
-                None => x,
-            };
+        // The colour the game gave this name, if it gave one; the engine
+        // resets to `con_color` after every string either way.
+        let asked = COLOR.swap(-1, Ordering::AcqRel);
+        let name_rgb = || match asked {
+            -1 => con_color(),
+            packed => ((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff),
+        };
+        let line_y = y;
+        let text_tall = text_tall();
+        let y = scale::name_draw_y(y, text_tall);
+        let backdrop_on = backdrop::active();
+        if backdrop_on {
+            // The killer's name is a line's first draw; the box goes under it.
+            // Safety: inside the HUD draw, on the engine's thread.
+            unsafe { backdrop::line_box_at(x, line_y, scale::line_height(text_tall)) };
         }
-        let y = super::super::scale::name_draw_y(y, FONT_TALL.load(Ordering::Relaxed));
+        if font == 0 {
+            let Some(e) = engine::engfuncs() else {
+                return x;
+            };
+            if backdrop_on && !text.is_null() {
+                if backdrop::name_boxes() {
+                    let (mut w, mut h) = (0, 0);
+                    unsafe { (e.pfn_draw_console_string_len)(text, &mut w, &mut h) };
+                    let line = (line_y, scale::line_height(text_tall));
+                    unsafe { backdrop::name_box_at(name_rgb(), x, w, y, text_tall, line) };
+                }
+                let (px, (r, g, b), _alpha) = backdrop::outline();
+                if px > 0 {
+                    // The engine's call takes no alpha: the outline is opaque.
+                    let to_f = |v: i32| v as f32 / 255.0;
+                    for dy in -px..=px {
+                        for dx in -px..=px {
+                            if backdrop::in_outline(dx, dy, px) {
+                                unsafe {
+                                    (e.pfn_draw_set_text_color)(to_f(r), to_f(g), to_f(b));
+                                    (e.pfn_draw_console_string)(x + dx, y + dy, text);
+                                }
+                            }
+                        }
+                    }
+                    if asked != -1 {
+                        let f = |i: usize| f32::from_bits(COLOR_F[i].load(Ordering::Relaxed));
+                        unsafe { (e.pfn_draw_set_text_color)(f(0), f(1), f(2)) };
+                    }
+                }
+            }
+            return unsafe { (e.pfn_draw_console_string)(x, y, text) };
+        }
         let Ok(surface) = surface() else {
             return x;
         };
@@ -545,9 +605,16 @@ mod hook {
         }
         // Safety: the game's own `szKiller`/`szVictim`, NUL-terminated by `MsgFunc_DeathMsg`.
         let wide = to_wide(unsafe { CStr::from_ptr(text) }.to_bytes());
-        let (r, g, b) = match COLOR.swap(-1, Ordering::AcqRel) {
-            -1 => con_color(),
-            packed => ((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff),
+        let (r, g, b) = name_rgb();
+        let width = text_width(surface, font, &wide);
+        if backdrop_on && backdrop::name_boxes() {
+            let line = (line_y, scale::line_height(text_tall));
+            unsafe { backdrop::name_box_at((r, g, b), x, width, y, text_tall, line) };
+        }
+        let (outline_px, (or, og, ob), outline_alpha) = if backdrop_on {
+            backdrop::outline()
+        } else {
+            (0, (0, 0, 0), 0)
         };
         let chars = (wide.len() - 1) as i32;
         // Safety: the engine's own text path makes these same calls from
@@ -559,22 +626,35 @@ mod hook {
             let print: PrintTextFn = slot(surface, SURFACE_DRAW_PRINT_TEXT);
             let flush: FlushFn = slot(surface, SURFACE_DRAW_FLUSH_TEXT);
             set_font(surface, font);
+            if outline_px > 0 {
+                set_color(surface, or, og, ob, outline_alpha);
+                for dy in -outline_px..=outline_px {
+                    for dx in -outline_px..=outline_px {
+                        if backdrop::in_outline(dx, dy, outline_px) {
+                            set_pos(surface, x + dx, y + dy);
+                            print(surface, wide.as_ptr(), chars);
+                        }
+                    }
+                }
+            }
             set_pos(surface, x, y);
             set_color(surface, r, g, b, 255);
             print(surface, wide.as_ptr(), chars);
             flush(surface);
         }
-        x + text_width(surface, font, &wide)
+        x + width
     }
 
     /// Stands in for `pfnDrawSetTextColor` before each name: remembers the
-    /// colour for [`draw_string`] and still tells the engine, so its own
-    /// state is what it would have been.
+    /// colour for [`draw_string`] (our font's colour, a team box's shade, and
+    /// the engine font's colour again after an outline) and still tells the
+    /// engine, so its own state is what it would have been.
     unsafe extern "C" fn set_text_color(r: f32, g: f32, b: f32) {
-        if FONT.load(Ordering::Acquire) != 0 {
-            let packed = (color_byte(r) << 16) | (color_byte(g) << 8) | color_byte(b);
-            COLOR.store(packed, Ordering::Release);
+        for (slot, v) in COLOR_F.iter().zip([r, g, b]) {
+            slot.store(v.to_bits(), Ordering::Relaxed);
         }
+        let packed = (color_byte(r) << 16) | (color_byte(g) << 8) | color_byte(b);
+        COLOR.store(packed, Ordering::Release);
         if let Some(e) = engine::engfuncs() {
             unsafe { (e.pfn_draw_set_text_color)(r, g, b) };
         }
@@ -813,7 +893,7 @@ mod hook {
         FONT_TALL.store(tall.max(0), Ordering::Release);
         FONT.store(handle, Ordering::Release);
         let outline = if spec.outline {
-            " (outline: this engine's font renderer has none, so it is drawn without)"
+            " (outline: this engine's font renderer has none, so it is drawn without; `outline <px>` draws one)"
         } else {
             ""
         };
