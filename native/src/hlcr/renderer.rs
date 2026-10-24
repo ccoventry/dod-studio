@@ -20,6 +20,11 @@ pub enum RenderUpdate {
     Finished(String, bool, Option<String>), // (job_id, success, error_log)
 }
 
+/// Room an export drive must have past a job's reservation before the job is
+/// routed to it. Public for the automatic take cleanup (#644), which makes
+/// room by the same rule.
+pub const EXPORT_SAFETY_MARGIN_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+
 /// Safe, deliberately conservative upper bound on the bytes a render job
 /// will need on its export drive — used only to size the JIT reservation in
 /// `run_render_job` below, never to predict the real (compressed) output.
@@ -302,7 +307,6 @@ pub async fn run_render_job(
     // pick the same drive before any of them has written a byte — the flat
     // 20 GiB threshold this replaced was only ever sized to be safe for one
     // job at a time.
-    const SAFETY_MARGIN_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
     let reservation_estimate =
         job_reservation_estimate(&clip, config.target_codec, &config.custom_codec_args);
 
@@ -323,7 +327,7 @@ pub async fn run_render_job(
             let live_free = crate::sys::disk::get_available_bytes(dir);
             let already_reserved = *ledger.get(dir).unwrap_or(&0);
             if live_free.saturating_sub(already_reserved)
-                > reservation_estimate + SAFETY_MARGIN_BYTES
+                > reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES
             {
                 *ledger.entry(dir.clone()).or_insert(0) += reservation_estimate;
                 selected_export_dir = Some(dir.clone());
@@ -353,7 +357,7 @@ pub async fn run_render_job(
             Some(format!(
                 "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
                 config.export_directories.len(),
-                (reservation_estimate + SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
+                (reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
             )),
         ));
         return;

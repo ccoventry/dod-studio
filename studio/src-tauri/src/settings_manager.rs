@@ -253,6 +253,17 @@ pub struct AppSettings {
     pub finish_codec_video: String,
     #[serde(default = "default_finish_codec_render_tab")]
     pub finish_codec_frames: String,
+    /// "After a clip is finished" (#644): `"keep"`, `"recycle"` (the Recycle
+    /// Bin) or `"delete"` (for good). A string so a value this build does not
+    /// know still loads, and reads as `"keep"`
+    /// (`native::hlcr::take_cleanup::AfterFinish::from_setting`). Keep by
+    /// default, and for every settings file written before it existed.
+    #[serde(default = "default_take_after_finish")]
+    pub take_after_finish: String,
+    /// "Only when space is needed" (#644), read only with `"delete"`: takes
+    /// stay until a capture or finish job is short of room.
+    #[serde(default)]
+    pub take_delete_only_when_space_needed: bool,
     /// How a highlight's clip name is built (#441), in the placeholder syntax
     /// of `studio/src/clip_name.js`. Configuration > Render Output.
     #[serde(default = "default_clip_name_template")]
@@ -470,6 +481,9 @@ fn default_finish_codec_obs() -> String {
 fn default_finish_codec_render_tab() -> String {
     "render_tab".to_string()
 }
+fn default_take_after_finish() -> String {
+    "keep".to_string()
+}
 fn default_dem_open_target() -> String {
     "analyzer".to_string()
 }
@@ -553,6 +567,8 @@ impl Default for AppSettings {
             finish_codec_obs: default_finish_codec_obs(),
             finish_codec_video: default_finish_codec_render_tab(),
             finish_codec_frames: default_finish_codec_render_tab(),
+            take_after_finish: default_take_after_finish(),
+            take_delete_only_when_space_needed: false,
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
@@ -772,6 +788,9 @@ mod tests {
         assert_eq!(settings.finish_codec_obs, "source_copy");
         assert_eq!(settings.finish_codec_video, "render_tab");
         assert_eq!(settings.finish_codec_frames, "render_tab");
+        // Settings saved before #644 keep every take.
+        assert_eq!(settings.take_after_finish, "keep");
+        assert!(!settings.take_delete_only_when_space_needed);
         // Settings saved before #246 get today's worker count.
         assert_eq!(
             settings.scan_workers,

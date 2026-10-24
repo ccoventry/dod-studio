@@ -215,7 +215,8 @@ pub use engine::{PatchStage, StreamPatcher};
 #[cfg(not(target_arch = "wasm32"))]
 pub use builder::{
     WorkspaceGuard, build_batch_queue, build_director_message, build_director_stufftext,
-    build_preview_patch_jobs, final_init_commands, playdemo_safe_stem, spawn_patch_batch,
+    build_preview_patch_jobs, estimate_batch_capture_bytes, final_init_commands,
+    playdemo_safe_stem, spawn_patch_batch,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

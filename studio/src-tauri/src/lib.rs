@@ -32,6 +32,7 @@ mod project_convert;
 mod render_manager;
 mod review_manager;
 mod settings_manager;
+mod take_cleanup_manager;
 mod take_delete_manager;
 mod updater_manager;
 
