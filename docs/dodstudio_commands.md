@@ -248,7 +248,13 @@ sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 answer from the console, for key binds. Bare prints where the review is.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
-move the camera off the highlight's player (#826).
+move the camera off the highlight's player (#826), and the console refuses
+the commands that move the demo or the camera (seeks, `dem_*`, `viewdemo`
+and other loads, `stop`, `disconnect`, `spec_mode`, `ds_spec_target`,
+`spec_autodirector`, `mirv_input`, ...) with one line saying so; a typed
+`host_framerate` or `spec_autodirector_internal` is put back
+(#855). The lists are in `src/review_lock.rs`; `ds_demo_review` itself
+always works.
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
 pipe. See `src/review.rs`.
 

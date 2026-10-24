@@ -602,6 +602,8 @@ pub fn poll() {
     crate::spectator_follow::poll();
     // While a review runs, the viewer's clicks don't move its camera (#826).
     crate::spectator_buttons::poll();
+    // ...and the console can't move its demo or camera (#855).
+    crate::review_lock::console::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     crate::overview_speaker::poll();
@@ -1565,6 +1567,8 @@ pub fn install() {
     crate::demo_reload::install();
     crate::connect_guard::install();
     crate::events::install();
+    // The rest of what a review locks is wrapped by its poll as it appears.
+    crate::review_lock::console::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
