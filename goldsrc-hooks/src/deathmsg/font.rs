@@ -34,7 +34,10 @@
 //! surface with our handle, [`hook::string_len`] measures it with the same
 //! handle (so the right-edge anchoring the layout computes stays right), and
 //! [`hook::set_text_color`] records the colour the game asked for, since each
-//! name is coloured by a call just before it. A 16-byte detour at the line
+//! name is coloured by a call just before it. The victim's width call goes to
+//! [`hook::victim_len`] instead, which adds a right margin while a font or a
+//! scale is in force, so a big last glyph or a drop shadow is not cut by the
+//! screen's edge (`scale::right_margin`). A 16-byte detour at the line
 //! step makes it `max(icon height, font height)`, so taller text does not
 //! overlap the next line. The icon's size and its place on the line are
 //! [`super::scale`]'s (#728), which rewrites three more operands and adds a
@@ -89,6 +92,9 @@ enum Call {
     Color,
     /// `pfnDrawConsoleStringLen`, slot 29.
     Len,
+    /// The same call for the victim, the width the line is anchored by: it
+    /// also reserves the right margin (`scale::right_margin`).
+    VictimLen,
 }
 
 impl Call {
@@ -98,7 +104,7 @@ impl Call {
         match self {
             Call::Draw => 27,
             Call::Color => 28,
-            Call::Len => 29,
+            Call::Len | Call::VictimLen => 29,
         }
     }
 }
@@ -106,7 +112,7 @@ impl Call {
 /// The six call sites, as offsets from the [`PATTERN`] match: the victim's
 /// and killer's width, then the killer's colour and name, then the victim's.
 const SITES: &[(usize, Call)] = &[
-    (0x0b, Call::Len),
+    (0x0b, Call::VictimLen),
     (0x4c, Call::Len),
     (0x77, Call::Color),
     (0x87, Call::Draw),
@@ -450,7 +456,47 @@ mod hook {
             Call::Draw => draw_string as engine::DrawConsoleStringFn as usize,
             Call::Color => set_text_color as engine::DrawSetTextColorFn as usize,
             Call::Len => string_len as engine::DrawConsoleStringLenFn as usize,
+            Call::VictimLen => victim_len as engine::DrawConsoleStringLenFn as usize,
         }
+    }
+
+    /// The screen's width as the engine reports it, 0 when it cannot.
+    fn screen_width() -> i32 {
+        let Some(e) = engine::engfuncs() else {
+            return 0;
+        };
+        let mut info = engine::ScreenInfo {
+            size: size_of::<engine::ScreenInfo>() as i32,
+            width: 0,
+            height: 0,
+            flags: 0,
+            char_height: 0,
+            char_widths: [0; 256],
+        };
+        // Safety: the engine fills the struct whose size it is told.
+        unsafe { (e.pfn_get_screen_info)(&mut info) };
+        info.width.max(0)
+    }
+
+    /// Stands in for `pfnDrawConsoleStringLen` at the victim's width, the
+    /// first call of every line: [`string_len`], plus the right margin while
+    /// a scale or a font is in force. `Draw` anchors the line at
+    /// `ScreenWidth - icon - victim width`, so the extra width moves the whole line left
+    /// and leaves the victim's name that far from the edge; the name itself is
+    /// drawn where the icon's advance puts it, at its own width.
+    unsafe extern "C" fn victim_len(text: *const c_char, width: *mut i32, height: *mut i32) {
+        unsafe { string_len(text, width, height) };
+        if width.is_null() || !super::super::scale::layout_is_ours() {
+            return;
+        }
+        let tall = if height.is_null() {
+            0
+        } else {
+            unsafe { *height }
+        };
+        let margin = super::super::scale::right_margin(screen_width(), tall);
+        // Safety: the caller's out-parameter, which `string_len` just wrote.
+        unsafe { *width += margin };
     }
 
     /// `con_color` as (r, g, b), the colour a string gets with none set.
