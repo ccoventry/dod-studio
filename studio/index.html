@@ -299,6 +299,15 @@
                 <select id="config-game-folder" style="flex: 1;"></select>
               </div>
               <div id="config-game-folder-warning" class="path-warning" style="display: none;"></div>
+              <!-- #985: menu_scale_setting.js. The box shows whether Studio's
+                   scheme copy is in this install's addon folder; the row is
+                   hidden for a pre-Anniversary install. -->
+              <div class="inline-controls" id="config-menu-scale-row" style="display: none;">
+                <div class="control-group">
+                  <input type="checkbox" id="config-menu-scale" disabled />
+                  <label for="config-menu-scale" data-str="CAPTURE_CONFIG.MENU_SCALE_LABEL">Size the Game's Menus Like the Pre-Anniversary Engine</label>
+                </div>
+              </div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_EXEC_LABEL">HLAE Executable:</label>
                 <input type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" style="flex: 1;" />

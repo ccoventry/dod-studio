@@ -20,6 +20,7 @@ import { wireReviewSettings } from './review_settings.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
 import { initHookDllPicker, refreshHookDllPicker } from './hook_dll_picker.js';
 import { createInstallPicker } from './install_picker.js';
+import { createMenuScaleSetting } from './menu_scale_setting.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -352,9 +353,18 @@ export function initConfigWiring({ persistAppSettings }) {
   // field's change event itself.
   const installPicker = createInstallPicker({ persist: persistAppSettings });
   installPicker.refresh();
+  // Menu size (#985): what's in this install's addon folder, so it is read
+  // again for another hl.exe or game folder.
+  const menuScale = createMenuScaleSetting({
+    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    getGameFolder,
+  });
+  menuScale.refresh();
+  document.querySelector('#hl-path-input')
+    ?.addEventListener('change', () => { menuScale.refresh(); });
   // The Half-Life Executable's movie-copy note depends on the game folder too.
   document.querySelector('#config-game-folder')
-    ?.addEventListener('change', () => { refreshPathWarnings(); });
+    ?.addEventListener('change', () => { refreshPathWarnings(); menuScale.refresh(); });
 
   const hlaeBrowseBtn = document.querySelector('#hlae-browse-btn');
   if (hlaeBrowseBtn) {
@@ -502,6 +512,7 @@ export function initConfigWiring({ persistAppSettings }) {
           await refreshPathWarnings();
           await gameFolderUi.refresh();
           await installPicker.refresh();
+          await menuScale.refresh();
         }
       } catch (err) {
         console.error("Error selecting Half-Life executable:", err);

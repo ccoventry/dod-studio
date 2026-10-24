@@ -319,6 +319,14 @@ export const STRINGS = {
     gameFolderMissing: (name) =>
         `There's no "${name}" folder beside hl.exe with a liblist.gam and a cl_dlls/client.dll, so the game can't start it. Pick one from the list.`,
     GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
+    // #985: menu_scale_setting.js. The box shows what's in the install.
+    MENU_SCALE_LABEL: 'Size the Game\'s Menus Like the Pre-Anniversary Engine',
+    MENU_SCALE_TITLE:
+        "The 25th Anniversary engine draws the main menu, Options, the console and DoD Studio's in-game window bigger the higher your resolution (twice as big at 1440p). Tick to draw them at the pre-Anniversary size instead: more room, smaller text. DoD Studio puts its own copy of the menu scheme in <game folder>_addon\\resource; your game's own files aren't changed. It works when DoD Studio starts the game (it adds -addons). Starting the game from Steam keeps the big menus unless you add -addons to its launch options. Untick to remove the copy.",
+    MENU_SCALE_PRE_NOTE: "This install runs the pre-Anniversary engine, which already draws the menus at this size.",
+    MENU_SCALE_NO_INSTALL: 'Set the Half-Life Executable first.',
+    menuScaleForeign: (path) => `${path} isn't DoD Studio's, so it's left alone. Move it away to use this setting.`,
+    menuScaleFailed: (err) => `Couldn't change the menu size: ${err}`,
     // #925: a copy of dod lacks <folder>_<language>.txt, so VGUI2 text shows
     // raw keys. Studio only says what to do; it never writes the folder.
     languageFileMissing: (folder, needed, renameFrom) =>
