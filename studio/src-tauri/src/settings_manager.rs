@@ -259,8 +259,10 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
-    /// Demo Auditor > Duplicates' "Look inside .zip files" (#929): off by
-    /// default, since a first scan of big zips reads every demo in them.
+    /// Demo Auditor > Duplicates' "Show demos backed up in archives" (#929,
+    /// .zip, .7z and .rar): off by default, since a first scan of big
+    /// archives decompresses the demos in them that a loose demo shares a
+    /// size with.
     #[serde(default)]
     pub audit_look_in_zips: bool,
     /// "Skip setup for now" in the Setup window (#599): it stops opening by
