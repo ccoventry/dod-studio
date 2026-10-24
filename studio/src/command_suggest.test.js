@@ -52,7 +52,7 @@ describe('suggestions (#215)', () => {
     expect(tierNote('r_decals', { scheduled: true }).level).toBe('refused');
     expect(tierNote('r_decals', { scheduled: false }).level).toBe('warned');
     expect(tierNote('mirv_movie_filename', { scheduled: false }).level).toBe('noop');
-    expect(tierNote('exec', { scheduled: true }).level).toBe('noop');
+    expect(tierNote('exec', { scheduled: true, seeks: false }).level).toBe('noop');
     expect(tierNote('sensitivity', { scheduled: true })).toBeNull();
   });
 
@@ -66,13 +66,26 @@ describe('suggestions (#215)', () => {
     }
   });
 
-  it("says when the game drops a name from a demo (#679), in either list", () => {
+  it("says when the game drops a name from a demo (#679), in either list, with Seek Between Clips off", () => {
     for (const scheduled of [false, true]) {
-      const note = tierNote('mirv_matte_setcolor', { scheduled });
+      const note = tierNote('mirv_matte_setcolor', { scheduled, seeks: false });
       expect(note.level).toBe('noop');
       expect(note.text).toContain("'_set'");
+      expect(note.text).toContain('Seek Between Clips is off');
     }
-    expect(tierNote('kill', { scheduled: true }).text).toContain("'kill'");
+    expect(tierNote('kill', { scheduled: true, seeks: false }).text).toContain("'kill'");
+  });
+
+  it('says nothing about the demo filter while Seek Between Clips is on: the hook runs both lists', () => {
+    for (const scheduled of [false, true]) {
+      expect(tierNote('exec', { scheduled })).toBeNull();
+      expect(tierNote('exec', { scheduled, seeks: true })).toBeNull();
+      expect(tierNote('mirv_matte_setcolor', { scheduled, seeks: true })).toBeNull();
+    }
+    // The other tiers don't depend on it.
+    expect(tierNote('host_framerate', { scheduled: false, seeks: true }).level).toBe('refused');
+    expect(suggestions('exec', { seeks: false })[0].note.level).toBe('noop');
+    expect(suggestions('exec', { seeks: true })[0].note).toBeNull();
   });
 });
 
