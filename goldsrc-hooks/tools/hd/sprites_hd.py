@@ -27,11 +27,16 @@ The transparent pixels keep those fill colours under alpha 0 in the output
 on purpose: the engine's mip chain averages RGBA naively, so a black or
 blue fill would darken every icon's edge in the smaller levels.
 
-usage: python sprites_hd.py <out_dir> [--no-hud] [<source> ...]
+Then, for the game's own sprites, the kill-feed weapon icons are rendered
+from the weapon models into the weapons sheets just made
+(killfeed_icons.py, #841); icons with no model keep the upscale.
+
+usage: python sprites_hd.py <out_dir> [--no-hud] [--no-icons] [<source> ...]
   source: a .spr file, a folder of them, or a .txt list of .spr paths.
   With none, every sprite of the game (dod/ shadowing valve/), plus those of
-  any HD_ALSO install.
+  any HD_ALSO install, and the kill-feed icons.
   --no-hud: leave out the HUD sprites (as every build before #728 did).
+  --no-icons: keep the upscaled kill-feed icons.
 env:    HD_STYLE (default ultrasharp), HD_GAME, HD_ALSO, HD_WORK, HD_BATCH
 """
 import glob, os, re, sys
@@ -100,8 +105,10 @@ def pad_amount(n):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--no-hud"]
-    with_hud = len(args) == len(sys.argv) - 1
+    flags = {"--no-hud", "--no-icons"}
+    args = [a for a in sys.argv[1:] if a not in flags]
+    with_hud = "--no-hud" not in sys.argv[1:]
+    with_icons = with_hud and "--no-icons" not in sys.argv[1:]
     if not args:
         sys.exit(__doc__)
     out_dir, sources = args[0], args[1:]
@@ -175,6 +182,19 @@ def main():
 
     done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} sprite frame replacement(s) to {out_dir}")
+    if with_icons and not sources:
+        killfeed_icons(out_dir)
+
+
+def killfeed_icons(out_dir):
+    """The kill-feed icons from the weapon models (#841). A failure there
+    leaves the upscaled icons, never fails the sprites step."""
+    try:
+        import killfeed_icons as K
+        n = K.build(out_dir)
+        print(f"painted {n} kill-feed icon(s) from the weapon models", flush=True)
+    except Exception as e:  # noqa: BLE001 -- the upscaled sheets are already written
+        print(f"kill-feed icons skipped, the upscaled ones stay: {type(e).__name__}: {e}", flush=True)
 
 
 if __name__ == "__main__":

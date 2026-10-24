@@ -68,6 +68,9 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Rescan Recent Sessions (#938): rescan_recent.js.
+    RESCAN_RECENT: 'Rescan Recent Sessions…',
+    RESCAN_RECENT_TITLE: 'Rescan the demos an older DoD Studio scanned, in every recent session',
     // File → Open Recent (#935).
     OPEN_RECENT: 'Open Recent',
     OPEN_RECENT_EMPTY: 'No recent sessions',
@@ -195,7 +198,7 @@ export const STRINGS = {
     DEFAULT_TITLE: 'Highlight Details',
     detailTitle: (name) => `Highlight Details: ${name}`,
     LAUNCH_PREVIEW_BUTTON: 'Launch Preview',
-    LAUNCH_PREVIEW_TITLE: 'Patches this demo (or reuses an existing preview) and launches it in HLAE via viewdemo.',
+    LAUNCH_PREVIEW_TITLE: "Opens this demo in the game with viewdemo, to jump between its highlights. Your Initial and Scheduled Commands don't run in a preview: only a capture batch runs them.",
     LAUNCHING: 'Launching…',
     VIEW_TELEMETRY_BUTTON: 'View Match Telemetry',
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
@@ -519,6 +522,16 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    // .dem files in Explorer (#528, file_types_settings.js).
+    DEM_OPEN_WITH_LABEL: 'Show DoD Studio in Open With for .dem Files',
+    DEM_OPEN_WITH_TITLE: "Adds DoD Studio to the Open With menu when you right-click a demo in Explorer. Whatever opens a demo when you double-click it stays as it is. Untick to take DoD Studio back out.",
+    DEM_OPEN_TARGET_LABEL: 'Open .dem Files In:',
+    DEM_OPEN_TARGET_TITLE: 'Where a demo you open with DoD Studio from Explorer goes.',
+    DEM_OPEN_TARGET_ANALYZER: 'Demo Analyzer',
+    DEM_OPEN_TARGET_QUEUE: "Studio's Queue",
+    demOpenWithOtherCopy: (exe) =>
+      `Open With opens another copy of DoD Studio: ${exe}. Untick and tick again to make it open this one.`,
+    demOpenWithFailed: (err) => `Couldn't change Open With for .dem files: ${err}`,
     SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
     SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
     scanWorkersHint: (totalGb) => totalGb
@@ -568,7 +581,7 @@ export const STRINGS = {
     PROFILE_NOTICE_OK: 'OK',
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
-      "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",
+      "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, add exec and its name here (it runs with Seek Between Clips on), or use Import Config below to pull its lines in as Initial Commands. Only a capture batch runs these: Launch Preview and Launch Game don't.",
     ADD_INIT_COMMAND_BUTTON: '+ Add Initial Command',
     IMPORT_CFG_BUTTON: 'Import Config...',
     importedCfgToast: (n) => `Imported ${n} command(s) from the config.`,
@@ -581,7 +594,7 @@ export const STRINGS = {
     START_CAPTURE_BUTTON: 'Start Capture Batch',
     CANCEL_BATCH_BUTTON: 'Cancel Batch',
     STATUS_WAITING: 'Status: Waiting...',
-    INIT_COMMAND_PLACEHOLDER: 'e.g. mirv_streams add all',
+    INIT_COMMAND_PLACEHOLDER: 'e.g. mirv_fx_wh_enable 1',
     CUSTOM_COMMAND_PLACEHOLDER: 'Command',
     CUSTOM_COMMAND_RELATION_OPTIONS: ['Before', 'After'],
     footerRequiredSpace: (gb) => `Required: ${gb} GB`,
@@ -971,11 +984,17 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
-    // "Look inside .zip files" (#929).
-    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
-    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
-    IN_ZIP_CHIP: 'in a zip',
-    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
+    // "Show demos backed up in archives" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Show demos backed up in archives (.zip, .7z, .rar)',
+    LOOK_IN_ZIPS_TITLE: "Also read the demos inside .zip, .7z and .rar files, and mark each loose demo that an archive already holds as backed up, with every archive that holds it. An archive is a backup: a loose demo is never offered for deletion because an archive holds it, and archives are only read, never changed. Only .dem files count, an archive inside an archive isn't opened, and encrypted or damaged ones are skipped (the activity log names them). The first audit of big archives takes longer, solid .7z and .rar ones most; later audits remember them until they change.",
+    // A loose demo an archive holds a copy of (#929).
+    backedUpChip: (archives) => (archives.length === 1
+      ? `backed up in ${archives[0]}`
+      : `backed up in ${archives.length} archives`),
+    backedUpTitle: (entries) => `A copy of this demo is in:\n${entries.join('\n')}\n\nArchives are only read, never changed.`,
+    backedUpSectionLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Backed up in archives (${count} demo${count === 1 ? '' : 's'})`,
+    BACKED_UP_SECTION_NOTE: 'Each of these demos has a copy in an archive. Nothing here is deleted.',
+    footerBackedUp: (count) => ` | Backed up in archives: ${count}`,
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -986,12 +1005,12 @@ export const STRINGS = {
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
-    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside archives: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups, seconds) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
+    doneStatus: (demos, groups, seconds, archiveDemos = 0) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked${archiveDemos > 0 ? ` and ${archiveDemos} inside archives` : ''}, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
@@ -1140,6 +1159,10 @@ export const STRINGS = {
     THIS_PC_LABEL: '💻 This PC',
     PICK_FOLDER_FROM_SIDEBAR: 'Pick a folder from the Explorer sidebar.',
     NO_DEMOS_IN_FOLDER: 'No demos found in this folder.',
+    // A folder's file names are on their way; a cloud drive can take a while.
+    READING_FOLDER: 'Reading this folder…',
+    // The Map cell until the start of the demo is read.
+    MAP_READING: '…',
     NO_DEMOS_MATCH_FILTERS: 'No demos match the current filters.',
     ANALYZING_ELLIPSIS: 'Analyzing…',
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',
@@ -1427,6 +1450,10 @@ export const STRINGS = {
     DOWNLOAD_ALL_BUTTON: 'Download all',
     DISMISS_BUTTON: 'Dismiss',
     DOWNLOADING: 'Downloading…',
+    // "Downloading dod_anzio (1 of 3): 2.1 of 6 MB"; no count for one map.
+    downloadingLine: (map, index, count, bytes) =>
+      `Downloading ${map}${count > 1 ? ` (${index} of ${count})` : ''}${bytes ? `: ${bytes}` : '…'}`,
+    checkingLine: (map) => `Checking ${map}…`,
     NO_GAME_PATH: 'Set the hl.exe path in Configuration to check demo maps.',
     demoCount: (n) => (n === 1 ? '1 demo' : `${n} demos`),
     missingSummary: (maps, demos) =>
@@ -1451,6 +1478,7 @@ export const STRINGS = {
     conflictRow: (cvar, values, effective) => `${cvar}: ${values} — in effect: ${effective}`,
     stated: (value, source) => `${value} (${source})`,
     sourceConfig: (file, line) => `${file}, line ${line}`,
+    sourceExec: (file, line) => `${file}, line ${line}, run by Initial Commands`,
     SOURCE_INITIAL: 'Initial Commands',
     sourceApp: (setting) => `DoD Studio, from ${setting}`,
     sourceBefore: (secs) => `Scheduled, ${secs}s before`,
@@ -1542,7 +1570,11 @@ export const STRINGS = {
     // #679: the engine's filter for commands a demo carries.
     FILTERED_TITLE: 'The game drops these commands without running them:',
     FILTERED_ADVICE:
-      "Initial and Scheduled Commands reach the game inside the demo, and the game filters every command a demo carries. With no message, it drops any command whose name contains bind, _set, kill, exit, quit, retry, _restart, writecfg, motdfile or motd_write, any name starting with connect, any alias, and any line containing exec. A config file the game runs at start-up isn't filtered.",
+      "Seek Between Clips (Pipeline tab) is off, so Initial and Scheduled Commands reach the game inside a patched copy of the demo, and the game filters every command a demo carries. With no message, it drops any command whose name contains bind, _set, kill, exit, quit, retry, _restart, writecfg, motdfile or motd_write, any name starting with connect, any alias, and any line containing exec. Turn Seek Between Clips on and DoD Studio's hook runs them all. A config file the game runs at start-up isn't filtered.",
+    // An Initial Command `exec <file>` the game refuses or won't find.
+    MISSING_EXEC_TITLE: "The game won't run the file these Initial Commands exec:",
+    MISSING_EXEC_ADVICE:
+      'The name must end in .cfg (or .rc), with no other dot and no backslash; the game adds no extension. It looks in dod, then dod_addon, then dod_downloads, and prints "couldn\'t exec" when the file is in none of them. Check the name, or move the file into one of those folders.',
     filteredRow: (command, rule, pattern) => {
       const why = {
         nameContains: `its name contains '${pattern}'`,
@@ -1566,6 +1598,16 @@ export const STRINGS = {
       `<code>${name} ${have.toFixed(1)}s</code> — needs at least <code>${need.toFixed(1)}s</code> for ${binding}`,
   },
 
+  // After a .json project loads (#528, project_convert.js).
+  PROJECT_CONVERT: {
+    TITLE: 'Switch to .dodstudio?',
+    MESSAGE: 'Switch this project to the .dodstudio file type? It will open in DoD Studio when double-clicked. The file is renamed in its folder; nothing inside it changes.',
+    SWITCH: 'Switch to .dodstudio',
+    KEEP: 'Keep as .json',
+    switchedToast: (name) => `Project switched to ${name}.`,
+    failedToast: (err) => `The project stays as .json: ${err}`,
+  },
+
   MAIN: {
     SELECT_CAPTURE_OUTPUT_DIR_TITLE: 'Select Capture Output Directory',
     SELECT_RENDER_EXPORT_DIR_TITLE: 'Select Render Export Directory',
@@ -1578,6 +1620,7 @@ export const STRINGS = {
     SELECT_DEMO_FILES_TITLE: 'Select Demo Files (.dem)',
     SELECT_DEMO_FOLDER_TITLE: 'Select Demo Folder',
 
+    PROJECT_FILTER_NAME: 'DoD Studio Project',
     JSON_PROJECT_FILTER_NAME: 'JSON Project File',
     EXECUTABLE_FILTER_NAME: 'Executable',
     DLL_FILTER_NAME: 'DLL',
@@ -2268,7 +2311,7 @@ export const STRINGS = {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
     GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
     SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
-    droppedFromDemo: (pattern) => `Does nothing: the game drops any command from a demo with '${pattern}' in it.`,
+    droppedFromDemo: (pattern) => `Does nothing while Seek Between Clips is off: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
     FAST_FORWARD_RESTORED: "Lasts until the next clip: the fast-forward between clips sets this, and every clip's pre-roll puts your Initial Commands value back.",
@@ -2606,8 +2649,11 @@ export const STRINGS = {
     STATUS_CHECKING: 'Checking for updates…',
     STATUS_UP_TO_DATE: 'Up to date.',
     STATUS_AVAILABLE: (v) => `Update available: v${v}`,
-    STATUS_DOWNLOADING: 'Downloading update…',
-    STATUS_READY: 'Update downloaded — restart to apply.',
+    STATUS_DOWNLOADING: 'Downloading the update…',
+    statusDownloadingBytes: (bytes) => `Downloading the update: ${bytes}`,
+    // On Windows the installer closes Studio and takes over from here.
+    STATUS_INSTALLING: 'Installing the update… DoD Studio closes while it installs.',
+    STATUS_READY: 'Ready: restart to finish.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
     // Local and debug builds: report what's published, never offer to install
     // it -- the installer would replace the *installed* app, not this one.
@@ -2615,6 +2661,12 @@ export const STRINGS = {
       `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
       + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
       + 'Get the published build from the Releases page.',
+  },
+
+  // Byte counts on the update and map downloads (download_progress.js).
+  DOWNLOADS: {
+    bytesOf: (done, total) => `${done} of ${total} MB`,
+    bytes: (done) => `${done} MB`,
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────
@@ -2642,6 +2694,50 @@ export const STRINGS = {
       const onThisDemo = `Fast-forwarding to clip ${clipIndex} of ${clipCountThisDemo}`;
       return totalBatchClips ? `${onThisDemo} · ${clipsSoFar} of ${totalBatchClips} clips total` : onThisDemo;
     },
+  },
+
+  // ── rescan_recent.js: every recent session's outdated demos in one go (#938)
+  RESCAN_RECENT: {
+    TITLE: 'Rescan recent sessions',
+    MESSAGE: 'These sessions have demos an older DoD Studio scanned. Rescan them all now? Each session is backed up first (a .before-rescan copy beside it), then rescanned and saved. Marks, notes, status and kill ranges are carried over.',
+    SKIP_HINT: 'This takes a while: “Skip for now” leaves a session until you next open it.',
+    RESCAN_ALL: 'Rescan all',
+    NOT_NOW: 'Not now',
+    CANCEL: 'Cancel',
+    SKIP: 'Skip for now',
+    SKIPPED: 'Skipped',
+    TIME_PENDING: 'working out how long…',
+    ALL_CURRENT_TOAST: 'Every recent session is up to date.',
+    NONE_RECENT_TOAST: 'No recent sessions to rescan.',
+    BUSY_TOAST: 'Recent sessions are already being rescanned.',
+    READING: 'Reading recent sessions…',
+    demos: (n) => `${n} demo${n === 1 ? '' : 's'}`,
+    MISSING: 'file not found, skipped',
+    UNREADABLE: "couldn't be read, skipped",
+    total: (duration) => `Total: about ${duration}.`,
+    // The progress line: which session, which step.
+    step: (i, n, name, what) => `${name} (${i} of ${n}): ${what}`,
+    STEP_BACKUP: 'backing up…',
+    STEP_OPEN: 'opening…',
+    stepScan: (n) => `rescanning ${n} demo${n === 1 ? '' : 's'}…`,
+    STEP_SAVE: 'saving…',
+    STEP_REOPEN: 'Reopening the session you had open…',
+    STOPPING: 'stopping after this session…',
+    doneToast: (done, total, failed) => `Rescanned ${done} of ${total} session${total === 1 ? '' : 's'}`
+      + (failed > 0 ? `; ${failed} failed (see View Logs).` : '.'),
+    // Activity log, one line per session, like #926's [scan] lines.
+    doneLog: (name, demos, seconds, backup) => `[rescan] ${name}: ${demos} demo(s) rescanned in ${seconds} s and saved (backup: ${backup})`,
+    failedLog: (name, seconds, err) => `[rescan] ${name}: failed after ${seconds} s, not saved: ${err}`,
+    skippedLog: (name) => `[rescan] ${name}: skipped for now`,
+    missingLog: (path) => `[rescan] ${path}: file not found, skipped`,
+    noDemosLog: (name) => `[rescan] ${name}: none of its outdated demos are on disk, nothing to rescan`,
+    stoppedLog: (left) => `[rescan] stopped by Cancel; ${left} session(s) left as they were`,
+    OPEN_FAILED: "the session didn't open",
+    SCAN_FAILED: 'the scan failed',
+    SAVE_FAILED: "the session wasn't saved",
+    SESSION_CHANGED: 'another session was opened while it scanned',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
   // ── progress_view.js: what every long job's progress line shares (#951)
@@ -2891,6 +2987,12 @@ export const STRINGS = {
       return `Not a demo or a folder, so not added: ${shown}${more}`;
     },
     BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+    // A demo opened from Explorer into the queue during a scan (#528).
+    openedWhileScanningToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `A scan is running, so ${shown}${more} was not added. Open it again when the scan has finished.`;
+    },
   },
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {

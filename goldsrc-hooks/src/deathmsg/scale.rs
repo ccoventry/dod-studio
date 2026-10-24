@@ -226,6 +226,28 @@ pub(super) fn name_draw_y(y: i32, text_tall: i32) -> i32 {
     name_y(y, ICON_TALL.load(Ordering::Relaxed), font_tall, text_tall)
 }
 
+/// The gap between the victim's name and the screen's right edge, for a
+/// screen `screen_width` px wide and names `text_tall` px tall: 1/160 of the
+/// width (12 px at 1920, 16 at 2560), or a quarter of the text's height when
+/// that is more.
+///
+/// `Draw` puts the victim's measured width flush against `ScreenWidth`, and
+/// the measure is the sum of the glyphs' advances: a last glyph that reaches
+/// past its advance (a bold or large face's overhang) and a font's drop
+/// shadow land past the edge. At the game's size that is a pixel or two of
+/// a 16 px face; a big `font` or `scale` cut the last letter visibly on
+/// POST and PRE at 2560x1440.
+pub(super) fn right_margin(screen_width: i32, text_tall: i32) -> i32 {
+    (screen_width.max(0) / 160).max(text_tall.max(0) / 4)
+}
+
+/// Whether the layout differs from the game's: a scale or a font in force.
+/// At scale 1 with no font the kill feed is the game's own, right margin
+/// included.
+pub(super) fn layout_is_ours() -> bool {
+    !is_unity(scale()) || font::tall() != 0
+}
+
 /// The line-start stub, hand-assembled:
 ///
 /// ```asm
@@ -858,6 +880,21 @@ mod tests {
         // And a scaled rect at 1 is the game's.
         assert_eq!(scale_rect(GARAND, 1.0), GARAND);
         assert_eq!(icon_y(20, 34, 0), 20);
+    }
+
+    #[test]
+    fn the_victim_keeps_clear_of_the_right_edge() {
+        // 2560x1440 with the WSOD25 font (Bahnschrift SemiBold 32): 16 px.
+        assert_eq!(right_margin(2560, 32), 16);
+        assert_eq!(right_margin(1920, 28), 12);
+        assert_eq!(right_margin(1280, 16), 8);
+        // A huge face needs more than the screen's share.
+        assert_eq!(right_margin(1920, 120), 30);
+        // Unknown sizes never pull the line right of the game's.
+        assert_eq!(right_margin(0, 0), 0);
+        assert_eq!(right_margin(-1, -5), 0);
+        // The game's own layout at scale 1 with no font.
+        assert!(!layout_is_ours());
     }
 
     #[test]
