@@ -479,9 +479,7 @@ fn read_c_string(at: usize, max: usize) -> Option<Vec<u8>> {
             return None;
         }
         let region_end = (info.BaseAddress as usize).saturating_add(info.RegionSize);
-        let take = region_end
-            .saturating_sub(cursor)
-            .min(max - out.len());
+        let take = region_end.saturating_sub(cursor).min(max - out.len());
         if take == 0 {
             return None;
         }
@@ -500,8 +498,8 @@ fn read_c_string(at: usize, max: usize) -> Option<Vec<u8>> {
 
 /// Reads the current map's names once per map, from the world model the
 /// engine loaded. Every frame once the calls are redirected, on the engine
-/// thread; a frame where nothing changed costs a hash of the level name and
-/// three pointer reads.
+/// thread; a frame where nothing changed costs a hash of the level name, one
+/// `VirtualQuery` and a few pointer reads, and allocates nothing.
 fn read_map(build: &Build) {
     let Some(engfuncs) = engine::engfuncs() else {
         return;
@@ -520,13 +518,13 @@ fn read_map(build: &Build) {
     let level_hash = level.iter().fold(0x811c_9dc5_u32, |h, &b| {
         (h ^ b as u32).wrapping_mul(0x0100_0193)
     });
-    let level_text = String::from_utf8_lossy(level);
-    let map = crate::map_text::short_name(&level_text).to_string();
+    // Only built when something changed: most frames allocate nothing.
+    let map = || crate::map_text::short_name(&String::from_utf8_lossy(level)).to_string();
     if READ_LEVEL.swap(level_hash, Ordering::Relaxed) != level_hash {
         // A new level: the last map's names no longer apply.
         READ_MODEL.store(0, Ordering::Relaxed);
         READ_ENTITIES.store(0, Ordering::Relaxed);
-        set_state(MapState::Waiting { map: map.clone() });
+        set_state(MapState::Waiting { map: map() });
     }
 
     // The world is entity 0's model (`cl_entities[0].model`).
@@ -550,7 +548,8 @@ fn read_map(build: &Build) {
         return;
     }
     // Safety: both inside the readable span checked above.
-    let model_type = unsafe { std::ptr::read_unaligned((model + build.model_type_at) as *const i32) };
+    let model_type =
+        unsafe { std::ptr::read_unaligned((model + build.model_type_at) as *const i32) };
     // A 32-bit pointer: this DLL only ever runs in the 32-bit engine.
     let entities =
         unsafe { std::ptr::read_unaligned((model + build.model_entities_at) as *const u32) }
@@ -566,6 +565,7 @@ fn read_map(build: &Build) {
     READ_MODEL.store(model, Ordering::Relaxed);
     READ_ENTITIES.store(entities, Ordering::Relaxed);
 
+    let map = map();
     let state = if entities == 0 {
         MapState::Unreadable {
             map,
@@ -1001,7 +1001,10 @@ mod tests {
         );
         assert_eq!(
             runtime.capture,
-            names(&["ambience/gerpointcaptured.wav", "ambience/uspointcaptured.wav"])
+            names(&[
+                "ambience/gerpointcaptured.wav",
+                "ambience/uspointcaptured.wav"
+            ])
         );
 
         let offline = dod::map_sounds::map_sounds(
@@ -1028,8 +1031,8 @@ mod tests {
                 )
             });
         let mut read = 0;
-        for entry in std::fs::read_dir(&dir)
-            .unwrap_or_else(|e| panic!("no maps at {}: {e}", dir.display()))
+        for entry in
+            std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("no maps at {}: {e}", dir.display()))
         {
             let path = entry.unwrap().path();
             if !path
@@ -1048,8 +1051,18 @@ mod tests {
                     let as_bytes = |set: &BTreeSet<String>| -> BTreeSet<Vec<u8>> {
                         set.iter().map(|n| n.as_bytes().to_vec()).collect()
                     };
-                    assert_eq!(runtime.victory, as_bytes(&offline.round_win), "{}", path.display());
-                    assert_eq!(runtime.capture, as_bytes(&offline.capture), "{}", path.display());
+                    assert_eq!(
+                        runtime.victory,
+                        as_bytes(&offline.round_win),
+                        "{}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        runtime.capture,
+                        as_bytes(&offline.capture),
+                        "{}",
+                        path.display()
+                    );
                 }
                 (Err(_), Err(_)) => {}
                 (runtime, offline) => panic!(
@@ -1078,12 +1091,17 @@ mod tests {
     #[test]
     fn a_name_only_the_map_has_is_muted_from_the_map() {
         let map = custom_map();
-        let only = |family: Family, name: &str| {
-            muted_by(name.as_bytes(), 0, |f| f == family, Some(&map))
-        };
-        assert_eq!(only(VictoryMusic, CUSTOM_WIN), Some((VictoryMusic, Source::Map)));
+        let only =
+            |family: Family, name: &str| muted_by(name.as_bytes(), 0, |f| f == family, Some(&map));
+        assert_eq!(
+            only(VictoryMusic, CUSTOM_WIN),
+            Some((VictoryMusic, Source::Map))
+        );
         assert_eq!(only(FlagCapture, CUSTOM_WIN), None);
-        assert_eq!(only(FlagCapture, CUSTOM_CAP), Some((FlagCapture, Source::Map)));
+        assert_eq!(
+            only(FlagCapture, CUSTOM_CAP),
+            Some((FlagCapture, Source::Map))
+        );
         assert_eq!(only(VictoryMusic, CUSTOM_CAP), None);
         // Case, slashes and the stream marker, as for the lists.
         assert_eq!(
@@ -1121,9 +1139,15 @@ mod tests {
         let map = custom_map();
         for name in [CUSTOM_WIN, CUSTOM_CAP, "ambience/uswin.wav"] {
             assert_eq!(muted_by(name.as_bytes(), 0, |_| false, Some(&map)), None);
-            assert_eq!(muted_by(name.as_bytes(), SND_STOP, |_| true, Some(&map)), None);
+            assert_eq!(
+                muted_by(name.as_bytes(), SND_STOP, |_| true, Some(&map)),
+                None
+            );
         }
-        assert_eq!(muted_by(b"ambience/windy.wav", 0, |_| true, Some(&map)), None);
+        assert_eq!(
+            muted_by(b"ambience/windy.wav", 0, |_| true, Some(&map)),
+            None
+        );
     }
 
     /// The hook reads whatever is in the game's memory, and a release build
@@ -1135,7 +1159,11 @@ mod tests {
             b"{ \"key\" }",
             b"\"",
         ] {
-            assert!(classify(text).is_err(), "{:?}", String::from_utf8_lossy(text));
+            assert!(
+                classify(text).is_err(),
+                "{:?}",
+                String::from_utf8_lossy(text)
+            );
         }
         // Not entity text at all: whatever it gives, it names nothing.
         let junk: Vec<u8> = (1..=255u8).cycle().take(8192).collect();
@@ -1258,7 +1286,11 @@ mod tests {
     #[test]
     fn with_both_settings_off_everything_plays() {
         for name in VICTORY_SAMPLES.iter().chain(&CAPTURE_SAMPLES) {
-            assert_eq!(muted_by(name.as_bytes(), 0, |_| false, None), None, "{name}");
+            assert_eq!(
+                muted_by(name.as_bytes(), 0, |_| false, None),
+                None,
+                "{name}"
+            );
         }
     }
 

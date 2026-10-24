@@ -49,8 +49,8 @@ use std::collections::{BTreeSet, HashMap};
 use dem::bit::BitSliceCast;
 use dem::types::{Demo, EngineMessage, FrameData, MessageData, NetMessage};
 
-pub use dod::map_sounds::{MapSounds, MuteSelection, map_sounds};
 use dod::map_sounds::normalise;
+pub use dod::map_sounds::{MapSounds, MuteSelection, map_sounds};
 
 /// What a mute pass did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

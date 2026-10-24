@@ -22,7 +22,6 @@
 // destination is the caller's problem, and the map in a game directory belongs
 // to the user.
 
-
 // The parser itself lives in `dod::map_entities`, pure and without I/O, so the
 // hook DLL reads a map's entities with the same code (#284). Re-exported here
 // so the patcher's callers keep their paths.
