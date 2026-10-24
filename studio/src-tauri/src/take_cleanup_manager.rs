@@ -268,6 +268,18 @@ fn take_out_of_list(
 /// in that run) go, if the setting says so right after finish. Runs on a
 /// blocking thread; returns at once.
 pub(crate) fn after_render_batch(app: &AppHandle, finished_takes: Vec<String>) {
+    remove_finished(app, finished_takes, true);
+}
+
+/// While a capture batch renders as it goes (#861): the takes whose clip just
+/// finished go at once, if the setting says so right after finish, so the
+/// batch gets the space back. Quiet, since a long batch would toast every
+/// clip: the activity log has each one, and a failure still toasts.
+pub(crate) fn after_takes_rendered(app: &AppHandle, takes: Vec<String>) {
+    remove_finished(app, takes, false);
+}
+
+fn remove_finished(app: &AppHandle, finished_takes: Vec<String>, report: bool) {
     if finished_takes.is_empty() {
         return;
     }
@@ -288,7 +300,9 @@ pub(crate) fn after_render_batch(app: &AppHandle, finished_takes: Vec<String>) {
         };
         let total = finished_takes.len();
         for (i, folder) in finished_takes.iter().enumerate() {
-            progress.report(step, i, total);
+            if report {
+                progress.report(step, i, total);
+            }
             let path = Path::new(folder);
             if !all_jobs_finished(&render.take_statuses(folder)) {
                 continue;
@@ -320,9 +334,14 @@ pub(crate) fn after_render_batch(app: &AppHandle, finished_takes: Vec<String>) {
             };
             done.record(why, method, path, outcome);
         }
-        progress.report(step, total, total);
-        // Sent even when nothing went, so the progress bar goes away.
-        done.emit(&app);
+        if report {
+            progress.report(step, total, total);
+            // Sent even when nothing went, so the progress bar goes away.
+            done.emit(&app);
+        } else if !done.failed.is_empty() {
+            done.deleted.clear();
+            done.emit(&app);
+        }
     });
 }
 

@@ -17,7 +17,7 @@ import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus, isSkipped, markBlockCaptured } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -882,6 +882,21 @@ function initClearPreviewsModal() {
   }
 }
 
+/**
+ * Render While Capturing (#861): a take of the running batch has settled and
+ * is about to be queued for rendering. Its highlights go Captured and the
+ * take index learns it now, before the render: the render's clip name and
+ * its Rendered mark both resolve through the index, and the take may be
+ * deleted before the batch's own verification looks. `clip` is a
+ * `capture_clip_ready` payload; one from another batch is ignored.
+ */
+export function markClipCaptured(clip) {
+  if (!clip || !lastDispatch || clip.session_id !== lastDispatch.sessionId) return;
+  const takeIndex = currentGetTakeIndex ? currentGetTakeIndex() : null;
+  const { advanced, markCleared } = markBlockCaptured(clip, lastDispatch, takeIndex);
+  if ((advanced > 0 || markCleared) && currentOnStatusChange) currentOnStatusChange();
+}
+
 export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
@@ -1191,38 +1206,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        // A block can cover several highlights — overlapping ones are recorded
-        // as one continuous take — so every highlight it covers advances.
-        const uids = [];
-        const sourceIndices = block.source_streak_indices || [];
-        sourceIndices.forEach(i => {
-          const streak = lastDispatch?.streaks?.[i];
-          if (!streak) return;
-          const demoPath = lastDispatch?.demoPaths?.[i];
-          uids.push(streakUid(demoPath, streak));
-          // Merged blocks (2+ source highlights recorded into one take) get a
-          // visible affordance in Highlight Details (detail_pane.js) so it's
-          // obvious why the rows flipped together. Non-enumerable, same as
-          // `.uid`, so it never leaks into a future capture payload sent
-          // over IPC (buildCapturePayload pushes the live streak object).
-          if (sourceIndices.length > 1 && block.take_key) {
-            Object.defineProperty(streak, 'mergedTakeKey', { value: block.take_key, enumerable: false, configurable: true });
-            Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
-          }
-          // Status only ever moves forward. Re-capturing something already
-          // rendered must not knock it back down to Captured -- unless that
-          // Rendered was set by hand: a verified capture beats an unverified
-          // claim (#105).
-          if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
-          if (streak.statusByHand) markCleared = true;
-          if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
-        });
-        // Recorded even when the take isn't renderable yet — a future render
-        // still needs to resolve this take_key back to these highlights once
-        // it succeeds, and the index outlives this dispatch's in-memory state.
-        if (takeIndex && block.take_key) {
-          recordTake(takeIndex, block.take_key, uids);
-        }
+        const marked = markBlockCaptured(block, lastDispatch, takeIndex);
+        advanced += marked.advanced;
+        markCleared ||= marked.markCleared;
       });
 
       if (total === 0) return;

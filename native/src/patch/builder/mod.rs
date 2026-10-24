@@ -19,7 +19,7 @@ mod speed;
 mod timing;
 mod workspace;
 
-use alloc::allocate_blocks_first_fit_decreasing;
+use alloc::{allocate_blocks_first_fit_decreasing, allocate_blocks_one_at_a_time};
 pub use preview::*;
 pub use speed::*;
 pub use timing::*;
@@ -375,6 +375,9 @@ pub fn build_batch_queue(
     if drive_free.is_empty() {
         drive_free.push(u64::MAX);
     }
+    // What each drive had when the batch was planned: the most Render While
+    // Capturing (#861) can ever free there for one block.
+    let drive_capacity = drive_free.clone();
 
     let active_export_dir = match config.primary_media_dir.clone() {
         Some(dir) => dir,
@@ -690,15 +693,45 @@ pub fn build_batch_queue(
             .map(|streak| block_byte_estimate(config, streak, demo_fps))
             .collect();
 
-        let assignments = allocate_blocks_first_fit_decreasing(
+        let assignments = match allocate_blocks_first_fit_decreasing(
             &block_estimates,
             &mut drive_free,
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
-        )
-        .map_err(|_| {
-            std::io::Error::other("Insufficient space across all mapped drives to allocate a block")
-        })?;
+        ) {
+            Ok(assignments) => assignments,
+            // Render While Capturing (#861) frees space as the batch runs and
+            // holds it between clips until there is room, so the blocks that
+            // don't fit now still get a drive, as long as each fits one on
+            // its own: counted as if the earlier blocks will have been freed
+            // by the time it records. A block bigger than any drive could
+            // ever hold is still refused, rather than starting a batch that
+            // can't finish.
+            Err(_) if config.render_while_capturing => {
+                let (pairs, left) = allocate_blocks_one_at_a_time(
+                    &block_estimates,
+                    &drive_capacity,
+                    &mut active_drive_idx,
+                    FAILOVER_THRESHOLD,
+                )
+                .map_err(|_| {
+                    std::io::Error::other(
+                        "A clip needs more space than any capture drive has free, even with every earlier take rendered and deleted",
+                    )
+                })?;
+                for (free, left) in drive_free.iter_mut().zip(left) {
+                    if let Some(left) = left {
+                        *free = left;
+                    }
+                }
+                pairs
+            }
+            Err(_) => {
+                return Err(std::io::Error::other(
+                    "Insufficient space across all mapped drives to allocate a block",
+                ));
+            }
+        };
 
         // Route aliases key off each block's original index in merged_streaks,
         // not allocation order, so the scheduled-command lookup below (which

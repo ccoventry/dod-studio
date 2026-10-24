@@ -37,6 +37,7 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
@@ -46,7 +47,7 @@ pub const NAME: &str = console_name!("capture_batch");
 /// The batch file's first line.
 pub(crate) const HEADER: &str = "dodstudio-batch 1";
 
-const USAGE: &str = "start \"<batch file>\" | away | stop (bare: where it is)";
+const USAGE: &str = "start \"<batch file>\" | away | hold | go | stop (bare: where it is)";
 
 /// How long a demo may take to load before the batch skips it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
@@ -265,6 +266,46 @@ enum Phase {
     },
     /// Running the demo's schedule.
     Playing { cursor: Cursor, beat: Instant },
+    /// Held between two clips (`hold`, #861), the demo paused, until `go`;
+    /// `then` is what the schedule asked for when it stopped. `beat` is when
+    /// `BATCH_HELD` last went out, `gone_since` when Studio was first seen
+    /// gone from the events pipe.
+    Held {
+        cursor: Cursor,
+        then: Then,
+        beat: Instant,
+        gone_since: Option<Instant>,
+    },
+}
+
+/// How often a held batch repeats `BATCH_HELD`: the events pipe only notices
+/// a reader has gone when a write fails, so a hold that wrote nothing would
+/// never see Studio go.
+const HELD_BEAT: Duration = Duration::from_secs(5);
+
+/// How long Studio may be gone from the events pipe before a held batch
+/// stops waiting for its `go`.
+const HELD_ALONE: Duration = Duration::from_secs(10);
+
+/// Whether a held batch gives up on Studio: the events pipe is in use and
+/// has had no reader for [`HELD_ALONE`]. Only Studio's `go` ends a hold, so
+/// without this a Studio that closed or crashed would leave the game paused
+/// for good, and the next Studio's catch-up (#760) waits for the game to
+/// close. Without the pipe (`GOLDSRC_HOOKS_EVENTS=0`) there is no telling,
+/// so the hold stays.
+pub(crate) fn studio_gone(pipe_in_use: bool, gone_for: Option<Duration>) -> bool {
+    pipe_in_use && gone_for.is_some_and(|d| d >= HELD_ALONE)
+}
+
+/// Studio asked the batch to stop at the next clip boundary (#861): a seek to
+/// the next clip, or the move to the next demo. Both come after the clip's
+/// recording has stopped, so nothing records while held. Studio sends `hold`
+/// when a render has to free space for the next clip, and `go` once it has.
+static HOLD: AtomicBool = AtomicBool::new(false);
+
+/// Whether the batch stops before doing `then`: only at a clip boundary.
+pub(crate) fn holds_at(then: &Then, hold: bool) -> bool {
+    hold && matches!(then, Then::Seek(_) | Then::Next)
 }
 
 struct Batch {
@@ -443,42 +484,141 @@ pub fn poll() {
             } else {
                 beat
             };
-            match then {
-                Then::Next => {
-                    let next = batch.at + 1;
-                    go_to(&mut guard, next);
-                }
-                Then::Seek(to) => {
-                    match crate::demo_seek::seek_to_seconds(to) {
-                        Ok(how) => trace(&format!(
-                            "demo {}: seeking from {:.1} to {to:.1} ({how})",
-                            batch.at + 1,
-                            c.now
-                        )),
-                        Err(why) => trace(&format!(
-                            "demo {}: the seek to {to:.1} failed ({why}); playing on",
-                            batch.at + 1
-                        )),
-                    }
-                    batch.phase = Phase::Playing { cursor, beat };
-                }
-                Then::Play => {
-                    // The last entry passed with no `next`: the demo is done.
-                    if left == 0 && entries.last().is_some_and(|e| e.action != Action::Next) {
-                        let next = batch.at + 1;
-                        go_to(&mut guard, next);
-                    } else if c.now >= c.end - 0.05 && left > 0 {
-                        skip(
-                            &mut guard,
-                            format!(
-                                "the demo ended at {:.1} s with {left} timed line(s) not run",
-                                c.end
-                            ),
-                        );
+            // The last entry passed with no `next`: the demo is done, which is
+            // a boundary like `next`.
+            let then = if then == Then::Play
+                && left == 0
+                && entries.last().is_some_and(|e| e.action != Action::Next)
+            {
+                Then::Next
+            } else {
+                then
+            };
+            if holds_at(&then, HOLD.load(Ordering::Relaxed)) {
+                let _ = crate::demo_seek::set_paused(true);
+                say(&format!(
+                    "held before {} (demo {}, clock {:.1})",
+                    if then == Then::Next {
+                        "the next demo"
                     } else {
-                        batch.phase = Phase::Playing { cursor, beat };
-                    }
+                        "the next clip"
+                    },
+                    batch.at + 1,
+                    c.now
+                ));
+                crate::events::send("BATCH_HELD");
+                batch.phase = Phase::Held {
+                    cursor,
+                    then,
+                    beat: Instant::now(),
+                    gone_since: None,
+                };
+                return;
+            }
+            act(&mut guard, cursor, beat, then, &c, left);
+        }
+        Phase::Held {
+            cursor,
+            then,
+            beat,
+            gone_since,
+        } => {
+            if HOLD.load(Ordering::Relaxed) {
+                let gone_since = if crate::events::studio_connected() {
+                    None
+                } else {
+                    gone_since.or(Some(Instant::now()))
+                };
+                if studio_gone(
+                    crate::events::pipe_in_use(),
+                    gone_since.map(|t| t.elapsed()),
+                ) {
+                    // Nobody is left to render and free the room this hold
+                    // waits for, so going on could fill the drive: end the
+                    // batch here, keeping what it recorded, and let the game
+                    // quit as it does after a batch Studio stopped watching.
+                    HOLD.store(false, Ordering::Relaxed);
+                    let _ = crate::demo_seek::set_paused(false);
+                    say(
+                        "Studio is gone while the batch was held for space: ending it here; the clips recorded so far are kept",
+                    );
+                    finish(&mut guard);
+                    crate::batch_end::batch_ended();
+                    return;
                 }
+                let beat = if beat.elapsed() >= HELD_BEAT {
+                    crate::events::send("BATCH_HELD");
+                    Instant::now()
+                } else {
+                    beat
+                };
+                batch.phase = Phase::Held {
+                    cursor,
+                    then,
+                    beat,
+                    gone_since,
+                };
+                return;
+            }
+            let _ = crate::demo_seek::set_paused(false);
+            say("going on");
+            crate::events::send("BATCH_GOING");
+            // The next demo needs nothing from this one's clock.
+            if then == Then::Next {
+                let next = batch.at + 1;
+                go_to(&mut guard, next);
+                return;
+            }
+            let Some(c) = crate::demo_seek::clock().filter(|c| c.active && !c.loading) else {
+                skip(&mut guard, "the demo stopped playing while held".into());
+                return;
+            };
+            let left = batch.plan.demos[batch.at].entries.len() - cursor.next;
+            act(&mut guard, cursor, Instant::now(), then, &c, left);
+        }
+    }
+}
+
+/// Does what one frame of the schedule asked for after its commands ran.
+fn act(
+    guard: &mut Option<Batch>,
+    cursor: Cursor,
+    beat: Instant,
+    then: Then,
+    c: &crate::demo_seek::Clock,
+    left: usize,
+) {
+    let Some(batch) = guard.as_mut() else { return };
+    match then {
+        Then::Next => {
+            let next = batch.at + 1;
+            go_to(guard, next);
+        }
+        Then::Seek(to) => {
+            match crate::demo_seek::seek_to_seconds(to) {
+                Ok(how) => trace(&format!(
+                    "demo {}: seeking from {:.1} to {to:.1} ({how})",
+                    batch.at + 1,
+                    c.now
+                )),
+                Err(why) => trace(&format!(
+                    "demo {}: the seek to {to:.1} failed ({why}); playing on",
+                    batch.at + 1
+                )),
+            }
+            batch.phase = Phase::Playing { cursor, beat };
+        }
+        Then::Play => {
+            if c.now >= c.end - 0.05 && left > 0 {
+                skip(
+                    guard,
+                    format!(
+                        "the demo ended at {:.1} s with {left} timed line(s) not run",
+                        c.end
+                    ),
+                );
+            } else {
+                batch.phase = Phase::Playing { cursor, beat };
             }
         }
     }
@@ -509,6 +649,7 @@ fn start(path: &str) {
     if crate::hlae_window::wanted() {
         crate::hlae_window::step_aside();
     }
+    HOLD.store(false, Ordering::Relaxed);
     let mut guard = lock();
     *guard = Some(Batch {
         plan,
@@ -531,6 +672,7 @@ pub unsafe extern "C" fn command() {
             Some(b) => {
                 let what = match &b.phase {
                     Phase::Loading { .. } => "loading".to_string(),
+                    Phase::Held { .. } => "held between clips".to_string(),
                     Phase::Playing { cursor, .. } => format!(
                         "{} of {} timed line(s) run",
                         cursor.next,
@@ -556,7 +698,18 @@ pub unsafe extern "C" fn command() {
                 say(&format!("away needs {} 1 first", crate::hlae_window::NAME));
             }
         }
+        // Studio holds the batch at the next clip boundary while renders
+        // free space for the next clip (#861), and lets it go on after.
+        Some("hold") => {
+            HOLD.store(true, Ordering::Relaxed);
+            say("will hold at the next clip boundary");
+        }
+        Some("go") => {
+            HOLD.store(false, Ordering::Relaxed);
+            say("not holding");
+        }
         Some("stop") => {
+            HOLD.store(false, Ordering::Relaxed);
             if lock().take().is_some() {
                 run("mirv_recordmovie_stop");
                 say("stopped");
@@ -672,6 +825,26 @@ mod tests {
         assert_eq!(cursor.due(&e, 2.0).0, ["a", "b"]);
         assert_eq!(cursor.due(&e, 0.5), (vec![], Then::Play));
         assert_eq!(cursor.due(&e, 2.0), (vec![], Then::Play));
+    }
+
+    #[test]
+    fn a_held_batch_gives_up_on_studio_only_after_it_has_been_gone_a_while() {
+        assert!(!studio_gone(true, None), "Studio is reading");
+        assert!(!studio_gone(true, Some(Duration::from_secs(2))), "a moment");
+        assert!(studio_gone(true, Some(HELD_ALONE)));
+        assert!(
+            !studio_gone(false, Some(Duration::from_secs(600))),
+            "no events pipe: no telling, so the hold stays"
+        );
+    }
+
+    #[test]
+    fn a_hold_stops_only_at_a_clip_boundary() {
+        assert!(holds_at(&Then::Seek(20.0), true));
+        assert!(holds_at(&Then::Next, true));
+        assert!(!holds_at(&Then::Play, true), "mid-clip: plays on");
+        assert!(!holds_at(&Then::Seek(20.0), false));
+        assert!(!holds_at(&Then::Next, false));
     }
 
     #[test]

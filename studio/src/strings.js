@@ -934,6 +934,25 @@ export const STRINGS = {
       `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} of room, and deleting every finished take would give only ${available}. No takes were deleted.`,
   },
 
+  // ── Render while capturing (#861) ────────────────────────────────────────
+  RENDER_WHILE_CAPTURING: {
+    LABEL: 'Render while capturing',
+    TITLE:
+        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    HINT_OFF: 'Clips render after the batch.',
+    HINT_ON_KEEP:
+        'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
+    HINT_ON_DELETE:
+        'Each clip renders while the batch goes on, and its take is deleted once the clip is done. When the drive runs short, the batch waits between clips for the renders to free room.',
+    holdingLine: (short) =>
+      `Will wait after this clip for renders to free ${short || 'room'} for the next one`,
+    heldLine: (short, minutes) =>
+      `Waiting for renders to free ${short || 'room'} for the next clip${minutes ? ` (about ${minutes} min)` : ''}`,
+    stoppedToast: (clip, reason) =>
+      `The batch stopped before clip ${clip}: ${reason}. The clips recorded so far are kept.`,
+    queueFailed: (err) => `Couldn't queue a recorded clip for rendering: ${err}`,
+  },
+
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
   ERROR_LOG_MODAL: {
     TITLE_DEFAULT: 'FFmpeg Error Log',

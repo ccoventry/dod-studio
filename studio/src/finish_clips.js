@@ -323,27 +323,42 @@ export function requestFinishClips(verified, captureMode) {
   }
   if (reason) return;
 
-  const { codec, customArgs } = finishCodecFor(captureMode, settings.codecs);
-  if (codec === 'custom' && !customArgs) {
+  const built = renderPayloadFor(folders, verified?.capture_fps, captureMode, { settings, exportDirs });
+  if (built.skip === 'custom_args') {
     showToast(STRINGS.FINISH.SKIPPED_CUSTOM_ARGS, 'warning', 8000);
     return;
   }
-  const captureFps = Number(verified?.capture_fps) || 0;
-  controller.request({
+  controller.request({ payload: built.payload });
+}
+
+/**
+ * The `queue_render_batch` payload that renders `folders`, takes a batch
+ * captured in `captureMode` at `captureFps`, with the finish step's codec
+ * and the Render tab's other settings. `{ payload }`, or `{ skip }` when it
+ * can't: `no_export_dir` or `custom_args`. Render While Capturing (#861)
+ * queues each take through this too, as it lands.
+ */
+export function renderPayloadFor(folders, captureFps, captureMode, { settings = readSettings(), exportDirs } = {}) {
+  const dirs = exportDirs || (getExportDirsFn ? getExportDirsFn() : []).filter(Boolean);
+  if (dirs.length === 0) return { skip: 'no_export_dir' };
+  const { codec, customArgs } = finishCodecFor(captureMode, settings.codecs);
+  if (codec === 'custom' && !customArgs) return { skip: 'custom_args' };
+  const fps = Number(captureFps) || 0;
+  return {
     payload: {
       render_directories: folders,
       codec,
       custom_codec_args: customArgs,
       // A frame sequence is timed by this number, so it must be the rate the
       // batch captured at, not whatever the Render tab happens to show.
-      fps: captureFps > 0 ? captureFps : settings.renderFps,
+      fps: fps > 0 ? fps : settings.renderFps,
       ffmpeg_path: settings.ffmpegPath,
-      export_directories: exportDirs,
+      export_directories: dirs,
       max_concurrent_renders: settings.maxConcurrent,
       // The same clip names (#441) the Render tab's Scan gives these takes.
-      clip_names: getClipNamesFn ? getClipNamesFn(exportDirs) : {},
+      clip_names: getClipNamesFn ? getClipNamesFn(dirs) : {},
     },
-  });
+  };
 }
 
 /** See `createFinishController`'s `ownsJobs`. */

@@ -57,4 +57,78 @@ pub(super) fn allocate_blocks_first_fit_decreasing(
     Ok(result)
 }
 
+/// Render While Capturing (#861), for a demo whose blocks don't all fit at
+/// once: renders free room between clips and the batch holds until they
+/// have, so each block only has to fit **on its own**. Each goes to the
+/// earliest drive, from `*active_drive_idx` and wrapping, whose `capacity`
+/// (its free space when the batch was planned) holds it plus `threshold`.
+/// Deleting this batch's takes can never give a drive more room than that,
+/// so a block no drive holds alone can never be recorded: `Err(block_index)`.
+///
+/// Returns the pairs like [`allocate_blocks_first_fit_decreasing`] and, per
+/// drive, the room left beside its largest block, which is all the batch can
+/// count on there from now on.
+pub(super) fn allocate_blocks_one_at_a_time(
+    block_estimates: &[u64],
+    capacity: &[u64],
+    active_drive_idx: &mut usize,
+    threshold: u64,
+) -> Result<(Vec<(usize, usize)>, Vec<Option<u64>>), usize> {
+    let num_drives = capacity.len();
+    let mut result = Vec::with_capacity(block_estimates.len());
+    let mut largest: Vec<Option<u64>> = vec![None; num_drives];
+    for (block_index, &estimate) in block_estimates.iter().enumerate() {
+        let drive = (0..num_drives)
+            .map(|step| (*active_drive_idx + step) % num_drives)
+            .find(|&d| capacity[d] >= estimate.saturating_add(threshold))
+            .ok_or(block_index)?;
+        result.push((block_index, drive));
+        *active_drive_idx = drive;
+        largest[drive] = Some(largest[drive].map_or(estimate, |l| l.max(estimate)));
+    }
+    let left = largest
+        .iter()
+        .zip(capacity)
+        .map(|(l, &cap)| l.map(|l| cap - l))
+        .collect();
+    Ok((result, left))
+}
+
+#[cfg(test)]
+mod one_at_a_time_tests {
+    use super::*;
+
+    const GB: u64 = 1_000_000_000;
+
+    #[test]
+    fn blocks_that_fit_alone_go_to_the_first_drive_that_holds_each() {
+        let mut active = 0;
+        let (pairs, left) = allocate_blocks_one_at_a_time(
+            &[30 * GB, 50 * GB],
+            &[40 * GB, 100 * GB],
+            &mut active,
+            5 * GB,
+        )
+        .unwrap();
+        // 30 GB fits drive 0 alone; 50 GB only fits drive 1.
+        assert_eq!(pairs, vec![(0, 0), (1, 1)]);
+        assert_eq!(active, 1);
+        assert_eq!(left, vec![Some(10 * GB), Some(50 * GB)]);
+    }
+
+    #[test]
+    fn a_block_no_drive_holds_alone_is_refused() {
+        let mut active = 0;
+        assert_eq!(
+            allocate_blocks_one_at_a_time(
+                &[10 * GB, 96 * GB],
+                &[40 * GB, 100 * GB],
+                &mut active,
+                5 * GB
+            ),
+            Err(1)
+        );
+    }
+}
+
 // ── Batch queue builder ───────────────────────────────────────────────────────

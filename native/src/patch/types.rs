@@ -471,6 +471,12 @@ pub struct PatcherConfig {
     /// (`ds_capture_run_in_background`).
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
+    /// Render While Capturing (#861): takes render and go while the batch
+    /// runs, and the batch holds between clips until they have freed the
+    /// room. So the planner may route more blocks to a drive than it holds
+    /// now, rather than refusing the batch.
+    #[serde(default)]
+    pub render_while_capturing: bool,
     /// Configuration > Players' "Use in the game" box (#428), sent to the
     /// game as `ds_player_overrides` when its pipe first answers.
     /// `None` sends nothing: a config not built from the saved settings.
@@ -826,6 +832,7 @@ impl Default for PatcherConfig {
             save_local_patched_copy: false,
             hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
+            render_while_capturing: false,
             player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),

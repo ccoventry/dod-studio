@@ -778,6 +778,16 @@
                 </div>
               </div>
               <p id="config-take-after-finish-hint" class="setting-hint">Takes stay on disk. Delete them from the Render tab when you are done.</p>
+              <!-- "Render while capturing" (#861) — render_while_capturing.js.
+                   Off by default: a render slows the capture by however much
+                   this machine has to spare. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <input type="checkbox" id="config-render-while-capturing" />
+                  <label for="config-render-while-capturing" data-str="RENDER_WHILE_CAPTURING.LABEL" data-str-title="RENDER_WHILE_CAPTURING.TITLE">Render while capturing</label>
+                </div>
+              </div>
+              <p id="config-render-while-capturing-hint" class="setting-hint">Clips render after the batch.</p>
               <!-- Clip names (#441): the finished file of each highlight is
                    named from this template, unless its row has a typed name. -->
               <div class="input-row" style="margin-top: 10px;">
