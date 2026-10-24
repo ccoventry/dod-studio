@@ -68,6 +68,9 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Rescan Recent Sessions (#938): rescan_recent.js.
+    RESCAN_RECENT: 'Rescan Recent Sessions…',
+    RESCAN_RECENT_TITLE: 'Rescan the demos an older DoD Studio scanned, in every recent session',
     // File → Open Recent (#935).
     OPEN_RECENT: 'Open Recent',
     OPEN_RECENT_EMPTY: 'No recent sessions',
@@ -2632,6 +2635,50 @@ export const STRINGS = {
       const onThisDemo = `Fast-forwarding to clip ${clipIndex} of ${clipCountThisDemo}`;
       return totalBatchClips ? `${onThisDemo} · ${clipsSoFar} of ${totalBatchClips} clips total` : onThisDemo;
     },
+  },
+
+  // ── rescan_recent.js: every recent session's outdated demos in one go (#938)
+  RESCAN_RECENT: {
+    TITLE: 'Rescan recent sessions',
+    MESSAGE: 'These sessions have demos an older DoD Studio scanned. Rescan them all now? Each session is backed up first (a .before-rescan copy beside it), then rescanned and saved. Marks, notes, status and kill ranges are carried over.',
+    SKIP_HINT: 'This takes a while: “Skip for now” leaves a session until you next open it.',
+    RESCAN_ALL: 'Rescan all',
+    NOT_NOW: 'Not now',
+    CANCEL: 'Cancel',
+    SKIP: 'Skip for now',
+    SKIPPED: 'Skipped',
+    TIME_PENDING: 'working out how long…',
+    ALL_CURRENT_TOAST: 'Every recent session is up to date.',
+    NONE_RECENT_TOAST: 'No recent sessions to rescan.',
+    BUSY_TOAST: 'Recent sessions are already being rescanned.',
+    READING: 'Reading recent sessions…',
+    demos: (n) => `${n} demo${n === 1 ? '' : 's'}`,
+    MISSING: 'file not found, skipped',
+    UNREADABLE: "couldn't be read, skipped",
+    total: (duration) => `Total: about ${duration}.`,
+    // The progress line: which session, which step.
+    step: (i, n, name, what) => `${name} (${i} of ${n}): ${what}`,
+    STEP_BACKUP: 'backing up…',
+    STEP_OPEN: 'opening…',
+    stepScan: (n) => `rescanning ${n} demo${n === 1 ? '' : 's'}…`,
+    STEP_SAVE: 'saving…',
+    STEP_REOPEN: 'Reopening the session you had open…',
+    STOPPING: 'stopping after this session…',
+    doneToast: (done, total, failed) => `Rescanned ${done} of ${total} session${total === 1 ? '' : 's'}`
+      + (failed > 0 ? `; ${failed} failed (see View Logs).` : '.'),
+    // Activity log, one line per session, like #926's [scan] lines.
+    doneLog: (name, demos, seconds, backup) => `[rescan] ${name}: ${demos} demo(s) rescanned in ${seconds} s and saved (backup: ${backup})`,
+    failedLog: (name, seconds, err) => `[rescan] ${name}: failed after ${seconds} s, not saved: ${err}`,
+    skippedLog: (name) => `[rescan] ${name}: skipped for now`,
+    missingLog: (path) => `[rescan] ${path}: file not found, skipped`,
+    noDemosLog: (name) => `[rescan] ${name}: none of its outdated demos are on disk, nothing to rescan`,
+    stoppedLog: (left) => `[rescan] stopped by Cancel; ${left} session(s) left as they were`,
+    OPEN_FAILED: "the session didn't open",
+    SCAN_FAILED: 'the scan failed',
+    SAVE_FAILED: "the session wasn't saved",
+    SESSION_CHANGED: 'another session was opened while it scanned',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
   // ── progress_view.js: what every long job's progress line shares (#951)

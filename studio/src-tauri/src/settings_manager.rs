@@ -313,6 +313,11 @@ pub struct AppSettings {
     /// starts there instead of wherever any other picker last was.
     #[serde(default)]
     pub pick_folders: BTreeMap<String, String>,
+    /// The update Rescan Recent Sessions' start-up offer last ran for
+    /// (`studio/src/rescan_recent.js`'s `offerStamp`, #938): the app version
+    /// plus the highlight detection version. Empty until it has run once.
+    #[serde(default)]
+    pub rescan_offered_for: String,
 }
 
 fn default_true() -> bool {
@@ -552,6 +557,7 @@ impl Default for AppSettings {
             review_fast_forward_gap: default_review_fast_forward_gap(),
             scan_read_bytes_per_sec: 0.0,
             pick_folders: BTreeMap::new(),
+            rescan_offered_for: String::new(),
         }
     }
 }
@@ -1034,6 +1040,23 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let restored: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.scan_read_bytes_per_sec, 140e6);
+    }
+
+    #[test]
+    fn the_rescan_offer_stamp_roundtrips_and_an_older_file_has_none() {
+        let original = AppSettings {
+            rescan_offered_for: "0.2.1+h1".into(),
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.rescan_offered_for, "0.2.1+h1");
+        let older: AppSettings = serde_json::from_str(
+            r#"{"hlae_path": "", "hl_path": "", "ffmpeg_path": null, "pinned_folders": [],
+                "language": "en", "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6}"#,
+        )
+        .expect("a settings file");
+        assert_eq!(older.rescan_offered_for, "");
     }
 
     #[test]
