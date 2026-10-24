@@ -480,8 +480,8 @@ mod hook {
 
     /// Stands in for `pfnDrawConsoleStringLen` at the victim's width, the
     /// first call of every line: [`string_len`], plus the right margin while
-    /// a scale or a font is in force. `Draw` anchors the line at `ScreenWidth
-    /// - icon - victim width`, so the extra width moves the whole line left
+    /// a scale or a font is in force. `Draw` anchors the line at
+    /// `ScreenWidth - icon - victim width`, so the extra width moves the whole line left
     /// and leaves the victim's name that far from the edge; the name itself is
     /// drawn where the icon's advance puts it, at its own width.
     unsafe extern "C" fn victim_len(text: *const c_char, width: *mut i32, height: *mut i32) {
