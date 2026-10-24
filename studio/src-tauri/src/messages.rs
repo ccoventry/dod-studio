@@ -262,6 +262,16 @@ pub const REVIEW_GAME_NOT_FROM_STUDIO: &str = "Day of Defeat is open, but DoD St
 pub const REVIEW_GAME_LAUNCH_SETTINGS_DIFFER: &str = "Day of Defeat is open with other launch settings than DoD Studio's (another install or resolution). Close the game and press Review highlights again.";
 pub const GAME_DID_NOT_CLOSE: &str = "Day of Defeat didn't close within 10 seconds, so nothing was started. Close it yourself, then try again.";
 pub const REVIEW_GAME_DID_NOT_START: &str = "Day of Defeat didn't open within two minutes. Start it with Launch Game, then press Review highlights again.";
+// ── review_library.rs (#848) ────────────────────────────────────────────────
+pub fn review_library_unreadable(path: &std::path::Path, e: impl Display) -> String {
+    format!(
+        "Could not read your saved Review marks ({}): {e}",
+        path.display()
+    )
+}
+pub fn review_library_unwritable(path: &std::path::Path, e: impl Display) -> String {
+    format!("Could not save your Review marks ({}): {e}", path.display())
+}
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 

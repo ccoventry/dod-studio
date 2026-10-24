@@ -30,6 +30,7 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod render_manager;
+mod review_library;
 mod review_manager;
 mod settings_manager;
 mod take_delete_manager;
@@ -1010,6 +1011,8 @@ pub fn run() {
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_library::review_library_get,
+            review_library::review_library_update,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,
