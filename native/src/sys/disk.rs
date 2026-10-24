@@ -19,6 +19,50 @@ pub fn calculate_agr_bytes(fps: i32, duration_secs: f32) -> u64 {
 /// literals that could silently drift apart.
 pub const MIN_DRIVE_HEADROOM_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 
+/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
+/// `None` for a path with no prefix. Folders with the same key share one
+/// drive's free space, so planners budget per key, not per folder (#774).
+pub fn volume_key(path: &std::path::Path) -> Option<String> {
+    match path.components().next()? {
+        std::path::Component::Prefix(prefix) => {
+            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+        }
+        _ => None,
+    }
+}
+
+/// Groups `dirs` by volume: returns the index of each dir's budget and one
+/// starting budget per volume, from `free_of` (the smallest answer among the
+/// volume's dirs). A dir with no volume key gets a budget of its own.
+pub fn group_by_volume(
+    dirs: &[std::path::PathBuf],
+    mut free_of: impl FnMut(&std::path::Path) -> u64,
+) -> (Vec<usize>, Vec<u64>) {
+    let mut budget_of_dir = Vec::with_capacity(dirs.len());
+    let mut budgets: Vec<u64> = Vec::new();
+    let mut keys: Vec<Option<String>> = Vec::new();
+    for dir in dirs {
+        let key = volume_key(dir);
+        let free = free_of(dir);
+        let existing = key
+            .is_some()
+            .then(|| keys.iter().position(|k| *k == key))
+            .flatten();
+        match existing {
+            Some(i) => {
+                budgets[i] = budgets[i].min(free);
+                budget_of_dir.push(i);
+            }
+            None => {
+                budget_of_dir.push(budgets.len());
+                budgets.push(free);
+                keys.push(key);
+            }
+        }
+    }
+    (budget_of_dir, budgets)
+}
+
 // Disk query results are cached for TTL_MS milliseconds to avoid
 // issuing blocking kernel disk-enumeration syscalls on every frame.
 const TTL_MS: u128 = 2_000;
@@ -198,6 +242,41 @@ mod tests {
             get_available_bytes(std::path::Path::new("relative/folder")),
             u64::MAX
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn folders_on_one_drive_share_a_key() {
+        use std::path::Path;
+        assert_eq!(
+            volume_key(Path::new(r"C:\captures")),
+            volume_key(Path::new(r"c:\Programs\HLAE"))
+        );
+        assert_ne!(
+            volume_key(Path::new(r"C:\captures")),
+            volume_key(Path::new(r"D:\captures"))
+        );
+        assert_eq!(
+            volume_key(Path::new(r"\\nas\movies\a")),
+            volume_key(Path::new(r"\\NAS\Movies\b"))
+        );
+        assert_eq!(volume_key(Path::new("relative")), None);
+    }
+
+    /// #774: two folders on C: get one budget, D: its own, and folders with
+    /// no drive never merge.
+    #[cfg(windows)]
+    #[test]
+    fn folders_on_one_drive_share_one_budget() {
+        use std::path::PathBuf;
+        let dirs: Vec<PathBuf> = [r"C:\a", r"D:\x", r"c:\b", "rel1", "rel2"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        let (budget_of_dir, budgets) =
+            group_by_volume(&dirs, |p| if p.starts_with(r"D:\") { 50 } else { 100 });
+        assert_eq!(budget_of_dir, vec![0, 1, 0, 2, 3]);
+        assert_eq!(budgets, vec![100, 50, 100, 100]);
     }
 
     /// A list re-listed within TTL_MS serves the next caller; an older one
