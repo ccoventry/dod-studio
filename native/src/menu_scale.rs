@@ -122,17 +122,20 @@ pub fn pre_sized(scheme: &str) -> Option<String> {
         let token = first_token(line);
         let mut replaced = None;
         if let Some(inner) = block {
-            if depth == inner && (token == WIDTH_KEY || token == HEIGHT_KEY) {
+            // KeyValues keys are case-insensitive and the first of two wins,
+            // so a lowercase key left in place would beat the one added below.
+            let is_width = token.eq_ignore_ascii_case(WIDTH_KEY);
+            if depth == inner && (is_width || token.eq_ignore_ascii_case(HEIGHT_KEY)) {
                 let lead: String = line.chars().take_while(|c| c.is_whitespace()).collect();
                 indent = lead.clone();
-                if token == WIDTH_KEY {
+                if is_width {
                     width_done = true;
                     replaced = Some(base_line(&lead, WIDTH_KEY, BASE_WIDTH_HD));
                 } else {
                     height_done = true;
                     replaced = Some(base_line(&lead, HEIGHT_KEY, BASE_HEIGHT_HD));
                 }
-            } else if depth == inner && close > open && depth - (close - open) < inner {
+            } else if depth == inner && close > open && depth.saturating_sub(close - open) < inner {
                 // The block's closing brace: add whatever was missing first.
                 if !width_done {
                     out.push(base_line(&indent, WIDTH_KEY, BASE_WIDTH_HD));
@@ -183,9 +186,36 @@ pub fn addon_scheme(game_dir: &Path) -> PathBuf {
         .join(FILE)
 }
 
+const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+
 fn is_ours(path: &Path) -> Option<bool> {
     let bytes = std::fs::read(path).ok()?;
-    Some(decode(&bytes).0.starts_with(MARK))
+    let bytes = bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes);
+    Some(decode(bytes).0.starts_with(MARK))
+}
+
+/// `source`'s scheme as Studio's copy, in the source's own encoding. A UTF-8
+/// BOM stays the file's first bytes, ahead of [`MARK`]; UTF-16 is refused
+/// rather than edited as bytes.
+fn sized_copy(source: &Path) -> Result<Vec<u8>, String> {
+    let bytes =
+        std::fs::read(source).map_err(|e| format!("could not read {}: {e}", source.display()))?;
+    if bytes.starts_with(b"\xff\xfe") || bytes.starts_with(b"\xfe\xff") {
+        return Err(format!(
+            "{} is UTF-16 text, which DoD Studio doesn't edit",
+            source.display()
+        ));
+    }
+    let (bom, body) = match bytes.strip_prefix(UTF8_BOM) {
+        Some(rest) => (UTF8_BOM, rest),
+        None => (&b""[..], &bytes[..]),
+    };
+    let (text, utf8) = decode(body);
+    let sized = pre_sized(&text)
+        .ok_or_else(|| format!("{} has no BaseSettings block to change", source.display()))?;
+    let mut out = bom.to_vec();
+    out.extend(encode(&sized, utf8));
+    Ok(out)
 }
 
 fn status_in(game_dir: &Path, applies: bool) -> MenuScaleStatus {
@@ -222,13 +252,7 @@ pub fn set_in(game_dir: &Path, on: bool, applies: bool) -> Result<MenuScaleStatu
                     game_dir.join("resource").display()
                 )
             })?;
-            let bytes = std::fs::read(&source)
-                .map_err(|e| format!("could not read {}: {e}", source.display()))?;
-            let (text, utf8) = decode(&bytes);
-            let sized = pre_sized(&text).ok_or_else(|| {
-                format!("{} has no BaseSettings block to change", source.display())
-            })?;
-            let sized = encode(&sized, utf8);
+            let sized = sized_copy(&source)?;
             if std::fs::read(&path).ok().as_deref() != Some(sized.as_slice()) {
                 if let Some(dir) = path.parent() {
                     std::fs::create_dir_all(dir)
@@ -370,6 +394,57 @@ mod tests {
         assert!(set_in(&game, true, true).is_err());
         assert!(set_in(&game, false, true).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "Scheme { }");
+    }
+
+    #[test]
+    fn a_lowercase_key_is_replaced_not_shadowed() {
+        // KeyValues keys are case-insensitive and the first one wins.
+        let scheme = VALVE.replace(
+            "\"ProportionalBaseHeightHD\"",
+            "\"proportionalbaseheighthd\"",
+        );
+        let out = pre_sized(&scheme).unwrap();
+        assert!(!out.contains("\"720\""));
+        assert_eq!(
+            out.to_ascii_lowercase()
+                .matches(&HEIGHT_KEY.to_ascii_lowercase())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn extra_closing_braces_do_not_panic() {
+        assert_eq!(pre_sized("BaseSettings\n{\n}}}\n").map(|_| ()), Some(()));
+    }
+
+    #[test]
+    fn a_utf8_bom_stays_first() {
+        let (_root, game) = install("menu_scale_bom");
+        let mut bytes = UTF8_BOM.to_vec();
+        bytes.extend(VALVE.as_bytes());
+        let valve = game.with_file_name("valve").join("resource").join(FILE);
+        std::fs::write(&valve, &bytes).unwrap();
+        assert!(set_in(&game, true, true).unwrap().on);
+        let out = std::fs::read(addon_scheme(&game)).unwrap();
+        assert!(out.starts_with(UTF8_BOM));
+        assert!(out[UTF8_BOM.len()..].starts_with(MARK.as_bytes()));
+        assert_eq!(out.windows(3).filter(|w| *w == UTF8_BOM).count(), 1);
+        // Recognised as ours, so off removes it.
+        assert!(!set_in(&game, false, true).unwrap().on);
+        assert!(!addon_scheme(&game).exists());
+    }
+
+    #[test]
+    fn utf16_is_refused_and_nothing_is_written() {
+        let (_root, game) = install("menu_scale_utf16");
+        let mut bytes = vec![0xff, 0xfe];
+        bytes.extend(VALVE.encode_utf16().flat_map(u16::to_le_bytes));
+        let valve = game.with_file_name("valve").join("resource").join(FILE);
+        std::fs::write(&valve, &bytes).unwrap();
+        let err = set_in(&game, true, true).unwrap_err();
+        assert!(err.contains("UTF-16"), "{err}");
+        assert!(!addon_scheme(&game).exists());
     }
 
     #[test]
