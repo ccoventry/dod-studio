@@ -7,9 +7,9 @@
 //! the copy the engine keeps in memory (`model_t.entities`,
 //! `goldsrc-hooks/src/map_sounds.rs`).
 //!
-//! Malformed text never panics: anything outside a `{ }` block is skipped and
-//! a string that never closes is an error, so the caller decides what an
-//! unreadable map means.
+//! Malformed text never panics: anything outside a `{ }` block is skipped, a
+//! `//` comment is skipped as the engine skips it, and a string that never
+//! closes is an error, so the caller decides what an unreadable map means.
 
 use std::fmt::Write as _;
 
@@ -74,7 +74,8 @@ impl MapEntity {
 /// Parses the entity lump text into entities, preserving key order.
 ///
 /// Tolerant in the same places the engine is: anything outside a `{ }` block is
-/// skipped, and the lump's trailing NUL terminates it.
+/// skipped, a `//` comment is skipped to the end of its line, and the lump's
+/// trailing NUL terminates it.
 pub fn parse_entity_text(text: &str) -> Result<Vec<MapEntity>, String> {
     let mut out = Vec::new();
     let mut current: Option<MapEntity> = None;
@@ -89,20 +90,16 @@ pub fn parse_entity_text(text: &str) -> Result<Vec<MapEntity>, String> {
                     out.push(e);
                 }
             }
+            '/' if starts_comment(text.as_bytes(), i) => {
+                skip_to(&mut chars, comment_end(text.as_bytes(), i));
+            }
             '"' => {
                 let key = take_quoted(text, i)?;
                 let after_key = key.1;
-                let vq = text[after_key..]
-                    .find('"')
+                let vq = next_quote(text, after_key)
                     .ok_or_else(|| format!("entity lump: key {:?} has no value", key.0))?;
-                let value = take_quoted(text, after_key + vq)?;
-                // Advance the iterator past the value's closing quote.
-                while let Some(&(j, _)) = chars.peek() {
-                    if j >= value.1 {
-                        break;
-                    }
-                    chars.next();
-                }
+                let value = take_quoted(text, vq)?;
+                skip_to(&mut chars, value.1);
                 match current.as_mut() {
                     Some(e) => e.pairs.push((key.0, value.0)),
                     // A key/value pair outside a block is malformed; the engine
@@ -115,6 +112,53 @@ pub fn parse_entity_text(text: &str) -> Result<Vec<MapEntity>, String> {
         }
     }
     Ok(out)
+}
+
+/// Advances `chars` to the first char at or past byte index `end`.
+fn skip_to(chars: &mut std::iter::Peekable<std::str::CharIndices>, end: usize) {
+    while chars.next_if(|&(j, _)| j < end).is_some() {}
+}
+
+/// Whether a `//` comment starts at byte `at`.
+///
+/// The engine's tokenizer (`COM_Parse`: pre-Anniversary `hw.dll` `0x1d2b13d`,
+/// Anniversary `0x101b8ddd`) skips `//` to the end of the line, but only where
+/// a token would start: after whitespace or the end of the previous token. In
+/// the middle of a bare word, or inside a quoted string, `//` is text. A
+/// commented-out line can then hold a lone `"` the engine never sees:
+/// dod_beachassault2_mtek's worldspawn has `//\sierra\...\aircraft.wad;"`, a
+/// wad list disabled by hand. Reading that quote shifted every later key and
+/// value by one and left the lump's last string unclosed (#988).
+fn starts_comment(bytes: &[u8], at: usize) -> bool {
+    bytes.get(at..at + 2) == Some(b"//")
+        && (at == 0
+            || matches!(
+                bytes[at - 1],
+                0..=b' ' | b'"' | b'{' | b'}' | b'(' | b')' | b'\'' | b','
+            ))
+}
+
+/// The byte index of the newline ending the comment at `at`, or the end of
+/// the text.
+fn comment_end(bytes: &[u8], at: usize) -> usize {
+    bytes[at..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(bytes.len(), |n| at + n)
+}
+
+/// The byte index of the next `"` at or after `at`, skipping comments: the
+/// opening quote of a key's value.
+fn next_quote(text: &str, mut at: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    while at < bytes.len() {
+        match bytes[at] {
+            b'"' => return Some(at),
+            b'/' if starts_comment(bytes, at) => at = comment_end(bytes, at),
+            _ => at += 1,
+        }
+    }
+    None
 }
 
 /// Reads a quoted string starting at the opening quote at `at`.
@@ -271,6 +315,54 @@ mod tests {
         // Bytes that are not UTF-8 at all, decoded the way the hook does.
         let junk: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
         let _ = parse_entity_text(&text_up_to_nul(&junk[1..]));
+    }
+
+    /// dod_beachassault2_mtek's worldspawn, shortened: a commented-out wad
+    /// list ending in a lone quote, which the engine skips with the comment
+    /// (#988). Then dod_achen_mtek's commented-out spawn door, which the
+    /// engine never spawns.
+    #[test]
+    fn a_comment_hides_its_stray_quote() {
+        let lump = r#"{
+"wad" "\sierra\half-life\valve\halflife.wad;\sierra\half-life\firearms\firearms.wad"
+
+//\sierra\half-life\valve\ed_terrain.wad;\sierra\half-life\valve\aircraft.wad;"
+"mapversion" "220"
+"skyname" "boat"
+"classname" "worldspawn"
+}
+//{
+//"model" "*180"  // AXIS SPAWN DOOR
+//"classname" "func_door_rotating"
+//}
+{
+"classname" "ambient_generic"
+"message" "ambience/uswin.wav"
+}
+"#;
+        let ents = parse_entity_text(lump).unwrap();
+        assert_eq!(ents.len(), 2);
+        let keys: Vec<&str> = ents[0].pairs.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, ["wad", "mapversion", "skyname", "classname"]);
+        assert_eq!(ents[0].get("mapversion"), Some("220"));
+        assert_eq!(ents[0].classname(), "worldspawn");
+        assert_eq!(ents[1].get("message"), Some("ambience/uswin.wav"));
+    }
+
+    /// Inside a quoted string `//` is text, as in `COM_Parse`. A comment
+    /// between a key and its value, or after the last brace, is skipped.
+    #[test]
+    fn comments_are_skipped_outside_quoted_strings() {
+        let ents =
+            parse_entity_text("{\n\"url\" \"http://x//y\"\n\"key\" // \"not\"\n\"value\"\n}// \"")
+                .unwrap();
+        assert_eq!(
+            ents[0].pairs,
+            [
+                ("url".to_string(), "http://x//y".to_string()),
+                ("key".to_string(), "value".to_string()),
+            ]
+        );
     }
 
     #[test]
