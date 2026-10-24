@@ -146,6 +146,8 @@ DEBUG
       List the textures that had no HD version, per map.
   ds_debug_log_weapon_model 0/1
       Log the weapon model the spectated player holds.
+  ds_debug_log_gun_lowered 0/1
+      Log each time the first-person gun goes down or comes back up, with the demo's clock (POV and HLTV in-eye). POV reads client.dll's own flag, not the drawn gun, so it misses jump lowering.
   ds_debug_log_spectator_target 0/1
       Log who the spectator camera follows.
   ds_debug_log_texture_loads 0/1

@@ -99,6 +99,7 @@ mod tests {
 
     /// Names the hook registers that never had a `dodstudio_` one.
     const NEW_SINCE_555: &[&str] = &[
+        "debug_log_gun_lowered",
         "debug_log_server_sounds",
         "debug_log_view_bob",
         "hud_hide_center_text",

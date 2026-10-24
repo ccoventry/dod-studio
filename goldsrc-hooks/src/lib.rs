@@ -240,6 +240,7 @@ mod frame_esc;
 mod game_dir_check;
 mod game_folder;
 mod gl_zoom;
+mod gun_log;
 mod hand_signals;
 mod hide_asset;
 mod hlae_window;

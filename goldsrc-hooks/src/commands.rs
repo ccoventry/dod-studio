@@ -594,6 +594,7 @@ pub fn poll() {
     crate::player_crosshair::poll();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
+    crate::gun_log::poll();
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
     // After spectator_bars::poll, so it lays out by this frame's bar state.
@@ -1689,6 +1690,9 @@ pub fn install() {
     }
     // Outside the all-or-nothing tuple for the same reason as the HD switch:
     // it is independent of every other setting here.
+    if let Some(gun_log) = register(crate::gun_log::NAME, "0") {
+        crate::gun_log::set_cvar(gun_log);
+    }
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
     }
