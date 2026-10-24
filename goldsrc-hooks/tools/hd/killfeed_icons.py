@@ -146,6 +146,10 @@ class Icon:
     (place_barrel). cut_below: with barrel_top, whatever hangs below the
     rect is cut off at its bottom edge (the outline closes the cut);
     without it the gun keeps its width and is raised until it fits.
+    shrink_below: with barrel_top, the barrel stays on its row and the
+    whole gun is drawn smaller until what hangs below ends inside the rect
+    (nothing cut, the gun narrower than Valve's); wins over cut_below.
+    Unset in the table: for the MP44 it is the other option to cut_part.
     see_through: (texture, x, y) texels inside a hole the skin paints black
     instead of modelling (a trigger guard drawn on a solid plate): the
     near-black texels joined to each are drawn transparent (see_through).
@@ -162,6 +166,7 @@ class Icon:
     turn: float = 0.0
     barrel_top: float | None = None
     cut_below: bool = False
+    shrink_below: bool = False
     see_through: tuple = ()
     skin_art: tuple = ()
     v_part: "VPart | None" = None
@@ -645,14 +650,16 @@ def barrel_top_row(alpha, front=0.15):
     return float(vals[np.argmax(counts)])
 
 
-def place_barrel(tris, basis, fit, alpha, box, row, cut=False):
+def place_barrel(tris, basis, fit, alpha, box, row, cut=False, shrink=False):
     """A transform that puts the top of the barrel's end (measured in
     `alpha`, rendered with `fit`) on screen row `row`, as wide as `box`
     allows. With `cut`, shrunk only so nothing pokes out above the box
-    (what hangs below is cut later). Without, the gun keeps that size and
-    is raised until its bottom fits, the barrel as near `row` as that
-    allows (shrunk only when it is taller than the box). Centred across as
-    fit_transform is."""
+    (what hangs below is cut later). With `shrink`, the barrel stays on
+    `row` and the whole gun is shrunk until nothing pokes out above or
+    below the box. With neither, the gun keeps that size and is raised
+    until its bottom fits, the barrel as near `row` as that allows (shrunk
+    only when it is taller than the box). Centred across as fit_transform
+    is."""
     kx, ky, ox, oy = fit
     r0 = barrel_top_row(alpha)
     if r0 is None:
@@ -661,9 +668,11 @@ def place_barrel(tris, basis, fit, alpha, box, row, cut=False):
     lo, hi = pts[:, :2].min(0), pts[:, :2].max(0)
     ub = (oy - r0) / ky  # the barrel top, model units up
     k = (box[2] - box[0]) / max(hi[0] - lo[0], 1e-6)
-    if cut:
+    if cut or shrink:
         if hi[1] > ub:
             k = min(k, (row - box[1]) / (hi[1] - ub))
+        if shrink and lo[1] < ub:
+            k = min(k, (box[3] - row) / (ub - lo[1]))
     else:
         k = min(k, (box[3] - box[1]) / max(hi[1] - lo[1], 1e-6))
         row = min(row, box[3] - k * (ub - lo[1]))  # raised until the bottom fits
@@ -1483,9 +1492,10 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     fit = fit_transform(tris, basis, box)
     lit = specks(draw(fit))
     if icon.barrel_top is not None:
-        fit = place_barrel(tris, basis, fit, lit[..., 3], box, icon.barrel_top * scale, icon.cut_below)
+        fit = place_barrel(tris, basis, fit, lit[..., 3], box, icon.barrel_top * scale, icon.cut_below,
+                           icon.shrink_below)
         lit = draw(fit)
-        if icon.cut_below:
+        if icon.cut_below and not icon.shrink_below:
             lit = cut_under(lit, box[3])
         lit = specks(lit)
     else:
@@ -1518,6 +1528,10 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     if icon.barrel_top is not None:
         info["barrel_top"] = icon.barrel_top
         info["cut_below"] = icon.cut_below
+        if icon.shrink_below:
+            info["shrink_below"] = True
+    if icon.cut_part:
+        info["cut_part"] = icon.cut_part
     return img, info
 
 
