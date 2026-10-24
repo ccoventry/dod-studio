@@ -183,31 +183,55 @@ export function createProjectSession({
     return !!(await requestUnsavedChangesConfirmation());
   }
 
-  // Load Project Session
-  document.querySelector('#load-project-btn')?.addEventListener('click', async () => {
-    if (!(await confirmReplaceProject())) return;
+  // Set from Load Session's click or Open Recent until the unsaved-changes
+  // prompt and the dialog are done, so a second Ctrl+O in that wait stacks
+  // no second prompt or dialog. Cleared before the load itself, which can
+  // run a rescan for minutes and shows its own progress (#958).
+  let choosing = false;
+  const loadProjectBtn = document.querySelector('#load-project-btn');
+
+  // Load Project Session. The button is disabled until the dialog returns;
+  // pickPath shows the busy cursor while it comes.
+  loadProjectBtn?.addEventListener('click', async () => {
+    if (choosing) return;
+    choosing = true;
+    loadProjectBtn.disabled = true;
+    let selected = null;
     try {
+      if (!(await confirmReplaceProject())) return;
       const projectsDir = await defaultProjectsDir();
-      const selected = await pickPath({
+      selected = await pickPath({
         field: 'project.open',
         current: currentSessionPath,
         fallback: projectsDir,
         multiple: false,
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
-      if (selected) await loadProjectFile(selected);
     } catch (err) {
       console.error("Load project error:", err);
       showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
+      return;
+    } finally {
+      choosing = false;
+      loadProjectBtn.disabled = false;
     }
+    if (selected) await loadProjectFile(selected);
   });
 
   /** Opens the project at `path` as Load Session would once its file is
    *  picked, unsaved-changes prompt first (File → Open Recent, #935).
-   *  Resolves whether it opened. */
+   *  Resolves whether it opened; false while Load Session's prompt or
+   *  dialog is up. */
   async function openProject(path) {
-    if (!(await confirmReplaceProject())) return false;
-    return loadProjectFile(path);
+    if (choosing) return false;
+    choosing = true;
+    let confirmed;
+    try {
+      confirmed = await confirmReplaceProject();
+    } finally {
+      choosing = false;
+    }
+    return confirmed ? loadProjectFile(path) : false;
   }
 
   // Reads and applies a project file: the half of Load Session after the
