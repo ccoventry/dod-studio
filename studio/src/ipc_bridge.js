@@ -1155,6 +1155,16 @@ export async function pickUserFolders() {
     });
 }
 
+/** Whether one of Studio's dialog windows is on screen (dialog_wait.js). */
+export async function fileDialogShown() {
+  return invoke("file_dialog_shown")
+    .catch((err) => {
+      console.error("IPC Execution Error (file_dialog_shown):", err);
+      // Treated as shown, so a failing check never leaves the notice up.
+      return true;
+    });
+}
+
 /** Non-recursive `.dem` count for a single folder — used by the Explorer
  *  sidebar's Quick Links rows (Pinned/Recent/Local). */
 export async function countDemoFiles(path) {
