@@ -48,6 +48,78 @@ export async function filesExist(paths) {
     });
 }
 
+/** Files Windows asked Studio to open and not yet opened (#528,
+ *  launch_files.js), oldest first; each is handed out once. */
+export async function takeOpenFiles() {
+  return invoke("take_open_files")
+    .catch((err) => {
+      console.error("IPC Execution Error (take_open_files):", err);
+      return [];
+    });
+}
+
+/** The `.dodstudio` name a just-loaded `.json` project could switch to
+ *  (#528, project_convert.js), or null when there's nothing to offer or the
+ *  check failed. */
+export async function projectConvertOffer(path) {
+  return invoke("project_convert_offer", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (project_convert_offer):", err);
+      return null;
+    });
+}
+
+/** Renames a `.json` project to `.dodstudio`; resolves the new path, rejects
+ *  with the backend's message (say, the name is taken). */
+export async function convertProjectFile(path) {
+  return invoke("convert_project_file", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (convert_project_file):", err);
+      throw err;
+    });
+}
+
+/** A project file's text, for Rescan Recent Sessions' count and backup
+ *  (#938). Rejects with the backend's message, which names the file. */
+export async function readProjectFile(path) {
+  return invoke("load_project_session", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (load_project_session):", err);
+      throw err;
+    });
+}
+
+/** Whether DoD Studio is in `.dem`'s Open With list (#528):
+ *  `{ registered, thisCopy, otherExe }`, or null when it couldn't be read. */
+export async function demOpenWithStatus() {
+  return invoke("dem_open_with_status")
+    .catch((err) => {
+      console.error("IPC Execution Error (dem_open_with_status):", err);
+      return null;
+    });
+}
+
+/** Adds DoD Studio to `.dem`'s Open With list, or removes it. Resolves the
+ *  new status; rejects with the backend's message when the registry write
+ *  failed, so the setting can say so. */
+export async function setDemOpenWith(enabled) {
+  return invoke("set_dem_open_with", { enabled })
+    .catch((err) => {
+      console.error("IPC Execution Error (set_dem_open_with):", err);
+      throw err;
+    });
+}
+
+/** Writes `contents` to `path` (a project backup, #938). Rejects with the
+ *  backend's message, which names the file. */
+export async function writeProjectFile(path, contents) {
+  return invoke("save_project_session", { path, contents })
+    .catch((err) => {
+      console.error("IPC Execution Error (save_project_session):", err);
+      throw err;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
@@ -1044,6 +1116,16 @@ export async function browseDirectory(path) {
     });
 }
 
+/** The map and type from the start of each demo, `[{ path, map_name,
+ *  demo_type }]`; a listing from browseDirectory leaves them out. */
+export async function readDemoHeads(paths) {
+  return invoke("read_demo_heads", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (read_demo_heads):", err);
+      return [];
+    });
+}
+
 export async function defaultBrowseDir() {
   return invoke("default_browse_dir")
     .catch((err) => {
@@ -1130,8 +1212,9 @@ export async function checkForUpdate(channel) {
 
 /** Downloads and installs whatever update the last checkForUpdate() call
  *  found — throws if none is pending. Progress arrives via the
- *  `update_download_progress`/`update_ready` events, not this call's
- *  return value. */
+ *  `update_download_progress`, `update_installing` and `update_ready`
+ *  events, not this call's return value. On Windows the installer closes
+ *  Studio, so it never returns there. */
 export async function downloadAndInstallUpdate() {
   return invoke("download_and_install_update")
     .catch((err) => {

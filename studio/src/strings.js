@@ -68,6 +68,9 @@ export const STRINGS = {
     SAVE_SESSION_TITLE: 'Save Project Session',
     LOAD_SESSION_BUTTON: 'Load Session',
     LOAD_SESSION_TITLE: 'Load Project Session',
+    // File → Rescan Recent Sessions (#938): rescan_recent.js.
+    RESCAN_RECENT: 'Rescan Recent Sessions…',
+    RESCAN_RECENT_TITLE: 'Rescan the demos an older DoD Studio scanned, in every recent session',
     // File → Open Recent (#935).
     OPEN_RECENT: 'Open Recent',
     OPEN_RECENT_EMPTY: 'No recent sessions',
@@ -519,6 +522,16 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    // .dem files in Explorer (#528, file_types_settings.js).
+    DEM_OPEN_WITH_LABEL: 'Show DoD Studio in Open With for .dem Files',
+    DEM_OPEN_WITH_TITLE: "Adds DoD Studio to the Open With menu when you right-click a demo in Explorer. Whatever opens a demo when you double-click it stays as it is. Untick to take DoD Studio back out.",
+    DEM_OPEN_TARGET_LABEL: 'Open .dem Files In:',
+    DEM_OPEN_TARGET_TITLE: 'Where a demo you open with DoD Studio from Explorer goes.',
+    DEM_OPEN_TARGET_ANALYZER: 'Demo Analyzer',
+    DEM_OPEN_TARGET_QUEUE: "Studio's Queue",
+    demOpenWithOtherCopy: (exe) =>
+      `Open With opens another copy of DoD Studio: ${exe}. Untick and tick again to make it open this one.`,
+    demOpenWithFailed: (err) => `Couldn't change Open With for .dem files: ${err}`,
     SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
     SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
     scanWorkersHint: (totalGb) => totalGb
@@ -1146,6 +1159,10 @@ export const STRINGS = {
     THIS_PC_LABEL: '💻 This PC',
     PICK_FOLDER_FROM_SIDEBAR: 'Pick a folder from the Explorer sidebar.',
     NO_DEMOS_IN_FOLDER: 'No demos found in this folder.',
+    // A folder's file names are on their way; a cloud drive can take a while.
+    READING_FOLDER: 'Reading this folder…',
+    // The Map cell until the start of the demo is read.
+    MAP_READING: '…',
     NO_DEMOS_MATCH_FILTERS: 'No demos match the current filters.',
     ANALYZING_ELLIPSIS: 'Analyzing…',
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',
@@ -1417,6 +1434,10 @@ export const STRINGS = {
     DOWNLOAD_ALL_BUTTON: 'Download all',
     DISMISS_BUTTON: 'Dismiss',
     DOWNLOADING: 'Downloading…',
+    // "Downloading dod_anzio (1 of 3): 2.1 of 6 MB"; no count for one map.
+    downloadingLine: (map, index, count, bytes) =>
+      `Downloading ${map}${count > 1 ? ` (${index} of ${count})` : ''}${bytes ? `: ${bytes}` : '…'}`,
+    checkingLine: (map) => `Checking ${map}…`,
     NO_GAME_PATH: 'Set the hl.exe path in Configuration to check demo maps.',
     demoCount: (n) => (n === 1 ? '1 demo' : `${n} demos`),
     missingSummary: (maps, demos) =>
@@ -1556,6 +1577,16 @@ export const STRINGS = {
       `<code>${name} ${have.toFixed(1)}s</code> — needs at least <code>${need.toFixed(1)}s</code> for ${binding}`,
   },
 
+  // After a .json project loads (#528, project_convert.js).
+  PROJECT_CONVERT: {
+    TITLE: 'Switch to .dodstudio?',
+    MESSAGE: 'Switch this project to the .dodstudio file type? It will open in DoD Studio when double-clicked. The file is renamed in its folder; nothing inside it changes.',
+    SWITCH: 'Switch to .dodstudio',
+    KEEP: 'Keep as .json',
+    switchedToast: (name) => `Project switched to ${name}.`,
+    failedToast: (err) => `The project stays as .json: ${err}`,
+  },
+
   MAIN: {
     SELECT_CAPTURE_OUTPUT_DIR_TITLE: 'Select Capture Output Directory',
     SELECT_RENDER_EXPORT_DIR_TITLE: 'Select Render Export Directory',
@@ -1568,6 +1599,7 @@ export const STRINGS = {
     SELECT_DEMO_FILES_TITLE: 'Select Demo Files (.dem)',
     SELECT_DEMO_FOLDER_TITLE: 'Select Demo Folder',
 
+    PROJECT_FILTER_NAME: 'DoD Studio Project',
     JSON_PROJECT_FILTER_NAME: 'JSON Project File',
     EXECUTABLE_FILTER_NAME: 'Executable',
     DLL_FILTER_NAME: 'DLL',
@@ -2596,8 +2628,11 @@ export const STRINGS = {
     STATUS_CHECKING: 'Checking for updates…',
     STATUS_UP_TO_DATE: 'Up to date.',
     STATUS_AVAILABLE: (v) => `Update available: v${v}`,
-    STATUS_DOWNLOADING: 'Downloading update…',
-    STATUS_READY: 'Update downloaded — restart to apply.',
+    STATUS_DOWNLOADING: 'Downloading the update…',
+    statusDownloadingBytes: (bytes) => `Downloading the update: ${bytes}`,
+    // On Windows the installer closes Studio and takes over from here.
+    STATUS_INSTALLING: 'Installing the update… DoD Studio closes while it installs.',
+    STATUS_READY: 'Ready: restart to finish.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
     // Local and debug builds: report what's published, never offer to install
     // it -- the installer would replace the *installed* app, not this one.
@@ -2605,6 +2640,12 @@ export const STRINGS = {
       `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
       + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
       + 'Get the published build from the Releases page.',
+  },
+
+  // Byte counts on the update and map downloads (download_progress.js).
+  DOWNLOADS: {
+    bytesOf: (done, total) => `${done} of ${total} MB`,
+    bytes: (done) => `${done} MB`,
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────
@@ -2632,6 +2673,50 @@ export const STRINGS = {
       const onThisDemo = `Fast-forwarding to clip ${clipIndex} of ${clipCountThisDemo}`;
       return totalBatchClips ? `${onThisDemo} · ${clipsSoFar} of ${totalBatchClips} clips total` : onThisDemo;
     },
+  },
+
+  // ── rescan_recent.js: every recent session's outdated demos in one go (#938)
+  RESCAN_RECENT: {
+    TITLE: 'Rescan recent sessions',
+    MESSAGE: 'These sessions have demos an older DoD Studio scanned. Rescan them all now? Each session is backed up first (a .before-rescan copy beside it), then rescanned and saved. Marks, notes, status and kill ranges are carried over.',
+    SKIP_HINT: 'This takes a while: “Skip for now” leaves a session until you next open it.',
+    RESCAN_ALL: 'Rescan all',
+    NOT_NOW: 'Not now',
+    CANCEL: 'Cancel',
+    SKIP: 'Skip for now',
+    SKIPPED: 'Skipped',
+    TIME_PENDING: 'working out how long…',
+    ALL_CURRENT_TOAST: 'Every recent session is up to date.',
+    NONE_RECENT_TOAST: 'No recent sessions to rescan.',
+    BUSY_TOAST: 'Recent sessions are already being rescanned.',
+    READING: 'Reading recent sessions…',
+    demos: (n) => `${n} demo${n === 1 ? '' : 's'}`,
+    MISSING: 'file not found, skipped',
+    UNREADABLE: "couldn't be read, skipped",
+    total: (duration) => `Total: about ${duration}.`,
+    // The progress line: which session, which step.
+    step: (i, n, name, what) => `${name} (${i} of ${n}): ${what}`,
+    STEP_BACKUP: 'backing up…',
+    STEP_OPEN: 'opening…',
+    stepScan: (n) => `rescanning ${n} demo${n === 1 ? '' : 's'}…`,
+    STEP_SAVE: 'saving…',
+    STEP_REOPEN: 'Reopening the session you had open…',
+    STOPPING: 'stopping after this session…',
+    doneToast: (done, total, failed) => `Rescanned ${done} of ${total} session${total === 1 ? '' : 's'}`
+      + (failed > 0 ? `; ${failed} failed (see View Logs).` : '.'),
+    // Activity log, one line per session, like #926's [scan] lines.
+    doneLog: (name, demos, seconds, backup) => `[rescan] ${name}: ${demos} demo(s) rescanned in ${seconds} s and saved (backup: ${backup})`,
+    failedLog: (name, seconds, err) => `[rescan] ${name}: failed after ${seconds} s, not saved: ${err}`,
+    skippedLog: (name) => `[rescan] ${name}: skipped for now`,
+    missingLog: (path) => `[rescan] ${path}: file not found, skipped`,
+    noDemosLog: (name) => `[rescan] ${name}: none of its outdated demos are on disk, nothing to rescan`,
+    stoppedLog: (left) => `[rescan] stopped by Cancel; ${left} session(s) left as they were`,
+    OPEN_FAILED: "the session didn't open",
+    SCAN_FAILED: 'the scan failed',
+    SAVE_FAILED: "the session wasn't saved",
+    SESSION_CHANGED: 'another session was opened while it scanned',
+    NO_BACKUP_NAME: 'no backup could be made without overwriting an earlier one',
+    SCAN_RUNNING_TOAST: 'A scan is running: rescan recent sessions once it ends.',
   },
 
   // ── progress_view.js: what every long job's progress line shares (#951)
@@ -2881,6 +2966,12 @@ export const STRINGS = {
       return `Not a demo or a folder, so not added: ${shown}${more}`;
     },
     BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+    // A demo opened from Explorer into the queue during a scan (#528).
+    openedWhileScanningToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `A scan is running, so ${shown}${more} was not added. Open it again when the scan has finished.`;
+    },
   },
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {

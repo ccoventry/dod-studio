@@ -66,4 +66,24 @@
       !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
     ${EndIf}
   ${EndIf}
+
+  ; Tauri writes the .dodstudio association (bundle.fileAssociations, #528) but never tells
+  ; Explorer, which then shows project files with no icon until it restarts.
+  !insertmacro UPDATEFILEASSOC
+!macroend
+
+; Settings -> "Show DoD Studio in Open With for .dem files" (#528) adds a ProgID and an
+; OpenWithProgids value under HKCU (studio/src-tauri/src/dem_open_with.rs). An uninstall takes
+; them out when they open this install's exe. An update never runs the uninstaller (and the
+; $UpdateMode check covers one started with /UPDATE), and a dev build's entry opens another exe,
+; so both keep theirs. .dem's own default handler was never touched: nothing to restore.
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+    ReadRegStr $R7 HKCU "Software\Classes\DoDStudio.Demo\shell\open\command" ""
+    ${If} $R7 == '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
+      DeleteRegKey HKCU "Software\Classes\DoDStudio.Demo"
+      DeleteRegValue HKCU "Software\Classes\.dem\OpenWithProgids" "DoDStudio.Demo"
+      !insertmacro UPDATEFILEASSOC
+    ${EndIf}
+  ${EndIf}
 !macroend
