@@ -683,9 +683,10 @@ fn status_text() -> String {
             crate::map_sounds::status()
         ),
         format!(
-            "{} = {} -- the same svc sound calls",
+            "{} = {} -- the same svc sound calls; {}",
             crate::map_sounds::FLAG_CAPTURE_NAME,
             bit(crate::map_sounds::Family::FlagCapture.on()),
+            crate::map_sounds::map_status()
         ),
         format!(
             "{CROSSHAIR_NAME} = {} -- {}",

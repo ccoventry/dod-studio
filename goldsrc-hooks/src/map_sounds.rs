@@ -31,9 +31,9 @@
 //! attenuation, flags, pitch)`), at three call sites per build: `svc_sound`'s
 //! two (static when the channel is `CHAN_STATIC`, else dynamic) and
 //! `svc_spawnstaticsound`'s one. Each call is redirected to [`start_static`]
-//! or [`start_dynamic`], which drop a sound in [`VICTORY_MUSIC`] or
-//! [`FLAG_CAPTURE`] while that list's setting is on and call the engine's
-//! function for everything else.
+//! or [`start_dynamic`], which drop a sound the current map names for a family
+//! (or that family's fixed list does, see below) while that family's setting
+//! is on, and call the engine's function for everything else.
 //!
 //! Why the call sites rather than a function:
 //!
@@ -56,21 +56,37 @@
 //!
 //! ## Which names
 //!
-//! Two fixed lists, because this DLL has no BSP reader: the union over the
-//! 250 maps in both movie installs of what `native::patch::map_sounds` picks
-//! out of each map's entities, `round_win` for [`VICTORY_MUSIC`] and
-//! `capture` for [`FLAG_CAPTURE`] (`native/examples/map_sound_table.rs`
-//! prints both). No name is in both. Matching on a word like "win" instead
-//! would silence `ambience/windy.wav` on 28 maps. Three names are also placed
-//! as an `ambient_generic` elsewhere, and each is the same kind of sound
-//! there, so it keeps its list: dod_vicenza fires `uswin` / `germanwin` as
-//! its victory music through a `dod_score_ent`, and dod_escape plays
-//! `usobjectivesecure` when a mortar objective is destroyed. A map not in the
-//! survey with its own file names keeps its sounds;
-//! `ds_debug_log_server_sounds 1` logs every name that passes, to add one.
+//! **The map's own, read as it loads.** Once per map, on the engine thread
+//! from the per-frame poll, [`poll`] reads the world model's entity lump out
+//! of the engine's memory (`model_t.entities`, `com_model.h`: the copy
+//! `Mod_LoadEntities` keeps, NUL-terminated, at `model_t+0x180` in both
+//! builds) and runs the same structural selection the demo patcher and the
+//! offline survey use (`dod::map_sounds`): the win music the round-end wiring
+//! fires, through one relay if need be, and the capture entities' sound
+//! keyvalues. So a custom map with its own file names is muted too. The sound
+//! hook reads the result through an `RwLock` it never waits on
+//! (`try_read`), and the read swaps it whole on the engine thread.
 //!
-//! `tools/verify_map_sounds_offsets.py` checks the call sites in both builds.
+//! **And two fixed lists, always.** The union over the 250 maps in both movie
+//! installs of the same selection, `round_win` for [`VICTORY_MUSIC`] and
+//! `capture` for [`FLAG_CAPTURE`] (`native/examples/map_sound_table.rs`
+//! prints both). A sound is muted when it is in the map's set *or* its
+//! family's list, so a map whose lump can't be read (or a build whose
+//! `model_t` moved) still gets today's behaviour, and dod_vicenza keeps its
+//! victory music muted: it fires `uswin` / `germanwin` through a
+//! `dod_score_ent`, which the selection doesn't follow, and the lists carry
+//! both from the maps that wire them the usual way. No name is in both lists.
+//! Matching on a word like "win" instead would silence `ambience/windy.wav`
+//! on 28 maps. dod_escape plays `usobjectivesecure` when a mortar objective
+//! is destroyed, the same kind of announcement, so it stays in its list.
+//! `ds_debug_log_server_sounds 1` says which matched: `(map)` or `(list)`.
+//!
+//! `tools/verify_map_sounds_offsets.py` checks the call sites in both builds,
+//! `tools/verify_map_entities_offsets.py` the `model_t` offsets.
 
+use std::collections::BTreeSet;
+use std::ffi::CStr;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine::{self, CvarSPartial};
@@ -116,6 +132,12 @@ struct Site {
 struct Build {
     name: &'static str,
     sites: [Site; 3],
+    /// `model_t.type` (`modtype_t`, 0 is `mod_brush`): `Mod_LoadBrushModel`
+    /// zeroes it first thing.
+    model_type_at: usize,
+    /// `model_t.entities`: `Mod_LoadEntities` stores its hunk copy of the
+    /// entity lump here, or 0 for a map without one.
+    model_entities_at: usize,
 }
 
 #[rustfmt::skip]
@@ -146,6 +168,9 @@ const BUILDS: [Build; 2] = [
                 call_at: 24,
             },
         ],
+        // Mod_LoadBrushModel hw+0x41bb0, Mod_LoadEntities hw+0x40a20.
+        model_type_at: 0x44,
+        model_entities_at: 0x180,
     },
     Build {
         name: "25th Anniversary",
@@ -173,6 +198,9 @@ const BUILDS: [Build; 2] = [
                 call_at: 30,
             },
         ],
+        // Mod_LoadBrushModel hw+0x23f060, Mod_LoadEntities hw+0x23ff90.
+        model_type_at: 0x44,
+        model_entities_at: 0x180,
     },
 ];
 
@@ -302,6 +330,271 @@ static REDIRECTED: AtomicUsize = AtomicUsize::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
 static MUTED: AtomicU32 = AtomicU32::new(0);
 
+/// Largest entity lump read. The biggest in the 250 installed maps is ~440 KB
+/// (`dod_lennon4`); a string running past this is not an entity lump.
+const MAX_ENTITY_TEXT: usize = 2 * 1024 * 1024;
+
+/// The current map's own names, from [`read_map`]. Written only by the
+/// per-frame poll on the engine thread; the sound hook only `try_read`s it.
+static CURRENT: RwLock<MapState> = RwLock::new(MapState::NoMap);
+
+/// What the current map's names were read from, so a new level, a reloaded
+/// world model or a moved lump is read again: (level name hash, world model,
+/// entity text pointer).
+static READ_LEVEL: AtomicU32 = AtomicU32::new(0);
+static READ_MODEL: AtomicUsize = AtomicUsize::new(0);
+static READ_ENTITIES: AtomicUsize = AtomicUsize::new(0);
+
+/// Where a name that muted a sound was found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    /// The current map's entities.
+    Map,
+    /// The family's fixed list.
+    List,
+}
+
+impl Source {
+    fn word(self) -> &'static str {
+        match self {
+            Source::Map => "map",
+            Source::List => "list",
+        }
+    }
+}
+
+/// One map's own victory and capture names, normalised as the hook compares
+/// them ([`normalize`]).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct MapNames {
+    victory: BTreeSet<Vec<u8>>,
+    capture: BTreeSet<Vec<u8>>,
+}
+
+impl MapNames {
+    fn of(&self, family: Family) -> &BTreeSet<Vec<u8>> {
+        match family {
+            Family::VictoryMusic => &self.victory,
+            Family::FlagCapture => &self.capture,
+        }
+    }
+}
+
+/// The current map, as far as the names go.
+#[derive(Debug, PartialEq, Eq)]
+enum MapState {
+    /// No level loaded yet.
+    NoMap,
+    /// A level is loading and its world model isn't ready yet: the lists alone.
+    Waiting { map: String },
+    /// Read from the map's entities.
+    Read { map: String, names: MapNames },
+    /// The entities couldn't be read or parsed: the lists alone.
+    Unreadable { map: String, why: String },
+}
+
+impl MapState {
+    fn names(&self) -> Option<&MapNames> {
+        match self {
+            MapState::Read { names, .. } => Some(names),
+            _ => None,
+        }
+    }
+
+    /// For `ds_debug_status` and the log.
+    fn describe(&self) -> String {
+        match self {
+            MapState::NoMap => "map sounds: no map loaded yet".into(),
+            MapState::Waiting { map } => format!("map sounds: {map} not read yet, the lists alone"),
+            MapState::Read { map, names } => format!(
+                "map sounds: {map} {} victory, {} capture (from the map)",
+                names.victory.len(),
+                names.capture.len()
+            ),
+            MapState::Unreadable { map, why } => {
+                format!("map sounds: {map} unreadable ({why}), the lists alone")
+            }
+        }
+    }
+}
+
+/// The names one map's entity lump declares, as the engine keeps it
+/// (`model_t.entities`: text up to a NUL), or why there are none.
+fn classify(text: &[u8]) -> Result<MapNames, String> {
+    let entities = dod::map_entities::parse_entity_text(&dod::map_entities::text_up_to_nul(text))?;
+    let sounds = dod::map_sounds::map_sounds(&entities);
+    let hook_form = |names: &BTreeSet<String>| -> BTreeSet<Vec<u8>> {
+        names
+            .iter()
+            .map(|name| {
+                let mut buf = [0u8; MAX_NAME];
+                normalize(name.as_bytes(), &mut buf).to_vec()
+            })
+            .collect()
+    };
+    Ok(MapNames {
+        victory: hook_form(&sounds.round_win),
+        capture: hook_form(&sounds.capture),
+    })
+}
+
+/// Whether `info` describes memory a read can't fault on.
+fn readable_region(info: &windows_sys::Win32::System::Memory::MEMORY_BASIC_INFORMATION) -> bool {
+    use windows_sys::Win32::System::Memory::{
+        MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_GUARD,
+        PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+    };
+    let readable = PAGE_READONLY
+        | PAGE_READWRITE
+        | PAGE_WRITECOPY
+        | PAGE_EXECUTE_READ
+        | PAGE_EXECUTE_READWRITE
+        | PAGE_EXECUTE_WRITECOPY;
+    info.State == MEM_COMMIT
+        && info.Protect & readable != 0
+        && info.Protect & (PAGE_GUARD | PAGE_NOACCESS) == 0
+}
+
+/// The bytes of the NUL-terminated string at `at`, without the NUL, reading
+/// only committed, readable pages. `None` if any of it isn't readable or no
+/// NUL comes within `max` bytes.
+fn read_c_string(at: usize, max: usize) -> Option<Vec<u8>> {
+    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
+    if at == 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut cursor = at;
+    while out.len() < max {
+        // Safety: VirtualQuery writes a struct we own and never faults.
+        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        let written = unsafe {
+            VirtualQuery(
+                cursor as *const std::ffi::c_void,
+                &mut info,
+                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        if written == 0 || !readable_region(&info) {
+            return None;
+        }
+        let region_end = (info.BaseAddress as usize).saturating_add(info.RegionSize);
+        let take = region_end.saturating_sub(cursor).min(max - out.len());
+        if take == 0 {
+            return None;
+        }
+        // Safety: `take` bytes from `cursor` lie inside one committed,
+        // readable region, checked just above.
+        let chunk = unsafe { std::slice::from_raw_parts(cursor as *const u8, take) };
+        if let Some(nul) = chunk.iter().position(|&b| b == 0) {
+            out.extend_from_slice(&chunk[..nul]);
+            return Some(out);
+        }
+        out.extend_from_slice(chunk);
+        cursor += take;
+    }
+    None
+}
+
+/// Reads the current map's names once per map, from the world model the
+/// engine loaded. Every frame once the calls are redirected, on the engine
+/// thread; a frame where nothing changed costs a hash of the level name, one
+/// `VirtualQuery` and a few pointer reads, and allocates nothing.
+fn read_map(build: &Build) {
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    // Safety: a pointer into the engine's client state, valid for the
+    // session; checked for null before reading.
+    let raw = unsafe { (engfuncs.pfn_get_level_name)() };
+    let level: &[u8] = if raw.is_null() {
+        &[]
+    } else {
+        unsafe { CStr::from_ptr(raw) }.to_bytes()
+    };
+    if level.is_empty() {
+        return;
+    }
+    let level_hash = level.iter().fold(0x811c_9dc5_u32, |h, &b| {
+        (h ^ b as u32).wrapping_mul(0x0100_0193)
+    });
+    // Only built when something changed: most frames allocate nothing.
+    let map = || crate::map_text::short_name(&String::from_utf8_lossy(level)).to_string();
+    if READ_LEVEL.swap(level_hash, Ordering::Relaxed) != level_hash {
+        // A new level: the last map's names no longer apply.
+        READ_MODEL.store(0, Ordering::Relaxed);
+        READ_ENTITIES.store(0, Ordering::Relaxed);
+        set_state(MapState::Waiting { map: map() });
+    }
+
+    // The world is entity 0's model (`cl_entities[0].model`).
+    // Safety: the engine's own accessor, bounds-checked by the engine.
+    let entity = unsafe { (engfuncs.get_entity_by_index)(0) };
+    if entity.is_null() {
+        return;
+    }
+    // Safety: a cl_entity_t the engine owns; `model` is the SDK layout.
+    let model = unsafe { (*entity).model } as usize;
+    if model == 0 || !crate::crash::readable(model, build.model_entities_at + 4) {
+        return;
+    }
+    // Safety: readable, checked above; `name` is a NUL-padded char[64].
+    let name = unsafe { &(*(model as *const engine::ModelSPartial)).name };
+    let name_len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    // Only this level's own world, fully loaded: until the new map's world
+    // model replaces the old one, the old one's lump is hunk memory the new
+    // map may already be reusing.
+    if !name[..name_len].eq_ignore_ascii_case(level) {
+        return;
+    }
+    // Safety: both inside the readable span checked above.
+    let model_type =
+        unsafe { std::ptr::read_unaligned((model + build.model_type_at) as *const i32) };
+    // A 32-bit pointer: this DLL only ever runs in the 32-bit engine.
+    let entities =
+        unsafe { std::ptr::read_unaligned((model + build.model_entities_at) as *const u32) }
+            as usize;
+    if model_type != 0 {
+        return;
+    }
+    if READ_MODEL.load(Ordering::Relaxed) == model
+        && READ_ENTITIES.load(Ordering::Relaxed) == entities
+    {
+        return;
+    }
+    READ_MODEL.store(model, Ordering::Relaxed);
+    READ_ENTITIES.store(entities, Ordering::Relaxed);
+
+    let map = map();
+    let state = if entities == 0 {
+        MapState::Unreadable {
+            map,
+            why: "the map has no entity lump".into(),
+        }
+    } else {
+        match read_c_string(entities, MAX_ENTITY_TEXT) {
+            None => MapState::Unreadable {
+                map,
+                why: format!("its entity text isn't readable or runs past {MAX_ENTITY_TEXT} bytes"),
+            },
+            Some(text) => match classify(&text) {
+                Ok(names) => MapState::Read { map, names },
+                Err(why) => MapState::Unreadable { map, why },
+            },
+        }
+    };
+    let line = state.describe();
+    set_state(state);
+    // Safety: plain file append.
+    unsafe { crate::debug::report(&line) };
+}
+
+fn set_state(state: MapState) {
+    // A poisoned lock only means a panic elsewhere held it; the state is a
+    // plain value, so take it back.
+    *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = state;
+}
+
 /// The two kinds of map sound, each with its own list and setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
@@ -380,17 +673,32 @@ fn listed_in(names: &[&str], name: &[u8]) -> bool {
     names.binary_search_by(|n| n.as_bytes().cmp(name)).is_ok()
 }
 
-/// The family whose setting drops a sound named `raw` with these flags, when
-/// `on` says which settings are on; `None` plays it.
-fn muted_by(raw: &[u8], flags: i32, on: impl Fn(Family) -> bool) -> Option<Family> {
+/// The family whose setting drops a sound named `raw` with these flags, and
+/// where the name was found, when `on` says which settings are on and `map`
+/// holds the current map's own names; `None` plays it.
+///
+/// The map's names and the fixed lists are a union: a name in either mutes.
+/// The map is asked first, so a name both have is reported as the map's.
+fn muted_by(
+    raw: &[u8],
+    flags: i32,
+    on: impl Fn(Family) -> bool,
+    map: Option<&MapNames>,
+) -> Option<(Family, Source)> {
     if flags & SND_STOP != 0 {
         return None;
     }
     let mut buf = [0u8; MAX_NAME];
     let name = normalize(raw, &mut buf);
-    Family::ALL
-        .into_iter()
-        .find(|&family| on(family) && listed_in(family.names(), name))
+    let wanted = || Family::ALL.into_iter().filter(|&family| on(family));
+    if let Some(map) = map
+        && let Some(family) = wanted().find(|&family| map.of(family).contains(name))
+    {
+        return Some((family, Source::Map));
+    }
+    wanted()
+        .find(|&family| listed_in(family.names(), name))
+        .map(|family| (family, Source::List))
 }
 
 /// The name an `sfx` argument carries: an `sfx_t`, whose `name[64]` comes
@@ -424,10 +732,22 @@ unsafe fn start(
 ) {
     // Safety: the engine passes an sfx_t or its 64-byte sentence buffer.
     let name = unsafe { name_of(sfx) };
-    let muted = muted_by(name, flags, Family::on);
+    let muted = {
+        // Never waits: the only writer is the per-frame poll on this same
+        // thread, so a lock it can't take means the lists alone.
+        let current = CURRENT.try_read().ok();
+        muted_by(
+            name,
+            flags,
+            Family::on,
+            current.as_deref().and_then(MapState::names),
+        )
+    };
     if logging() {
         let outcome = match muted {
-            Some(family) => format!("muted by {}", family.setting()),
+            Some((family, source)) => {
+                format!("muted by {} ({})", family.setting(), source.word())
+            }
             None => "played".into(),
         };
         let line = format!(
@@ -587,23 +907,30 @@ fn redirect() -> Result<&'static str, String> {
     ))
 }
 
-/// Redirects the calls the first time either setting or the log is on. Every
-/// frame, from `commands::poll`.
+/// Redirects the calls the first time either setting or the log is on, then
+/// reads each map's own names as it loads. Every frame, from
+/// `commands::poll`, on the engine thread.
 pub fn poll() {
-    if REDIRECTED.load(Ordering::Acquire) != 0
-        || GAVE_UP.load(Ordering::Relaxed)
-        || !(any_on() || logging())
-    {
-        return;
-    }
-    let line = match redirect() {
-        Ok(build) => format!("map sound mutes: svc sound calls redirected ({build} hw.dll)"),
-        Err(why) => {
-            GAVE_UP.store(true, Ordering::Relaxed);
-            format!("map sound mutes: {why}")
+    if REDIRECTED.load(Ordering::Acquire) == 0 {
+        if GAVE_UP.load(Ordering::Relaxed) || !(any_on() || logging()) {
+            return;
         }
-    };
-    unsafe { crate::debug::report(&line) };
+        let line = match redirect() {
+            Ok(build) => format!("map sound mutes: svc sound calls redirected ({build} hw.dll)"),
+            Err(why) => {
+                GAVE_UP.store(true, Ordering::Relaxed);
+                format!("map sound mutes: {why}")
+            }
+        };
+        unsafe { crate::debug::report(&line) };
+    }
+    if let Some(build) = REDIRECTED
+        .load(Ordering::Acquire)
+        .checked_sub(1)
+        .and_then(|index| BUILDS.get(index))
+    {
+        read_map(build);
+    }
 }
 
 /// For `ds_debug_status`.
@@ -621,20 +948,276 @@ pub fn status() -> String {
     }
 }
 
+/// For `ds_debug_status`: the current map's own names, or that the lists
+/// stand alone.
+pub fn map_status() -> String {
+    if REDIRECTED.load(Ordering::Acquire) == 0 {
+        return "map sounds: read once the calls are redirected".into();
+    }
+    match CURRENT.try_read() {
+        Ok(state) => state.describe(),
+        Err(_) => "map sounds: busy".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use Family::{FlagCapture, VictoryMusic};
 
-    /// Whether `name` is muted with every setting on.
+    /// Whether `name` is muted with every setting on, by the lists alone.
     fn mutes(name: &[u8], flags: i32) -> bool {
-        muted_by(name, flags, |_| true).is_some()
+        muted_by(name, flags, |_| true, None).is_some()
     }
 
-    /// Who mutes `name` with only `family`'s setting on.
+    /// Who mutes `name` with only `family`'s setting on, by the lists alone.
     fn with_only(family: Family, name: &str) -> Option<Family> {
-        muted_by(name.as_bytes(), 0, |f| f == family)
+        muted_by(name.as_bytes(), 0, |f| f == family, None).map(|(f, _)| f)
+    }
+
+    /// Anzio's real sound wiring (`test-fixtures/dod_anzio_sound_entities.txt`).
+    const ANZIO: &str = include_str!("../../test-fixtures/dod_anzio_sound_entities.txt");
+
+    /// `text` as the engine keeps it: NUL-terminated, with whatever follows.
+    fn in_memory(text: &str) -> Vec<u8> {
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.extend_from_slice(b"\0{ \"classname\" \"after the NUL\" }");
+        bytes
+    }
+
+    fn names(list: &[&str]) -> BTreeSet<Vec<u8>> {
+        list.iter().map(|n| n.as_bytes().to_vec()).collect()
+    }
+
+    /// The runtime route (bytes in the engine's memory) and the offline one
+    /// (the example's table, `dod::map_sounds` on the parsed lump) agree.
+    #[test]
+    fn the_runtime_classification_matches_the_offline_table() {
+        let runtime = classify(&in_memory(ANZIO)).expect("anzio parses");
+        assert_eq!(
+            runtime.victory,
+            names(&["ambience/germanwin.wav", "ambience/uswin.wav"])
+        );
+        assert_eq!(
+            runtime.capture,
+            names(&[
+                "ambience/gerpointcaptured.wav",
+                "ambience/uspointcaptured.wav"
+            ])
+        );
+
+        let offline = dod::map_sounds::map_sounds(
+            &dod::map_entities::parse_entity_text(ANZIO).expect("anzio parses"),
+        );
+        let as_bytes = |set: &BTreeSet<String>| -> BTreeSet<Vec<u8>> {
+            set.iter().map(|n| n.as_bytes().to_vec()).collect()
+        };
+        assert_eq!(runtime.victory, as_bytes(&offline.round_win));
+        assert_eq!(runtime.capture, as_bytes(&offline.capture));
+    }
+
+    /// Every installed map, read both ways: the whole lump as the engine
+    /// keeps it, and the offline example's `parse_entities` on the `.bsp`.
+    /// `DOD_MAPS_DIR`, or the pre-Anniversary install's `dod\maps`.
+    #[test]
+    #[ignore = "needs a folder of real maps"]
+    fn every_installed_map_classifies_the_same_both_ways() {
+        let dir = std::env::var_os("DOD_MAPS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod\maps",
+                )
+            });
+        let mut read = 0;
+        for entry in
+            std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("no maps at {}: {e}", dir.display()))
+        {
+            let path = entry.unwrap().path();
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("bsp"))
+            {
+                continue;
+            }
+            let bsp = std::fs::read(&path).unwrap();
+            let (offset, length) = dod::map_entities::lump_span(&bsp, 0).unwrap();
+            let lump = &bsp[offset..offset + length];
+            let offline = dod::map_entities::parse_entities(&bsp)
+                .map(|entities| dod::map_sounds::map_sounds(&entities));
+            match (classify(lump), offline) {
+                (Ok(runtime), Ok(offline)) => {
+                    let as_bytes = |set: &BTreeSet<String>| -> BTreeSet<Vec<u8>> {
+                        set.iter().map(|n| n.as_bytes().to_vec()).collect()
+                    };
+                    assert_eq!(
+                        runtime.victory,
+                        as_bytes(&offline.round_win),
+                        "{}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        runtime.capture,
+                        as_bytes(&offline.capture),
+                        "{}",
+                        path.display()
+                    );
+                }
+                (Err(_), Err(_)) => {}
+                (runtime, offline) => panic!(
+                    "{}: runtime {:?}, offline {:?}",
+                    path.display(),
+                    runtime.is_ok(),
+                    offline.is_ok()
+                ),
+            }
+            read += 1;
+        }
+        assert!(read > 0, "no .bsp in {}", dir.display());
+    }
+
+    /// A custom map's own name, in neither list.
+    const CUSTOM_WIN: &str = "custom_map/our_team_won.wav";
+    const CUSTOM_CAP: &str = "custom_map/flag_taken.wav";
+
+    fn custom_map() -> MapNames {
+        MapNames {
+            victory: names(&[CUSTOM_WIN, "ambience/uswin.wav"]),
+            capture: names(&[CUSTOM_CAP]),
+        }
+    }
+
+    #[test]
+    fn a_name_only_the_map_has_is_muted_from_the_map() {
+        let map = custom_map();
+        let only =
+            |family: Family, name: &str| muted_by(name.as_bytes(), 0, |f| f == family, Some(&map));
+        assert_eq!(
+            only(VictoryMusic, CUSTOM_WIN),
+            Some((VictoryMusic, Source::Map))
+        );
+        assert_eq!(only(FlagCapture, CUSTOM_WIN), None);
+        assert_eq!(
+            only(FlagCapture, CUSTOM_CAP),
+            Some((FlagCapture, Source::Map))
+        );
+        assert_eq!(only(VictoryMusic, CUSTOM_CAP), None);
+        // Case, slashes and the stream marker, as for the lists.
+        assert_eq!(
+            only(VictoryMusic, "*Custom_Map\\Our_Team_Won.WAV"),
+            Some((VictoryMusic, Source::Map))
+        );
+        // Without the map it plays: the lists don't know it.
+        assert_eq!(muted_by(CUSTOM_WIN.as_bytes(), 0, |_| true, None), None);
+    }
+
+    /// The union: everything the lists mute today, they still mute with a
+    /// map read, including a name this map doesn't declare.
+    #[test]
+    fn the_lists_still_mute_beside_the_map() {
+        let map = custom_map();
+        for name in VICTORY_SAMPLES.iter().chain(&CAPTURE_SAMPLES) {
+            let lists = muted_by(name.as_bytes(), 0, |_| true, None).map(|(f, _)| f);
+            let both = muted_by(name.as_bytes(), 0, |_| true, Some(&map)).map(|(f, _)| f);
+            assert!(lists.is_some(), "{name}");
+            assert_eq!(lists, both, "{name}");
+        }
+        assert_eq!(
+            muted_by(b"ambience/gerpointcaptured.wav", 0, |_| true, Some(&map)),
+            Some((FlagCapture, Source::List))
+        );
+        // In both: reported as the map's.
+        assert_eq!(
+            muted_by(b"ambience/uswin.wav", 0, |_| true, Some(&map)),
+            Some((VictoryMusic, Source::Map))
+        );
+    }
+
+    #[test]
+    fn the_map_mutes_nothing_with_both_settings_off_or_on_a_stop() {
+        let map = custom_map();
+        for name in [CUSTOM_WIN, CUSTOM_CAP, "ambience/uswin.wav"] {
+            assert_eq!(muted_by(name.as_bytes(), 0, |_| false, Some(&map)), None);
+            assert_eq!(
+                muted_by(name.as_bytes(), SND_STOP, |_| true, Some(&map)),
+                None
+            );
+        }
+        assert_eq!(
+            muted_by(b"ambience/windy.wav", 0, |_| true, Some(&map)),
+            None
+        );
+    }
+
+    /// The hook reads whatever is in the game's memory, and a release build
+    /// aborts on a panic: malformed text gives an error, never a panic.
+    #[test]
+    fn malformed_entity_text_gives_nothing_without_panicking() {
+        for text in [
+            &b"{ \"classname\" \"dod_control_point\" \"point_allies_capsound"[..],
+            b"{ \"key\" }",
+            b"\"",
+        ] {
+            assert!(
+                classify(text).is_err(),
+                "{:?}",
+                String::from_utf8_lossy(text)
+            );
+        }
+        // Not entity text at all: whatever it gives, it names nothing.
+        let junk: Vec<u8> = (1..=255u8).cycle().take(8192).collect();
+        if let Ok(names) = classify(&junk) {
+            assert!(names.victory.is_empty() && names.capture.is_empty());
+        }
+        assert_eq!(classify(b""), Ok(MapNames::default()));
+        assert_eq!(classify(b"\0{ \"x\" \"y\" }"), Ok(MapNames::default()));
+        // Every prefix of the real map, as a truncated lump would be.
+        for end in (0..ANZIO.len()).step_by(7) {
+            let _ = classify(&ANZIO.as_bytes()[..end]);
+        }
+    }
+
+    #[test]
+    fn a_c_string_is_read_up_to_its_nul() {
+        let buf = b"maps/dod_anzio.bsp\0after".to_vec();
+        assert_eq!(
+            read_c_string(buf.as_ptr() as usize, 64).as_deref(),
+            Some(&b"maps/dod_anzio.bsp"[..])
+        );
+        // No NUL within the limit.
+        assert_eq!(read_c_string(buf.as_ptr() as usize, 5), None);
+        // Null and unmapped memory.
+        assert_eq!(read_c_string(0, 64), None);
+        assert_eq!(read_c_string(0x10, 64), None);
+    }
+
+    #[test]
+    fn the_status_line_says_where_the_names_came_from() {
+        let read = MapState::Read {
+            map: "dod_anzio".into(),
+            names: classify(&in_memory(ANZIO)).unwrap(),
+        };
+        assert_eq!(
+            read.describe(),
+            "map sounds: dod_anzio 2 victory, 2 capture (from the map)"
+        );
+        let unreadable = MapState::Unreadable {
+            map: "dod_x".into(),
+            why: "the map has no entity lump".into(),
+        };
+        assert!(unreadable.describe().ends_with("the lists alone"));
+        assert_eq!(unreadable.names(), None);
+    }
+
+    /// `model_t` is the SDK's struct, shared with client.dll, so both builds
+    /// agree; `tools/verify_map_entities_offsets.py` checks each `hw.dll`.
+    #[test]
+    fn the_model_offsets_are_the_sdk_layout() {
+        for build in &BUILDS {
+            assert_eq!(build.model_type_at, 0x44, "{}", build.name);
+            assert_eq!(build.model_entities_at, 0x180, "{}", build.name);
+        }
     }
 
     const VICTORY_SAMPLES: [&str; 6] = [
@@ -703,7 +1286,11 @@ mod tests {
     #[test]
     fn with_both_settings_off_everything_plays() {
         for name in VICTORY_SAMPLES.iter().chain(&CAPTURE_SAMPLES) {
-            assert_eq!(muted_by(name.as_bytes(), 0, |_| false), None, "{name}");
+            assert_eq!(
+                muted_by(name.as_bytes(), 0, |_| false, None),
+                None,
+                "{name}"
+            );
         }
     }
 

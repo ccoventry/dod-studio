@@ -90,8 +90,10 @@ is the complete list):
   plays when a team wins the round, and the point-captured announcements
   (also the objective-secured ones, like dod_escape's). Both are map sounds
   the server sends, so three `svc_` call sites into `S_Start*Sound` are
-  redirected and a sound is dropped by name, from two lists surveyed over the
-  installed maps (`native/examples/map_sound_table.rs`). See the module doc in
+  redirected and a sound is dropped by name: the names each map's own entities
+  give it, read from the engine's copy as the map loads (`dod::map_sounds`,
+  the rules the demo patcher uses), plus two lists surveyed over the installed
+  maps (`native/examples/map_sound_table.rs`). See the module doc in
   `src/map_sounds.rs` (#284).
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
