@@ -4232,8 +4232,15 @@ mod hook {
     /// Each page's `OnKeyCodePressed`. On the Console tab, a key the borrowed
     /// input line passes up (Tab, the arrows) goes to the console dialog, its
     /// usual parent, which does the type-ahead and the command history.
+    /// Enter stays here: the dialog's base `OnKeyCodePressed` posts `Hotkey`
+    /// to its default button, the borrowed Submit, which ran the line a
+    /// second time after [`page_on_key`]'s Submit had cleared it, echoing an
+    /// empty `] ` (#989).
     unsafe extern "thiscall" fn page_on_key_pressed(this: *mut c_void, code: i32) {
         let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
+        if this == console_page && (code == KEY_ENTER || code == KEY_PAD_ENTER) {
+            return;
+        }
         if this == console_page
             && let Ok(vgui) = Vgui::get()
         {
