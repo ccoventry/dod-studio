@@ -304,6 +304,13 @@ body {
   background: transparent;
 }
 
+/* A file/folder dialog is on its way (pick_path.js): the busy cursor
+   everywhere, over each element's own cursor, until the dialog returns. */
+html.picking-path,
+html.picking-path * {
+  cursor: progress !important;
+}
+
 .recent-project-item {
   justify-content: flex-start;
   gap: 10px;
