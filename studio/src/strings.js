@@ -198,7 +198,7 @@ export const STRINGS = {
     DEFAULT_TITLE: 'Highlight Details',
     detailTitle: (name) => `Highlight Details: ${name}`,
     LAUNCH_PREVIEW_BUTTON: 'Launch Preview',
-    LAUNCH_PREVIEW_TITLE: 'Patches this demo (or reuses an existing preview) and launches it in HLAE via viewdemo.',
+    LAUNCH_PREVIEW_TITLE: "Opens this demo in the game with viewdemo, to jump between its highlights. Your Initial and Scheduled Commands don't run in a preview: only a capture batch runs them.",
     LAUNCHING: 'Launching…',
     VIEW_TELEMETRY_BUTTON: 'View Match Telemetry',
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
@@ -581,7 +581,7 @@ export const STRINGS = {
     PROFILE_NOTICE_OK: 'OK',
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
-      "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",
+      "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, add exec and its name here (it runs with Seek Between Clips on), or use Import Config below to pull its lines in as Initial Commands. Only a capture batch runs these: Launch Preview and Launch Game don't.",
     ADD_INIT_COMMAND_BUTTON: '+ Add Initial Command',
     IMPORT_CFG_BUTTON: 'Import Config...',
     importedCfgToast: (n) => `Imported ${n} command(s) from the config.`,
@@ -1462,6 +1462,7 @@ export const STRINGS = {
     conflictRow: (cvar, values, effective) => `${cvar}: ${values} — in effect: ${effective}`,
     stated: (value, source) => `${value} (${source})`,
     sourceConfig: (file, line) => `${file}, line ${line}`,
+    sourceExec: (file, line) => `${file}, line ${line}, run by Initial Commands`,
     SOURCE_INITIAL: 'Initial Commands',
     sourceApp: (setting) => `DoD Studio, from ${setting}`,
     sourceBefore: (secs) => `Scheduled, ${secs}s before`,
@@ -1553,7 +1554,11 @@ export const STRINGS = {
     // #679: the engine's filter for commands a demo carries.
     FILTERED_TITLE: 'The game drops these commands without running them:',
     FILTERED_ADVICE:
-      "Initial and Scheduled Commands reach the game inside the demo, and the game filters every command a demo carries. With no message, it drops any command whose name contains bind, _set, kill, exit, quit, retry, _restart, writecfg, motdfile or motd_write, any name starting with connect, any alias, and any line containing exec. A config file the game runs at start-up isn't filtered.",
+      "Seek Between Clips (Pipeline tab) is off, so Initial and Scheduled Commands reach the game inside a patched copy of the demo, and the game filters every command a demo carries. With no message, it drops any command whose name contains bind, _set, kill, exit, quit, retry, _restart, writecfg, motdfile or motd_write, any name starting with connect, any alias, and any line containing exec. Turn Seek Between Clips on and DoD Studio's hook runs them all. A config file the game runs at start-up isn't filtered.",
+    // An Initial Command `exec <file>` the game refuses or won't find.
+    MISSING_EXEC_TITLE: "The game won't run the file these Initial Commands exec:",
+    MISSING_EXEC_ADVICE:
+      'The name must end in .cfg (or .rc), with no other dot and no backslash; the game adds no extension. It looks in dod, then dod_addon, then dod_downloads, and prints "couldn\'t exec" when the file is in none of them. Check the name, or move the file into one of those folders.',
     filteredRow: (command, rule, pattern) => {
       const why = {
         nameContains: `its name contains '${pattern}'`,
@@ -2290,7 +2295,7 @@ export const STRINGS = {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
     GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
     SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
-    droppedFromDemo: (pattern) => `Does nothing: the game drops any command from a demo with '${pattern}' in it.`,
+    droppedFromDemo: (pattern) => `Does nothing while Seek Between Clips is off: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
     FAST_FORWARD_RESTORED: "Lasts until the next clip: the fast-forward between clips sets this, and every clip's pre-roll puts your Initial Commands value back.",
