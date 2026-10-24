@@ -971,11 +971,17 @@ export const STRINGS = {
     ALL_DRIVES_LABEL: 'All drives',
     allDrivesLabel: (letters) => (letters.length ? `All drives (${letters.join(', ')})` : 'All drives'),
     ALL_DRIVES_TITLE: "Check every fixed drive in one pass, so a copy on one drive pairs with its original on another. USB sticks and network drives are left out, and so are the Recycle Bin and System Volume Information.",
-    // "Look inside .zip files" (#929).
-    LOOK_IN_ZIPS_LABEL: 'Look inside .zip files',
-    LOOK_IN_ZIPS_TITLE: "Also check the demos inside .zip files. Zips are only read, never changed: a demo in a zip is always the copy kept, and loose copies of it can be deleted. Only .dem files count, a zip inside a zip isn't opened, and 7z and rar aren't read. The first audit of big zips takes longer; later ones remember them until they change.",
-    IN_ZIP_CHIP: 'in a zip',
-    IN_ZIP_TITLE: "This copy is inside a .zip file. Zips are never changed, so it can't be deleted; it is the copy kept unless you pick another.",
+    // "Show demos backed up in archives" (#929).
+    LOOK_IN_ZIPS_LABEL: 'Show demos backed up in archives (.zip, .7z, .rar)',
+    LOOK_IN_ZIPS_TITLE: "Also read the demos inside .zip, .7z and .rar files, and mark each loose demo that an archive already holds as backed up, with every archive that holds it. An archive is a backup: a loose demo is never offered for deletion because an archive holds it, and archives are only read, never changed. Only .dem files count, an archive inside an archive isn't opened, and encrypted or damaged ones are skipped (the activity log names them). The first audit of big archives takes longer, solid .7z and .rar ones most; later audits remember them until they change.",
+    // A loose demo an archive holds a copy of (#929).
+    backedUpChip: (archives) => (archives.length === 1
+      ? `backed up in ${archives[0]}`
+      : `backed up in ${archives.length} archives`),
+    backedUpTitle: (entries) => `A copy of this demo is in:\n${entries.join('\n')}\n\nArchives are only read, never changed.`,
+    backedUpSectionLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Backed up in archives (${count} demo${count === 1 ? '' : 's'})`,
+    BACKED_UP_SECTION_NOTE: 'Each of these demos has a copy in an archive. Nothing here is deleted.',
+    footerBackedUp: (count) => ` | Backed up in archives: ${count}`,
     CHOOSE_FOLDER_FIRST: 'Add a folder to check, or tick All drives, before starting an audit.',
     AUDITING_IN_PROGRESS_ROW: 'Auditing in progress...',
     auditFailedRow: (e) => `Audit failed: ${e}`,
@@ -986,12 +992,12 @@ export const STRINGS = {
     listingLine: (folders) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read`,
     listingLineOf: (folders, last) => `Looking for demos: ${folders} folder${folders === 1 ? '' : 's'} read (about ${last} last time)`,
     keyingLine: (done, total) => `Comparing demos: ${done} / ${total}`,
-    zipsLine: (done, total) => `Looking inside zips: ${done} / ${total}`,
+    zipsLine: (done, total) => `Looking inside archives: ${done} / ${total}`,
     checkingCopiesLine: (done, total) => `Checking each copy matches the kept one byte for byte: ${done} / ${total}`,
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups, seconds) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked, ${groups} with copies.`,
+    doneStatus: (demos, groups, seconds, archiveDemos = 0) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked${archiveDemos > 0 ? ` and ${archiveDemos} inside archives` : ''}, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
