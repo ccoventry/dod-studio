@@ -317,26 +317,52 @@ cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --lib --bin
 ```
 
 Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
-`inject.exe`.
+`inject.exe` (which loads the DLL too late to do anything in a running game:
+see below).
 
 ## Testing manually
 
 > [!WARNING]
-> **Never join a server from a game you injected this DLL into, and never
-> inject it into a game you are about to play online with.** This DLL patches
-> the game in memory, which is what VAC detects. Injecting by hand skips the
-> connect warning HLAE shows in every DoD Studio launch. The DLL refuses
-> `connect` once it has hooked the engine, but don't rely on that alone. See
-> [`docs/vac_safety.md`](../docs/vac_safety.md).
+> **Never join a server from a game you loaded this DLL into, and never load
+> it into a game you are about to play online with.** This DLL patches the
+> game in memory, which is what VAC detects. Only use a separate movie copy of
+> Half-Life. The DLL refuses `connect` once it has hooked the engine, but
+> don't rely on that alone. See [`docs/vac_safety.md`](../docs/vac_safety.md).
 
-1. Launch DoD 1.3 (with or without HLAE) from the install you use with DoD Studio and load an HLTV/POV demo.
-2. Find `hl.exe`'s PID (Task Manager, or `Get-Process hl | Select Id`).
-3. Set any `GOLDSRC_HOOKS_*` env var(s) you want *before* launching `hl.exe` --
-   `inject.exe` only delivers the DLL, it doesn't set environment variables
-   for a process that's already running.
-4. `inject.exe <pid> path\to\dodstudio_goldsrc_hooks.dll`
-5. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_<YYYYMMDD>.log` for its own diagnostics (never pops a
-   dialog -- this is meant to run inside an unattended capture pipeline).
+The DLL has to be in the game **before `client.dll` starts**: it reaches the
+engine only through `client.dll`'s `Initialize` (`src/engine.rs`). Without
+DoD Studio, start the game through HLAE's command-line launcher, the way
+Studio and `tools/game_probe.py` do:
+
+1. Set any `GOLDSRC_HOOKS_*` environment variables you want in the shell you
+   launch from, plus `SteamAppId=30` (without it Steam refuses the game).
+2. From HLAE's own folder (HLAE needs it as the working directory), with
+   Steam running, run this as one line:
+
+   ```
+   HLAE.exe -customLoader -noGui -autoStart
+     -hookDllPath <HLAE folder>\AfxHookGoldSrc.dll
+     -hookDllPath <path>\dodstudio_goldsrc_hooks.dll
+     -programPath "<movie install>\hl.exe"
+     -cmdLine "-game dod -insecure -windowed -condebug -addons"
+   ```
+
+   `-addons` lets the game read the DoD Studio menu entry the DLL writes into
+   `dod_addon`.
+3. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_<YYYYMMDD>.log`
+   for its own diagnostics (it never pops a dialog: it is meant to run inside
+   an unattended capture pipeline). `ds_debug_status` in the console lists
+   what installed.
+
+**`inject.exe <pid> <dll>` into a game that is already running does not
+work.** The DLL loads and its worker thread starts, but `client.dll`'s
+`Initialize` has already run, so after 30 s the log says `timed out waiting
+for client.dll's Initialize to run; fixes not installed this session`.
+Nothing is registered: no `ds_*` commands or cvars (typing one does nothing,
+and `ds_` autocompletes nothing), no command or events pipe, and **no connect
+refusal**. A demo then plays as in the stock game. Checked on both builds
+(#784). The DLL has to load before `hl.exe` runs its first instruction (a
+suspended start), which is what HLAE's `-customLoader` does.
 
 ## Scripted in-game tests
 
