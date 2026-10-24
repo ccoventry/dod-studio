@@ -216,6 +216,24 @@ pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
     format!("Reading {demo} again for its clip times ({index} of {total})")
 }
 
+/// The activity-log line when a Seek Between Clips batch falls back to
+/// patching and some of its Initial or Scheduled Commands are ones the
+/// game's demo filter drops (#679), or `None` when there are none.
+pub fn dropped_when_patched(dropped: &[native::patch::cfg_scan::DemoFiltered]) -> Option<String> {
+    if dropped.is_empty() {
+        return None;
+    }
+    let list = dropped
+        .iter()
+        .map(|d| format!("`{}`", d.command))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "⚠️ **Commands dropped** — a patched batch puts Initial and Scheduled Commands in the demo, \
+         and the game drops these from a demo without running them: {list}"
+    ))
+}
+
 pub fn game_directory_not_found(game_dir: &str) -> String {
     format!("Game directory not found: {}", game_dir)
 }
@@ -502,6 +520,18 @@ pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropped_when_patched_lists_each_command_or_says_nothing() {
+        assert_eq!(dropped_when_patched(&[]), None);
+        let dropped = native::patch::cfg_scan::demo_filtered_commands(&[
+            "exec movie.cfg".to_string(),
+            "sensitivity 2".to_string(),
+            "quit".to_string(),
+        ]);
+        let line = dropped_when_patched(&dropped).unwrap();
+        assert!(line.ends_with("`exec movie.cfg`, `quit`"), "{line}");
+    }
 
     #[test]
     fn lib_rs_messages_match_their_original_inline_text() {

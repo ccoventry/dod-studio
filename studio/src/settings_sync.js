@@ -8,6 +8,7 @@ import { saveSettings } from './ipc_bridge.js';
 import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
 import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
+import { rescanOfferSettings, applyRescanOfferSettings } from './rescan_recent.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { updateNotificationSettings } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -20,6 +21,8 @@ import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
 import { getHiddenInstalls, setHiddenInstalls } from './install_picker.js';
 import { getPickFolders, setPickFolders } from './pick_path.js';
+import { getDemOpenTarget, applyDemOpenTarget } from './file_types_settings.js';
+import { getKeptJsonProjects, setKeptJsonProjects } from './project_convert.js';
 import { getPinnedReviewed, setPinnedReviewed } from './pinned_review.js';
 
 /**
@@ -109,6 +112,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       pinned_folders: state.scanPaths,
       demo_folder_history: state.demoFolderHistory,
       recent_projects: state.recentProjects || [],
+      dem_open_target: getDemOpenTarget(),
+      kept_json_projects: getKeptJsonProjects(),
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
       language: "en",
@@ -179,6 +184,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       ...scanRateSettings(),
       // "After a clip is finished" (#644).
       ...getTakeCleanupSetting(),
+      ...rescanOfferSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -331,6 +337,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
   const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
   if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+  applyDemOpenTarget(settings.dem_open_target);
+  setKeptJsonProjects(settings.kept_json_projects);
   setClipNameTemplate(settings.clip_name_template);
   setDemoRenameTemplates(
     settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
@@ -383,6 +391,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   setRenderPresets(settings.render_presets);
   applyReviewSettings(settings);
   applyScanRateSettings(settings);
+  applyRescanOfferSettings(settings);
   if (settings.scan_workers) {
     const inputEl = document.querySelector('#config-scan-workers');
     if (inputEl) inputEl.value = settings.scan_workers;

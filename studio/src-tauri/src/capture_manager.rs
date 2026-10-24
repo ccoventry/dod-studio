@@ -1195,6 +1195,21 @@ pub async fn start_capture_batch_impl(
                     log_markdown(&format!(
                         "ℹ️ **This batch is patched instead of seeking between clips** — {why}"
                     ));
+                    // The Commands tab checked these for a seeking batch, which
+                    // runs them all; a patched one puts them in the demo, where
+                    // the game's filter drops some (`cfg_scan::demo_filter_rule`).
+                    let mut commands = patcher_config.init_commands.clone();
+                    commands.extend(
+                        patcher_config
+                            .custom_commands
+                            .iter()
+                            .map(|c| c.command.clone()),
+                    );
+                    if let Some(line) = crate::messages::dropped_when_patched(
+                        &native::patch::cfg_scan::demo_filtered_commands(&commands),
+                    ) {
+                        log_markdown(&line);
+                    }
                     None
                 }
             }
