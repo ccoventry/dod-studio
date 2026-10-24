@@ -309,8 +309,15 @@ pub(super) fn hidden_because(view: &View, now: f64) -> Option<Hidden> {
 /// (`DoDGunGoOnOffScreen`, issue #559): the same states as the crosshair's
 /// lowered ones, whatever the weapon. Call after [`hidden_because`] in the
 /// same frame, which keeps the prone timer up to date.
-pub(super) fn gun_lowered(view: &View, now: f64) -> bool {
+#[cfg(test)]
+fn gun_lowered(view: &View, now: f64) -> bool {
     lowered_because(view, now).is_some()
+}
+
+/// `gun_lowered` with the reason, for `ds_debug_log_gun_lowered`
+/// (#704): 0 when the gun is up, else the [`Hidden`] value.
+pub(super) fn gun_lowered_code(view: &View, now: f64) -> u8 {
+    lowered_because(view, now).map_or(0, |why| why as u8)
 }
 
 /// The gun-lowered states (`g_ihidexhair`), none of which apply on a deployed

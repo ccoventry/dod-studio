@@ -67,6 +67,12 @@ pub fn set_lowered(lowered: bool) {
     LOWERED.store(lowered, Ordering::Relaxed);
 }
 
+/// Whether the watched player's gun was last said to be lowered (for
+/// `gun_log`).
+pub fn lowered() -> bool {
+    LOWERED.load(Ordering::Relaxed)
+}
+
 /// The camera moved to another player: his gun starts where the game's does,
 /// up.
 pub fn reset() {

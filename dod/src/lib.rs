@@ -16,6 +16,9 @@ use std::convert::Infallible;
 use std::str::from_utf8;
 use std::time::Duration;
 
+pub mod map_entities;
+pub mod map_sounds;
+
 #[cfg(test)]
 mod tests;
 

@@ -8,8 +8,10 @@ use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, UNIX_EPOCH};
 
 pub mod archive;
+pub mod backup;
 mod key_cache;
 pub use archive::{ZipDemoEntry, ZipRef};
+pub use backup::{ArchiveListing, ArchivedCopy, Backup, BackupIndex};
 pub use key_cache::{ArchiveEntry, KeyCache, KeyEntry};
 
 /// A demo file's identity: its size plus an FNV-1a hash of its first 64 KB.
@@ -47,25 +49,19 @@ impl FileKey {
 /// How much of a file [`get_file_key`] hashes.
 pub const KEY_BYTES: u64 = 64 * 1024;
 
+/// Loose copies of one demo. A copy inside an archive is never a member
+/// (#929): archives are backups, listed in [`Audit::backups`] instead.
 #[derive(Debug, Clone)]
 pub struct DuplicateGroup {
     pub key: FileKey,
     /// The loose copies, sorted.
     pub files: Vec<PathBuf>,
-    /// The copies inside zips (#929), sorted: one is the copy kept, and none
-    /// is ever deleted.
-    pub archived: Vec<ZipRef>,
 }
 
 impl DuplicateGroup {
-    /// The copies a delete could free: every loose one when a zip holds the
-    /// demo, else all but the one kept.
+    /// The copies a delete could free: all but the one kept.
     pub fn copies(&self) -> usize {
-        if self.archived.is_empty() {
-            self.files.len().saturating_sub(1)
-        } else {
-            self.files.len()
-        }
+        self.files.len().saturating_sub(1)
     }
 
     fn wasted_bytes(&self) -> u64 {
@@ -74,11 +70,7 @@ impl DuplicateGroup {
 
     /// The first path in the group, for a stable order.
     fn first_name(&self) -> PathBuf {
-        self.files
-            .first()
-            .cloned()
-            .or_else(|| self.archived.first().map(|z| z.zip.clone()))
-            .unwrap_or_default()
+        self.files.first().cloned().unwrap_or_default()
     }
 }
 
@@ -90,7 +82,7 @@ pub enum AuditProgress {
     /// far the key pass has got. Each of them then sends one `Hashing`,
     /// whether it was read, remembered or never needed a key.
     Keying(usize),
-    /// How many zips [`find_duplicates_in`] looks inside (#929), sent before
+    /// How many archives [`find_duplicates_in`] looks inside (#929), sent before
     /// the first `ReadingArchive`; each of them then sends one, whether its
     /// list of entries was read or remembered. All of this comes before
     /// `Keying`.
@@ -192,6 +184,16 @@ pub fn comparable_path(path: &Path) -> String {
     text.trim_end_matches('\\').to_lowercase()
 }
 
+/// A path for a message: a canonical path's `\\?\` prefix dropped
+/// (`\\?\UNC\nas\d` is `\\nas\d`), as `audit_duplicates.js`'s `shownPath`.
+pub fn shown_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => text.strip_prefix(r"\\?\").unwrap_or(&text).to_string(),
+    }
+}
+
 /// The Windows folder as [`comparable_path`] writes it, from `%SystemRoot%`
 /// (what `GetWindowsDirectoryW` reports), so a PC that installed Windows
 /// somewhere other than `C:\Windows` is still matched. `None` off Windows.
@@ -264,8 +266,8 @@ fn has_extension(path: &Path, wanted: &str) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case(wanted))
 }
 
-/// One folder's listing: its demos into `demos`, its `.zip` files into
-/// `zips` when given, the folders to walk next into `subdirs`.
+/// One folder's listing: its demos into `demos`, its archives (`.zip`,
+/// `.7z`, `.rar`) into `zips` when given, the folders to walk next into `subdirs`.
 #[allow(clippy::too_many_arguments)]
 fn list_dir(
     dir: &Path,
@@ -295,7 +297,7 @@ fn list_dir(
         } else if has_extension(&path, "dem") {
             demos.push(path);
         } else if let Some(zips) = zips.as_deref_mut()
-            && has_extension(&path, "zip")
+            && archive::is_archive(&path)
         {
             zips.push(path);
         }
@@ -314,8 +316,8 @@ pub fn scan_roots(
     scan_roots_with(roots, worker_threads(), windows_folder(), cancel, progress)
 }
 
-/// [`scan_roots`] that also lists every `.zip` file it passes (#929): the
-/// demos, then the zips.
+/// [`scan_roots`] that also lists every archive it passes (`.zip`, `.7z`,
+/// `.rar`, #929): the demos, then the archives.
 pub fn scan_roots_and_zips(
     roots: &[PathBuf],
     cancel: &AtomicBool,
@@ -534,22 +536,29 @@ pub struct Reads {
     pub heads: usize,
     pub tails: usize,
     pub fulls: usize,
-    /// Zips whose list of entries was read (#929).
+    /// Archives whose list of entries was read (#929).
     pub zips: usize,
-    /// Demos inside zips decompressed in full (#929).
+    /// Demos inside archives decompressed in full (#929).
     pub zip_demos: usize,
 }
 
 /// What [`find_duplicates_cached`] found.
 #[derive(Debug, Default)]
 pub struct Audit {
-    /// One loose file per demo: each group's first, when no zip holds it.
+    /// One loose file per demo: each group's first.
     pub unique_files: Vec<PathBuf>,
+    /// Loose copies only: an archive's copy is never in a group (#929).
     pub groups: Vec<DuplicateGroup>,
     pub copies: usize,
     pub wasted_bytes: u64,
     pub reads: Reads,
-    /// Zips looked inside, and the demos found in them that could be read.
+    /// Every loose demo an archive holds a copy of, by path (#929), whether
+    /// or not it has loose copies too.
+    pub backups: Vec<Backup>,
+    /// Each archive looked inside and its `.dem` entries that could be
+    /// listed, by path: their sizes and CRC-32s, and their hashes where read.
+    pub archives: Vec<ArchiveListing>,
+    /// Archives looked inside, and the demos found in them that could be read.
     pub zips: usize,
     pub zip_demos: usize,
     /// A zip, or a demo inside one, that couldn't be read and was left out
@@ -637,17 +646,19 @@ pub fn find_duplicates_cached(
     find_duplicates_in(files, Vec::new(), cancel, progress, cache)
 }
 
-/// A group member: a loose demo, or a demo inside a zip.
-#[derive(Clone, Copy, Debug)]
-enum Member {
-    Loose(usize),
-    Zip(usize),
-}
-
-/// A `.dem` entry of one of the pass's zips.
+/// A `.dem` entry of one of the pass's archives.
 struct ZipDemo {
     zip: usize,
     entry: ZipDemoEntry,
+}
+
+impl ZipDemo {
+    fn at(&self, zips: &[(PathBuf, Option<Stamp>)]) -> ZipRef {
+        ZipRef {
+            zip: zips[self.zip].0.clone(),
+            entry: self.entry.name.clone(),
+        }
+    }
 }
 
 /// Paths resolved to their canonical form with their stamps, each once,
@@ -672,8 +683,8 @@ fn resolve_paths(
     out
 }
 
-/// Each zip's `.dem` entries (#929): remembered while the zip's size and
-/// modified time hold, else read from its central directory. A zip that
+/// Each archive's `.dem` entries (#929): remembered while the archive's
+/// size and modified time hold, else read from its listing. An archive that
 /// can't be read lists none and is named in `skipped`.
 fn list_zips(
     zips: &[(PathBuf, Option<Stamp>)],
@@ -707,7 +718,7 @@ fn list_zips(
     }
     let read = par_map(&to_read, threads, cancel, |&i| {
         let path = &zips[i].0;
-        let listing = archive::list_zip_demos(path);
+        let listing = archive::list_archive_demos(path);
         reading(path);
         listing
     });
@@ -725,7 +736,7 @@ fn list_zips(
         let path = &zips[i].0;
         match listing {
             None => {}
-            Some(Err(e)) => skipped.push(format!("{}: {e}", path.display())),
+            Some(Err(e)) => skipped.push(format!("{}: {e}", shown_path(path))),
             Some(Ok(entries)) => {
                 for entry in entries {
                     match &entry.error {
@@ -734,7 +745,7 @@ fn list_zips(
                                 zip: path.clone(),
                                 entry: entry.name.clone(),
                             };
-                            skipped.push(format!("{}: {e}", at.display()));
+                            skipped.push(format!("{}: {e}", at.shown()));
                         }
                         None => demos.push(ZipDemo { zip: i, entry }),
                     }
@@ -745,8 +756,9 @@ fn list_zips(
     demos
 }
 
-/// Reads each of `picks` (indices into `demos`) in full, one zip per thread
-/// at a time and each zip opened once; sends one `Hashing` per demo.
+/// Reads each of `picks` (indices into `demos`) in full, one archive per
+/// thread at a time and each archive opened once; sends one `Hashing` per
+/// demo.
 fn read_zip_demos(
     picks: &[usize],
     demos: &[ZipDemo],
@@ -766,14 +778,10 @@ fn read_zip_demos(
             .iter()
             .map(|&j| demos[j].entry.name.clone())
             .collect();
-        let found = archive::hash_zip_entries(&zips[*zip].0, &names);
+        let found = archive::hash_archive_entries(&zips[*zip].0, &names);
         if let Some(tx) = progress {
-            for name in names {
-                let at = ZipRef {
-                    zip: zips[*zip].0.clone(),
-                    entry: name,
-                };
-                let _ = tx.send(AuditProgress::Hashing(at.display()));
+            for &j in members {
+                let _ = tx.send(AuditProgress::Hashing(demos[j].at(zips).display()));
             }
         }
         members.iter().copied().zip(found).collect::<Vec<_>>()
@@ -781,12 +789,15 @@ fn read_zip_demos(
     done.into_iter().flatten().flatten().collect()
 }
 
-/// [`find_duplicates_cached`] over loose demos and the demos inside `zips`
-/// (#929). A demo in a zip groups with loose copies of it by the same key,
-/// tail and whole-file hash; it is decompressed only when another demo has
-/// its size, once per (size, CRC-32) pair, and what it held is remembered
-/// under the zip's path, size and modified time. A zip, or an entry, that
-/// can't be read is left out and named in [`Audit::skipped`].
+/// [`find_duplicates_cached`] that also looks inside `zips` (`.zip`, `.7z`,
+/// `.rar`; #929). An archive is a backup: its demos never join a duplicate
+/// group, so the groups are the ones the loose demos alone make. Each loose
+/// demo an archive holds a copy of is listed in [`Audit::backups`] with every
+/// archive entry holding it ([`BackupIndex::copies_of`]). An entry is
+/// decompressed only when a loose demo has its size, and what it held is
+/// remembered under the archive's path, size and modified time. An archive,
+/// or an entry, that can't be read is left out and named in
+/// [`Audit::skipped`].
 pub fn find_duplicates_in(
     files: Vec<PathBuf>,
     zips: Vec<PathBuf>,
@@ -832,18 +843,18 @@ pub fn find_duplicates_in(
     }
     send(AuditProgress::Keying(files.len() + zip_demos.len()));
 
-    // A size no other demo has, loose or in a zip, can't be a copy: such a
-    // file is not read.
-    let mut sizes: HashMap<u64, usize> = HashMap::new();
+    let mut loose_sizes: HashMap<u64, usize> = HashMap::new();
     for (_, stamp) in &files {
         if let Some(s) = stamp {
-            *sizes.entry(s.size).or_default() += 1;
+            *loose_sizes.entry(s.size).or_default() += 1;
         }
     }
-    for z in &zip_demos {
-        *sizes.entry(z.entry.size).or_default() += 1;
-    }
-    let shared_size = |size: u64| sizes.get(&size).copied().unwrap_or(0) >= 2;
+    let archived_sizes: HashSet<u64> = zip_demos.iter().map(|z| z.entry.size).collect();
+    // A loose demo is opened only when another loose demo, or a demo in an
+    // archive, has its size: otherwise it can't be a copy or backed up.
+    let worth_keying = |size: u64| {
+        loose_sizes.get(&size).copied().unwrap_or(0) >= 2 || archived_sizes.contains(&size)
+    };
     let mut keys: Vec<Option<FileKey>> = vec![None; files.len()];
     let mut to_read = Vec::new();
     for (i, (path, stamp)) in files.iter().enumerate() {
@@ -852,7 +863,7 @@ pub fn find_duplicates_in(
                 keys[i] = Some(unreadable_key(path));
                 hashing(path);
             }
-            Some(s) if !shared_size(s.size) => hashing(path),
+            Some(s) if !worth_keying(s.size) => hashing(path),
             Some(s) => match cache.entry(path, *s) {
                 Some(entry) => {
                     keys[i] = Some(FileKey {
@@ -887,116 +898,65 @@ pub fn find_duplicates_in(
         });
     }
 
-    // A demo in a zip is read in full or not at all: deflate can't seek to
-    // its last 64 KiB. Two entries of one size and CRC-32 hold the same
-    // bytes, so one of them is read for both; when that read fails, the
-    // other is read too.
-    let zip_hashing = |z: &ZipDemo| {
-        let at = ZipRef {
-            zip: zips[z.zip].0.clone(),
-            entry: z.entry.name.clone(),
-        };
-        send(AuditProgress::Hashing(at.display()));
-    };
-    let mut by_crc: HashMap<(u64, u32), ContentHashes> = HashMap::new();
-    for z in &zip_demos {
-        if let Some(h) = z.entry.hashes {
-            by_crc.entry((z.entry.size, z.entry.crc32)).or_insert(h);
-        }
-    }
+    // A demo in an archive is read in full or not at all: deflate, LZMA and
+    // RAR can't seek to its last 64 KiB. Only an entry a loose demo shares a
+    // size with is read, and each such entry is read itself, so every
+    // archive holding a demo is listed: a size and CRC-32 in a header say
+    // nothing about the data behind them, and a damaged archive listing the
+    // same header must not show as a backup.
     let mut needed = Vec::new();
     for (j, z) in zip_demos.iter().enumerate() {
-        if z.entry.hashes.is_some() || !shared_size(z.entry.size) {
-            zip_hashing(z);
+        if z.entry.hashes.is_some() || !loose_sizes.contains_key(&z.entry.size) {
+            send(AuditProgress::Hashing(z.at(&zips).display()));
         } else {
             needed.push(j);
         }
     }
-    // Each round: a demo whose twin is known takes its hashes, and one demo
-    // per pair still unknown is read.
-    let mut pending = needed;
-    let mut round = Vec::new();
-    loop {
-        round.clear();
-        let mut picked: HashSet<(u64, u32)> = HashSet::new();
-        pending.retain(|&j| {
-            let crc = (zip_demos[j].entry.size, zip_demos[j].entry.crc32);
-            if let Some(h) = by_crc.get(&crc) {
-                zip_demos[j].entry.hashes = Some(*h);
-                zip_hashing(&zip_demos[j]);
-                false
-            } else {
-                if picked.insert(crc) {
-                    round.push(j);
-                }
-                true
-            }
-        });
-        if round.is_empty() || cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        for (j, read) in read_zip_demos(&round, &zip_demos, &zips, threads, cancel, progress) {
+    if !needed.is_empty() && !cancel.load(Ordering::Relaxed) {
+        for (j, read) in read_zip_demos(&needed, &zip_demos, &zips, threads, cancel, progress) {
             reads.zip_demos += 1;
             let (path, stamp) = &zips[zip_demos[j].zip];
             if let Some(stamp) = stamp {
                 cache.set_archive_hashes(path, *stamp, &zip_demos[j].entry.name, read.clone());
             }
             match read {
-                Ok(h) => {
-                    zip_demos[j].entry.hashes = Some(h);
-                    by_crc
-                        .entry((zip_demos[j].entry.size, zip_demos[j].entry.crc32))
-                        .or_insert(h);
-                }
+                Ok(h) => zip_demos[j].entry.hashes = Some(h),
                 Err(e) => {
-                    let at = ZipRef {
-                        zip: path.clone(),
-                        entry: zip_demos[j].entry.name.clone(),
-                    };
-                    skipped.push(format!("{}: {e}", at.display()));
+                    skipped.push(format!("{}: {e}", zip_demos[j].at(&zips).shown()));
                     zip_demos[j].entry.error = Some(e);
                 }
             }
         }
-        let was_read: HashSet<usize> = round.iter().copied().collect();
-        pending.retain(|j| !was_read.contains(j));
     }
+    let index = BackupIndex::new(zip_demos.iter().filter_map(|z| {
+        let hashes = z.entry.hashes.filter(|_| z.entry.error.is_none())?;
+        Some(ArchivedCopy {
+            at: z.at(&zips),
+            hashes,
+        })
+    }));
 
-    let mut groups: HashMap<FileKey, Vec<Member>> = HashMap::new();
+    let mut groups: HashMap<FileKey, Vec<usize>> = HashMap::new();
     let mut singles: Vec<usize> = Vec::new();
     for (i, key) in keys.iter().enumerate() {
         match key {
-            Some(key) => groups
-                .entry(key.clone())
-                .or_default()
-                .push(Member::Loose(i)),
+            Some(key) => groups.entry(key.clone()).or_default().push(i),
             None => singles.push(i),
-        }
-    }
-    for (j, z) in zip_demos.iter().enumerate() {
-        if let (Some(h), None) = (z.entry.hashes, &z.entry.error) {
-            groups
-                .entry(FileKey {
-                    size: z.entry.size,
-                    header_hash: h.head,
-                })
-                .or_default()
-                .push(Member::Zip(j));
         }
     }
 
     // The key reads only the start, so two cuts of one recording can share
     // it. Files that end differently are different demos: split each group
-    // by its last bytes too. Only grouped files pay the extra read. The key
-    // itself stays as it is, since project files save its text.
+    // by its last bytes too. Only grouped files, and files an archive holds
+    // a demo with the same key, pay the extra read. The key itself stays as
+    // it is, since project files save its text.
     let mut tails: Vec<Option<u64>> = vec![None; files.len()];
     let mut tail_reads = Vec::new();
     for (key, members) in &groups {
-        if members.len() < 2 {
+        if members.len() < 2 && !index.has_key(key) {
             continue;
         }
-        for &m in members {
-            let Member::Loose(i) = m else { continue };
+        for &i in members {
             let (path, stamp) = &files[i];
             match stamp
                 .and_then(|s| cache.entry(path, s))
@@ -1026,7 +986,34 @@ pub fn find_duplicates_in(
         });
     }
 
-    let mut split: Vec<(FileKey, Vec<Member>)> = Vec::new();
+    let mut backups = Vec::new();
+    if !index.is_empty() {
+        for (i, key) in keys.iter().enumerate() {
+            let (Some(key), Some(tail)) = (key, tails[i]) else {
+                continue;
+            };
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let (path, stamp) = &files[i];
+            // Read in full once, then remembered while its size and
+            // modified time hold.
+            let known = stamp
+                .and_then(|s| cache.entry(path, s))
+                .and_then(|e| e.full);
+            let copies = index.copies_of(key, tail, || {
+                known.or_else(|| read_full(path, *stamp, cache, &mut reads))
+            });
+            if !copies.is_empty() {
+                backups.push(Backup {
+                    demo: path.clone(),
+                    copies,
+                });
+            }
+        }
+    }
+
+    let mut split: Vec<(FileKey, Vec<usize>)> = Vec::new();
     for (key, members) in groups {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -1035,18 +1022,14 @@ pub fn find_duplicates_in(
             split.push((key, members));
             continue;
         }
-        let mut by_tail: HashMap<u64, Vec<Member>> = HashMap::new();
-        for m in members {
-            let tail = match m {
-                Member::Loose(i) => tails[i],
-                Member::Zip(j) => zip_demos[j].entry.hashes.map(|h| h.tail),
-            };
-            if let Some(tail) = tail {
-                by_tail.entry(tail).or_default().push(m);
+        let mut by_tail: HashMap<u64, Vec<usize>> = HashMap::new();
+        for i in members {
+            if let Some(tail) = tails[i] {
+                by_tail.entry(tail).or_default().push(i);
             }
         }
         for (_, same_tail) in by_tail {
-            for part in split_by_full_hash(same_tail, &files, &zip_demos, cache, &mut reads) {
+            for part in split_by_full_hash(same_tail, &files, cache, &mut reads) {
                 split.push((key.clone(), part));
             }
         }
@@ -1057,12 +1040,26 @@ pub fn find_duplicates_in(
                 size: files[i].1.map_or(0, |s| s.size),
                 header_hash: 0,
             },
-            vec![Member::Loose(i)],
+            vec![i],
         ));
     }
 
+    let mut listings: Vec<ArchiveListing> = zips
+        .iter()
+        .map(|(path, _)| ArchiveListing {
+            archive: path.clone(),
+            demos: Vec::new(),
+        })
+        .collect();
+    for z in &zip_demos {
+        if z.entry.error.is_none() {
+            listings[z.zip].demos.push(z.entry.clone());
+        }
+    }
     let mut audit = Audit {
         reads,
+        backups,
+        archives: listings,
         zips: zips.len(),
         zip_demos: zip_demos.len(),
         skipped,
@@ -1073,30 +1070,13 @@ pub fn find_duplicates_in(
             break;
         }
         // Sorted, so original vs duplicate selection is stable.
-        let mut paths: Vec<PathBuf> = Vec::new();
-        let mut archived: Vec<ZipRef> = Vec::new();
-        for m in members {
-            match m {
-                Member::Loose(i) => paths.push(files[i].0.clone()),
-                Member::Zip(j) => archived.push(ZipRef {
-                    zip: zips[zip_demos[j].zip].0.clone(),
-                    entry: zip_demos[j].entry.name.clone(),
-                }),
-            }
-        }
+        let mut paths: Vec<PathBuf> = members.iter().map(|&i| files[i].0.clone()).collect();
         paths.sort();
-        archived.sort();
-        if archived.is_empty()
-            && let Some(first) = paths.first()
-        {
+        if let Some(first) = paths.first() {
             audit.unique_files.push(first.clone());
         }
-        if paths.len() + archived.len() > 1 {
-            let group = DuplicateGroup {
-                key,
-                files: paths,
-                archived,
-            };
+        if paths.len() > 1 {
+            let group = DuplicateGroup { key, files: paths };
             audit.copies += group.copies();
             audit.wasted_bytes += group.wasted_bytes();
             audit.groups.push(group);
@@ -1113,56 +1093,58 @@ pub fn find_duplicates_in(
     audit
 }
 
-/// One group (same key and tail) split by whole-file hash, but only when the
-/// cache already proves two of its files differ: two remembered full hashes
-/// that don't match. A demo in a zip always has one, since it is read in
-/// full. Its other files are then read in full to see which side they
-/// belong to; a file that can't be read goes on its own. Without that proof
-/// the group stays whole, as it was before the cache.
-fn split_by_full_hash(
-    members: Vec<Member>,
-    files: &[(PathBuf, Option<Stamp>)],
-    zip_demos: &[ZipDemo],
+/// `path`'s whole-file hash, read now and remembered in `cache` while its
+/// size holds; `None` when it can't be read.
+fn read_full(
+    path: &Path,
+    stamp: Option<Stamp>,
     cache: &mut KeyCache,
     reads: &mut Reads,
-) -> Vec<Vec<Member>> {
+) -> Option<u64> {
+    reads.fulls += 1;
+    let hashes = content_hashes(path).ok()?;
+    if let Some(s) = stamp
+        && s.size == hashes.size
+    {
+        cache.remember_contents(path, s, hashes);
+    }
+    Some(hashes.full)
+}
+
+/// One group (same key and tail) split by whole-file hash, but only when the
+/// cache already proves two of its files differ: two remembered full hashes
+/// that don't match. Its other files are then read in full to see which side
+/// they belong to; a file that can't be read goes on its own. Without that
+/// proof the group stays whole, as it was before the cache.
+fn split_by_full_hash(
+    members: Vec<usize>,
+    files: &[(PathBuf, Option<Stamp>)],
+    cache: &mut KeyCache,
+    reads: &mut Reads,
+) -> Vec<Vec<usize>> {
     if members.len() < 2 {
         return vec![members];
     }
     let known: Vec<Option<u64>> = members
         .iter()
-        .map(|&m| match m {
-            Member::Loose(i) => {
-                let (path, stamp) = &files[i];
-                stamp
-                    .and_then(|s| cache.entry(path, s))
-                    .and_then(|e| e.full)
-            }
-            Member::Zip(j) => zip_demos[j].entry.hashes.map(|h| h.full),
+        .map(|&i| {
+            let (path, stamp) = &files[i];
+            stamp
+                .and_then(|s| cache.entry(path, s))
+                .and_then(|e| e.full)
         })
         .collect();
     let distinct: HashSet<u64> = known.iter().flatten().copied().collect();
     if distinct.len() < 2 {
         return vec![members];
     }
-    let mut parts: HashMap<Option<u64>, Vec<Member>> = HashMap::new();
+    let mut parts: HashMap<u64, Vec<usize>> = HashMap::new();
     let mut alone = Vec::new();
-    for (&m, full) in members.iter().zip(known) {
-        let full = full.or_else(|| {
-            let Member::Loose(i) = m else { return None };
-            let (path, stamp) = &files[i];
-            reads.fulls += 1;
-            let hashes = content_hashes(path).ok()?;
-            if let Some(s) = stamp
-                && s.size == hashes.size
-            {
-                cache.remember_contents(path, *s, hashes);
-            }
-            Some(hashes.full)
-        });
-        match full {
-            Some(_) => parts.entry(full).or_default().push(m),
-            None => alone.push(vec![m]),
+    for (&i, full) in members.iter().zip(known) {
+        let (path, stamp) = &files[i];
+        match full.or_else(|| read_full(path, *stamp, cache, reads)) {
+            Some(full) => parts.entry(full).or_default().push(i),
+            None => alone.push(vec![i]),
         }
     }
     parts.into_values().chain(alone).collect()
@@ -1747,18 +1729,14 @@ mod tests {
         (audit, rx.try_iter().collect())
     }
 
-    /// Each group as its loose names, then its archived entries as
-    /// `zip name › entry`.
-    fn zip_group_names(audit: &Audit) -> Vec<Vec<String>> {
-        let mut groups: Vec<Vec<String>> = audit
-            .groups
+    /// Each backed-up loose demo by name, with every archive entry holding
+    /// it as `zip name › entry`.
+    fn backup_names(audit: &Audit) -> Vec<(String, Vec<String>)> {
+        audit
+            .backups
             .iter()
-            .map(|g| {
-                let loose = g
-                    .files
-                    .iter()
-                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned());
-                let zipped = g.archived.iter().map(|z| {
+            .map(|b| {
+                let copies = b.copies.iter().map(|z| {
                     format!(
                         "{}{}{}",
                         z.zip.file_name().unwrap().to_string_lossy(),
@@ -1766,21 +1744,32 @@ mod tests {
                         z.entry
                     )
                 });
-                loose.chain(zipped).collect()
+                (
+                    b.demo.file_name().unwrap().to_string_lossy().into_owned(),
+                    copies.collect(),
+                )
             })
-            .collect();
-        groups.sort();
-        groups
+            .collect()
+    }
+
+    fn backed_up(demo: &str, copies: &[&str]) -> (String, Vec<String>) {
+        (
+            demo.to_string(),
+            copies
+                .iter()
+                .map(|c| c.replace(" > ", archive::SEPARATOR))
+                .collect(),
+        )
     }
 
     #[test]
-    fn demos_inside_zips_group_with_their_loose_copies() {
-        let d = Demos::new("zips_group");
+    fn a_loose_demo_in_a_zip_is_backed_up_not_a_copy() {
+        let d = Demos::new("zips_backup");
         let long = demo_of(3 * KEY_BYTES as usize + 500, 1);
         let short = demo_of(2000, 2);
         let other = demo_of(2000, 3);
         let loose = d.file("match.dem", &long);
-        // Its size is its own among the loose demos: only the zip's copy
+        // Its size is its own among the loose demos: only the archive's copy
         // makes it worth reading.
         let loose_short = d.file("short.dem", &short);
         let lone = d.file("lone.dem", b"nobody has this size");
@@ -1799,6 +1788,7 @@ mod tests {
                 ("2025/match.dem", &long, true),
                 ("short.dem", &short, true),
                 ("other.dem", &other, true),
+                ("only_here.dem", &demo_of(777, 4), true),
             ],
         );
         let corrupt = d.0.join("corrupt.zip");
@@ -1807,45 +1797,70 @@ mod tests {
 
         let mut cache = KeyCache::default();
         let (audit, messages) = zip_pass(&[loose, loose_short, lone], &zips, &mut cache);
+        // No group: an archive's copy is a backup, never a copy to delete.
+        assert!(audit.groups.is_empty(), "{:?}", audit.groups);
+        assert_eq!((audit.copies, audit.wasted_bytes), (0, 0));
+        assert_eq!(audit.unique_files.len(), 3);
+        // Every archive holding match.dem is listed.
         assert_eq!(
-            zip_group_names(&audit),
+            backup_names(&audit),
             [
-                vec![
-                    "match.dem".to_string(),
-                    "deflated.zip › 2025/match.dem".into(),
-                    "stored.zip › match.dem".into()
-                ],
-                vec!["short.dem".into(), "deflated.zip › short.dem".into()],
+                backed_up(
+                    "match.dem",
+                    &["deflated.zip > 2025/match.dem", "stored.zip > match.dem"]
+                ),
+                backed_up("short.dem", &["deflated.zip > short.dem"]),
             ]
         );
-        // The loose copies are the copies: a zip's copy is kept.
-        assert_eq!(audit.copies, 2);
-        assert_eq!(audit.wasted_bytes, long.len() as u64 + short.len() as u64);
-        assert_eq!(audit.unique_files.len(), 1, "only lone.dem");
-        assert_eq!((audit.zips, audit.zip_demos), (3, 4));
+        assert_eq!((audit.zips, audit.zip_demos), (3, 5));
         assert_eq!(audit.skipped.len(), 1, "{:?}", audit.skipped);
         assert!(
             audit.skipped[0].contains("corrupt.zip: "),
             "{:?}",
             audit.skipped
         );
-        // The two match.dem entries share a size and CRC-32: one is read
-        // for both. other.dem shares short's size, so it is read too.
+        // Both match.dem entries are read; other.dem shares short's size, so
+        // it is read too; only_here.dem has no loose demo of its size.
         assert_eq!(audit.reads.zips, 3);
-        assert_eq!(audit.reads.zip_demos, 3);
+        assert_eq!(audit.reads.zip_demos, 4);
+        // Every archive's demos are listed as data, the unread one too.
+        let listed: Vec<(String, usize, usize)> = audit
+            .archives
+            .iter()
+            .map(|a| {
+                (
+                    a.archive
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    a.demos.len(),
+                    a.demos.iter().filter(|e| e.hashes.is_some()).count(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("corrupt.zip".to_string(), 0, 0),
+                ("deflated.zip".into(), 4, 3),
+                ("stored.zip".into(), 1, 1),
+            ]
+        );
 
-        // Every zip is reported read, then each demo, loose or zipped, once.
+        // Every archive is reported read, then each demo, loose or archived,
+        // once.
         assert!(matches!(messages.first(), Some(AuditProgress::Archives(3))));
         let count = |f: fn(&AuditProgress) -> bool| messages.iter().filter(|m| f(m)).count();
         assert_eq!(count(|m| matches!(m, AuditProgress::ReadingArchive(_))), 3);
         assert!(
             messages
                 .iter()
-                .any(|m| matches!(m, AuditProgress::Keying(7)))
+                .any(|m| matches!(m, AuditProgress::Keying(8)))
         );
-        assert_eq!(count(|m| matches!(m, AuditProgress::Hashing(_))), 7);
+        assert_eq!(count(|m| matches!(m, AuditProgress::Hashing(_))), 8);
 
-        // A second pass opens no zip and finds the same groups.
+        // A second pass opens no archive and finds the same backups.
         let files = [
             d.0.join("match.dem"),
             d.0.join("short.dem"),
@@ -1853,26 +1868,97 @@ mod tests {
         ];
         let (again, _) = zip_pass(&files, &zips, &mut cache);
         assert_eq!(again.reads, Reads::default());
-        assert_eq!(zip_group_names(&again), zip_group_names(&audit));
+        assert_eq!(backup_names(&again), backup_names(&audit));
         assert_eq!(again.skipped, audit.skipped, "a bad zip is still reported");
     }
 
     #[test]
-    fn a_changed_zip_is_read_again_and_two_zips_alone_still_group() {
-        let d = Demos::new("zips_changed");
+    fn loose_copies_group_as_without_archives_and_each_is_marked_backed_up() {
+        let d = Demos::new("zips_loose_group");
+        let bytes = demo_of(3 * KEY_BYTES as usize + 9, 5);
+        let a = d.file("a.dem", &bytes);
+        let b = d.file("b.dem", &bytes);
+        let zip = d.0.join("pack.zip");
+        write_zip(&zip, &[("m.dem", &bytes, true)]);
+        let (audit, _) = zip_pass(&[a.clone(), b.clone()], &[zip], &mut KeyCache::default());
+        let (_, plain, copies, wasted) =
+            find_duplicates(vec![a, b], &AtomicBool::new(false), &None);
+        // The same group as with no archive: one kept, one copy offered.
+        assert_eq!(group_names(&audit), [["a.dem", "b.dem"]]);
+        assert_eq!(plain.len(), 1);
+        assert_eq!((audit.copies, audit.wasted_bytes), (copies, wasted));
+        assert_eq!(audit.copies, 1);
+        assert_eq!(
+            backup_names(&audit),
+            [
+                backed_up("a.dem", &["pack.zip > m.dem"]),
+                backed_up("b.dem", &["pack.zip > m.dem"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_demo_only_in_archives_forms_no_group_and_is_not_read() {
+        let d = Demos::new("zips_only");
         let bytes = demo_of(5000, 9);
         let a = d.0.join("a.zip");
         let b = d.0.join("b.zip");
         write_zip(&a, &[("m.dem", &bytes, true)]);
         write_zip(&b, &[("m.dem", &bytes, false)]);
+        let (audit, _) = zip_pass(&[], &[a, b], &mut KeyCache::default());
+        assert!(audit.groups.is_empty());
+        assert!(audit.backups.is_empty());
+        assert_eq!(audit.reads.zip_demos, 0, "no loose demo has its size");
+        // Still listed as data: which archives hold which demos.
+        assert!(audit.archives.iter().all(|a| a.demos.len() == 1));
+    }
+
+    /// "Backed up" is a whole-file match: the same size and the same first
+    /// and last 64 KiB are not enough, and the loose demo's full read is
+    /// remembered.
+    #[test]
+    fn a_loose_demo_that_differs_only_in_the_middle_is_not_backed_up() {
+        let d = Demos::new("zips_middle");
+        let same = d.file("same.dem", &long_demo(0));
+        let middle = d.file("middle.dem", &long_demo(1));
+        let zip = d.0.join("pack.zip");
+        write_zip(&zip, &[("m.dem", &long_demo(0), true)]);
+        let files = [same, middle];
         let mut cache = KeyCache::default();
-        let (first, _) = zip_pass(&[], &[a.clone(), b.clone()], &mut cache);
-        // Nothing to delete, but the demo is kept twice.
+        let (audit, _) = zip_pass(&files, std::slice::from_ref(&zip), &mut cache);
         assert_eq!(
-            zip_group_names(&first),
-            [["a.zip › m.dem", "b.zip › m.dem"]]
+            backup_names(&audit),
+            [backed_up("same.dem", &["pack.zip > m.dem"])]
         );
-        assert_eq!((first.copies, first.wasted_bytes), (0, 0));
+        assert_eq!(
+            audit.reads.fulls, 2,
+            "each loose candidate is read in full once"
+        );
+        // Their whole-file hashes, now known and different, split them, as
+        // the cache does once the delete's check has read two files.
+        assert!(audit.groups.is_empty(), "{:?}", audit.groups);
+        let (again, _) = zip_pass(&files, &[zip], &mut cache);
+        assert_eq!(again.reads, Reads::default());
+        assert_eq!(backup_names(&again), backup_names(&audit));
+    }
+
+    #[test]
+    fn a_changed_zip_is_read_again() {
+        let d = Demos::new("zips_changed");
+        let bytes = demo_of(5000, 9);
+        let loose = d.file("m.dem", &bytes);
+        let a = d.0.join("a.zip");
+        let b = d.0.join("b.zip");
+        write_zip(&a, &[("m.dem", &bytes, true)]);
+        write_zip(&b, &[("m.dem", &bytes, false)]);
+        let files = [loose];
+        let mut cache = KeyCache::default();
+        let (first, _) = zip_pass(&files, &[a.clone(), b.clone()], &mut cache);
+        assert_eq!(first.reads.zip_demos, 2);
+        assert_eq!(
+            backup_names(&first),
+            [backed_up("m.dem", &["a.zip > m.dem", "b.zip > m.dem"])]
+        );
 
         write_zip(&b, &[("m.dem", &demo_of(5000, 10), false)]);
         let later = std::time::SystemTime::now() + Duration::from_secs(5);
@@ -1882,9 +1968,13 @@ mod tests {
             .unwrap()
             .set_modified(later)
             .unwrap();
-        let (second, _) = zip_pass(&[], &[a, b], &mut cache);
+        let (second, _) = zip_pass(&files, &[a, b], &mut cache);
         assert_eq!(second.reads.zips, 1, "only the changed zip");
-        assert!(second.groups.is_empty());
+        assert_eq!(second.reads.zip_demos, 1, "only its entry");
+        assert_eq!(
+            backup_names(&second),
+            [backed_up("m.dem", &["a.zip > m.dem"])]
+        );
     }
 
     #[test]
@@ -1892,11 +1982,177 @@ mod tests {
         let d = Demos::new("zips_walk");
         d.file("a.dem", b"x");
         d.file("pack.ZIP", b"y");
+        d.file("pack.7z", b"y");
+        d.file("pack.rar", b"y");
+        d.file("pack.tar", b"never");
         let cancel = AtomicBool::new(false);
         let roots = [d.0.clone()];
-        let (demos, zips) = walk_roots(&roots, 2, None, true, &cancel, &None);
-        assert_eq!((demos.len(), zips.len()), (1, 1));
-        assert!(zips[0].ends_with("pack.ZIP"));
+        let (demos, mut zips) = walk_roots(&roots, 2, None, true, &cancel, &None);
+        zips.sort();
+        let names: Vec<_> = zips.iter().map(|z| z.file_name().unwrap()).collect();
+        let rar = cfg!(all(windows, feature = "rar"));
+        let expected: &[&str] = if rar {
+            &["pack.7z", "pack.ZIP", "pack.rar"]
+        } else {
+            &["pack.7z", "pack.ZIP"]
+        };
+        assert_eq!(demos.len(), 1);
+        assert_eq!(names, expected);
         assert_eq!(scan_roots_with(&roots, 2, None, &cancel, &None).len(), 1);
+    }
+
+    #[test]
+    fn demos_inside_7z_and_rar_files_back_up_their_loose_copies() {
+        use archive::sevenz::tests::write_7z;
+        let d = Demos::new("7z_rar_backup");
+        let long = demo_of(3 * KEY_BYTES as usize + 500, 4);
+        // The same size, other bytes: read too, and matches nothing.
+        let other = demo_of(3 * KEY_BYTES as usize + 500, 5);
+        let loose = d.file("match.dem", &long);
+        let solid = d.0.join("solid.7z");
+        write_7z(
+            &solid,
+            &[("first.dem", &other), ("x/match.dem", &long)],
+            true,
+        );
+        let plain = d.0.join("plain.7z");
+        write_7z(&plain, &[("match.dem", &long)], false);
+        let corrupt = d.0.join("corrupt.7z");
+        fs::write(&corrupt, b"7z\xbc\xaf\x27\x1c not a 7z at all").unwrap();
+        let mut files = vec![loose];
+        let mut archives = vec![solid, plain, corrupt];
+        let mut expected = vec![backed_up(
+            "match.dem",
+            &["plain.7z > match.dem", "solid.7z > x/match.dem"],
+        )];
+        let rar = cfg!(all(windows, feature = "rar"));
+        if rar {
+            // archive::rar's fixture: match/a.dem, readme.txt, and an
+            // encrypted locked.dem.
+            let pack = d.file("pack.rar", include_bytes!("archive/testdata/pack.rar"));
+            let bytes: Vec<u8> = (0..3000).map(|i| ((i * 31 + 5 * 7) % 251) as u8).collect();
+            files.push(d.file("a.dem", &bytes));
+            archives.push(pack);
+            expected.insert(0, backed_up("a.dem", &["pack.rar > match/a.dem"]));
+        }
+
+        let mut cache = KeyCache::default();
+        let (audit, _) = zip_pass(&files, &archives, &mut cache);
+        assert!(audit.groups.is_empty());
+        assert_eq!(audit.copies, 0);
+        assert_eq!(backup_names(&audit), expected);
+        let skipped = audit.skipped.join("\n");
+        assert!(skipped.contains("corrupt.7z: "), "{skipped}");
+        // Plain words and paths: no Debug form, no verbatim prefix.
+        assert!(!skipped.contains("(\""), "{skipped}");
+        assert!(!skipped.contains(r"\\?\"), "{skipped}");
+        assert_eq!(
+            rar,
+            skipped.contains("pack.rar › locked.dem: it is encrypted"),
+            "{skipped}"
+        );
+        assert_eq!(audit.skipped.len(), if rar { 2 } else { 1 });
+        // Both 7z copies of match.dem and first.dem, which shares its size.
+        assert_eq!(audit.reads.zip_demos, if rar { 4 } else { 3 });
+
+        // A second pass opens no archive and finds the same backups.
+        let (again, _) = zip_pass(&files, &archives, &mut cache);
+        assert_eq!(again.reads, Reads::default());
+        assert_eq!(backup_names(&again), backup_names(&audit));
+    }
+
+    /// Two archives listing one entry with the same size and CRC-32, one of
+    /// them damaged, in both orders and on a second (cached) pass: only the
+    /// good one is listed as holding the loose demo.
+    fn a_damaged_twin_never_shows_as_a_backup(
+        ext: &str,
+        good: &[u8],
+        bad: &[u8],
+        entry: &str,
+        loose: &[u8],
+    ) {
+        for good_first in [true, false] {
+            let d = Demos::new(&format!("twin_{ext}_{good_first}"));
+            let (good_name, bad_name) = if good_first {
+                (format!("a_good.{ext}"), format!("b_bad.{ext}"))
+            } else {
+                (format!("b_good.{ext}"), format!("a_bad.{ext}"))
+            };
+            let archives = [d.file(&good_name, good), d.file(&bad_name, bad)];
+            let files = [d.file("loose.dem", loose)];
+            let mut cache = KeyCache::default();
+            for pass in ["first", "second"] {
+                let (audit, _) = zip_pass(&files, &archives, &mut cache);
+                assert_eq!(
+                    backup_names(&audit),
+                    [(
+                        "loose.dem".to_string(),
+                        vec![format!("{good_name}{}{entry}", archive::SEPARATOR)]
+                    )],
+                    "{ext}, good first: {good_first}, {pass} pass"
+                );
+                assert!(audit.groups.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn a_damaged_zip_with_the_same_header_never_shows_as_a_backup() {
+        let d = Demos::new("twin_zip_src");
+        let bytes = demo_of(3 * KEY_BYTES as usize + 500, 7);
+        let zip = d.0.join("src.zip");
+        write_zip(&zip, &[("m.dem", &bytes, false)]);
+        let good = fs::read(&zip).unwrap();
+        // Stored, so the middle of the file is the entry's data.
+        let mut bad = good.clone();
+        let mid = bad.len() / 2;
+        bad[mid] ^= 0xff;
+        a_damaged_twin_never_shows_as_a_backup("zip", &good, &bad, "m.dem", &bytes);
+    }
+
+    #[test]
+    fn a_damaged_7z_with_the_same_header_never_shows_as_a_backup() {
+        use archive::sevenz::tests::write_7z;
+        let d = Demos::new("twin_7z_src");
+        let bytes = demo_of(3 * KEY_BYTES as usize + 500, 8);
+        let path = d.0.join("src.7z");
+        write_7z(&path, &[("m.dem", &bytes)], false);
+        let good = fs::read(&path).unwrap();
+        // The packed data follows the 32-byte signature header; the header
+        // that lists the entry is at the end.
+        let mut bad = good.clone();
+        bad[40] ^= 0xff;
+        a_damaged_twin_never_shows_as_a_backup("7z", &good, &bad, "m.dem", &bytes);
+    }
+
+    /// The live check's case: `pack.rar` cut to 1500 bytes still lists
+    /// match/a.dem with the good one's size and CRC-32.
+    #[cfg(all(windows, feature = "rar"))]
+    #[test]
+    fn a_truncated_rar_with_the_same_header_never_shows_as_a_backup() {
+        let good = include_bytes!("archive/testdata/pack.rar");
+        let loose: Vec<u8> = (0..3000).map(|i| ((i * 31 + 5 * 7) % 251) as u8).collect();
+        a_damaged_twin_never_shows_as_a_backup("rar", good, &good[..1500], "match/a.dem", &loose);
+    }
+
+    #[test]
+    fn shown_paths_lose_the_verbatim_prefix_only() {
+        assert_eq!(
+            shown_path(Path::new(r"\\?\C:\Demos\A.dem")),
+            r"C:\Demos\A.dem"
+        );
+        assert_eq!(
+            shown_path(Path::new(r"\\?\UNC\nas\d\a.dem")),
+            r"\\nas\d\a.dem"
+        );
+        assert_eq!(shown_path(Path::new(r"D:\a.dem")), r"D:\a.dem");
+        let at = archive::ZipRef {
+            zip: PathBuf::from(r"\\?\C:\packs\p.7z"),
+            entry: "x/m.dem".into(),
+        };
+        assert_eq!(
+            at.shown(),
+            format!(r"C:\packs\p.7z{}x/m.dem", archive::SEPARATOR)
+        );
     }
 }
