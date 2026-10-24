@@ -194,7 +194,9 @@
 //! and sets MIN to `gl_filter_min` (trilinear by default) and MAG to
 //! `gl_filter_max`. At 1:1 the HUD then samples level 2 of a 4x file, a
 //! clean box reduction, and a scaled draw (the scopes, a bigger kill feed)
-//! gets the finer levels. Read on both builds: the `mipmap` test is at
+//! gets the finer levels; a LOD bias of -1, set right after the upload
+//! (`upload_then_bias`, `hud_sprite_lod.rs`, #841), makes a scale-2 or -3
+//! kill feed read the full-size level. Read on both builds: the `mipmap` test is at
 //! `hw+0x3e492` / `hw+0x23d473`, the single-level filter at `hw+0x3e4bf` /
 //! `hw+0x23d4a4`, the mip loop at `hw+0x3e580` / `hw+0x23d573`. The atlases
 //! are 256x256 (the `weapons*` ones 512x512), so at 4x they need
@@ -1450,6 +1452,42 @@ static PENDING: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
 /// Owns the pixels `PENDING` points at. Replaced on the next swap, by which
 /// time `GL_Upload32` has long since copied them into its own buffer.
 static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+/// The texture type of the replacement [`PENDING`] holds, for
+/// [`upload_then_bias`].
+static PENDING_TYPE: AtomicU32 = AtomicU32::new(0);
+/// What the swap stubs call: [`upload_then_bias`].
+static SWAP_UPLOAD_FN: AtomicUsize = AtomicUsize::new(0);
+/// Replaced HUD sprites whose LOD bias the driver took (#841).
+static HUD_BIASED: AtomicU32 = AtomicU32::new(0);
+
+/// The swap stubs' upload: the engine's `GL_Upload32` with the same six
+/// arguments, then, for a replaced HUD sprite, the LOD bias of
+/// `hud_sprite_lod.rs` on the texture it just filled. Returns what
+/// `GL_Upload32` returned, so `eax` after the stub's call is unchanged.
+///
+/// # Safety
+///
+/// Only called by the swap stubs, on the engine's GL thread, after
+/// [`install`] stored `UPLOAD32_FN`.
+unsafe extern "C" fn upload_then_bias(
+    data: usize,
+    width: usize,
+    height: usize,
+    mipmap: usize,
+    i_type: usize,
+    filter: usize,
+) -> usize {
+    type Upload32 = unsafe extern "C" fn(usize, usize, usize, usize, usize, usize) -> usize;
+    // Safety: GL_Upload32's address, verified at install; cdecl, six dwords.
+    let upload: Upload32 = unsafe { std::mem::transmute(UPLOAD32_FN.load(Ordering::Acquire)) };
+    let result = unsafe { upload(data, width, height, mipmap, i_type, filter) };
+    if crate::hud_sprite_lod::wants_bias(PENDING_TYPE.load(Ordering::Acquire), mipmap as u32)
+        && unsafe { crate::hud_sprite_lod::apply() }
+    {
+        HUD_BIASED.fetch_add(1, Ordering::Relaxed);
+    }
+    result
+}
 
 /// Installed once per process; see [`detour::Detour`] on why never undone.
 static INSTALLED: Mutex<Option<Vec<detour::Detour>>> = Mutex::new(None);
@@ -2628,6 +2666,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         replacement_mipmap(texture_type, mipmap) as usize,
         Ordering::Release,
     );
+    PENDING_TYPE.store(texture_type, Ordering::Release);
     drop(owned);
 
     replaced.fetch_add(1, Ordering::Relaxed);
@@ -2684,7 +2723,7 @@ const JMP: u8 = 0x25;
 ///     push [eax+8]                  ; replacement height
 ///     push [eax+4]                  ; replacement width
 ///     push [eax]                    ; replacement pixels
-///     call [UPLOAD32_FN]
+///     call [SWAP_UPLOAD_FN]        ; GL_Upload32, then a HUD sprite's LOD bias
 ///     add esp, 0x18
 ///     jmp [AFTER]
 /// ```
@@ -2709,7 +2748,7 @@ fn swap_stub() -> Vec<u8> {
     code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
     code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
     code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
-    indirect(&mut code, CALL, &UPLOAD32_FN);
+    indirect(&mut code, CALL, &SWAP_UPLOAD_FN);
     code.extend_from_slice(&[0x83, 0xC4, 0x18]); // add esp, 0x18
     indirect(&mut code, JMP, &AFTER);
     code
@@ -3423,7 +3462,7 @@ mod anniversary {
     ///     push [eax+8]                  ; replacement height
     ///     push [eax+4]                  ; replacement width
     ///     push [eax]                    ; replacement pixels
-    ///     call [UPLOAD32_FN]
+    ///     call [SWAP_UPLOAD_FN]        ; GL_Upload32, then a HUD sprite's LOD bias
     ///     add esp, 0x18
     ///     jmp [AFTER]
     /// ```
@@ -3448,7 +3487,7 @@ mod anniversary {
         code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
         code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
         code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
-        indirect(&mut code, CALL, &UPLOAD32_FN);
+        indirect(&mut code, CALL, &SWAP_UPLOAD_FN);
         code.extend_from_slice(&[0x83, 0xC4, 0x18]); // add esp, 0x18
         indirect(&mut code, JMP, &AFTER);
         code
@@ -3511,6 +3550,7 @@ mod anniversary {
             },
         }
         UPLOAD32_FN.store(upload32, Ordering::Release);
+        SWAP_UPLOAD_FN.store(upload_then_bias as *const () as usize, Ordering::Release);
         RESUME.store(tail + tail::JNE_UPLOAD8, Ordering::Release);
         AFTER.store(after, Ordering::Release);
         DECIDE_FN.store(decide as *const () as usize, Ordering::Release);
@@ -3636,6 +3676,7 @@ pub fn install() -> Result<(), String> {
         },
     }
     UPLOAD32_FN.store(upload32, Ordering::Release);
+    SWAP_UPLOAD_FN.store(upload_then_bias as *const () as usize, Ordering::Release);
     RESUME.store(tail + tail::RESUME, Ordering::Release);
     UPLOAD8_ARGS.store(tail + tail::UPLOAD8_ARGS, Ordering::Release);
     AFTER.store(tail + tail::AFTER, Ordering::Release);
@@ -3728,9 +3769,11 @@ pub fn status() -> String {
     );
     // Same folder as the world sprites, so no file count of its own.
     let hud = format!(
-        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps)",
+        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps; LOD bias {} on {})",
         HUD_REPLACED.load(Ordering::Relaxed),
         HUD_SEEN.load(Ordering::Relaxed),
+        crate::hud_sprite_lod::HUD_LOD_BIAS,
+        HUD_BIASED.load(Ordering::Relaxed),
     );
     let decals = format!(
         "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Players table says",
