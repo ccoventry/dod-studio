@@ -22,6 +22,10 @@ crate-type = ["cdylib"]
 # The DoD Studio window's Killstreaks tab (#565): analyses the playing demo,
 # through the analyzer cache Studio shares (`analysis::cache`).
 analysis = { path = "../analysis" }
+# The map's entity parser and the victory/capture sound rules (#284), shared
+# with the demo patcher so a map loading in the game is classified the same
+# way as on disk (`map_sounds.rs`).
+dod = { path = "../dod" }
 # HD player sprays are PNGs in the game's `logos` folder (#428); the one
 # image format the rest of the hook reads is TGA, decoded by hand.
 png = "0.18"

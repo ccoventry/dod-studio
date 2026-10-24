@@ -43,6 +43,11 @@ hl-demo-auditor = { path = "../../hl-demo-auditor" }
 dirs = { workspace = true }
 sysinfo = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+# Settings → Open With for .dem files (#528). Already in the lock, through
+# embed-resource.
+winreg = "0.55"
+
 [dev-dependencies]
 # Small zips for the Duplicates audit's zip tests (#929); the same build
 # hl-demo-auditor reads them with.

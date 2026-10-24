@@ -169,6 +169,42 @@ describe('createPickPath', () => {
     err.mockRestore();
   });
 
+  it('a second pick while the first is pending opens nothing and resolves null', async () => {
+    let finish;
+    const open = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const setBusy = vi.fn();
+    const p = createPickPath({ open, pathStates: async () => [], userFolders: async () => ({}), setBusy });
+    const first = p.pick({ field: 'project.open' });
+    // A repeat Ctrl+O before the first dialog has even opened, and while it's open.
+    await expect(p.pick({ field: 'project.open' })).resolves.toBeNull();
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    await expect(p.pick({ field: 'config.hl' })).resolves.toBeNull();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(p.isPicking()).toBe(true);
+    expect(setBusy).toHaveBeenLastCalledWith(true);
+    finish('C:\\Users\\me\\Documents\\a.json');
+    await expect(first).resolves.toBe('C:\\Users\\me\\Documents\\a.json');
+    expect(p.isPicking()).toBe(false);
+    expect(setBusy).toHaveBeenLastCalledWith(false);
+  });
+
+  it('after the first pick returns, the next one opens', async () => {
+    const { p, open } = harness({ dirs: [] });
+    await p.pick({ field: 'config.hl' });
+    await p.pick({ field: 'config.hl' });
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it('a dialog that fails lets the next pick open', async () => {
+    const open = vi.fn().mockRejectedValueOnce(new Error('dialog failed')).mockResolvedValueOnce('D:\\a.dem');
+    const setBusy = vi.fn();
+    const p = createPickPath({ open, pathStates: async () => [], userFolders: async () => ({}), setBusy });
+    await expect(p.pick({ field: 'analyzer.demo' })).rejects.toThrow('dialog failed');
+    expect(setBusy).toHaveBeenLastCalledWith(false);
+    await expect(p.pick({ field: 'analyzer.demo' })).resolves.toBe('D:\\a.dem');
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
   it('setFolders keeps only folder strings', () => {
     const { p } = harness();
     p.setFolders({ a: 'C:\\A', b: 3, c: '' });
