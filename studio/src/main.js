@@ -859,8 +859,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFileTypeSettings({ onSettingsChange: () => persistAppSettings() });
   createLaunchFiles({
     openProject,
-    openDemoInAnalyzer: (path) => { switchNavTab('demo-analyzer'); return openAnalyzerDemo(path); },
-    addDemosToQueue: (paths) => { switchNavTab('workspace'); return triggerAutoScan(paths, { pickedFiles: true }); },
+    openDemoInAnalyzer: openAnalyzerDemo,
+    addDemosToQueue: (paths) => triggerAutoScan(paths, { pickedFiles: true }),
     getDemTarget: getDemOpenTarget, isScanning,
   }).start();
 

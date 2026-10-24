@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { routeOpenedFiles, normalizeDemTarget, createLaunchFiles } from './launch_files.js';
+import { routeOpenedFiles, normalizeDemTarget, createLaunchFiles, showCaptureQueue } from './launch_files.js';
+import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { demOpenWithNote } from './file_types_settings.js';
+
+vi.mock('./nav.js', () => ({ switchNavTab: vi.fn(), setCaptureDetailSubtab: vi.fn() }));
 
 // Files opened from Explorer (#528): a project opens like Load Project, a
 // demo goes where Settings → Open .dem Files In says.
@@ -38,6 +41,8 @@ function harness({ files, target = 'analyzer', scanning = false }) {
     toast: vi.fn(),
     take: vi.fn(async () => batches.shift() || []),
     listenFor: vi.fn(async (event, cb) => { app.fire = cb; }),
+    showQueue: vi.fn(),
+    showAnalyzerTab: vi.fn(),
   };
   return { app, launch: createLaunchFiles(app) };
 }
@@ -56,7 +61,9 @@ describe('createLaunchFiles', () => {
     await launch.start();
     expect(app.openDemoInAnalyzer).toHaveBeenCalledTimes(1);
     expect(app.openDemoInAnalyzer).toHaveBeenCalledWith('D:\\demos\\b.dem');
+    expect(app.showAnalyzerTab).toHaveBeenCalledTimes(1);
     expect(app.addDemosToQueue).not.toHaveBeenCalled();
+    expect(app.showQueue).not.toHaveBeenCalled();
   });
 
   it("adds demos to Studio's queue when Settings says so", async () => {
@@ -64,6 +71,22 @@ describe('createLaunchFiles', () => {
     await launch.start();
     expect(app.addDemosToQueue).toHaveBeenCalledWith(['D:\\demos\\a.dem', 'D:\\demos\\b.dem']);
     expect(app.openDemoInAnalyzer).not.toHaveBeenCalled();
+    expect(app.showAnalyzerTab).not.toHaveBeenCalled();
+  });
+
+  // Studio reopens on its last sub-tab, and Render or Configuration has no
+  // queue to watch the demos arrive in.
+  it('shows the queue before adding to it', async () => {
+    const { app, launch } = harness({ files: [['D:\\demos\\a.dem']], target: 'queue' });
+    await launch.start();
+    expect(app.showQueue).toHaveBeenCalledTimes(1);
+    expect(app.showQueue.mock.invocationCallOrder[0]).toBeLessThan(app.addDemosToQueue.mock.invocationCallOrder[0]);
+  });
+
+  it("the queue is Studio's Capture sub-tab, whichever sub-tab was open", () => {
+    showCaptureQueue();
+    expect(switchNavTab).toHaveBeenCalledWith('workspace');
+    expect(setCaptureDetailSubtab).toHaveBeenCalledWith('highlights');
   });
 
   // A second scan beside a running one is what a drop refuses too (#530,

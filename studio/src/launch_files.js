@@ -13,9 +13,21 @@ import { takeOpenFiles } from './ipc_bridge.js';
 import { isProjectFile, isDemoFile } from './project_file_type.js';
 import { fileNameOf } from './path_display.js';
 import { showToast } from './toast.js';
+import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { STRINGS } from './strings.js';
 
 export const DEM_TARGETS = ['analyzer', 'queue'];
+
+/** Studio's Capture sub-tab, where the Master Demo Queue is: Studio
+ *  otherwise reopens on whichever sub-tab was last shown. */
+export function showCaptureQueue() {
+  switchNavTab('workspace');
+  setCaptureDetailSubtab('highlights');
+}
+
+function showAnalyzer() {
+  switchNavTab('demo-analyzer');
+}
 
 /** `paths` sorted into what to do: the project to open (the first one; a
  *  window holds one project), and the demos. Anything else is dropped. */
@@ -36,8 +48,8 @@ export function normalizeDemTarget(raw) {
  * @param {object} app  What this needs from main.js: openProject(path) from
  *   project_session.js, openDemoInAnalyzer(path), addDemosToQueue(paths)
  *   (queue_scan.js's triggerAutoScan), getDemTarget(), the setting, and
- *   isScanning() (queue_scan.js). `take`, `listenFor` and `toast` are
- *   swappable for tests.
+ *   isScanning() (queue_scan.js). `take`, `listenFor`, `toast` and the tab
+ *   switches `showQueue` and `showAnalyzerTab` are swappable for tests.
  */
 export function createLaunchFiles({
   openProject,
@@ -48,6 +60,8 @@ export function createLaunchFiles({
   take = takeOpenFiles,
   listenFor = listen,
   toast = showToast,
+  showQueue = showCaptureQueue,
+  showAnalyzerTab = showAnalyzer,
 }) {
   // One batch at a time: a second double-click while the unsaved-changes
   // prompt of the first is open waits for it.
@@ -64,9 +78,11 @@ export function createLaunchFiles({
         toast(STRINGS.DROP.openedWhileScanningToast(demos.map((p) => fileNameOf(p) || p)), 'warning', 8000);
         return;
       }
+      showQueue();
       await addDemosToQueue(demos);
     } else {
       // The Analyzer shows one demo: the last one opened.
+      showAnalyzerTab();
       await openDemoInAnalyzer(demos[demos.length - 1]);
     }
   }
