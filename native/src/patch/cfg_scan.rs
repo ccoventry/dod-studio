@@ -131,6 +131,9 @@ pub enum ValueSource {
     /// An Initial Command the pipeline appends for itself
     /// (`builder::final_init_commands`), e.g. `mirv_movie_fps` from Capture FPS.
     App,
+    /// A line in a file an Initial Command `exec`s (Seek Between Clips only:
+    /// the demo filter drops the `exec` in a patched batch).
+    Exec { file: PathBuf, line: usize },
     /// A Scheduled Command, `offset_seconds` before each highlight.
     ScheduledBefore { offset_seconds: f32 },
     /// A Scheduled Command, `offset_seconds` after each highlight.
@@ -140,6 +143,12 @@ pub enum ValueSource {
 impl ValueSource {
     pub fn is_config(&self) -> bool {
         matches!(self, ValueSource::Config { .. })
+    }
+
+    /// A line in one of the user's own files: a config, or a file an
+    /// Initial Command execs.
+    pub fn is_users_file(&self) -> bool {
+        matches!(self, ValueSource::Config { .. } | ValueSource::Exec { .. })
     }
 
     pub fn is_scheduled(&self) -> bool {
@@ -237,6 +246,21 @@ pub fn value_warnings(
     user_count: usize,
     scheduled: &[ScheduledCommand],
 ) -> ValueWarnings {
+    value_warnings_with_execs(scan, init_commands, user_count, scheduled, &[])
+}
+
+/// [`value_warnings`], with each Initial Command `exec` that `execs` has
+/// followed (`follow_initial_exec`) adding its file's settings where the
+/// `exec` stands. They count as the user's files, like configs: a conflict
+/// made only of config and exec'd-file lines is not reported, for the same
+/// `echo` noise reason, but one with an Initial, app or Scheduled value is.
+pub fn value_warnings_with_execs(
+    scan: &CfgScan,
+    init_commands: &[String],
+    user_count: usize,
+    scheduled: &[ScheduledCommand],
+    execs: &[InitialExec],
+) -> ValueWarnings {
     // Pool per cvar, in firing order, cvars in first-seen order and spelling.
     // A Vec rather than a map: a config is a couple of hundred lines.
     let mut pool: Vec<(String, Vec<StatedValue>)> = Vec::new();
@@ -259,13 +283,27 @@ pub fn value_warnings(
         );
     }
     for (index, command) in init_commands.iter().enumerate() {
-        if let Some((cvar, value)) = assigned_cvar(command) {
+        // `exec x.cfg` reads as an assignment too; it is a file to follow.
+        if exec_target(command).is_none()
+            && let Some((cvar, value)) = assigned_cvar(command)
+        {
             let source = if index < user_count {
                 ValueSource::Initial
             } else {
                 ValueSource::App
             };
             add(&cvar, value, source);
+        } else if let Some(followed) = execs.iter().find(|e| e.command == command.trim()) {
+            for s in &followed.settings {
+                add(
+                    &s.cvar,
+                    s.value.clone(),
+                    ValueSource::Exec {
+                        file: s.file.clone(),
+                        line: s.line,
+                    },
+                );
+            }
         }
     }
     for s in scheduled.iter().filter(|s| !s.after) {
@@ -286,7 +324,7 @@ pub fn value_warnings(
         let disagree = values
             .iter()
             .any(|v| !same_value(&v.value, &effective.value));
-        let app_side = values.iter().any(|v| !v.source.is_config());
+        let app_side = values.iter().any(|v| !v.source.is_users_file());
         if disagree && app_side {
             out.conflicts.push(ValueConflict {
                 cvar: cvar.clone(),
@@ -666,10 +704,15 @@ pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
 // filter as `svc_stufftext` before it reaches the command buffer (`hw+0x1dce0`
 // pre-Anniversary, `hw+0x1aaa30` on the 25th Anniversary build;
 // `docs/goldsrc_hw_dll_survey.md` §13.3). A command it matches is dropped with
-// nothing printed. Initial Commands and Scheduled Commands are both written
-// into the patched demo as `ConsoleCommand` frames (`engine.rs`), so both are
-// filtered; a config the engine execs at start-up is a different path and is
-// not. The lists below are the filter's own, read offline from `hw.dll`.
+// nothing printed. A patched batch (Seek Between Clips off, or a batch that
+// can't seek) writes Initial and Scheduled Commands into the demo as
+// `ConsoleCommand` frames (`engine.rs`), so both are filtered there. A Seek
+// Between Clips batch doesn't: the hook DLL runs both lists through
+// `ClientCmd` (`runtime_batch.rs`, goldsrc-hooks `batch.rs`), which skips the
+// filter, so the Commands tab reports this tier only while that setting is
+// off. A config the engine execs at start-up is a different path and is not
+// filtered either. The lists below are the filter's own, read offline from
+// `hw.dll`.
 //
 // This is the tier `exec` and `quit` used to have to themselves: `dod-studio`
 // once planned to `exec` a per-demo config and to inject `quit` at batch end,
@@ -811,7 +854,8 @@ pub struct DemoFiltered {
 }
 
 /// Every command in `commands` the demo filter drops, in order. Applies to
-/// Initial and Scheduled Commands alike: both reach the game as demo frames.
+/// Initial and Scheduled Commands alike, in a patched batch only: there both
+/// reach the game as demo frames.
 pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
     commands
         .iter()
@@ -905,10 +949,11 @@ pub fn scan(game_dir: &Path) -> CfgScan {
     }
 
     let mut visited: HashSet<PathBuf> = HashSet::new();
+    let dirs = [game_dir.to_path_buf()];
     for entry in ENTRY_POINTS {
         let path = game_dir.join(entry);
         if path.is_file() {
-            read_config(&path, game_dir, 0, &mut visited, &mut out, true);
+            read_config(&path, &dirs, 0, &mut visited, &mut out, true);
         }
     }
 
@@ -957,15 +1002,108 @@ pub fn scan_cached(game_dir: &Path) -> std::sync::Arc<CfgScan> {
     scanned
 }
 
+// ── Following an Initial Command's `exec` ────────────────────────────────────
+//
+// In a Seek Between Clips batch the hook DLL runs Initial Commands through
+// `ClientCmd`, which skips the demo filter, so an `exec movie.cfg` there runs
+// the file. Its settings then join the value rules at the place of the `exec`.
+// Read-only, like the rest of this module.
+
+/// The folders the game looks in for a file an `exec` names, in order. Every
+/// game Studio starts has `-addons` on its launch line (`types.rs`), so the
+/// game's `_addon` folder comes first, then the game folder itself, then its
+/// `_downloads` folder.
+pub fn exec_search_dirs(game_dir: &Path) -> Vec<PathBuf> {
+    let Some(name) = game_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+    else {
+        return vec![game_dir.to_path_buf()];
+    };
+    let sibling = |suffix: &str| game_dir.with_file_name(format!("{name}{suffix}"));
+    vec![
+        sibling("_addon"),
+        game_dir.to_path_buf(),
+        sibling("_downloads"),
+    ]
+}
+
+/// The file an `exec` command names, or `None` when `command` is not one.
+pub fn exec_target(command: &str) -> Option<String> {
+    let trimmed = command.trim();
+    let head = trimmed.split_whitespace().next()?;
+    if !head.eq_ignore_ascii_case("exec") {
+        return None;
+    }
+    let rest = trimmed[head.len()..].trim_start();
+    // A quoted name may hold spaces, as the console's tokenizer allows.
+    let target = match rest.strip_prefix('"') {
+        Some(quoted) => quoted.split('"').next().unwrap_or(""),
+        None => rest.split_whitespace().next().unwrap_or(""),
+    };
+    Some(target.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+/// An Initial Command `exec <file>`, followed into the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitialExec {
+    /// The command, trimmed.
+    pub command: String,
+    /// The file the game would run, or `None` when no folder in
+    /// [`exec_search_dirs`] has it (the game prints "couldn't exec").
+    pub file: Option<PathBuf>,
+    /// Every assignment in it, and in the files it execs in turn, in the
+    /// order the game runs them. Bounded like the start-up scan: depth, file
+    /// count and size, and each file read once, so an exec loop ends.
+    pub settings: Vec<CvarSetting>,
+}
+
+/// Follows `command` when it is an `exec`, reading only. `game_dir` is the
+/// game folder (`<hl.exe dir>/dod`).
+pub fn follow_initial_exec(game_dir: &Path, command: &str) -> Option<InitialExec> {
+    let target = exec_target(command)?;
+    let dirs = exec_search_dirs(game_dir);
+    let file = resolve_exec(&dirs, &target);
+    let mut out = CfgScan::default();
+    if let Some(path) = &file {
+        read_config(path, &dirs, 0, &mut HashSet::new(), &mut out, true);
+    }
+    Some(InitialExec {
+        command: command.trim().to_string(),
+        file,
+        settings: out.settings,
+    })
+}
+
 /// `dirs::canonicalize` would resolve symlinks and fail on missing files; all
 /// this needs is a stable key so an `exec` cycle is recognised.
 fn normalise(path: &Path) -> PathBuf {
     PathBuf::from(path.to_string_lossy().to_lowercase().replace('\\', "/"))
 }
 
+/// The file an `exec` line names, looked for in `dirs` in order, or `None`
+/// when no folder has it. Paths that climb out of a folder are refused: a
+/// config is not a place to accept one.
+fn resolve_exec(dirs: &[PathBuf], target: &str) -> Option<PathBuf> {
+    let name = unquote(target);
+    if name.is_empty() || name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
+        return None;
+    }
+    dirs.iter().find_map(|dir| {
+        let next = dir.join(&name);
+        let next = if next.extension().is_none() {
+            next.with_extension("cfg")
+        } else {
+            next
+        };
+        next.is_file().then_some(next)
+    })
+}
+
+/// `dirs` are the folders an `exec` inside the file is looked for in.
 fn read_config(
     path: &Path,
-    game_dir: &Path,
+    dirs: &[PathBuf],
     depth: usize,
     visited: &mut HashSet<PathBuf>,
     out: &mut CfgScan,
@@ -1009,22 +1147,8 @@ fn read_config(
             }
 
             if head_lower == "exec" {
-                if let Some(target) = parts.next() {
-                    let name = unquote(target);
-                    // Config paths are relative to the mod folder, and a config
-                    // is not a place to accept a path that climbs out of it.
-                    if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
-                        continue;
-                    }
-                    let next = game_dir.join(&name);
-                    let next = if next.extension().is_none() {
-                        next.with_extension("cfg")
-                    } else {
-                        next
-                    };
-                    if next.is_file() {
-                        read_config(&next, game_dir, depth + 1, visited, out, auto_executed);
-                    }
+                if let Some(next) = parts.next().and_then(|t| resolve_exec(dirs, t)) {
+                    read_config(&next, dirs, depth + 1, visited, out, auto_executed);
                 }
                 continue;
             }
@@ -2133,5 +2257,133 @@ mod tests {
         // Nothing to assert about the outcome beyond it not being read: the
         // point is that the traversal is refused rather than attempted.
         assert_eq!(scan(&dir).files_read, 1);
+    }
+
+    #[test]
+    fn exec_is_looked_for_in_the_addon_folder_then_the_game_then_downloads() {
+        let root = Path::new("install");
+        assert_eq!(
+            exec_search_dirs(&root.join("dod")),
+            vec![
+                root.join("dod_addon"),
+                root.join("dod"),
+                root.join("dod_downloads")
+            ]
+        );
+    }
+
+    #[test]
+    fn only_an_exec_line_has_an_exec_target() {
+        assert_eq!(exec_target("exec movie.cfg"), Some("movie.cfg".into()));
+        assert_eq!(
+            exec_target("  EXEC \"my movie.cfg\""),
+            Some("my movie.cfg".into())
+        );
+        assert_eq!(exec_target("exec"), None);
+        assert_eq!(exec_target("execute 1"), None);
+        assert_eq!(exec_target("sensitivity 2"), None);
+    }
+
+    /// An install root with a `dod` folder, and `files` written under it.
+    fn install(tag: &str, files: &[(&str, &str)]) -> Scratch {
+        let root = scratch(tag);
+        std::fs::create_dir_all(root.join("dod")).unwrap();
+        for (path, text) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn an_initial_exec_follows_the_files_it_execs_in_turn_from_any_folder() {
+        let root = install(
+            "initial_exec_chain",
+            &[
+                ("dod_addon/movie.cfg", "fps_max 100\nexec more\n"),
+                (
+                    "dod/more.cfg",
+                    "hud_deathnotice_time 12\nbind f7 \"fps_max 1\"\n",
+                ),
+            ],
+        );
+        let followed = follow_initial_exec(&root.join("dod"), "exec movie.cfg").unwrap();
+
+        assert_eq!(
+            followed.file,
+            Some(root.join("dod_addon").join("movie.cfg"))
+        );
+        let set: Vec<(&str, &str)> = followed
+            .settings
+            .iter()
+            .map(|s| (s.cvar.as_str(), s.value.as_str()))
+            .collect();
+        assert_eq!(set, [("fps_max", "100"), ("hud_deathnotice_time", "12")]);
+    }
+
+    #[test]
+    fn an_initial_exec_loop_ends() {
+        let root = install(
+            "initial_exec_loop",
+            &[
+                ("dod/a.cfg", "exec b.cfg\nfps_max 60\n"),
+                (
+                    "dod/b.cfg",
+                    "exec a.cfg\nexec b.cfg\nhud_deathnotice_time 3\n",
+                ),
+            ],
+        );
+        let followed = follow_initial_exec(&root.join("dod"), "exec a.cfg").unwrap();
+        let cvars: Vec<&str> = followed.settings.iter().map(|s| s.cvar.as_str()).collect();
+        assert_eq!(cvars, ["hud_deathnotice_time", "fps_max"]);
+    }
+
+    #[test]
+    fn an_initial_exec_of_a_missing_file_has_no_file_and_no_settings() {
+        let root = install("initial_exec_missing", &[]);
+        let followed = follow_initial_exec(&root.join("dod"), "exec nope").unwrap();
+        assert_eq!(followed.file, None);
+        assert!(followed.settings.is_empty());
+        assert!(follow_initial_exec(&root.join("dod"), "sensitivity 2").is_none());
+        assert!(
+            follow_initial_exec(&root.join("dod"), "exec ../secret.cfg")
+                .unwrap()
+                .file
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_exec_d_file_s_values_join_the_value_rules_where_the_exec_stands() {
+        let root = install(
+            "initial_exec_values",
+            &[("dod_addon/wsod.cfg", "hud_deathnotice_time 12\n")],
+        );
+        let dod = root.join("dod");
+        let commands = init(&["hud_deathnotice_time 6", "exec wsod.cfg"]);
+        let execs: Vec<InitialExec> = commands
+            .iter()
+            .filter_map(|c| follow_initial_exec(&dod, c))
+            .collect();
+        let w = value_warnings_with_execs(&CfgScan::default(), &commands, 2, &[], &execs);
+
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        let c = &w.conflicts[0];
+        assert_eq!(c.effective.value, "12");
+        assert!(matches!(
+            c.effective.source,
+            ValueSource::Exec { line: 1, .. }
+        ));
+        // Rule 2 sees it as the baseline too.
+        let w = value_warnings_with_execs(
+            &CfgScan::default(),
+            &init(&["exec wsod.cfg"]),
+            1,
+            &[after("hud_deathnotice_time 1", 0.5)],
+            &execs,
+        );
+        assert_eq!(w.asymmetric.len(), 1, "{:?}", w.asymmetric);
+        assert_eq!(w.asymmetric[0].baseline.value, "12");
     }
 }

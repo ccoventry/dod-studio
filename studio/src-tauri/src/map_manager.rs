@@ -128,7 +128,7 @@ pub struct CfgWarningRow {
 #[serde(rename_all = "camelCase")]
 pub struct ValueSourceRow {
     pub value: String,
-    /// `config` | `initial` | `app` | `before` | `after`
+    /// `config` | `exec` | `initial` | `app` | `before` | `after`
     pub kind: String,
     pub file: Option<String>,
     pub line: Option<usize>,
@@ -141,6 +141,16 @@ impl From<&native::patch::cfg_scan::StatedValue> for ValueSourceRow {
         let (kind, file, line, offset_seconds) = match &v.source {
             ValueSource::Config { file, line } => (
                 "config",
+                Some(
+                    file.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| file.to_string_lossy().to_string()),
+                ),
+                Some(*line),
+                None,
+            ),
+            ValueSource::Exec { file, line } => (
+                "exec",
                 Some(
                     file.file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -343,10 +353,17 @@ pub struct CfgReport {
     /// `banned_scheduled` instead.
     pub noop_init: Vec<NoopCommandRow>,
     /// Initial / Scheduled Commands the engine's demo command filter drops
-    /// (#679). Both lists reach the game as demo frames, so both are
-    /// filtered; a config the engine execs is not, so configs are not checked.
+    /// (#679). A patched batch puts both lists in the demo, so both are
+    /// filtered; a Seek Between Clips batch runs them through the hook DLL,
+    /// which skips the filter, so both stay empty while that is on. A config
+    /// the engine execs is not filtered, so configs are not checked.
     pub filtered_init: Vec<FilteredCommandRow>,
     pub filtered_scheduled: Vec<FilteredCommandRow>,
+    /// Whether the filter above applied: Seek Between Clips is off.
+    pub filter_applies: bool,
+    /// Initial Commands `exec <file>` whose file the game won't find in any
+    /// folder it looks in (`cfg_scan::exec_search_dirs`).
+    pub missing_exec: Vec<String>,
     /// `cfg_scan::FATAL_CVARS` entries a config sets wrong -- DoD's own
     /// client quits the game outright the moment it renders a HUD frame with
     /// one of these not at its required value. Not blocking (nothing here can
@@ -408,7 +425,12 @@ pub async fn scan_game_configs(
     custom_commands: Vec<CustomCommandPayload>,
     capture_fps: Option<i32>,
     decal_flush: Option<bool>,
+    hook_runs_batch: Option<bool>,
 ) -> Result<CfgReport, String> {
+    // Seek Between Clips: the hook DLL runs both command lists through
+    // `ClientCmd`, which the demo filter never sees (`cfg_scan`'s filter
+    // section), so the filter tier applies only when the batch is patched.
+    let patched = !hook_runs_batch.unwrap_or_else(native::patch::types::default_hook_runs_batch);
     let exe = PathBuf::from(&game_path);
     let Some(dir) = native::shared::paths::mod_dir_for_exe(&exe) else {
         return Ok(CfgReport::default());
@@ -555,9 +577,20 @@ pub async fn scan_game_configs(
                 .map(|(cvar, command)| BannedCommandRow { cvar, command }),
         );
         // Dropped by the engine on the way in (#679), wherever in the demo
-        // they arrive — see `cfg_scan::demo_filter_rule`.
-        let filtered_init = filtered_rows(&init_commands);
-        let filtered_scheduled = filtered_rows(&command_texts);
+        // they arrive — see `cfg_scan::demo_filter_rule`. Only a patched
+        // batch puts them in the demo.
+        let filter = |c: &str| {
+            if patched {
+                native::patch::cfg_scan::demo_filter_rule(c)
+            } else {
+                None
+            }
+        };
+        let (filtered_init, filtered_scheduled) = if patched {
+            (filtered_rows(&init_commands), filtered_rows(&command_texts))
+        } else {
+            (Vec::new(), Vec::new())
+        };
         // Every scheduled `r_decals` breaks the flush, however many there are,
         // so the hazard list is not deduplicated the way the overrides are.
         for (cvar, command) in native::patch::cfg_scan::mid_demo_hazards(&command_texts) {
@@ -581,7 +614,7 @@ pub async fn scan_game_configs(
         let scheduled: Vec<native::patch::cfg_scan::ScheduledCommand> =
             application_order(&custom_commands)
                 .into_iter()
-                .filter(|c| native::patch::cfg_scan::demo_filter_rule(&c.command).is_none())
+                .filter(|c| filter(&c.command).is_none())
                 .filter(|c| {
                     native::patch::cfg_scan::assigned_cvar(&c.command)
                         .is_none_or(|(cvar, _)| !flagged.contains(&cvar.to_lowercase()))
@@ -595,13 +628,25 @@ pub async fn scan_game_configs(
         // Initial Commands the demo filter drops set nothing either. The
         // pipeline's own additions all get through (pinned by a builder test),
         // so dropping from the whole list keeps the user's count right.
-        let passes = |c: &&String| native::patch::cfg_scan::demo_filter_rule(c).is_none();
+        let passes = |c: &&String| filter(c).is_none();
         let applied_init: Vec<String> = effective_commands.iter().filter(passes).cloned().collect();
-        let values = native::patch::cfg_scan::value_warnings(
+        // An `exec` that gets through runs its file: follow it (read-only),
+        // so its settings join the value rules where the `exec` stands.
+        let execs: Vec<native::patch::cfg_scan::InitialExec> = applied_init
+            .iter()
+            .filter_map(|c| native::patch::cfg_scan::follow_initial_exec(&dir, c))
+            .collect();
+        let missing_exec: Vec<String> = execs
+            .iter()
+            .filter(|e| e.file.is_none())
+            .map(|e| e.command.clone())
+            .collect();
+        let values = native::patch::cfg_scan::value_warnings_with_execs(
             &scan,
             &applied_init,
             init_commands.iter().filter(passes).count(),
             &scheduled,
+            &execs,
         );
         let conflicts: Vec<ValueConflictRow> = values
             .conflicts
@@ -664,6 +709,8 @@ pub async fn scan_game_configs(
             noop_init,
             filtered_init,
             filtered_scheduled,
+            filter_applies: patched,
+            missing_exec,
             fatal_cvars,
             renamed,
             config_cfg_writable,
@@ -978,6 +1025,7 @@ mod tests {
             custom,
             Some(120),
             Some(true),
+            None,
         ))
         .unwrap()
     }
@@ -1207,11 +1255,27 @@ mod tests {
             custom,
             Some(fps),
             Some(true),
+            None,
         ))
         .unwrap()
     }
 
     fn report(tag: &str, init: &[&str], custom: &[&str], fps: i32) -> CfgReport {
+        report_mode(tag, init, custom, fps, None)
+    }
+
+    /// `report` with Seek Between Clips off: a patched batch.
+    fn report_patched(tag: &str, init: &[&str], custom: &[&str], fps: i32) -> CfgReport {
+        report_mode(tag, init, custom, fps, Some(false))
+    }
+
+    fn report_mode(
+        tag: &str,
+        init: &[&str],
+        custom: &[&str],
+        fps: i32,
+        hook_runs_batch: Option<bool>,
+    ) -> CfgReport {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -1223,6 +1287,7 @@ mod tests {
             custom.iter().map(|s| scheduled(s, "Before", 2.0)).collect(),
             Some(fps),
             Some(true),
+            hook_runs_batch,
         ))
         .unwrap()
     }
@@ -1245,6 +1310,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(false),
+                None,
             ))
             .unwrap();
 
@@ -1359,6 +1425,7 @@ mod tests {
                 vec![],
                 Some(120),
                 Some(true),
+                None,
             ))
             .unwrap();
 
@@ -1386,6 +1453,7 @@ mod tests {
                 vec![],
                 Some(120),
                 Some(true),
+                None,
             ))
             .unwrap();
 
@@ -1406,6 +1474,7 @@ mod tests {
                 vec![],
                 Some(120),
                 Some(true),
+                None,
             ))
             .unwrap();
 
@@ -1438,6 +1507,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(false),
+                None,
             ))
             .unwrap();
 
@@ -1458,7 +1528,7 @@ mod tests {
 
     #[test]
     fn initial_commands_the_demo_filter_drops_are_reported() {
-        let r = report(
+        let r = report_patched(
             "filtered_init",
             &["exec somefile.cfg", "quit", "sensitivity 3"],
             &[],
@@ -1474,11 +1544,12 @@ mod tests {
         );
         assert!(r.noop_init.is_empty(), "{:?}", r.noop_init);
         assert!(r.filtered_scheduled.is_empty());
+        assert!(r.filter_applies);
     }
 
     #[test]
     fn scheduled_commands_the_demo_filter_drops_are_reported() {
-        let r = report(
+        let r = report_patched(
             "filtered_scheduled",
             &[],
             &["mirv_matte_setcolor 255 0 255", "echo ok", "alias a b"],
@@ -1498,7 +1569,7 @@ mod tests {
     #[test]
     fn a_scheduled_command_the_demo_filter_drops_sets_no_value() {
         // A dropped command never runs, so it cannot conflict with anything.
-        let r = report(
+        let r = report_patched(
             "filtered_no_conflict",
             &["cl_killsound 0", "sensitivity 2"],
             &["cl_killsound 1", "sensitivity 3"],
@@ -1518,6 +1589,122 @@ mod tests {
             "{:?}",
             r.conflicts
         );
+    }
+
+    #[test]
+    fn with_seek_between_clips_on_nothing_is_reported_as_dropped() {
+        // The hook DLL runs both lists through ClientCmd, past the filter.
+        let r = report(
+            "filtered_seek",
+            &["exec somefile.cfg", "cl_killsound 0"],
+            &["cl_killsound 1", "alias a b"],
+            120,
+        );
+
+        assert!(r.filtered_init.is_empty(), "{:?}", r.filtered_init);
+        assert!(
+            r.filtered_scheduled.is_empty(),
+            "{:?}",
+            r.filtered_scheduled
+        );
+        assert!(!r.filter_applies);
+        // So the commands it would have dropped do set values.
+        assert!(
+            r.conflicts.iter().any(|c| c.cvar == "cl_killsound"),
+            "{:?}",
+            r.conflicts
+        );
+    }
+
+    /// `fake_game`, plus `files` written under the install root (e.g.
+    /// `dod_addon/wsod.cfg`), with Seek Between Clips as given.
+    fn report_with_files(
+        tag: &str,
+        files: &[(&str, &str)],
+        init: &[&str],
+        custom: Vec<CustomCommandPayload>,
+        hook_runs_batch: Option<bool>,
+    ) -> CfgReport {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (root, game) = fake_game(tag);
+        for (path, text) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        rt.block_on(scan_game_configs(
+            game,
+            init.iter().map(|s| s.to_string()).collect(),
+            custom,
+            Some(300),
+            Some(true),
+            hook_runs_batch,
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn an_initial_exec_is_followed_into_its_file_addon_folder_first() {
+        let r = report_with_files(
+            "exec_followed",
+            &[
+                ("dod_addon/wsod.cfg", "hud_deathnotice_time \"12\"\n"),
+                // The game finds dod_addon's copy first, so this one never runs.
+                ("dod/wsod.cfg", "hud_deathnotice_time \"99\"\n"),
+            ],
+            &["exec wsod.cfg"],
+            vec![scheduled("hud_deathnotice_time 4", "Before", 2.0)],
+            None,
+        );
+
+        let row = conflict(&r, "hud_deathnotice_time").expect("exec'd file + Scheduled");
+        assert_eq!(
+            values_of(row),
+            [("10", "config"), ("12", "exec"), ("4", "before")]
+        );
+        assert_eq!(row.values[1].file.as_deref(), Some("wsod.cfg"));
+        assert!(r.missing_exec.is_empty(), "{:?}", r.missing_exec);
+    }
+
+    #[test]
+    fn an_exec_d_file_against_only_configs_is_not_a_conflict() {
+        // Both are the user's own files, like a config-only conflict.
+        let r = report_with_files(
+            "exec_config_only",
+            &[("dod_addon/wsod.cfg", "hud_deathnotice_time 12\n")],
+            &["exec wsod.cfg"],
+            vec![],
+            None,
+        );
+        assert!(
+            conflict(&r, "hud_deathnotice_time").is_none(),
+            "{:?}",
+            r.conflicts
+        );
+    }
+
+    #[test]
+    fn an_initial_exec_of_a_missing_file_is_reported() {
+        let r = report_with_files("exec_missing", &[], &["exec nope.cfg"], vec![], None);
+        assert_eq!(r.missing_exec, vec!["exec nope.cfg".to_string()]);
+    }
+
+    #[test]
+    fn a_patched_batch_drops_the_exec_so_its_file_is_not_followed() {
+        let r = report_with_files(
+            "exec_patched",
+            &[("dod_addon/wsod.cfg", "hud_deathnotice_time 12\n")],
+            &["exec wsod.cfg"],
+            vec![scheduled("hud_deathnotice_time 4", "Before", 2.0)],
+            Some(false),
+        );
+        let row = conflict(&r, "hud_deathnotice_time").expect("config + Scheduled");
+        assert_eq!(values_of(row), [("10", "config"), ("4", "before")]);
+        assert_eq!(r.filtered_init.len(), 1, "{:?}", r.filtered_init);
+        assert!(r.missing_exec.is_empty(), "{:?}", r.missing_exec);
     }
 
     #[test]
@@ -1609,6 +1796,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(true),
+                None,
             ))
             .unwrap();
         assert_eq!(
@@ -1674,6 +1862,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(true),
+                None,
             ))
             .unwrap();
         assert!(!r.decal_flush_is_noop, "{:?}", r);
@@ -1693,6 +1882,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(true),
+                None,
             ))
             .unwrap();
         assert!(!r.decal_flush_is_noop, "{:?}", r);
@@ -1713,6 +1903,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(false),
+                None,
             ))
             .unwrap();
         assert!(!r.decal_flush_is_noop, "{:?}", r);
@@ -1732,6 +1923,7 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(false),
+                None,
             ))
             .unwrap();
         assert_eq!(r.decal_default_ring, None);
