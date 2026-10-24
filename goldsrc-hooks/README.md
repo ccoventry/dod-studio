@@ -239,6 +239,13 @@ is the complete list):
   crate; a demo too big for the game's address space is refused, not tried).
   One `.res` per tab in `dod_addon\dodstudio_ui\` (`dod\dodstudio_ui\` without `-addons`), editable in
   build mode; never narrower than its tabs. See `src/studio_panel.rs`.
+- **Loading progress on the VCR bar** (`ds_demo_show_load_progress 1`, on
+  by default): while `viewdemo` is still reading a demo, the stock bar shows
+  `n%` and a progress bar where its time label sits, then hides them. The
+  controls come from the bar layout DoD Studio's launch writes to
+  `dod_addon\resource\DemoPlayerDialog.res` (its own copy of the user's, with
+  the two added), so a game started without `-addons` or without Studio shows
+  nothing. See `src/demo_bar_progress.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when
