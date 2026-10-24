@@ -80,16 +80,23 @@ Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.
 
 ## Use at your own risk
 
-DoD Studio does what it can to keep your demos and your Steam account safe.
-It reads demos and never moves or deletes one unless you asked it to and it
-said so first, and every launch goes through the safeguards above. That is
-best effort, not a guarantee. Software has bugs, VAC's rules are Valve's and
-unpublished, and only you decide what you run and where you connect. You use
-the app at your own risk: if a demo is lost or an account is banned, the
-responsibility is yours, not the project's. Back up demos you care about
-before pointing any tool at them, this one included. The MIT licence says the
-same in its own words: the software is provided as is, without warranty of any
-kind.
+Everything DoD Studio does happens offline. It plays demos in a game it
+started itself, never joins a server, and starts that game with HLAE's connect
+warning and the hook DLL's own connect refusal in place. As Valve describes
+VAC, it acts when a game connects to a VAC-secured server, so a game that never
+joins one has nothing to be banned for. Valve publishes that rule, not what VAC
+checks or when it bans, so nobody can promise that a given tool is safe, and
+what happens once you connect from a game with the DLL loaded, or load it into
+the game you play online with, is outside this project's control.
+
+The same goes for your files. The app reads demos and never moves or deletes
+one unless you asked it to and it said so first. That is best effort, not a
+guarantee: software has bugs. Back up demos you care about before pointing any
+tool at them, this one included.
+
+You use DoD Studio at your own risk. A lost demo or a banned account is yours
+to carry, not the project's. The MIT licence says the same in its own words:
+the software is provided as is, without warranty of any kind.
 
 ---
 
