@@ -34,12 +34,27 @@
 //! (the sideways part of `vieworg - simorg - viewheight`, which is all
 //! `V_CalcRefdef` adds there besides a fixed 1/32 and a grenade's screen
 //! shake, which `screen_effects::unshake` takes out first when
-//! `ds_view_hide_screen_shake` is on) and replaced by the live one [`after_calc_refdef`]
-//! measured the same way a moment earlier. The camera moves sideways and the
-//! gun forward by the difference, so the recorded path, its smoothing and everything else in the
-//! view stay as recorded. The live tilt is added to the gun's angles in
+//! `ds_view_hide_screen_shake` is on) and replaced by the live one, the bob
+//! `V_CalcBob` gives for the cvars set now, on the demo's own clock (below).
+//! The camera moves sideways and the gun forward by the difference, so the
+//! recorded path, its smoothing and everything else in the view stay as
+//! recorded. The live tilt is added to the gun's angles in
 //! [`before_view_model`], after the engine has set them and before the gun is
 //! drawn.
+//!
+//! ## The bob runs on the demo's clock
+//!
+//! `V_CalcBob`'s phase is `bobtime`, a static it adds each frame's
+//! `frametime` to since the game started, menus and earlier demos included.
+//! So the client's own bob reaches a given demo moment at a different point
+//! of its cycle on every run: two captures of one clip (a normal and a
+//! wallhack pass) swayed out of step. [`demo_bob`] works the same formula out
+//! itself (`cl_bob`, `cl_bobcycle`, `cl_bobup`, the recorded speed, the same
+//! clamp) with the demo's clock as `bobtime`: the demo player's world clock
+//! under `viewdemo` (the clock seeks and capture batches use), the recorded
+//! client time under `playdemo`. Same amplitude and cycle as the client's, so
+//! it looks the same; a moment of the demo is always at the same phase,
+//! whichever way playback got there.
 //!
 //! That only holds while the recorded view is the recorder's own living eye.
 //! While the recorder is dead or spectates a teammate in first person,
@@ -56,8 +71,9 @@
 //! `ds_view_hide_screen_shake` (which shares the call) is first turned on;
 //! `tools/verify_pov_live_bob_offsets.py` re-derives both.
 //!
-//! `ds_debug_log_view_bob 1` logs each frame's numbers: in a POV demo the live
-//! and recorded bob, why a frame was left alone, and where the gun ends up
+//! `ds_debug_log_view_bob 1` logs each frame's numbers: in a POV demo the
+//! demo clock, the live bob on it and the client's own (for comparison), the
+//! recorded bob, why a frame was left alone, and where the gun ends up
 //! relative to the camera; in an HLTV demo watched in first person the same
 //! for the view `client.dll` works out live, to compare against.
 
@@ -136,6 +152,13 @@ const GUN_FORWARD: f32 = 0.4;
 /// DoD's gun tilt per unit of bob, subtracted from its pitch, yaw and roll
 /// (`client.dll+0x4f86b`..`+0x4f8a1`).
 const GUN_TILT: [f32; 3] = [0.3, 0.5, 1.0];
+/// `V_CalcBob`'s clamp itself (`client.dll+0x4ede0`, `+0x4ee05`).
+const CALC_BOB_MIN: f32 = -7.0;
+const CALC_BOB_MAX: f32 = 4.0;
+/// `V_CalcBob`'s share of the bob that stays and the share that swings
+/// (`client.dll+0x4edcc`, `+0x4edd2`).
+const BOB_STEADY: f32 = 0.3;
+const BOB_SWING: f32 = 0.7;
 
 type OverrideFn = unsafe extern "C" fn(*mut View, *mut [f32; 3], *mut i32);
 
@@ -156,6 +179,13 @@ static TILT_PENDING: AtomicBool = AtomicBool::new(false);
 /// The recorded view angles of the frame the tilt is for, for the log.
 static TILT_VIEW_YAW: AtomicU32 = AtomicU32::new(0);
 static TILT_VIEW_ROLL: AtomicU32 = AtomicU32::new(0);
+/// `cl_bob`, `cl_bobcycle` and `cl_bobup`, once looked up.
+static BOB_CVARS: [AtomicPtr<CvarSPartial>; 3] = [
+    AtomicPtr::new(std::ptr::null_mut()),
+    AtomicPtr::new(std::ptr::null_mut()),
+    AtomicPtr::new(std::ptr::null_mut()),
+];
+const BOB_CVAR_NAMES: [&std::ffi::CStr; 3] = [c"cl_bob", c"cl_bobcycle", c"cl_bobup"];
 
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
@@ -196,6 +226,63 @@ fn speed_of(view: &View) -> f32 {
 fn bob_of(view: &View) -> f32 {
     let side = [0, 1, 2].map(|i| view.vieworg[i] - view.simorg[i] - view.viewheight[i] - NUDGE);
     dot(side, view.right)
+}
+
+/// The cvars `V_CalcBob` reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BobCvars {
+    bob: f32,
+    cycle: f32,
+    up: f32,
+}
+
+/// The values of `cl_bob`, `cl_bobcycle` and `cl_bobup` now, or `None` until
+/// the client has registered them.
+fn bob_cvars() -> Option<BobCvars> {
+    let mut values = [0.0; 3];
+    for (i, slot) in BOB_CVARS.iter().enumerate() {
+        let mut cvar = slot.load(Ordering::Acquire);
+        if cvar.is_null() {
+            let engfuncs = engine::engfuncs()?;
+            // Safety: a plain lookup by name; null when not registered.
+            cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(BOB_CVAR_NAMES[i].as_ptr()) };
+            if cvar.is_null() {
+                return None;
+            }
+            slot.store(cvar, Ordering::Release);
+        }
+        // Safety: the engine owns the cvar for the session.
+        values[i] = unsafe { (*cvar).value };
+    }
+    let [bob, cycle, up] = values;
+    Some(BobCvars { bob, cycle, up })
+}
+
+/// `V_CalcBob` (`client.dll+0x4ed10`, the Half-Life SDK's formula) with
+/// `clock` in place of its `bobtime`, for a player moving at `speed`.
+fn demo_bob(clock: f64, speed: f32, cvars: BobCvars) -> f32 {
+    use std::f32::consts::PI;
+    let mut cycle = if cvars.cycle > 0.0 {
+        let period = f64::from(cvars.cycle);
+        (clock.rem_euclid(period) / period) as f32
+    } else {
+        0.0
+    };
+    cycle = if cycle < cvars.up {
+        PI * cycle / cvars.up
+    } else {
+        PI + PI * (cycle - cvars.up) / (1.0 - cvars.up)
+    };
+    let bob = speed * cvars.bob;
+    (bob * BOB_STEADY + bob * BOB_SWING * cycle.sin()).clamp(CALC_BOB_MIN, CALC_BOB_MAX)
+}
+
+/// The clock the live bob runs on: the demo player's world clock under
+/// `viewdemo`, else the client time the recorded view carries.
+fn demo_clock(recorded: &View) -> f64 {
+    crate::demo_seek::clock()
+        .filter(|c| c.active)
+        .map_or(f64::from(recorded.time), |c| c.now)
 }
 
 fn is_a_bob(bob: f32) -> bool {
@@ -332,11 +419,14 @@ unsafe extern "C" fn after_override(view: *mut View, gun: *mut [f32; 3], viewmod
     if !on() || !HAVE_LIVE.swap(false, Ordering::Relaxed) {
         return;
     }
-    let live = f32::from_bits(LIVE_BOB.load(Ordering::Relaxed));
+    let client_bob = f32::from_bits(LIVE_BOB.load(Ordering::Relaxed));
     let spectating = crate::spectator_target::mode().is_some_and(|mode| mode != 0);
     // Safety: the engine's ref_params_s and the gun entity's origin, both
     // live for this call.
     let (view, gun) = unsafe { (&mut *view, &mut *gun) };
+    let clock = demo_clock(view);
+    // The client's own bob only until its cvars are registered.
+    let live = bob_cvars().map_or(client_bob, |cvars| demo_bob(clock, speed_of(view), cvars));
     let decision = decide(view, live, spectating);
     if let Ok(recorded) = decision {
         let (camera, gun_shift) = shift(view, recorded, live);
@@ -360,8 +450,8 @@ unsafe extern "C" fn after_override(view: *mut View, gun: *mut [f32; 3], viewmod
             ),
         };
         log(&format!(
-            "{LOG_NAME}: pov t {:.3} speed {:.0} (live {:.0}) onground {} health {} g_iUser1 {} \
-             live bob {live:+.3}, {action}; gun f {f:+.3} r {r:+.3} u {u:+.3}",
+            "{LOG_NAME}: pov t {:.3} clock {clock:.4} speed {:.0} (live {:.0}) onground {} health {} g_iUser1 {} \
+             live bob {live:+.4} (client's {client_bob:+.3}), {action}; gun f {f:+.4} r {r:+.4} u {u:+.4}",
             view.time,
             speed_of(view),
             f32::from_bits(LIVE_SPEED.load(Ordering::Relaxed)),
@@ -575,6 +665,58 @@ mod tests {
         // A live view that isn't the player's own eye either.
         assert_eq!(decide(&bobbing(0.5), -25.0, false), Err(Skip::NotABob));
         assert_eq!(decide(&bobbing(0.5), f32::NAN, false), Err(Skip::NotABob));
+    }
+
+    const DOD_DEFAULT: BobCvars = BobCvars {
+        bob: 0.005,
+        cycle: 0.8,
+        up: 0.5,
+    };
+
+    #[test]
+    fn the_live_bob_follows_v_calc_bobs_formula() {
+        // Standing still: no bob at any phase.
+        assert_eq!(demo_bob(12.3, 0.0, DOD_DEFAULT), 0.0);
+        // Running at 200 u/s, bob 1.0: 0.3 steady plus 0.7 swinging, the
+        // swing's top a quarter of the cycle in (half of the up half).
+        let top = demo_bob(0.2, 200.0, DOD_DEFAULT);
+        assert!((top - 1.0).abs() < 1e-5, "{top}");
+        let start = demo_bob(0.0, 200.0, DOD_DEFAULT);
+        assert!((start - 0.3).abs() < 1e-5, "{start}");
+        // Three quarters in, the down half's bottom.
+        let bottom = demo_bob(0.6, 200.0, DOD_DEFAULT);
+        assert!((bottom + 0.4).abs() < 1e-5, "{bottom}");
+        // Clamped as V_CalcBob clamps.
+        assert_eq!(demo_bob(0.2, 1e5, DOD_DEFAULT), 4.0);
+        assert_eq!(demo_bob(0.6, 1e5, DOD_DEFAULT), -7.0);
+    }
+
+    #[test]
+    fn a_demo_moment_is_always_at_the_same_phase() {
+        // Same clock, same bob, whatever came before; one cycle on, too.
+        let a = demo_bob(1234.567, 180.0, DOD_DEFAULT);
+        assert_eq!(a, demo_bob(1234.567, 180.0, DOD_DEFAULT));
+        let b = demo_bob(1234.567 + 0.8, 180.0, DOD_DEFAULT);
+        assert!((a - b).abs() < 1e-3, "{a} {b}");
+    }
+
+    #[test]
+    fn odd_cvars_give_no_nan() {
+        let no_cycle = BobCvars {
+            cycle: 0.0,
+            ..DOD_DEFAULT
+        };
+        assert!(demo_bob(3.0, 200.0, no_cycle).is_finite());
+        let all_up = BobCvars {
+            up: 1.0,
+            ..DOD_DEFAULT
+        };
+        assert!(demo_bob(0.7, 200.0, all_up).is_finite());
+        let no_up = BobCvars {
+            up: 0.0,
+            ..DOD_DEFAULT
+        };
+        assert!(demo_bob(0.7, 200.0, no_up).is_finite());
     }
 
     #[test]

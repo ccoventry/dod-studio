@@ -26,6 +26,41 @@ test('an open folder still lists its subfolders after Refresh from elsewhere', a
   await expect(page.locator('.tree-loading')).toHaveCount(0);
 });
 
+// A demo opened from Explorer deep in a cloud folder (#973): the list showed
+// the folder and selected the demo only once every folder above it had been
+// read, and every demo in all of them had been opened for its map.
+const row = (page, path) => page.locator(`#analyzer-demo-tbody tr[data-path="${css(path)}"]`);
+
+test('an opened demo is listed and selected while the folders above it are still read', async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate(() => { window.__held.add('D:\\Users'); window.__holdHeads = true; });
+  // The analysis never finishes here, so its promise isn't handed back.
+  await page.evaluate(() => { window.__openDemo('D:\\Users\\chris\\x.dem'); });
+
+  const x = row(page, 'D:\\Users\\chris\\x.dem');
+  await expect(x).toHaveClass(/selected/);
+  await expect(row(page, 'D:\\Users\\chris\\a.dem')).not.toHaveClass(/selected/);
+  // The map waits for the start of the file, and says so.
+  await expect(x.locator('td').nth(2)).toHaveText('…');
+
+  await page.evaluate(() => window.__releaseHeads());
+  await expect(x.locator('td').nth(2)).toHaveText('dod_anzio');
+
+  // The tree reaches the folder once the folder above it is read.
+  await expect(label(page, 'D:\\Users\\chris')).toHaveCount(0);
+  await page.evaluate(() => window.__release['D:\\Users']());
+  await expect(label(page, 'D:\\Users\\chris').locator('xpath=..')).toHaveClass(/selected/);
+});
+
+test("the Demos list says it is reading a folder whose names aren't in yet", async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate(() => window.__held.add('D:\\Users\\chris'));
+  await page.evaluate(() => { window.__openDemo('D:\\Users\\chris\\x.dem'); });
+  await expect(page.locator('#analyzer-demo-tbody')).toHaveText('Reading this folder…');
+  await page.evaluate(() => window.__release['D:\\Users\\chris']());
+  await expect(row(page, 'D:\\Users\\chris\\x.dem')).toHaveClass(/selected/);
+});
+
 test('an open folder that cannot be read shows empty, not Loading… for good', async ({ page }) => {
   await gotoHarness(page);
   await toggle(page, 'D:\\').click();

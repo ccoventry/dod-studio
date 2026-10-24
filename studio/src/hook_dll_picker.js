@@ -58,6 +58,11 @@ export function selectedValue(options, current) {
 }
 
 let dropdown = null;
+// The saved settings ask for a refresh as they land (settings_sync.js), and
+// that can come before initHookDllPicker makes the dropdown: main.js awaits
+// the built-in command profiles in between. Such a refresh runs from init,
+// or the list stays empty until Refresh is clicked.
+let refreshWanted = false;
 
 const pathInput = () => document.querySelector('#goldsrc-hooks-dll-path-input');
 
@@ -65,7 +70,11 @@ const pathInput = () => document.querySelector('#goldsrc-hooks-dll-path-input');
 export async function refreshHookDllPicker() {
   const input = pathInput();
   const box = document.querySelector('#goldsrc-hooks-dll-choice');
-  if (!dropdown || !input || !box) return;
+  if (!dropdown) {
+    refreshWanted = true;
+    return;
+  }
+  if (!input || !box) return;
   const refresh = document.querySelector('#goldsrc-hooks-refresh-btn');
   if (refresh) refresh.disabled = true;
   try {
@@ -97,4 +106,8 @@ export function initHookDllPicker() {
   }
   document.querySelector('#goldsrc-hooks-refresh-btn')
     ?.addEventListener('click', () => { refreshHookDllPicker(); });
+  if (dropdown && refreshWanted) {
+    refreshWanted = false;
+    refreshHookDllPicker();
+  }
 }
