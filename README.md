@@ -69,8 +69,8 @@ memory, which is exactly what VAC looks for. So:
   unless it's an HLTV proxy you chose to watch. DoD Studio's hook DLL refuses
   `connect` itself while it is loaded, except to an HLTV proxy that says VAC
   is off.
-- **Never inject the hook DLL by hand** (`inject.exe`) into a game you then
-  play online with.
+- **Never load the hook DLL by hand** (with HLAE or any injector) into a game
+  you then play online with.
 - **To play online, start Day of Defeat from Steam, without DoD Studio.** A
   separate copy of Half-Life for movies is recommended but never required: it
   keeps your movie configs, models, sprites and sounds out of the game you
