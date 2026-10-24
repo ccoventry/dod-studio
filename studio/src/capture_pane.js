@@ -73,7 +73,7 @@ let currentOnStatusChange = null;
 // gets serialized on Save Session. Null until main.js wires one up.
 let currentGetTakeIndex = null;
 // Fired once per batch when capture_status reports it's no longer running
-// (finished, cancelled, or errored) — main.js's updateExportPoolIndicator,
+// (finished, cancelled, or errored) — folder_pools.js's updateExportPoolIndicator,
 // so the footer's "Capture Output Free" figure reflects what the batch just
 // wrote. Previously only refreshLaunchGuard() ran here, which reads its own
 // separate availableBytes for the launch-guard banner and never touched the
@@ -579,7 +579,8 @@ export async function refreshLaunchGuard(state) {
 
 // ── Custom Engine Commands (Init / Before-After) ──────────────────────────────
 // Local to the Batch Capture Config panel — nothing else in the app reads
-// these, unlike scanPaths/targetDrives which main.js owns for cross-pane use.
+// these, unlike the pinned folders and capture folders (demo_folders.js,
+// folder_pools.js), which other panes read too.
 
 let initCommands = [];
 let customCommands = [];
