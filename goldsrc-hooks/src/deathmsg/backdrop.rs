@@ -373,9 +373,13 @@ pub(super) fn set_outline(px: i32, rgb: Rgb, alpha: i32) -> String {
 pub(super) fn set_background(asked: Background) -> String {
     match asked {
         Background::Off => {
+            // Everything `background` set, so a later `background team`
+            // starts from the shades again, not an old cfg's team colours.
             MODE.store(MODE_OFF, Ordering::Relaxed);
             LINE_PENDING.store(false, Ordering::Relaxed);
-            "background off".to_string()
+            ALLIES_BOX.store(UNSET, Ordering::Relaxed);
+            AXIS_BOX.store(UNSET, Ordering::Relaxed);
+            "background off, team colours back to the shade".to_string()
         }
         Background::Line {
             alpha,
@@ -727,6 +731,26 @@ mod tests {
         assert!(parse_background(&argv(&["160", "1", "2"])).is_err());
         assert!(parse_background(&argv(&["160", "65"])).is_err(), "padding");
         assert!(parse_background(&argv(&[])).is_err());
+    }
+
+    #[test]
+    fn background_default_also_forgets_the_team_colours() {
+        set_background(Background::TeamColour(Team::Allies, Some((10, 40, 110))));
+        set_background(Background::TeamColour(Team::Axis, Some((90, 0, 0))));
+        set_background(Background::Team {
+            alpha: 200,
+            padding: 4,
+        });
+        assert!(describe().contains("allies 10 40 110, axis 90 0 0"));
+        set_background(Background::Off);
+        assert_eq!(ALLIES_BOX.load(Ordering::Relaxed), UNSET);
+        assert_eq!(AXIS_BOX.load(Ordering::Relaxed), UNSET);
+        set_background(Background::Team {
+            alpha: 200,
+            padding: 4,
+        });
+        assert!(describe().contains("allies shade, axis shade"));
+        set_background(Background::Off);
     }
 
     #[test]

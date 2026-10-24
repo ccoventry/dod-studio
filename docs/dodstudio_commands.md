@@ -135,7 +135,7 @@ one by hand, changes the names' font, or scales the weapon icons. The font
 | `ds_hud_deathmsg background <alpha> [r g b] [padding]` | one translucent box behind each line, from the killer's name to the victim's, `alpha` 0..255, colour default black, `padding` 0..64 px sideways (default 4); the box is the line's height, 2 px short so two lines' boxes don't overlap |
 | `ds_hud_deathmsg background team <alpha> [padding]` | a box behind each name instead, in a dark shade (a quarter) of that name's team colour; the icon gets none |
 | `ds_hud_deathmsg background allies <r g b>` / `background axis <r g b>` | that team's box colour for `background team` (`allies` covers the British, who are team 1 on a British map); `background allies default` goes back to the shade |
-| `ds_hud_deathmsg background default` | no boxes (the default) |
+| `ds_hud_deathmsg background default` | no boxes (the default), and `allies`/`axis` back to the shade |
 
 A `block` id is any of:
 

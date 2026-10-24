@@ -1238,7 +1238,7 @@ fn usage() -> String {
          \x20                               a box behind each name, a dark shade of its team's colour\n\
          \x20 {COMMAND} background allies|axis <r g b>|default\n\
          \x20                               that team's box colour (allies covers the British)\n\
-         \x20 {COMMAND} background default no boxes\n",
+         \x20 {COMMAND} background default no boxes, team colours back to the shade\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,
