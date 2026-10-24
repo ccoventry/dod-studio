@@ -78,6 +78,19 @@ memory, which is exactly what VAC looks for. So:
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
 
+## Use at your own risk
+
+DoD Studio does what it can to keep your demos and your Steam account safe.
+It reads demos and never moves or deletes one unless you asked it to and it
+said so first, and every launch goes through the safeguards above. That is
+best effort, not a guarantee. Software has bugs, VAC's rules are Valve's and
+unpublished, and only you decide what you run and where you connect. You use
+the app at your own risk: if a demo is lost or an account is banned, the
+responsibility is yours, not the project's. Back up demos you care about
+before pointing any tool at them, this one included. The MIT licence says the
+same in its own words: the software is provided as is, without warranty of any
+kind.
+
 ---
 
 ## For developers

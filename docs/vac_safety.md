@@ -12,6 +12,11 @@ injected, what protects each one, and what is still open. It doesn't try to
 say whether any particular action would or wouldn't get an account banned. The
 rules below are deliberately cautious.
 
+Everything here is best effort. VAC's rules are Valve's and unpublished, and
+only you decide where you connect from. You use DoD Studio at your own risk:
+a banned account is yours to carry, not the project's (the README's "Use at
+your own risk" section, and the MIT licence's no-warranty clause).
+
 ## The rules
 
 1. **Only play demos in a game DoD Studio started.** Never join a game server
