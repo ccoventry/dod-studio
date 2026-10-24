@@ -1179,6 +1179,18 @@ export async function indexDemoPlayers(paths, requestId, lane) {
     });
 }
 
+/** Sorts a folder's demos for the player read without opening any (#992):
+ *  `found` (players already cached, with them), `to_read`, and `in_cloud`
+ *  (no cache entry, on a cloud drive: reading one downloads it). Null on
+ *  failure, so the caller reads every demo as before. */
+export async function lookupDemoPlayers(paths) {
+  return invoke("lookup_demo_players", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (lookup_demo_players):", err);
+      return null;
+    });
+}
+
 /** Writes a text file the user picked a path for (#110's marker list).
  *  Goes through the same unscoped Rust write as Save Project, since the fs
  *  plugin can't reach paths a save dialog returns. */

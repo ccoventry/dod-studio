@@ -1122,7 +1122,10 @@ export const STRINGS = {
     // #437: every demo a player appears in.
     PLAYER_PLACEHOLDER: 'Player',
     PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
-    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    playersReading: (done, total) => `Reading players: ${done} / ${total} not read yet`,
+    // #992: the one quick lookup of the players already read.
+    PLAYERS_LOOKING: 'Looking up players…',
+    playersInCloud: (n) => `Players not read for ${n} demo${n === 1 ? '' : 's'} on a cloud drive (reading one downloads it). Cache all reads them.`,
     ROLE_RECORDED: 'recorded it',
     ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',

@@ -13,12 +13,17 @@ import { STRINGS } from './strings.js';
 
 /**
  * @param {{ getDemoPaths: () => string[] }} deps  the current folder's demos
+ * @returns {{ isCaching: (path: string) => boolean }}  whether a run has
+ *   `path` queued, so the player read leaves it to the run (#992)
  */
 export function initDemoCache({ getDemoPaths }) {
   const button = document.querySelector('#analyzer-cache-all-btn');
   const status = document.querySelector('#analyzer-cache-status');
   const bar = document.querySelector('#analyzer-cache-bar');
-  if (!button || !status) return;
+  // The running run's demos, cleared when it ends.
+  let queued = new Set();
+  const api = { isCaching: (path) => queued.has(path) };
+  if (!button || !status) return api;
   let running = false;
   const parses = parseClock();
 
@@ -51,6 +56,7 @@ export function initDemoCache({ getDemoPaths }) {
       return;
     }
     setRunning(true);
+    queued = new Set(paths);
     showBar();
     parses.reset();
     // Until the first event the backend is checking which demos the cache has.
@@ -59,6 +65,7 @@ export function initDemoCache({ getDemoPaths }) {
       await cacheDemos(paths);
     } catch (err) {
       setRunning(false);
+      queued = new Set();
       status.textContent = String(err);
     }
   });
@@ -66,6 +73,7 @@ export function initDemoCache({ getDemoPaths }) {
   listen('demo_cache_progress', ({ payload }) => {
     if (payload.finished) {
       setRunning(false);
+      queued = new Set();
       status.textContent = STRINGS.ANALYZER.cacheDone(payload);
     } else {
       setRunning(true);
