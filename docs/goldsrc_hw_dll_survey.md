@@ -25,9 +25,9 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 >
 > §1–§5 are the first pass; §7–§11 are later passes (#273, closed) that resolved
 > most of what §3.3–§3.5 and §4 leave open. Where the two disagree, trust the
-> later section; §11 is what is still not surveyed. §12–§13 are #300: §12
+> later section; §11 is what is still not surveyed. §12–§14 are #300: §12
 > redoes the HLAE map against HLAE 2.192.4 for **both** engine builds, and
-> supersedes §1–§2's counts.
+> supersedes §1–§2's counts; §13–§14 open the demo reader.
 >
 > | Candidate | Built? | Command / module | Issue / PR |
 > | --- | --- | --- | --- |
@@ -639,7 +639,9 @@ Shorter than §5, and deliberately not empty.
 
 *(#300 picks these up. §12 answers the HLAE items — the eight keys and the
 census of writes — for both builds; §13 is the demo reader; §3.2's flag is
-answered by `docs/goldsrc_ex_interp.md` §2–§2b.)*
+answered by `docs/goldsrc_ex_interp.md` §2–§2b. §14 closes what §12 and §13
+left: HLAE's writes through computed pointers, its unhook paths, and the rest
+of the demo reader.)*
 
 ---
 
@@ -990,12 +992,14 @@ away from demo-borne commands would sidestep the filter entirely.
 ### 13.4 The Anniversary build
 
 Rechecked, not re-traced: its reader has the same messages (`Bad demo length.`
-and `Demo message > MAX_POSSIBLE_MSG` in one function, `hw+0x199cc0`;
+and `Demo message > MAX_POSSIBLE_MSG` in one function, `hw+0x199d20` — the
+reader proper; `hw+0x199cc0` just before it is the wrapper §14.1 describes;
 `Error: Corrupt demo file.` in `hw+0x199890`), the same filter (`hw+0x1aaa30`,
 the same strings in the same order, called from the `stufftext` handler and
 from the reader immediately after a 64-byte read at `hw+0x199f40`). The gate
 details in §13.3 — the `tfc` exemption and the `cl_filterstuffcmd` stage — were
-read on the pre-Anniversary build only.
+read on the pre-Anniversary build only *(§14.5 rechecks both on the
+Anniversary build)*.
 
 ### 13.5 What is still not surveyed
 
@@ -1004,3 +1008,228 @@ read on the pre-Anniversary build only.
   their read sizes.
 - The 92-byte directory entry's fields other than `offset`, and whether
   playback ever consults `length` or the frame count.
+
+*(§14 answers all three, on both builds.)*
+
+---
+
+## 14. What §12 and §13 left (#300)
+
+After #678, #300 had five loose ends: two about HLAE (writes through pointers
+that are not keys, and its unhook paths) and three about the demo reader
+(§13.5). All five are answered here, offline, on both engine builds: the
+pre-Anniversary `hw.dll` (`ImageBase 0x1d00000`) and the 25th Anniversary one
+(`0x10000000`), with HLAE 2.192.4 (§12). Code is `hw+<rva>`; data globals are
+written as absolute addresses, as the rest of this document does.
+
+### 14.1 First: `viewdemo` does not use this reader
+
+Every demo message reaches the client through one wrapper (pre-Anniversary
+`hw+0x1151d`, Anniversary `hw+0x199cc0`). It asks one question — is
+`DemoPlayer.dll` loaded **and** was this demo started by `viewdemo`? — and
+either takes the message from `DemoPlayer.dll`'s interface or falls into the
+`hw.dll` frame reader §13 describes (`hw+0x1104d` / `hw+0x199d20`). `viewdemo`
+sets that mode flag to 1 and hands the file to `DemoPlayer.dll`'s own loader;
+`playdemo` sets it to 0 (proven on both builds: the setter is called with 1 from
+the `viewdemo` handler, `hw+0x1093d` / `hw+0x19c590`, and with 0 from
+`playdemo`'s).
+
+So **§13 and this section describe `playdemo` and `timedemo`**, which is what
+a patched capture batch uses (`game_handoff.rs` starts every chain demo with
+`playdemo`). `viewdemo` — which Goto and Review use — reads the file in
+`DemoPlayer.dll`, which this survey does not open. It very likely shares the
+*consumers*: an engine-side interface has four consecutive vtable slots
+(pre-Anniversary `0x1e1e294`, `.rdata`) whose methods are thin wrappers around
+the same ClientData, event, weapon-animation and sound consumers the `hw.dll`
+reader calls (§14.4). That this is the interface `DemoPlayer.dll` calls back
+into is inferred from its shape, not traced. So what each frame type *does* is
+most likely common to both commands; how the file is read and validated is not.
+
+### 14.2 The end of the directory, and the end of the file
+
+`NextSection` (type 5, pre-Anniversary `hw+0xf36d`, inlined on the Anniversary
+build at `hw+0x199e85`):
+
+1. if the segment being left has flag `4` (a CD track), queues `cd stop`;
+2. moves to the next directory entry; **if there is none, calls
+   `Host_EndGame("End of demo.")`**;
+3. otherwise stores the entry's `cdtrack`, seeks to its `offset`, resets the
+   playback clock and the per-segment message counter, and reads on.
+
+`Host_EndGame` does not return on either build: it `longjmp`s out of the frame
+(after moving to the next demo of a `startdemos` list, or disconnecting when
+there is none). So the normal end of a demo is the second `NextSection` — the
+one at the end of the playback segment — and nothing after it in the file is
+read. A demo whose last frame is not a `NextSection` is not detected as
+truncated: the 9-byte header reads are unchecked, so the type byte keeps
+whatever that stack slot held, and the frame is decided by that.
+*Inferred from the code, not tested:* the likely outcome is the
+network-message path, ending at `Bad demo length.`.
+
+### 14.3 The clock: `playdemo`'s speed, `host_framerate` and `timedemo`
+
+The reader's clock is **`realtime × replayspeed`**, measured from the last
+`DemoStart` or `NextSection` (pre-Anniversary `hw+0xd1e0`; inlined on the
+Anniversary build). `replayspeed` is `playdemo`'s optional second argument:
+1.0 by default, and any value ≤ 0 becomes 1.0 (`Playdemo:  Time scale %f`). A
+frame is due when its recorded time is below that clock (types 0 and 5 are
+never held back, §13.2).
+
+`host_framerate` reaches the reader through `realtime`. When it is above zero
+**and a demo is playing** (or a local server runs), the host frame advances
+`realtime` by exactly `sys_timescale × host_framerate`, whatever the wall clock
+did (pre-Anniversary `hw+0x56f86`, Anniversary `hw+0x1d43fd`). So under
+`playdemo` a fixed `host_framerate` makes the demo advance a fixed step per
+rendered frame — the frame-locked behaviour a capture relies on.
+
+`timedemo` (pre-Anniversary `hw+0x10b1d`, Anniversary `hw+0x19c530`) runs
+`playdemo` and then sets the timedemo flag. With it set:
+
+- **nothing is time-gated**: every frame is due as soon as it is read;
+- **one network message per host frame**: a second one in the same host frame
+  is put back (the reader seeks 9 bytes back over its header) for the next
+  frame. Non-message frames (commands, events, sounds) are not limited;
+- the `fps_max` limiter in the host frame is skipped (pre-Anniversary
+  `hw+0x570c3`; Anniversary `hw+0x1d4513`);
+- the start time is taken one host frame after `timedemo` runs, when the
+  first message is read, rather than when the command runs.
+
+### 14.4 The type-specific readers
+
+Every read below is unchecked (`FS_Read`'s count is never compared), as the
+header's are. Pre-Anniversary addresses first, then Anniversary.
+
+| type | reads | then |
+| --- | --- | --- |
+| 0, 1, and 10–255 | the 436-byte demo-info block and the 28-byte sequence block (straight into the engine's netchan sequence fields), then the checked length and payload (§13.2) | the message is parsed. As a segment starts, its entry's CD track, title and fades run (§14.6) |
+| 4 `ClientData` | 32 bytes: origin, view angles, weapon bits, FOV | the client's `HUD_UpdateClientData` export is offered the block with the client time. If it returns non-zero, **and the HLTV flag is clear**, the view angles are copied back to the engine; the FOV is stored either way. The origin is never used by the engine itself. `hw+0xc010` / `hw+0x196cf0` |
+| 6 event | flags, index, delay, then 72 bytes of `event_args_t` | queued by the same function `svc_event` and `svc_event_reliable` call (`hw+0x1e910`; inlined, calling `hw+0x1aa750`) |
+| 7 weapon animation | sequence, body | `pfnWeaponAnim`, the function `cl_enginefuncs` slot 66 points at (`hw+0xc990` / `hw+0x1963e0`): it sets the view model's sequence and body, and writes them to a demo being recorded. HLAE detours this function (§12.3), so with that hook in, a recorded type 7 frame runs through HLAE |
+| 8 sound | channel, a name length **clamped to 255**, that many bytes, attenuation, volume, flags, pitch | the sound is started (`hw+0xf8ed`). As with type 9, a longer recorded name is not skipped: the rest of it is read as the next frame header |
+| 9 `DemoBuffer` | a length clamped to 32,768, that many bytes | handed to the client's `Demo_ReadBuffer` export, if it has one (`hw+0xc120` / `hw+0x1972a0`); the engine reads none of it |
+
+The HLTV flag in the type 4 row is `docs/goldsrc_ex_interp.md`'s flag
+(`0x2d5df84` / `0x1140e9f4`). On the pre-Anniversary build nothing ever sets
+it, so a POV demo's and an HLTV demo's `ClientData` angles are both applied; on
+the Anniversary build `svc_hltv` sets it, so an HLTV demo's are not. Same
+build split as the `ex_interp` ceiling.
+
+### 14.5 The `ConsoleCommand` filter on the Anniversary build
+
+§13.3's two gates hold there too. The `exec` test is skipped when a flag is
+set, and the only writes to that flag (`0x10531150`, two sites) follow a
+comparison of the game directory with `tfc`, as on the pre-Anniversary build.
+The `cl_filterstuffcmd` value is read right after the always-on lists, where
+the pre-Anniversary build reads it. One layout difference: the Anniversary build's 64-byte command
+buffer ends at the function's stack cookie, so a command that fills all 64
+bytes is read on into the cookie (random, rarely containing a zero) and the
+saved frame pointer — the pipeline's strictly-under-64 rule matters there for
+the same reason as on the old build.
+
+### 14.6 The directory entry: what playback reads
+
+Every function that loads the current-entry pointer or the entry array (ten on
+the pre-Anniversary build, nine on the Anniversary one) was followed through
+the registers those land in, and every field access listed:
+
+| field | read on playback? | what for |
+| --- | --- | --- |
+| `+0x04` description | yes | shown as on-screen text as the segment starts, when flag `1` is set |
+| `+0x44` flags | yes | `1` title text; `4` CD track (`cd play` at the start, `cd stop` on leaving); `8` / `0x10` a 2 s / 0.5 s fade in at the start; `0x20` / `0x40` a 2 s / 0.5 s fade out near the end |
+| `+0x48` cdtrack | yes | the `cd play` argument |
+| `+0x4c` time | yes | only to time the fade out |
+| `+0x54` offset | yes | where `playdemo` and `NextSection` seek |
+| `+0x50` frames | **no** | written by the recorder only |
+| `+0x58` length | **no** | written by the recorder only (end position − `offset`) |
+
+So **playback never consults an entry's frame count or length**, on either
+build. A tool that inserts or removes frames does not have to keep them
+consistent for the engine to play the file; only `offset` must be right, and
+the flags decide which of the title, CD and fade effects run. (That says
+nothing about `DemoPlayer.dll`, which reads the directory itself.)
+
+### 14.7 HLAE's writes through pointers that are not keys (closes §12.2's "not proven")
+
+§12.2 could not rule out a store into already-writable memory through a pointer
+HLAE computes at run time. A store that *redirects* anything has to put an HLAE
+address there — a function or a vtable — so the module was searched for every
+way one can travel (a linear sweep of `.text`, restarting past any byte
+capstone cannot decode):
+
+- **Stores of an HLAE code address**, as an immediate or through a register
+  loaded from one: 15. Eight go into HLAE's own globals (its static import-hook
+  objects and function-pointer variables it calls through), six into one HLAE
+  object (§12.2's six), one into a stack descriptor that registers a console
+  command.
+- **Code addresses passed as arguments** (178, leaving out the 138 that are
+  only a C++ prologue's exception-handler push): they go to HLAE's own command
+  registry (67), Detours' `DetourAttach` (40), the C runtime's `atexit` (37),
+  the write primitives already in §12.2's table and their helpers — the jump
+  writers, the import-hook manager, the `cldll_func_t` slot setter (3), the
+  command-handler swapper (4) — and the rest to C runtime internals and one
+  HLAE-internal callback list. None reaches engine memory any other way.
+- **Stores of a vtable address** (120): every one belongs, by HLAE's own RTTI,
+  to an HLAE class (campath interpolators, capture streams, import-hook
+  objects) or to the C++ library (`std::ostringstream`, exceptions,
+  `rapidxml`). None is a class shaped like an engine interface, so HLAE
+  replaces no engine object's vtable.
+
+**So §12.2's census is complete for redirections, proven within the sweep.**
+HLAE still writes plain *values* into engine memory — `msg_readcount`
+(§12.3) is one — but a value is data, not a hook, and does not change which
+code runs. This search does not list those.
+
+### 14.8 HLAE's unhook paths: there are none
+
+- **Detours:** `DetourDetach` is not in the module. Detours' pending-transaction
+  state is touched by exactly four functions (begin, `DetourAttachEx`, commit,
+  update-thread), and all 30 transactions contain at least one attach.
+- **`cldll_func_t` slots, command handlers, import slots:** each saved original
+  is written once, when the hook goes in, and afterwards only called through.
+  The slot setter has three callers, all installs; the command-handler swapper
+  four, all in the one function that runs after `Host_Init`; the import-hook
+  manager's only writes store the new pointer after saving the old one.
+- **Span patches and jumps:** the jump writers have only their installers as
+  callers, and the bracketed writes are §12.2's twelve. The one write that puts
+  something back is by design and per call: `skytextures` is swapped back after
+  each sky draw.
+
+Every HLAE hook therefore lasts for the life of the process. That turns §12.5's
+*inferred* "neither side restores its saved value" into a proven one for HLAE;
+`goldsrc-hooks` has no restore path for the three shared slots either
+(`hook_import`, `connect_guard`'s `wrap` and `swap_slot` only ever install).
+So the three shared slots are chain-safe in either install order, and stay so.
+
+One detail of the swapper: for `startmovie` and `endmovie` HLAE throws the old
+handler away rather than keeping it, so those two commands are replaced, not
+wrapped. Nothing of ours wraps either.
+
+### 14.9 Landmarks
+
+The shortest byte run that is unique in `.text` at each address (absolute
+addresses inside the runs make them build-specific; they locate, they are not
+our signatures):
+
+| | pre-Anniversary | 25th Anniversary |
+| --- | --- | --- |
+| message wrapper (§14.1) | `hw+0x1151d` `e8 de 11 02 00 85 c0 75` | `hw+0x199cc0` `e8 2b 7d 02 00 85 c0 0f` |
+| frame reader | `hw+0x1104d` `55 8b ec b8 74 00 01 00` | `hw+0x199d20` `55 8b ec b8 58 02 01 00` |
+| 64-byte command read | `hw+0x111c3` `6a 40 52 e8 55 aa 02 00` | `hw+0x199f34` `6a 40 50 e8 b4 e1 02 00` |
+| `NextSection` | `hw+0xf36d` `a1 60 e2 f2 02 83 f8 01` | `hw+0x199e85` (inlined) `a1 e0 ea 45 11 83 f8 01` |
+| segment start (CD, fade in) | `hw+0xf28d` `55 8b ec 81 ec 80 00 00 00 a1 a0` | inlined in the reader |
+| `playdemo` | `hw+0x105fd` `55 8b ec 81 ec 00 01 00 00 a1 7c` | `hw+0x199890` (20 bytes; prologue + cookie) |
+| `timedemo` | `hw+0x10b1d` `83 3d 7c 82 d0 02 01 75 47` | `hw+0x19c530` `83 3d 00 cc 24 11 01 75 4f` |
+| `viewdemo` | `hw+0x1093d` `55 8b ec 81 ec 04 01 00 00 a1 7c` | `hw+0x19c590` (22 bytes; prologue + cookie) |
+| `host_framerate` step | `hw+0x56f86` `d9 05 b0 9d e4 01 d8 1d` | `hw+0x1d43fd` `f3 0f 10 0d 3c b6 31 10` |
+| `ClientData` consumer | `hw+0xc010` `55 8b ec 51 a1 70 ed f2` | `hw+0x196cf0` `55 8b ec a1 50 ef 45 11` |
+
+Nothing in `goldsrc-hooks` patches any of these, so there is no `verify_*`
+tool for them; the one-off scripts that produced §14 disassembled these
+functions, followed the directory pointers, and swept `AfxHookGoldSrc.dll` for
+code and vtable addresses, and were not kept.
+
+### 14.10 What is still not surveyed
+
+- `DemoPlayer.dll`'s own reader, the one `viewdemo` uses (§14.1).
+- The 436-byte demo-info block's fields, beyond its size.
+- Most of `hw.dll`, as before.

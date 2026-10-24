@@ -154,10 +154,13 @@ at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 ### `ds_hud_hide_element`
 
 `ds_hud_hide_element <name> <0|1>` with no arguments lists the nine
-elements DoD draws that the stock `cl_hud_*` cvars don't already reach --
-chat, the kill feed, the status bar, the objective icons and the rest.
-`ds_hud_hide_element all 0` puts everything back. See
-[`goldsrc_hud_elements.md`](goldsrc_hud_elements.md).
+elements DoD draws that it can hide -- chat, the kill feed, the status
+bar, the objective icons and the rest. Three overlap a stock cvar
+(`saytext` and `hud_saytext_internal 0`, `objectives` and the
+`cl_hud_objectives`/`cl_hud_objtimer`/`cl_hud_reinforcements` trio,
+`deathnotice` and `hud_deathnotice_time 0`); the hook's switch differs in
+that it is never written to `config.cfg` (#342). `ds_hud_hide_element all 0`
+puts everything back. See [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md).
 
 ### `ds_map_clear_decals`
 
