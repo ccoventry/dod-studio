@@ -39,6 +39,8 @@
                 <button class="menu-dropdown-item" id="save-project-btn" data-str-title="NAV.SAVE_SESSION_TITLE">
                   <span id="save-project-btn-label" data-str="NAV.SAVE_SESSION_BUTTON">Save Session</span><span class="menu-shortcut-hint">Ctrl+S</span>
                 </button>
+                <!-- #938: rescan_recent.js. -->
+                <button class="menu-dropdown-item" id="rescan-recent-btn" data-str="NAV.RESCAN_RECENT" data-str-title="NAV.RESCAN_RECENT_TITLE">Rescan Recent Sessions…</button>
               </div>
             </div>
             <div class="menu-dropdown" data-menu="help">
@@ -580,6 +582,22 @@
                 <input type="number" id="config-scan-workers" value="2" min="1" max="8" style="width: 60px;" />
                 <span id="config-scan-workers-hint" class="text-muted"></span>
               </div>
+              <!-- .dem files in Explorer (#528): file_types_settings.js. The
+                   box shows the registry's state, not a saved setting. -->
+              <div class="inline-controls">
+                <div class="control-group">
+                  <input type="checkbox" id="config-dem-open-with" />
+                  <label for="config-dem-open-with" data-str="CAPTURE_CONFIG.DEM_OPEN_WITH_LABEL" data-str-title="CAPTURE_CONFIG.DEM_OPEN_WITH_TITLE">Show DoD Studio in Open With for .dem Files</label>
+                </div>
+              </div>
+              <div id="config-dem-open-with-note" class="path-warning" style="display: none;"></div>
+              <div class="input-row">
+                <label for="config-dem-open-target" data-str="CAPTURE_CONFIG.DEM_OPEN_TARGET_LABEL" data-str-title="CAPTURE_CONFIG.DEM_OPEN_TARGET_TITLE">Open .dem Files In:</label>
+                <select id="config-dem-open-target">
+                  <option value="analyzer" data-str="CAPTURE_CONFIG.DEM_OPEN_TARGET_ANALYZER">Demo Analyzer</option>
+                  <option value="queue" data-str="CAPTURE_CONFIG.DEM_OPEN_TARGET_QUEUE">Studio's Queue</option>
+                </select>
+              </div>
             </div>
 
             <!-- Tab Content: Initial + Scheduled Commands -->
@@ -992,9 +1010,9 @@
                     <input type="checkbox" id="audit-all-drives" />
                     <span id="audit-all-drives-label" data-str="AUDITOR.ALL_DRIVES_LABEL">All drives</span>
                   </label>
-                  <label class="audit-all-drives" data-str-title="AUDITOR.LOOK_IN_ZIPS_TITLE" title="Also check the demos inside .zip files">
+                  <label class="audit-all-drives" data-str-title="AUDITOR.LOOK_IN_ZIPS_TITLE" title="Also read the demos inside .zip, .7z and .rar files, and mark each loose demo an archive already holds as backed up">
                     <input type="checkbox" id="audit-look-in-zips" />
-                    <span data-str="AUDITOR.LOOK_IN_ZIPS_LABEL">Look inside .zip files</span>
+                    <span data-str="AUDITOR.LOOK_IN_ZIPS_LABEL">Show demos backed up in archives (.zip, .7z, .rar)</span>
                   </label>
                 </div>
                 <div class="row-inputs">
@@ -1854,6 +1872,26 @@
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
           <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
           <button id="unsaved-changes-cancel-btn" data-str="UNSAVED_CHANGES_MODAL.CANCEL_BUTTON">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rescan Recent Sessions (#938): the offer, then one bar across every
+         session; rescan_recent.js. Before #themed-confirm-modal, so a prompt
+         the queue's scan shows mid-run (identical copies) opens over it. -->
+    <div id="rescan-recent-modal" class="modal" style="display: none;">
+      <div class="modal-content rescan-recent-content">
+        <h2 data-str="RESCAN_RECENT.TITLE">Rescan recent sessions</h2>
+        <p id="rescan-recent-message"></p>
+        <ul id="rescan-recent-list" class="rescan-recent-list"></ul>
+        <p id="rescan-recent-total" class="rescan-recent-total"></p>
+        <div id="rescan-recent-progress" hidden>
+          <p id="rescan-recent-step" class="rescan-recent-step"></p>
+          <div class="progress-bar-container"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+        </div>
+        <div class="rescan-recent-actions">
+          <button id="rescan-recent-start-btn" class="primary-btn" data-str="RESCAN_RECENT.RESCAN_ALL">Rescan all</button>
+          <button id="rescan-recent-cancel-btn" data-str="RESCAN_RECENT.NOT_NOW">Not now</button>
         </div>
       </div>
     </div>

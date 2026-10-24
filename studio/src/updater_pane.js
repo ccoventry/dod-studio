@@ -4,6 +4,7 @@ import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, is
 import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
 import { showUpdateChip, RECHECK_MS } from './update_chip.js';
+import { updateDownloadLine, showBytes, showSliding } from './download_progress.js';
 
 function currentChannel() {
   return document.querySelector('#config-update-channel')?.value || 'stable';
@@ -144,6 +145,11 @@ async function reportPublishedVersions() {
   setStatus(STRINGS.UPDATE_MODAL.statusLocalBuild(stable?.version, experimental?.version));
 }
 
+function showUpdateProgress() {
+  const container = document.querySelector('#update-progress-container');
+  if (container) container.style.display = 'block';
+}
+
 async function beginDownloadAndInstall() {
   // Belt and braces: the button is never shown on a local or debug build,
   // and the backend refuses too.
@@ -153,12 +159,16 @@ async function beginDownloadAndInstall() {
   setStatus(STRINGS.UPDATE_MODAL.STATUS_DOWNLOADING);
   if (downloadBtn) downloadBtn.disabled = true;
   if (progressContainer) progressContainer.style.display = 'block';
+  // Sliding until the first byte count arrives.
+  showSliding(document.querySelector('#update-progress-bar'));
   try {
     await downloadAndInstallUpdate();
-  } catch {
+  } catch (err) {
     // ipc_bridge.js already toasted; leave the button re-enabled so the user
     // can retry rather than getting stuck on a dead "Download & Install".
     if (downloadBtn) downloadBtn.disabled = false;
+    if (progressContainer) progressContainer.style.display = 'none';
+    setStatus(STRINGS.IPC.updateInstallFailed(err));
   }
 }
 
@@ -208,17 +218,25 @@ export async function initUpdater(settings, persistSettings) {
     restartApp();
   });
 
+  // Throttled to ~33 ms in Rust (download_progress.rs), the last count
+  // always sent; then the install, which can't be measured (#957).
   listen('update_download_progress', (event) => {
     const { downloaded, total } = event.payload || {};
-    const bar = document.querySelector('#update-progress-bar');
-    if (bar && total) {
-      bar.max = total;
-      bar.value = downloaded;
-    }
+    showUpdateProgress();
+    showBytes(document.querySelector('#update-progress-bar'), downloaded, total);
+    setStatus(updateDownloadLine(event.payload));
+  });
+
+  listen('update_installing', () => {
+    showUpdateProgress();
+    showSliding(document.querySelector('#update-progress-bar'));
+    setStatus(STRINGS.UPDATE_MODAL.STATUS_INSTALLING);
   });
 
   listen('update_ready', () => {
     found.ready = true;
+    const container = document.querySelector('#update-progress-container');
+    if (container) container.style.display = 'none';
     showUpdateChip(found);
     setStatus(STRINGS.UPDATE_MODAL.STATUS_READY);
     const downloadBtn = document.querySelector('#download-install-update-btn');

@@ -121,6 +121,13 @@ export function createRecentProjects({
     await commit(removeRecent(recent, path));
   }
 
+  /** A project renamed on disk (switched to .dodstudio, #528): its entry
+   *  follows the new name, at the top. */
+  async function rename(oldPath, newPath) {
+    missing.delete(oldPath);
+    await commit(addRecent(removeRecent(recent, oldPath), newPath));
+  }
+
   async function clearRecent() {
     missing = new Set();
     await commit([]);
@@ -169,6 +176,7 @@ export function createRecentProjects({
     },
     remember,
     forget,
+    rename,
     clearRecent,
     openRecent,
   };

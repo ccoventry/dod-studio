@@ -3,7 +3,7 @@
 // say. audit_consolidate_ui.js does the DOM; native::demo_consolidate plans
 // and moves.
 import { STRINGS } from './strings.js';
-import { wastedSizeText, isNotCopy, isArchived, shownPath } from './audit_duplicates.js';
+import { wastedSizeText, isNotCopy, shownPath } from './audit_duplicates.js';
 
 const asDemo = (file, size) => ({ path: file.path, size, game_folder: file.in_use === 'game_folder' });
 
@@ -11,15 +11,13 @@ const asDemo = (file, size) => ({ path: file.path, size, game_folder: file.in_us
 /// (its first file) and every demo without copies move; the group's other
 /// copies are recycled once the backend finds each matches its `keep` byte
 /// for byte. A row already marked "Not an exact copy" is a different demo,
-/// so it is never sent to be recycled. A demo inside a zip (#929) is never
-/// sent at all, since a zip is never changed: when the group keeps that
-/// one, its first loose copy not marked "Not an exact copy" moves instead
-/// and the other loose copies are checked against that.
+/// so it is never sent to be recycled. Groups hold loose copies only: an
+/// archive's copy is a backup (#929), never moved or recycled.
 export function consolidateRequest({ groups, singles, roots, destination, layout, includeGameFolders }) {
   const keep = [];
   const recycle = [];
   for (const g of groups ?? []) {
-    const loose = (g.files ?? []).filter((f) => !isArchived(f));
+    const loose = g.files ?? [];
     if (!loose.length) continue;
     const kept = loose.find((f) => !isNotCopy(g, f.path)) ?? loose[0];
     keep.push(asDemo(kept, g.size));
@@ -107,8 +105,7 @@ export function singlesAfterDelete(groups, deleted) {
   const out = [];
   for (const g of groups ?? []) {
     const left = g.files.filter((f) => !gone.has(f.path));
-    // A demo left only inside a zip has no file to move.
-    if (left.length === 1 && left.length < g.files.length && !isArchived(left[0])) {
+    if (left.length === 1 && left.length < g.files.length) {
       out.push({ path: left[0].path, size: g.size, in_use: left[0].in_use ?? null });
     }
   }

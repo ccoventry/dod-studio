@@ -513,25 +513,28 @@ test('a file that fails to delete stays listed and is reported', async ({ page }
   await expect(page.locator('#audit-results-body .audit-file-path')).toContainText(['E:\\old\\a.dem']);
 });
 
-// "Look inside .zip files" (#929): a demo inside a zip is the copy kept,
-// shown as `archive.zip › inner/path.dem` with a chip, and never deleted.
-const ZIP_GROUPS = [
+// "Show demos backed up in archives" (#929): an archive is a backup. A
+// loose demo it holds gets a chip naming it, groups hold loose copies only
+// and are ticked as without archives, and a section below the groups lists
+// every backed-up demo, one with no loose copy too.
+const LAN = { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' };
+const OLD = { zip: '\\\\?\\E:\\old\\2022.7z', entry: 'm.dem' };
+const SOLO = { path: '\\\\?\\C:\\demos\\solo.dem', in_use: null, backups: [{ zip: '\\\\?\\D:\\packs\\cup.rar', entry: 'solo.dem' }] };
+const BACKED_UP_GROUPS = [
   {
     size: 1024 * 1024,
     header_hash: 0x123,
     files: [
-      {
-        path: '\\\\?\\D:\\packs\\lan.zip › hltv/m.dem',
-        in_use: null,
-        archive: { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' },
-      },
-      { path: '\\\\?\\C:\\demos\\m.dem', in_use: null },
+      { path: '\\\\?\\C:\\demos\\m.dem', in_use: null, backups: [LAN] },
+      { path: '\\\\?\\F:\\downloads\\m.dem', in_use: null, backups: [LAN, OLD] },
     ],
   },
 ];
+const BACKED_UP = [...BACKED_UP_GROUPS[0].files, SOLO];
 
-test('Look inside .zip files is sent, saved, and its zips show in the progress line', async ({ page }) => {
+test('Show demos backed up in archives is sent, saved, and its archives show in the progress line', async ({ page }) => {
   await loadHarness(page);
+  await expect(page.locator('label:has(#audit-look-in-zips)')).toHaveText('Show demos backed up in archives (.zip, .7z, .rar)');
   await expect(page.locator('#audit-look-in-zips')).not.toBeChecked();
   await page.check('#audit-look-in-zips');
   expect(await page.evaluate(() => window.__settingsSaves)).toBe(1);
@@ -543,48 +546,67 @@ test('Look inside .zip files is sent, saved, and its zips show in the progress l
   await page.evaluate(() => window.__mockEmit('audit_progress', {
     folders: 12, zips_total: 4, zips_done: 1, total: 0, done: 0, current: '\\\\?\\D:\\packs\\lan.zip',
   }));
-  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking inside zips: 1 \/ 4 · 0:0\d$/);
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Looking inside archives: 1 \/ 4 · 0:0\d$/);
   await expect(page.locator('#audit-status-current')).toHaveText('D:\\packs\\lan.zip');
   await expect(page.locator('#audit-progress .progress-bar-fill')).toHaveAttribute('style', /width: 25%/);
-  await page.evaluate((groups) => window.__finishAudit({ groups, demos: 2, cancelled: false }), ZIP_GROUPS);
+  await page.evaluate(() => window.__finishAudit({ groups: [], backed_up: [], demos: 2, cancelled: false }));
   await expect(page.locator('#audit-look-in-zips')).toBeEnabled();
 });
 
-test('a copy inside a zip is kept, marked, never ticked, and loose copies are checked against it', async ({ page }) => {
+test('a backed-up demo is marked, and its loose copies are offered as without archives', async ({ page }) => {
   await loadHarness(page);
   await page.fill('#audit-target-folder-input', 'C:\\Demos');
   await page.click('#run-audit-btn');
-  await page.evaluate((groups) => window.__finishAudit({ groups, demos: 2, cancelled: false }), ZIP_GROUPS);
+  await page.evaluate(([groups, backedUp]) => window.__finishAudit({ groups, backed_up: backedUp, demos: 3, archive_demos: 4, cancelled: false }),
+    [BACKED_UP_GROUPS, BACKED_UP]);
+  await expect(page.locator('#audit-status-text')).toHaveText(/^Done in \d+\.\d s: 3 demos checked and 4 inside archives, \d+ with copies\.$/);
 
   const rows = page.locator('#audit-results-body tr.audit-file-row');
-  await expect(rows.locator('.audit-file-path')).toHaveText(['D:\\packs\\lan.zip › hltv/m.dem in a zip', 'C:\\demos\\m.dem']);
-  await expect(rows.nth(0).locator('.audit-zip-chip')).toHaveAttribute('title', /never changed/);
+  await expect(rows.locator('.audit-file-path')).toHaveText([
+    'C:\\demos\\m.dem backed up in lan.zip',
+    'F:\\downloads\\m.dem backed up in 2 archives',
+    // The section below the groups: every backed-up demo.
+    'C:\\demos\\m.dem backed up in lan.zip',
+    'F:\\downloads\\m.dem backed up in 2 archives',
+    'C:\\demos\\solo.dem backed up in cup.rar',
+  ]);
+  const chip = rows.nth(1).locator('.audit-backup-chip');
+  await expect(chip).toHaveAttribute('title', /D:\\packs\\lan\.zip › hltv\/m\.dem/);
+  await expect(chip).toHaveAttribute('title', /E:\\old\\2022\.7z › m\.dem/);
+  // The group works as with no archive: kept first, the copy ticked.
   await expect(rows.nth(0).locator('.audit-file-status')).toHaveText('Kept');
-  await expect(rows.nth(0).locator('input.audit-row-cb')).toBeDisabled();
-  await expect(rows.nth(0).locator('input.audit-row-cb')).toHaveAttribute('title', /never changed/);
   await expect(rows.nth(1).locator('input.audit-row-cb')).toBeChecked();
-  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 1 | Wasted Space: 1.0 MB');
+  // Nothing in the section can be ticked.
+  await expect(rows.nth(4).locator('input')).toHaveCount(0);
+  await expect(page.locator('.audit-backed-up-row .group-toggle-btn')).toHaveText('▼ Backed up in archives (3 demos)');
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 1 | Wasted Space: 1.0 MB | Backed up in archives: 3');
 
-  // Open Folder shows the zip itself.
-  await rows.nth(0).getByText('Open Folder').click();
+  // Open Folder shows the loose demo, not the archive.
+  await rows.nth(4).getByText('Open Folder').click();
   const [reveal] = await calls(page, 'reveal_in_explorer');
-  expect(reveal.path).toBe('D:\\packs\\lan.zip');
+  expect(reveal.path).toBe('C:\\demos\\solo.dem');
 
-  // Keeping the loose copy instead leaves nothing to delete: the zip's copy
-  // can't be ticked, even by Select all.
-  await rows.nth(1).locator('input[type=radio]').click();
-  await expect(rows.nth(0).locator('input.audit-row-cb')).toBeDisabled();
-  await page.check('#audit-select-all');
-  await expect(rows.nth(0).locator('input.audit-row-cb')).not.toBeChecked();
-  await expect(page.locator('#delete-selected-audits-btn')).toBeDisabled();
-  await page.click('.audit-keep-reset-btn');
-
+  // The delete is the usual one, checked against the kept loose copy.
   await page.click('#delete-selected-audits-btn');
   await confirm(page);
   const [del] = await calls(page, 'delete_audit_files');
-  expect(del.copies).toEqual([{
-    path: '\\\\?\\C:\\demos\\m.dem',
-    keep: '\\\\?\\D:\\packs\\lan.zip › hltv/m.dem',
-    keep_zip: { zip: '\\\\?\\D:\\packs\\lan.zip', entry: 'hltv/m.dem' },
-  }]);
+  expect(del.copies).toEqual([{ path: '\\\\?\\F:\\downloads\\m.dem', keep: '\\\\?\\C:\\demos\\m.dem' }]);
+  // The deleted copy leaves the section too.
+  await expect(page.locator('.audit-backed-up-row .group-toggle-btn')).toHaveText('▼ Backed up in archives (2 demos)');
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 0 | Wasted Space: 0.0 MB | Backed up in archives: 2');
+});
+
+test('a backed-up demo with no loose copy shows in the section, which folds', async ({ page }) => {
+  await loadHarness(page);
+  await page.fill('#audit-target-folder-input', 'C:\\Demos');
+  await page.click('#run-audit-btn');
+  await page.evaluate((solo) => window.__finishAudit({ groups: [], backed_up: [solo], demos: 1, cancelled: false }), SOLO);
+  await expect(page.locator('#audit-results-body .table-empty')).toHaveText('No duplicates found! Your demos are clean.');
+  const rows = page.locator('#audit-results-body tr.audit-file-row');
+  await expect(rows.locator('.audit-file-path')).toHaveText(['C:\\demos\\solo.dem backed up in cup.rar']);
+  await expect(page.locator('#audit-list-footer')).toHaveText('Duplicates Found: 0 | Wasted Space: 0.0 MB | Backed up in archives: 1');
+  await expect(page.locator('#delete-selected-audits-btn')).toBeDisabled();
+  await page.click('.audit-backed-up-row .group-toggle-btn');
+  await expect(rows).toHaveCount(0);
+  await expect(page.locator('.audit-backed-up-row .group-toggle-btn')).toHaveText('▶ Backed up in archives (1 demo)');
 });
