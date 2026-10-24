@@ -686,6 +686,17 @@ pub struct MapFetchResult {
     pub replaced_path: Option<String>,
 }
 
+/// One `map_download_progress` event. `step` is `"downloading"` or
+/// `"checking"` (the checksum read and the install).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapDownloadProgress {
+    pub map: String,
+    pub step: &'static str,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RollFloorReport {
@@ -765,20 +776,48 @@ pub fn roll_floors(
 /// This writes into the user's game folder and talks to the network, so it is
 /// only ever reached from an explicit action — never from a scan, and never as
 /// a side effect of starting a capture.
+///
+/// Sends `map_download_progress` ([`MapDownloadProgress`]) as it goes: bytes
+/// at most every ~33 ms, the last count, then the check (#957).
 #[tauri::command]
 pub async fn download_map(
+    app: tauri::AppHandle,
     map_name: String,
     expected_checksum: Option<u32>,
     game_path: String,
 ) -> Result<MapFetchResult, String> {
+    use tauri::Emitter;
     let dir = maps_dir(&game_path)?;
 
     tokio::task::spawn_blocking(move || {
-        map_fetch::fetch_map(
+        let mut meter = crate::download_progress::DownloadMeter::default();
+        let emit = |step: &'static str, p: crate::download_progress::DownloadProgress| {
+            let _ = app.emit(
+                "map_download_progress",
+                MapDownloadProgress {
+                    map: map_name.clone(),
+                    step,
+                    downloaded: p.downloaded,
+                    total: p.total,
+                },
+            );
+        };
+        map_fetch::fetch_map_with_progress(
             &map_name,
             expected_checksum,
             &dir,
             map_fetch::DEFAULT_MIRROR,
+            &mut |step| match step {
+                map_fetch::FetchStep::Downloaded { chunk, total } => {
+                    if let Some(p) = meter.chunk(chunk, total, std::time::Instant::now()) {
+                        emit("downloading", p);
+                    }
+                }
+                map_fetch::FetchStep::Checking => {
+                    emit("downloading", meter.progress());
+                    emit("checking", meter.progress());
+                }
+            },
         )
         .map(|o| MapFetchResult {
             map_name: o.map_name,
@@ -797,6 +836,26 @@ pub async fn download_map(
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn the_map_download_event_is_shaped_as_the_banner_reads_it() {
+        let json = serde_json::to_value(MapDownloadProgress {
+            map: "dod_anzio".into(),
+            step: "downloading",
+            downloaded: 2_100_000,
+            total: Some(6_000_000),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "map": "dod_anzio",
+                "step": "downloading",
+                "downloaded": 2_100_000,
+                "total": 6_000_000,
+            })
+        );
+    }
 
     #[test]
     fn a_game_path_with_no_map_folder_says_so_rather_than_failing_later() {

@@ -1150,8 +1150,9 @@ export async function checkForUpdate(channel) {
 
 /** Downloads and installs whatever update the last checkForUpdate() call
  *  found — throws if none is pending. Progress arrives via the
- *  `update_download_progress`/`update_ready` events, not this call's
- *  return value. */
+ *  `update_download_progress`, `update_installing` and `update_ready`
+ *  events, not this call's return value. On Windows the installer closes
+ *  Studio, so it never returns there. */
 export async function downloadAndInstallUpdate() {
   return invoke("download_and_install_update")
     .catch((err) => {
