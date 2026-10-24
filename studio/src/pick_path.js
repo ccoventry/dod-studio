@@ -13,6 +13,12 @@
 //   5. else wherever Windows puts it.
 // Call sites keep their own `open()` options: `pickPath({ field, current,
 // ...options })` takes the same options and returns what `open()` returns.
+//
+// One dialog at a time, app-wide: a pick asked for while another is being
+// prepared or is open returns null without opening, as on Cancel. Getting a
+// dialog up can take seconds, and every Ctrl+O or Browse click in that wait
+// used to queue its own dialog, all appearing at once. The busy cursor shows
+// from the click until the dialog returns.
 
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import { pickPathStates, pickUserFolders } from './ipc_bridge.js';
@@ -125,11 +131,17 @@ export function folderToRemember(picked) {
   return parentOf(first) || null;
 }
 
+/** The busy cursor over the whole window (styles.css `html.picking-path`). */
+function showBusyCursor(on) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.classList.toggle('picking-path', !!on);
+}
+
 /**
  * @param {object} deps
  *   open(options) the dialog; pathStates(paths) and userFolders() the
  *   backend's answers; getContext() { hlPath, gameFolder }; persist() saves
- *   settings after a remembered folder changes.
+ *   settings after a remembered folder changes; setBusy(on) shows the wait.
  */
 export function createPickPath({
   // Looked up at call time, so a test mocking ipc_bridge.js without these
@@ -139,9 +151,11 @@ export function createPickPath({
   userFolders = () => pickUserFolders(),
   getContext = () => ({}),
   persist = async () => {},
+  setBusy = showBusyCursor,
 } = {}) {
   const deps = { getContext, persist };
   let folders = {};
+  let picking = false;
   let userFoldersPromise = null;
 
   function loadUserFolders() {
@@ -179,22 +193,32 @@ export function createPickPath({
    * `open(options)` started in the right folder.
    * @param {object} options  `field` the PICK_FIELDS id, `current` the
    *   field's path now, `fallback` a default ahead of the field's own, and
-   *   the dialog's options as they were.
+   *   the dialog's options as they were. Null without opening while
+   *   another pick is under way.
    */
   async function pick({ field, current, fallback, ...options }) {
-    let defaultPath;
+    if (picking) return null;
+    picking = true;
+    setBusy(true);
     try {
-      defaultPath = await startPathFor({ field, current, directory: !!options.directory, fallback });
-    } catch (err) {
-      console.error('Choosing where the dialog starts failed:', err);
+      let defaultPath;
+      try {
+        defaultPath = await startPathFor({ field, current, directory: !!options.directory, fallback });
+      } catch (err) {
+        console.error('Choosing where the dialog starts failed:', err);
+      }
+      const picked = await open(defaultPath ? { ...options, defaultPath } : options);
+      if (picked) await remember(field, picked);
+      return picked;
+    } finally {
+      picking = false;
+      setBusy(false);
     }
-    const picked = await open(defaultPath ? { ...options, defaultPath } : options);
-    if (picked) await remember(field, picked);
-    return picked;
   }
 
   return {
     pick,
+    isPicking: () => picking,
     startPathFor,
     getFolders: () => ({ ...folders }),
     setFolders: (map) => {

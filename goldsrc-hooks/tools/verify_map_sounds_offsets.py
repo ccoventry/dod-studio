@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks `map_sounds.rs`'s call sites against real `hw.dll` files (#284).
 
-`map_sounds.rs` (`ds_sound_mute_win_and_capture`) redirects the three calls
+`map_sounds.rs` (`ds_sound_mute_victory_music`, `ds_sound_mute_flag_capture`) redirects the three calls
 the `svc_sound` and `svc_spawnstaticsound` handlers make into
 `S_StartStaticSound` / `S_StartDynamicSound`. The unit tests prove each
 pattern's offset lands on an `E8`; only the binaries can prove:

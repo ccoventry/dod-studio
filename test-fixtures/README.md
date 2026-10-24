@@ -42,3 +42,17 @@ crosshairs), the one format both sides share:
 `native::player_overrides::table_text` must write exactly this from its test
 table, and `goldsrc-hooks`' `player_table` parser tests read it back.
 Change the format in all three places together.
+
+## `dod_anzio_sound_entities.txt`
+
+The sound wiring from `dod_anzio.bsp`'s entity lump, verbatim: its control
+points and capture areas, the control point master, and every
+`ambient_generic` with a `targetname` (the win music beside the bell, the tree
+and the scripted gunshots, which must stay unmuted). Every other entity is left
+out: 17 entities, not the map's whole lump.
+
+**Tests that use it:** `dod`'s `map_sounds` (the structural selection picks
+anzio's two win tracks and two capture announcements, nothing else) and
+`goldsrc-hooks`' `map_sounds` (the hook's runtime classification of the same
+text, as NUL-terminated bytes the way the engine keeps it, gives the same
+names).

@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('./ipc_bridge.js', () => ({ listHookDlls: vi.fn() }));
+const dropdown = vi.hoisted(() => ({ setOptions: () => {}, setValue: () => {} }));
+vi.mock('./searchable_select.js', () => ({ createSearchableSelect: () => dropdown }));
 
-import { pickerOptions, selectedValue, shortDate } from './hook_dll_picker.js';
+import { listHookDlls } from './ipc_bridge.js';
+import { initHookDllPicker, pickerOptions, refreshHookDllPicker, selectedValue, shortDate } from './hook_dll_picker.js';
 import { STRINGS } from './strings.js';
 
 const S = STRINGS.CAPTURE_CONFIG;
@@ -58,5 +61,25 @@ describe('pickerOptions order', () => {
       dlls: [dll('402b', 100), dll('555', 300), dll('889', null), dll('910', 200)],
     }, '');
     expect(options.map((o) => o.value)).toEqual(['', 'target.dll', '555.dll', '910.dll', '402b.dll', '889.dll']);
+  });
+});
+
+describe('a refresh asked for before the dropdown exists', () => {
+  it('runs once initHookDllPicker makes the dropdown, so the list is filled at start', async () => {
+    const elements = {
+      '#goldsrc-hooks-dll-path-input': { value: '' },
+      '#goldsrc-hooks-dll-choice': {},
+    };
+    vi.stubGlobal('document', { querySelector: (sel) => elements[sel] ?? null });
+    listHookDlls.mockResolvedValue({ folder: null, checkout_build: null, dlls: [] });
+    const setOptions = vi.spyOn(dropdown, 'setOptions');
+
+    await refreshHookDllPicker();
+    expect(listHookDlls).not.toHaveBeenCalled();
+
+    initHookDllPicker();
+    await vi.waitFor(() => expect(setOptions).toHaveBeenCalledTimes(1));
+    expect(setOptions.mock.calls[0][0][0].text).toBe(S.HOOK_DLL_BUNDLED);
+    vi.unstubAllGlobals();
   });
 });
