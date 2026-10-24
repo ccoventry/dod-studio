@@ -73,7 +73,7 @@ made *after* a trimmed map is deployed. See #207 for the original problem and
 | --- | --- |
 | `mute_map_sounds` | What does this map play on a capture or a round win, and can it be silenced? |
 | `hide_map_text` | What does this map put on screen, and can it be hidden? |
-| `map_sound_table` | Which round-end and capture sound names do all the installed maps use? The list behind `ds_sound_mute_win_and_capture` (#284) |
+| `map_sound_table` | Which victory-music and capture-announcement names do all the installed maps use, and what fires each? The two lists behind `ds_sound_mute_victory_music` and `ds_sound_mute_flag_capture` (#284) |
 
 The other one here that writes a file. It reads the sound names out of the
 map's own entity lump -- `dod_control_point`'s `point_*_capsound` keyvalues,

@@ -104,7 +104,8 @@ mod tests {
         "hud_hide_center_text",
         "hud_overview_hide_speaker",
         "player_fix_model_flicker",
-        "sound_mute_win_and_capture",
+        "sound_mute_flag_capture",
+        "sound_mute_victory_music",
         "spec_hide_text",
     ];
 
