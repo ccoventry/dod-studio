@@ -253,10 +253,11 @@ export async function scanGameConfigs(
     customCommands,
     captureFps: context.captureFps ?? null,
     decalFlush: context.decalFlush ?? null,
+    hookRunsBatch: context.hookRunsBatch ?? null,
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], filteredInit: [], filteredScheduled: [], configCfgWritable: false };
+      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], filteredInit: [], filteredScheduled: [], filterApplies: false, missingExec: [], configCfgWritable: false };
     });
 }
 
