@@ -1743,6 +1743,7 @@ name = "goldsrc-hooks"
 version = "0.10.0"
 dependencies = [
  "analysis",
+ "dod",
  "png 0.18.1",
  "serde_json",
  "windows-sys 0.59.0",

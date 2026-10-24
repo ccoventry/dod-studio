@@ -2,10 +2,12 @@
 //! `ds_sound_mute_flag_capture` (`goldsrc-hooks/src/map_sounds.rs`, #284)
 //! from the maps on disk.
 //!
-//! The hook matches a sample name against fixed lists, because the DLL has
-//! no BSP parser. This walks every `.bsp` in the folders given, runs the same
-//! structural selection the demo patcher uses (`native::patch::map_sounds`:
-//! the win music the round-end wiring fires, and capture keyvalues), and
+//! The hook classifies each map's own sounds as it loads, and keeps these
+//! lists as the fallback for a map it can't read. This walks every `.bsp` in
+//! the folders given, runs the same structural selection the hook and the
+//! demo patcher use (`dod::map_sounds`, re-exported as
+//! `native::patch::map_sounds`: the win music the round-end wiring fires, and
+//! capture keyvalues), and
 //! prints each family with a map count per name, the maps too when there are
 //! few. A name in both families is printed separately, since it can only sit
 //! in one list.
