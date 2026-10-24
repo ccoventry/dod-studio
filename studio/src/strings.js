@@ -920,8 +920,29 @@ export const STRINGS = {
     footer: (demos, split) => `Multi-map demos: ${demos} | Already split: ${split}`,
     // split_progress.js: a split's progress line (#217).
     progressReading: (pct) => `Reading the demo… ${pct}%`,
-    progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
-    progressChecking: (map, part, parts, pct) => `Checking ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
+    progressWriting: (map, pct) => `Writing ${map}… ${pct}%`,
+    progressChecking: (map, pct) => `Checking ${map}… ${pct}%`,
+    // Several maps are written and checked side by side (#876).
+    progressMaps: (done, parts, pct) => `Writing and checking ${parts} maps: ${done} done… ${pct}%`,
+    // split_status.js: each map's row while it's split (#876).
+    COL_STATUS: 'Status',
+    COL_PROGRESS: 'Progress',
+    COL_SIZE: 'Size',
+    STATUS_WAITING: 'Waiting',
+    statusReading: (pct) => `Reading the demo… ${pct}%`,
+    STATUS_WRITING: 'Writing…',
+    statusChecking: (pct) => `Checking… ${pct}%`,
+    STATUS_FINISHED: 'Finished',
+    statusFailed: (e) => `Failed: ${e}`,
+    STATUS_CANCELLED: 'Cancelled',
+    NOT_WRITTEN: 'not written',
+    sizeMb: (mb) => `${mb} MB`,
+    splitSummary: (wrote, failed, cancelled) => {
+      const parts = [`Wrote ${wrote} demo${wrote === 1 ? '' : 's'}`];
+      if (failed) parts.push(`${failed} failed`);
+      if (cancelled) parts.push(`${cancelled} cancelled`);
+      return `${parts.join(', ')}.`;
+    },
     TITLE: 'Demos With More Than One Map',
     HINT: "A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.",
     RECURSIVE: 'Include subfolders',
@@ -942,11 +963,8 @@ export const STRINGS = {
     SPLIT_BUTTON: 'Split Checked Maps',
     CANCEL_SPLIT_BUTTON: 'Cancel',
     CANCELLING_SPLIT: 'Cancelling after this step…',
-    cancelledSplit: (n) => n === 0 ? 'Cancelled. Nothing was written.' : `Cancelled after ${n} demo${n === 1 ? '' : 's'}:`,
     SHOW_IN_FOLDER: 'Show in folder',
     NOTHING_TICKED: 'Tick at least one map to split.',
-    wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
-    writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
     SOURCE_TITLE: { cache: 'Remembered from an earlier check', analyzer: 'From the analyzer cache', scan: 'Read from the demo' },
   },

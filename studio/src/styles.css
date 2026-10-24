@@ -2691,14 +2691,33 @@ tr.keyboard-selected {
   font-size: 0.9em;
 }
 
-.split-written {
-  margin: 4px 0 0;
-  padding-left: 1.2em;
+.split-reveal {
+  font-size: 0.85em;
 }
 
-.split-reveal {
-  margin-left: 6px;
-  font-size: 0.85em;
+/* Each map's split, like a Render tab job (#876): status colours match it. */
+.split-map-status {
+  max-width: 40ch;
+  overflow-wrap: anywhere;
+}
+
+.split-maps tr[data-stage="finished"] .split-map-status { color: #4caf50; }
+.split-maps tr[data-stage="failed"] .split-map-status { color: #f44336; }
+.split-maps tr[data-stage="cancelled"] .split-map-status { color: var(--text-muted, #aaa); }
+.split-maps tr[data-stage="writing"] .split-map-status,
+.split-maps tr[data-stage="checking"] .split-map-status { color: #7ec8e3; }
+
+.split-map-bar {
+  min-width: 90px;
+}
+
+.split-map-bar .progress-bar-container {
+  margin-top: 0;
+}
+
+.split-map-size {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ── Overviews page (#371) ─────────────────────────────────────────────── */
