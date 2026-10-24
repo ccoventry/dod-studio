@@ -85,6 +85,14 @@ is the complete list):
   hole!" and the rest, without overwriting the game's own `player/us*.wav`,
   `player/brit*.wav` and `player/ger*.wav`. Subtitles and speaker icons still
   show -- see `docs/goldsrc_hud_suppression.md`.
+- **Victory music and capture announcements** (`ds_sound_mute_victory_music 1`,
+  `ds_sound_mute_flag_capture 1`, each on its own): silence the music a map
+  plays when a team wins the round, and the point-captured announcements
+  (also the objective-secured ones, like dod_escape's). Both are map sounds
+  the server sends, so three `svc_` call sites into `S_Start*Sound` are
+  redirected and a sound is dropped by name, from two lists surveyed over the
+  installed maps (`native/examples/map_sound_table.rs`). See the module doc in
+  `src/map_sounds.rs` (#284).
 - **Crosshair** (`ds_hud_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
@@ -102,6 +110,13 @@ is the complete list):
   which `V_CalcRefdef` never reaches for a spectator. A movie wants it, a
   shoutcast does not, so it is not part of `spec_match_pov`. See
   `docs/goldsrc_spectator_camera.md`.
+- **Model flicker fix** (`ds_player_fix_model_flicker 1`, on by default): in
+  an HLTV demo under `viewdemo` above the packet rate, the client clock steps
+  back about 1 ms on some frames, and a strafing player's model turns round
+  for that frame, so his upper body flickers. This draws each player model at
+  the last place it was shown until the clock catches up (#927). A bug in how
+  the game draws, not a difference in what HLTV records, so it is not part of
+  `spec_match_pov`. See `src/strafe_twitch.rs`.
 - **Overview map icons** (`ds_hud_overview_players 0-4`): which players the
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
