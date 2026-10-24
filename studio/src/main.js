@@ -25,6 +25,7 @@ import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane } from './demo_rename_ui.js';
 import { initThemedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane, refreshAnalyzerQuickLinks } from './analyzer_pane.js';
+import { startOpenFromExplorer } from './open_from_explorer.js';
 import { initHdPane } from './hd_pane.js';
 import { initBlenderPane } from './blender_pane.js';
 import { initOverviewsPane } from './overviews_pane.js';
@@ -55,6 +56,7 @@ import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
 import { createRecentProjects } from './recent_projects.js';
+import { createProjectConvert } from './project_convert.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
@@ -149,6 +151,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     getReviewSettings: () => hltvPick.getState(),
     setReviewSettings: (raw) => hltvPick.setState(raw),
     onProjectFile: (path) => recentProjects.remember(path),
+    offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
+    onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
   const { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
   // File → Open Recent (#935), saved in the settings file.
@@ -856,6 +860,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   }))
     // One startup prompt at a time: the rescan offer (#938) waits for the pins review.
     .finally(() => rescanRecent.offerAfterUpdate().catch((err) => console.error("Rescan recent sessions:", err)));
+
+  startOpenFromExplorer({ openProject, isScanning, persist: () => persistAppSettings(),
+    addDemosToQueue: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {

@@ -522,6 +522,16 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    // .dem files in Explorer (#528, file_types_settings.js).
+    DEM_OPEN_WITH_LABEL: 'Show DoD Studio in Open With for .dem Files',
+    DEM_OPEN_WITH_TITLE: "Adds DoD Studio to the Open With menu when you right-click a demo in Explorer. Whatever opens a demo when you double-click it stays as it is. Untick to take DoD Studio back out.",
+    DEM_OPEN_TARGET_LABEL: 'Open .dem Files In:',
+    DEM_OPEN_TARGET_TITLE: 'Where a demo you open with DoD Studio from Explorer goes.',
+    DEM_OPEN_TARGET_ANALYZER: 'Demo Analyzer',
+    DEM_OPEN_TARGET_QUEUE: "Studio's Queue",
+    demOpenWithOtherCopy: (exe) =>
+      `Open With opens another copy of DoD Studio: ${exe}. Untick and tick again to make it open this one.`,
+    demOpenWithFailed: (err) => `Couldn't change Open With for .dem files: ${err}`,
     SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
     SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
     scanWorkersHint: (totalGb) => totalGb
@@ -1149,6 +1159,10 @@ export const STRINGS = {
     THIS_PC_LABEL: '💻 This PC',
     PICK_FOLDER_FROM_SIDEBAR: 'Pick a folder from the Explorer sidebar.',
     NO_DEMOS_IN_FOLDER: 'No demos found in this folder.',
+    // A folder's file names are on their way; a cloud drive can take a while.
+    READING_FOLDER: 'Reading this folder…',
+    // The Map cell until the start of the demo is read.
+    MAP_READING: '…',
     NO_DEMOS_MATCH_FILTERS: 'No demos match the current filters.',
     ANALYZING_ELLIPSIS: 'Analyzing…',
     ANALYZING_DEMO_ELLIPSIS: 'Analyzing demo…',
@@ -1563,6 +1577,16 @@ export const STRINGS = {
       `<code>${name} ${have.toFixed(1)}s</code> — needs at least <code>${need.toFixed(1)}s</code> for ${binding}`,
   },
 
+  // After a .json project loads (#528, project_convert.js).
+  PROJECT_CONVERT: {
+    TITLE: 'Switch to .dodstudio?',
+    MESSAGE: 'Switch this project to the .dodstudio file type? It will open in DoD Studio when double-clicked. The file is renamed in its folder; nothing inside it changes.',
+    SWITCH: 'Switch to .dodstudio',
+    KEEP: 'Keep as .json',
+    switchedToast: (name) => `Project switched to ${name}.`,
+    failedToast: (err) => `The project stays as .json: ${err}`,
+  },
+
   MAIN: {
     SELECT_CAPTURE_OUTPUT_DIR_TITLE: 'Select Capture Output Directory',
     SELECT_RENDER_EXPORT_DIR_TITLE: 'Select Render Export Directory',
@@ -1575,6 +1599,7 @@ export const STRINGS = {
     SELECT_DEMO_FILES_TITLE: 'Select Demo Files (.dem)',
     SELECT_DEMO_FOLDER_TITLE: 'Select Demo Folder',
 
+    PROJECT_FILTER_NAME: 'DoD Studio Project',
     JSON_PROJECT_FILTER_NAME: 'JSON Project File',
     EXECUTABLE_FILTER_NAME: 'Executable',
     DLL_FILTER_NAME: 'DLL',
@@ -2941,6 +2966,12 @@ export const STRINGS = {
       return `Not a demo or a folder, so not added: ${shown}${more}`;
     },
     BUSY_TOAST: 'A scan is running. Drop them again when it has finished.',
+    // A demo opened from Explorer into the queue during a scan (#528).
+    openedWhileScanningToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `A scan is running, so ${shown}${more} was not added. Open it again when the scan has finished.`;
+    },
   },
   // The one-time look at the pinned folders (#533): pinned_review.js.
   PINNED_REVIEW: {

@@ -18,6 +18,7 @@ import { projectFolders } from './project_paths.js';
 import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
 import { createProjectOpenProgress } from './project_open_progress.js';
 
 /**
@@ -30,7 +31,10 @@ import { createProjectOpenProgress } from './project_open_progress.js';
  *   offerRescan() from project_rescan.js, and getReviewSettings()/
  *   setReviewSettings(raw), the Review box's HLTV pick (#828,
  *   review_hltv_picker.js), and onProjectFile(path), told each file opened
- *   or saved (File → Open Recent, #935).
+ *   or saved (File → Open Recent, #935). offerConvert(path) asks to switch a
+ *   loaded `.json` project to `.dodstudio` and resolves its new path or null
+ *   (project_convert.js, #528); onProjectRenamed(oldPath, newPath) is told
+ *   when it did.
  */
 export function createProjectSession({
   getDemos,
@@ -45,6 +49,8 @@ export function createProjectSession({
   getReviewSettings = () => undefined,
   setReviewSettings = () => {},
   onProjectFile = () => {},
+  offerConvert = async () => null,
+  onProjectRenamed = () => {},
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -133,11 +139,9 @@ export function createProjectSession({
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
       const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
-      const filePath = currentSessionPath || await save({
-        title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
-        filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
-      });
+      // A first save is `.dodstudio`; a project opened from `.json` keeps
+      // saving to that `.json` (#528, project_file_type.js).
+      const filePath = currentSessionPath || await save(projectSaveDialogOptions(projectsDir));
       if (!filePath) return false;
 
       // No HLAE or hl.exe path: those are this PC's settings, not the
@@ -197,7 +201,7 @@ export function createProjectSession({
         current: currentSessionPath,
         fallback: projectsDir,
         multiple: false,
-        filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
+        filters: PROJECT_OPEN_FILTERS,
       });
       if (selected) await loadProjectFile(selected);
     } catch (err) {
@@ -287,7 +291,21 @@ export function createProjectSession({
       openProgress.opened();
       openProgress.searched();
     }
+    await switchToDodstudio(selected);
     return true;
+  }
+
+  // Last, once the load and every prompt it brings (missing demos, the
+  // rescan offer) are done: the one-time offer to switch a `.json` project
+  // to `.dodstudio` (#528, project_convert.js). Changes made since the load
+  // (a relocated demo, a rescan) are saved into the renamed file.
+  async function switchToDodstudio(path) {
+    const renamed = await offerConvert(path);
+    if (!renamed) return;
+    currentSessionPath = renamed;
+    updateSessionFileIndicator();
+    onProjectRenamed(path, renamed);
+    if (hasUnsavedChanges) await saveProjectSession();
   }
 
   // New Session (#122/#149) — resets to the same blank state the app starts
