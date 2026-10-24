@@ -37,7 +37,7 @@ loaded into the game when it joins a server, whichever folder it runs from.
 | Capture batch | `capture_engine` → `PatcherConfig::build_hlae_process` | HLAE's hook, plus ours if found | the hook DLL's connect refusal (when ours is found); HLAE's connect warning; `-insecure` |
 | Launch Preview | `launch_demo_preview` → `build_hlae_process` | same | same |
 | Launch Game | `launch_standalone_game` → `build_hlae_process` | same | same. This one opens at the main menu with no demo, so the server browser is one click away |
-| `inject.exe` (manual testing, `goldsrc-hooks/README.md`) | the user, any way they like | ours only, into any running `hl.exe` | the hook DLL's connect refusal, once the DLL has hooked the engine (its log says `connect_guard: wrapped`). No HLAE, so no connect warning |
+| `inject.exe` (manual testing, `goldsrc-hooks/README.md`) | the user, any way they like | ours only, into any running `hl.exe` | none: injected into a running game the DLL is too late to hook the engine, so its connect refusal never installs (no `connect_guard: wrapped` in its log, #784). No HLAE, so no connect warning |
 
 Every DoD Studio launch goes through the one function,
 `native/src/patch/types.rs`'s `build_hlae_process`. It always starts the game
@@ -79,9 +79,13 @@ line of defence, not a guarantee.
 ### The hook DLL loaded without HLAE
 
 `inject.exe` loads `dodstudio_goldsrc_hooks.dll` into whatever process ID it is
-given. There is no HLAE in that session, so no connect warning. Until #451
-that was the one route with no protection at all; the DLL's own refusal
-(below) now covers it too. Its README and the tool itself still warn.
+given. There is no HLAE in that session, so no connect warning. Into a game
+that is already running it is also too late for the DLL's own refusal
+(below): `client.dll`'s `Initialize` has already run, so the DLL installs
+nothing, the refusal included (checked on both builds, #784). The game then
+has our code loaded and no protection at all. Its README and the tool itself
+still warn, and the README now gives HLAE's launch line as the way to load the
+DLL without DoD Studio.
 
 ## The hook DLL refuses to join a server, except an HLTV proxy (#451)
 
