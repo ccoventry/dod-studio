@@ -1647,13 +1647,14 @@ mod tests {
     }
 
     #[test]
-    fn an_initial_exec_is_followed_into_its_file_addon_folder_first() {
+    fn an_initial_exec_is_followed_into_its_file_game_folder_first() {
         let r = report_with_files(
             "exec_followed",
             &[
-                ("dod_addon/wsod.cfg", "hud_deathnotice_time \"12\"\n"),
-                // The game finds dod_addon's copy first, so this one never runs.
-                ("dod/wsod.cfg", "hud_deathnotice_time \"99\"\n"),
+                ("dod/wsod.cfg", "hud_deathnotice_time \"12\"\n"),
+                // `exec` opens under GAMECONFIG (dod alone) before GAME, so
+                // dod's copy wins and this one never runs.
+                ("dod_addon/wsod.cfg", "hud_deathnotice_time \"99\"\n"),
             ],
             &["exec wsod.cfg"],
             vec![scheduled("hud_deathnotice_time 4", "Before", 2.0)],

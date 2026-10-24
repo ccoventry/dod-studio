@@ -1009,10 +1009,13 @@ pub fn scan_cached(game_dir: &Path) -> std::sync::Arc<CfgScan> {
 // the file. Its settings then join the value rules at the place of the `exec`.
 // Read-only, like the rest of this module.
 
-/// The folders the game looks in for a file an `exec` names, in order. Every
-/// game Studio starts has `-addons` on its launch line (`types.rs`), so the
-/// game's `_addon` folder comes first, then the game folder itself, then its
-/// `_downloads` folder.
+/// The folders the game looks in for a file an `exec` names, in order.
+/// `Cmd_Exec_f` (both builds; `hw+0x1b5bde` on the 25th Anniversary one)
+/// opens the file under the `GAMECONFIG` path ID, which is the game folder
+/// alone, then `GAME`, which adds the `_addon` folder (every game Studio
+/// starts has `-addons` on its launch line, `types.rs`), then every search
+/// path, which adds `_downloads` (`GAMEDOWNLOAD`). So the game folder's copy
+/// wins over `_addon`'s. The `valve` fallback folders are not modelled.
 pub fn exec_search_dirs(game_dir: &Path) -> Vec<PathBuf> {
     let Some(name) = game_dir
         .file_name()
@@ -1022,8 +1025,8 @@ pub fn exec_search_dirs(game_dir: &Path) -> Vec<PathBuf> {
     };
     let sibling = |suffix: &str| game_dir.with_file_name(format!("{name}{suffix}"));
     vec![
-        sibling("_addon"),
         game_dir.to_path_buf(),
+        sibling("_addon"),
         sibling("_downloads"),
     ]
 }
@@ -1049,8 +1052,8 @@ pub fn exec_target(command: &str) -> Option<String> {
 pub struct InitialExec {
     /// The command, trimmed.
     pub command: String,
-    /// The file the game would run, or `None` when no folder in
-    /// [`exec_search_dirs`] has it (the game prints "couldn't exec").
+    /// The file the game would run, or `None` when the game refuses the name
+    /// or no folder in [`exec_search_dirs`] has it ("couldn't exec").
     pub file: Option<PathBuf>,
     /// Every assignment in it, and in the files it execs in turn, in the
     /// order the game runs them. Bounded like the start-up scan: depth, file
@@ -1082,20 +1085,27 @@ fn normalise(path: &Path) -> PathBuf {
 }
 
 /// The file an `exec` line names, looked for in `dirs` in order, or `None`
-/// when no folder has it. Paths that climb out of a folder are refused: a
-/// config is not a place to accept one.
+/// when the game would not run one. `Cmd_Exec_f`'s own checks come first:
+/// it refuses a name containing a backslash, `:`, `~` or `..`, or starting
+/// with `/` ("invalid path"), one with more than one `.` ("invalid
+/// filename"), and one not ending in `.cfg` or `.rc` ("not a .cfg or .rc
+/// file"); it adds no extension.
 fn resolve_exec(dirs: &[PathBuf], target: &str) -> Option<PathBuf> {
     let name = unquote(target);
-    if name.is_empty() || name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
+    if name.is_empty()
+        || ['\\', ':', '~'].iter().any(|c| name.contains(*c))
+        || name.contains("..")
+        || name.starts_with('/')
+        || name.matches('.').count() > 1
+    {
+        return None;
+    }
+    let ext = name.rsplit_once('.').map(|(_, ext)| ext)?;
+    if !ext.eq_ignore_ascii_case("cfg") && !ext.eq_ignore_ascii_case("rc") {
         return None;
     }
     dirs.iter().find_map(|dir| {
         let next = dir.join(&name);
-        let next = if next.extension().is_none() {
-            next.with_extension("cfg")
-        } else {
-            next
-        };
         next.is_file().then_some(next)
     })
 }
@@ -2260,15 +2270,51 @@ mod tests {
     }
 
     #[test]
-    fn exec_is_looked_for_in_the_addon_folder_then_the_game_then_downloads() {
+    fn exec_is_looked_for_in_the_game_folder_then_addon_then_downloads() {
         let root = Path::new("install");
         assert_eq!(
             exec_search_dirs(&root.join("dod")),
             vec![
-                root.join("dod_addon"),
                 root.join("dod"),
+                root.join("dod_addon"),
                 root.join("dod_downloads")
             ]
+        );
+    }
+
+    #[test]
+    fn an_exec_the_game_refuses_resolves_to_nothing() {
+        let root = install(
+            "exec_refused",
+            &[
+                ("dod/movie.cfg", "fps_max 100\n"),
+                ("dod/movie", "fps_max 1\n"),
+                ("dod/my.movie.cfg", "fps_max 2\n"),
+                ("dod/cfg/sub.cfg", "fps_max 3\n"),
+                ("dod/valve.rc", "fps_max 4\n"),
+            ],
+        );
+        let dirs = exec_search_dirs(&root.join("dod"));
+        // No extension is added, and only .cfg and .rc run.
+        assert_eq!(resolve_exec(&dirs, "movie"), None);
+        assert_eq!(resolve_exec(&dirs, "movie.txt"), None);
+        // More than one dot: "invalid filename".
+        assert_eq!(resolve_exec(&dirs, "my.movie.cfg"), None);
+        // Backslash, colon, tilde: "invalid path".
+        assert_eq!(resolve_exec(&dirs, "cfg\\sub.cfg"), None);
+        assert_eq!(resolve_exec(&dirs, "c:movie.cfg"), None);
+        assert_eq!(resolve_exec(&dirs, "~movie.cfg"), None);
+        assert_eq!(
+            resolve_exec(&dirs, "cfg/sub.cfg"),
+            Some(root.join("dod").join("cfg/sub.cfg"))
+        );
+        assert_eq!(
+            resolve_exec(&dirs, "\"movie.cfg\""),
+            Some(root.join("dod").join("movie.cfg"))
+        );
+        assert_eq!(
+            resolve_exec(&dirs, "valve.rc"),
+            Some(root.join("dod").join("valve.rc"))
         );
     }
 
@@ -2301,7 +2347,7 @@ mod tests {
         let root = install(
             "initial_exec_chain",
             &[
-                ("dod_addon/movie.cfg", "fps_max 100\nexec more\n"),
+                ("dod_addon/movie.cfg", "fps_max 100\nexec more.cfg\n"),
                 (
                     "dod/more.cfg",
                     "hud_deathnotice_time 12\nbind f7 \"fps_max 1\"\n",
@@ -2342,7 +2388,7 @@ mod tests {
     #[test]
     fn an_initial_exec_of_a_missing_file_has_no_file_and_no_settings() {
         let root = install("initial_exec_missing", &[]);
-        let followed = follow_initial_exec(&root.join("dod"), "exec nope").unwrap();
+        let followed = follow_initial_exec(&root.join("dod"), "exec nope.cfg").unwrap();
         assert_eq!(followed.file, None);
         assert!(followed.settings.is_empty());
         assert!(follow_initial_exec(&root.join("dod"), "sensitivity 2").is_none());

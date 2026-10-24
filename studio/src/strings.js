@@ -1555,10 +1555,10 @@ export const STRINGS = {
     FILTERED_TITLE: 'The game drops these commands without running them:',
     FILTERED_ADVICE:
       "Seek Between Clips (Pipeline tab) is off, so Initial and Scheduled Commands reach the game inside a patched copy of the demo, and the game filters every command a demo carries. With no message, it drops any command whose name contains bind, _set, kill, exit, quit, retry, _restart, writecfg, motdfile or motd_write, any name starting with connect, any alias, and any line containing exec. Turn Seek Between Clips on and DoD Studio's hook runs them all. A config file the game runs at start-up isn't filtered.",
-    // An Initial Command `exec <file>` the game won't find.
-    MISSING_EXEC_TITLE: "The game can't find the file these Initial Commands exec:",
+    // An Initial Command `exec <file>` the game refuses or won't find.
+    MISSING_EXEC_TITLE: "The game won't run the file these Initial Commands exec:",
     MISSING_EXEC_ADVICE:
-      'It looks in dod_addon, then dod, then dod_downloads, and prints "couldn\'t exec" when the file is in none of them. Check the name, or move the file into one of those folders.',
+      'The name must end in .cfg (or .rc), with no other dot and no backslash; the game adds no extension. It looks in dod, then dod_addon, then dod_downloads, and prints "couldn\'t exec" when the file is in none of them. Check the name, or move the file into one of those folders.',
     filteredRow: (command, rule, pattern) => {
       const why = {
         nameContains: `its name contains '${pattern}'`,
