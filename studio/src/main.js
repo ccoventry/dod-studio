@@ -7,6 +7,7 @@ import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
+import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
@@ -377,7 +378,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),
     targetDrives: folderPools.targetDrives(),
-    currentScannedDemos
+    currentScannedDemos,
+    projectPath: projectSession.currentPath(),
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, folderPools.updateExportPoolIndicator, captureDemosReady);
   // Saving, renaming or deleting a profile changes its name in the capture
   // summary strip without touching a field the strip listens to.
@@ -421,6 +423,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   checkObsOrphanOnStartup();
+
+  // A batch that ran while Studio was closed (#545): mark its finished clips.
+  createBatchCatchUp({ getDemos: () => currentScannedDemos, getTakeIndex: () => takeIndex,
+    getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
   startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation, persistAppSettings });

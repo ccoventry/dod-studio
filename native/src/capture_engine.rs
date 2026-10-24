@@ -282,6 +282,9 @@ pub fn spawn_capture_engine(
     // `jobs` is then empty: nothing is patched into `dod/`, the game starts on
     // no demo, and the file is handed to it once it takes commands.
     runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
+    // Where the batch's start in the game stands, read by Studio's close
+    // prompt (#545). Studio sets it to `Preparing` when the batch starts.
+    batch_start: Arc<crate::game_handoff::BatchStart>,
 ) {
     std::thread::Builder::new()
         .name("capture_engine".into())
@@ -758,6 +761,11 @@ pub fn spawn_capture_engine(
                 }
             };
             log_markdown(&format!("[HLAE] Spawned (PID {})", child.id()));
+            batch_start.set(if handoff.is_some() {
+                crate::game_handoff::StartState::Pending
+            } else {
+                crate::game_handoff::StartState::NotNeeded
+            });
 
             // The HLAE launcher process (`_child` above) injects into `hl.exe` and then
             // exits on its own under `-noGui -autoStart` — that is expected handoff
@@ -881,12 +889,14 @@ pub fn spawn_capture_engine(
                         Handoff::Waiting | Handoff::Sent => {}
                         Handoff::JustSent(pid) => {
                             foreground_lock.release();
+                            batch_start.set(crate::game_handoff::StartState::Sent);
                             log_markdown(&format!(
                                 "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
                                 handoff.lines.join("; ")
                             ))
                         }
                         Handoff::Failed(why) => {
+                            batch_start.set(crate::game_handoff::StartState::Failed);
                             log_markdown(&format!("[HLAE] {why}"));
                             failure_reason = Some(why);
                             kill_hl_exe_and_wait(&mut sys);
