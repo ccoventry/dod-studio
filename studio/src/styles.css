@@ -304,11 +304,32 @@ body {
   background: transparent;
 }
 
-/* A file/folder dialog is on its way (pick_path.js): the busy cursor
+/* A file/folder dialog is on its way (dialog_wait.js): the busy cursor
    everywhere, over each element's own cursor, until the dialog returns. */
 html.picking-path,
 html.picking-path * {
   cursor: progress !important;
+}
+
+/* ...and when it is slow to appear, this notice until it does. */
+#file-dialog-notice {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10000;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+#file-dialog-notice[hidden] {
+  display: none;
 }
 
 .recent-project-item {

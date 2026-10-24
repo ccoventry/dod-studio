@@ -1084,6 +1084,7 @@ pub fn run() {
             dir_browser::default_browse_dir,
             pick_paths::pick_path_states,
             pick_paths::pick_user_folders,
+            pick_paths::file_dialog_shown,
             dir_browser::count_demo_files_in_folder,
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
