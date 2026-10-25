@@ -1,6 +1,6 @@
 # HLTV demos lose most of their gunshots, and how they are put back
 
-An HLTV demo is quieter than the match was. Whole bursts play with no sound,
+An HLTV demo is quieter than the match was (a POV demo too, less so: §6). Whole bursts play with no sound,
 no muzzle flash and no bullet impact, while the player's model stands there
 firing. `ds_spec_match_pov 1` puts those rounds back (it also turns on the
 viewmodel animations and the POV crosshair; until 2026-10-01 this part had a
@@ -189,9 +189,8 @@ for each weapon script and forwards the call. The log says how many it got:
 - **See two rounds from one player inside one rendered frame.** At 60 fps a
   frame is 17 ms and the fastest weapon fires every 50 ms. Under about 20 fps
   an MG42 burst could lose a round.
-- **Do anything for a POV demo.** A player's own recording only ever held what
-  that player could hear, and that is what it should play. The hook acts only
-  while `IsSpectateOnly()` is true.
+- **Restore a POV recorder's own rounds.** Those are the recorder's client's
+  predicted events, and need another signal (§6).
 
 ## 5. Checking it
 
@@ -220,3 +219,38 @@ side. Another 38 rounds came with their own event and were left alone. The
 ```
 missing gunshots: 412 played, 280 rounds had their own event, 0 skipped (weapon not known)
 ```
+
+## 6. POV demos: other players' rounds
+
+A POV demo loses other players' rounds too, less often. The audit for #1036
+(`analysis/examples/pov_event_audit.rs`, 361 POV demos from 27 recorders)
+found 14.4% of the rounds other players fired in the recorder's view (74,848
+of 518,947) with no fire event, and 14.6% of their gun kills with none from
+the killer. Per recorder the median is 15% (6% to 47%), and it doesn't follow
+ping. In game none of them make a sound (0 of 7 on each build). An event that
+never reached the recorder's client was not heard live either (an inference),
+so the stand-in improves the movie rather than restoring what the player
+heard.
+
+`ds_sound_restore_gunshots 1` (the default; the name is a placeholder,
+#1036) runs §3 while a POV demo plays (`IsPlayingback()` and not
+`IsSpectateOnly()`), for every player but the recorder (`GetLocalPlayer()`).
+Two things differ from HLTV:
+
+- **Only players in the latest update.** A POV recording carries only the
+  players the recorder could see. One out of view keeps the state last sent
+  for it, and coming back into view would look like a restart, so a player
+  whose `curstate.messagenum` is not the newest one is forgotten until seen
+  again.
+- **When the event counts as this round's.** Of the 444,099 rounds that kept
+  their event, 97.2% had it in the same message as the restart; 886 (0.2%)
+  had it one message (1-20 ms) before, and 6 after (within 40 ms). The rest
+  paired with an event 80-200 ms away, which is a neighbouring round of a
+  burst, not this one. So in a POV demo a real shot counts for a restart on
+  the same frame, the frame before or after, or up to 25 ms before it. A
+  round never plays twice that way, and a round whose own event is missing
+  is not taken for one with a neighbour's.
+
+The recorder's own rounds are left alone: a POV demo's own shots are the
+recorder's client predicting them, saved as `Dem_Event`, and only 0.26% go
+missing. #1029 (PR #1040) restores those from the clip count instead.

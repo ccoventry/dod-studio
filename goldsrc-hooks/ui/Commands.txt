@@ -79,6 +79,8 @@ SOUND
       Silence the music the map plays when a team wins the round.
   ds_sound_mute_flag_capture 0/1
       Silence the map's point-captured announcements, and also its objective-secured ones (dod_escape's).
+  ds_sound_restore_gunshots 0/1
+      POV demos: play other players' gunshots the demo left silent (about 1 in 7; on by default).
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>

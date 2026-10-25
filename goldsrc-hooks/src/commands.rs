@@ -755,6 +755,11 @@ fn status_text() -> String {
         bit(crate::strafe_twitch::enabled()),
         crate::strafe_twitch::status()
     ));
+    lines.push(format!(
+        "{} = {} -- POV demos: other players' rounds the demo has no fire event for are played",
+        missing_shots::RESTORE_NAME,
+        bit(missing_shots::restore_enabled()),
+    ));
     if let Some(deathcam) = crate::spectator_deathcam::status_line() {
         lines.push(deathcam);
     }
@@ -1375,6 +1380,15 @@ unsafe extern "C" fn cmd_fix_model_flicker() {
     );
 }
 
+/// Only registered when `missing_shots::RESTORE_NAME` could not be a cvar.
+unsafe extern "C" fn cmd_restore_gunshots() {
+    handle_toggle(
+        missing_shots::RESTORE_NAME,
+        &missing_shots::RESTORE_WITHOUT_A_CVAR,
+        || String::from("POV demos: other players' rounds with no fire event"),
+    );
+}
+
 /// Only registered when `ds_ui_console_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
@@ -1779,6 +1793,12 @@ pub fn install() {
         Some(flicker) => crate::strafe_twitch::set_cvar(flicker),
         None => add_command(crate::strafe_twitch::NAME, cmd_fix_model_flicker),
     }
+    // On by default: a round fired in view should be heard (#1036). Read by
+    // `missing_shots::poll` itself; `2` also logs every round.
+    match register(missing_shots::RESTORE_NAME, "1") {
+        Some(restore) => missing_shots::set_restore_cvar(restore),
+        None => add_command(missing_shots::RESTORE_NAME, cmd_restore_gunshots),
+    }
     // On by default: a demo then shows the sniper scope the player saw.
     if let Some(scope) = register(crate::demo_scope::NAME, "1") {
         crate::demo_scope::set_cvar(scope);
@@ -2020,6 +2040,7 @@ mod tests {
             crate::center_text::NAME,
             crate::spectator_text::NAME,
             crate::strafe_twitch::NAME,
+            missing_shots::RESTORE_NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")

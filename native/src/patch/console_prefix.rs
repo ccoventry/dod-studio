@@ -107,6 +107,7 @@ mod tests {
         "player_fix_model_flicker",
         "sound_mute_flag_capture",
         "sound_mute_victory_music",
+        "sound_restore_gunshots",
         "spec_hide_text",
     ];
 
