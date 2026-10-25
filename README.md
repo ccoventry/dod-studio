@@ -10,12 +10,14 @@ A creative fork of [cgdangelo/dod-tools](https://github.com/cgdangelo/dod-tools)
 ## Download
 
 **[Get the latest release](https://github.com/ccoventry/dod-studio/releases/latest)**:
-download `setup.exe` and run it. Windows 10 or 11, 64-bit.
+download `DoD.Studio_<version>_x64-setup.exe` and run it. Windows 10 or 11, 64-bit.
 
 - DoD Studio tells you when an update is out (the button beside Help) and
   installs it for you.
 - Want new features before they're released? Pick the **Experimental** channel
-  under Help › Check for Updates. It can have bugs the stable one doesn't.
+  under Help › Check for Updates, or download it from the
+  [experimental release](https://github.com/ccoventry/dod-studio/releases/tag/experimental-latest).
+  It can have bugs the stable one doesn't.
 - Just want stats from one demo? The **[web analyzer](https://ccoventry.github.io/dod-studio/)**
   reads a demo in your browser, with nothing to install.
 
@@ -110,6 +112,39 @@ into your browser yourself:
 
 Read them before you decide what to run.
 
+## Documentation
+
+- [Use at your own risk](#use-at-your-own-risk): what can go wrong, and who
+  carries it.
+- [`docs/vac_safety.md`](docs/vac_safety.md): every way the game gets started,
+  and what keeps each one away from VAC-secured servers.
+- [`docs/features.md`](docs/features.md): what the app does, page by page.
+- [`docs/dodstudio_commands.md`](docs/dodstudio_commands.md): every in-game
+  `ds_*` console command and setting, with its default.
+- [Wiki](https://github.com/ccoventry/dod-studio/wiki): the same commands
+  list, and links back here.
+- [Releases](https://github.com/ccoventry/dod-studio/releases): what changed in
+  each version.
+
+For developers:
+
+- [`docs/README.md`](docs/README.md): the index of engineering notes
+  (architecture, GoldSrc and DoD engine quirks, HLAE protocols, releases).
+  Retired plans are in [`docs/archive/`](docs/archive/).
+- [`goldsrc-hooks/README.md`](goldsrc-hooks/README.md): the in-game DLL, what
+  each module does, and how to build and test it.
+- [`CLAUDE.md`](CLAUDE.md): the repository's rules (branch and PR names, CI,
+  engine quirks).
+- One README per part: [`native/`](native/README.md),
+  [`native/examples/`](native/examples/README.md),
+  [`analysis/examples/`](analysis/examples/README.md),
+  [`studio/`](studio/README.md), [`studio/tests/e2e/`](studio/tests/e2e/README.md),
+  [`web-analyzer/`](web-analyzer/README.md), [`dem-patch/`](dem-patch/README.md),
+  [`test-fixtures/`](test-fixtures/README.md), [`blender/`](blender/README.md) and
+  [`goldsrc-hooks/tools/hd/`](goldsrc-hooks/tools/hd/README.md).
+- Bugs and planned work are in
+  [GitHub Issues](https://github.com/ccoventry/dod-studio/issues).
+
 ---
 
 ## For developers
@@ -146,6 +181,8 @@ If you are here to look at demo parsing or stats extraction, `dod/` and
     goldsrc-hooks/    32-bit DLL injected into hl.exe: HLTV fixes, HUD control, HD textures
     studio/           Tauri v2 + Vite frontend
     web-analyzer/     analysis/ compiled to wasm, browser-based demo viewer
+    blender/          scripts that rebuild an HLAE .agr take in Blender (the Blender page runs them)
+    test-fixtures/    the real demo and data files CI's tests read
 
 ### Quick start
 
@@ -191,15 +228,6 @@ error**, which kills the whole process mid-batch. The fork falls back to the
 library's built-in initial delta table where one exists and returns a graceful
 parse failure otherwise. As of upstream v0.3.0 all 29 of those call sites are
 still present, so the patch is still required.
-
-### Documentation
-
-Engineering notes live in `docs/` ([index](docs/README.md)): architecture
-decisions, GoldSrc and DoD engine quirks, and HLAE protocol constraints.
-`docs/features.md` describes what the app does, page by page.
-`docs/dodstudio_commands.md` lists the in-game `ds_*` console commands. Bugs
-and planned work are tracked in GitHub Issues; retired planning docs are in
-`docs/archive/`.
 
 ## Licensing
 
