@@ -60,7 +60,8 @@
 //!
 //! `font` -- the names in a font of our own -- lives in [`font`] (#562), and
 //! `scale` -- the icons S times bigger, lines spaced to match -- in [`scale`]
-//! (#728).
+//! (#728), and `layout even` -- every icon in a box of one height, from DoD
+//! Studio's own atlas -- in [`even`] (#1022).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -72,7 +73,9 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
+mod even;
 mod font;
+mod name_cap;
 mod replace;
 mod scale;
 
@@ -292,7 +295,7 @@ impl std::fmt::Display for Player {
 /// one players and server admins recognise (#537). `None` for an id that
 /// isn't a player's own account, such as the HLTV proxy's: that form only
 /// exists for individual accounts, base + a 32-bit account number.
-fn classic_steam_id(id: u64) -> Option<String> {
+pub(crate) fn classic_steam_id(id: u64) -> Option<String> {
     let account = id
         .checked_sub(STEAM_ID64_BASE)
         .filter(|&a| a <= u64::from(u32::MAX))?;
@@ -356,7 +359,7 @@ const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
 /// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
 /// the engine that printed it and does not change the account), or the newer
 /// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
-fn parse_steam_id(text: &str) -> Option<u64> {
+pub(crate) fn parse_steam_id(text: &str) -> Option<u64> {
     let bare = text
         .strip_prefix('[')
         .and_then(|t| t.strip_suffix(']'))
@@ -771,7 +774,7 @@ fn apply_max(max: i32) -> Result<(), String> {
     };
 
     for &(rva, field) in ARRAY_REFS {
-        let value = (array + field) as u32;
+        let value = (array + name_cap::field_for(base, rva, field)) as u32;
         if !unsafe { write_code(base, rva, &value.to_le_bytes()) } {
             return Err(format!("could not make +{rva:#x} writable"));
         }
@@ -794,6 +797,25 @@ fn apply_max(max: i32) -> Result<(), String> {
 
     PATCHED_MAX.store(if reverting { 0 } else { max }, Ordering::Release);
     Ok(())
+}
+
+/// Lets the kill feed hold names of up to 63 characters instead of 31, for
+/// `ds_player_change_name`'s long names (#1021). Once lifted it stays: the
+/// engine's own names are at most 31, so they show as before. See
+/// [`name_cap`].
+pub(crate) fn lift_name_cap() -> Result<(), String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    let (array, _) = current_array(base);
+    // Safety: the stock check has passed for this module.
+    unsafe { name_cap::lift(base, array) }
+}
+
+/// Whether the kill feed holds 63-character names now.
+pub(crate) fn name_cap_lifted() -> bool {
+    engine::client_module_base().is_some_and(name_cap::lifted)
 }
 
 // ── The y detour ─────────────────────────────────────────────────────────────
@@ -1077,6 +1099,8 @@ pub fn poll() {
         install_hook();
     }
     font::poll();
+    // Before `scale`, whose copy follows what the even layout finds.
+    even::poll();
     scale::poll();
 }
 
@@ -1261,7 +1285,11 @@ fn usage() -> String {
          \x20 {COMMAND} font default       the game's own font again\n\
          \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
          \x20                               lines spaced and right-aligned to match (default 1)\n\
-         \x20 {COMMAND} scale default      the game's own size again\n",
+         \x20 {COMMAND} scale default      the game's own size again\n\
+         \x20 {COMMAND} layout even        every weapon icon in a box of one height, full\n\
+         \x20                               magazines and bipods shown, every line one step\n\
+         \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
+         \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,
@@ -1284,10 +1312,11 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}, replacing {}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, blocking {block}, replacing {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
+        even::describe(),
         match replace::count() {
             0 => "nothing".to_string(),
             1 => "1 kill line (replace list)".to_string(),
@@ -1416,6 +1445,19 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} scale: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} scale: {why}\n"),
+            }
+        }
+        "layout" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe(), usage());
+            }
+            match even::parse_args(rest) {
+                Ok(layout) => match even::apply(layout) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} layout: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} layout: {why}\n"),
             }
         }
         "fake" => {

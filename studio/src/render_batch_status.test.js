@@ -30,4 +30,11 @@ describe('batchEndStatus', () => {
     expect(batchEndStatus(3, 0, 18)).toEqual({ text: 'Status: Finished — 3 rendered, 18 cancelled', status: JOB_STATUS.CANCELLED });
     expect(batchEndStatus(3, 1, 0)).toEqual({ text: 'Status: Finished — 3 rendered, 1 failed', status: JOB_STATUS.ERROR });
   });
+
+  it('says how long it took when it knows (#954)', () => {
+    expect(batchEndStatus(10, 0, 0, '7 min 40 s')).toEqual({ text: 'Done in 7 min 40 s: 10 rendered', status: JOB_STATUS.FINISHED });
+    expect(batchEndStatus(3, 1, 2, '42 s')).toEqual({ text: 'Done in 42 s: 3 rendered, 1 failed, 2 cancelled', status: JOB_STATUS.ERROR });
+    expect(batchEndStatus(0, 0, 4, '42 s')).toEqual({ text: 'Status: Cancelled', status: JOB_STATUS.CANCELLED });
+    expect(batchEndStatus(0, 0, 0, '0.1 s')).toEqual({ text: 'Status: Finished', status: JOB_STATUS.FINISHED });
+  });
 });

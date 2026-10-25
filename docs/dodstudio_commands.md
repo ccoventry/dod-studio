@@ -16,7 +16,7 @@ start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
 **Scope:** the surface actually on `dev` today: forty-eight cvars and
-fifteen commands. Entries still in open PRs are not listed -- update this file as
+sixteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
@@ -60,6 +60,7 @@ the death cam).
 | `ds_hud_overview_hide_speaker` | `0` | leaves the speaker icon (`mapsprites/speakerIcon.spr`) off the players' icons on the overview map, so the sprite needs no blanking; the player icons stay, unlike `ds_hud_overview_players 4`. What makes the game draw it (a player talking or using a voice command) is a guess (#677) | `goldsrc-hooks/src/overview_speaker.rs` |
 | `ds_view_hide_headshot_red_screen` | `0` | POV demos: drops the red screen flash (a server `ScreenFade` of (128,0,0) at alpha 200, flags 0) that comes with every hit on the player's head hitbox, fatal or not, grenades included (#606). The black fades (the clear at respawn, the end of the map) still play | `goldsrc-hooks/src/screen_effects.rs` |
 | `ds_view_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (amplitude 16 for 1 s; no WSOD25 map has an `env_shake`) (#606), and takes the shake the recorder's client already put into the recorded view back out of it (#910) | same |
+| `ds_view_show_own_blood` | `0` | POV demos: shows the recording player's own blood when they're hit, which the game skips this close to the camera. DoD draws no blood puff closer than 32 units to the view (`EV_BloodPuff`), and the recorder's own wounds land a few units below the eye, so the demo has them (25-58 per demo in 6 demos from 6 recorders) and the game never draws them; a puff 27 units away drew at 60 fps and not at 300, by chance (#1018). The value picks the cut: `0` the game's own 32, `1` 24, `2` 16 (most sprays, without the blocky close-ups), `3` 8, `4` 0 (everything; under about 16 units a puff covers a third of the screen with blocky pixels and a pale haze). Switches live; a value past 4 gives 4, below 0 gives 0, with a console line. Only the blood-puff cut changes (#1035) | `goldsrc-hooks/src/own_blood.rs` |
 | `ds_hud_show_scope` | `1` | shows the sniper scope while a demo plays. The game turns it off for playback (`CHudScope::DrawTriApiScope` skips its draw when `IsPlayingback()`). A POV demo shows the recorder's own scope whenever they zoomed. Watching in-eye, the game always picks the Springfield's scope; with this on it is the watched player's rifle: the scoped K98 and scoped FG42 get `scope_k43`, the Springfield `scope_spring`, the scoped Enfield `scope_enfield` (that one only when the game's scoped-weapon flag is set, which an HLTV viewer may not have). Still only while the view is zoomed (#307). The round scope keeps its size and everything outside its frame is black, at any FOV: DoD sizes the frame for the view it expects, so `gl_widescreen_yfov 1` (25th Anniversary) or a wider `mirv_fov` used to show the map around it; demos only, live play keeps the game's own scope (#799) | `goldsrc-hooks/src/demo_scope.rs`, `goldsrc-hooks/src/demo_scope/fill.rs`, [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md) |
 | `ds_player_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `ds_player_fix_model_flicker` | `1` | player models hold still from the frame an HLTV demo's clock steps back until it passes the last frame they were drawn on (one frame at normal speed, a few at 1/4 speed). The step back otherwise turns a strafing player's model round for that frame, several times a second, so his upper body flickers (#927). It happens under `viewdemo` at a frame rate above the demo's packet rate. A switch of its own, not part of `ds_spec_match_pov`: it is a bug in how the game draws a model, which HLTV only shows more often, not a difference in what an HLTV demo records. Stands down in a POV demo, where the clock (almost) never steps back | `goldsrc-hooks/src/strafe_twitch.rs`, [`goldsrc_dod_quirks.md`](goldsrc_dod_quirks.md) |
@@ -95,13 +96,16 @@ The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 Always a command rather than a cvar when it has subcommands or a variable
 argument count, which a cvar's single value can't hold.
 
-A command (or subcommand) that takes more than three values, or any
-optional ones, names its parameters: each value follows its name
-(`killer 3`, `at 7:42`), and the named parts can come in any order. A
-row of positional values would need `-` placeholders for the ones left
-out, and nobody remembers which slot is which. Short commands with a fixed
-shape stay positional (`scale 2`, `block <id>...`, `fake <killer>
-<victim> <weapon>`). An unknown name is refused, and the message names it.
+**Named parameters.** A command (or subcommand) that takes more than three
+values, or any optional ones, names its parameters: each value follows its
+name (`killer 3`, `at 7:42`, `id <player> in <demo> to <name>`), and the
+named parts can come in any order. A row of positional values would need
+`-` placeholders for the ones left out, and nobody remembers which slot is
+which (#1021). Short commands with a fixed shape stay positional
+(`scale 2`, `block <id>...`, `fake <killer> <victim> <weapon>`). A value
+with spaces goes in quotes; GoldSrc's console can't put `"` or `;` inside
+one. An unknown name is refused, and the message names it, so a typo never
+silently does something else.
 
 ### `ds_debug_status`
 
@@ -119,7 +123,8 @@ state, not the state from before that line ran.
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
 one by hand, changes the names' font, or scales the weapon icons. It also
 changes or hides one recorded kill (`replace`, #1021). The font
-(#562) and the scale (#728) take effect on the next frame. HLAE's own
+(#562), the scale (#728) and the layout (#1022) take effect on the next frame.
+HLAE's own
 `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
@@ -142,6 +147,8 @@ changes or hides one recorded kill (`replace`, #1021). The font
 | `ds_hud_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 | `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale` or `font` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
 | `ds_hud_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
+| `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it. It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
+| `ds_hud_deathmsg layout default` | the game's own boxes and spacing, with whatever icons the sheets hold (the default) |
 
 A `block` id is any of:
 
@@ -448,6 +455,53 @@ capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a
 batch draws recorded sprays and would only change the file on disk.
 Source: `goldsrc-hooks/src/spray.rs`, `goldsrc-hooks/src/spray_hltv.rs`
 (offsets checked by `goldsrc-hooks/tools/verify_hltv_spray_offsets.py`).
+
+### `ds_player_change_name`
+
+Renames a player everywhere their name shows during playback: the kill
+feed, the scoreboard, the aim-at-teammate name, the voice icon, chat, the
+capture lines and the join and team lines (#1021). The demo files stay as
+they are.
+
+```
+ds_player_change_name add id <slot | SteamID | self> [in <demo>[,<demo>...]] to <new name>
+ds_player_change_name list
+ds_player_change_name remove <n>
+ds_player_change_name clear
+```
+
+- **`id`**: a SteamID in any form `ds_hud_deathmsg block` takes
+  (`STEAM_0:1:5550002`, `[U:1:11100005]`, `7656119...`; `ds_hud_deathmsg
+  players` lists them), a slot (1-32), or `self`, the recording player of a
+  POV demo. Bots have no SteamID, so they go by slot.
+- **`in`**: one demo, a comma list, or `*` patterns, matched against the
+  loaded demo's file name without `.dem` (`in wsod25_r03_*`). Without `in`,
+  every demo.
+- **`to`**: the new name, up to 63 characters; quoted when it has spaces or
+  any of `: , ( ) { } '`. No `%`. Unquoted, the console splits a name at
+  `:` and `,` and loses the spaces beside them (`dicE[: :]Alex` arrives as
+  `dicE[::]Alex`), so the pieces are glued back with a warning that shows
+  the name as it now reads.
+- `self` or a slot without `in` gets a warning, not a refusal: "self is a
+  different player in each POV demo; add `in <demo>` or use a SteamID".
+- Refused, with the reason: `add` without `id` and `to`, any unknown word, a
+  value given twice, a bad id, a name too long.
+- When two renames match one player, one with `in` wins over one without,
+  then the one added last. `add` with the same `id` and `in` again changes
+  that rename's name instead of adding another.
+- `list` numbers the renames and says who each one renames in the demo
+  playing now; `remove <n>` takes that number.
+
+How: a detour of `client.dll`'s copy of `pfnGetPlayerInfo` (slot 21), which
+hands out the new name; the names the hook itself looks up go through the
+engine's own table, so SteamID matching always sees the real player. The
+server wrote the sender's name into each chat line, so `SayText` is rewritten
+too (the game then colours the new name, since it finds the detour's name in
+the line), and a `TextMsg` argument equal to a renamed player's real name
+(`*<name> joined Axis`) is swapped. A name over 31 characters lifts the kill
+feed's copy cap (`strncpy(..., 32)` into its 64-byte fields) to 63; checked by
+`goldsrc-hooks/tools/verify_killfeed_name_cap_offsets.py`. Source:
+`goldsrc-hooks/src/player_names.rs`, `goldsrc-hooks/src/deathmsg/name_cap.rs`.
 
 ### `ds_map_hide_asset`
 
