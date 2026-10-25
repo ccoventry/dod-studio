@@ -158,7 +158,7 @@ const SURFACE_CREATE_NEW_TEXTURE_ID: usize = 31;
 const SURFACE_GET_SCREEN_SIZE: usize = 32;
 
 /// The images' folder under `<game>_addon`, and what their names start with.
-const FOLDER: &str = "resource/background";
+const FOLDER: [&str; 2] = ["resource", "background"];
 const PREFIX: &str = "dodstudio_menu";
 /// Larger sides are refused: GL drivers of the game's era stop at 8192, and
 /// a 32-bit game has little room for the decoded copy.
@@ -171,6 +171,9 @@ static BUILD: AtomicUsize = AtomicUsize::new(0);
 /// The stock `DrawBackgroundImage`.
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
 static SURFACE: AtomicUsize = AtomicUsize::new(0);
+/// Set once the stock layout has been described in the log.
+static REPORTED_TILES: AtomicBool = AtomicBool::new(false);
+static REPORTED_DRAW: AtomicBool = AtomicBool::new(false);
 
 /// One image found in the folder.
 struct Candidate {
@@ -275,10 +278,27 @@ pub(crate) fn fit_tile(
     (at(ox, x), at(oy, y), at(ox, x + w), at(oy, y + h))
 }
 
+/// A layout tile on screen: a `scaled` one through [`fit_tile`]; any other
+/// at its own pixel size from its fitted position, as the game places one.
+pub(crate) fn place_tile(
+    res: (i32, i32),
+    screen: (i32, i32),
+    tile: (i32, i32, i32, i32),
+    scaled: bool,
+) -> (i32, i32, i32, i32) {
+    let fitted = fit_tile(res, screen, tile);
+    if scaled {
+        fitted
+    } else {
+        (fitted.0, fitted.1, fitted.0 + tile.2, fitted.1 + tile.3)
+    }
+}
+
 fn folder() -> PathBuf {
     crate::game_folder::game_root()
         .join(crate::game_folder::addon_name())
-        .join(FOLDER)
+        .join(FOLDER[0])
+        .join(FOLDER[1])
 }
 
 /// The candidates in `dir`, by name so the order is the same every run.
@@ -442,8 +462,7 @@ unsafe fn whole_image(surface: *mut c_void, screen: (i32, i32)) -> Option<(i32, 
     }
 }
 
-/// The stock tiles, fitted. `false` when the layout holds a tile that isn't
-/// `scaled` (a mod's own layout), which is left to the game.
+/// The stock tiles, fitted. `false` when there is no layout to draw.
 unsafe fn fitted_tiles(
     panel: *mut c_void,
     build: &Build,
@@ -463,15 +482,22 @@ unsafe fn fitted_tiles(
         if tiles == 0 || count <= 0 || res.0 <= 0 || res.1 <= 0 {
             return false;
         }
-        for i in 0..count as usize {
-            if *((tiles + i * TILE_SIZE + TILE_SCALED) as *const u8) == 0 {
-                return false;
-            }
-        }
+        let report = !REPORTED_TILES.swap(true, Ordering::Relaxed);
+        let mut unscaled = Vec::new();
         for i in 0..count as usize {
             let t = (tiles + i * TILE_SIZE) as *const i32;
             let tile = (*t.add(1), *t.add(2), *t.add(3), *t.add(4));
-            paint(surface, *t, fit_tile(res, screen, tile));
+            let scaled = *((tiles + i * TILE_SIZE + TILE_SCALED) as *const u8) != 0;
+            if report && !scaled {
+                unscaled.push(tile);
+            }
+            paint(surface, *t, place_tile(res, screen, tile, scaled));
+        }
+        if report {
+            crate::debug::report(&format!(
+                "menu_background: fitting the stock layout ({}x{}, {count} tile(s), unscaled (x, y, w, h): {unscaled:?}) to a {}x{} screen",
+                res.0, res.1, screen.0, screen.1
+            ));
         }
     }
     true
@@ -491,6 +517,14 @@ unsafe extern "thiscall" fn draw(panel: *mut c_void) {
         unsafe {
             let size: ScreenSizeFn = slot(surface, SURFACE_GET_SCREEN_SIZE);
             size(surface, &mut screen.0, &mut screen.1);
+            if !REPORTED_DRAW.swap(true, Ordering::Relaxed) {
+                crate::debug::report(&format!(
+                    "menu_background: first draw, {}x{} screen, keep shape {}",
+                    screen.0,
+                    screen.1,
+                    keep_shape()
+                ));
+            }
             if let Some((texture, w, h)) = whole_image(surface, screen) {
                 paint(surface, texture, cover(w, h, screen));
                 return;
@@ -715,5 +749,11 @@ mod tests {
         assert_eq!(left.3, below.1);
         let last = fit_tile(res, screen, (768, 512, 32, 88));
         assert_eq!((left.0, left.1, last.2, last.3), cover(800, 600, screen));
+        // An unscaled tile keeps its pixel size from its fitted corner.
+        assert_eq!(
+            place_tile(res, screen, (256, 0, 256, 256), false),
+            (right.0, right.1, right.0 + 256, right.1 + 256)
+        );
+        assert_eq!(place_tile(res, screen, (256, 0, 256, 256), true), right);
     }
 }
