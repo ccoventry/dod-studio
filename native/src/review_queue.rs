@@ -106,6 +106,12 @@ pub enum ReviewEvent {
     Ended {
         reason: String,
     },
+    /// The game refused a line Studio sent while the review runs (#880):
+    /// Launch Preview's `viewdemo`, a seek. `command` is the first locked
+    /// command in it (`review_lock::refused_label`).
+    Refused {
+        command: String,
+    },
 }
 
 /// The review event an events-pipe line carries, if it carries one.
@@ -139,6 +145,9 @@ pub fn parse_event(line: &str) -> Option<ReviewEvent> {
         }
         "REVIEW_END" => Some(ReviewEvent::Ended {
             reason: fields.next().unwrap_or("done").trim().to_string(),
+        }),
+        "REVIEW_REFUSED" => Some(ReviewEvent::Refused {
+            command: fields.next()?.trim().to_string(),
         }),
         _ => None,
     }
@@ -239,6 +248,24 @@ mod tests {
             panic!("not parsed");
         };
         assert_eq!(verdict, "maybe");
+    }
+
+    /// The game's `review_lock::refused_label` line, and the JSON the
+    /// frontend's review_mode.js reads (`kind`, `command`).
+    #[test]
+    fn a_refused_line_is_parsed() {
+        let event = parse_event("[dod-studio] REVIEW_REFUSED\tviewdemo").unwrap();
+        assert_eq!(
+            event,
+            ReviewEvent::Refused {
+                command: "viewdemo".to_string()
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({ "kind": "refused", "command": "viewdemo" })
+        );
+        assert_eq!(parse_event("[dod-studio] REVIEW_REFUSED"), None);
     }
 
     #[test]
