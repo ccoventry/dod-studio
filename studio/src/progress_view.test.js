@@ -98,3 +98,4 @@ describe('progress_view (#951)', () => {
     expect(redraw).toHaveBeenCalledTimes(3);
   });
 });
+

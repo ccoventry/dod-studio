@@ -919,6 +919,37 @@ pub async fn queue_render_batch(
     result
 }
 
+/// Scan for Takes' count of takes found, sent at most every ~33 ms (#954,
+/// CLAUDE.md's telemetry throttle): a folder of hundreds of takes used to
+/// send an event per take.
+#[derive(Default)]
+struct ScanCountThrottle {
+    found: u32,
+    sent: u32,
+    last_sent: Option<std::time::Instant>,
+}
+
+impl ScanCountThrottle {
+    /// One more take found at `now`: the count to send now, if any.
+    fn found_one(&mut self, now: std::time::Instant) -> Option<u32> {
+        self.found += 1;
+        let due = self
+            .last_sent
+            .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(33));
+        if !due {
+            return None;
+        }
+        self.last_sent = Some(now);
+        self.sent = self.found;
+        Some(self.found)
+    }
+
+    /// The count once the scan is done, when the last one sent was short.
+    fn last(&self) -> Option<u32> {
+        (self.found != self.sent).then_some(self.found)
+    }
+}
+
 async fn scan_and_merge(
     app: &AppHandle,
     state: &RenderManager,
@@ -960,9 +991,19 @@ async fn scan_and_merge(
                 // thread so the frontend gets live progress instead of the whole
                 // batch arriving at once when the scan finishes. Exits on its own
                 // once status_tx drops (scan_folder_background returns below).
+                // The line wants the count, not the names (#954): sent at most
+                // every ~33 ms, and once more at the end.
                 let status_thread = std::thread::spawn(move || {
-                    while let Ok(msg) = status_rx.recv() {
-                        let _ = scan_app.emit("render_scan_status", msg);
+                    let mut throttle = ScanCountThrottle::default();
+                    while status_rx.recv().is_ok() {
+                        if let Some(found) = throttle.found_one(std::time::Instant::now()) {
+                            let _ = scan_app
+                                .emit("render_scan_status", serde_json::json!({ "found": found }));
+                        }
+                    }
+                    if let Some(found) = throttle.last() {
+                        let _ = scan_app
+                            .emit("render_scan_status", serde_json::json!({ "found": found }));
                     }
                 });
 
@@ -1771,6 +1812,20 @@ fn recovered_jobs(session: &RenderSessionData) -> Vec<RenderJobRuntime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scan_count_is_sent_at_most_every_33_ms_and_once_at_the_end() {
+        let start = std::time::Instant::now();
+        let at = |ms: u64| start + std::time::Duration::from_millis(ms);
+        let mut throttle = ScanCountThrottle::default();
+        assert_eq!(throttle.found_one(at(0)), Some(1));
+        assert_eq!(throttle.found_one(at(10)), None);
+        assert_eq!(throttle.found_one(at(20)), None);
+        assert_eq!(throttle.found_one(at(40)), Some(4));
+        assert_eq!(throttle.last(), None, "the last count went out already");
+        assert_eq!(throttle.found_one(at(50)), None);
+        assert_eq!(throttle.last(), Some(5));
+    }
 
     fn attempt(stream: &str, outcome: RenderOutcome, path: &str) -> RenderAttempt {
         RenderAttempt {
