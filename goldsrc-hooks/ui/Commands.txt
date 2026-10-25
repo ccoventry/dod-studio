@@ -53,6 +53,8 @@ VIEW (POV demos: the recording player's own view)
       No red screen when the player is hit in the head.
   ds_view_hide_screen_shake 0/1
       No screen shake from grenades going off nearby.
+  ds_view_show_own_blood 0-4
+      Show the player's own blood when they're hit, which the game skips this close to the camera: 0 the game's own, 2 most of it, 4 all (blocky up close).
 
 PLAYERS
   ds_player_hide_hand_signals 0/1

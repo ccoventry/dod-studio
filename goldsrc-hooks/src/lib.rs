@@ -266,6 +266,7 @@ mod overview_map;
 mod overview_marker;
 mod overview_players;
 mod overview_speaker;
+mod own_blood;
 mod panic_log;
 mod particle_hide;
 mod patch;
