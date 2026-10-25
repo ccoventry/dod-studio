@@ -70,7 +70,7 @@ describe('HD Build', () => {
 
   it('a step: the line as before, the bar by step', () => {
     const view = buildView({ step: 2, steps: 6, style: 'ultrasharp', asset_type: 'world' }, 180, 'Map textures');
-    expect(view.text).toBe('Step 2 of 6: ultrasharp, Map textures (3m 00s so far)');
+    expect(view.text).toBe('Step 2 of 6: ultrasharp, Map textures (3 min 0 s so far)');
     expect(view.bar).toEqual({ done: 1, total: 6 });
   });
 });
@@ -86,13 +86,13 @@ describe('Blender', () => {
   it('names each step, then adds the clock after its first second', () => {
     expect(blenderStartView('import')).toEqual({ text: 'Importing the demo into Blender…', bar: { slide: true } });
     expect(blenderStartView('scene', 0.5).text).toBe('Building the scene…');
-    expect(blenderStartView('encode', 65).text).toBe('Encoding the MP4… (1m 05s so far)');
+    expect(blenderStartView('encode', 65).text).toBe('Encoding the MP4… (1 min 5 s so far)');
     expect(blenderStartView('unknown').text).toBe('Rendering…');
   });
 
   it('Render fills by frames', () => {
     const view = blenderFramesView({ done: 120, total: 600, frame_secs: 0.4 }, 60);
-    expect(view.text).toBe('Frame 120 of 600 (0.4 s each), 1m 00s so far');
+    expect(view.text).toBe('Frame 120 of 600 (0.4 s each), 1 min 0 s so far');
     expect(view.bar).toEqual({ pct: 20 });
   });
 });

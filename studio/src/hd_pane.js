@@ -15,7 +15,7 @@ import {
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
-import { elapsedWords } from './time_format.js';
+import { durationText } from './time_format.js';
 import {
   mostPerType, styleGaps, gapsSentence, mapCoverage, coverageSentence, uncoveredChosen, mapListWarning,
 } from './hd_coverage.js';
@@ -1190,7 +1190,7 @@ export function initHdPane() {
     buildClock = setInterval(showBuildStep, 1000);
     try {
       const outcome = await hdBuild(gamePath(), request);
-      buildProgress.textContent = STRINGS.HD.buildDone(outcome.steps, elapsedWords(outcome.elapsed_secs), outcome.log_path);
+      buildProgress.textContent = STRINGS.HD.buildDone(outcome.steps, durationText(outcome.elapsed_secs), outcome.log_path);
     } catch (err) {
       buildProgress.textContent = err === 'cancelled' ? STRINGS.HD.BUILD_CANCELLED : STRINGS.IPC.hdBuildFailed(err);
     } finally {
