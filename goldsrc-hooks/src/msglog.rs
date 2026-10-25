@@ -260,6 +260,17 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
+    // ds_sound_fix_pov_dry_fire reads CurWeapon's clip the same way.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::pov_dry_fire::MESSAGE))
+        && size > 0
+        && !buf.is_null()
+    {
+        crate::pov_dry_fire::on_cur_weapon(unsafe {
+            std::slice::from_raw_parts(buf as *const u8, size as usize)
+        });
+    }
     // Same for ds_hud_hide_clan_text's three messages, and
     // ds_hud_hide_center_text's TextMsg, which clan_text's filter asks.
     if let Some(result) = name_str

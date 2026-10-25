@@ -106,6 +106,8 @@ that panics the parser cannot take down the run:
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
 | `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |
 | `weapon_anim_probe` | What the engine does to the first-person viewmodel, read out of a demo. |
+| `pov_dry_fire_probe` | Around a POV recorder's shots: the recorded fire events, clip, buttons, `CurWeapon` and sounds (#1029). |
+| `pov_dry_fire_survey` | How many of a POV recorder's shots have no recorded fire event, per weapon, and the arguments the rest carry (#1029). |
 | `weapon_id_probe` | Tallies the weapon-ID byte of every `DeathMsg` across a folder of demos. |
 | `statusicon_probe` | Every `StatusIcon` message: icon name, enable/disable, colour. |
 | `statusvalue_probe` | Every `StatusValue` message, with the `viewdemo` window's timer. |

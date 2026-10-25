@@ -69,21 +69,22 @@ use crate::engine::{
 const NAME: &str = crate::names::SPEC_MATCH_POV;
 
 /// `event_args_t` (`common/event_args.h`), what a fire handler is passed.
+/// `pov_dry_fire` builds them too.
 #[repr(C)]
 #[derive(Default)]
-struct EventArgs {
-    flags: i32,
-    entindex: i32,
-    origin: [f32; 3],
-    angles: [f32; 3],
-    velocity: [f32; 3],
-    ducking: i32,
-    fparam1: f32,
-    fparam2: f32,
-    iparam1: i32,
-    iparam2: i32,
-    bparam1: i32,
-    bparam2: i32,
+pub(crate) struct EventArgs {
+    pub(crate) flags: i32,
+    pub(crate) entindex: i32,
+    pub(crate) origin: [f32; 3],
+    pub(crate) angles: [f32; 3],
+    pub(crate) velocity: [f32; 3],
+    pub(crate) ducking: i32,
+    pub(crate) fparam1: f32,
+    pub(crate) fparam2: f32,
+    pub(crate) iparam1: i32,
+    pub(crate) iparam2: i32,
+    pub(crate) bparam1: i32,
+    pub(crate) bparam2: i32,
 }
 
 const _: () = assert!(size_of::<EventArgs>() == 72);
@@ -327,7 +328,7 @@ fn restarted(before: (i32, f32), now: (i32, f32)) -> bool {
 /// ones: each wrapped into +-180, and the pitch turned back from the third
 /// of it, negated, that a player's entity state carries. The engine's own
 /// `CL_ParseEvent` does the same.
-fn event_angles(state: [f32; 3]) -> [f32; 3] {
+pub(crate) fn event_angles(state: [f32; 3]) -> [f32; 3] {
     let wrap = |a: f32| {
         let a = a % 360.0;
         if a > 180.0 {
@@ -349,13 +350,45 @@ fn heard_with(heard: u32, now: u32) -> bool {
 
 /// The next stand-in spread value, in `-SPREAD..=SPREAD`. A xorshift step:
 /// nothing here needs to be unpredictable, only not the same every round.
-fn next_spread() -> f32 {
+pub(crate) fn next_spread() -> f32 {
     let mut x = SPREAD_SEED.load(Ordering::Relaxed);
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
     SPREAD_SEED.store(x, Ordering::Relaxed);
     ((x >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0) * SPREAD
+}
+
+/// Calls `client.dll`'s own fire handler for the `event` script (a name in
+/// [`WEAPONS`]) with `args`, as a stand-in: the sound it makes is not taken
+/// for a recorded round, here or in `pov_dry_fire`. False when the client
+/// registered no handler for that script.
+pub(crate) fn play_fire_event(event: &str, args: &mut EventArgs) -> bool {
+    let Some(weapon) = WEAPONS.iter().position(|(e, _)| *e == event) else {
+        return false;
+    };
+    let handler = HANDLERS[weapon].load(Ordering::Acquire);
+    if handler.is_null() {
+        return false;
+    }
+    // Safety: a handler `client.dll` registered for exactly this script,
+    // called on the engine thread with the argument block it expects.
+    let handler: EventHandlerFn = unsafe { std::mem::transmute(handler) };
+    STANDING_IN.store(true, Ordering::Relaxed);
+    unsafe { handler((args as *mut EventArgs).cast()) };
+    STANDING_IN.store(false, Ordering::Relaxed);
+    true
+}
+
+/// Whether `event` names one of [`WEAPONS`].
+#[cfg(test)]
+pub(crate) fn is_known_script(event: &str) -> bool {
+    WEAPONS.iter().any(|(e, _)| *e == event)
+}
+
+/// Whether a stand-in's handler is running right now.
+pub(crate) fn standing_in() -> bool {
+    STANDING_IN.load(Ordering::Relaxed)
 }
 
 /// The engine's own `pfnHookEvent`, while it is wrapped.

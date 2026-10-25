@@ -273,6 +273,7 @@ mod player_overrides;
 mod player_table;
 mod pmove_guard;
 mod position;
+mod pov_dry_fire;
 mod pov_live_bob;
 mod remote;
 mod review;
