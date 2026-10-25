@@ -650,16 +650,16 @@ def barrel_top_row(alpha, front=0.15):
     return float(vals[np.argmax(counts)])
 
 
-def place_barrel(tris, basis, fit, alpha, box, row, cut=False, shrink=False):
+def place_barrel(tris, basis, fit, alpha, box, row, cut=False, shrink=False, k=None):
     """A transform that puts the top of the barrel's end (measured in
     `alpha`, rendered with `fit`) on screen row `row`, as wide as `box`
-    allows. With `cut`, shrunk only so nothing pokes out above the box
-    (what hangs below is cut later). With `shrink`, the barrel stays on
-    `row` and the whole gun is shrunk until nothing pokes out above or
-    below the box. With neither, the gun keeps that size and is raised
-    until its bottom fits, the barrel as near `row` as that allows (shrunk
-    only when it is taller than the box). Centred across as fit_transform
-    is."""
+    allows, or at scale `k` (screen pixels per model unit) when given. With
+    `cut`, shrunk only so nothing pokes out above the box (what hangs below
+    is cut later). With `shrink`, the barrel stays on `row` and the whole
+    gun is shrunk until nothing pokes out above or below the box. With
+    neither, the gun keeps that size and is raised until its bottom fits,
+    the barrel as near `row` as that allows (shrunk only when it is taller
+    than the box). Centred across as fit_transform is."""
     kx, ky, ox, oy = fit
     r0 = barrel_top_row(alpha)
     if r0 is None:
@@ -667,7 +667,8 @@ def place_barrel(tris, basis, fit, alpha, box, row, cut=False, shrink=False):
     pts = np.concatenate([t[0].reshape(-1, 3) for t in tris]) @ basis.T
     lo, hi = pts[:, :2].min(0), pts[:, :2].max(0)
     ub = (oy - r0) / ky  # the barrel top, model units up
-    k = (box[2] - box[0]) / max(hi[0] - lo[0], 1e-6)
+    if k is None:
+        k = (box[2] - box[0]) / max(hi[0] - lo[0], 1e-6)
     if cut or shrink:
         if hi[1] > ub:
             k = min(k, (row - box[1]) / (hi[1] - ub))
@@ -679,6 +680,96 @@ def place_barrel(tris, basis, fit, alpha, box, row, cut=False, shrink=False):
         row = max(row, box[1] + k * (hi[1] - ub))  # never past the top
     cx = (box[0] + box[2]) / 2
     return k, k, cx - k * (lo[0] + hi[0]) / 2, row + k * ub
+
+
+@dataclass(frozen=True)
+class Layout:
+    """One placement rule for every icon instead of each icon's own (#1022,
+    R&D: the review sheets pass one, build() never does). A field left at
+    its default keeps what hud.txt and the table give.
+
+    height, width: the rect's rows and columns (stock px) instead of
+    hud.txt's. A rect that isn't hud.txt's is a new atlas's, so no rows are
+    shared with a neighbour (shared_area). With no width, such a rect
+    holding a gun sized by "width" or a number is as wide as the gun ends
+    up (a gun shrunk to fit the height gets a narrower rect), plus the
+    outline; "natural" keeps hud.txt's width.
+    barrel_row: guns only, the row the top of the barrel's end goes on
+    (place_barrel); unset, or for a blade or grenade, the icon is centred
+    on the rect's height.
+    size: "width", a gun as wide as Valve's drawing (blades and grenades
+    keep their own size); "natural", the size the table's own placement
+    gives the icon in hud.txt's rect, only moved; a number, that many stock
+    pixels per model unit.
+    below: a gun that doesn't fit at that size is drawn smaller with its
+    barrel kept on the row ("shrink"), cut flat where it hangs below the
+    rect ("cut"; still shrunk if it pokes out above), or moved up or down
+    until it fits, the barrel as near the row as that allows ("move": the
+    Bren, whose magazine stands on top; shrunk only if taller than the
+    rect)."""
+    height: int | None = None
+    width: int | None = None
+    barrel_row: float | None = None
+    size: str | float = "width"
+    below: str = "shrink"
+
+
+def remap(ref, new, x, y):
+    """Where a point at screen (x, y) of an icon drawn with fit `ref` lands
+    when the same view is drawn with fit `new`."""
+    s = new[0] / ref[0]
+    return new[2] + s * (x - ref[2]), new[3] + s * (y - ref[3])
+
+
+def remap_table(icon, ref, new, scale):
+    """(v_part, skin_art, cut_part) of `icon`, their stock-pixel places
+    (set by hand against the table's own placement, `ref`) moved to where
+    the same parts of the gun are with fit `new`."""
+    def pt(x, y):
+        px, py = remap(ref, new, x * scale, y * scale)
+        return px / scale, py / scale
+
+    s = new[0] / ref[0]
+    vp = icon.v_part
+    if vp is not None:
+        (wx0, _), (wx1, _) = pt(vp.window[0], 0), pt(vp.window[1], 0)
+        bx0, by0 = pt(vp.box[0], vp.box[1])
+        bx1, by1 = pt(vp.box[2], vp.box[3])
+        vp = VPart(vp.model, (wx0, wx1), (bx0, by0, bx1, by1))
+    arts = tuple(SkinArt(a.texture, a.art, a.anchor, (a.offset[0] * s, a.offset[1] * s), a.dark)
+                 for a in icon.skin_art)
+    cut = icon.cut_part
+    if cut:
+        (cx0, row), (cx1, _) = pt(cut[0], cut[2]), pt(cut[1], cut[2])
+        cut = (cx0, cx1, row)
+    return vp, arts, cut
+
+
+def laid_out_fit(tris, basis, ref, ref_alpha, box, layout, k, gun):
+    """The fit `layout` gives an icon drawn with `ref` in hud.txt's rect
+    (`ref_alpha` its coverage): `k` screen pixels per model unit, the
+    barrel's top on `layout.barrel_row` (screen px, as `box` is) for a gun,
+    else the drawn icon centred in `box`; never past `box` but where
+    `below` is "cut"."""
+    r0 = barrel_top_row(ref_alpha)
+    if gun and layout.barrel_row is not None and r0 is not None:
+        row = layout.barrel_row
+        if layout.below == "cut":
+            # a sight or scope above the box moves the gun down rather than
+            # shrinking it: the cut below takes the difference
+            pts = np.concatenate([t[0].reshape(-1, 3) for t in tris]) @ basis.T
+            ub = (ref[3] - r0) / ref[1]
+            row = max(row, box[1] + k * (pts[:, 1].max() - ub))
+        return place_barrel(tris, basis, ref, ref_alpha, box, row,
+                            cut=layout.below == "cut", shrink=layout.below == "shrink", k=k)
+    ys, xs = np.nonzero(ref_alpha >= 0.5)
+    if not len(xs):
+        return ref
+    x0, x1, y0, y1 = xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
+    s = min(k / ref[0], (box[2] - box[0]) / (x1 - x0), (box[3] - box[1]) / (y1 - y0))
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    bx, by = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    return ref[0] * s, ref[1] * s, bx + s * (ref[2] - cx), by + s * (ref[3] - cy)
 
 
 HOLE_DARK = 16  # a see_through texel: every channel at most this (of 255)
@@ -1422,8 +1513,10 @@ def shared_area(entries, name):
     return mask, top, bottom
 
 
-def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_rows=False):
-    """(rgba at `scale`x the rect, info dict) or (None, reason)."""
+def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_rows=False, layout=None):
+    """(rgba at `scale`x the rect, info dict) or (None, reason). With a
+    Layout, the icon is first placed as the table says, then placed again
+    by the layout's rule, in the layout's rect (info["rect"])."""
     sheet, x, y, w, h = hud_rect(dod, name)
     stock, _, _ = stock_icon(dod, sheet, x, y, w, h)
     target = main_component(stock[..., 3])
@@ -1472,20 +1565,20 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     gun = not NOT_LEVELLED.search(name)
     samples = {}  # the last draw's supersamples, for soft_finish
 
-    def draw(f):
-        lit, hi = render(tris, basis, *f, w * scale, h * scale, skins, masked_names=cutouts, hires=True)
+    def draw(f, size=(w, h), vp=icon.v_part, arts=icon.skin_art):
+        lit, hi = render(tris, basis, *f, size[0] * scale, size[1] * scale, skins, masked_names=cutouts, hires=True)
         if gun:
             lit, hi, samples["wires"] = wire_lines(hi, tris, basis, f, skins, cutouts)
-        if icon.skin_art:
-            lit, hi, samples["skin_art"] = skin_art(hi, tris, basis, f, skins, icon.skin_art, scale)
-        if icon.v_part is not None:
-            lit, hi, samples["v_part"] = v_part(hi, tris, basis, f, icon.v_part, dod, style, models_dir, scale)
+        if arts:
+            lit, hi, samples["skin_art"] = skin_art(hi, tris, basis, f, skins, arts, scale)
+        if vp is not None:
+            lit, hi, samples["v_part"] = v_part(hi, tris, basis, f, vp, dod, style, models_dir, scale)
         samples["last"] = hi
         return keep_thin(lit) if gun else lit
 
-    def specks(lit):
-        if icon.cut_part:
-            x0, x1, row = icon.cut_part
+    def specks(lit, cut_part=icon.cut_part):
+        if cut_part:
+            x0, x1, row = cut_part
             lit = cut_columns(lit, x0 * scale, x1 * scale, row * scale)
         return drop_specks(lit, corners=gun)
 
@@ -1501,7 +1594,60 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     else:
         refit = refit_transform(fit, lit[..., 3], box)
         if refit is not None:
+            fit = refit
             lit = specks(draw(refit))
+    info = {"model": os.path.basename(path), "iou": round(float(score), 2),
+            "roll": round(float(pick[2] + icon.turn), 1), "clipped_tris": cut,
+            "skin": f"{style} ({n_hd} of {len(textures)})" if n_hd else "stock"}
+    if layout is not None:
+        # The table's placement is the reference: the size "natural" keeps,
+        # and what the hand-set places of v_part, skin_art and cut_part
+        # were set against (remap_table).
+        ref, ref_alpha = fit, lit[..., 3]
+        pts = np.concatenate([t[0].reshape(-1, 3) for t in tris]) @ basis.T
+        length = float(pts[:, 0].max() - pts[:, 0].min())
+        valve_k = (box[2] - box[0]) / max(length, 1e-6)  # as wide as Valve's drawing
+        if isinstance(layout.size, (int, float)):
+            k = layout.size * scale
+        elif layout.size == "natural" or not gun:
+            k = ref[0]
+        else:
+            k = valve_k
+        own = layout.height is None and layout.width is None  # hud.txt's rect, in Valve's sheet
+        auto_w = layout.width is None and (isinstance(layout.size, (int, float))
+                                           or (not own and gun and layout.size == "width"))
+        H = layout.height or h
+        row = None if layout.barrel_row is None else layout.barrel_row * scale
+
+        def place(W):
+            if own:
+                x0, x1, top, bottom = xs.min(), xs.max() + 1, *shared_area(hud_entries(dod), name)[1:]
+            elif W == w and not auto_w:
+                x0, x1, top, bottom = xs.min(), xs.max() + 1, 0, H
+            else:
+                x0, x1, top, bottom = 0.5, W - 0.5, 0, H
+            lbox = (x0 * scale + m, top * scale + m, x1 * scale - m, bottom * scale - m)
+            return lbox, laid_out_fit(tris, basis, ref, ref_alpha, lbox, Layout(H, W, row, layout.size, layout.below),
+                                      k, gun)
+
+        W = layout.width or w
+        if auto_w:  # as wide as the gun at the scale it ends up at (a tall one is shrunk)
+            _, new = place(int(np.ceil((k * length + 2 * m) / scale + 1)))
+            W = int(np.ceil((new[0] * length + 2 * m) / scale + 1))
+        lbox, new = place(W)
+        vp, arts, cut_part = remap_table(icon, ref, new, scale)
+        lit = draw(new, (W, H), vp, arts)
+        if gun and layout.below == "cut":
+            lit = cut_under(lit, lbox[3])
+        lit = specks(lit, cut_part)
+        img = soft_finish(lit, *samples["last"])
+        if own and shared.any():
+            img[np.kron(shared, np.ones((scale, scale), bool)), 3] = 0
+        info.update(rect=(W, H), k=round(new[0] / scale, 4), k_valve=round(valve_k / scale, 4),
+                    k_table=round(ref[0] / scale, 4), length=round(length, 2))
+        if samples.get("v_part"):
+            info["v_part"] = samples["v_part"]
+        return img, info
     img = soft_finish(lit, *samples["last"])
     if shared.any():  # nothing of the render in another sprite's area
         shared4 = np.kron(shared, np.ones((scale, scale), bool))
@@ -1512,9 +1658,6 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
         if not _free_rows and (top > 0 or bottom < h) and deep:
             return render_icon(dod, name, icon, style, models_dir, scale, log, _free_rows=True)
         img[shared4, 3] = 0
-    info = {"model": os.path.basename(path), "iou": round(float(score), 2),
-            "roll": round(float(pick[2] + icon.turn), 1), "clipped_tris": cut,
-            "skin": f"{style} ({n_hd} of {len(textures)})" if n_hd else "stock"}
     if cutouts:
         info["see_through"] = sorted(cutouts)
     if samples.get("wires"):

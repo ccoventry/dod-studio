@@ -226,6 +226,53 @@ class GeometryTest(unittest.TestCase):
         kx2, *_ = K.place_barrel(tris, basis, fit, alpha, (0, 0, 100, 400), 10, shrink=True)
         self.assertAlmostEqual(kx2, 5.0)
 
+    def test_place_barrel_at_a_given_scale(self):
+        tris, basis, box = self.magazine_gun(), np.eye(3), (0, 0, 100, 40)
+        fit = K.fit_transform(tris, basis, box)
+        alpha = K.silhouette(tris, basis, *fit, 100, 40, ss=1)
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, shrink=True, k=3.0)
+        self.assertAlmostEqual(kx, 3.0)  # fits (7 x 3 = 21 rows): the scale is kept
+        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)
+        kx, *_ = K.place_barrel(tris, basis, fit, alpha, box, 10, shrink=True, k=8.0)
+        self.assertLess(kx, 8.0)  # 6 below at 8 runs past the bottom: shrunk
+
+    def test_layout_shrinks_moves_or_cuts_a_gun_that_does_not_fit(self):
+        tris, basis = self.magazine_gun(), np.eye(3)
+        ref = K.fit_transform(tris, basis, (0, 0, 100, 40))
+        alpha = K.silhouette(tris, basis, *ref, 100, 40, ss=1)
+        box = (0, 0, 100, 30)
+        row = 6
+        k = 5.0  # 7 units tall x 5 = 35 rows: too tall for 30
+        shrunk = K.laid_out_fit(tris, basis, ref, alpha, box, K.Layout(barrel_row=row), k, True)
+        self.assertLess(shrunk[0], k)
+        self.assertAlmostEqual(shrunk[3] - shrunk[1] * 1.0, row, delta=0.6)  # barrel on the row
+        moved = K.laid_out_fit(tris, basis, ref, alpha, box, K.Layout(barrel_row=row, below="move"), 4.0, True)
+        self.assertAlmostEqual(moved[0], 4.0)  # 28 rows fit: same size...
+        self.assertLessEqual(moved[3] + moved[1] * 6, 30 + 1e-6)  # ...raised until the magazine ends inside
+        cut = K.laid_out_fit(tris, basis, ref, alpha, box, K.Layout(barrel_row=row, below="cut"), k, True)
+        self.assertAlmostEqual(cut[0], k)  # kept; what hangs below is cut later
+        self.assertAlmostEqual(cut[3] - cut[1] * 1.0, row, delta=0.6)
+
+    def test_layout_centres_a_blade_at_its_own_size(self):
+        tris, basis = [box_tris(0, 10, 0, 2)], np.eye(3)
+        ref = K.fit_transform(tris, basis, (0, 0, 40, 10))
+        alpha = K.silhouette(tris, basis, *ref, 40, 10, ss=1)
+        new = K.laid_out_fit(tris, basis, ref, alpha, (0, 0, 40, 26), K.Layout(barrel_row=8), ref[0], False)
+        self.assertAlmostEqual(new[0], ref[0])  # no barrel line for a blade, no growth into the tall box
+        self.assertAlmostEqual(new[3] - new[1] * 1.0, 13, delta=0.6)  # centred on the rect's height
+
+    def test_remap_moves_hand_set_places_with_the_gun(self):
+        ref, new = (2.0, 2.0, 10.0, 20.0), (1.0, 1.0, 4.0, 6.0)
+        self.assertEqual(K.remap(ref, new, 10.0, 20.0), (4.0, 6.0))  # the origin goes to the origin
+        self.assertEqual(K.remap(ref, new, 14.0, 22.0), (6.0, 7.0))  # offsets at half the size
+        icon = K.Icon(("x.mdl",), v_part=K.VPart("v.mdl", (2, 6), (2, 4, 4, 6)), cut_part=(2, 4, 6),
+                      skin_art=(K.SkinArt("t", (0, 0, 1, 1), (0, 0, 1, 1), (2.0, -4.0)),))
+        vp, arts, cut = K.remap_table(icon, (2.0, 2.0, 0.0, 0.0), (1.0, 1.0, 0.0, 0.0), scale=1)
+        self.assertEqual(vp.window, (1.0, 3.0))
+        self.assertEqual(vp.box, (1.0, 2.0, 2.0, 3.0))
+        self.assertEqual(cut, (1.0, 2.0, 3.0))
+        self.assertEqual(arts[0].offset, (1.0, -2.0))
+
     def test_no_icon_shrinks_by_default(self):
         # the MP44's shrink is one of the two options the user picks between
         self.assertEqual({n for n, i in K.ICONS.items() if i.shrink_below}, set())
