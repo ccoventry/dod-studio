@@ -1424,6 +1424,15 @@ unsafe extern "C" fn cmd_console_in_panel() {
     );
 }
 
+/// Only registered when `ds_demo_show_load_progress` could not be a cvar.
+unsafe extern "C" fn cmd_show_load_progress() {
+    handle_toggle(
+        crate::demo_bar_progress::NAME,
+        &crate::demo_bar_progress::SETTING.fallback,
+        crate::demo_bar_progress::status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1730,6 +1739,12 @@ pub fn install() {
     match register(crate::studio_panel::CONSOLE_NAME, "1") {
         Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
         None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
+    }
+    // On by default too: it only shows anything on the layout Studio's own
+    // launch ships, so nothing changes for a game started another way.
+    match register(crate::demo_bar_progress::NAME, "1") {
+        Some(cvar) => crate::demo_bar_progress::SETTING.set_cvar(cvar),
+        None => add_command(crate::demo_bar_progress::NAME, cmd_show_load_progress),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };

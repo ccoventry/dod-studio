@@ -34,7 +34,7 @@ HUD
   ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_hud_deathmsg
-      Kill feed: max lines, offset, block players, fake a kill, replace (change or hide one kill line), font <face> <size> [bold] [shadow], scale <1..8>, layout even|default (all three live). The bare command shows the options.
+      Kill feed: max lines, offset, block players, fake a kill, replace (change or hide one kill line), font <face> <size> [bold] [shadow], scale <1..8>, layout even|default, outline <0..4> [colour], background <alpha> [colour]|team <alpha> (all live; a colour is r g b or #rrggbb). The bare command shows the options.
   ds_hud_objectives
       Move the objective icons and the objective timer, or draw them bigger: scale <1..8>, and count_scale <1..8> for the player count under a flag. The bare command shows the options.
   ds_hud_overview_layout
@@ -100,6 +100,8 @@ DEMO PLAYBACK
       viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
   ds_demo_other_drives 0/1
       viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
+  ds_demo_show_load_progress 0/1
+      The VCR bar shows how far a loading demo has got, where the time goes.
   ds_demo_reload
       Play the last demo again.
   ds_demo_review yes|maybe|no|replay|next|back|stop
