@@ -1077,7 +1077,7 @@ export function initOverviewsPane() {
 
   resetBtn.addEventListener('click', async () => {
     if (!scene) return;
-    if (!(await themedConfirm(STRINGS.OVERVIEWS.resetConfirm(scene.map)))) return;
+    if (!(await themedConfirm(STRINGS.OVERVIEWS.resetConfirm(scene.map), { destructive: true }))) return;
     try {
       await overviewResetEdits(scene.map);
     } catch {

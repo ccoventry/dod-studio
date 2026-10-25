@@ -64,6 +64,11 @@ is the complete list):
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
   `src/msglog.rs`.
+- **Rename a player** (`ds_player_change_name add id <slot | SteamID | self>
+  [in <demo>,...] to <name>`, with `list`, `remove <n>` and `clear`): the new
+  name shows everywhere the old one did during playback -- kill feed (up to 63
+  characters), scoreboard, chat, join lines -- through a detour of
+  client.dll's `pfnGetPlayerInfo` (#1021). See `docs/dodstudio_commands.md`.
 - **Hide an asset** (`ds_map_hide_asset add <model-path>...`, with
   `list`, `del` and `clear`): suppresses specific world entities by model path
   (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`) -- an allow-list,
