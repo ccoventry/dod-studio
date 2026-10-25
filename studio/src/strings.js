@@ -641,9 +641,7 @@ export const STRINGS = {
     deletePreviewsConfirm: (n) => `Permanently delete ${n} orphaned preview demo(s)?`,
     deletedPreviews: (n) => `Deleted ${n} orphaned preview demo(s).`,
     deletionFailed: (e) => `Deletion failed: ${e}`,
-    CAPTURING_DEFAULT: 'Capturing',
     CAPTURING_ELLIPSIS_DEFAULT: 'Capturing...',
-    capturingWithName: (status, name) => `${status}: ${name}`,
     // #643: the batch's time left, after the status line.
     timeLeftMinutes: (minutes) => ` · about ${minutes} min left`,
     TIME_LEFT_UNDER_A_MINUTE: ' · under a minute left',
@@ -653,7 +651,6 @@ export const STRINGS = {
     CAPTURE_ERROR_TEXT_DEFAULT: 'Capture failed',
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
-    COMPLETED: 'Completed',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
     takesFoundMissing: (captured, total) => `${captured}/${total} takes found on disk — ${total - captured} missing.`,
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -817,7 +814,11 @@ export const STRINGS = {
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
     STATUS_RECOVERING: 'Status: Recovering the render batch…',
     recoveredStatus: (queued) => `Status: Render batch recovered — ${queued} take(s) queued`,
-    renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
+    // #954: the batch line counts only this batch's rows.
+    renderingLine: (n, total) => `Rendering ${n} of ${total}`,
+    doneIn: (duration, parts) => `Done in ${duration}: ${parts}`,
+    batchStartLog: () => '[render] started',
+    batchEndLog: (seconds, finished, failed, cancelled) => `[render] done after ${seconds} s: ${finished} rendered, ${failed} failed, ${cancelled} cancelled`,
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
     // Mixed-outcome batches report every non-zero count instead of one label,
@@ -830,10 +831,13 @@ export const STRINGS = {
     STATUS_FINISHED: 'Status: Finished',
     STATUS_CANCELLED: 'Status: Cancelled',
     statusFinishedWith: (parts) => `Status: Finished — ${parts}`,
-    scanFoundSoFar: (n) => `Status: Scanning… found ${n} take(s) so far`,
+    // #954: Scan for Takes' line while it looks, and the one it ends on.
+    lookingForTakes: (n) => `Looking for takes: ${n} found so far`,
+    foundTakesIn: (total, parts, seconds) => `Found ${total} ${total === 1 ? 'take' : 'takes'} (${parts}) in ${seconds} s`,
+    noTakesFoundIn: (seconds) => `Found no takes in ${seconds} s`,
+    scanNewShort: (n) => `${n} new`,
+    SCAN_NONE_NEW: 'none new',
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
-    SCANNING_TOAST: 'Scanning render directories...',
-    STATUS_SCANNING: 'Status: Scanning…',
     scanCompleteStatus: (count) => `Status: Scan complete — ${count} take(s) found`,
     // What a scan changed in the queue (#772); render_scan_summary.js joins them.
     scanNewTakes: (n) => (n === 1 ? '1 new take' : `${n} new takes`),
@@ -2728,6 +2732,19 @@ export const STRINGS = {
   // ── progress_view.js: what every long job's progress line shares (#951)
   PROGRESS: {
     elapsedSuffix: (clock) => ` · ${clock}`,
+  },
+
+  // ── capture_progress.js: the capture batch's footer line and bar (#952)
+  CAPTURE_PROGRESS: {
+    done: (duration, captured, total) => {
+      if (total == null) return `Done in ${duration}`;
+      const clips = total === 1 ? 'clip' : 'clips';
+      return captured === total
+        ? `Done in ${duration}: ${total} ${clips} captured`
+        : `Done in ${duration}: ${captured} of ${total} ${clips} captured`;
+    },
+    startLog: () => '[capture] started',
+    endLog: (outcome, seconds, captured, total) => `[capture] ${outcome} after ${seconds} s${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to
