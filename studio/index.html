@@ -968,6 +968,8 @@
                 <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
+              <!-- #954: Scan for Takes' sliding block. -->
+              <div id="render-scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
             </div>
           </div>
 

@@ -109,6 +109,7 @@ mod tests {
         "sound_mute_flag_capture",
         "sound_mute_victory_music",
         "spec_hide_text",
+        "view_show_own_blood",
     ];
 
     #[test]
