@@ -2,7 +2,7 @@
 // with no DOM: the clips being re-read, then FFmpeg joining them, then the
 // end. combine_clips.js puts it on the window.
 import { STRINGS } from './strings.js';
-import { clockRound, elapsedWords } from './time_format.js';
+import { clockRound, durationTextMs } from './time_format.js';
 
 // No time left until the join has run this long and got this far: FFmpeg's
 // first seconds (opening files, the encoder warming up) say little about
@@ -40,7 +40,7 @@ export function combineProgressView(p, totalSecs, joinMs = 0) {
 
 /// The line once it ends: `outcome` is 'saved', 'cancelled' or 'failed'.
 export function endText(outcome, ms) {
-  if (outcome === 'saved') return STRINGS.COMBINE.savedIn(elapsedWords(Math.max(0, Math.round(ms / 1000))));
+  if (outcome === 'saved') return STRINGS.COMBINE.savedIn(durationTextMs(ms));
   if (outcome === 'cancelled') return STRINGS.COMBINE.STOPPED;
   return STRINGS.COMBINE.FAILED;
 }

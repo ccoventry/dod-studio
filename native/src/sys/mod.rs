@@ -1,6 +1,9 @@
 /// Studio analyses demos for the game's Highlights tab (#565).
 #[cfg(windows)]
 pub mod analysis_server;
+/// Whether reading a file would download it from a cloud drive (#992).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cloud_file;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod dialogs;
 pub mod disk;

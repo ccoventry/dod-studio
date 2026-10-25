@@ -106,10 +106,12 @@ mod tests {
         "hud_hide_menus",
         "hud_hide_server_text",
         "hud_overview_hide_speaker",
+        "player_change_name",
         "player_fix_model_flicker",
         "sound_mute_flag_capture",
         "sound_mute_victory_music",
         "spec_hide_text",
+        "view_show_own_blood",
     ];
 
     #[test]

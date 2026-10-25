@@ -280,6 +280,15 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     {
         return result;
     }
+    // And ds_player_change_name's SayText, whose handler stands aside while
+    // this one watches it.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("SayText"))
+        && let Some(result) = crate::player_names::say_text(size, buf)
+    {
+        return result;
+    }
     // And for ds_hud_hide_voice_menus' ShowMenu.
     if let Some(result) = name_str
         .as_deref()

@@ -69,6 +69,66 @@ pub fn pick_user_folders() -> UserFolders {
     }
 }
 
+/// Whether one of Studio's own dialog windows is on screen. The first file
+/// dialog of a session can take seconds to appear after Studio's window is
+/// already disabled, where the page's busy cursor doesn't show, so
+/// `dialog_wait.js` asks this to show a notice only while it hasn't appeared.
+#[tauri::command(async)]
+pub fn file_dialog_shown() -> bool {
+    #[cfg(windows)]
+    {
+        own_dialog_visible()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(windows)]
+fn own_dialog_visible() -> bool {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
+    };
+
+    struct Search {
+        pid: u32,
+        found: bool,
+    }
+
+    unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> i32 {
+        // SAFETY: `lparam` is the `Search` passed below, alive for the whole
+        // EnumWindows call; the Win32 calls only read this window's details.
+        unsafe {
+            let search = &mut *(lparam as *mut Search);
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid != search.pid || IsWindowVisible(hwnd) == 0 {
+                return 1;
+            }
+            let mut class = [0u16; 16];
+            let len = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+            // "#32770": the class of Windows' dialog boxes, the file dialogs too.
+            if len > 0 && String::from_utf16_lossy(&class[..len as usize]) == "#32770" {
+                search.found = true;
+                return 0;
+            }
+            1
+        }
+    }
+
+    let mut search = Search {
+        // SAFETY: no preconditions.
+        pid: unsafe { GetCurrentProcessId() },
+        found: false,
+    };
+    // SAFETY: `visit` matches WNDENUMPROC and `search` outlives the call.
+    unsafe { EnumWindows(Some(visit), &mut search as *mut Search as LPARAM) };
+    search.found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +159,11 @@ mod tests {
         assert!(!s.exact && !s.is_file);
         assert_eq!(Path::new(&s.path), dir.as_path());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn no_dialog_is_shown_in_a_process_without_one() {
+        assert!(!file_dialog_shown());
     }
 
     #[test]

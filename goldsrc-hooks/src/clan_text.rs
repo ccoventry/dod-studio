@@ -189,7 +189,8 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
         if crate::spectator_text::hide_text_msg(payload) {
             return Some(1);
         }
-        return None;
+        // ds_player_change_name: a renamed player's join and team lines.
+        return crate::player_names::text_msg(payload);
     }
     if name.eq_ignore_ascii_case(CLAN_TIMER) {
         let seconds = payload.first().copied().unwrap_or(0);

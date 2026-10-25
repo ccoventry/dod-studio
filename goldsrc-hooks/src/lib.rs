@@ -51,6 +51,10 @@
 //!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
+//! - `player_names`: the `ds_player_change_name add|list|remove|clear`
+//!   command -- rename a player everywhere their name shows during playback,
+//!   by SteamID, slot or `self`, for one demo or all, through a detour of
+//!   client.dll's `pfnGetPlayerInfo` (#1021).
 //! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `ds_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -77,6 +81,8 @@
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
 //!   demo's player opened.
+//! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
+//!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
@@ -276,11 +282,13 @@ mod overview_map;
 mod overview_marker;
 mod overview_players;
 mod overview_speaker;
+mod own_blood;
 mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
 mod player_crosshair;
+mod player_names;
 mod player_overrides;
 mod player_table;
 mod pmove_guard;
@@ -318,6 +326,7 @@ mod texture_hires;
 mod vgui_menus;
 mod voice;
 mod voice_menus;
+mod weapon_list;
 mod window_layout;
 mod world_shaders;
 
