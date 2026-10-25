@@ -3,8 +3,7 @@
 //! This DLL patches `hw.dll` and `client.dll` in memory, which is what VAC
 //! looks for, so joining a VAC-secured server with it loaded is a ban risk
 //! (`docs/vac_safety.md`). HLAE asks before `connect`; this refuses outright,
-//! which also covers a session HLAE isn't in (`inject.exe`) and one where
-//! HLAE's own hook failed to install.
+//! which also covers a session where HLAE's own hook failed to install.
 //!
 //! ## Every route goes through `connect`
 //!
