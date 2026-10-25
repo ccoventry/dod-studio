@@ -1039,12 +1039,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const payload = event.payload || {};
       if (payload.running) {
         // The first running report of a batch: the last one's results go.
-        if (!capturingInFlight) batchStarted();
+        // A Cancel clears capturingInFlight before the takes are checked,
+        // and that check still reports as running: it is the same batch.
+        if (!capturingInFlight && !captureProgress.isRunning()) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
         captureProgress.update(payload);
         if (startBtn) startBtn.disabled = true;
-        if (cancelBtn) cancelBtn.disabled = false;
+        // The game has closed once the takes are checked: nothing to cancel.
+        if (cancelBtn) cancelBtn.disabled = payload.stage === 'checking';
       } else {
         capturingInFlight = false;
         // The line says how it ended; the toasts below say it too.

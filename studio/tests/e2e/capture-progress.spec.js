@@ -68,6 +68,24 @@ test('a step it can\'t measure keeps the fill and slides a block over it', async
   await expect(slide(page)).toHaveCount(0);
 });
 
+test('Cancel is greyed out while the takes are checked, after a Cancel too', async ({ page }) => {
+  await loadHarness(page);
+  const cancel = page.locator('#cancel-batch-btn');
+  await emit(page, { running: true, stage: 'capturing', index: 1, total: 4, status: 'Capturing clip 2 of 4' });
+  await expect(cancel).toBeEnabled();
+  await emit(page, { running: true, stage: 'checking', index: 0, total: 4, status: 'Checking the takes: 0 of 4' });
+  await expect(cancel).toBeDisabled();
+
+  // The cancel resolves before the game closes; the check that follows is
+  // the same batch, so Cancel stays greyed out and the line keeps its clock.
+  await emit(page, { running: true, stage: 'capturing', index: 2, total: 4, status: 'Capturing clip 3 of 4' });
+  await cancel.click();
+  await expect(cancel).toBeDisabled();
+  await emit(page, { running: true, stage: 'checking', index: 2, total: 4, status: 'Checking the takes: 2 of 4' });
+  await expect(cancel).toBeDisabled();
+  await expect(page.locator('#batch-status')).toHaveText(/Checking the takes: 2 of 4 · 0:0\d/);
+});
+
 test('a cancelled batch says so and empties the bar', async ({ page }) => {
   await loadHarness(page);
   await emit(page, { running: true, stage: 'capturing', index: 1, total: 4, status: 'Capturing clip 2 of 4' });
