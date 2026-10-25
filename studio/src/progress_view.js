@@ -17,6 +17,18 @@ export function secondsText(ms) {
   return (Math.max(0, Number(ms) || 0) / 1000).toFixed(1);
 }
 
+/// A job's length in words for "Done in …" on jobs that can run for minutes
+/// (a capture batch, #952): "2.1 s" under ten seconds, "42 s" under a
+/// minute, then "6 min 12 s", and "1 h 5 min" from an hour.
+export function durationWords(ms) {
+  const n = Math.max(0, Number(ms) || 0);
+  if (n < 10000) return `${secondsText(n)} s`;
+  const secs = Math.round(n / 1000);
+  if (secs < 60) return `${secs} s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ${secs % 60} s`;
+  return `${Math.floor(secs / 3600)} h ${Math.floor((secs % 3600) / 60)} min`;
+}
+
 /// The key a last run's count is remembered under: `area` and the same
 /// paths, in any order and any case. `extra` tells apart runs over the same
 /// paths that count differently (Duplicates' All drives).
