@@ -11,7 +11,8 @@ import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, WITH_FALLBACK, placeholdersFor,
   parseDemoTemplate, demoValues, planRenames, renamePairs, listProgressView, renameProgressView, renameDoneLine,
 } from './demo_rename.js';
-import { showBar, hideBar, secondsText } from './progress_view.js';
+import { showBar, hideBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
 import { parseClock } from './scan_progress.js';
 import { themedConfirm } from './themed_confirm.js';
@@ -100,7 +101,7 @@ async function runRenames(kind, count, run, toast) {
   let doneLine = '';
   try {
     const outcome = await run();
-    doneLine = renameDoneLine(kind, outcome, secondsText(Date.now() - started));
+    doneLine = renameDoneLine(kind, outcome, durationTextMs(Date.now() - started));
     followRenames(outcome.renamed);
     if (outcome.renamed.length) showToast(toast(outcome.renamed.length), 'success');
     reportFailures(outcome.failed);

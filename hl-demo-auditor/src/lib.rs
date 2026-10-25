@@ -128,13 +128,236 @@ impl Fnv1a {
     }
 }
 
-/// Threads a walk or key pass uses: separate drives list and read at once,
-/// and an SSD answers several requests at a time even on one drive.
+/// Threads a walk or key pass shares between the SSDs: separate drives list
+/// and read at once, and an SSD answers several requests at a time even on
+/// one drive. A hard disk gets one of its own ([`Readers`]).
 fn worker_threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
         .clamp(2, 8)
+}
+
+/// The drive a path is on, as `c:`, for sharing reads out by drive (#941).
+/// `None` for a network share or a relative path.
+fn drive_of(path: &Path) -> Option<String> {
+    let text = comparable_path(path);
+    let bytes = text.as_bytes();
+    (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        .then(|| text[..2].to_string())
+}
+
+/// Whether Windows says `drive` (`c:`) has a seek penalty: a spinning hard
+/// disk. `false` when it can't say, and off Windows, so an unknown drive
+/// keeps the pool, as before #941.
+fn drive_seeks(drive: &str) -> bool {
+    seek_penalty::query(drive).unwrap_or(false)
+}
+
+/// `IOCTL_STORAGE_QUERY_PROPERTY` with `StorageDeviceSeekPenaltyProperty` on
+/// `\\.\X:`, opened with no access rights, which needs no admin.
+#[cfg(windows)]
+mod seek_penalty {
+    use std::ffi::c_void;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateFileW(
+            file_name: *const u16,
+            desired_access: u32,
+            share_mode: u32,
+            security_attributes: *const c_void,
+            creation_disposition: u32,
+            flags_and_attributes: u32,
+            template_file: *mut c_void,
+        ) -> *mut c_void;
+        fn DeviceIoControl(
+            device: *mut c_void,
+            io_control_code: u32,
+            in_buffer: *const c_void,
+            in_buffer_size: u32,
+            out_buffer: *mut c_void,
+            out_buffer_size: u32,
+            bytes_returned: *mut u32,
+            overlapped: *mut c_void,
+        ) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+
+    const FILE_SHARE_READ: u32 = 1;
+    const FILE_SHARE_WRITE: u32 = 2;
+    const OPEN_EXISTING: u32 = 3;
+    const IOCTL_STORAGE_QUERY_PROPERTY: u32 = 0x002D_1400;
+    const STORAGE_DEVICE_SEEK_PENALTY_PROPERTY: u32 = 7;
+    const PROPERTY_STANDARD_QUERY: u32 = 0;
+
+    /// `STORAGE_PROPERTY_QUERY`.
+    #[repr(C)]
+    struct Query {
+        property_id: u32,
+        query_type: u32,
+        additional: [u8; 1],
+    }
+
+    /// `DEVICE_SEEK_PENALTY_DESCRIPTOR`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct SeekPenalty {
+        _version: u32,
+        _size: u32,
+        incurs_seek_penalty: u8,
+    }
+
+    /// `None` when the drive can't be opened or doesn't answer (a volume
+    /// spread over several disks, a virtual drive).
+    pub fn query(drive: &str) -> Option<bool> {
+        let name: Vec<u16> = format!(r"\\.\{drive}")
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: `name` is NUL-terminated and outlives the call.
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle.is_null() || handle as isize == -1 {
+            return None;
+        }
+        let query = Query {
+            property_id: STORAGE_DEVICE_SEEK_PENALTY_PROPERTY,
+            query_type: PROPERTY_STANDARD_QUERY,
+            additional: [0],
+        };
+        let mut answer = SeekPenalty::default();
+        let mut returned = 0u32;
+        // SAFETY: both buffers are live, sized as passed, and the handle is
+        // open until the CloseHandle below.
+        let ok = unsafe {
+            DeviceIoControl(
+                handle,
+                IOCTL_STORAGE_QUERY_PROPERTY,
+                (&raw const query).cast(),
+                size_of::<Query>() as u32,
+                (&raw mut answer).cast(),
+                size_of::<SeekPenalty>() as u32,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        // SAFETY: opened above and closed once.
+        unsafe { CloseHandle(handle) };
+        // The answer is in byte 8, after `version` and `size`.
+        (ok != 0 && returned >= 9).then_some(answer.incurs_seek_penalty != 0)
+    }
+}
+
+#[cfg(not(windows))]
+mod seek_penalty {
+    pub fn query(_drive: &str) -> Option<bool> {
+        None
+    }
+}
+
+/// One share of a pass's items: their indices, and how many are read at once.
+#[derive(Debug, PartialEq, Eq)]
+struct Lane {
+    threads: usize,
+    items: Vec<usize>,
+}
+
+/// Items shared out by drive (#941): each hard disk (`seeks` says so) gets a
+/// lane of its own with one reader, so its head never seeks back and forth
+/// between two files; every other item (SSDs, unknown drives, shares) is in
+/// one lane of `threads` readers, as before. [`Readers::map`] runs the lanes
+/// side by side, so a hard disk doesn't hold up the SSDs. In item order: the
+/// shared lane first, then the hard disks by drive.
+fn plan_lanes(
+    drives: impl Iterator<Item = Option<String>>,
+    threads: usize,
+    seeks: &dyn Fn(&str) -> bool,
+) -> Vec<Lane> {
+    let mut known: HashMap<String, bool> = HashMap::new();
+    let mut shared = Vec::new();
+    let mut disks: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
+    for (i, drive) in drives.enumerate() {
+        match drive {
+            Some(drive) if *known.entry(drive.clone()).or_insert_with(|| seeks(&drive)) => {
+                disks.entry(drive).or_default().push(i)
+            }
+            _ => shared.push(i),
+        }
+    }
+    let mut lanes = Vec::new();
+    if !shared.is_empty() {
+        lanes.push(Lane {
+            threads: threads.max(1),
+            items: shared,
+        });
+    }
+    lanes.extend(disks.into_values().map(|items| Lane { threads: 1, items }));
+    lanes
+}
+
+/// How a pass reads: `threads` at once over the SSDs, one per hard disk.
+struct Readers<'a> {
+    threads: usize,
+    /// Whether a drive (`c:`) is a hard disk; [`drive_seeks`] outside tests.
+    seeks: &'a (dyn Fn(&str) -> bool + Sync),
+}
+
+impl Readers<'static> {
+    fn system() -> Self {
+        Readers {
+            threads: worker_threads(),
+            seeks: &drive_seeks,
+        }
+    }
+}
+
+impl Readers<'_> {
+    /// [`par_map`] with the items shared out by drive ([`plan_lanes`]);
+    /// `drive` says which drive an item reads from.
+    fn map<T: Sync, R: Send>(
+        &self,
+        items: &[T],
+        drive: impl Fn(&T) -> Option<String>,
+        cancel: &AtomicBool,
+        f: impl Fn(&T) -> R + Sync,
+    ) -> Vec<Option<R>> {
+        let lanes = plan_lanes(items.iter().map(drive), self.threads, self.seeks);
+        if let [lane] = lanes.as_slice() {
+            return par_map(items, lane.threads, cancel, f);
+        }
+        let mut out: Vec<Option<R>> = std::iter::repeat_with(|| None).take(items.len()).collect();
+        let f = &f;
+        let done: Vec<Vec<Option<R>>> = std::thread::scope(|scope| {
+            let workers: Vec<_> = lanes
+                .iter()
+                .map(|lane| {
+                    scope.spawn(move || {
+                        par_map(&lane.items, lane.threads, cancel, |&i| f(&items[i]))
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|w| w.join().unwrap_or_default())
+                .collect()
+        });
+        for (lane, results) in lanes.iter().zip(done) {
+            for (&i, r) in lane.items.iter().zip(results) {
+                out[i] = r;
+            }
+        }
+        out
+    }
 }
 
 /// Recursively scans a directory for `.dem` files with cancellation and progress reporting.
@@ -305,15 +528,22 @@ fn list_dir(
 }
 
 /// [`scan_dir`] over several roots at once, several folders listed at a
-/// time (#888): every drive's walk runs alongside the others, and a big one
-/// (C:) is shared out between the threads. Finds the same demos as calling
-/// [`scan_dir`] on each root, in no particular order.
+/// time (#888): every drive's walk runs alongside the others, and a big SSD
+/// (C:) is shared out between the threads, while a hard disk is listed one
+/// folder at a time (#941). Finds the same demos as calling [`scan_dir`] on
+/// each root, in no particular order.
 pub fn scan_roots(
     roots: &[PathBuf],
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
 ) -> Vec<PathBuf> {
-    scan_roots_with(roots, worker_threads(), windows_folder(), cancel, progress)
+    scan_roots_with(
+        roots,
+        &Readers::system(),
+        windows_folder(),
+        cancel,
+        progress,
+    )
 }
 
 /// [`scan_roots`] that also lists every archive it passes (`.zip`, `.7z`,
@@ -325,7 +555,7 @@ pub fn scan_roots_and_zips(
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
     walk_roots(
         roots,
-        worker_threads(),
+        &Readers::system(),
         windows_folder(),
         true,
         cancel,
@@ -335,15 +565,57 @@ pub fn scan_roots_and_zips(
 
 fn scan_roots_with(
     roots: &[PathBuf],
-    threads: usize,
+    readers: &Readers,
     windows: Option<&str>,
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
 ) -> Vec<PathBuf> {
-    walk_roots(roots, threads, windows, false, cancel, progress).0
+    walk_roots(roots, readers, windows, false, cancel, progress).0
 }
 
+/// The roots walked in [`plan_lanes`]'s lanes, side by side: a folder found
+/// inside a root is on the root's drive, since a junction is never entered.
 fn walk_roots(
+    roots: &[PathBuf],
+    readers: &Readers,
+    windows: Option<&str>,
+    want_zips: bool,
+    cancel: &AtomicBool,
+    progress: &Option<Sender<AuditProgress>>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let lanes = plan_lanes(
+        roots.iter().map(|r| drive_of(r)),
+        readers.threads,
+        readers.seeks,
+    );
+    if let [lane] = lanes.as_slice() {
+        return walk_pool(roots, lane.threads, windows, want_zips, cancel, progress);
+    }
+    let walked: Vec<(Vec<PathBuf>, Vec<PathBuf>)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = lanes
+            .iter()
+            .map(|lane| {
+                let roots: Vec<PathBuf> = lane.items.iter().map(|&i| roots[i].clone()).collect();
+                scope.spawn(move || {
+                    walk_pool(&roots, lane.threads, windows, want_zips, cancel, progress)
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|w| w.join().unwrap_or_default())
+            .collect()
+    });
+    let mut found = (Vec::new(), Vec::new());
+    for (demos, zips) in walked {
+        found.0.extend(demos);
+        found.1.extend(zips);
+    }
+    found
+}
+
+/// `roots` walked by `threads` threads sharing one queue of folders.
+fn walk_pool(
     roots: &[PathBuf],
     threads: usize,
     windows: Option<&str>,
@@ -665,15 +937,20 @@ impl ZipDemo {
 /// sorted.
 fn resolve_paths(
     paths: &[PathBuf],
-    threads: usize,
+    readers: &Readers,
     cancel: &AtomicBool,
 ) -> Vec<(PathBuf, Option<Stamp>)> {
     // Canonicalizing opens each file, so it runs in parallel.
-    let resolved = par_map(paths, threads, cancel, |path| {
-        let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-        let stamp = stamp(&canonical);
-        (canonical, stamp)
-    });
+    let resolved = readers.map(
+        paths,
+        |p| drive_of(p),
+        cancel,
+        |path| {
+            let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+            let stamp = stamp(&canonical);
+            (canonical, stamp)
+        },
+    );
     let mut by_path: HashMap<PathBuf, Option<Stamp>> = HashMap::new();
     for (path, stamp) in resolved.into_iter().flatten() {
         by_path.entry(path).or_insert(stamp);
@@ -688,7 +965,7 @@ fn resolve_paths(
 /// can't be read lists none and is named in `skipped`.
 fn list_zips(
     zips: &[(PathBuf, Option<Stamp>)],
-    threads: usize,
+    readers: &Readers,
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
     cache: &mut KeyCache,
@@ -716,12 +993,17 @@ fn list_zips(
             None => to_read.push(i),
         }
     }
-    let read = par_map(&to_read, threads, cancel, |&i| {
-        let path = &zips[i].0;
-        let listing = archive::list_archive_demos(path);
-        reading(path);
-        listing
-    });
+    let read = readers.map(
+        &to_read,
+        |&i| drive_of(&zips[i].0),
+        cancel,
+        |&i| {
+            let path = &zips[i].0;
+            let listing = archive::list_archive_demos(path);
+            reading(path);
+            listing
+        },
+    );
     for (&i, listing) in to_read.iter().zip(read) {
         let Some(listing) = listing else { continue };
         reads.zips += 1;
@@ -763,7 +1045,7 @@ fn read_zip_demos(
     picks: &[usize],
     demos: &[ZipDemo],
     zips: &[(PathBuf, Option<Stamp>)],
-    threads: usize,
+    readers: &Readers,
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
 ) -> Vec<(usize, Result<ContentHashes, String>)> {
@@ -773,7 +1055,8 @@ fn read_zip_demos(
     }
     let mut jobs: Vec<(usize, Vec<usize>)> = by_zip.into_iter().collect();
     jobs.sort();
-    let done = par_map(&jobs, threads, cancel, |(zip, members)| {
+    let drive = |(zip, _): &(usize, Vec<usize>)| drive_of(&zips[*zip].0);
+    let done = readers.map(&jobs, drive, cancel, |(zip, members)| {
         let names: Vec<String> = members
             .iter()
             .map(|&j| demos[j].entry.name.clone())
@@ -805,7 +1088,19 @@ pub fn find_duplicates_in(
     progress: &Option<Sender<AuditProgress>>,
     cache: &mut KeyCache,
 ) -> Audit {
-    let threads = worker_threads();
+    find_duplicates_with(files, zips, &Readers::system(), cancel, progress, cache)
+}
+
+/// [`find_duplicates_in`] reading as `readers` says: every read below, the
+/// first and last 64 KiB and the archives, one at a time on a hard disk.
+fn find_duplicates_with(
+    files: Vec<PathBuf>,
+    zips: Vec<PathBuf>,
+    readers: &Readers,
+    cancel: &AtomicBool,
+    progress: &Option<Sender<AuditProgress>>,
+    cache: &mut KeyCache,
+) -> Audit {
     let mut reads = Reads::default();
     let mut skipped = Vec::new();
     let send = |msg: AuditProgress| {
@@ -817,8 +1112,8 @@ pub fn find_duplicates_in(
 
     // Canonicalize and deduplicate paths to prevent counting/grouping a file
     // with itself.
-    let files = resolve_paths(&files, threads, cancel);
-    let zips = resolve_paths(&zips, threads, cancel);
+    let files = resolve_paths(&files, readers, cancel);
+    let zips = resolve_paths(&zips, readers, cancel);
     if cancel.load(Ordering::Relaxed) {
         return Audit::default();
     }
@@ -830,7 +1125,7 @@ pub fn find_duplicates_in(
         send(AuditProgress::Archives(zips.len()));
         zip_demos = list_zips(
             &zips,
-            threads,
+            readers,
             cancel,
             progress,
             cache,
@@ -876,11 +1171,16 @@ pub fn find_duplicates_in(
             },
         }
     }
-    let heads = par_map(&to_read, threads, cancel, |&i| {
-        let (path, stamp) = &files[i];
-        hashing(path);
-        head_hash(path, stamp.map_or(0, |s| s.size))
-    });
+    let heads = readers.map(
+        &to_read,
+        |&i| drive_of(&files[i].0),
+        cancel,
+        |&i| {
+            let (path, stamp) = &files[i];
+            hashing(path);
+            head_hash(path, stamp.map_or(0, |s| s.size))
+        },
+    );
     for (&i, head) in to_read.iter().zip(heads) {
         let Some(head) = head else { continue };
         reads.heads += 1;
@@ -913,7 +1213,7 @@ pub fn find_duplicates_in(
         }
     }
     if !needed.is_empty() && !cancel.load(Ordering::Relaxed) {
-        for (j, read) in read_zip_demos(&needed, &zip_demos, &zips, threads, cancel, progress) {
+        for (j, read) in read_zip_demos(&needed, &zip_demos, &zips, readers, cancel, progress) {
             reads.zip_demos += 1;
             let (path, stamp) = &zips[zip_demos[j].zip];
             if let Some(stamp) = stamp {
@@ -967,7 +1267,8 @@ pub fn find_duplicates_in(
             }
         }
     }
-    let read_tails = par_map(&tail_reads, threads, cancel, |&(i, size)| {
+    let drive = |&(i, _): &(usize, u64)| drive_of(&files[i].0);
+    let read_tails = readers.map(&tail_reads, drive, cancel, |&(i, size)| {
         tail_hash(&files[i].0, size)
     });
     for (&(i, _), tail) in tail_reads.iter().zip(read_tails) {
@@ -1396,7 +1697,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let found = scan_roots_with(
             std::slice::from_ref(&tree.0),
-            4,
+            &pool(4),
             Some(&windows),
             &cancel,
             &None,
@@ -1416,14 +1717,20 @@ mod tests {
         let inside = tree.0.join("OS").join("System32");
         let found = scan_roots_with(
             std::slice::from_ref(&inside),
-            4,
+            &pool(4),
             Some(&windows),
             &cancel,
             &None,
         );
         assert_eq!(found, [inside.join("z.dem")]);
         // So is the Windows folder itself when it's the one picked.
-        let found = scan_roots_with(&[tree.0.join("OS")], 1, Some(&windows), &cancel, &None);
+        let found = scan_roots_with(
+            &[tree.0.join("OS")],
+            &pool(1),
+            Some(&windows),
+            &cancel,
+            &None,
+        );
         assert_eq!(found.len(), 1);
     }
 
@@ -1458,7 +1765,7 @@ mod tests {
             scan_dir(root, &mut one, &cancel, &None);
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let many = scan_roots_with(&roots, 8, None, &cancel, &Some(tx));
+        let many = scan_roots_with(&roots, &pool(8), None, &cancel, &Some(tx));
         assert_eq!(tree.names(many), tree.names(one));
         let folders = rx
             .try_iter()
@@ -1469,7 +1776,7 @@ mod tests {
         assert_eq!(folders, 14);
         // A cancel ends the walk at once.
         cancel.store(true, Ordering::Relaxed);
-        assert!(scan_roots_with(&roots, 4, None, &cancel, &None).is_empty());
+        assert!(scan_roots_with(&roots, &pool(4), None, &cancel, &None).is_empty());
     }
 
     /// Several roots walked into one list and keyed in one pass pair a copy
@@ -1702,6 +2009,162 @@ mod tests {
                 .iter()
                 .all(Option::is_none)
         );
+    }
+
+    /// Readers that treat every drive as an SSD: `threads` at once.
+    fn pool(threads: usize) -> Readers<'static> {
+        Readers {
+            threads,
+            seeks: &|_| false,
+        }
+    }
+
+    #[test]
+    fn a_path_names_its_drive() {
+        let drive = |p: &str| drive_of(Path::new(p));
+        assert_eq!(drive(r"C:\demos\a.dem").as_deref(), Some("c:"));
+        assert_eq!(drive(r"\\?\D:\demos\a.dem").as_deref(), Some("d:"));
+        assert_eq!(drive("e:/a.dem").as_deref(), Some("e:"));
+        assert_eq!(drive(r"\\nas\share\a.dem"), None);
+        assert_eq!(drive(r"\\?\UNC\nas\share\a.dem"), None);
+        assert_eq!(drive(r"demos\a.dem"), None);
+    }
+
+    #[test]
+    fn each_hard_disk_gets_one_reader_and_the_ssds_share_the_pool() {
+        let drives = [
+            Some("c:"),
+            Some("d:"),
+            Some("e:"),
+            None,
+            Some("c:"),
+            Some("d:"),
+        ];
+        let asked = Mutex::new(Vec::new());
+        let seeks = |d: &str| {
+            asked.lock().unwrap().push(d.to_string());
+            d == "d:" || d == "e:"
+        };
+        let lanes = plan_lanes(drives.iter().map(|d| d.map(String::from)), 8, &seeks);
+        assert_eq!(
+            lanes,
+            [
+                Lane {
+                    threads: 8,
+                    items: vec![0, 3, 4]
+                },
+                Lane {
+                    threads: 1,
+                    items: vec![1, 5]
+                },
+                Lane {
+                    threads: 1,
+                    items: vec![2]
+                },
+            ]
+        );
+        // Each drive is asked once a pass.
+        assert_eq!(*asked.lock().unwrap(), ["c:", "d:", "e:"]);
+        // Only SSDs: one lane, as before #941.
+        let lanes = plan_lanes(drives.iter().map(|d| d.map(String::from)), 8, &|_| false);
+        assert_eq!(
+            lanes,
+            [Lane {
+                threads: 8,
+                items: (0..6).collect()
+            }]
+        );
+        assert!(plan_lanes(std::iter::empty(), 8, &|_| false).is_empty());
+    }
+
+    #[test]
+    fn a_hard_disk_is_read_one_file_at_a_time_beside_the_ssds() {
+        // Fake paths: `f` only counts, it never opens them.
+        let items: Vec<PathBuf> = (0..24)
+            .map(|i| PathBuf::from(format!(r"{}:\demos\{i}.dem", ["c", "d", "e"][i % 3])))
+            .collect();
+        let counters = || -> HashMap<String, AtomicUsize> {
+            ["c:", "d:", "e:"]
+                .into_iter()
+                .map(|d| (d.to_string(), AtomicUsize::new(0)))
+                .collect()
+        };
+        let (in_flight, most) = (counters(), counters());
+        let readers = Readers {
+            threads: 4,
+            seeks: &|d| d == "d:" || d == "e:",
+        };
+        let cancel = AtomicBool::new(false);
+        let out = readers.map(
+            &items,
+            |p| drive_of(p),
+            &cancel,
+            |p| {
+                let drive = drive_of(p).unwrap();
+                let now = in_flight[&drive].fetch_add(1, Ordering::SeqCst) + 1;
+                most[&drive].fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(5));
+                in_flight[&drive].fetch_sub(1, Ordering::SeqCst);
+                p.clone()
+            },
+        );
+        // Every item, in order.
+        assert_eq!(out, items.iter().cloned().map(Some).collect::<Vec<_>>());
+        assert_eq!(most["d:"].load(Ordering::SeqCst), 1);
+        assert_eq!(most["e:"].load(Ordering::SeqCst), 1);
+        cancel.store(true, Ordering::Relaxed);
+        assert!(
+            readers
+                .map(&items, |p| drive_of(p), &cancel, |p| p.clone())
+                .iter()
+                .all(Option::is_none)
+        );
+    }
+
+    #[test]
+    fn a_walk_and_key_pass_on_a_hard_disk_find_what_the_pool_finds() {
+        let hdd = Readers {
+            threads: 8,
+            seeks: &|_| true,
+        };
+        let tree = SkipTree::new("hdd_walk");
+        let cancel = AtomicBool::new(false);
+        let roots = [tree.0.clone(), tree.0.join("keep")];
+        let pooled = scan_roots_with(&roots, &pool(8), None, &cancel, &None);
+        let one = scan_roots_with(&roots, &hdd, None, &cancel, &None);
+        assert_eq!(tree.names(one), tree.names(pooled));
+
+        let demos = Demos::new("hdd_keys");
+        let files = vec![
+            demos.file("a.dem", &long_demo(1)),
+            demos.file("a (1).dem", &long_demo(1)),
+            demos.file("b.dem", b"short"),
+            demos.file("b (1).dem", b"short"),
+            demos.file("c.dem", b"other"),
+        ];
+        let pass = |readers: &Readers| {
+            let mut cache = KeyCache::default();
+            let audit =
+                find_duplicates_with(files.clone(), vec![], readers, &cancel, &None, &mut cache);
+            (group_names(&audit), audit.reads)
+        };
+        let (groups, reads) = pass(&hdd);
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        assert_eq!(pass(&pool(8)), (groups, reads));
+    }
+
+    /// What this PC's drives say (#941), for the PR: `cargo test -p
+    /// hl-demo-auditor -- --ignored --nocapture drives_say`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn print_what_this_pcs_drives_say() {
+        for letter in b'a'..=b'z' {
+            let drive = format!("{}:", letter as char);
+            if Path::new(&format!(r"{drive}\")).exists() {
+                println!("{drive} seek penalty: {:?}", seek_penalty::query(&drive));
+            }
+        }
     }
 
     use archive::tests::write_zip;
@@ -1987,7 +2450,7 @@ mod tests {
         d.file("pack.tar", b"never");
         let cancel = AtomicBool::new(false);
         let roots = [d.0.clone()];
-        let (demos, mut zips) = walk_roots(&roots, 2, None, true, &cancel, &None);
+        let (demos, mut zips) = walk_roots(&roots, &pool(2), None, true, &cancel, &None);
         zips.sort();
         let names: Vec<_> = zips.iter().map(|z| z.file_name().unwrap()).collect();
         let rar = cfg!(all(windows, feature = "rar"));
@@ -1998,7 +2461,10 @@ mod tests {
         };
         assert_eq!(demos.len(), 1);
         assert_eq!(names, expected);
-        assert_eq!(scan_roots_with(&roots, 2, None, &cancel, &None).len(), 1);
+        assert_eq!(
+            scan_roots_with(&roots, &pool(2), None, &cancel, &None).len(),
+            1
+        );
     }
 
     #[test]

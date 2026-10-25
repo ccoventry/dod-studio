@@ -920,6 +920,13 @@
             <!-- #70: the ticked rows are what the footer buttons act on. -->
             <div id="render-selection-row" class="action-row" style="margin-top: 8px; align-items: center; gap: 6px; font-size: 0.9em;">
               <button id="render-select-unrendered-btn" disabled data-str="RENDER.SELECT_UNRENDERED_BUTTON" data-str-title="RENDER.SELECT_UNRENDERED_TITLE" title="Tick only the takes with no finished render in their history.">Select unrendered</button>
+              <button id="render-select-finished-btn" disabled data-str="RENDER.SELECT_FINISHED_BUTTON" data-str-title="RENDER.SELECT_FINISHED_TITLE" title="Tick only the takes whose clips are done.">Select finished</button>
+              <select id="render-finished-age-select" disabled data-str-title="RENDER.FINISHED_AGE_TITLE" title="Which finished takes Select finished ticks.">
+                <option value="0" data-str="RENDER.FINISHED_AGE_ANY">of any age</option>
+                <option value="86400000" data-str="RENDER.FINISHED_AGE_DAY">over a day old</option>
+                <option value="604800000" data-str="RENDER.FINISHED_AGE_WEEK">over a week old</option>
+                <option value="2592000000" data-str="RENDER.FINISHED_AGE_MONTH">over a month old</option>
+              </select>
               <span id="render-selection-count" class="status-text" style="margin: 0 0 0 6px;">0 of 0 selected</span>
             </div>
 
@@ -968,6 +975,8 @@
                 <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
+              <!-- #954: Scan for Takes' sliding block. -->
+              <div id="render-scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
             </div>
           </div>
 
@@ -1884,7 +1893,7 @@
         <h2 id="themed-confirm-title" data-str="THEMED_CONFIRM_MODAL.TITLE_DEFAULT">Confirm</h2>
         <p id="themed-confirm-message" style="white-space: pre-line;"></p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
-          <button id="themed-confirm-ok-btn" style="color: #ff5555; border-color: #ff5555;" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
+          <button id="themed-confirm-ok-btn" class="primary-btn" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
           <button id="themed-confirm-cancel-btn" data-str="THEMED_CONFIRM_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>

@@ -20,6 +20,7 @@ import {
   writeTextFile,
   measureTakeFolders,
   deleteTakeFolders,
+  logFrontendEvent,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
@@ -30,6 +31,9 @@ import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
 import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
 import { scanMergeMessage } from './render_scan_summary.js';
+import { rowsOf, batchFrames, secondsLeft, renderingLine, scanEndLine, createRenderBatch } from './render_batch_progress.js';
+import { createClock, hideBar, showBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { whileDialogOpens } from './dialog_wait.js';
@@ -51,10 +55,13 @@ let selection = null;
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
 // The rows this batch rendered or tried to (#70): every row seen Rendering
-// or Queued while it runs. The finish toast counts only these, so a take
-// that scanned in as Finished, or was cancelled before Start, isn't
-// reported as rendered by this batch. Emptied when the batch finishes.
-const batchJobIds = new Set();
+// or Queued while it runs. The finish toast, the batch bar and its line
+// count only these (#954), so a take that scanned in as Finished, or one
+// an earlier batch rendered, isn't counted as this batch's. The batch's
+// clock redraws the line every second (`redrawBatchLine`, set by
+// initRenderUI).
+let redrawBatchLine = () => {};
+const renderBatch = createRenderBatch({ redraw: () => redrawBatchLine(), log: logFrontendEvent });
 // Delete Take (#644), set up by initRenderUI.
 let takeDelete = null;
 // initRenderUI's getExportDirs, for the Start button's check.
@@ -124,11 +131,12 @@ function setRenderStatus(el, text, status = null) {
   el.style.color = status ? statusColor(status) : '';
 }
 
-/** The footer's whole-batch bar (#40): hidden until there's a batch. */
+/** The footer's whole-batch bar (#40): hidden until there's a batch, then
+ *  this batch's rows only, and the last batch's once it ended (#954). */
 function updateBatchProgress() {
   const wrap = document.querySelector('#render-batch-progress');
   if (!wrap) return;
-  const pct = batchProgress(jobs);
+  const pct = batchProgress(rowsOf(jobs, renderBatch.shownIds()));
   wrap.style.display = pct === null ? 'none' : 'flex';
   if (pct === null) return;
   const fill = wrap.querySelector('.progress-bar-fill');
@@ -498,6 +506,10 @@ function syncSelectionControls() {
   if (countEl) countEl.textContent = STRINGS.RENDER.selectedCount(ticked, total);
   const unrenderedBtn = document.querySelector('#render-select-unrendered-btn');
   if (unrenderedBtn) unrenderedBtn.disabled = total === 0;
+  for (const id of ['#render-select-finished-btn', '#render-finished-age-select']) {
+    const el = document.querySelector(id);
+    if (el) el.disabled = total === 0;
+  }
 
   const setButton = (id, count, label, title, disabled = count === 0) => {
     const btn = document.querySelector(id);
@@ -667,6 +679,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (e.target.checked) selection.selectAll(); else selection.selectNone();
   });
   document.querySelector('#render-select-unrendered-btn')?.addEventListener('click', () => selection.selectUnrendered());
+  // #644: tick the finished takes, of any age or older than the age picked.
+  document.querySelector('#render-select-finished-btn')?.addEventListener('click', () => {
+    const minAgeMs = Number(document.querySelector('#render-finished-age-select')?.value) || 0;
+    selection.selectFinished({ minAgeMs });
+  });
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
@@ -755,20 +772,26 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   function paintQueueStatus() {
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
-    const activeOrQueued = queuedCount + renderingCount;
     if (renderingCount > 0) {
-      setRenderStatus(renderStatusEl, STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length), JOB_STATUS.RENDERING);
+      const rows = rowsOf(jobs, renderBatch.ids());
+      const left = secondsLeft(batchFrames(rows), renderBatch.ms());
+      setRenderStatus(renderStatusEl, renderingLine(rows, left) + renderBatch.suffix(), JOB_STATUS.RENDERING);
     } else {
       setRenderStatus(renderStatusEl, queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
     }
   }
 
+  // The clock and the time left move between snapshots.
+  redrawBatchLine = () => {
+    if (!scanRunning && jobs.some((j) => j.status === JOB_STATUS.RENDERING)) paintQueueStatus();
+  };
+
   function applyJobsSnapshot(list) {
     jobs = list;
     if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
-      for (const j of jobs) {
-        if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
-      }
+      renderBatch.add(jobs
+        .filter((j) => j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED)
+        .map((j) => j.id));
     }
     renderJobsTable();
     if (!scanRunning) paintQueueStatus();
@@ -798,11 +821,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     // size reported the whole batch as cancelled — including the common case
     // of cancelling the takes you did not want and letting the rest run, where
     // it read as though nothing had rendered at all.
-    const batch = jobs.filter((j) => batchJobIds.has(j.id));
-    batchJobIds.clear();
-    const finished = batch.filter((j) => j.status === JOB_STATUS.FINISHED).length;
-    const failed = batch.filter((j) => j.status === JOB_STATUS.ERROR).length;
-    const cancelled = batch.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
+    const ended = renderBatch.finish(jobs);
+    const { rows: batch, finished, failed, cancelled } = ended;
+    updateBatchProgress();
 
     // A batch the finish step (#440) queued has already said how it ended, in
     // its own words ("12 clips ready") — a second toast would repeat it.
@@ -819,19 +840,25 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         notify(kind, title, summary);
       }
     }
-    const end = batchEndStatus(finished, failed, cancelled);
+    const end = batchEndStatus(finished, failed, cancelled, batch.length > 0 ? durationTextMs(ended.ms) : null);
     if (!scanRunning) setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
   if (scanRenderBtn) {
+    // #954: the line counts the takes found so far, with a clock, and a
+    // block slides on the scan's bar, since how many there are to find isn't
+    // known until the walk ends.
+    const scanBar = document.querySelector('#render-scan-progress');
     let scanFoundCount = 0;
-    listen('render_scan_status', () => {
-      // Payload is just "Found take: <name>" per take — the count is what
-      // the status line needs, not the name, so this stays a cheap counter
-      // rather than parsing/echoing every take's name into the DOM.
-      scanFoundCount += 1;
-      setRenderStatus(renderStatusEl, STRINGS.RENDER.scanFoundSoFar(scanFoundCount));
-    });
+    const paintScan = () => {
+      if (scanRunning) setRenderStatus(renderStatusEl, STRINGS.RENDER.lookingForTakes(scanFoundCount) + scanClock.suffix());
+    };
+    const scanClock = createClock({ redraw: paintScan });
+    // The backend counts the takes, at most one event every ~33 ms.
+    listen('render_scan_status', (event) => {
+      scanFoundCount = Math.max(scanFoundCount, Number(event.payload?.found) || 0);
+      paintScan();
+    }).catch((err) => console.error('Failed to register render_scan_status listener:', err));
 
     scanRenderBtn.addEventListener('click', () => {
       const captureLocations = getCaptureLocations ? getCaptureLocations() : [];
@@ -867,10 +894,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const ffmpegPathVal = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;
 
       scanFoundCount = 0;
-      showToast(STRINGS.RENDER.SCANNING_TOAST, 'info');
       scanRunning = true;
       scanRenderBtn.disabled = true;
-      setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCANNING);
+      scanClock.start();
+      showBar(scanBar, { indeterminate: true });
+      paintScan();
 
       const renderPayload = {
         render_directories: captureLocations,
@@ -892,15 +920,19 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         .then((summary) => {
           scanRunning = false;
           scanRenderBtn.disabled = false;
+          const ms = scanClock.stop();
+          hideBar(scanBar);
           const message = scanMergeMessage(summary);
           showToast(message.toast, message.level);
           // While a batch renders, its own progress line takes over again.
           if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) paintQueueStatus();
-          else setRenderStatus(renderStatusEl, message.status);
+          else setRenderStatus(renderStatusEl, scanEndLine(summary, ms));
         })
         .catch((err) => {
           scanRunning = false;
           scanRenderBtn.disabled = false;
+          scanClock.stop();
+          hideBar(scanBar);
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
           setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
         });
@@ -919,7 +951,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         return;
       }
       // A batch of Skip copies can end before any snapshot shows Rendering.
-      for (const j of jobs) if (j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
+      renderBatch.add(jobs.filter((j) => j.status === JOB_STATUS.QUEUED).map((j) => j.id));
       showToast(STRINGS.RENDER.INITIALIZING_RENDER_BATCH, 'info');
       startRenderBtn.disabled = true;
       if (cancelRenderBtn) cancelRenderBtn.disabled = false;
@@ -930,6 +962,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         })
         .catch((err) => {
           showToast(STRINGS.RENDER.renderBatchError(err), 'error');
+          if (!jobs.some((j) => j.status === JOB_STATUS.RENDERING)) renderBatch.discard();
           syncSelectionControls();
         });
     });
@@ -988,6 +1021,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         const ok = await themedConfirm(STRINGS.RENDER.clearQueueConfirmMessage(rendering), {
           title: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_TITLE,
           confirmLabel: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_BUTTON,
+          destructive: true,
         });
         if (!ok) return;
       }

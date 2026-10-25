@@ -1246,6 +1246,22 @@ mod tests {
         Scratch::new(format_args!("cfg_scan_{tag}"))
     }
 
+    /// `ds_player_change_name` (#1021) is an ordinary user command: renaming a
+    /// player for a batch is what Initial Commands are for, and one scheduled
+    /// mid-clip renames from that frame on, as asked. So it is in no tier.
+    #[test]
+    fn a_rename_is_allowed_in_initial_and_scheduled_commands() {
+        let name = "ds_player_change_name";
+        for (tier, list) in [
+            ("BANNED_COMMANDS", BANNED_COMMANDS),
+            ("SCHEDULED_BANNED_COMMANDS", SCHEDULED_BANNED_COMMANDS),
+            ("MID_DEMO_HAZARDS", MID_DEMO_HAZARDS),
+            ("NOOP_IN_INIT_COMMANDS", NOOP_IN_INIT_COMMANDS),
+        ] {
+            assert!(!list.contains(&name), "{name} is in {tier}");
+        }
+    }
+
     #[test]
     fn a_warning_names_the_file_or_falls_back_to_the_whole_path() {
         assert_eq!(

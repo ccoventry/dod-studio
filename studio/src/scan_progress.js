@@ -3,6 +3,7 @@
 // demos the analyzer cache has go first and take milliseconds; the parses
 // come after, and the time left is measured from their pace.
 import { STRINGS } from './strings.js';
+import { durationTextMs } from './time_format.js';
 
 /** " (N from the analyzer cache)", or nothing when the cache has none. */
 export function fromCacheText(cached) {
@@ -28,7 +29,7 @@ export function timeLeftText({
 }
 
 /** Seconds to one decimal. */
-const secs = (ms) => (Math.max(0, ms) / 1000).toFixed(1);
+const secs = durationTextMs;
 
 /**
  * The activity log's line for a finished or cancelled scan: how long it

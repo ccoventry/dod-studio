@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clockFloor, clockRound, clockLong, elapsedWords } from './time_format.js';
+import { clockFloor, clockRound, clockLong, durationText, durationTextMs } from './time_format.js';
 
 describe('clockFloor', () => {
   it('pads seconds and rounds down', () => {
@@ -42,13 +42,31 @@ describe('clockLong', () => {
   });
 });
 
-describe('elapsedWords', () => {
-  it('is seconds alone under a minute', () => {
-    expect(elapsedWords(0)).toBe('0s');
-    expect(elapsedWords(45)).toBe('45s');
+describe('durationText (#880)', () => {
+  it('is one decimal and a space under a minute', () => {
+    expect(durationText(2.14)).toBe('2.1 s');
+    expect(durationText(2)).toBe('2.0 s');
+    expect(durationText(0)).toBe('0.0 s');
+    expect(durationText(59.94)).toBe('59.9 s');
   });
-  it('pads seconds after minutes', () => {
-    expect(elapsedWords(245)).toBe('4m 05s');
-    expect(elapsedWords(3600)).toBe('60m 00s');
+  it('is whole minutes and seconds from a minute', () => {
+    // 59.96 would read 60.0 s: it is a minute.
+    expect(durationText(59.96)).toBe('1 min 0 s');
+    expect(durationText(372.4)).toBe('6 min 12 s');
+    expect(durationText(3599.4)).toBe('59 min 59 s');
+  });
+  it('adds hours from an hour', () => {
+    expect(durationText(3600)).toBe('1 h 0 min 0 s');
+    expect(durationText(3723)).toBe('1 h 2 min 3 s');
+  });
+  it('reads missing or negative as 0.0 s', () => {
+    expect(durationText(undefined)).toBe('0.0 s');
+    expect(durationText(-4)).toBe('0.0 s');
+    expect(durationText(NaN)).toBe('0.0 s');
+  });
+  it('takes milliseconds too', () => {
+    expect(durationTextMs(6_840)).toBe('6.8 s');
+    expect(durationTextMs(65_000)).toBe('1 min 5 s');
+    expect(durationTextMs(undefined)).toBe('0.0 s');
   });
 });

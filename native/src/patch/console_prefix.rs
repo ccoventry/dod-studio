@@ -104,10 +104,12 @@ mod tests {
         "debug_log_view_bob",
         "hud_hide_center_text",
         "hud_overview_hide_speaker",
+        "player_change_name",
         "player_fix_model_flicker",
         "sound_mute_flag_capture",
         "sound_mute_victory_music",
         "spec_hide_text",
+        "view_show_own_blood",
     ];
 
     #[test]

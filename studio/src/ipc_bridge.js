@@ -9,9 +9,12 @@ import { STRINGS } from './strings.js';
  *  Master Queue's Clear Untracked/Selected/All and row-delete actions) that
  *  have no other IPC call to log from. Best-effort: logs to the console on
  *  failure rather than toasting, since a lost log line isn't worth
- *  interrupting the user over. */
+ *  interrupting the user over (every toast is logged here, #873).
+ *  One line at a time: the command runs off the window's thread, where two
+ *  lines sent at once could land in either order. */
+let logQueue = Promise.resolve();
 export function logFrontendEvent(message) {
-  invoke('log_frontend_event', { message }).catch((err) => {
+  logQueue = logQueue.then(() => invoke('log_frontend_event', { message })).catch((err) => {
     console.error("IPC Execution Error (log_frontend_event):", err);
   });
 }
