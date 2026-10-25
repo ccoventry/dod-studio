@@ -177,7 +177,7 @@ export function createMovieCopy({
   async function askCancel() {
     if (state !== 'copying') return;
     const yes = await confirm(S.CANCEL_ASK, {
-      title: S.CANCEL_ASK_TITLE, confirmLabel: S.CANCEL_YES, cancelLabel: S.CANCEL_NO,
+      title: S.CANCEL_ASK_TITLE, confirmLabel: S.CANCEL_YES, cancelLabel: S.CANCEL_NO, destructive: true,
     });
     // The copy may have finished while the question was up.
     if (!yes || state !== 'copying') return;

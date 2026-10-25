@@ -328,17 +328,18 @@ pub fn build_batch_queue(
     // ── AOT disk-space simulation ─────────────────────────────────────────────
     // Snapshot current free bytes for every configured capture directory so we
     // can route each clip to the drive with sufficient headroom at build time.
+    // Directories on one volume share one budget (#774).
     const FAILOVER_THRESHOLD: u64 = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES;
-    let mut drive_free: Vec<u64> = config
-        .capture_directories
-        .iter()
-        .map(|p| crate::sys::disk::get_available_bytes(p))
-        .collect();
+    let (mut volume_of_drive, mut drive_free) = crate::sys::disk::group_by_volume(
+        &config.capture_directories,
+        crate::sys::disk::get_available_bytes,
+    );
     let mut active_drive_idx: usize = 0;
     // If no capture directories are configured, fall back to a single sentinel
     // that has "unlimited" free space so existing single-drive behaviour is
     // preserved without an error.
     if drive_free.is_empty() {
+        volume_of_drive.push(0);
         drive_free.push(u64::MAX);
     }
 
@@ -675,6 +676,7 @@ pub fn build_batch_queue(
 
         let assignments = allocate_blocks_first_fit_decreasing(
             &block_estimates,
+            &volume_of_drive,
             &mut drive_free,
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
@@ -1188,7 +1190,7 @@ pub fn build_batch_queue(
                 .get(idx)
                 .map(|p| crate::patch::types::DriveHeadroom {
                     path: p.clone(),
-                    free_bytes: drive_free[idx],
+                    free_bytes: drive_free[volume_of_drive[idx]],
                 })
         })
         .collect();

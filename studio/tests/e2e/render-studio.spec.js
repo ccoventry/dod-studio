@@ -225,7 +225,7 @@ test.describe('issue #772 — Scan for Takes merges into the queue', () => {
     // A render's snapshot mid-scan keeps it off and leaves the scan's status.
     await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 45 })]);
     await expect(page.locator('#scan-render-btn')).toBeDisabled();
-    await expect(page.locator('#render-status')).toContainText('Scanning');
+    await expect(page.locator('#render-status')).toContainText('Looking for takes');
 
     await page.evaluate(() => {
       window.__mockEmit('render_jobs_snapshot', [
@@ -509,6 +509,30 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
   });
 
+  test('Select finished ticks the finished takes for Delete Take folders (#644)', async ({ page }) => {
+    await gotoHarness(page);
+    const recent = [{ ...rendered[0], started_unix_ms: Date.now() - 1000 }];
+    await emitSnapshot(page, [
+      job({ id: '0' }),
+      job({ id: '1', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
+      job({ id: '2', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_03_b0\\take0000', history: recent }),
+    ]);
+    await expect(page.locator('#render-select-finished-btn')).toBeEnabled();
+
+    await page.locator('#render-select-finished-btn').click();
+    await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (2)');
+
+    // Over a day old: only the 2023 render.
+    await page.locator('#render-finished-age-select').selectOption('86400000');
+    await page.locator('#render-select-finished-btn').click();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (1)');
+  });
+
   test('the finish toast counts only the rows this batch rendered', async ({ page }) => {
     await gotoHarness(page);
     const before = [
@@ -704,12 +728,57 @@ test.describe('issue #40 — sortable columns and the batch progress bar', () =>
     expect(await page.locator('#render-jobs-tbody tr').first().getAttribute('data-job-id')).toBe('0');
   });
 
-  test('the batch bar averages the batch and hides with no jobs', async ({ page }) => {
+  test('the batch bar averages the batch and hides with no batch', async ({ page }) => {
     await gotoHarness(page);
     await expect(page.locator('#render-batch-progress')).toBeHidden();
-    await emitSnapshot(page, [job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Rendering', progress: 50 })]);
+    // Rows a scan queued are no batch yet.
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
+    await expect(page.locator('#render-batch-progress')).toBeHidden();
+    // A row that was already Finished isn't this batch's (#954).
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 50 }), job({ id: '1', status: 'Finished', progress: 100 })]);
     await expect(page.locator('#render-batch-progress')).toBeVisible();
-    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 75%');
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 50%');
+    await expect(page.locator('#render-status')).toHaveText(/^Rendering 1 of 1 · 0:0\d$/);
+  });
+
+  test('a second batch\'s bar starts at 0, not at the rows the first one finished (#954)', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 50 }), job({ id: '1', status: 'Queued' })]);
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 25%');
+    await emitSnapshot(page, [job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Finished', progress: 100 })]);
+    await page.evaluate(() => window.__mockEmit('render_batch_finished', {}));
+    // The bar keeps how the batch ended, and the line says how long it took.
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 100%');
+    await expect(page.locator('#render-status')).toHaveText(/^Done in \d+\.\d s: 2 rendered$/);
+
+    // A scan adds two takes and the next batch starts on them.
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Finished', progress: 100 }),
+      job({ id: '2', status: 'Rendering', progress: 0 }), job({ id: '3', status: 'Queued' }),
+    ]);
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 0%');
+    await expect(page.locator('#render-batch-progress .progress-bar-fill')).toHaveAttribute('style', /width:\s*0%/);
+    await expect(page.locator('#render-status')).toHaveText(/^Rendering 1 of 2 · 0:0\d$/);
+  });
+
+  test('Scan for Takes slides a block and counts the takes, then says what it found and how long it took (#954)', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__testCaptureLocations = ['C:\\captures'];
+      window.__mockInvokeHandlers['queue_render_batch'] = () =>
+        new Promise((resolve) => { window.__finishScan = resolve; });
+    });
+    await page.locator('#scan-render-btn').click();
+    await expect(page.locator('#render-scan-progress')).not.toHaveAttribute('hidden');
+    await expect(page.locator('#render-scan-progress')).toHaveClass(/indeterminate/);
+    await expect(page.locator('#render-status')).toHaveText(/^Looking for takes: 0 found so far · 0:0\d$/);
+    // No toast repeats the line.
+    await expect(page.locator('#toast-container', { hasText: 'Scanning' })).toHaveCount(0);
+    await page.evaluate(() => window.__mockEmit('render_scan_status', { found: 14 }));
+    await expect(page.locator('#render-status')).toContainText('Looking for takes: 14 found so far');
+    await page.evaluate(() => window.__finishScan({ total: 14, added: 3, refreshed: 0, kept: 11, gone: 0, gone_queued: 0 }));
+    await expect(page.locator('#render-status')).toHaveText(/^Found 14 takes \(3 new\) in \d+\.\d s$/);
+    await expect(page.locator('#render-scan-progress')).toHaveAttribute('hidden');
   });
 });
 

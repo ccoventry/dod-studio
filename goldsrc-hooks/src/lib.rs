@@ -51,6 +51,10 @@
 //!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
+//! - `player_names`: the `ds_player_change_name add|list|remove|clear`
+//!   command -- rename a player everywhere their name shows during playback,
+//!   by SteamID, slot or `self`, for one demo or all, through a detour of
+//!   client.dll's `pfnGetPlayerInfo` (#1021).
 //! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `ds_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -77,6 +81,8 @@
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
 //!   demo's player opened.
+//! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
+//!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
@@ -177,6 +183,14 @@
 //! - `spectator_text`: the `ds_spec_hide_text` cvar -- hide the
 //!   camera mode's name and the green "Press DUCK for Spectator Menu" when
 //!   the view becomes a spectator camera (#677).
+//! - `engine_center_print`: the `hw.dll` half of `ds_hud_hide_center_text`
+//!   -- the engine's own `svc_centerprint`, per engine build (#677).
+//! - `server_hud_text`: the `ds_hud_hide_server_text` cvar -- hide
+//!   server plugins' coloured HUD messages (`TE_TEXTMESSAGE`) by pointing one
+//!   `hw.dll` call at a filter, per engine build (#677).
+//! - `hw_call_site`: one `call rel32` in `hw.dll` found per engine build and
+//!   rewritten while a setting is on (`engine_center_print`,
+//!   `server_hud_text`).
 //! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -231,6 +245,7 @@ mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
+mod engine_center_print;
 mod events;
 mod ex_interp;
 mod fast_load;
@@ -251,6 +266,7 @@ mod hud_sprite_lod;
 mod hud_sprites;
 mod hudelement;
 mod hull_trace_guard;
+mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
 mod map_sounds;
@@ -265,11 +281,13 @@ mod overview_map;
 mod overview_marker;
 mod overview_players;
 mod overview_speaker;
+mod own_blood;
 mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
 mod player_crosshair;
+mod player_names;
 mod player_overrides;
 mod player_table;
 mod pmove_guard;
@@ -283,6 +301,7 @@ mod scan;
 mod schedule;
 mod scoreboard;
 mod screen_effects;
+mod server_hud_text;
 mod server_query;
 mod spectator_bars;
 mod spectator_buttons;
@@ -305,6 +324,7 @@ mod tempent_fix;
 mod texture_hires;
 mod voice;
 mod voice_menus;
+mod weapon_list;
 mod window_layout;
 mod world_shaders;
 

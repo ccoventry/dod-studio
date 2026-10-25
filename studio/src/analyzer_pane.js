@@ -8,7 +8,7 @@
 
 import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, readDemoHeads, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, readDemoHeads, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, lookupDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
 import { readDemoHeadsInto, mapCellText } from './demo_heads.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
@@ -19,8 +19,9 @@ import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres }
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
 import { analyzerLoadingView, analyzerLoadingHtml } from './analyzer_loading.js';
-import { clockFloor as formatMMSS } from './time_format.js';
+import { clockFloor as formatMMSS, durationText } from './time_format.js';
 import { initDemoCache } from './demo_cache.js';
+import { createFolderPlayers } from './folder_players.js';
 import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
 import { renderFlagsTab } from './analyzer_flags.js';
@@ -121,11 +122,22 @@ let demoFilterType = 'All';
 let demoFilterMap = '';
 let demoFilterDateStart = '';
 let demoFilterDateEnd = '';
-// #437: who is in each demo of the current folder, filled in as the backend
-// reads them (path -> { demoType, players }), and the player box's text.
-let demoPlayers = new Map();
-let playerIndexRequest = 0;
-let playerIndexTotal = 0;
+// #437: who is in each demo of the current folder (folder_players.js), and
+// the player box's text. Cache all's queued demos are left to it (#992).
+let isCaching = () => false;
+const folderPlayers = createFolderPlayers({
+  lookupDemoPlayers,
+  indexDemoPlayers,
+  isCaching: (path) => isCaching(path),
+  onChange: () => {
+    refreshPlayerOptions();
+    renderPlayerStatus();
+    // Re-render when the list can change: a filter by player, or the type
+    // column's guess being replaced by the real type.
+    renderDemoTable();
+  },
+  strings: STRINGS.ANALYZER,
+});
 let demoFilterPlayer = '';
 let playerOptions = [];
 /** The Demos table's sortable columns: index.html's `th[data-sort]` values (#35). */
@@ -155,11 +167,7 @@ function teamLabel(team, alliesAreBritish) {
 function durSecs(d) { return d ? (d.secs || 0) + (d.nanos || 0) / 1e9 : 0; }
 
 function formatDuration(totalSecs) {
-  totalSecs = Math.max(0, Math.floor(totalSecs || 0));
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  const s = totalSecs % 60;
-  return STRINGS.ANALYZER.durationLong(h, m, s);
+  return durationText(totalSecs);
 }
 
 function formatGameTime(totalSecs) {
@@ -275,7 +283,7 @@ function groupConsecutiveWeapons(names) {
 function demoTypeOf(entry) {
   // The real type once the player index has read the demo; until then the
   // listing's own guess.
-  return demoPlayers.get(entry.path)?.demoType || entry.demo_type || STRINGS.ANALYZER.TYPE_POV;
+  return folderPlayers.get(entry.path)?.demoType || entry.demo_type || STRINGS.ANALYZER.TYPE_POV;
 }
 
 /** The player the box picks out in `entry`, or null (also null while that
@@ -283,11 +291,11 @@ function demoTypeOf(entry) {
 function filteredPlayerIn(entry) {
   const query = parsePlayerQuery(demoFilterPlayer, playerOptions);
   if (!query) return null;
-  return findPlayer(demoPlayers.get(entry.path)?.players, query);
+  return findPlayer(folderPlayers.get(entry.path)?.players, query);
 }
 
 function refreshPlayerOptions() {
-  playerOptions = groupPlayers([...demoPlayers.values()].flatMap((d) => d.players || []));
+  playerOptions = groupPlayers(folderPlayers.all().flatMap((d) => d.players || []));
   const list = document.querySelector('#analyzer-player-options');
   if (list) list.innerHTML = playerOptions.map((o) => `<option value="${esc(o.label)}"></option>`).join('');
 }
@@ -295,33 +303,18 @@ function refreshPlayerOptions() {
 function renderPlayerStatus() {
   const el = document.querySelector('#analyzer-player-status');
   if (!el) return;
-  el.textContent = demoPlayers.size < playerIndexTotal
-    ? STRINGS.ANALYZER.playersReading(demoPlayers.size, playerIndexTotal)
-    : '';
+  el.textContent = folderPlayers.status();
 }
 
 /** Starts reading who is in every demo of the current folder (#437). */
 function startPlayerIndex(demos) {
-  playerIndexRequest += 1;
-  demoPlayers = new Map();
-  playerIndexTotal = demos.length;
-  refreshPlayerOptions();
-  renderPlayerStatus();
-  // Sent for no demos too: the new request id stops the last folder's reads,
-  // which on a cloud drive fetch whole demos.
-  indexDemoPlayers(demos.map((d) => d.path), playerIndexRequest, 'analyzer');
+  folderPlayers.start(demos.map((d) => d.path));
 }
 
-listen('demo_players', (event) => {
-  const p = event.payload || {};
-  if (p.lane !== 'analyzer' || p.requestId !== playerIndexRequest) return;
-  demoPlayers.set(p.path, { demoType: p.demoType, players: p.players || [] });
-  refreshPlayerOptions();
-  renderPlayerStatus();
-  // Re-render when the list can change: a filter by player, or the type
-  // column's guess being replaced by the real type.
-  renderDemoTable();
-}).catch((err) => console.error('Failed to register demo_players listener:', err));
+listen('demo_players', (event) => folderPlayers.onPlayers(event.payload || {}))
+  .catch((err) => console.error('Failed to register demo_players listener:', err));
+listen('demo_cache_progress', (event) => folderPlayers.onCacheProgress(event.payload || {}))
+  .catch((err) => console.error('Failed to register demo_cache_progress listener (players):', err));
 
 // Guarantees the drive letter and final folder name stay visible, eliding
 // the middle when the full path is too long to fit the sidebar — e.g.
@@ -1087,7 +1080,7 @@ export function initAnalyzerPane({
 
   loadWeaponDisplayNames();
   initExplorerResize();
-  initDemoCache({ getDemoPaths: () => currentFolderDemos.map((demo) => demo.path) });
+  ({ isCaching } = initDemoCache({ getDemoPaths: () => currentFolderDemos.map((demo) => demo.path) }));
 
   const browseBtn = document.querySelector('#analyzer-browse-btn');
   if (browseBtn) {
@@ -1489,7 +1482,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.MATCH_SCORE_TITLE}</div><div class="stat-value">${p.stats[0]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.KILLS_TITLE}</div><div class="stat-value">${p.stats[1]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.DEATHS_TITLE}</div><div class="stat-value">${p.stats[2]}</div><div class="stat-badge" style="color:${kd >= 1 ? '#22c55e' : '#ef4444'};">${kd.toFixed(2)} ${STRINGS.ANALYZER.KD_BADGE_LABEL}</div></div>
-      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${STRINGS.ANALYZER.secondsSuffix(avgLife.toFixed(1))}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(minLife.toFixed(0), maxLife.toFixed(0))}</div></div>
+      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${durationText(avgLife)}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(durationText(minLife), durationText(maxLife))}</div></div>
     </div>
 
     <div class="analyzer-stacked-sections">
@@ -1597,7 +1590,7 @@ function renderKillStreaksTable(container, p) {
         <td>${idx + 1}</td>
         <td>${kills.length}</td>
         <td>${formatGameTime(startSecs)}</td>
-        <td>${STRINGS.ANALYZER.secondsSuffix(durationSecs.toFixed(1))}</td>
+        <td>${durationText(durationSecs)}</td>
       </tr>
       <tr><td></td><td colspan="3" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
       ${sub}`;

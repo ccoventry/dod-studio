@@ -75,3 +75,43 @@ test('an open folder that cannot be read shows empty, not Loading… for good', 
   await expect(page.locator('.tree-loading')).toHaveCount(0);
   await expect(label(page, 'D:\\Program Files (x86)\\Steam')).toHaveCount(0);
 });
+
+// #992: a folder whose players are cached shows them from one lookup, and
+// only the demos not read yet are read one by one; a cloud demo is not read.
+test('a folder read before shows its players with no Reading players pass', async ({ page }) => {
+  await gotoHarness(page);
+  const reads = () => page.evaluate(() => window.__mockInvocations
+    .filter((c) => c.cmd === 'index_demo_players' && c.args.paths.length > 0)
+    .map((c) => c.args.paths));
+  await page.evaluate((path) => {
+    window.__cachedPlayers.add(path);
+    // A read that is still going, so its counter stays up.
+    window.__mockInvokeHandlers.index_demo_players = ({ paths }) => (paths.length ? new Promise(() => {}) : 0);
+  }, 'D:\\Users\\chris\\a.dem');
+  await toggle(page, 'D:\\').click();
+  await toggle(page, 'D:\\Users').click();
+  await label(page, 'D:\\Users\\chris').click();
+  await expect.poll(reads).toEqual([['D:\\Users\\chris\\x.dem']]);
+  await expect(page.locator('#analyzer-player-status')).toHaveText('Reading players: 0 / 1 not read yet');
+
+  // x.dem is read now (its players file written); open the folder again.
+  await page.evaluate((path) => window.__cachedPlayers.add(path), 'D:\\Users\\chris\\x.dem');
+  await label(page, 'D:\\Users').click();
+  await label(page, 'D:\\Users\\chris').click();
+  await expect(page.locator('#analyzer-demo-tbody tr')).toHaveCount(2);
+  await expect(page.locator('#analyzer-player-status')).toHaveText('');
+  expect(await reads()).toHaveLength(1);
+});
+
+test("a cloud folder's demos with no cache entry are not read", async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate((paths) => paths.forEach((p) => window.__cloud.add(p)),
+    ['D:\\Users\\chris\\a.dem', 'D:\\Users\\chris\\x.dem']);
+  await toggle(page, 'D:\\').click();
+  await toggle(page, 'D:\\Users').click();
+  await label(page, 'D:\\Users\\chris').click();
+  await expect(page.locator('#analyzer-player-status')).toContainText('2 demos on a cloud drive');
+  const reads = await page.evaluate(() => window.__mockInvocations
+    .filter((c) => c.cmd === 'index_demo_players' && c.args.paths.length > 0).length);
+  expect(reads).toBe(0);
+});
