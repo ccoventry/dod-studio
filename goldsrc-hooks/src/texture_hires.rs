@@ -2653,7 +2653,13 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let soft_sheet = (texture_type == GLT_HUDSPRITE && i_type == TEX_TYPE_ALPHA)
         .then(|| crate::hud_sprite_edges::sheet_of_frame(&name))
         .flatten();
-    let img = match load_replacement(path, i_type, tint, soft_sheet.is_some()) {
+    // So does a frame of the even layout's atlas, which that layout only
+    // draws once all its frames went up this way (#1022).
+    let atlas_frame = (texture_type == GLT_HUDSPRITE && i_type == TEX_TYPE_ALPHA)
+        .then(|| crate::hud_sprite_edges::atlas_frame_of(&name))
+        .flatten();
+    let soft = soft_sheet.is_some() || atlas_frame.is_some();
+    let img = match load_replacement(path, i_type, tint, soft) {
         Ok(img) => img,
         Err(why) => {
             unsafe {
@@ -2687,6 +2693,9 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     drop(owned);
     if let Some(sheet) = soft_sheet {
         crate::hud_sprite_edges::mark_soft(sheet);
+    }
+    if let Some(frame) = atlas_frame {
+        crate::hud_sprite_edges::mark_atlas_soft(frame);
     }
 
     replaced.fetch_add(1, Ordering::Relaxed);

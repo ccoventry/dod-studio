@@ -82,6 +82,12 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     } else if (e.kind === 'ended' && running) {
       running = false;
       showToast(STRINGS.REVIEW.endedToast(e.reason, answers), 'info', 8000);
+    } else if (e.kind === 'refused') {
+      // Launch Preview or a seek sent during a review (#880): the game
+      // refused it, so say why and offer the way out.
+      showToast(STRINGS.REVIEW.refusedToast(e.command), 'warning', 8000, {
+        action: { label: STRINGS.REVIEW.STOP, onClick: () => stopHighlightReview().catch(() => {}) },
+      });
     }
   }).catch((err) => console.error('[review] could not listen for answers:', err));
 

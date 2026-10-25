@@ -1,7 +1,7 @@
 // progress_view.js
 // What every long job's progress line and bar share (#951, lifted out of
-// #901's Duplicates bar): the clock that runs on the line and the "Done in
-// X s" seconds, the measure against the last run while the total isn't known
+// #901's Duplicates bar): the clock that runs on the line (the "Done in
+// 6.8 s" text is time_format.js's durationText), the measure against the last run while the total isn't known
 // yet (a folder walk), and the bar that switches between real progress and
 // the sliding block. CLAUDE.md's "Visible progress" is the spec.
 import { STRINGS } from './strings.js';
@@ -10,11 +10,6 @@ import { STRINGS } from './strings.js';
 export function elapsedText(ms) {
   const secs = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
   return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-}
-
-/// Milliseconds as seconds to one decimal, for "Done in 6.8 s".
-export function secondsText(ms) {
-  return (Math.max(0, Number(ms) || 0) / 1000).toFixed(1);
 }
 
 /// The key a last run's count is remembered under: `area` and the same
