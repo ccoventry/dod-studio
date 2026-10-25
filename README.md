@@ -10,12 +10,14 @@ A creative fork of [cgdangelo/dod-tools](https://github.com/cgdangelo/dod-tools)
 ## Download
 
 **[Get the latest release](https://github.com/ccoventry/dod-studio/releases/latest)**:
-download `setup.exe` and run it. Windows 10 or 11, 64-bit.
+download `DoD.Studio_<version>_x64-setup.exe` and run it. Windows 10 or 11, 64-bit.
 
 - DoD Studio tells you when an update is out (the button beside Help) and
   installs it for you.
 - Want new features before they're released? Pick the **Experimental** channel
-  under Help › Check for Updates. It can have bugs the stable one doesn't.
+  under Help › Check for Updates, or download it from the
+  [experimental release](https://github.com/ccoventry/dod-studio/releases/tag/experimental-latest).
+  It can have bugs the stable one doesn't.
 - Just want stats from one demo? The **[web analyzer](https://ccoventry.github.io/dod-studio/)**
   reads a demo in your browser, with nothing to install.
 
@@ -69,14 +71,79 @@ memory, which is exactly what VAC looks for. So:
   unless it's an HLTV proxy you chose to watch. DoD Studio's hook DLL refuses
   `connect` itself while it is loaded, except to an HLTV proxy that says VAC
   is off.
-- **Never inject the hook DLL by hand** (`inject.exe`) into a game you then
-  play online with.
+- **Never load the hook DLL by hand** (with HLAE or any injector) into a game
+  you then play online with.
 - **To play online, start Day of Defeat from Steam, without DoD Studio.** A
   separate copy of Half-Life for movies is recommended but never required: it
   keeps your movie configs, models, sprites and sounds out of the game you
   play online. It protects those files, not your account.
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
+
+## Use at your own risk
+
+Everything DoD Studio does happens offline. It plays demos in a game it
+started itself, never joins a server, and starts that game with HLAE's connect
+warning and the hook DLL's own connect refusal in place. As Valve describes
+VAC, it acts when a game connects to a VAC-secured server, so a game that never
+joins one has nothing to be banned for. Valve publishes that rule, not what VAC
+checks or when it bans, so nobody can promise that a given tool is safe, and
+what happens once you connect from a game with the DLL loaded, or load it into
+the game you play online with, is outside this project's control.
+
+The same goes for your files. The app reads demos and never moves or deletes
+one unless you asked it to and it said so first. That is best effort, not a
+guarantee: software has bugs. Back up demos you care about before pointing any
+tool at them, this one included.
+
+You use DoD Studio at your own risk. A lost demo or a banned account is yours
+to carry, not the project's. The MIT licence says the same in its own words:
+the software is provided as is, without warranty of any kind.
+
+Valve's own pages are the authority on VAC, not this README. The addresses are
+written out so you can see where each one goes before you click, or type it
+into your browser yourself:
+
+- Valve Anti-Cheat (VAC) System, on Steam Support: what VAC is, when a ban
+  applies, and that bans are permanent.
+  <https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74>
+- Steam Subscriber Agreement: the rules of the account itself.
+  <https://store.steampowered.com/subscriber_agreement/>
+
+Read them before you decide what to run.
+
+## Documentation
+
+- [Use at your own risk](#use-at-your-own-risk): what can go wrong, and who
+  carries it.
+- [`docs/vac_safety.md`](docs/vac_safety.md): every way the game gets started,
+  and what keeps each one away from VAC-secured servers.
+- [`docs/features.md`](docs/features.md): what the app does, page by page.
+- [`docs/dodstudio_commands.md`](docs/dodstudio_commands.md): every in-game
+  `ds_*` console command and setting, with its default.
+- [Wiki](https://github.com/ccoventry/dod-studio/wiki): the same commands
+  list, and links back here.
+- [Releases](https://github.com/ccoventry/dod-studio/releases): what changed in
+  each version.
+
+For developers:
+
+- [`docs/README.md`](docs/README.md): the index of engineering notes
+  (architecture, GoldSrc and DoD engine quirks, HLAE protocols, releases).
+  Retired plans are in [`docs/archive/`](docs/archive/).
+- [`goldsrc-hooks/README.md`](goldsrc-hooks/README.md): the in-game DLL, what
+  each module does, and how to build and test it.
+- [`CLAUDE.md`](CLAUDE.md): the repository's rules (branch and PR names, CI,
+  engine quirks).
+- One README per part: [`native/`](native/README.md),
+  [`native/examples/`](native/examples/README.md),
+  [`analysis/examples/`](analysis/examples/README.md),
+  [`studio/`](studio/README.md), [`studio/tests/e2e/`](studio/tests/e2e/README.md),
+  [`web-analyzer/`](web-analyzer/README.md), [`dem-patch/`](dem-patch/README.md),
+  [`test-fixtures/`](test-fixtures/README.md), [`blender/`](blender/README.md) and
+  [`goldsrc-hooks/tools/hd/`](goldsrc-hooks/tools/hd/README.md).
+- Bugs and planned work are in
+  [GitHub Issues](https://github.com/ccoventry/dod-studio/issues).
 
 ---
 
@@ -114,6 +181,8 @@ If you are here to look at demo parsing or stats extraction, `dod/` and
     goldsrc-hooks/    32-bit DLL injected into hl.exe: HLTV fixes, HUD control, HD textures
     studio/           Tauri v2 + Vite frontend
     web-analyzer/     analysis/ compiled to wasm, browser-based demo viewer
+    blender/          scripts that rebuild an HLAE .agr take in Blender (the Blender page runs them)
+    test-fixtures/    the real demo and data files CI's tests read
 
 ### Quick start
 
@@ -159,15 +228,6 @@ error**, which kills the whole process mid-batch. The fork falls back to the
 library's built-in initial delta table where one exists and returns a graceful
 parse failure otherwise. As of upstream v0.3.0 all 29 of those call sites are
 still present, so the patch is still required.
-
-### Documentation
-
-Engineering notes live in `docs/` ([index](docs/README.md)): architecture
-decisions, GoldSrc and DoD engine quirks, and HLAE protocol constraints.
-`docs/features.md` describes what the app does, page by page.
-`docs/dodstudio_commands.md` lists the in-game `ds_*` console commands. Bugs
-and planned work are tracked in GitHub Issues; retired planning docs are in
-`docs/archive/`.
 
 ## Licensing
 
