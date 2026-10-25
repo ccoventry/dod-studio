@@ -232,6 +232,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_bar_progress;
 mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;

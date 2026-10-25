@@ -98,6 +98,8 @@ DEMO PLAYBACK
       viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
   ds_demo_other_drives 0/1
       viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
+  ds_demo_show_load_progress 0/1
+      The VCR bar shows how far a loading demo has got, where the time goes.
   ds_demo_reload
       Play the last demo again.
   ds_demo_review yes|maybe|no|replay|next|back|stop
