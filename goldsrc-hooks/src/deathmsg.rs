@@ -74,6 +74,7 @@ use crate::scan;
 
 mod font;
 mod name_cap;
+mod replace;
 mod scale;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
@@ -1018,30 +1019,55 @@ fn original_thunk() -> Option<engine::UserMsgHookFn> {
     Some(unsafe { std::mem::transmute::<usize, engine::UserMsgHookFn>(base + THUNK_RVA) })
 }
 
-/// Our `DeathMsg` handler. Reads the three bytes, drops the message if the
-/// block list says so, and otherwise hands it to the game untouched.
+/// Our `DeathMsg` handler. Reads the three bytes, applies the `replace` lines
+/// (#1021), drops the message if one hides it or the block list says so, and
+/// otherwise hands it to the game.
 ///
-/// Deliberately does not parse or rewrite the payload on the way through: a
-/// forwarded message is the *same* buffer the engine handed us, so a message
-/// that is not being blocked behaves exactly as if we were not here.
+/// A message no `replace` line changes is forwarded as the *same* buffer the
+/// engine handed us, so it behaves exactly as if we were not here. A changed
+/// one goes over as a copy: the engine's buffer is left as it was read.
 unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
+    let mut rewritten = None;
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
-        let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
-        // The death happened whether or not the feed shows it.
-        crate::spectator_deathcam::note_death(killer, victim);
+        let original = [bytes[0], bytes[1], bytes[2]];
+        // The death happened whether or not the feed shows it, and as it was
+        // recorded, whatever `replace` shows.
+        crate::spectator_deathcam::note_death(original[0] as i32, original[1] as i32);
+        let rules = replace::live();
+        let shown = if rules.is_empty() {
+            original
+        } else {
+            match replace::apply(rules, original) {
+                // 1 is what the engine's own dispatcher treats as handled.
+                replace::Outcome::Hide(_) => return 1,
+                replace::Outcome::Rewrite(_, out) => {
+                    rewritten = Some(out);
+                    out
+                }
+                replace::Outcome::Keep | replace::Outcome::Unresolved(..) => original,
+            }
+        };
+        // `block` filters the feed as `replace` leaves it.
         let blocked = BLOCK
             .lock()
-            .map(|list| list.blocks_slots(killer, victim))
+            .map(|list| list.blocks_slots(shown[0] as i32, shown[1] as i32))
             .unwrap_or(false);
         if blocked {
-            // 1 is what the engine's own dispatcher treats as handled.
             return 1;
         }
     }
-    match original_thunk() {
-        Some(original) => unsafe { original(name, size, buf) },
-        None => 1,
+    let Some(original) = original_thunk() else {
+        return 1;
+    };
+    match rewritten {
+        Some(out) => {
+            let mut copy =
+                unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }.to_vec();
+            copy[..3].copy_from_slice(&out);
+            unsafe { original(name, size, copy.as_mut_ptr() as *mut c_void) }
+        }
+        None => unsafe { original(name, size, buf) },
     }
 }
 
@@ -1241,6 +1267,14 @@ fn usage() -> String {
          \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
          \x20                               weapon is a name (d_garand, garand) or 1..43\n\
+         \x20 {COMMAND} replace [killer <id>] [victim <id>] [at <time>] [in <demo>,...]\n\
+         \x20                  with [killer <id>] [victim <id>] [weapon <weapon>]\n\
+         \x20                               change one kill-feed line; with hide hides it.\n\
+         \x20                               Before with: which kill (killer or victim needed;\n\
+         \x20                               at is the demo bar's clock, m:ss or seconds, +-2 s;\n\
+         \x20                               in: demo file names, * allowed). After with: what\n\
+         \x20                               changes. Any order. The kill feed only.\n\
+         \x20 {COMMAND} replace list | remove <n> | clear\n\
          \x20 {COMMAND} font <face> <size> [bold] [shadow]\n\
          \x20                               draw the names in that font (size {}..{} px), live;\n\
          \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
@@ -1270,10 +1304,15 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}, replacing {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
+        match replace::count() {
+            0 => "nothing".to_string(),
+            1 => "1 kill line (replace list)".to_string(),
+            n => format!("{n} kill lines (replace list)"),
+        },
     )
 }
 
@@ -1372,6 +1411,7 @@ fn dispatch(argv: &[String]) -> String {
             status()
         }
         "players" => players(),
+        "replace" => replace::command(&argv[2..]),
         "font" => {
             let rest = &argv[2..];
             if rest.is_empty() {
