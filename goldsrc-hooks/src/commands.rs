@@ -553,7 +553,8 @@ pub fn poll() {
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
-    // ds_hud_hide_weapon_list: one code byte, checked each frame.
+    // Keeps the weapon list off screen in demo playback with hud_fastswitch 1:
+    // one code byte, checked each frame.
     crate::weapon_list::poll();
     // Follows ds_hd_enabled / ds_hd_style, then notes what each map
     // uses for ds_debug_hd_misses. Cheap unless one of them changed.
@@ -1717,9 +1718,6 @@ pub fn install() {
     }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
         crate::voice_menus::set_cvar(voice_menus);
-    }
-    if let Some(weapon_list) = register(crate::weapon_list::NAME, "0") {
-        crate::weapon_list::set_cvar(weapon_list);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.

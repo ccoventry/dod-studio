@@ -77,9 +77,8 @@
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
 //!   demo's player opened.
-//! - `weapon_list`: the `ds_hud_hide_weapon_list` cvar -- keep the
-//!   weapon-selection list off screen when a POV demo replays the player's
-//!   weapon keys (#1032).
+//! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
+//!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.

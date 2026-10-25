@@ -21,8 +21,6 @@ HUD
       Hide the crosshair and keep it hidden.
   ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
-  ds_hud_hide_weapon_list 0/1
-      Hide the weapon list on the right that a POV demo's weapon keys open (the weapon still switches).
   ds_hud_hide_element <name> 0/1
       Hide one HUD element; the bare command lists them.
   ds_hud_hide_map_text 0/1

@@ -15,7 +15,7 @@ them; everything else is a setting you'd use for a capture. No name is the
 start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
-**Scope:** the surface actually on `dev` today: forty-nine cvars and
+**Scope:** the surface actually on `dev` today: forty-eight cvars and
 fifteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
@@ -64,7 +64,6 @@ the death cam).
 | `ds_player_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `ds_player_fix_model_flicker` | `1` | player models hold still from the frame an HLTV demo's clock steps back until it passes the last frame they were drawn on (one frame at normal speed, a few at 1/4 speed). The step back otherwise turns a strafing player's model round for that frame, several times a second, so his upper body flickers (#927). It happens under `viewdemo` at a frame rate above the demo's packet rate. A switch of its own, not part of `ds_spec_match_pov`: it is a bug in how the game draws a model, which HLTV only shows more often, not a difference in what an HLTV demo records. Stands down in a POV demo, where the clock (almost) never steps back | `goldsrc-hooks/src/strafe_twitch.rs`, [`goldsrc_dod_quirks.md`](goldsrc_dod_quirks.md) |
 | `ds_hud_hide_voice_menus` | `0` | hides the numbered menus a POV demo's player picked voice commands and hand signals from: the three voice-command menus (`voice_menu1`-`3`, which the server sends as `ShowMenu` with the nine `#Menu_*Voice*` keys) and the command menu `+commandmenu` opens, where the hand signals are. The menus still take the recorded number presses, so weapon switches replay as recorded; other `ShowMenu` text menus (server plugin votes) still show. While on, `+commandmenu` doesn't open in live play either. Turning it on or off with a voice menu up hides or shows it at once | `goldsrc-hooks/src/voice_menus.rs` |
-| `ds_hud_hide_weapon_list` | `0` | hides the weapon-selection list on the middle right that a POV demo's recorded weapon keys open. With `hud_fastswitch 1` a `slotN` still opens it when that slot holds two weapons, and with 0 every `slotN`, `invnext` and `invprev` does; the list then stays up until a recorded `+attack` picks a weapon. The weapon still switches as recorded: only `CHudAmmo::DrawWeaponList` is skipped (one code byte). While on, the list doesn't show in live play either (#1032) | `goldsrc-hooks/src/weapon_list.rs` |
 | `ds_hud_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `ds_hud_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
 | `ds_hud_hide_center_text` | `0` | hides the text the server prints in the middle of the screen: every `TextMsg` to `HUD_PRINTCENTER` (destination 4), such as match plugins' `print_center` countdowns and notices. Chat, joins and leaves (destination 3) still show. Turning it on also ends the centre line showing at that moment. Takes the server's copy of the spectator camera mode's name too, but not the game's own (`ds_spec_hide_text` hides both); doesn't reach the clan countdown (`ds_hud_hide_clan_text`) or the engine's own `svc_centerprint` (#677) | `goldsrc-hooks/src/center_text.rs` |
@@ -483,6 +482,10 @@ the first time and never overwritten. The empty `...Slot` controls in
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
 `slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
 or `engine <console command>`. See `src/studio_panel.rs` (#408).
+
+## Stock settings the hook extends
+
+- **`hud_fastswitch 1` also keeps the weapon list hidden in demo playback (#1032).** A POV demo replays the player's number keys, and the game's own `SelectSlot` opens the weapon list even with fast switch when the key's slot holds two weapons. In DoD that happens to the grenade key after a primed grenade is caught with USE: the caught one becomes a weapon of its own beside the class's grenade. While a demo plays with `hud_fastswitch 1`, the hook skips drawing the list (one code byte in `CHudAmmo::DrawWeaponList`); the weapon still switches as recorded. With `hud_fastswitch 0` playback shows the list as the player saw it, and live play is unchanged either way. `ds_debug_status` gets a `weapon list:` line once it has hidden it. `goldsrc-hooks/src/weapon_list.rs`.
 
 ## Renamed from `dodstudio_` (#555)
 

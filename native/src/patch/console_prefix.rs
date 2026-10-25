@@ -103,7 +103,6 @@ mod tests {
         "debug_log_server_sounds",
         "debug_log_view_bob",
         "hud_hide_center_text",
-        "hud_hide_weapon_list",
         "hud_overview_hide_speaker",
         "player_fix_model_flicker",
         "sound_mute_flag_capture",

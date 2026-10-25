@@ -1,7 +1,8 @@
-//! `ds_hud_hide_weapon_list`: keep the weapon-selection list (the column of
-//! weapon icons on the middle right) off screen while a POV demo replays the
-//! recording player's weapon keys (#1032). The weapon still switches as
-//! recorded; only the list is not drawn.
+//! `hud_fastswitch 1` keeps the weapon-selection list (the column of weapon
+//! icons on the middle right) off screen while a demo plays (#1032). With
+//! `hud_fastswitch 0` playback shows the list as the recording player saw
+//! it, and live play is left as shipped either way. The weapon still
+//! switches as recorded; only the list is not drawn.
 //!
 //! ## What brings the list up in playback
 //!
@@ -28,7 +29,11 @@
 //! The list then stays up until a recorded `+attack` picks a weapon, or a
 //! death or `HideWeapon` closes it. A recorder who plays with fast switch
 //! presses no `+attack` after a `slotN`, so with `hud_fastswitch 0` the list
-//! can stay up for many seconds.
+//! can stay up for many seconds -- which is what that viewer asked for.
+//!
+//! So with `hud_fastswitch 1` the only list playback can show is the
+//! grenade bucket's, which a viewer who chose fast switch never wants over
+//! the shot; this takes that one away too.
 //!
 //! ## What this patches: one displacement byte
 //!
@@ -50,19 +55,18 @@
 //! on the `xor`, so the function always returns without drawing. The opcode
 //! stays, and nothing that selects a weapon is touched: `gpActiveSel`,
 //! `SelectSlot`, the `+attack` pick in `CHudAmmo::Think` all run as shipped.
-//!
-//! It also hides the list in live play while the cvar is on, the same as
-//! `ds_hud_hide_voice_menus` with the command menu: the game can't tell a
-//! replayed key press from a live one here. With `hud_fastswitch 1` that only
-//! matters for the grenade bucket.
+//! [`poll`] writes it only while a demo plays with `hud_fastswitch` on, and
+//! puts the shipped byte back the frame either stops being true, so live
+//! play (a fast-switch player cycling two grenades) keeps its list.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine::{self, CvarSPartial};
-use crate::names::console_name;
 use crate::scan;
 
-pub const NAME: &str = console_name!("hud_hide_weapon_list");
+/// The stock cvar this follows. Registered by `client.dll` (`gHUD+0x6e2b8`
+/// caches its pointer), looked up by name.
+const FASTSWITCH: &std::ffi::CStr = c"hud_fastswitch";
 
 /// `CHudAmmo::DrawWeaponList`'s whole early-out, wildcarded over
 /// `&gpActiveSel`. Unique in `client.dll`.
@@ -76,7 +80,8 @@ const DRAW: u8 = 0x08;
 /// Patched: `jne` lands on the next instruction, the early return.
 const SKIP: u8 = 0x00;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+/// `hud_fastswitch`, once the client has registered it.
+static FASTSWITCH_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// The resolved displacement byte and the module base it belongs to.
 static DISP_ADDRESS: AtomicUsize = AtomicUsize::new(0);
@@ -84,8 +89,6 @@ static RESOLVED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether the list is hidden in the loaded module.
 static HIDDEN: AtomicBool = AtomicBool::new(false);
-/// The cvar as [`poll`] last read it.
-static WANTED: AtomicBool = AtomicBool::new(false);
 /// Frames the list would have been drawn on while hidden, for the status line.
 static SUPPRESSED_FRAMES: AtomicU32 = AtomicU32::new(0);
 /// `&gpActiveSel`, read from the pattern, for that count.
@@ -93,9 +96,10 @@ static ACTIVE_SEL: AtomicUsize = AtomicUsize::new(0);
 /// So a failure is reported once, not every frame.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
+/// Whether the list should be kept off screen: only in demo playback, and
+/// only for a viewer who chose fast switch.
+fn should_hide(playing_demo: bool, fastswitch: bool) -> bool {
+    playing_demo && fastswitch
 }
 
 /// The byte `apply` wants at the displacement, or an error naming a byte
@@ -111,6 +115,22 @@ fn wanted_byte(present: u8, hide: bool) -> Result<Option<u8>, String> {
         ));
     }
     Ok(Some(want))
+}
+
+/// `hud_fastswitch`'s value now, or `None` until the client registers it.
+fn fastswitch_on() -> Option<bool> {
+    let mut cvar = FASTSWITCH_CVAR.load(Ordering::Acquire);
+    if cvar.is_null() {
+        let engfuncs = engine::engfuncs()?;
+        // Safety: a plain lookup by name; null when not registered.
+        cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(FASTSWITCH.as_ptr()) };
+        if cvar.is_null() {
+            return None;
+        }
+        FASTSWITCH_CVAR.store(cvar, Ordering::Release);
+    }
+    // Safety: the engine owns the cvar for the session.
+    Some(unsafe { (*cvar).value } != 0.0)
 }
 
 /// Resolves the displacement byte for the loaded `client.dll`.
@@ -146,45 +166,37 @@ fn apply(hide: bool) -> Result<(), String> {
     {
         return Err("could not make DrawWeaponList writable".to_string());
     }
-    HIDDEN.store(hide, Ordering::Relaxed);
-    Ok(())
-}
-
-fn complain_once(why: &str) {
-    if !COMPLAINED.swap(true, Ordering::Relaxed) {
-        crate::commands::console_print(&format!("{NAME}: {why}\n"));
-        unsafe { crate::debug::report(&format!("weapon_list: {why}")) };
-    }
-}
-
-/// Called every frame from `commands::poll`: follows the cvar. At 0 and never
-/// used, `client.dll` stays exactly as shipped.
-pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
-    if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
-        COMPLAINED.store(false, Ordering::Relaxed);
+    if hide != HIDDEN.swap(hide, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
-                "weapon_list: {NAME} = {}",
-                if wanted {
-                    "1 (weapon list hidden)"
+                "weapon_list: {}",
+                if hide {
+                    "demo playback with hud_fastswitch 1, the weapon list is not drawn"
                 } else {
-                    "0 (normal)"
+                    "the weapon list draws as shipped"
                 }
             ))
         };
     }
+    Ok(())
+}
+
+/// Called every frame from `commands::poll`: hides the list while a demo
+/// plays with `hud_fastswitch` on, and puts it back otherwise. Until the
+/// first time that holds, `client.dll` stays exactly as shipped.
+pub fn poll() {
     if engine::client_module_base().is_none() {
         return;
     }
-    if (wanted || HIDDEN.load(Ordering::Relaxed))
-        && let Err(why) = apply(wanted)
+    let Some(fastswitch) = fastswitch_on() else {
+        return;
+    };
+    let hide = should_hide(crate::spray_hltv::playing_demo(), fastswitch);
+    if (hide || HIDDEN.load(Ordering::Relaxed))
+        && let Err(why) = apply(hide)
+        && !COMPLAINED.swap(true, Ordering::Relaxed)
     {
-        complain_once(&why);
+        unsafe { crate::debug::report(&format!("weapon_list: {why}")) };
     }
     let active_sel = ACTIVE_SEL.load(Ordering::Acquire);
     if HIDDEN.load(Ordering::Relaxed)
@@ -196,23 +208,19 @@ pub fn poll() {
     }
 }
 
-/// A `ds_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` until the list was first hidden.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
     let frames = SUPPRESSED_FRAMES.load(Ordering::Relaxed);
-    if !wanted && frames == 0 {
+    let hidden = HIDDEN.load(Ordering::Relaxed);
+    if !hidden && frames == 0 {
         return None;
     }
     Some(format!(
-        "{NAME}: {}; the list was up, unseen, for {frames} frame(s) this session",
-        if HIDDEN.load(Ordering::Relaxed) {
-            "the weapon list is not drawn"
+        "weapon list: {}; it was up, unseen, for {frames} frame(s) this session",
+        if hidden {
+            "not drawn (demo playback, hud_fastswitch 1)"
         } else {
-            "the weapon list draws normally"
+            "drawn as shipped"
         }
     ))
 }
@@ -223,6 +231,17 @@ mod tests {
 
     fn tokens() -> Vec<&'static str> {
         PATTERN.split_whitespace().collect()
+    }
+
+    #[test]
+    fn hidden_only_in_playback_with_fastswitch() {
+        assert!(should_hide(true, true));
+        assert!(
+            !should_hide(true, false),
+            "fastswitch 0: as the recorder saw it"
+        );
+        assert!(!should_hide(false, true), "live play keeps its list");
+        assert!(!should_hide(false, false));
     }
 
     #[test]
