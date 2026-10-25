@@ -632,6 +632,9 @@ pub fn poll() {
     crate::world_shaders::poll();
     crate::gun_log::poll();
     crate::missing_shots::poll();
+    // Keeps the CurWeapon handler prepended during a POV demo and plays the
+    // rounds it found with no recorded sound.
+    crate::pov_dry_fire::poll();
     crate::spectator_bars::poll();
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
@@ -866,6 +869,9 @@ fn status_text() -> String {
     }
     if let Some(shots) = missing_shots::status_line() {
         lines.push(shots);
+    }
+    if let Some(dry_fire) = crate::pov_dry_fire::status_line() {
+        lines.push(dry_fire);
     }
     if let Some(bars) = crate::spectator_bars::status_line() {
         lines.push(bars);
@@ -1778,6 +1784,10 @@ pub fn install() {
     }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
         crate::voice_menus::set_cvar(voice_menus);
+    }
+    // On by default: nobody wants a real shot to play nothing (#1029).
+    if let Some(dry_fire) = register(crate::pov_dry_fire::NAME, "1") {
+        crate::pov_dry_fire::set_cvar(dry_fire);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
