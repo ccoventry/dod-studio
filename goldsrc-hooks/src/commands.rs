@@ -583,6 +583,8 @@ pub fn poll() {
     crate::center_text::poll();
     // ds_spec_hide_text: two code patches, byte-checked each frame.
     crate::spectator_text::poll();
+    // ds_hud_hide_server_text: one hw.dll call, byte-checked each frame.
+    crate::server_hud_text::poll();
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
@@ -897,6 +899,9 @@ fn status_text() -> String {
     }
     if let Some(spectator_text) = crate::spectator_text::status_line() {
         lines.push(spectator_text);
+    }
+    if let Some(server_hud_text) = crate::server_hud_text::status_line() {
+        lines.push(server_hud_text);
     }
     if let Some(voice_menus) = crate::voice_menus::status_line() {
         lines.push(voice_menus);
@@ -1762,6 +1767,9 @@ pub fn install() {
     if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
         crate::spectator_text::set_cvar(spectator_text);
     }
+    if let Some(server_hud_text) = register(crate::server_hud_text::NAME, "0") {
+        crate::server_hud_text::set_cvar(server_hud_text);
+    }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
         crate::voice_menus::set_cvar(voice_menus);
     }
@@ -2010,6 +2018,7 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::server_hud_text::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
@@ -2039,6 +2048,7 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::server_hud_text::NAME,
             crate::strafe_twitch::NAME,
             crate::own_blood::NAME,
         ];
