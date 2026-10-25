@@ -12,7 +12,7 @@
 //! module docs and `docs/goldsrc_client_dll_internals.md`.
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
-//! others and each safe to inject without them:
+//! others and each safe to install without them:
 //! - `ds_spec_match_pov`, one cvar over five modules, for making a
 //!   spectated first-person view look and sound like the player's own
 //!   recording:

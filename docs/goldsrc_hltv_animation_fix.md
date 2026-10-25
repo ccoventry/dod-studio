@@ -254,7 +254,8 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 
 ## 11. How to check it is working
 
-1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
+1. Build for `i686-pc-windows-msvc` and load it through DoD Studio or HLAE's
+   custom loader (`goldsrc-hooks/README.md`) into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
 2. `ds_spec_match_pov 1`, `ds_debug_log_weapon_model 1`.
