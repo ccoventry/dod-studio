@@ -41,6 +41,7 @@ pub fn refresh_viewdemo_times(app: &tauri::AppHandle, streaks: &mut [CaptureStre
             "capture_status",
             serde_json::json!({
                 "running": true,
+                "stage": "reading_again",
                 "index": i as u32,
                 "total": total,
                 "status": crate::messages::reading_demo_again(&name, i as u32 + 1, total),
