@@ -57,7 +57,7 @@
 //! `SelectSlot`, the `+attack` pick in `CHudAmmo::Think` all run as shipped.
 //! [`poll`] writes it only while a demo plays with `hud_fastswitch` on, and
 //! puts the shipped byte back the frame either stops being true, so live
-//! play (a fast-switch player cycling two grenades) keeps its list.
+//! play is left as shipped.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
@@ -240,7 +240,7 @@ mod tests {
             !should_hide(true, false),
             "fastswitch 0: as the recorder saw it"
         );
-        assert!(!should_hide(false, true), "live play keeps its list");
+        assert!(!should_hide(false, true), "live play is left as shipped");
         assert!(!should_hide(false, false));
     }
 
