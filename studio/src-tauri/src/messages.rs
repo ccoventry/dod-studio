@@ -205,9 +205,39 @@ pub fn failed_to_launch_obs(err: impl Display) -> String {
 }
 
 /// The batch status line while the game fast-forwards to, then records, a
-/// clip (#76). 1-based.
-pub fn capturing_clip(clip: u32, total: u32) -> String {
-    format!("Capturing clip {} of {}", clip, total)
+/// clip (#76) of the demo `demo` (#952). 1-based.
+pub fn capturing_clip(clip: u32, total: u32, demo: &str) -> String {
+    if demo.is_empty() {
+        format!("Capturing clip {clip} of {total}")
+    } else {
+        format!("Capturing clip {clip} of {total} ({demo})")
+    }
+}
+
+/// The batch status line from the click that opens the game until its first
+/// demo loads (#952). `first_demo` is the batch's first demo, `demos` how
+/// many it plays.
+pub fn starting_the_game(first_demo: Option<&str>, demos: usize) -> String {
+    match first_demo {
+        None => "Starting the game…".to_string(),
+        Some(name) if demos > 1 => format!("Starting the game for {name} (demo 1 of {demos})"),
+        Some(name) => format!("Starting the game for {name}"),
+    }
+}
+
+/// The batch status line while the game loads a demo (#952).
+pub fn loading_demo(demo: &str) -> String {
+    if demo.is_empty() {
+        "Loading the next demo…".to_string()
+    } else {
+        format!("Loading {demo}…")
+    }
+}
+
+/// The batch status line while the takes are checked on disk after the
+/// game closes (#952).
+pub fn checking_takes(done: usize, total: usize) -> String {
+    format!("Checking the takes: {done} of {total}")
 }
 
 /// The batch status line while a demo whose highlights have no demo-player
@@ -269,29 +299,35 @@ pub fn failed_to_read_dod_directory(err: impl Display) -> String {
     format!("Failed to read dod directory: {}", err)
 }
 
-/// The batch status line while demos patch (#75). `writing` holds each
-/// in-flight job's percent written; `clearing` counts those still in the
-/// decal pass, which reports no percentage.
-pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8]) -> String {
-    let head = format!("Patching {} / {}", done, total);
-    match (clearing, writing) {
-        (0, []) => head,
-        (1, []) => format!("{}: clearing decals", head),
-        (0, [percent]) => format!("{}: writing, {}%", head, percent),
+/// The batch status line from the moment the batch starts until a step
+/// with a count says more (#952): checking the demos are unchanged, reading
+/// any again, copying them beside the game.
+pub const GETTING_DEMOS_READY: &str = "Getting demos ready…";
+
+/// The batch status line while demos are patched (#75), in plain words
+/// (#952): `running` is each in-flight demo's name and its percent written,
+/// `None` while it is in a step that reports none (the decal pass, whose
+/// name stays out of the line).
+pub fn preparing_status(done: u32, total: usize, running: &[(&str, Option<u8>)]) -> String {
+    let head = "Getting demos ready";
+    match running {
+        [] => format!("{head}: {done} of {total}"),
+        [(name, percent)] => {
+            let number = (done as usize + 1).min(total);
+            match percent {
+                Some(p) => format!("{head}: {number} of {total} ({name}, {p}%)"),
+                None => format!("{head}: {number} of {total} ({name})"),
+            }
+        }
         _ => {
-            let mut parts = Vec::new();
-            if clearing > 0 {
-                parts.push(format!("{} clearing decals", clearing));
-            }
-            if !writing.is_empty() {
+            let writing: Vec<u8> = running.iter().filter_map(|(_, p)| *p).collect();
+            let at_once = running.len();
+            if writing.is_empty() {
+                format!("{head}: {done} of {total} done, {at_once} at once")
+            } else {
                 let average = writing.iter().map(|&p| p as usize).sum::<usize>() / writing.len();
-                parts.push(format!(
-                    "{} writing ({}% on average)",
-                    writing.len(),
-                    average
-                ));
+                format!("{head}: {done} of {total} done, {at_once} at once ({average}% on average)")
             }
-            format!("{}: {}", head, parts.join(", "))
         }
     }
 }
