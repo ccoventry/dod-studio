@@ -575,6 +575,9 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // ds_hud_hide_clan_text changes.
     crate::clan_text::poll();
+    // ds_player_change_name: who each slot is and which rename wins, for the
+    // GetPlayerInfo detour to read; keeps the SayText handler prepended.
+    crate::player_names::poll();
     // ds_hud_hide_center_text: its filter rides on clan_text's TextMsg
     // handler, so this only follows the cvar.
     crate::center_text::poll();
@@ -635,6 +638,8 @@ pub fn poll() {
     crate::spectator_follow::poll();
     // While a review runs, the viewer's clicks don't move its camera (#826).
     crate::spectator_buttons::poll();
+    // ...and the console can't move its demo or camera (#855).
+    crate::review_lock::console::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     crate::overview_speaker::poll();
@@ -818,6 +823,9 @@ fn status_text() -> String {
         lines.push(blood);
     }
     lines.push(crate::player_overrides::status());
+    if let Some(renames) = crate::player_names::status_line() {
+        lines.push(renames);
+    }
     if let Some(sprays) = crate::spray_hltv::status_line() {
         lines.push(sprays);
     }
@@ -1606,6 +1614,8 @@ pub fn install() {
     crate::demo_reload::install();
     crate::connect_guard::install();
     crate::events::install();
+    // The rest of what a review locks is wrapped by its poll as it appears.
+    crate::review_lock::console::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
@@ -1614,6 +1624,7 @@ pub fn install() {
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
     add_command(crate::spray::NAME, crate::spray::command);
+    add_command(crate::player_names::NAME, crate::player_names::command);
 
     // Standalone, like `ds_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one

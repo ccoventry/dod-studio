@@ -17,6 +17,20 @@ describe('scanCompleteToast', () => {
   });
 });
 
+describe('review refusedToast (#880)', () => {
+  it('says a review is running and to end it first', () => {
+    expect(STRINGS.REVIEW.refusedToast('viewdemo')).toBe(
+      "A review is running in the game, so it didn't load the preview. End the review first (Stop), then try again."
+    );
+  });
+
+  it('names a seek as a jump, and anything else plainly', () => {
+    expect(STRINGS.REVIEW.refusedToast('ds_demo_seek_to')).toContain("didn't jump to that time");
+    expect(STRINGS.REVIEW.refusedToast('spec_mode')).toContain("didn't do that");
+    expect(STRINGS.REVIEW.refusedToast(undefined)).toContain('A review is running in the game');
+  });
+});
+
 describe('scanCancelledToast', () => {
   it('says nothing was added when Cancel came while listing folders (#843)', () => {
     expect(STRINGS.MAIN.scanCancelledToast(0)).toBe('Scan cancelled, nothing added');
