@@ -73,6 +73,8 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
+mod backdrop;
+mod colour;
 mod even;
 mod font;
 mod name_cap;
@@ -1289,12 +1291,39 @@ fn usage() -> String {
          \x20 {COMMAND} layout even        every weapon icon in a box of one height, full\n\
          \x20                               magazines and bipods shown, every line one step\n\
          \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
-         \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n",
+         \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n\
+         \x20 {COMMAND} outline <0..{}> [colour] [alpha]\n\
+         \x20                               outline the names that many px (default black, 255)\n\
+         \x20 {COMMAND} outline default    no outline\n\
+         \x20 {COMMAND} background <alpha> [colour] [padding]\n\
+         \x20                               a box behind each line (default black, padding {})\n\
+         \x20 {COMMAND} background team <alpha> [padding]\n\
+         \x20                               a box behind each name, a dark shade of its team's colour\n\
+         \x20 {COMMAND} background allies|axis <colour>|default\n\
+         \x20                               that team's box colour (allies covers the British)\n\
+         \x20 {COMMAND} background default no boxes, team colours back to the shade\n\
+         \x20                               a colour is r g b (0..255 each) or hex, #0a286e or #0af\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,
-        scale::MAX_SCALE
+        scale::MAX_SCALE,
+        backdrop::MAX_OUTLINE,
+        backdrop::DEFAULT_PADDING,
     )
+}
+
+/// Puts `font`'s text calls and `scale`'s icon call in place (both forward
+/// to the game's while unused), which `outline` and `background` draw from.
+fn install_backdrop() -> Result<(), String> {
+    #[cfg(target_arch = "x86")]
+    {
+        font::ensure_installed()?;
+        scale::ensure_installed()
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        Err("only in the 32-bit game".to_string())
+    }
 }
 
 /// `pub(crate)`: also folded into `ds_debug_status`'s combined report.
@@ -1312,11 +1341,12 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, blocking {block}, replacing {}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, {}, blocking {block}, replacing {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
         even::describe(),
+        backdrop::describe(),
         match replace::count() {
             0 => "nothing".to_string(),
             1 => "1 kill line (replace list)".to_string(),
@@ -1445,6 +1475,38 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} scale: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} scale: {why}\n"),
+            }
+        }
+        "outline" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", backdrop::describe(), usage());
+            }
+            match backdrop::parse_outline(rest) {
+                Ok((0, rgb, alpha)) => {
+                    format!("{COMMAND}: {}\n", backdrop::set_outline(0, rgb, alpha))
+                }
+                Ok((px, rgb, alpha)) => match install_backdrop() {
+                    Ok(()) => format!("{COMMAND}: {}\n", backdrop::set_outline(px, rgb, alpha)),
+                    Err(why) => format!("{COMMAND} outline: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} outline: {why}\n"),
+            }
+        }
+        "background" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", backdrop::describe(), usage());
+            }
+            match backdrop::parse_background(rest) {
+                Ok(
+                    asked @ (backdrop::Background::Line { .. } | backdrop::Background::Team { .. }),
+                ) => match install_backdrop() {
+                    Ok(()) => format!("{COMMAND}: {}\n", backdrop::set_background(asked)),
+                    Err(why) => format!("{COMMAND} background: {why}\n"),
+                },
+                Ok(asked) => format!("{COMMAND}: {}\n", backdrop::set_background(asked)),
+                Err(why) => format!("{COMMAND} background: {why}\n"),
             }
         }
         "layout" => {
