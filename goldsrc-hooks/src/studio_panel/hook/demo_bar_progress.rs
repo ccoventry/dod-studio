@@ -50,10 +50,12 @@ pub(super) fn update() {
         );
         if label.is_none() && progress.is_none() {
             if percent.is_some() && !MISSING_REPORTED.swap(true, Ordering::AcqRel) {
+                // The addon folder is named after `-game`'s (#402).
                 crate::debug::report(&format!(
                     "demo_bar_progress: the demo bar has no {PERCENT_LABEL}: the game was \
-                     started without DoD Studio's dod_addon\\resource\\DemoPlayerDialog.res \
-                     or without -addons, so it shows no loading progress"
+                     started without DoD Studio's {}\\resource\\DemoPlayerDialog.res \
+                     or without -addons, so it shows no loading progress",
+                    crate::game_folder::addon_name()
                 ));
             }
             store(None);

@@ -4,7 +4,8 @@
 //! While the demo player reads the file its title says "Loading <demo> ...",
 //! and nothing says how far along it is. DoD Studio's launch adds two hidden
 //! controls to the bar's layout (`native/src/demo_bar_res.rs`, into
-//! `dod_addon\resource\DemoPlayerDialog.res`): a `Label` named
+//! `dod_addon\resource\DemoPlayerDialog.res`, `<folder>_addon` for another
+//! Game folder, #402; an edit saved there is kept): a `Label` named
 //! [`PERCENT_LABEL`] and a `ProgressBar` named [`PROGRESS_BAR`], where the
 //! time label sits. Every frame while the player is loading, the vgui side
 //! (`studio_panel/hook/demo_bar_progress.rs`) writes `n%` into the label,

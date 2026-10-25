@@ -15,6 +15,25 @@
 //! The user's own text is kept byte for byte; the blocks are inserted before
 //! the top-level object's closing brace, and a layout that already has them
 //! is left as it is.
+//!
+//! ## An edit saved in the addon folder is kept
+//!
+//! The game's build mode (Ctrl+Shift+Alt+B) saves the bar where it loaded it
+//! from, which with `-addons` is this very file. Rebuilding it at every launch
+//! would throw that edit away, so a launch first asks whether the file is
+//! still the one Studio wrote: Studio's copy starts with a `//` line holding
+//! a hash of the rest of the file ([`MARKER`]). A file without that line
+//! (build mode writes no comments) or whose hash no longer matches (edited by
+//! hand) is the user's: the launch builds from it instead, adding the two
+//! controls only if they are missing, and leaves it alone if they are there.
+//! Deleting it goes back to the game folder's layout.
+//!
+//! A marker in the file, not a record Studio keeps elsewhere: it travels with
+//! the file, so a reinstalled Studio, a second Studio or a cleared settings
+//! folder still knows its own copy from the user's, and nothing can drift out
+//! of step with it. Not timestamps: a copy or an unzip changes them without
+//! changing the file. A copy written before the marker existed (#758's test
+//! builds) that is exactly what Studio would write now counts as Studio's.
 
 use std::path::{Path, PathBuf};
 
@@ -44,6 +63,10 @@ struct Rect {
     tall: i32,
 }
 
+/// The start of the first line of the file Studio writes, followed by its
+/// hash of the rest of the file.
+const MARKER: &str = "// DoD Studio writes this file from the game's own layout";
+
 /// What a launch did with the layout.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -51,6 +74,12 @@ pub enum Outcome {
     Written { source: PathBuf, target: PathBuf },
     /// The target already holds exactly what would be written.
     Unchanged,
+    /// The target is the user's own edit and already has the controls: left
+    /// as it is.
+    KeptEdit { target: PathBuf },
+    /// The target is the user's own edit, which lacked the controls: they
+    /// were added, and the rest kept byte for byte.
+    AddedToEdit { target: PathBuf },
 }
 
 /// `res` with the two controls added, or unchanged when it already has
@@ -206,10 +235,55 @@ fn text_as_bytes(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Writes `<game folder>_addon\resource\DemoPlayerDialog.res` for the game at
-/// `game_dir` (the folder `hl.exe` is in). Nothing in the game folder or
-/// `valve` is ever written.
-pub fn install(game_dir: &Path, game_folder: &str) -> Result<Outcome, String> {
+/// 64-bit FNV-1a: a stable hash for [`MARKER`], the same on every build.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| {
+        (hash ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// `body` behind the [`MARKER`] line that says Studio wrote it, in the
+/// body's own line ending.
+fn marked(body: &[u8]) -> Vec<u8> {
+    let eol = if body.windows(2).any(|w| w == b"\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut out = format!(
+        "{MARKER} at every launch (marker {:016x}). An edit saved here is kept; \
+         delete the file to go back to the game's own.{eol}",
+        fnv1a(body)
+    )
+    .into_bytes();
+    out.extend_from_slice(body);
+    out
+}
+
+/// Whether `bytes` is a file [`marked`] wrote, unchanged since: its first
+/// line is the marker, and the hash there is the rest's.
+fn written_by_studio(bytes: &[u8]) -> bool {
+    let Some(end) = bytes.iter().position(|&b| b == b'\n') else {
+        return false;
+    };
+    let (line, rest) = (bytes_as_text(&bytes[..end]), &bytes[end + 1..]);
+    line.starts_with(MARKER)
+        && line
+            .split("(marker ")
+            .nth(1)
+            .and_then(|after| after.get(..16))
+            .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+            == Some(fnv1a(rest))
+}
+
+/// A UTF-16 file: ASCII blocks spliced into it would break the whole layout.
+fn is_utf16(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff])
+}
+
+/// The layout a launch builds from the game folder's (or `valve`'s) file:
+/// its bytes with the two controls added, no marker yet.
+fn built_from_game(game_dir: &Path, game_folder: &str) -> Result<(PathBuf, Vec<u8>), String> {
     let source = source_in(game_dir, game_folder).ok_or_else(|| {
         format!(
             "no {FILE_NAME} in {} or {}",
@@ -219,8 +293,7 @@ pub fn install(game_dir: &Path, game_folder: &str) -> Result<Outcome, String> {
     })?;
     let bytes =
         std::fs::read(&source).map_err(|e| format!("could not read {}: {e}", source.display()))?;
-    // ASCII blocks spliced into UTF-16 text would break the whole layout.
-    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+    if is_utf16(&bytes) {
         return Err(format!(
             "{} is UTF-16 text, which this can't add to",
             source.display()
@@ -229,15 +302,61 @@ pub fn install(game_dir: &Path, game_folder: &str) -> Result<Outcome, String> {
     let with_controls = with_loading_controls(&bytes_as_text(&bytes))
         .map(|text| text_as_bytes(&text))
         .ok_or_else(|| format!("{} holds no layout to add to", source.display()))?;
+    Ok((source, with_controls))
+}
+
+/// The user's own `target` (holding `now`), with the controls added if it
+/// lacks them. `None` when it holds no layout at all, which is nobody's edit
+/// worth keeping: the caller rebuilds it.
+fn keep_edit(target: &Path, now: &[u8]) -> Result<Option<Outcome>, String> {
+    if is_utf16(now) {
+        return Err(format!(
+            "{} is UTF-16 text, which this can't add to; it was left as it is",
+            target.display()
+        ));
+    }
+    let Some(text) = with_loading_controls(&bytes_as_text(now)) else {
+        return Ok(None);
+    };
+    let with_controls = text_as_bytes(&text);
+    if with_controls == now {
+        return Ok(Some(Outcome::KeptEdit {
+            target: target.to_path_buf(),
+        }));
+    }
+    // No marker: it stays the user's on the next launch too.
+    std::fs::write(target, &with_controls)
+        .map_err(|e| format!("could not write {}: {e}", target.display()))?;
+    Ok(Some(Outcome::AddedToEdit {
+        target: target.to_path_buf(),
+    }))
+}
+
+/// Writes `<game folder>_addon\resource\DemoPlayerDialog.res` for the game at
+/// `game_dir` (the folder `hl.exe` is in), or keeps the user's edit there
+/// (see the module docs). Nothing in the game folder or `valve` is ever
+/// written.
+pub fn install(game_dir: &Path, game_folder: &str) -> Result<Outcome, String> {
     let target = target_in(game_dir, game_folder);
-    if std::fs::read(&target).is_ok_and(|now| now == with_controls) {
+    if let Ok(now) = std::fs::read(&target)
+        && !written_by_studio(&now)
+    {
+        // Studio's own copy from before the marker: exactly what it builds now.
+        let unmarked_ours = built_from_game(game_dir, game_folder).is_ok_and(|(_, b)| b == now);
+        if !unmarked_ours && let Some(outcome) = keep_edit(&target, &now)? {
+            return Ok(outcome);
+        }
+    }
+    let (source, body) = built_from_game(game_dir, game_folder)?;
+    let with_marker = marked(&body);
+    if std::fs::read(&target).is_ok_and(|now| now == with_marker) {
         return Ok(Outcome::Unchanged);
     }
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
-    std::fs::write(&target, &with_controls)
+    std::fs::write(&target, &with_marker)
         .map_err(|e| format!("could not write {}: {e}", target.display()))?;
     Ok(Outcome::Written { source, target })
 }
@@ -260,6 +379,14 @@ pub fn prepare(hl_exe: &str, game_folder: &str) {
             source.display()
         )),
         Ok(Outcome::Unchanged) => {}
+        Ok(Outcome::KeptEdit { target }) => crate::log_markdown(&format!(
+            "- Demo bar layout: kept your edited {} (delete it to go back to the game's own layout)",
+            target.display()
+        )),
+        Ok(Outcome::AddedToEdit { target }) => crate::log_markdown(&format!(
+            "- Demo bar layout: added the loading progress controls to your edited {}, keeping your edit",
+            target.display()
+        )),
         Err(why) => crate::log_markdown(&format!(
             "- Demo bar layout: skipped, the game will show no loading progress on the demo bar ({why})"
         )),
@@ -460,7 +587,7 @@ mod tests {
         users.splice(at..at + 4, b"Zur\xfcck".iter().copied());
         std::fs::write(dir.join("valve").join("resource").join(FILE_NAME), &users).unwrap();
         install(&dir, "dod").unwrap();
-        let written = std::fs::read(target_in(&dir, "dod")).unwrap();
+        let written = body_of(&std::fs::read(target_in(&dir, "dod")).unwrap());
         let close = users.iter().rposition(|&b| b == b'}').unwrap();
         assert!(written.starts_with(&users[..close]));
         assert!(written.ends_with(&users[close..]));
@@ -477,6 +604,171 @@ mod tests {
         assert!(why.contains("UTF-16"), "{why}");
         assert!(!target_in(&dir, "dod").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file Studio wrote, less its marker line.
+    fn body_of(written: &[u8]) -> Vec<u8> {
+        assert!(written_by_studio(written), "no valid marker");
+        let end = written.iter().position(|&b| b == b'\n').unwrap();
+        written[end + 1..].to_vec()
+    }
+
+    /// A launch with the stock layout in `valve`, returning the target.
+    fn launched(name: &str) -> (PathBuf, PathBuf) {
+        let dir = game_dir(name);
+        std::fs::write(dir.join("valve").join("resource").join(FILE_NAME), STOCK).unwrap();
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::Written { .. })));
+        let target = target_in(&dir, "dod");
+        (dir, target)
+    }
+
+    /// A build-mode save: every control written out again, no comments, a
+    /// button moved.
+    const BUILD_MODE_SAVE: &str = "\"Resource\\DemoPlayerDialog.res\"\n{\n\t\"TimeLabel\"\n\t{\n\t\t\"ControlName\"\t\t\"Label\"\n\t\t\"xpos\"\t\t\"284\"\n\t\t\"ypos\"\t\t\"64\"\n\t\t\"wide\"\t\t\"142\"\n\t\t\"tall\"\t\t\"24\"\n\t}\n\t\"StopButton\"\n\t{\n\t\t\"ControlName\"\t\t\"Button\"\n\t\t\"xpos\"\t\t\"400\"\n\t\t\"command\"\t\t\"stop\"\n\t}\n}\n\0";
+
+    #[test]
+    fn studio_s_copy_carries_a_marker_and_is_rebuilt() {
+        let (dir, target) = launched("marker");
+        let written = std::fs::read(&target).unwrap();
+        assert!(written.starts_with(MARKER.as_bytes()));
+        // The file's own line ending on the marker line too.
+        assert!(written.windows(2).any(|w| w == b"\r\n"));
+        assert_eq!(
+            body_of(&written),
+            text_as_bytes(&with_loading_controls(STOCK).unwrap())
+        );
+        assert_eq!(install(&dir, "dod"), Ok(Outcome::Unchanged));
+        // The game's layout changes: Studio's copy follows it.
+        std::fs::write(
+            dir.join("valve").join("resource").join(FILE_NAME),
+            STOCK.replace("\"284\"", "\"290\""),
+        )
+        .unwrap();
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::Written { .. })));
+        assert!(
+            std::fs::read_to_string(&target)
+                .unwrap()
+                .contains("\"290\"")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_build_mode_save_with_the_controls_is_left_alone() {
+        let (dir, target) = launched("kept");
+        let saved = with_loading_controls(BUILD_MODE_SAVE).unwrap();
+        std::fs::write(&target, &saved).unwrap();
+        assert_eq!(
+            install(&dir, "dod"),
+            Ok(Outcome::KeptEdit {
+                target: target.clone()
+            })
+        );
+        // Even once the game's own layout changes.
+        std::fs::write(
+            dir.join("valve").join("resource").join(FILE_NAME),
+            STOCK.replace("\"284\"", "\"290\""),
+        )
+        .unwrap();
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::KeptEdit { .. })));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), saved);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_build_mode_save_without_the_controls_gets_them_and_stays_the_user_s() {
+        let (dir, target) = launched("added");
+        std::fs::write(&target, BUILD_MODE_SAVE).unwrap();
+        assert_eq!(
+            install(&dir, "dod"),
+            Ok(Outcome::AddedToEdit {
+                target: target.clone()
+            })
+        );
+        let now = std::fs::read_to_string(&target).unwrap();
+        assert!(!written_by_studio(now.as_bytes()));
+        assert!(now.starts_with(&BUILD_MODE_SAVE[..BUILD_MODE_SAVE.rfind('}').unwrap()]));
+        assert!(now.contains("\"xpos\"\t\t\"400\""));
+        assert!(now.contains(PERCENT_LABEL) && now.contains(PROGRESS_BAR));
+        assert!(now.ends_with("}\n\0"));
+        // The next launch keeps it.
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::KeptEdit { .. })));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), now);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hand_edit_that_keeps_the_marker_line_is_still_the_user_s() {
+        let (dir, target) = launched("hand");
+        let edited = std::fs::read_to_string(&target)
+            .unwrap()
+            .replace("\"stop\"", "\"pause\"");
+        std::fs::write(&target, &edited).unwrap();
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::KeptEdit { .. })));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), edited);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unmarked_copy_studio_would_write_is_studio_s() {
+        // #758's test builds wrote the file before the marker existed.
+        let (dir, target) = launched("legacy");
+        let unmarked = text_as_bytes(&with_loading_controls(STOCK).unwrap());
+        std::fs::write(&target, &unmarked).unwrap();
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::Written { .. })));
+        assert!(written_by_studio(&std::fs::read(&target).unwrap()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_user_s_edit_in_utf16_is_left_as_it_is() {
+        let (dir, target) = launched("edit16");
+        let mut users = vec![0xff, 0xfe];
+        users.extend(BUILD_MODE_SAVE.encode_utf16().flat_map(u16::to_le_bytes));
+        std::fs::write(&target, &users).unwrap();
+        let why = install(&dir, "dod").unwrap_err();
+        assert!(why.contains("UTF-16"), "{why}");
+        assert_eq!(std::fs::read(&target).unwrap(), users);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_user_s_edit_that_is_not_utf8_is_kept_byte_for_byte() {
+        let (dir, target) = launched("edit1252");
+        let users = BUILD_MODE_SAVE.replace("stop", "Zur\u{fc}ck");
+        let users = text_as_bytes(&users); // 0xfc, as Windows-1252 writes it
+        std::fs::write(&target, &users).unwrap();
+        assert!(matches!(
+            install(&dir, "dod"),
+            Ok(Outcome::AddedToEdit { .. })
+        ));
+        let now = std::fs::read(&target).unwrap();
+        let close = users.iter().rposition(|&b| b == b'}').unwrap();
+        assert!(now.starts_with(&users[..close]));
+        assert!(now.ends_with(&users[close..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_addon_file_with_no_layout_is_rebuilt() {
+        let (dir, target) = launched("empty_edit");
+        std::fs::write(&target, b"").unwrap();
+        assert!(matches!(install(&dir, "dod"), Ok(Outcome::Written { .. })));
+        assert!(written_by_studio(&std::fs::read(&target).unwrap()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_marker_needs_its_own_hash() {
+        let body = b"\"x\"\n{\n}\n";
+        let good = marked(body);
+        assert!(written_by_studio(&good));
+        assert!(!written_by_studio(body));
+        let mut changed = good.clone();
+        *changed.last_mut().unwrap() = b' ';
+        assert!(!written_by_studio(&changed));
+        assert!(!written_by_studio(b""));
+        assert!(!written_by_studio(MARKER.as_bytes()));
     }
 
     #[test]
