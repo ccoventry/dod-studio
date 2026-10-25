@@ -162,7 +162,7 @@ test.describe('value rules (#216)', () => {
     await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
     const row = page.locator('#scheduled-commands-warning-banner li code');
     await expect(row).toHaveCount(1);
-    await expect(row).toContainText('555 (Scheduled, 2s before)');
+    await expect(row).toContainText('555 (Scheduled, 2 s before)');
   });
 
   test('an unpaired After says what the first and later clips record at', async ({ page }) => {
@@ -181,7 +181,7 @@ test.describe('value rules (#216)', () => {
     await expect(banner).toContainText('change a value for the rest of the batch');
     const row = banner.locator('li code');
     await expect(row).toContainText('the first clip records at 10 (movie.cfg, line 3)');
-    await expect(row).toContainText('every later clip at 1 (Scheduled, 0.5s after)');
+    await expect(row).toContainText('every later clip at 1 (Scheduled, 0.5 s after)');
   });
 });
 

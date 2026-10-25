@@ -52,11 +52,7 @@ function teamLabel(team, alliesAreBritish) {
 function durSecs(d) { return d ? (d.secs || 0) + (d.nanos || 0) / 1e9 : 0; }
 
 function formatDuration(totalSecs) {
-  totalSecs = Math.max(0, Math.floor(totalSecs || 0));
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  const s = totalSecs % 60;
-  return STRINGS.ANALYZER.durationLong(h, m, s);
+  return durationText(totalSecs);
 }
 
 function formatMMSS(totalSecs) {
@@ -64,6 +60,18 @@ function formatMMSS(totalSecs) {
   const m = Math.floor(totalSecs / 60);
   const s = totalSecs % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// studio/src/time_format.js's durationText (#880): `2.1 s`, `6 min 12 s`.
+function durationText(seconds) {
+  const x = Math.max(0, Number(seconds) || 0);
+  const tenths = Math.round(x * 10);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} s`;
+  const whole = Math.round(x);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  return `${h ? `${h} h ` : ''}${m} min ${s} s`;
 }
 
 function formatGameTime(totalSecs) {
@@ -472,7 +480,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.MATCH_SCORE_TITLE}</div><div class="stat-value">${p.stats[0]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.KILLS_TITLE}</div><div class="stat-value">${p.stats[1]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.DEATHS_TITLE}</div><div class="stat-value">${p.stats[2]}</div><div class="stat-badge" style="color:${kd >= 1 ? '#22c55e' : '#ef4444'};">${kd.toFixed(2)} ${STRINGS.ANALYZER.KD_BADGE_LABEL}</div></div>
-      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${STRINGS.ANALYZER.secondsSuffix(avgLife.toFixed(1))}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(minLife.toFixed(0), maxLife.toFixed(0))}</div></div>
+      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${durationText(avgLife)}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(durationText(minLife), durationText(maxLife))}</div></div>
     </div>
 
     <div class="analyzer-stacked-sections">
@@ -580,7 +588,7 @@ function renderKillStreaksTable(container, p) {
         <td>${idx + 1}</td>
         <td>${kills.length}</td>
         <td>${formatGameTime(startSecs)}</td>
-        <td>${STRINGS.ANALYZER.secondsSuffix(durationSecs.toFixed(1))}</td>
+        <td>${durationText(durationSecs)}</td>
       </tr>
       <tr><td></td><td colspan="3" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
       ${sub}`;

@@ -248,7 +248,6 @@ export const STRINGS = {
     UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
-    secondsSuffix: (n) => `${n}s`,
     HLAE_PATH_REQUIRED: 'Set the HLAE and Half-Life executable paths in Configuration → Paths before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
@@ -497,18 +496,18 @@ export const STRINGS = {
     INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
     // showing how they relate to each other and to the recording window.
-    timingDiagramInitialDelayNote: (v) => `This timeline starts after Initial Delay (${v}s) has already passed — a once-per-demo wait, not part of the per-clip cycle below.`,
+    timingDiagramInitialDelayNote: (v) => `This timeline starts after Initial Delay (${v} s) has already passed — a once-per-demo wait, not part of the per-clip cycle below.`,
     TIMING_DIAGRAM_COL_TIME: 'Relative Time',
     TIMING_DIAGRAM_COL_EVENT: 'Event',
     // Signed offset from the first kill (0.0s) — matches the pre-Tauri egui
     // build's "+{n} sec" / "{n} sec" formatting.
-    timingDiagramTime: (v) => (v >= 0 ? `+${v.toFixed(1)}s` : `${v.toFixed(1)}s`),
-    timingDiagramPreRollEvent: (v) => `Normal speed, Pre-roll starts — Pre-roll is ${v}s`,
-    timingDiagramRecordStartEvent: (v) => `Recording starts — Start Lead is ${v}s`,
+    timingDiagramTime: (v) => (v >= 0 ? `+${v.toFixed(1)} s` : `${v.toFixed(1)} s`),
+    timingDiagramPreRollEvent: (v) => `Normal speed, Pre-roll starts — Pre-roll is ${v} s`,
+    timingDiagramRecordStartEvent: (v) => `Recording starts — Start Lead is ${v} s`,
     TIMING_DIAGRAM_FIRST_KILL_EVENT: 'First kill (anchor)',
     TIMING_DIAGRAM_LAST_KILL_EVENT: 'Last kill (anchor — illustrative gap, not a real streak length)',
-    timingDiagramRecordStopEvent: (v) => `Recording stops — Stop Trail is ${v}s`,
-    timingDiagramPostRollEvent: (v) => `Post-roll ends, on to the next clip — Post-roll is ${v}s`,
+    timingDiagramRecordStopEvent: (v) => `Recording stops — Stop Trail is ${v} s`,
+    timingDiagramPostRollEvent: (v) => `Post-roll ends, on to the next clip — Post-roll is ${v} s`,
     CAPTURE_FPS_LABEL: 'Capture FPS:',
     // Worth stating outright. This used to sit under Timing Options, and the
     // adjacency invited exactly the confusion that cost real time: the demo's
@@ -641,9 +640,7 @@ export const STRINGS = {
     deletePreviewsConfirm: (n) => `Permanently delete ${n} orphaned preview demo(s)?`,
     deletedPreviews: (n) => `Deleted ${n} orphaned preview demo(s).`,
     deletionFailed: (e) => `Deletion failed: ${e}`,
-    CAPTURING_DEFAULT: 'Capturing',
     CAPTURING_ELLIPSIS_DEFAULT: 'Capturing...',
-    capturingWithName: (status, name) => `${status}: ${name}`,
     // #643: the batch's time left, after the status line.
     timeLeftMinutes: (minutes) => ` · about ${minutes} min left`,
     TIME_LEFT_UNDER_A_MINUTE: ' · under a minute left',
@@ -653,7 +650,6 @@ export const STRINGS = {
     CAPTURE_ERROR_TEXT_DEFAULT: 'Capture failed',
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
-    COMPLETED: 'Completed',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
     takesFoundMissing: (captured, total) => `${captured}/${total} takes found on disk — ${total - captured} missing.`,
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -763,6 +759,13 @@ export const STRINGS = {
     CLEAR_QUEUE_CONFIRM_BUTTON: 'Stop and clear',
     SELECT_UNRENDERED_BUTTON: 'Select unrendered',
     SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
+    SELECT_FINISHED_BUTTON: 'Select finished',
+    SELECT_FINISHED_TITLE: 'Tick only the takes whose clips are done: the last render of each part finished and the clip file is still there. Then Delete Take folders clears them in one go.',
+    FINISHED_AGE_TITLE: 'Which finished takes Select finished ticks: all of them, or only those rendered at least this long ago.',
+    FINISHED_AGE_ANY: 'of any age',
+    FINISHED_AGE_DAY: 'over a day old',
+    FINISHED_AGE_WEEK: 'over a week old',
+    FINISHED_AGE_MONTH: 'over a month old',
     SELECT_ALL_CB_TITLE: 'Tick or untick every row',
     SELECT_ROW_TITLE: 'Tick this row for Cancel, Retry, Remove and Delete Take folders below',
     selectedCount: (ticked, total) => `${ticked} of ${total} selected`,
@@ -817,7 +820,11 @@ export const STRINGS = {
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
     STATUS_RECOVERING: 'Status: Recovering the render batch…',
     recoveredStatus: (queued) => `Status: Render batch recovered — ${queued} take(s) queued`,
-    renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
+    // #954: the batch line counts only this batch's rows.
+    renderingLine: (n, total) => `Rendering ${n} of ${total}`,
+    doneIn: (duration, parts) => `Done in ${duration}: ${parts}`,
+    batchStartLog: () => '[render] started',
+    batchEndLog: (elapsed, finished, failed, cancelled) => `[render] done after ${elapsed}: ${finished} rendered, ${failed} failed, ${cancelled} cancelled`,
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
     // Mixed-outcome batches report every non-zero count instead of one label,
@@ -830,10 +837,13 @@ export const STRINGS = {
     STATUS_FINISHED: 'Status: Finished',
     STATUS_CANCELLED: 'Status: Cancelled',
     statusFinishedWith: (parts) => `Status: Finished — ${parts}`,
-    scanFoundSoFar: (n) => `Status: Scanning… found ${n} take(s) so far`,
+    // #954: Scan for Takes' line while it looks, and the one it ends on.
+    lookingForTakes: (n) => `Looking for takes: ${n} found so far`,
+    foundTakesIn: (total, parts, elapsed) => `Found ${total} ${total === 1 ? 'take' : 'takes'} (${parts}) in ${elapsed}`,
+    noTakesFoundIn: (elapsed) => `Found no takes in ${elapsed}`,
+    scanNewShort: (n) => `${n} new`,
+    SCAN_NONE_NEW: 'none new',
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
-    SCANNING_TOAST: 'Scanning render directories...',
-    STATUS_SCANNING: 'Status: Scanning…',
     scanCompleteStatus: (count) => `Status: Scan complete — ${count} take(s) found`,
     // What a scan changed in the queue (#772); render_scan_summary.js joins them.
     scanNewTakes: (n) => (n === 1 ? '1 new take' : `${n} new takes`),
@@ -1010,7 +1020,7 @@ export const STRINGS = {
     deletingLine: (done, total, permanent) => (permanent
       ? `Deleting permanently: ${done} / ${total}`
       : `Moving to the Recycle Bin: ${done} / ${total}`),
-    doneStatus: (demos, groups, seconds, archiveDemos = 0) => `Done in ${seconds} s: ${demos} demo${demos === 1 ? '' : 's'} checked${archiveDemos > 0 ? ` and ${archiveDemos} inside archives` : ''}, ${groups} with copies.`,
+    doneStatus: (demos, groups, elapsed, archiveDemos = 0) => `Done in ${elapsed}: ${demos} demo${demos === 1 ? '' : 's'} checked${archiveDemos > 0 ? ` and ${archiveDemos} inside archives` : ''}, ${groups} with copies.`,
     NO_DUPLICATES_ROW: 'No duplicates found! Your demos are clean.',
     groupToggleLabel: (expanded, count) => `${expanded ? '▼' : '▶'} Group (${count} files)`,
     identicalHash: (hash) => `Identical Hash: ${hash}`,
@@ -1122,7 +1132,10 @@ export const STRINGS = {
     // #437: every demo a player appears in.
     PLAYER_PLACEHOLDER: 'Player',
     PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
-    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    playersReading: (done, total) => `Reading players: ${done} / ${total} not read yet`,
+    // #992: the one quick lookup of the players already read.
+    PLAYERS_LOOKING: 'Looking up players…',
+    playersInCloud: (n) => `Players not read for ${n} demo${n === 1 ? '' : 's'} on a cloud drive (reading one downloads it). Cache all reads them.`,
     ROLE_RECORDED: 'recorded it',
     ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',
@@ -1213,12 +1226,6 @@ export const STRINGS = {
 
     scoreboardHeading: (alliesLabel, alliesScore, cmp, axisScore) => `Scoreboard: ${alliesLabel} (${alliesScore}) ${cmp} Axis (${axisScore})`,
     compareGlyph: (a, b) => (a > b ? '>' : (a === b ? '=' : '<')),
-    durationLong: (h, m, s) => {
-      if (h > 0) return `${h}h ${m}m ${s}s`;
-      if (m > 0) return `${m}m ${s}s`;
-      return `${s}s`;
-    },
-    secondsSuffix: (n) => `${n}s`,
     megabytesLabel: (mb) => `${mb} MB`,
     KD_BADGE_LABEL: 'K/D',
     partialRecordingBoth: (fmt) => `Partial recording — demo started with ${fmt} remaining and ended before the match concluded.`,
@@ -1263,7 +1270,7 @@ export const STRINGS = {
     KILLS_TITLE: 'Kills',
     DEATHS_TITLE: 'Deaths',
     AVG_LIFESPAN_TITLE: 'Avg. Lifespan',
-    minMaxBadge: (min, max) => `Min: ${min}s / Max: ${max}s`,
+    minMaxBadge: (min, max) => `Min: ${min} / Max: ${max}`,
     WEAPON_BREAKDOWN_TITLE: 'Weapon Breakdown',
     COL_WEAPON: 'Weapon',
     COL_PCT_TOTAL: '% of Total',
@@ -1465,8 +1472,8 @@ export const STRINGS = {
     sourceExec: (file, line) => `${file}, line ${line}, run by Initial Commands`,
     SOURCE_INITIAL: 'Initial Commands',
     sourceApp: (setting) => `DoD Studio, from ${setting}`,
-    sourceBefore: (secs) => `Scheduled, ${secs}s before`,
-    sourceAfter: (secs) => `Scheduled, ${secs}s after`,
+    sourceBefore: (secs) => `Scheduled, ${secs} s before`,
+    sourceAfter: (secs) => `Scheduled, ${secs} s after`,
     // Rule 2 of #216: an After with no Before for the same cvar.
     ASYMMETRIC_TITLE: 'These Scheduled Commands change a value for the rest of the batch:',
     ASYMMETRIC_ADVICE:
@@ -1579,7 +1586,7 @@ export const STRINGS = {
     ADVICE:
       'Playback only returns to real time one pre-roll before recording starts. Anything that has to happen at normal speed — the engine flushing its audio buffers after the fast-forward, the decal sweep, a Scheduled Command — has to fit inside that window, or it happens while the engine is still racing through frames.',
     tooShort: (name, have, need, binding) =>
-      `<code>${name} ${have.toFixed(1)}s</code> — needs at least <code>${need.toFixed(1)}s</code> for ${binding}`,
+      `<code>${name} ${have.toFixed(1)} s</code> — needs at least <code>${need.toFixed(1)} s</code> for ${binding}`,
   },
 
   // After a .json project loads (#528, project_convert.js).
@@ -1731,7 +1738,7 @@ export const STRINGS = {
     // The queue's line while splits run (#951): "Splitting 1 of 3: a.dem".
     queueSplitHead: (name, i = 0, n = 1) => (n > 1 ? `Splitting ${i + 1} of ${n}: ${name}` : `Splitting ${name}`),
     QUEUE_SPLIT_ADDING: 'adding its maps to the queue',
-    queueSplitDoneLine: (seconds, demos) => `Done in ${seconds} s: split ${demos} demo${demos === 1 ? '' : 's'}`,
+    queueSplitDoneLine: (elapsed, demos) => `Done in ${elapsed}: split ${demos} demo${demos === 1 ? '' : 's'}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
     MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
@@ -1757,15 +1764,15 @@ export const STRINGS = {
       const n = (x) => Number(x || 0).toLocaleString('en-US');
       return `Checking which demos are new: ${n(done)} of ${n(total)}`;
     },
-    scanDoneLine: (seconds, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
+    scanDoneLine: (elapsed, { added = 0, rescanned = 0, unchanged = 0 } = {}) => {
       const parts = [
         added > 0 && `${added} demo${added === 1 ? '' : 's'} added`,
         rescanned > 0 && `${rescanned} rescanned`,
         unchanged > 0 && `${unchanged} already in the queue`,
       ].filter(Boolean);
-      return `Done in ${seconds} s: ${parts.length ? parts.join(', ') : 'no demos found'}`;
+      return `Done in ${elapsed}: ${parts.length ? parts.join(', ') : 'no demos found'}`;
     },
-    scanCancelledLine: (seconds, added) => `Cancelled after ${seconds} s: ${added > 0 ? `${added} demo${added === 1 ? '' : 's'} added` : 'nothing added'}`,
+    scanCancelledLine: (elapsed, added) => `Cancelled after ${elapsed}: ${added > 0 ? `${added} demo${added === 1 ? '' : 's'} added` : 'nothing added'}`,
     // Appended to the two lines above when the scan skipped demos (#23).
     skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
     // `skipped` is [{name, reason}]; names the first three, counts the rest.
@@ -1897,7 +1904,7 @@ export const STRINGS = {
     done: (label, elapsed) => `${label}: done in ${elapsed}.`,
     failed: (label) => `${label}: stopped with an error (see the message).`,
     CANCELLED: 'Stopped. A render keeps the frames it finished; Render again to carry on.',
-    frames: (done, total, secs, elapsed) => `Frame ${done} of ${total}${secs ? ` (${secs.toFixed(1)} s each)` : ''}, ${elapsed} so far`,
+    frames: (done, total, each, elapsed) => `Frame ${done} of ${total}${each ? ` (${each} each)` : ''}, ${elapsed} so far`,
   },
 
   // #443: the capture summary strip above Start Capture Batch.
@@ -2505,7 +2512,8 @@ export const STRINGS = {
     PICK_NO_PLAYERS: 'No HLTV highlights in the queue',
     PICK_ADD_TEAM: 'Add a team…',
     PICK_ADD_TEAM_TITLE: 'Adds every player of a team from the Teams list: whoever played on its side in an HLTV demo, or has its tag in their name.',
-    PICK_NO_TEAMS: 'No teams in the HLTV demos',
+    // Short enough for the list's fixed 160 px; its tooltip says where teams come from.
+    PICK_NO_TEAMS: 'No teams',
     pickTeamOption: (name, count) => `${name} (${count} player${count === 1 ? '' : 's'})`,
     PICK_NONE: 'Nobody picked yet',
     PICK_REMOVE: 'Take this player out',
@@ -2545,6 +2553,14 @@ export const STRINGS = {
       if (reason === 'stopped') return `Review stopped: ${answered}.`;
       if (reason === 'closed') return `The game closed: ${answered}.`;
       return `Review ended (${reason}): ${answered}.`;
+    },
+    // #880: the game refused something DoD Studio sent while a review runs.
+    refusedToast: (command) => {
+      const name = String(command || '').toLowerCase();
+      let what = 'do that';
+      if (['viewdemo', 'playdemo', 'timedemo', 'ds_demo_reload'].includes(name)) what = 'load the preview';
+      else if (name.startsWith('ds_demo_seek') || name === 'dem_jump') what = 'jump to that time';
+      return `A review is running in the game, so it didn't ${what}. End the review first (Stop), then try again.`;
     },
   },
 
@@ -2710,8 +2726,8 @@ export const STRINGS = {
     doneToast: (done, total, failed) => `Rescanned ${done} of ${total} session${total === 1 ? '' : 's'}`
       + (failed > 0 ? `; ${failed} failed (see View Logs).` : '.'),
     // Activity log, one line per session, like #926's [scan] lines.
-    doneLog: (name, demos, seconds, backup) => `[rescan] ${name}: ${demos} demo(s) rescanned in ${seconds} s and saved (backup: ${backup})`,
-    failedLog: (name, seconds, err) => `[rescan] ${name}: failed after ${seconds} s, not saved: ${err}`,
+    doneLog: (name, demos, elapsed, backup) => `[rescan] ${name}: ${demos} demo(s) rescanned in ${elapsed} and saved (backup: ${backup})`,
+    failedLog: (name, elapsed, err) => `[rescan] ${name}: failed after ${elapsed}, not saved: ${err}`,
     skippedLog: (name) => `[rescan] ${name}: skipped for now`,
     missingLog: (path) => `[rescan] ${path}: file not found, skipped`,
     noDemosLog: (name) => `[rescan] ${name}: none of its outdated demos are on disk, nothing to rescan`,
@@ -2729,6 +2745,19 @@ export const STRINGS = {
     elapsedSuffix: (clock) => ` · ${clock}`,
   },
 
+  // ── capture_progress.js: the capture batch's footer line and bar (#952)
+  CAPTURE_PROGRESS: {
+    done: (duration, captured, total) => {
+      if (total == null) return `Done in ${duration}`;
+      const clips = total === 1 ? 'clip' : 'clips';
+      return captured === total
+        ? `Done in ${duration}: ${total} ${clips} captured`
+        : `Done in ${duration}: ${captured} of ${total} ${clips} captured`;
+    },
+    startLog: () => '[capture] started',
+    endLog: (outcome, elapsed, captured, total) => `[capture] ${outcome} after ${elapsed}${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
+  },
+
   // ── scan_progress.js: what every scan reading demos one by one adds to
   //    its progress line (List Demos, Cache all, the Master Queue scan; #687)
   SCAN_PROGRESS: {
@@ -2738,9 +2767,9 @@ export const STRINGS = {
     // The Master Queue scan's start and end in the activity log, with its
     // times, so how long a rescan takes can be measured (#926).
     startLog: (paths) => `[scan] started: ${paths} path(s) to read`,
-    endLog: (outcome, seconds, read, unchanged) => `[scan] ${outcome} after ${seconds} s: ${read} demo(s) read, ${unchanged} unchanged`,
-    endLogSplit: (cached, notCached, seconds) => ` (${cached} from the analyzer cache, ${notCached} not${notCached > 0 ? `: those took ${seconds} s` : ''})`,
-    failedLog: (seconds, err) => `[scan] failed after ${seconds} s: ${err}`,
+    endLog: (outcome, elapsed, read, unchanged) => `[scan] ${outcome} after ${elapsed}: ${read} demo(s) read, ${unchanged} unchanged`,
+    endLogSplit: (cached, notCached, elapsed) => ` (${cached} from the analyzer cache, ${notCached} not${notCached > 0 ? `: those took ${elapsed}` : ''})`,
+    failedLog: (elapsed, err) => `[scan] failed after ${elapsed}: ${err}`,
   },
 
   // #441: clip names, their template and its checks.
@@ -2788,8 +2817,8 @@ export const STRINGS = {
     renaming: (done, total) => `Renaming ${done} of ${total}…`,
     UNDO_STARTING: 'Putting back the last renames…',
     puttingBack: (done, total) => `Putting back ${done} of ${total}…`,
-    renamedIn: (count, secs) => `Renamed ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
-    putBackIn: (count, secs) => `Put back ${count} demo${count === 1 ? '' : 's'} in ${secs} s.`,
+    renamedIn: (count, elapsed) => `Renamed ${count} demo${count === 1 ? '' : 's'} in ${elapsed}.`,
+    putBackIn: (count, elapsed) => `Put back ${count} demo${count === 1 ? '' : 's'} in ${elapsed}.`,
     notRenamed: (count) => ` ${count} couldn't be renamed.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
     // Rename Demos' own meaning of a placeholder, where it isn't the one in
@@ -2962,6 +2991,10 @@ export const STRINGS = {
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  // A file dialog that is slow to appear (dialog_wait.js).
+  FILE_DIALOG: {
+    OPENING: 'Opening the file dialog… Windows can take a few seconds the first time.',
   },
   // Dropping demos and folders from Windows (#530): demo_drop.js.
   DROP: {

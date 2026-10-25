@@ -11,9 +11,10 @@
 //!
 //! The same one `deathmsg`'s `block`/`fake` already rely on:
 //! `pfnHookUserMsg` **prepends** a fresh record rather than overwriting the
-//! existing one, so the engine's by-name dispatcher stops at the newest
-//! entry and the game's own handler stays reachable by calling its thunk
-//! directly. **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
+//! existing one, so the engine's by-number dispatcher -- the one every
+//! message from the server goes through -- stops at the newest entry and the
+//! game's own handler stays reachable by calling its thunk directly.
+//! **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
 //!
 //! One handler, [`hooked_msg`], is registered for every message DoD's
 //! `client.dll` hooks -- the full 71-entry name/thunk table below, derived
@@ -265,6 +266,15 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     if let Some(result) = name_str
         .as_deref()
         .and_then(|n| crate::clan_text::filter(n, size, buf))
+    {
+        return result;
+    }
+    // And ds_player_change_name's SayText, whose handler stands aside while
+    // this one watches it.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("SayText"))
+        && let Some(result) = crate::player_names::say_text(size, buf)
     {
         return result;
     }
