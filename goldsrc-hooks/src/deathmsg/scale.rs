@@ -283,11 +283,20 @@ pub(super) fn right_margin(screen_width: i32, text_tall: i32) -> i32 {
     (screen_width.max(0) / 160).max(text_tall.max(0) / 4)
 }
 
-/// Whether the layout differs from the game's: a scale, a font or the even
-/// layout in force. At scale 1 with no font and `layout default` the kill
-/// feed is the game's own, right margin included.
+/// Whether the layout differs from the game's: a scale, a font, the even
+/// layout, an outline or a background in force. At scale 1 with no font,
+/// `layout default` and no outline or background the kill feed is the game's
+/// own, right margin included.
 pub(super) fn layout_is_ours() -> bool {
-    !is_unity(scale()) || font::tall() != 0 || super::even::ready()
+    !is_unity(scale()) || font::tall() != 0 || super::even::ready() || super::backdrop::active()
+}
+
+/// The height of the line `Draw` is on, for text `text_tall` px tall: the
+/// taller of its icon (the even layout's box when that is in force, since
+/// the stub reads the copy `Draw` steps by), our font and the text. 0 until
+/// the line-start stub ran.
+pub(super) fn line_height(text_tall: i32) -> i32 {
+    line_step(ICON_TALL.load(Ordering::Relaxed), font::tall()).max(text_tall)
 }
 
 /// The line-start stub, hand-assembled:
@@ -627,6 +636,9 @@ mod hook {
             unsafe { original(frame, x, y, prc) };
             return;
         }
+        // A line with no killer starts at its icon: its box goes down first.
+        // Safety: inside the HUD draw, on the engine's thread.
+        unsafe { super::super::backdrop::line_box_at(x, y, line_height(font::text_tall())) };
         // Safety: `Draw`'s stack copy of the rect it read from `RECTS`.
         let drawn = unsafe { *prc };
         // The line's own entry, by the stub's index, whenever `Draw` reads the

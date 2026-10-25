@@ -61,6 +61,11 @@ pub mod match_groups;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
 
+/// The demo player bar's layout with the loading progress controls, written
+/// into `dod_addon` at every launch (#465).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_bar_res;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
@@ -85,6 +90,10 @@ pub mod overview;
 /// folder's sprites (#842).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod crosshair_import;
+/// Configuration › Paths: the Anniversary menus at the pre-Anniversary size,
+/// through a scheme copy in the addon folder (#985).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod menu_scale;
 /// Who is in a demo, from a small index beside the analyzer cache (#437).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod player_index;
