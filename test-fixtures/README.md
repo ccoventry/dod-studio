@@ -3,7 +3,7 @@
 ## `ci_fixture.dem`
 
 A real Day of Defeat 1.3 POV demo, checked in so CI parses real network
-traffic. `dem-patch/src/tests/demotest.dem` is built in code and has no
+traffic. [`dem-patch/src/tests/demotest.dem`](../dem-patch/src/tests/README.md) is built in code and has no
 network messages, so before this file nothing in CI exercised the message
 parsers or the analyzer on a real recording.
 
