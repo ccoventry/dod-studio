@@ -145,23 +145,31 @@ struct Parsed {
 /// (`goldsrc-misc-facts`: hw+0x2b18b). A `:` or `,` is glued to the token
 /// before it and the one after. A quoted argument arrives whole, so a name in
 /// quotes is never touched.
-fn rejoin(tokens: &[String]) -> Vec<String> {
+///
+/// Beside each token: whether it was glued from several, so `add` can warn
+/// that an unquoted name lost any spaces around its `:` or `,`.
+fn rejoin(tokens: &[String]) -> (Vec<String>, Vec<bool>) {
     let mut out: Vec<String> = Vec::with_capacity(tokens.len());
+    let mut glued: Vec<bool> = Vec::with_capacity(tokens.len());
     let mut glue_next = false;
     for token in tokens {
         let separator = token == ":" || token == ",";
-        match out.last_mut() {
-            Some(last) if separator => {
+        match (out.last_mut(), glued.last_mut()) {
+            (Some(last), Some(mark)) if separator => {
                 last.push_str(token);
+                *mark = true;
                 glue_next = true;
                 continue;
             }
-            Some(last) if glue_next => last.push_str(token),
-            _ => out.push(token.clone()),
+            (Some(last), Some(_)) if glue_next => last.push_str(token),
+            _ => {
+                out.push(token.clone());
+                glued.push(false);
+            }
         }
         glue_next = false;
     }
-    out
+    (out, glued)
 }
 
 /// `self`, a SteamID in any form `ds_hud_deathmsg block` takes, or a slot.
@@ -226,11 +234,13 @@ fn check_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `add`'s named parameters, in any order.
-fn parse_add(args: &[String]) -> Result<Parsed, String> {
+/// `add`'s named parameters, in any order. `glued` is [`rejoin`]'s mark for
+/// each of `args`.
+fn parse_add(args: &[String], glued: &[bool]) -> Result<Parsed, String> {
     let mut id = None;
     let mut demos = None;
     let mut name: Option<String> = None;
+    let mut name_glued = false;
     let mut after_to = false;
     let mut i = 0;
     while i < args.len() {
@@ -255,6 +265,9 @@ fn parse_add(args: &[String]) -> Result<Parsed, String> {
                     return Err(format!("`{word}` is given twice"));
                 }
                 after_to = word == "to";
+                if after_to {
+                    name_glued = glued.get(i + 1).copied().unwrap_or(false);
+                }
                 i += 2;
             }
             _ => {
@@ -282,6 +295,13 @@ fn parse_add(args: &[String]) -> Result<Parsed, String> {
             Id::Steam(_) => {}
         }
     }
+    // The console splits an unquoted `dicE[: :]Alex` into `dicE[`, `:`, `:`
+    // and `]Alex`, so the space is gone before the hook sees it.
+    if name_glued {
+        warnings.push(format!(
+            "the name was typed without quotes, so the console dropped any spaces around its : or , and it reads \"{name}\"; put it in quotes to keep it as typed"
+        ));
+    }
     Ok(Parsed {
         command: Command::Add(Rule { id, demos, name }),
         warnings,
@@ -297,7 +317,7 @@ fn no_more(verb: &str, rest: &[String]) -> Result<(), String> {
 
 /// The arguments after the command name.
 fn parse(raw: &[String]) -> Result<Parsed, String> {
-    let tokens = rejoin(raw);
+    let (tokens, glued) = rejoin(raw);
     let Some((verb, rest)) = tokens.split_first() else {
         return Ok(Parsed {
             command: Command::List,
@@ -311,7 +331,7 @@ fn parse(raw: &[String]) -> Result<Parsed, String> {
         })
     };
     match verb.to_ascii_lowercase().as_str() {
-        "add" => parse_add(rest),
+        "add" => parse_add(rest, &glued[1..]),
         "list" => no_more("list", rest).and_then(|()| plain(Command::List)),
         "clear" => no_more("clear", rest).and_then(|()| plain(Command::Clear)),
         "remove" => {
@@ -1019,6 +1039,37 @@ mod tests {
             "add", "id", "3", "in", "x", "to", "dicE[", ":", "]Alex",
         ]));
         assert_eq!(rule(parsed).name, "dicE[:]Alex");
+    }
+
+    #[test]
+    fn an_unquoted_name_with_a_colon_warns_that_spaces_are_gone() {
+        // `to dicE[: :]Alex` typed without quotes.
+        let parsed = parse(&s(&[
+            "add", "id", "3", "in", "x", "to", "dicE[", ":", ":", "]Alex",
+        ]))
+        .unwrap();
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("without quotes") && w.contains("\"dicE[::]Alex\"")),
+            "{:?}",
+            parsed.warnings
+        );
+        // Quoted, or a glued SteamID or demo list: no such warning.
+        for quiet in [
+            &["add", "id", "3", "in", "x", "to", "dicE[: :]Alex"][..],
+            &[
+                "add", "id", "STEAM_0", ":", "1", ":", "5", "in", "a", ",", "b", "to", "x",
+            ][..],
+        ] {
+            let parsed = parse(&s(quiet)).unwrap();
+            assert!(
+                parsed.warnings.is_empty(),
+                "{quiet:?}: {:?}",
+                parsed.warnings
+            );
+        }
     }
 
     #[test]

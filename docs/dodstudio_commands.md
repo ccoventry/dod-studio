@@ -427,7 +427,10 @@ ds_player_change_name clear
   loaded demo's file name without `.dem` (`in wsod25_r03_*`). Without `in`,
   every demo.
 - **`to`**: the new name, up to 63 characters; quoted when it has spaces or
-  any of `: , ( ) { } '`. No `%`.
+  any of `: , ( ) { } '`. No `%`. Unquoted, the console splits a name at
+  `:` and `,` and loses the spaces beside them (`dicE[: :]Alex` arrives as
+  `dicE[::]Alex`), so the pieces are glued back with a warning that shows
+  the name as it now reads.
 - `self` or a slot without `in` gets a warning, not a refusal: "self is a
   different player in each POV demo; add `in <demo>` or use a SteamID".
 - Refused, with the reason: `add` without `id` and `to`, any unknown word, a
