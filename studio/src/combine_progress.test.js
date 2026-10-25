@@ -35,8 +35,8 @@ describe('combine_progress (#955)', () => {
   });
 
   it('says how it ended', () => {
-    expect(endText('saved', 42400)).toBe('Saved in 42s.');
-    expect(endText('saved', 65000)).toBe('Saved in 1m 05s.');
+    expect(endText('saved', 42400)).toBe('Saved in 42.4 s.');
+    expect(endText('saved', 65000)).toBe('Saved in 1 min 5 s.');
     expect(endText('cancelled', 3000)).toBe('Cancelled. Nothing was saved.');
     expect(endText('failed', 3000)).toBe('Stopped with an error (see the message).');
   });

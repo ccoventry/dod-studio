@@ -74,9 +74,9 @@ describe('the end of a batch', () => {
     expect(endLine({ status: 'Complete', clips_captured: 12, clips_total: 12 }, 372_000))
       .toBe('Done in 6 min 12 s: 12 clips captured');
     expect(endLine({ status: 'Complete', clips_captured: 10, clips_total: 12 }, 42_000))
-      .toBe('Done in 42 s: 10 of 12 clips captured');
+      .toBe('Done in 42.0 s: 10 of 12 clips captured');
     expect(endLine({ status: 'Complete', clips_captured: 1, clips_total: 1 }, 42_000))
-      .toBe('Done in 42 s: 1 clip captured');
+      .toBe('Done in 42.0 s: 1 clip captured');
     expect(endLine({ status: 'Complete' }, 4_200)).toBe('Done in 4.2 s');
   });
 
@@ -118,7 +118,7 @@ describe('createCaptureProgress', () => {
     progress.end({ running: false, status: 'Complete', clips_captured: 2, clips_total: 2 });
     expect(progress.isRunning()).toBe(false);
     expect(statusEl.textContent).toBe('Done in 6 min 12 s: 2 clips captured');
-    expect(log).toHaveBeenLastCalledWith('[capture] completed after 372.0 s: 2 of 2 clip(s) captured');
+    expect(log).toHaveBeenLastCalledWith('[capture] completed after 6 min 12 s: 2 of 2 clip(s) captured');
   });
 
   it('logs nothing for a batch refused before it ran', () => {

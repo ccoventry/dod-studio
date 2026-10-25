@@ -143,6 +143,24 @@ describe('createPickPath', () => {
     expect(open.mock.calls[0][0].defaultPath).toBe('C:\\Users\\me\\Documents\\dod-studio\\projects');
   });
 
+  it('a fallback given as a function is asked for inside the wait', async () => {
+    const open = vi.fn(async () => null);
+    const order = [];
+    const setBusy = (on) => order.push(`busy:${on}`);
+    const p2 = createPickPath({ open, pathStates: async () => [null, null, { path: 'C:\\P', exact: true, is_file: false, is_root: false }], userFolders: async () => ({}), setBusy });
+    const fallback = vi.fn(async () => { order.push('fallback'); return 'C:\\P'; });
+    await p2.pick({ field: 'project.open', fallback });
+    expect(order).toEqual(['busy:true', 'fallback', 'busy:false']);
+    expect(open.mock.calls[0][0].defaultPath).toBe('C:\\P');
+    expect(open.mock.calls[0][0]).not.toHaveProperty('fallback');
+  });
+
+  it('a fallback function that fails still opens the dialog', async () => {
+    const { p, open } = harness({ dirs: ['C:\\Users\\me\\Documents'] });
+    await p.pick({ field: 'project.open', fallback: async () => { throw new Error('no Documents'); } });
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
   it('a successful pick updates the remembered folder and saves it', async () => {
     const { p, persist } = harness({ dirs: [], picked: 'F:\\Downloads\\ffmpeg\\bin\\ffmpeg.exe' });
     p.setFolders({ 'config.hlae': 'C:\\HLAE' });

@@ -67,7 +67,8 @@ the death cam).
 | `ds_hud_hide_voice_menus` | `0` | hides the numbered menus a POV demo's player picked voice commands and hand signals from: the three voice-command menus (`voice_menu1`-`3`, which the server sends as `ShowMenu` with the nine `#Menu_*Voice*` keys) and the command menu `+commandmenu` opens, where the hand signals are. The menus still take the recorded number presses, so weapon switches replay as recorded; other `ShowMenu` text menus (server plugin votes) still show. While on, `+commandmenu` doesn't open in live play either. Turning it on or off with a voice menu up hides or shows it at once | `goldsrc-hooks/src/voice_menus.rs` |
 | `ds_hud_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `ds_hud_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
-| `ds_hud_hide_center_text` | `0` | hides the text the server prints in the middle of the screen: every `TextMsg` to `HUD_PRINTCENTER` (destination 4), such as match plugins' `print_center` countdowns and notices. Chat, joins and leaves (destination 3) still show. Turning it on also ends the centre line showing at that moment. Takes the server's copy of the spectator camera mode's name too, but not the game's own (`ds_spec_hide_text` hides both); doesn't reach the clan countdown (`ds_hud_hide_clan_text`) or the engine's own `svc_centerprint` (#677) | `goldsrc-hooks/src/center_text.rs` |
+| `ds_hud_hide_center_text` | `0` | hides the text the server prints in the middle of the screen, whichever way it sends it: every `TextMsg` to `HUD_PRINTCENTER` (destination 4), such as match plugins' `print_center` countdowns and notices, and the engine's own `svc_centerprint`, which `hw.dll` draws itself (one call in its handler becomes `nop`s, per engine build). Chat, joins and leaves (destination 3) still show. Turning it on also ends a `TextMsg` centre line showing at that moment; an engine one stays for its last `scr_centertime`. Takes the server's copy of the spectator camera mode's name too, but not the game's own (`ds_spec_hide_text` hides both); doesn't reach the clan countdown (`ds_hud_hide_clan_text`) (#677) | `goldsrc-hooks/src/center_text.rs`, `goldsrc-hooks/src/engine_center_print.rs` |
+| `ds_hud_hide_server_text` | `0` | hides the coloured HUD messages server plugins put on screen (`set_hudmessage`/`show_hudmessage`: KTP's "Match Pending" and ready lists, practice-mode banners, stats lines). They arrive as `TE_TEXTMESSAGE`, which the engine hands to every `HudText` handler, so no message hook can drop them: one call in `hw.dll`'s `TE_TEXTMESSAGE` handler goes through a filter instead, per engine build. A line the loaded map declares on its own `game_text` still shows, and so does everything on the `HudText` message itself (map text, DoD's prompts). A line already on screen fades out on its own (#677) | `goldsrc-hooks/src/server_hud_text.rs` |
 | `ds_demo_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
 | `ds_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites (world and HUD, #728), decals, detail textures and skies from `dodstudio_hd`, and player sprays from PNGs in `logos` (`ds_player_spray`). `ds_debug_status` counts each kind's loads and replacements (HUD sprites apart from world sprites). A change applies to what loads next -- walls, detail and skies from the next map, models, sprites and decals already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `ds_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `ds_hd_enabled` | same |
@@ -123,7 +124,8 @@ state, not the state from before that line ran.
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
 one by hand, changes the names' font, or scales the weapon icons. It also
 changes or hides one recorded kill (`replace`, #1021). The font
-(#562) and the scale (#728) take effect on the next frame. HLAE's own
+(#562), the scale (#728) and the layout (#1022) take effect on the next frame.
+HLAE's own
 `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
@@ -146,6 +148,8 @@ changes or hides one recorded kill (`replace`, #1021). The font
 | `ds_hud_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 | `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale` or `font` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
 | `ds_hud_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
+| `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it. It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
+| `ds_hud_deathmsg layout default` | the game's own boxes and spacing, with whatever icons the sheets hold (the default) |
 
 A `block` id is any of:
 
@@ -307,7 +311,13 @@ sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 answer from the console, for key binds. Bare prints where the review is.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
-move the camera off the highlight's player (#826).
+move the camera off the highlight's player (#826), and the console refuses
+the commands that move the demo or the camera (seeks, `dem_*`, `viewdemo`
+and other loads, `stop`, `disconnect`, `spec_mode`, `ds_spec_target`,
+`spec_autodirector`, `mirv_input`, ...) with one line saying so; a typed
+`host_framerate` or `spec_autodirector_internal` is put back
+(#855). The lists are in `src/review_lock.rs`; `ds_demo_review` itself
+always works.
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
 pipe. See `src/review.rs`.
 

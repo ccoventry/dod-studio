@@ -64,7 +64,7 @@ describe('createRenderBatch', () => {
     t = 461_000;
     const ended = batch.finish([row('a', 'Finished'), row('b', 'Error'), row('z', 'Finished')]);
     expect(ended).toMatchObject({ ms: 460_000, finished: 1, failed: 1, cancelled: 0 });
-    expect(log).toHaveBeenLastCalledWith('[render] done after 460.0 s: 1 rendered, 1 failed, 0 cancelled');
+    expect(log).toHaveBeenLastCalledWith('[render] done after 7 min 40 s: 1 rendered, 1 failed, 0 cancelled');
     // The bar still shows how it ended.
     expect([...batch.shownIds()]).toEqual(['a', 'b']);
 

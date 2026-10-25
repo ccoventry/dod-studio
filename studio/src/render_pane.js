@@ -32,9 +32,11 @@ import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js'
 import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
 import { scanMergeMessage } from './render_scan_summary.js';
 import { rowsOf, batchFrames, secondsLeft, renderingLine, scanEndLine, createRenderBatch } from './render_batch_progress.js';
-import { createClock, durationWords, hideBar, showBar } from './progress_view.js';
+import { createClock, hideBar, showBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
+import { whileDialogOpens } from './dialog_wait.js';
 import { notify } from './os_notifications.js';
 import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
@@ -504,6 +506,10 @@ function syncSelectionControls() {
   if (countEl) countEl.textContent = STRINGS.RENDER.selectedCount(ticked, total);
   const unrenderedBtn = document.querySelector('#render-select-unrendered-btn');
   if (unrenderedBtn) unrenderedBtn.disabled = total === 0;
+  for (const id of ['#render-select-finished-btn', '#render-finished-age-select']) {
+    const el = document.querySelector(id);
+    if (el) el.disabled = total === 0;
+  }
 
   const setButton = (id, count, label, title, disabled = count === 0) => {
     const btn = document.querySelector(id);
@@ -638,10 +644,10 @@ async function exportMarkerList(getTakeIndex, getAllDemos) {
     showToast(STRINGS.RENDER.EXPORT_MARKERS_NONE, 'info');
     return;
   }
-  const path = await save({
+  const path = await whileDialogOpens(() => save({
     defaultPath: 'dod_markers.csv',
     filters: [{ name: 'CSV', extensions: ['csv'] }],
-  }).catch((err) => {
+  })).catch((err) => {
     console.error('Save dialog failed:', err);
     return null;
   });
@@ -673,6 +679,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (e.target.checked) selection.selectAll(); else selection.selectNone();
   });
   document.querySelector('#render-select-unrendered-btn')?.addEventListener('click', () => selection.selectUnrendered());
+  // #644: tick the finished takes, of any age or older than the age picked.
+  document.querySelector('#render-select-finished-btn')?.addEventListener('click', () => {
+    const minAgeMs = Number(document.querySelector('#render-finished-age-select')?.value) || 0;
+    selection.selectFinished({ minAgeMs });
+  });
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
@@ -829,7 +840,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         notify(kind, title, summary);
       }
     }
-    const end = batchEndStatus(finished, failed, cancelled, batch.length > 0 ? durationWords(ended.ms) : null);
+    const end = batchEndStatus(finished, failed, cancelled, batch.length > 0 ? durationTextMs(ended.ms) : null);
     if (!scanRunning) setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
@@ -1010,6 +1021,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         const ok = await themedConfirm(STRINGS.RENDER.clearQueueConfirmMessage(rendering), {
           title: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_TITLE,
           confirmLabel: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_BUTTON,
+          destructive: true,
         });
         if (!ok) return;
       }

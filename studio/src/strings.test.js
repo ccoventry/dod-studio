@@ -17,6 +17,20 @@ describe('scanCompleteToast', () => {
   });
 });
 
+describe('review refusedToast (#880)', () => {
+  it('says a review is running and to end it first', () => {
+    expect(STRINGS.REVIEW.refusedToast('viewdemo')).toBe(
+      "A review is running in the game, so it didn't load the preview. End the review first (Stop), then try again."
+    );
+  });
+
+  it('names a seek as a jump, and anything else plainly', () => {
+    expect(STRINGS.REVIEW.refusedToast('ds_demo_seek_to')).toContain("didn't jump to that time");
+    expect(STRINGS.REVIEW.refusedToast('spec_mode')).toContain("didn't do that");
+    expect(STRINGS.REVIEW.refusedToast(undefined)).toContain('A review is running in the game');
+  });
+});
+
 describe('scanCancelledToast', () => {
   it('says nothing was added when Cancel came while listing folders (#843)', () => {
     expect(STRINGS.MAIN.scanCancelledToast(0)).toBe('Scan cancelled, nothing added');
@@ -89,11 +103,11 @@ describe('scanCapToast (#531)', () => {
 
 describe('AUDITOR.doneStatus', () => {
   it('counts demos inside archives apart from the loose ones (#929)', () => {
-    expect(STRINGS.AUDITOR.doneStatus(3, 0, '0.0', 82))
+    expect(STRINGS.AUDITOR.doneStatus(3, 0, '0.0 s', 82))
       .toBe('Done in 0.0 s: 3 demos checked and 82 inside archives, 0 with copies.');
   });
 
   it('leaves archives out when none were looked inside', () => {
-    expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
+    expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4 s')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
   });
 });

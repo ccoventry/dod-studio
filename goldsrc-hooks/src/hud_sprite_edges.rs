@@ -12,7 +12,9 @@
 //! out, and a 4x sheet drawn at 3x showed that texel grid as uneven steps.
 //!
 //! Three changes, for HD-replaced `weapons<N>` HUD sheets only (the sheets
-//! `hud.txt`'s `d_*` kill-feed icons come from):
+//! `hud.txt`'s `d_*` kill-feed icons come from). The first two also hold
+//! for the frames of the even layout's own atlas ([`ATLAS_NAME`], #1022),
+//! whose rects share no rows:
 //!
 //! 1. **Upload** ([`prepare_soft_alpha`]): the file's alpha is kept as it
 //!    is, the engine's texture gamma goes on the colour of every texel that
@@ -107,6 +109,49 @@ pub fn mark_soft(sheet: u32) {
     if (1..32).contains(&sheet) {
         SOFT_SHEETS.fetch_or(1 << sheet, Ordering::Relaxed);
     }
+}
+
+/// `sprites/<ATLAS_NAME>.spr`: the kill feed's even-layout atlas, written by
+/// `killfeed_icons.py --even` (#1022, `deathmsg::even`). Its frames go up
+/// with soft edges as the `weapons<N>` sheets do, and draw blended.
+pub const ATLAS_NAME: &str = "dodstudio_killfeed";
+
+/// The most frames the atlas may have: one bit each in [`ATLAS_SOFT`].
+pub const ATLAS_MAX_FRAMES: u32 = 32;
+
+/// Bit N set: frame N of the atlas went up with its HD file (soft edges)
+/// this session. The engine keeps an uploaded sprite until the process
+/// exits, so a frame that went up stock stays stock.
+static ATLAS_SOFT: AtomicU32 = AtomicU32::new(0);
+
+/// The atlas frame a `texture_hires` sprite frame name (`dodstudio_killfeed_1`)
+/// is, for frames below [`ATLAS_MAX_FRAMES`].
+pub fn atlas_frame_of(name: &str) -> Option<u32> {
+    let rest = strip_prefix_ignore_case(name, ATLAS_NAME)?.strip_prefix('_')?;
+    if rest.is_empty() || rest.len() > 2 || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse().ok().filter(|n| *n < ATLAS_MAX_FRAMES)
+}
+
+/// Notes that atlas frame `frame` went up with its HD file.
+pub fn mark_atlas_soft(frame: u32) {
+    if frame < ATLAS_MAX_FRAMES {
+        ATLAS_SOFT.fetch_or(1 << frame, Ordering::Relaxed);
+    }
+}
+
+/// Whether frames `0..frames` of the atlas all went up with their HD files.
+pub fn atlas_all_soft(frames: u32) -> bool {
+    if frames == 0 || frames > ATLAS_MAX_FRAMES {
+        return false;
+    }
+    let want = if frames == 32 {
+        u32::MAX
+    } else {
+        (1u32 << frames) - 1
+    };
+    ATLAS_SOFT.load(Ordering::Relaxed) & want == want
 }
 
 /// The sheet number of the sheet at `path` when it went up with soft edges,
@@ -429,6 +474,40 @@ mod tests {
             assert_eq!(sheet_of_path(path), None, "{path}");
         }
         assert_eq!(sheet_of_path("sprites/weapons32.spr"), None);
+    }
+
+    #[test]
+    fn the_atlas_frames_are_known_by_name() {
+        assert_eq!(atlas_frame_of("dodstudio_killfeed_0"), Some(0));
+        assert_eq!(atlas_frame_of("DODSTUDIO_KILLFEED_1"), Some(1));
+        assert_eq!(atlas_frame_of("dodstudio_killfeed_31"), Some(31));
+        for name in [
+            "dodstudio_killfeed_32",
+            "dodstudio_killfeed_",
+            "dodstudio_killfeed",
+            "dodstudio_killfeed_x",
+            "dodstudio_killfeed_100",
+            "dodstudio_killfeedx_0",
+            "weapons2_0",
+        ] {
+            assert_eq!(atlas_frame_of(name), None, "{name}");
+        }
+        // Not a weapons sheet, so no trims and no sheet bit.
+        assert_eq!(sheet_of_frame("dodstudio_killfeed_0"), None);
+        assert_eq!(sheet_of_path("sprites/dodstudio_killfeed.spr"), None);
+    }
+
+    #[test]
+    fn the_atlas_counts_as_soft_only_with_every_frame() {
+        assert!(!atlas_all_soft(0));
+        assert!(!atlas_all_soft(33));
+        mark_atlas_soft(0);
+        mark_atlas_soft(40);
+        assert!(atlas_all_soft(1));
+        // Frame 1 never went up with its HD file, so a two-frame atlas isn't.
+        assert!(!atlas_all_soft(2));
+        mark_atlas_soft(1);
+        assert!(atlas_all_soft(2));
     }
 
     #[test]

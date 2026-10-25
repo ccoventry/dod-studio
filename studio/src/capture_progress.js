@@ -14,7 +14,8 @@
 // the end. The pure parts come first, so they can be tested on their own.
 
 import { STRINGS } from './strings.js';
-import { createClock, durationWords, secondsText } from './progress_view.js';
+import { createClock } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { clearStepBar, showFillAndSlide } from './step_bar.js';
 import { timeLeftSuffix } from './capture_time_left.js';
 import { setStatusLine } from './status_line.js';
@@ -87,7 +88,7 @@ export function heldView(view, shown) {
 export function endLine(p, ms) {
   if (p?.error) return STRINGS.CAPTURE.captureErrorStatusText(p.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT);
   if (p?.status === 'Cancelled') return STRINGS.CAPTURE.CANCELLED;
-  return STRINGS.CAPTURE_PROGRESS.done(durationWords(ms), p?.clips_captured ?? null, p?.clips_total ?? null);
+  return STRINGS.CAPTURE_PROGRESS.done(durationTextMs(ms), p?.clips_captured ?? null, p?.clips_total ?? null);
 }
 
 /// How a batch ended, for the activity log and Last Batch.
@@ -147,7 +148,7 @@ export function createCaptureProgress({ statusEl, container, now = () => Date.no
       if (fill && kind === 'cancelled') fill.style.width = '0%';
       setStatusLine(statusEl, endLine(p, ms));
       if (wasRunning) {
-        log(STRINGS.CAPTURE_PROGRESS.endLog(kind, secondsText(ms), p?.clips_captured, p?.clips_total ?? null));
+        log(STRINGS.CAPTURE_PROGRESS.endLog(kind, durationTextMs(ms), p?.clips_captured, p?.clips_total ?? null));
       }
       return ms;
     },

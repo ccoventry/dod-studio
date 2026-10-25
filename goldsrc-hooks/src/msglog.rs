@@ -11,9 +11,10 @@
 //!
 //! The same one `deathmsg`'s `block`/`fake` already rely on:
 //! `pfnHookUserMsg` **prepends** a fresh record rather than overwriting the
-//! existing one, so the engine's by-name dispatcher stops at the newest
-//! entry and the game's own handler stays reachable by calling its thunk
-//! directly. **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
+//! existing one, so the engine's by-number dispatcher -- the one every
+//! message from the server goes through -- stops at the newest entry and the
+//! game's own handler stays reachable by calling its thunk directly.
+//! **Nothing is patched.** See [`crate::engine::HookUserMsgFn`].
 //!
 //! One handler, [`hooked_msg`], is registered for every message DoD's
 //! `client.dll` hooks -- the full 71-entry name/thunk table below, derived
