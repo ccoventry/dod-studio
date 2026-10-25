@@ -29,6 +29,7 @@ documented in its own `//!` header.
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `voice_menu_probe` | When does a POV demo show a voice menu (`ShowMenu`) or open the command menu, on the viewdemo clock? |
+| `weapon_list_probe` | Which recorded weapon keys open the weapon-selection list in playback, and was it open on the recorder's screen (#1032)? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
 | `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
 | `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |

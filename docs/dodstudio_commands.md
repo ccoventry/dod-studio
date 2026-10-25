@@ -96,6 +96,14 @@ The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 Always a command rather than a cvar when it has subcommands or a variable
 argument count, which a cvar's single value can't hold.
 
+A command (or subcommand) that takes more than three values, or any
+optional ones, names its parameters: each value follows its name
+(`killer 3`, `at 7:42`), and the named parts can come in any order. A
+row of positional values would need `-` placeholders for the ones left
+out, and nobody remembers which slot is which. Short commands with a fixed
+shape stay positional (`scale 2`, `block <id>...`, `fake <killer>
+<victim> <weapon>`). An unknown name is refused, and the message names it.
+
 ### `ds_debug_status`
 
 No arguments. Always reports the four suppression cvars, the two
@@ -110,7 +118,8 @@ state, not the state from before that line ran.
 ### `ds_hud_deathmsg`
 
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
-one by hand, changes the names' font, or scales the weapon icons. The font
+one by hand, changes the names' font, or scales the weapon icons. It also
+changes or hides one recorded kill (`replace`, #1021). The font
 (#562) and the scale (#728) take effect on the next frame. HLAE's own
 `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
@@ -127,6 +136,9 @@ one by hand, changes the names' font, or scales the weapon icons. The font
 | `ds_hud_deathmsg block clear` | stop hiding anything |
 | `ds_hud_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `ds_hud_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
+| `ds_hud_deathmsg replace [killer <id>] [victim <id>] [at <time>] [in <demo>[,<demo>...]] with [killer <id>] [victim <id>] [weapon <weapon>]` | change one kill-feed line as it arrives (see below) |
+| `ds_hud_deathmsg replace ... with hide` | hide just that line |
+| `ds_hud_deathmsg replace list` / `remove <n>` / `clear` | list the lines (numbered), drop one, or drop them all |
 | `ds_hud_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font (`scale` sizes the icon); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
 | `ds_hud_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 | `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale` or `font` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
@@ -149,6 +161,46 @@ A `block` id is any of:
 Mix them freely. `ds_hud_deathmsg block !self !76561197975574370` shows
 only your own frags in both kinds of demo: in a POV demo both entries point
 at you, and in an HLTV demo `self` drops out and the SteamID finds you.
+
+#### `replace`: change or hide one kill (#1021)
+
+`replace` rewrites a recorded kill's line in the kill feed: who got it, who
+died, or the weapon. The motivating case is a kill the recorder stole from a
+teammate, shown as the teammate's:
+
+    ds_hud_deathmsg replace killer self victim STEAM_0:0:5550001 at 7:42 in dice-wsod25_r03 with killer STEAM_0:1:5550002
+
+- **Before `with`: which kill.** `killer` and `victim` take an id as `block`
+  does (a slot, a SteamID in any form, or `self`); at least one of them is
+  needed, so a slip can't change every kill. `at` is the demo bar's clock
+  (the one `ds_demo_seek_to` takes), as `m:ss`, `h:mm:ss` or seconds, and
+  matches within 2 s. `in` takes a demo file name, a comma list, or `*`
+  patterns (`wsod25_r03_*`), compared with the loaded demo's file name
+  without its folder or `.dem`; without `in` the line applies to every demo.
+  A part left out matches any.
+- **After `with`: what changes.** `killer <id>`, `victim <id>`, `weapon
+  <weapon>` (the names `fake` takes, or `1..43`); a part left out stays as
+  recorded. Or `hide` alone, which hides just that line. The names' colours
+  follow the new killer's and victim's teams.
+- **Named, any order**, per the rule above.
+- **Refused, with the reason:** no `killer` or `victim` before `with`;
+  nothing after `with`; no `with`; a word given twice; an unknown word,
+  named in the message.
+- **Warned, not refused:** `self` or a slot without `in`, since each is a
+  different player in each demo ("self is a different player in each POV
+  demo; add `in <demo>` or use a SteamID").
+- **The kill feed only**, and the console's kill line with it. The
+  scoreboard's frags, the POV effects (red screen, kill sound) and the demo
+  file are untouched. A new killer or victim has to be in the demo; when
+  they aren't, the line shows as recorded and the console says so once.
+- The first line that matches a kill decides. `block` then filters the
+  feed as `replace` left it. `fake` lines are not changed. The same line
+  sent twice (a batch's Initial Commands run again for every demo) is kept
+  once.
+- A kill played again after a seek matches again. During a stepped forward
+  seek the world clock runs up to one 5 s step ahead of the kills being
+  read, so the match then allows that whole step. Under `playdemo`, which
+  has no demo bar, `at` uses the client's clock instead (not measured).
 
 ### `ds_hud_hide_element`
 
@@ -483,6 +535,10 @@ the first time and never overwritten. The empty `...Slot` controls in
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
 `slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
 or `engine <console command>`. See `src/studio_panel.rs` (#408).
+
+## Stock settings the hook extends
+
+- **`hud_fastswitch 1` also keeps the weapon list hidden in demo playback (#1032).** A POV demo replays the player's number keys, and the game's own `SelectSlot` opens the weapon list even with fast switch when the key's slot holds two weapons. In DoD that happens to the grenade key after a primed grenade is caught with USE: the caught one becomes a weapon of its own beside the class's grenade. While a demo plays with `hud_fastswitch 1`, the hook skips drawing the list (one code byte in `CHudAmmo::DrawWeaponList`); the weapon still switches as recorded. With `hud_fastswitch 0` playback shows the list as the player saw it, and live play is unchanged either way. `ds_debug_status` gets a `weapon list:` line once it has hidden it. `goldsrc-hooks/src/weapon_list.rs`.
 
 ## Renamed from `dodstudio_` (#555)
 
