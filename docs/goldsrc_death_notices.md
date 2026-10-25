@@ -725,6 +725,9 @@ are centred on the 26-row line as with a scale.
 It draws only while every frame of the atlas went up with its HD file this
 session and `ds_hd_enabled` is 1; otherwise -- no atlas, a bad file, HD off,
 no atlas built for the style -- the feed is the game's own, exactly as with
-`layout default`. Nothing in `hw.dll` is touched, and the sprite calls go
+`layout default`. The engine keeps a sprite's first upload until it exits, so
+an atlas rebuilt while the game runs is refused until a restart (the hook
+compares the files with the ones it first handed the engine): the old pixels
+laid out by the new boxes would draw the wrong crops. Nothing in `hw.dll` is touched, and the sprite calls go
 through `gEngfuncs`, so both engine builds take the same path.
 `tools/verify_killfeed_scale_offsets.py` also checks the names field.

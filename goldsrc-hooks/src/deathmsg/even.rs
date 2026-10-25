@@ -31,7 +31,9 @@
 //!   sprite's own pixels are a placeholder (grey boxes), so with HD off, or
 //!   no atlas built for the style, nothing of it shows;
 //! - the atlas loaded since the HUD last loaded its sheets (a level load can
-//!   hand the same handle to another sprite).
+//!   hand the same handle to another sprite);
+//! - the same files the engine was first handed this session: it keeps that
+//!   upload until it exits, so a rebuilt atlas needs a restart.
 //!
 //! It is followed every frame from `deathmsg::poll`, on the engine's thread:
 //! `ds_hd_enabled 0` gives the game's layout from the next frame. The files
@@ -42,7 +44,9 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
+};
 
 use super::scale::WRect;
 use crate::hud_sprite_edges::{ATLAS_MAX_FRAMES, ATLAS_NAME};
@@ -270,6 +274,26 @@ pub(super) fn check_fit(table: &Table, sprite: &SpriteInfo) -> Result<(), String
     Ok(())
 }
 
+/// What a load read, as [`UPLOADED`] keeps it: FNV-1a 64 over the sprite's
+/// bytes, then the table's, never 0.
+pub(super) fn files_key(sprite: &[u8], table: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in sprite.iter().chain(table) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h.max(1)
+}
+
+/// Whether files read now (`now`) may be laid out over the upload the engine
+/// kept from the files it was first handed (`first`, 0 for none yet).
+pub(super) fn check_unchanged(first: u64, now: u64) -> Result<(), String> {
+    if first == 0 || first == now {
+        return Ok(());
+    }
+    Err("the atlas changed on disk since the game first loaded it, and the engine keeps that first one: restart the game".to_string())
+}
+
 /// The name in one `m_rgszSpriteNames` entry: up to its first NUL, or all
 /// [`SPRITE_NAME_LEN`] bytes when `strncpy` left none.
 fn entry_name(entry: &[u8]) -> &[u8] {
@@ -363,6 +387,11 @@ static TABLE: RwLock<Option<Table>> = RwLock::new(None);
 static TABLE_LOADS: AtomicU32 = AtomicU32::new(0);
 /// What went wrong at the last load, for `status`.
 static LOAD_ERROR: RwLock<String> = RwLock::new(String::new());
+/// [`files_key`] of the sprite and table the engine was first handed this
+/// session; 0 before. The engine keeps a sprite's first upload, HD frames
+/// included, until it exits, so files rebuilt since would lay the old
+/// pixels out by the new boxes: a load that finds other files is refused.
+static UPLOADED: AtomicU64 = AtomicU64::new(0);
 
 /// Whether the even layout draws this frame.
 pub(super) fn ready() -> bool {
@@ -455,7 +484,9 @@ fn even_on() -> Result<String, String> {
     super::scale::ensure_installed().map_err(|why| format!("cannot lay the feed out: {why}"))?;
     super::font::ensure_installed().map_err(|why| format!("cannot centre the names: {why}"))?;
     WANT_EVEN.store(true, Ordering::Relaxed);
-    // Typed again: the files are read again too, so a rebuilt one counts.
+    // Typed again: the files are read again too, so a fixed table or a
+    // first-time build counts. A rebuild of an atlas the engine already
+    // uploaded is refused there (`UPLOADED`).
     LOADED_IN.store(u32::MAX, Ordering::Relaxed);
     poll();
     super::scale::refresh();
@@ -579,16 +610,21 @@ fn load() {
         }
         let spr = locate()?;
         let txt = spr.with_extension("txt");
-        let sprite = parse_sprite(&read_capped(&spr, MAX_SPRITE_BYTES)?)
-            .map_err(|why| format!("{}: {why}", spr.display()))?;
+        let spr_bytes = read_capped(&spr, MAX_SPRITE_BYTES)?;
+        let sprite = parse_sprite(&spr_bytes).map_err(|why| format!("{}: {why}", spr.display()))?;
         let bytes = read_capped(&txt, MAX_TABLE_BYTES)?;
         let text =
             std::str::from_utf8(&bytes).map_err(|_| format!("{} is not text", txt.display()))?;
         let table = parse_table(text).map_err(|why| format!("{}: {why}", txt.display()))?;
         check_fit(&table, &sprite).map_err(|why| format!("{}: {why}", txt.display()))?;
+        let key = files_key(&spr_bytes, &bytes);
+        check_unchanged(UPLOADED.load(Ordering::Relaxed), key)?;
         let handle = crate::hud_sprites::load_sprite(SPRITE_PATH);
         if handle == 0 {
             return Err(format!("the engine did not load {SPRITE_PATH}"));
+        }
+        if UPLOADED.load(Ordering::Relaxed) == 0 {
+            UPLOADED.store(key, Ordering::Relaxed);
         }
         Ok((handle, table, sprite.frames.len() as u32))
     })();
@@ -838,6 +874,29 @@ mod tests {
         assert_eq!(map[4], None, "d_skull isn't in this table");
         // A count past the array gives no box rather than a read past it.
         assert_eq!(boxes_by_index(&names, 7, &t)[6], None);
+    }
+
+    #[test]
+    fn an_atlas_rebuilt_after_the_engine_uploaded_it_is_refused() {
+        let spr = sprite(&[(256, 256)]);
+        let first = files_key(&spr, TABLE_TEXT.as_bytes());
+        assert_ne!(first, 0, "0 means nothing uploaded yet");
+        assert_eq!(check_unchanged(0, first), Ok(()), "the first load");
+        assert_eq!(
+            check_unchanged(first, first),
+            Ok(()),
+            "the same files again"
+        );
+        // Two boxes swapped in the table, the sprite's bytes the same: the
+        // kept pixels would draw the wrong icons.
+        let swapped = TABLE_TEXT
+            .replace("d_mp44", "d_tmp")
+            .replace("d_30cal", "d_mp44");
+        let later = files_key(&spr, swapped.as_bytes());
+        assert!(check_unchanged(first, later).is_err());
+        let mut repacked = spr.clone();
+        *repacked.last_mut().unwrap() = 0;
+        assert!(check_unchanged(first, files_key(&repacked, TABLE_TEXT.as_bytes())).is_err());
     }
 
     #[test]
