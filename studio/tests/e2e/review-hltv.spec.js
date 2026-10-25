@@ -62,6 +62,21 @@ test.describe('Review: HLTV players', () => {
     const add = page.locator('#review-hltv-add-player');
     await expect(add).toBeDisabled();
     await expect(add.locator('option')).toHaveText(['No HLTV highlights in the queue']);
+    await expect(page.locator('#review-hltv-add-team option')).toHaveText(['No teams']);
+    // Both lists' fixed widths show the whole line beside the ~12 px arrow
+    // (#845: the team list cut "No teams in the HLTV demos" short).
+    const cut = await page.evaluate(() => {
+      const ctx = document.createElement('canvas').getContext('2d');
+      return [...document.querySelectorAll('#review-hltv-add-player, #review-hltv-add-team')]
+        .filter((list) => {
+          const css = getComputedStyle(list);
+          ctx.font = `${css.fontSize} ${css.fontFamily}`;
+          const room = list.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) - 12;
+          return ctx.measureText(list.options[0].text).width > room;
+        })
+        .map((list) => list.options[0].text);
+    });
+    expect(cut).toEqual([]);
     // What main.js's updateDemoFooter does after a scan.
     await page.evaluate(() => { window.__emptyQueue(false); window.__pick.refresh(); });
     await expect(add).toBeEnabled();
