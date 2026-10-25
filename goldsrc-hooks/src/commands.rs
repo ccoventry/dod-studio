@@ -1410,11 +1410,9 @@ unsafe extern "C" fn cmd_fix_model_flicker() {
 
 /// Only registered when `missing_shots::NAME` could not be a cvar.
 unsafe extern "C" fn cmd_restore_gunshots() {
-    handle_toggle(
-        missing_shots::NAME,
-        &missing_shots::WITHOUT_A_CVAR,
-        || String::from("HLTV and POV demos: rounds with no fire event"),
-    );
+    handle_toggle(missing_shots::NAME, &missing_shots::WITHOUT_A_CVAR, || {
+        String::from("HLTV and POV demos: rounds with no fire event")
+    });
 }
 
 /// Only registered when `ds_ui_console_in_panel` could not be a cvar.

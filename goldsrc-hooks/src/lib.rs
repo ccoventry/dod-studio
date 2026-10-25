@@ -13,16 +13,11 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to install without them:
-//! - `ds_spec_match_pov`, one cvar over five modules, for making a
-//!   spectated first-person view look and sound like the player's own
-//!   recording:
+//! - `ds_spec_match_pov`, one cvar over four modules, for making a
+//!   spectated first-person view look like the player's own recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
 //!     reload, draw, idle, grenades -- which the engine otherwise leaves
 //!     static. Full design write-up in `docs/goldsrc_hltv_animation_fix.md`.
-//!   - `missing_shots`: an HLTV demo carries the fire event for well under
-//!     half the rounds fired; the rest are found from the shooter's body
-//!     animation restarting and get the weapon's own event handler called for
-//!     them (sound, flash, impact).
 //!   - `spectator_crosshair`: draw the spectator crosshair from the same
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
 //!     are drawn by different code paths and do not otherwise share a look.
@@ -30,6 +25,13 @@
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
 //!     player's own would (sprint, jump, prone, ladder).
+//! - `missing_shots` and `pov_recorder_shots`: `ds_sound_restore_gunshots`,
+//!   the gunshots a demo lost (#1036). An HLTV demo carries the fire event
+//!   for well under half the rounds fired, a POV demo for about six in seven
+//!   of the other players'; the rest are found from the shooter's body
+//!   animation restarting and get the weapon's own event handler called for
+//!   them (sound, flash, impact). A POV recorder's own unpredicted shots are
+//!   found from his clip count instead (#1029).
 //! - `strafe_twitch`: `ds_player_fix_model_flicker`, player models hold
 //!   still for the frame an HLTV demo's clock steps back, which would turn a
 //!   strafing model round (#927). Its own switch, on by default: a bug in how
@@ -38,8 +40,8 @@
 //!   when the watched player dies, as his recording shows it, instead of the
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
 //!   shoutcast does not.
-//! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
-//!   gunshots through. It changes no sound.
+//! - `fire_sounds`: the `EV_PlaySound` hook `anim_fix` and the gunshot
+//!   modules hear gunshots through. It changes no sound.
 //! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
@@ -291,8 +293,8 @@ mod player_overrides;
 mod player_table;
 mod pmove_guard;
 mod position;
-mod pov_recorder_shots;
 mod pov_live_bob;
+mod pov_recorder_shots;
 mod remote;
 mod review;
 mod review_lock;

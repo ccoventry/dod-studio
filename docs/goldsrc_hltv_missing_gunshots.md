@@ -2,9 +2,12 @@
 
 An HLTV demo is quieter than the match was (a POV demo too, less so: §6). Whole bursts play with no sound,
 no muzzle flash and no bullet impact, while the player's model stands there
-firing. `ds_spec_match_pov 1` puts those rounds back (it also turns on the
-viewmodel animations and the POV crosshair; until 2026-10-01 this part had a
-cvar of its own, `dodstudio_hltv_play_missing_gunshots`).
+firing. `ds_sound_restore_gunshots 1` (the default) puts those rounds back,
+in HLTV and POV demos alike (§6, §7). It was part of `ds_spec_match_pov`
+until #1036, and before that a cvar of its own,
+`dodstudio_hltv_play_missing_gunshots`; a config that sets
+`ds_spec_match_pov 0` to silence restored gunshots now needs
+`ds_sound_restore_gunshots 0`.
 
 Code: `goldsrc-hooks/src/missing_shots.rs`. Probe:
 `analysis/examples/hltv_shot_evidence_probe.rs`.
@@ -190,11 +193,11 @@ for each weapon script and forwards the call. The log says how many it got:
   frame is 17 ms and the fastest weapon fires every 50 ms. Under about 20 fps
   an MG42 burst could lose a round.
 - **Restore a POV recorder's own rounds.** Those are the recorder's client's
-  predicted events, and need another signal (§6).
+  predicted events, and need another signal (§7).
 
 ## 5. Checking it
 
-`ds_spec_match_pov 2` logs every round it plays (1 logs the
+`ds_sound_restore_gunshots 2` logs every round it plays (1 logs the
 first twenty, then every 200th):
 
 ```
@@ -232,10 +235,9 @@ never reached the recorder's client was not heard live either (an inference),
 so the stand-in improves the movie rather than restoring what the player
 heard.
 
-`ds_sound_restore_gunshots 1` (the default; the name is a placeholder,
-#1036) runs §3 while a POV demo plays (`IsPlayingback()` and not
-`IsSpectateOnly()`), for every player but the recorder (`GetLocalPlayer()`).
-Two things differ from HLTV:
+`ds_sound_restore_gunshots` runs §3 while a POV demo plays
+(`IsPlayingback()` and not `IsSpectateOnly()`), for every player but the
+recorder (`GetLocalPlayer()`). Two things differ from HLTV:
 
 - **Only players in the latest update.** A POV recording carries only the
   players the recorder could see. One out of view keeps the state last sent
@@ -251,6 +253,32 @@ Two things differ from HLTV:
   round never plays twice that way, and a round whose own event is missing
   is not taken for one with a neighbour's.
 
-The recorder's own rounds are left alone: a POV demo's own shots are the
-recorder's client predicting them, saved as `Dem_Event`, and only 0.26% go
-missing. #1029 (PR #1040) restores those from the clip count instead.
+The recorder's own rounds are left to §7.
+
+## 7. POV demos: the recorder's own rounds
+
+A POV demo's own shots are the recorder's client predicting them, saved as
+`Dem_Event`, and played back with nothing else: the client's weapon
+prediction does not run during playback. A round the server fired that the
+client did not predict (fire pressed a little before the gun was ready
+again) has no sound, flash or fire animation. That is 0.26% of the
+recorder's shots (163 of 61,514 over the same 361 demos, 18 of 27
+recorders; #1029's own survey: 94 of 33,807).
+
+The body can't tell those apart from his predicted events, so
+`ds_sound_restore_gunshots` reads the clip count the server sends him after
+every round (`CurWeapon`) instead (`goldsrc-hooks/src/pov_recorder_shots.rs`):
+a one-round drop in the held weapon's clip is a round fired, paired with the
+oldest of his recorded shot sounds in the half second before it; a drop with
+none plays the weapon's own fire handler for him. Over #1029's 153 demos that
+plays a little over half the unrecorded shots and leaves the rest silent
+rather than risk doubling one. A real empty-gun press drops no clip and is
+left alone: nothing restores the empty click (#1036 chose not to).
+
+So the one switch picks its path by what is playing:
+
+| playing | other players | the recorder |
+| --- | --- | --- |
+| HLTV demo | §3, every player | (none: an HLTV demo has no recorder) |
+| POV demo | §3 with §6's two changes | the clip count, above |
+| live play | nothing | nothing |
