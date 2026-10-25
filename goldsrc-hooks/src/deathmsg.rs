@@ -60,7 +60,8 @@
 //!
 //! `font` -- the names in a font of our own -- lives in [`font`] (#562), and
 //! `scale` -- the icons S times bigger, lines spaced to match -- in [`scale`]
-//! (#728).
+//! (#728), and `layout even` -- every icon in a box of one height, from DoD
+//! Studio's own atlas -- in [`even`] (#1022).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -72,7 +73,10 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
+mod even;
 mod font;
+mod name_cap;
+mod replace;
 mod scale;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
@@ -291,7 +295,7 @@ impl std::fmt::Display for Player {
 /// one players and server admins recognise (#537). `None` for an id that
 /// isn't a player's own account, such as the HLTV proxy's: that form only
 /// exists for individual accounts, base + a 32-bit account number.
-fn classic_steam_id(id: u64) -> Option<String> {
+pub(crate) fn classic_steam_id(id: u64) -> Option<String> {
     let account = id
         .checked_sub(STEAM_ID64_BASE)
         .filter(|&a| a <= u64::from(u32::MAX))?;
@@ -355,7 +359,7 @@ const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
 /// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
 /// the engine that printed it and does not change the account), or the newer
 /// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
-fn parse_steam_id(text: &str) -> Option<u64> {
+pub(crate) fn parse_steam_id(text: &str) -> Option<u64> {
     let bare = text
         .strip_prefix('[')
         .and_then(|t| t.strip_suffix(']'))
@@ -770,7 +774,7 @@ fn apply_max(max: i32) -> Result<(), String> {
     };
 
     for &(rva, field) in ARRAY_REFS {
-        let value = (array + field) as u32;
+        let value = (array + name_cap::field_for(base, rva, field)) as u32;
         if !unsafe { write_code(base, rva, &value.to_le_bytes()) } {
             return Err(format!("could not make +{rva:#x} writable"));
         }
@@ -793,6 +797,25 @@ fn apply_max(max: i32) -> Result<(), String> {
 
     PATCHED_MAX.store(if reverting { 0 } else { max }, Ordering::Release);
     Ok(())
+}
+
+/// Lets the kill feed hold names of up to 63 characters instead of 31, for
+/// `ds_player_change_name`'s long names (#1021). Once lifted it stays: the
+/// engine's own names are at most 31, so they show as before. See
+/// [`name_cap`].
+pub(crate) fn lift_name_cap() -> Result<(), String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    let (array, _) = current_array(base);
+    // Safety: the stock check has passed for this module.
+    unsafe { name_cap::lift(base, array) }
+}
+
+/// Whether the kill feed holds 63-character names now.
+pub(crate) fn name_cap_lifted() -> bool {
+    engine::client_module_base().is_some_and(name_cap::lifted)
 }
 
 // ── The y detour ─────────────────────────────────────────────────────────────
@@ -998,30 +1021,55 @@ fn original_thunk() -> Option<engine::UserMsgHookFn> {
     Some(unsafe { std::mem::transmute::<usize, engine::UserMsgHookFn>(base + THUNK_RVA) })
 }
 
-/// Our `DeathMsg` handler. Reads the three bytes, drops the message if the
-/// block list says so, and otherwise hands it to the game untouched.
+/// Our `DeathMsg` handler. Reads the three bytes, applies the `replace` lines
+/// (#1021), drops the message if one hides it or the block list says so, and
+/// otherwise hands it to the game.
 ///
-/// Deliberately does not parse or rewrite the payload on the way through: a
-/// forwarded message is the *same* buffer the engine handed us, so a message
-/// that is not being blocked behaves exactly as if we were not here.
+/// A message no `replace` line changes is forwarded as the *same* buffer the
+/// engine handed us, so it behaves exactly as if we were not here. A changed
+/// one goes over as a copy: the engine's buffer is left as it was read.
 unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
+    let mut rewritten = None;
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
-        let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
-        // The death happened whether or not the feed shows it.
-        crate::spectator_deathcam::note_death(killer, victim);
+        let original = [bytes[0], bytes[1], bytes[2]];
+        // The death happened whether or not the feed shows it, and as it was
+        // recorded, whatever `replace` shows.
+        crate::spectator_deathcam::note_death(original[0] as i32, original[1] as i32);
+        let rules = replace::live();
+        let shown = if rules.is_empty() {
+            original
+        } else {
+            match replace::apply(rules, original) {
+                // 1 is what the engine's own dispatcher treats as handled.
+                replace::Outcome::Hide(_) => return 1,
+                replace::Outcome::Rewrite(_, out) => {
+                    rewritten = Some(out);
+                    out
+                }
+                replace::Outcome::Keep | replace::Outcome::Unresolved(..) => original,
+            }
+        };
+        // `block` filters the feed as `replace` leaves it.
         let blocked = BLOCK
             .lock()
-            .map(|list| list.blocks_slots(killer, victim))
+            .map(|list| list.blocks_slots(shown[0] as i32, shown[1] as i32))
             .unwrap_or(false);
         if blocked {
-            // 1 is what the engine's own dispatcher treats as handled.
             return 1;
         }
     }
-    match original_thunk() {
-        Some(original) => unsafe { original(name, size, buf) },
-        None => 1,
+    let Some(original) = original_thunk() else {
+        return 1;
+    };
+    match rewritten {
+        Some(out) => {
+            let mut copy =
+                unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }.to_vec();
+            copy[..3].copy_from_slice(&out);
+            unsafe { original(name, size, copy.as_mut_ptr() as *mut c_void) }
+        }
+        None => unsafe { original(name, size, buf) },
     }
 }
 
@@ -1051,6 +1099,8 @@ pub fn poll() {
         install_hook();
     }
     font::poll();
+    // Before `scale`, whose copy follows what the even layout finds.
+    even::poll();
     scale::poll();
 }
 
@@ -1221,13 +1271,25 @@ fn usage() -> String {
          \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
          \x20                               weapon is a name (d_garand, garand) or 1..43\n\
+         \x20 {COMMAND} replace [killer <id>] [victim <id>] [at <time>] [in <demo>,...]\n\
+         \x20                  with [killer <id>] [victim <id>] [weapon <weapon>]\n\
+         \x20                               change one kill-feed line; with hide hides it.\n\
+         \x20                               Before with: which kill (killer or victim needed;\n\
+         \x20                               at is the demo bar's clock, m:ss or seconds, +-2 s;\n\
+         \x20                               in: demo file names, * allowed). After with: what\n\
+         \x20                               changes. Any order. The kill feed only.\n\
+         \x20 {COMMAND} replace list | remove <n> | clear\n\
          \x20 {COMMAND} font <face> <size> [bold] [shadow]\n\
          \x20                               draw the names in that font (size {}..{} px), live;\n\
          \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
          \x20 {COMMAND} font default       the game's own font again\n\
          \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
          \x20                               lines spaced and right-aligned to match (default 1)\n\
-         \x20 {COMMAND} scale default      the game's own size again\n",
+         \x20 {COMMAND} scale default      the game's own size again\n\
+         \x20 {COMMAND} layout even        every weapon icon in a box of one height, full\n\
+         \x20                               magazines and bipods shown, every line one step\n\
+         \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
+         \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,
@@ -1250,10 +1312,16 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, blocking {block}, replacing {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
+        even::describe(),
+        match replace::count() {
+            0 => "nothing".to_string(),
+            1 => "1 kill line (replace list)".to_string(),
+            n => format!("{n} kill lines (replace list)"),
+        },
     )
 }
 
@@ -1352,6 +1420,7 @@ fn dispatch(argv: &[String]) -> String {
             status()
         }
         "players" => players(),
+        "replace" => replace::command(&argv[2..]),
         "font" => {
             let rest = &argv[2..];
             if rest.is_empty() {
@@ -1376,6 +1445,19 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} scale: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} scale: {why}\n"),
+            }
+        }
+        "layout" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe(), usage());
+            }
+            match even::parse_args(rest) {
+                Ok(layout) => match even::apply(layout) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} layout: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} layout: {why}\n"),
             }
         }
         "fake" => {

@@ -63,15 +63,16 @@ pub async fn combine_clips(
 
 /// The activity log's last line for a join.
 fn end_log(result: &Result<(), String>, output: &str, secs: f64) -> String {
+    let took = native::utils::duration_text::duration_text(secs);
     match result {
         Ok(()) => format!(
-            "[combine] done in {secs:.1} s: {}",
+            "[combine] done in {took}: {}",
             std::path::Path::new(output).display()
         ),
         Err(e) if combine::is_cancelled(e) => {
-            format!("[combine] cancelled after {secs:.1} s")
+            format!("[combine] cancelled after {took}")
         }
-        Err(e) => format!("[combine] failed after {secs:.1} s: {e}"),
+        Err(e) => format!("[combine] failed after {took}: {e}"),
     }
 }
 

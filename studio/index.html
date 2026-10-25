@@ -975,6 +975,8 @@
                 <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
+              <!-- #954: Scan for Takes' sliding block. -->
+              <div id="render-scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
             </div>
           </div>
 
@@ -1891,7 +1893,7 @@
         <h2 id="themed-confirm-title" data-str="THEMED_CONFIRM_MODAL.TITLE_DEFAULT">Confirm</h2>
         <p id="themed-confirm-message" style="white-space: pre-line;"></p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
-          <button id="themed-confirm-ok-btn" style="color: #ff5555; border-color: #ff5555;" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
+          <button id="themed-confirm-ok-btn" class="primary-btn" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
           <button id="themed-confirm-cancel-btn" data-str="THEMED_CONFIRM_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>

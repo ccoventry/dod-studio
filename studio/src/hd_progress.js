@@ -6,7 +6,7 @@
 // build_all.py can go a minute without printing) and the map coverage check.
 // Each view is `{ text, bar }`, `bar` as `step_bar.js`'s `drawBar` takes it.
 import { STRINGS } from './strings.js';
-import { elapsedWords } from './time_format.js';
+import { durationText } from './time_format.js';
 
 export function formatSize(bytes) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -51,7 +51,7 @@ export function buildStartView() {
 export function buildView(p, secs, typeName) {
   const steps = Math.max(1, p.steps || 1);
   return {
-    text: STRINGS.HD.buildStep(p.step, steps, p.style, typeName, elapsedWords(secs)),
+    text: STRINGS.HD.buildStep(p.step, steps, p.style, typeName, durationText(secs)),
     bar: { done: Math.max(0, (p.step || 1) - 1), total: steps },
   };
 }

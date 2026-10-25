@@ -26,8 +26,15 @@ export function stepBarLayout(done, total, { fraction = null, share = 1 } = {}) 
 
 /// Draws `stepBarLayout`'s result on a `.progress-bar-container`.
 export function showStepBar(bar, done, total, options = {}) {
-  if (!bar) return;
   const { fill, slideFrom, slideWidth } = stepBarLayout(done, total, options);
+  showFillAndSlide(bar, fill, slideFrom, slideWidth);
+}
+
+/// The fill at `fill` percent, and the sliding block over `slideWidth`
+/// percent from `slideFrom`, or no block when `slideFrom` is null. For a
+/// bar whose shares aren't equal steps (the capture batch's, #952).
+export function showFillAndSlide(bar, fill, slideFrom = null, slideWidth = 0) {
+  if (!bar) return;
   bar.hidden = false;
   bar.classList.remove('indeterminate');
   bar.classList.add('step-bar');

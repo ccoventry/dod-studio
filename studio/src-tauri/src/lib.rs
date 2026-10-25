@@ -346,8 +346,12 @@ async fn cancel_capture_batch(state: tauri::State<'_, CaptureManager>) -> Result
 /// Writes one line to today's activity log from the frontend. Exists for
 /// events that have no other Tauri command to piggyback logging on — the
 /// Master Demo Queue's Clear Untracked/Selected/All and row-delete actions
-/// are pure frontend array mutations with nothing else calling into Rust.
-#[tauri::command]
+/// are pure frontend array mutations with nothing else calling into Rust —
+/// and every toast (#873). Off the window's thread: each line is flushed to
+/// disk under the log's lock, which a capture's own logging can hold while
+/// the disk is busy with frames. `logFrontendEvent` sends one line at a time,
+/// so a burst (a rescan's carry report) still lands in order.
+#[tauri::command(async)]
 fn log_frontend_event(message: String) {
     native::log_markdown(&message);
 }
@@ -413,17 +417,6 @@ fn cancel_scan(scan_state: tauri::State<'_, ScanManager>) -> Result<(), String> 
     Ok(())
 }
 
-/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
-/// `None` for a path with no prefix.
-fn volume_key(path: &std::path::Path) -> Option<String> {
-    match path.components().next()? {
-        std::path::Component::Prefix(prefix) => {
-            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
-        }
-        _ => None,
-    }
-}
-
 /// Free space across the capture folders, each drive counted once: two
 /// folders on one drive share its space. On the blocking pool (#853): a
 /// cache miss re-lists every volume, which can wait on a sleeping or network
@@ -441,7 +434,7 @@ fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut seen = std::collections::HashSet::new();
     for path_str in paths {
         let p = std::path::PathBuf::from(path_str);
-        if let Some(key) = volume_key(&p)
+        if let Some(key) = native::sys::disk::volume_key(&p)
             && !seen.insert(key)
         {
             continue;
@@ -1147,29 +1140,5 @@ mod analyzer_progress_tests {
         assert_eq!(parsing["processed"], 30);
         assert_eq!(parsing["total"], 100);
         assert_eq!(parsing["cached"], false);
-    }
-}
-
-#[cfg(test)]
-mod pool_space_tests {
-    use super::volume_key;
-    use std::path::Path;
-
-    #[cfg(windows)]
-    #[test]
-    fn folders_on_one_drive_share_a_key() {
-        assert_eq!(
-            volume_key(Path::new(r"C:\captures")),
-            volume_key(Path::new(r"c:\Programs\HLAE"))
-        );
-        assert_ne!(
-            volume_key(Path::new(r"C:\captures")),
-            volume_key(Path::new(r"D:\captures"))
-        );
-        assert_eq!(
-            volume_key(Path::new(r"\\nas\movies\a")),
-            volume_key(Path::new(r"\\NAS\Movies\b"))
-        );
-        assert_eq!(volume_key(Path::new("relative")), None);
     }
 }

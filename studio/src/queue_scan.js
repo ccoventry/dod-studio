@@ -19,7 +19,8 @@ import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { parseClock, timeLeftText, scanEndLogLine, scanFailedLogLine } from './scan_progress.js';
 import { learnFromScan } from './rescan_estimate.js';
-import { readLastRun, rememberLastRun, secondsText } from './progress_view.js';
+import { readLastRun, rememberLastRun } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { SCAN_STEPS, nest, placed, queueProgress, scanFoldersKey, scanStepView } from './queue_progress.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -274,7 +275,7 @@ export function createQueueScan({
       // queued demos aren't cached yet.
       if (newlyScanned.length > 0) await regroupMatches({ within: nest(place, SCAN_STEPS.grouping) });
       if (!cancelled) rememberLastRun(foldersKey, active.foldersSeen);
-      const seconds = secondsText(Date.now() - startedAt);
+      const seconds = durationTextMs(Date.now() - startedAt);
       const added = newlyScanned.length - rescans.length;
       endLine = (cancelled
         ? STRINGS.MAIN.scanCancelledLine(seconds, newlyScanned.length)

@@ -84,7 +84,7 @@ test('each step sends its own request, for the chosen take, map and style', asyn
   await page.evaluate(() => window.__finishRun.resolve({
     saved: ['D:/takes/streak_blender/imported.blend'], images: [], elapsed_secs: 12, work_dir: 'D:/takes/streak_blender',
   }));
-  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12s.');
+  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12.0 s.');
   await expect(page.locator('#blender-results li')).toHaveText(['D:/takes/streak_blender/imported.blend']);
 
   await page.selectOption('#blender-map-select', 'dod_anzio');
@@ -119,7 +119,7 @@ test('render progress, then cancel', async ({ page }) => {
   await page.evaluate(() => window.__mockEmit('blender_progress', {
     line: 'frame 181 (2/977) 1.9s', done: 2, total: 977, frame_secs: 1.9, elapsed_secs: 65,
   }));
-  await expect(page.locator('#blender-progress')).toHaveText('Frame 2 of 977 (1.9 s each), 1m 05s so far');
+  await expect(page.locator('#blender-progress')).toHaveText('Frame 2 of 977 (1.9 s each), 1 min 5 s so far');
   // Then the bar fills by frames.
   await expect(page.locator('#blender-bar')).not.toHaveClass(/indeterminate/);
   await page.evaluate(() => window.__mockEmit('blender_progress', {
@@ -157,11 +157,11 @@ test('Import names itself with the sliding block, and its clock moves (#956)', a
   await expect(page.locator('#blender-bar')).toHaveJSProperty('hidden', false);
   await expect(page.locator('#blender-bar')).toHaveClass(/indeterminate/);
   await page.clock.runFor(12_000);
-  await expect(page.locator('#blender-progress')).toHaveText('Importing the demo into Blender… (12s so far)');
+  await expect(page.locator('#blender-progress')).toHaveText('Importing the demo into Blender… (12.0 s so far)');
 
   await page.evaluate(() => window.__finishRun.resolve({ saved: [], images: [], elapsed_secs: 12, work_dir: '' }));
-  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12s.');
+  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12.0 s.');
   await expect(page.locator('#blender-bar')).toHaveJSProperty('hidden', true);
   await page.clock.runFor(3_000);
-  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12s.');
+  await expect(page.locator('#blender-progress')).toHaveText('Import: done in 12.0 s.');
 });
