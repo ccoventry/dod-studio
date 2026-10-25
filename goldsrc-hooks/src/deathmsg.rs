@@ -73,6 +73,7 @@ use crate::names::console_name;
 use crate::scan;
 
 mod font;
+mod name_cap;
 mod scale;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
@@ -291,7 +292,7 @@ impl std::fmt::Display for Player {
 /// one players and server admins recognise (#537). `None` for an id that
 /// isn't a player's own account, such as the HLTV proxy's: that form only
 /// exists for individual accounts, base + a 32-bit account number.
-fn classic_steam_id(id: u64) -> Option<String> {
+pub(crate) fn classic_steam_id(id: u64) -> Option<String> {
     let account = id
         .checked_sub(STEAM_ID64_BASE)
         .filter(|&a| a <= u64::from(u32::MAX))?;
@@ -355,7 +356,7 @@ const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
 /// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
 /// the engine that printed it and does not change the account), or the newer
 /// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
-fn parse_steam_id(text: &str) -> Option<u64> {
+pub(crate) fn parse_steam_id(text: &str) -> Option<u64> {
     let bare = text
         .strip_prefix('[')
         .and_then(|t| t.strip_suffix(']'))
@@ -770,7 +771,7 @@ fn apply_max(max: i32) -> Result<(), String> {
     };
 
     for &(rva, field) in ARRAY_REFS {
-        let value = (array + field) as u32;
+        let value = (array + name_cap::field_for(base, rva, field)) as u32;
         if !unsafe { write_code(base, rva, &value.to_le_bytes()) } {
             return Err(format!("could not make +{rva:#x} writable"));
         }
@@ -793,6 +794,25 @@ fn apply_max(max: i32) -> Result<(), String> {
 
     PATCHED_MAX.store(if reverting { 0 } else { max }, Ordering::Release);
     Ok(())
+}
+
+/// Lets the kill feed hold names of up to 63 characters instead of 31, for
+/// `ds_player_change_name`'s long names (#1021). Once lifted it stays: the
+/// engine's own names are at most 31, so they show as before. See
+/// [`name_cap`].
+pub(crate) fn lift_name_cap() -> Result<(), String> {
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_verified(base)?;
+    let (array, _) = current_array(base);
+    // Safety: the stock check has passed for this module.
+    unsafe { name_cap::lift(base, array) }
+}
+
+/// Whether the kill feed holds 63-character names now.
+pub(crate) fn name_cap_lifted() -> bool {
+    engine::client_module_base().is_some_and(name_cap::lifted)
 }
 
 // ── The y detour ─────────────────────────────────────────────────────────────

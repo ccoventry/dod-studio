@@ -55,6 +55,8 @@ VIEW (POV demos: the recording player's own view)
       No screen shake from grenades going off nearby.
 
 PLAYERS
+  ds_player_change_name add id <slot|SteamID|self> [in <demo>,...] to <name>
+      Rename a player everywhere their name shows (kill feed, scoreboard, chat), up to 63 characters; also list, remove <n>, clear.
   ds_player_hide_hand_signals 0/1
       Replace players' hand-signal animations.
   ds_player_fix_model_flicker 0/1
