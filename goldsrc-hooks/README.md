@@ -311,14 +311,12 @@ for the `i686-pc-windows-msvc` target, not the default 64-bit one:
 
 ```
 rustup target add i686-pc-windows-msvc   # one-time
-# --lib matters: the injector is a standalone binary that does not depend on
-# the cdylib, so --bins alone silently leaves a stale DLL in place.
-cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --lib --bins
+cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --lib
 ```
 
-Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
-`inject.exe` (which loads the DLL too late to do anything in a running game:
-see below).
+Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll`.
+The crate has no binaries: it ships without an injector (#784), because a DLL
+loaded into a running game is too late to do anything (see below).
 
 ## Testing manually
 
@@ -354,15 +352,16 @@ Studio and `tools/game_probe.py` do:
    an unattended capture pipeline). `ds_debug_status` in the console lists
    what installed.
 
-**`inject.exe <pid> <dll>` into a game that is already running does not
-work.** The DLL loads and its worker thread starts, but `client.dll`'s
-`Initialize` has already run, so after 30 s the log says `timed out waiting
-for client.dll's Initialize to run; fixes not installed this session`.
-Nothing is registered: no `ds_*` commands or cvars (typing one does nothing,
-and `ds_` autocompletes nothing), no command or events pipe, and **no connect
-refusal**. A demo then plays as in the stock game. Checked on both builds
-(#784). The DLL has to load before `hl.exe` runs its first instruction (a
-suspended start), which is what HLAE's `-customLoader` does.
+**Loading the DLL into a game that is already running does not work**, which
+is why no injector ships with it (#784). The DLL loads and its worker thread
+starts, but `client.dll`'s `Initialize` has already run, so after 30 s the log
+says `timed out waiting for client.dll's Initialize to run; fixes not
+installed this session`. Nothing is registered: no `ds_*` commands or cvars
+(typing one does nothing, and `ds_` autocompletes nothing), no command or
+events pipe, and **no connect refusal**. A demo then plays as in the stock
+game. Checked on both builds (#784). The DLL has to load before `hl.exe` runs
+its first instruction (a suspended start), which is what HLAE's
+`-customLoader` does.
 
 ## Scripted in-game tests
 
@@ -389,7 +388,8 @@ or `--keep-console` grabs it as it is (#894).
 ## Status
 
 Per-feature details, and what is live-proven versus established by static
-analysis only, are in each module's `//!` doc and the linked `docs/` pages.
+analysis only, are in each module's `//!` doc and the linked `docs/` pages
+(listed under "The hook DLL" in the [docs index](../docs/README.md)).
 `tools/` holds a verifier per patched site, which checks the Rust constants
 against a real `client.dll` or `hw.dll`.
 
@@ -400,7 +400,7 @@ not the crosshairs, which stay stock -- the latter uploaded with mipmaps so they
 `dodstudio_hd` folder (`dod_addon`, or `dod` from before #415), `ds_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
-those files; see its README. It works the same on the 25th Anniversary
+those files; see its [README](tools/hd/README.md). It works the same on the 25th Anniversary
 `hw.dll` (#370), from that build's own offsets
 (`tools/verify_texture_hires_offsets.py --anniversary`).
 
