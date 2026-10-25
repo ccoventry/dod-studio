@@ -418,11 +418,12 @@ impl RenderManager {
             .map(|j| j.clip.take_folder.clone())
     }
 
-    /// What the first jobs to start need on the export drives: the largest
-    /// `max_concurrent` estimates among the queued jobs, which is what
-    /// `run_render_job`'s drive routing checks as they start together. Later
-    /// jobs reserve from what finished renders actually wrote (#120).
-    pub(crate) fn first_wave_bytes(&self, max_concurrent: usize) -> u64 {
+    /// What the first jobs to start need on the export drives, one figure per
+    /// job, since each job writes to one drive: the largest `max_concurrent`
+    /// estimates among the queued jobs, which is what `run_render_job`'s drive
+    /// routing checks as they start together. Later jobs reserve from what
+    /// finished renders actually wrote (#120).
+    pub(crate) fn first_wave_pieces(&self, max_concurrent: usize) -> Vec<u64> {
         let mut estimates: Vec<u64> = self
             .jobs
             .lock()
@@ -432,10 +433,8 @@ impl RenderManager {
             .map(|j| job_reservation_estimate(&j.clip, j.codec, &j.custom_codec_args))
             .collect();
         estimates.sort_unstable_by(|a, b| b.cmp(a));
+        estimates.truncate(max_concurrent.max(1));
         estimates
-            .into_iter()
-            .take(max_concurrent.max(1))
-            .fold(0u64, u64::saturating_add)
     }
 
     /// Takes these takes' rows out of the list before their folders go to the
@@ -1190,7 +1189,7 @@ pub async fn start_queued_render(
     if crate::take_cleanup_manager::makes_room(&app) && !config.export_directories.is_empty() {
         let need = native::hlcr::take_cleanup::SpaceNeed {
             targets: config.export_directories.clone(),
-            needed_bytes: state.first_wave_bytes(config.max_concurrent_renders),
+            pieces: state.first_wave_pieces(config.max_concurrent_renders),
             headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
         };
         let cleanup_app = app.clone();

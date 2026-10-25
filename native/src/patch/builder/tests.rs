@@ -1862,4 +1862,23 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
     let merged = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 3.0);
     assert!(merged <= estimate_batch_capture_bytes(&streaks, &config));
     assert_eq!(estimate_batch_capture_bytes(&[], &config), 0);
+
+    // Per drive (#716): the two that merge are one block, billed at both
+    // estimates; one far later, and another player's, are blocks of their own.
+    assert_eq!(
+        estimate_batch_capture_blocks(&streaks, &config),
+        vec![2 * one]
+    );
+    let mut other_player = streak(1000, 1200);
+    other_player.player_index = 1;
+    let spread = vec![
+        streak(2500, 2700),
+        streak(1000, 1200),
+        other_player,
+        streak(1100, 1300),
+    ];
+    let mut blocks = estimate_batch_capture_blocks(&spread, &config);
+    blocks.sort_unstable();
+    assert_eq!(blocks, vec![one, one, 2 * one]);
+    assert!(estimate_batch_capture_blocks(&[], &config).is_empty());
 }

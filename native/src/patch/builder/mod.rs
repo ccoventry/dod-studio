@@ -243,15 +243,61 @@ fn block_byte_estimate(config: &PatcherConfig, streak: &CaptureStreak, demo_fps:
 /// that `build_batch_queue` later merges into one recording count their
 /// shared footage twice: an upper bound, never an under-count.
 pub fn estimate_batch_capture_bytes(streaks: &[CaptureStreak], config: &PatcherConfig) -> u64 {
-    streaks
-        .iter()
-        .map(|streak| {
-            let demo_fps = Some(streak.demo_fps)
-                .filter(|&fps| fps > 0.0)
-                .unwrap_or(30.0);
-            block_byte_estimate(config, streak, demo_fps)
-        })
+    estimate_batch_capture_blocks(streaks, config)
+        .into_iter()
         .fold(0u64, u64::saturating_add)
+}
+
+/// What each recording block of a batch is expected to need on the one
+/// capture drive it is written to, before `build_batch_queue` runs: the
+/// pieces the automatic take cleanup (#644) makes room for, drive by drive.
+/// Highlights of one demo and player whose recordings would merge
+/// (`blocks_merge`, as `build_batch_queue` decides it) count as one block,
+/// billed at the sum of their own estimates, so a block is never
+/// under-counted.
+pub fn estimate_batch_capture_blocks(
+    streaks: &[CaptureStreak],
+    config: &PatcherConfig,
+) -> Vec<u64> {
+    let fps_of = |streak: &CaptureStreak| {
+        Some(streak.demo_fps)
+            .filter(|&fps| fps > 0.0)
+            .unwrap_or(30.0)
+    };
+    let mut order: Vec<&CaptureStreak> = streaks.iter().collect();
+    order.sort_by(|a, b| {
+        (&a.source_demo, a.player_index, first_kill_frame(a)).cmp(&(
+            &b.source_demo,
+            b.player_index,
+            first_kill_frame(b),
+        ))
+    });
+    let mut blocks: Vec<u64> = Vec::new();
+    let mut prev: Option<(&str, usize, i32)> = None;
+    for streak in order {
+        let demo_fps = fps_of(streak);
+        let bytes = block_byte_estimate(config, streak, demo_fps);
+        let lead = (config.record_start_lead * demo_fps) as i32;
+        let trail =
+            ((config.record_stop_trail + take_separation_seconds(config)) * demo_fps) as i32;
+        let merges = prev.is_some_and(|(demo, player, prev_end)| {
+            demo == streak.source_demo
+                && player == streak.player_index
+                && blocks_merge(prev_end, first_kill_frame(streak), lead, trail)
+        });
+        let end = last_kill_frame(streak);
+        match (merges, blocks.last_mut(), prev.as_mut()) {
+            (true, Some(last), Some(p)) => {
+                *last = last.saturating_add(bytes);
+                p.2 = p.2.max(end);
+            }
+            _ => {
+                blocks.push(bytes);
+                prev = Some((&streak.source_demo, streak.player_index, end));
+            }
+        }
+    }
+    blocks
 }
 
 /// The hook DLL's `ds_capture_stay_behind` (goldsrc-hooks `hlae_window.rs`),

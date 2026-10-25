@@ -931,7 +931,7 @@ export const STRINGS = {
     failedToast: (n, error) =>
       `Couldn't delete ${n === 1 ? 'a finished take' : `${n} finished takes`}: ${error}. Scan for Takes to list it again.`,
     shortToast: (reason, needed, available) =>
-      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} of room, and deleting every finished take would give only ${available}. No takes were deleted.`,
+      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} free on one drive, and deleting every finished take would leave at most ${available} on any one drive. No takes were deleted.`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────

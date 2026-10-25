@@ -117,7 +117,8 @@ describe('the reports', () => {
       short: { needed_bytes: 40 * 1073741824, available_bytes: 1073741824 },
     }, gb);
     expect(short.level).toBe('warning');
-    expect(short.message).toContain('The capture needs 40.0 GB');
+    expect(short.message).toContain('The capture needs 40.0 GB free on one drive');
+    expect(short.message).toContain('at most 1.0 GB on any one drive');
     expect(short.message).toContain('No takes were deleted');
     const failed = doneToast({ reason: 'finished', method: 'delete', deleted: [], failed: [{ take_folder: 'x', error: 'in use' }] }, gb);
     expect(failed.level).toBe('error');

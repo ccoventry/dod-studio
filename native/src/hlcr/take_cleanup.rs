@@ -155,57 +155,190 @@ pub fn volume_of(path: &Path) -> String {
     }
 }
 
-/// Free space on the drives a job writes to, and what the job needs there.
+/// Free space on the drives a job writes to, and the pieces it writes there.
 ///
-/// The drives are summed, each keeping `headroom_bytes` back: a capture
-/// spreads its blocks over every Destinations drive and refuses to leave one
-/// with less than `MIN_DRIVE_HEADROOM_BYTES`, and a render picks the first
-/// export drive with room plus a safety margin.
+/// Each piece (a render job, a capture block) is written whole to one drive,
+/// so free space is never added up across drives: two drives with 60% of a
+/// piece free each don't hold it. Pieces are placed largest first on the
+/// first drive, in target order, with room past `headroom_bytes`: the rule
+/// `build_batch_queue`'s first-fit-decreasing uses for capture blocks
+/// (`MIN_DRIVE_HEADROOM_BYTES`), and close to a render's, which routes each
+/// job to the first export drive with room plus a safety margin.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoomLedger {
-    free: BTreeMap<String, u64>,
+    /// Each drive's free space, keyed by `volume_of`, in target order.
+    drives: Vec<(String, u64)>,
     headroom_bytes: u64,
-    needed_bytes: u64,
+    /// Largest first.
+    pieces: Vec<u64>,
+}
+
+/// What doesn't fit: the largest piece no drive has room for, and the most
+/// room any one drive has left once the larger pieces are placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shortfall {
+    pub piece_bytes: u64,
+    pub best_drive_bytes: u64,
 }
 
 impl RoomLedger {
-    /// `free` is each drive's free space, keyed by `volume_of`.
-    pub fn new(free: BTreeMap<String, u64>, headroom_bytes: u64, needed_bytes: u64) -> Self {
+    /// `drives` is each drive's free space, keyed by `volume_of`; a drive
+    /// listed twice counts once, with its first entry.
+    pub fn new(drives: Vec<(String, u64)>, headroom_bytes: u64, mut pieces: Vec<u64>) -> Self {
+        let mut unique: Vec<(String, u64)> = Vec::with_capacity(drives.len());
+        for (volume, free) in drives {
+            if !unique.iter().any(|(v, _)| *v == volume) {
+                unique.push((volume, free));
+            }
+        }
+        pieces.sort_unstable_by(|a, b| b.cmp(a));
         Self {
-            free,
+            drives: unique,
             headroom_bytes,
-            needed_bytes,
+            pieces,
         }
     }
 
-    /// What the job can use: each drive's free space past its headroom.
-    pub fn usable_bytes(&self) -> u64 {
-        self.free
-            .values()
-            .map(|f| f.saturating_sub(self.headroom_bytes))
-            .fold(0u64, u64::saturating_add)
+    /// `None` when every piece has a drive, else what's left over.
+    pub fn shortfall(&self) -> Option<Shortfall> {
+        let mut usable: Vec<u64> = self
+            .drives
+            .iter()
+            .map(|(_, f)| f.saturating_sub(self.headroom_bytes))
+            .collect();
+        for &piece in &self.pieces {
+            match usable.iter_mut().find(|u| **u >= piece) {
+                Some(u) => *u -= piece,
+                None => {
+                    return Some(Shortfall {
+                        piece_bytes: piece,
+                        best_drive_bytes: usable.iter().copied().max().unwrap_or(0),
+                    });
+                }
+            }
+        }
+        None
     }
 
     pub fn has_room(&self) -> bool {
-        self.usable_bytes() >= self.needed_bytes
-    }
-
-    pub fn needed_bytes(&self) -> u64 {
-        self.needed_bytes
+        self.shortfall().is_none()
     }
 
     /// Whether freeing space on `volume` helps this job at all: a take on a
     /// drive the job doesn't write to frees nothing it can use.
     pub fn counts(&self, volume: &str) -> bool {
-        self.free.contains_key(volume)
+        self.drives.iter().any(|(v, _)| v == volume)
     }
 
     /// Counts `bytes` freed on `volume`.
     pub fn add(&mut self, volume: &str, bytes: u64) {
-        if let Some(free) = self.free.get_mut(volume) {
+        if let Some((_, free)) = self.drives.iter_mut().find(|(v, _)| v == volume) {
             *free = free.saturating_add(bytes);
         }
     }
+}
+
+/// Picks which finished takes to delete so every piece in `ledger` fits,
+/// counting each take's size only on its own drive. `volumes[i]` is
+/// candidate `i`'s drive, candidates oldest first; `size_of(i)` sizes one
+/// (`None` for a take the delete would refuse), and is asked only as far as
+/// needed. Returns candidate indexes, oldest first.
+///
+/// The drive that fits the job by deleting the fewest bytes, oldest takes
+/// first, wins; takes on the other drives stay. When no one drive can (only
+/// possible with several pieces), the drive with the most to give is used up
+/// and the search goes on, and takes that turn out not to be needed are put
+/// back, newest first.
+pub fn choose_deletions(
+    ledger: &RoomLedger,
+    volumes: &[String],
+    mut size_of: impl FnMut(usize) -> Option<u64>,
+) -> Result<Vec<usize>, Shortfall> {
+    let with = |chosen: &[(usize, u64)]| {
+        let mut l = ledger.clone();
+        for &(i, bytes) in chosen {
+            l.add(&volumes[i], bytes);
+        }
+        l
+    };
+    // Each drive's candidates, oldest first, and how far each is used.
+    let per_drive: Vec<Vec<usize>> = ledger
+        .drives
+        .iter()
+        .map(|(v, _)| (0..volumes.len()).filter(|&i| volumes[i] == *v).collect())
+        .collect();
+    let mut used = vec![0usize; per_drive.len()];
+    let mut chosen: Vec<(usize, u64)> = Vec::new();
+
+    while !with(&chosen).has_room() {
+        let base = with(&chosen);
+        // (drive, takes used up to, bytes freed, takes sized)
+        let mut best: Option<(usize, usize, u64, Vec<(usize, u64)>)> = None;
+        let mut fullest: Option<(usize, u64)> = None;
+        for (d, list) in per_drive.iter().enumerate() {
+            if used[d] >= list.len() {
+                continue;
+            }
+            let mut trial = base.clone();
+            let mut freed = 0u64;
+            let mut taken = Vec::new();
+            let mut fits_at = None;
+            for (k, &i) in list.iter().enumerate().skip(used[d]) {
+                if let Some(bytes) = size_of(i) {
+                    trial.add(&volumes[i], bytes);
+                    freed = freed.saturating_add(bytes);
+                    taken.push((i, bytes));
+                }
+                if trial.has_room() {
+                    fits_at = Some(k + 1);
+                    break;
+                }
+            }
+            match fits_at {
+                Some(upto) => {
+                    if best.as_ref().is_none_or(|b| freed < b.2) {
+                        best = Some((d, upto, freed, taken));
+                    }
+                }
+                None => {
+                    if fullest.is_none_or(|(_, f)| freed > f) {
+                        fullest = Some((d, freed));
+                    }
+                }
+            }
+        }
+        if let Some((d, upto, _, taken)) = best {
+            used[d] = upto;
+            chosen.extend(taken);
+            break;
+        }
+        let Some((d, _)) = fullest else {
+            // Every candidate is in, and the job still doesn't fit.
+            return Err(with(&chosen).shortfall().unwrap_or(Shortfall {
+                piece_bytes: 0,
+                best_drive_bytes: 0,
+            }));
+        };
+        for &i in &per_drive[d][used[d]..] {
+            if let Some(bytes) = size_of(i) {
+                chosen.push((i, bytes));
+            }
+        }
+        used[d] = per_drive[d].len();
+    }
+
+    // Put back what isn't needed, newest first.
+    chosen.sort_by_key(|&(i, _)| i);
+    let mut k = chosen.len();
+    while k > 0 {
+        k -= 1;
+        let mut without = chosen.clone();
+        without.remove(k);
+        if with(&without).has_room() {
+            chosen = without;
+        }
+    }
+    Ok(chosen.into_iter().map(|(i, _)| i).collect())
 }
 
 /// A take whose clip is finished, and when.
@@ -254,12 +387,13 @@ pub fn finished_takes(capture_dirs: &[PathBuf], busy: &HashSet<String>) -> Vec<F
     takes
 }
 
-/// What a job about to start needs: the drives it writes to, how much, and
+/// What a job about to start needs: the drives it writes to, the pieces it
+/// writes (each render job, or each capture block, whole on one drive), and
 /// how much each drive keeps back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpaceNeed {
     pub targets: Vec<PathBuf>,
-    pub needed_bytes: u64,
+    pub pieces: Vec<u64>,
     pub headroom_bytes: u64,
 }
 
@@ -282,8 +416,10 @@ pub enum RoomPlan {
     Unknown,
     /// Delete these, oldest first, and the job fits.
     Delete(Vec<TakeDeletion>),
-    /// Every finished take together still isn't enough, so none is deleted
-    /// for a job that won't fit anyway.
+    /// Even with every finished take on the job's drives deleted, a piece
+    /// has no drive with room for it, so none is deleted for a job that won't
+    /// fit anyway. `needed_bytes` is that piece; `available_bytes` is the most
+    /// room one drive would have.
     Short {
         needed_bytes: u64,
         available_bytes: u64,
@@ -304,18 +440,18 @@ pub fn plan_room(
     free_of: impl Fn(&Path) -> u64,
     mut progress: impl FnMut(RoomStep),
 ) -> RoomPlan {
-    let mut free = BTreeMap::new();
+    let mut drives = Vec::new();
     for target in &need.targets {
         let bytes = free_of(target);
         if bytes == u64::MAX {
             return RoomPlan::Unknown;
         }
-        free.insert(volume_of(target), bytes);
+        drives.push((volume_of(target), bytes));
     }
-    if free.is_empty() {
+    if drives.is_empty() {
         return RoomPlan::Unknown;
     }
-    let mut ledger = RoomLedger::new(free, need.headroom_bytes, need.needed_bytes);
+    let ledger = RoomLedger::new(drives, need.headroom_bytes, need.pieces.clone());
     if ledger.has_room() {
         return RoomPlan::Enough;
     }
@@ -325,26 +461,42 @@ pub fn plan_room(
         .into_iter()
         .filter(|t| ledger.counts(&volume_of(&t.take_folder)))
         .collect();
+    let volumes: Vec<String> = candidates
+        .iter()
+        .map(|t| volume_of(&t.take_folder))
+        .collect();
     let total = candidates.len();
-    let mut chosen = Vec::new();
-    for (i, take) in candidates.iter().enumerate() {
-        progress(RoomStep::Measuring { done: i, total });
-        // The same check the delete runs; a take it refuses is skipped here
-        // rather than counted as space that will never come back.
-        let Ok(plan) = plan_take_deletion(&take.take_folder, capture_dirs) else {
-            continue;
-        };
-        ledger.add(&volume_of(&take.take_folder), plan.size_bytes);
-        chosen.push(plan);
-        if ledger.has_room() {
-            progress(RoomStep::Measuring { done: total, total });
-            return RoomPlan::Delete(chosen);
+    // Each take is sized once, when the search first needs it.
+    let mut sized: Vec<Option<Option<TakeDeletion>>> = (0..total).map(|_| None).collect();
+    let mut measured = 0usize;
+    let result = choose_deletions(&ledger, &volumes, |i| {
+        if sized[i].is_none() {
+            progress(RoomStep::Measuring {
+                done: measured,
+                total,
+            });
+            measured += 1;
+            // The same check the delete runs; a take it refuses is skipped
+            // rather than counted as space that will never come back.
+            sized[i] = Some(plan_take_deletion(&candidates[i].take_folder, capture_dirs).ok());
         }
-    }
+        sized[i]
+            .as_ref()
+            .and_then(|p| p.as_ref())
+            .map(|p| p.size_bytes)
+    });
     progress(RoomStep::Measuring { done: total, total });
-    RoomPlan::Short {
-        needed_bytes: ledger.needed_bytes(),
-        available_bytes: ledger.usable_bytes(),
+    match result {
+        Ok(chosen) => RoomPlan::Delete(
+            chosen
+                .into_iter()
+                .filter_map(|i| sized[i].take().flatten())
+                .collect(),
+        ),
+        Err(short) => RoomPlan::Short {
+            needed_bytes: short.piece_bytes,
+            available_bytes: short.best_drive_bytes,
+        },
     }
 }
 
@@ -493,27 +645,122 @@ mod tests {
         );
     }
 
+    fn drives(list: &[(&str, u64)]) -> Vec<(String, u64)> {
+        list.iter().map(|(v, f)| (v.to_string(), *f)).collect()
+    }
+
+    fn vols(list: &[&str]) -> Vec<String> {
+        list.iter().map(|v| v.to_string()).collect()
+    }
+
     #[test]
-    fn the_ledger_sums_drives_past_their_headroom() {
-        let free = BTreeMap::from([("c:".to_string(), 30), ("d:".to_string(), 5)]);
-        let mut ledger = RoomLedger::new(free, 10, 25);
+    fn each_drive_keeps_its_headroom_and_a_piece_needs_one_drive() {
+        let mut ledger = RoomLedger::new(drives(&[("c:", 30), ("d:", 5)]), 10, vec![25]);
         // 20 usable on C:, none on D: (5 is below its headroom).
-        assert_eq!(ledger.usable_bytes(), 20);
-        assert!(!ledger.has_room());
+        assert_eq!(
+            ledger.shortfall(),
+            Some(Shortfall {
+                piece_bytes: 25,
+                best_drive_bytes: 20
+            })
+        );
         // Freeing on D: first fills its headroom.
-        ledger.add("d:", 5);
-        assert_eq!(ledger.usable_bytes(), 20);
+        ledger.add("d:", 25);
+        assert!(!ledger.has_room(), "D: has 20 usable, still short of 25");
         ledger.add("d:", 5);
         assert!(ledger.has_room());
     }
 
     #[test]
     fn space_on_a_drive_the_job_does_not_use_does_not_count() {
-        let free = BTreeMap::from([("c:".to_string(), 0)]);
-        let mut ledger = RoomLedger::new(free, 0, 10);
+        let mut ledger = RoomLedger::new(drives(&[("c:", 0)]), 0, vec![10]);
         assert!(!ledger.counts("e:"));
         ledger.add("e:", 100);
         assert!(!ledger.has_room());
+    }
+
+    /// The case #716's review found: 60% of a job free on each of two drives
+    /// used to add up to enough, and nothing was deleted.
+    #[test]
+    fn two_drives_with_sixty_percent_each_do_not_hold_one_job() {
+        let ledger = RoomLedger::new(drives(&[("d:", 60), ("e:", 60)]), 0, vec![100]);
+        assert_eq!(
+            ledger.shortfall(),
+            Some(Shortfall {
+                piece_bytes: 100,
+                best_drive_bytes: 60
+            })
+        );
+    }
+
+    #[test]
+    fn room_is_made_on_one_drive_by_its_oldest_takes() {
+        let ledger = RoomLedger::new(drives(&[("d:", 60), ("e:", 60)]), 0, vec![100]);
+        // Oldest first: D: 30, E: 45, D: 20. Making room on D: takes 50 (both
+        // of its takes), on E: 45, so E:'s take goes and D:'s stay.
+        let volumes = vols(&["d:", "e:", "d:"]);
+        let sizes = [30, 45, 20];
+        let chosen = choose_deletions(&ledger, &volumes, |i| Some(sizes[i])).unwrap();
+        assert_eq!(chosen, vec![1]);
+
+        // Only D: has takes: both of them go, E:'s free space doesn't help.
+        let volumes = vols(&["d:", "d:"]);
+        let sizes = [30, 20];
+        let chosen = choose_deletions(&ledger, &volumes, |i| Some(sizes[i])).unwrap();
+        assert_eq!(chosen, vec![0, 1]);
+    }
+
+    #[test]
+    fn it_says_so_when_no_one_drive_can_be_made_to_fit() {
+        let ledger = RoomLedger::new(drives(&[("d:", 60), ("e:", 60)]), 0, vec![100]);
+        // 30 more on each drive: 180 in all, but 90 at most on one.
+        let volumes = vols(&["d:", "e:"]);
+        let short = choose_deletions(&ledger, &volumes, |_| Some(30)).unwrap_err();
+        assert_eq!(
+            short,
+            Shortfall {
+                piece_bytes: 100,
+                best_drive_bytes: 90
+            }
+        );
+        // A take the delete refuses frees nothing.
+        let short = choose_deletions(&ledger, &vols(&["d:"]), |_| None).unwrap_err();
+        assert_eq!(short.best_drive_bytes, 60);
+    }
+
+    #[test]
+    fn a_job_that_fits_on_one_drive_needs_nothing_while_another_is_full() {
+        let ledger = RoomLedger::new(drives(&[("d:", 0), ("e:", 150)]), 0, vec![100]);
+        assert!(ledger.has_room());
+        let chosen = choose_deletions(&ledger, &vols(&["d:", "e:"]), |_| {
+            panic!("nothing is sized when the job fits")
+        })
+        .unwrap();
+        assert!(chosen.is_empty());
+    }
+
+    #[test]
+    fn several_pieces_are_placed_largest_first_across_drives() {
+        // Two blocks of 60 fit one on each 70-byte drive.
+        assert!(RoomLedger::new(drives(&[("d:", 70), ("e:", 70)]), 0, vec![60, 60]).has_room());
+        // 80 and 50 don't: 80 has no drive. Freeing 10 on D: places 80 there
+        // and 50 on E:.
+        let ledger = RoomLedger::new(drives(&[("d:", 70), ("e:", 70)]), 0, vec![50, 80]);
+        assert!(!ledger.has_room());
+        let chosen = choose_deletions(&ledger, &vols(&["e:", "d:"]), |i| Some([5, 10][i])).unwrap();
+        assert_eq!(chosen, vec![1]);
+    }
+
+    #[test]
+    fn pieces_that_need_room_on_two_drives_use_both() {
+        // Two blocks of 60, both drives full, one 70-byte take on each: no one
+        // drive's takes are enough, so D: is used up and then E:'s take
+        // finishes the job.
+        let ledger = RoomLedger::new(drives(&[("d:", 0), ("e:", 0)]), 0, vec![60, 60]);
+        let volumes = vols(&["d:", "e:"]);
+        let sizes = [70, 70];
+        let chosen = choose_deletions(&ledger, &volumes, |i| Some(sizes[i])).unwrap();
+        assert_eq!(chosen, vec![0, 1]);
     }
 
     #[test]
@@ -622,7 +869,7 @@ mod tests {
     fn need(capture: &Scratch, needed: u64) -> SpaceNeed {
         SpaceNeed {
             targets: vec![capture.path().to_path_buf()],
-            needed_bytes: needed,
+            pieces: vec![needed],
             headroom_bytes: 0,
         }
     }
@@ -701,7 +948,7 @@ mod tests {
         ));
         let no_targets = SpaceNeed {
             targets: Vec::new(),
-            needed_bytes: 100,
+            pieces: vec![100],
             headroom_bytes: 0,
         };
         assert!(matches!(
