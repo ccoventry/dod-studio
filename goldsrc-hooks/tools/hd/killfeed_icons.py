@@ -71,17 +71,32 @@ the upscaled one is kept beside it as `<file>.bak`, and every run paints
 over that copy; dodstudio_hd/killfeed_icons.json records which files hold
 which version of the icons, so a finished sheet is skipped.
 
+--even builds the atlas `ds_hud_deathmsg layout even` draws from instead
+(#1022, build_even): every kill-feed icon in a box EVEN_HEIGHT rows tall,
+each long gun's barrel top on one row, nothing cut. It leaves the sheets
+alone, and so the default layout.
+
 usage: python killfeed_icons.py <sprites out_dir> [--only d_kar,d_mp40]
                                 [--review DIR] [--force]
+       python killfeed_icons.py <sprites out_dir> --even [--sheets DIR]
+                                [--sprite-dir DIR] [--force]
   out_dir   dodstudio_hd/sprites/<style>, where sprites_hd.py put the sheets
   --only    just these icons
   --review  also write comparison sheets (stock | #733 upscale | new, at
             kill-feed scale 1, 2 and 3 on dark and bright) to DIR
   --force   repaint even if the record says the sheet is current
+  --even    build the even layout's atlas: its HD frames into out_dir, its
+            sprite and rect table into --sprite-dir
+  --sheets  with --even: read the HD sheets (for the icons with no model)
+            and the HD model skins next to them from this
+            dodstudio_hd/sprites/<style> instead of out_dir
+  --sprite-dir  with --even: where sprites/dodstudio_killfeed.spr and .txt
+            go (default <game>_addon/sprites)
 env: HD_STYLE (default ultrasharp), HD_GAME, HD_GAME_FOLDER, REALESRGAN
-Reads the game's models and sprites; writes only in dodstudio_hd.
+Reads the game's models and sprites; writes only in dodstudio_hd, and with
+--even the atlas's sprite and table in the addon folder's sprites.
 """
-import argparse, hashlib, json, os, re, shutil, sys, tempfile
+import argparse, glob, hashlib, json, math, os, re, shutil, struct, sys, tempfile
 from dataclasses import dataclass
 
 import numpy as np
@@ -1835,6 +1850,293 @@ def build(out_dir, only=None, review=None, force=False, log=print):
     return done_icons
 
 
+# -- the even layout's atlas (#1022) -------------------------------------------
+#
+# `ds_hud_deathmsg layout even` (R2, the user's pick on #1022): every
+# kill-feed icon in a box EVEN_HEIGHT stock rows tall, every long gun's
+# barrel top on row EVEN_BARREL_ROW, nothing cut, so every line of the feed
+# steps the same. hud.txt's rects can't hold that: the engine samples the
+# texture from the same rect the layout reads, and Valve's 256x256 sheets are
+# packed too tight for 27 of the 35 icons to grow to 26 rows in place. So
+# the icons go into an atlas of our own, sprites/ATLAS_NAME.spr, with a rect
+# table beside it that the hook reads (deathmsg/even.rs).
+#
+# The .spr's own pixels are a placeholder made from the rects alone: the hook
+# draws the even layout only once every frame went up with its HD file (the
+# icons themselves), so the stock pixels never show. Kept that way, the .spr
+# and its HD key don't depend on the style, and one sprite serves every
+# style's frames.
+
+EVEN_HEIGHT = 26
+EVEN_BARREL_ROW = 8
+# Bump when the even atlas's look or rule changes: a style's atlas built by
+# an older one is built again.
+EVEN_VERSION = 1
+ATLAS_NAME = "dodstudio_killfeed"
+ATLAS_TABLE_VERSION = 1
+ATLAS_SIZE = 256  # stock px per frame side, as Valve's sheets: 1024 at 4x, gl_max_size 1024 as theirs
+ATLAS_GAP = 2  # stock px between boxes and round each frame's edge, so no mip level reads a neighbour
+ATLAS_MAX_FRAMES = 32  # the hook's limit (one bit per frame)
+PLACEHOLDER = 0  # the palette index of a box's stock pixels; 255 is transparent
+
+# The rifles, SMGs and MGs: as wide as Valve's drawing, shrunk with the barrel
+# kept on its row when something hangs below the box.
+LONG_GUNS = frozenset({
+    "d_kar", "d_scopedkar", "d_k43", "d_garand", "d_spring", "d_m1carbine", "d_fcarbine",
+    "d_enfield", "d_scopedenfield", "d_thompson", "d_greasegun", "d_mp40", "d_mp44", "d_sten",
+    "d_bar", "d_30cal", "d_mg42", "d_mg34", "d_fg42", "d_scopedfg42", "d_bren"})
+# Today's size, only moved onto the barrel row.
+PISTOLS = frozenset({"d_colt", "d_luger", "d_webley"})
+LAUNCHERS = frozenset({"d_bazooka", "d_pschreck", "d_piat"})
+# These stand far above or below the barrel line (the Bren's magazine on top,
+# the launchers' shields and frames): they keep their size and move up or
+# down as little as fits, rather than shrink to half.
+MOVE_TO_FIT = frozenset({"d_bren"}) | LAUNCHERS
+
+
+def even_layout(name):
+    """The Layout `layout even` draws icon `name` with. Knives, the spade and
+    grenades (anything else in ICONS) keep their own size, centred."""
+    below = "move" if name in MOVE_TO_FIT else "shrink"
+    if name in LONG_GUNS:
+        return Layout(height=EVEN_HEIGHT, barrel_row=EVEN_BARREL_ROW, size="width", below=below)
+    if name in PISTOLS or name in LAUNCHERS:
+        return Layout(height=EVEN_HEIGHT, barrel_row=EVEN_BARREL_ROW, size="natural", below=below)
+    return Layout(height=EVEN_HEIGHT, size="natural")
+
+
+def resize_rgba(img, w, h):
+    """`img` (RGBA float) resampled to w x h, premultiplied so no transparent
+    texel's colour leaks into an edge."""
+    a = img[..., 3]
+    planes = [img[..., c] * a for c in range(3)] + [a]
+    out = np.dstack([np.asarray(Image.fromarray(p.astype(np.float32), "F").resize((w, h), Image.LANCZOS))
+                     for p in planes]).clip(0, 1)
+    rgb = out[..., :3] / np.maximum(out[..., 3:4], 1e-9)
+    return np.dstack([np.where(out[..., 3:4] > 0, rgb, 0).clip(0, 1), out[..., 3]])
+
+
+def fit_box(img, w, h, height, scale):
+    """An icon of w x h stock px (`img` at `scale`x) in a box `height` rows
+    tall: shrunk to the height when taller, centred, the box as wide as the
+    icon then is. (rgba at scale, (box w, box h))."""
+    f = min(1.0, height / h)
+    box_w = max(1, int(math.ceil(w * f - 1e-9)))
+    if f < 1:
+        img = resize_rgba(img, max(1, round(w * scale * f)), max(1, round(h * scale * f)))
+    out = np.zeros((height * scale, box_w * scale, 4))
+    ih, iw = img.shape[:2]
+    oy, ox = (out.shape[0] - ih) // 2, (out.shape[1] - iw) // 2
+    out[max(oy, 0):max(oy, 0) + min(ih, out.shape[0]), max(ox, 0):max(ox, 0) + min(iw, out.shape[1])] = \
+        img[max(-oy, 0):max(-oy, 0) + min(ih, out.shape[0]), max(-ox, 0):max(-ox, 0) + min(iw, out.shape[1])]
+    return out, (box_w, height)
+
+
+def kept_icon(dod, name, sheet4, scale, height=EVEN_HEIGHT):
+    """A KEEP_UPSCALE icon for the atlas: its own pixels in the HD sheet
+    `sheet4` (RGBA float, `scale`x the stock sheet), a neighbouring icon's
+    bits inside the rect left out as paint() does, in a box `height` rows
+    tall (fit_box)."""
+    sheet, x, y, w, h = hud_rect(dod, name)
+    stock, _, _ = stock_icon(dod, sheet, x, y, w, h)
+    own = ndimage.binary_dilation(own_mask(stock[..., 3]), iterations=1)
+    region = sheet4[y * scale:(y + h) * scale, x * scale:(x + w) * scale].copy()
+    region[..., 3] *= np.kron(own, np.ones((scale, scale)))
+    return fit_box(region, w, h, height, scale)
+
+
+def pack(sizes, frame=ATLAS_SIZE, gap=ATLAS_GAP):
+    """Shelf packing of boxes {key: (w, h)} into frames `frame` px square:
+    tallest then widest first, each into the first shelf with room, else a
+    new shelf, else a new frame. ({key: (frame, x, y)}, frame count). The
+    order is fixed by the sizes and keys alone, so the same icons always
+    land in the same places."""
+    order = sorted(sizes, key=lambda k: (-sizes[k][1], -sizes[k][0], k))
+    frames = []  # per frame, its shelves: [top, height, next free x]
+    out = {}
+    for k in order:
+        w, h = sizes[k]
+        if w <= 0 or h <= 0 or w + 2 * gap > frame or h + 2 * gap > frame:
+            raise ValueError(f"{k}: a {w}x{h} box doesn't fit a {frame}x{frame} frame")
+        spot = None
+        for fi, shelves in enumerate(frames):
+            for s in shelves:
+                if h <= s[1] and s[2] + w + gap <= frame:
+                    spot = (fi, s[2], s[0])
+                    s[2] += w + gap
+                    break
+            if spot:
+                break
+            top = shelves[-1][0] + shelves[-1][1] + gap
+            if top + h + gap <= frame:
+                shelves.append([top, h, gap + w + gap])
+                spot = (fi, gap, top)
+                break
+        if spot is None:
+            frames.append([[gap, h, gap + w + gap]])
+            spot = (len(frames) - 1, gap, gap)
+        out[k] = spot
+    return out, len(frames)
+
+
+def atlas_palette():
+    """The placeholder's palette: PLACEHOLDER grey, 255 (transparent) blue
+    as in Valve's alpha-test sheets."""
+    pal = bytearray(768)
+    pal[PLACEHOLDER * 3:PLACEHOLDER * 3 + 3] = bytes((128, 128, 128))
+    pal[765:768] = bytes((0, 0, 255))
+    return bytes(pal)
+
+
+def placeholder_frames(boxes, count, size=ATLAS_SIZE):
+    """Each frame's stock indices: PLACEHOLDER inside every box, 255 (cut
+    out) elsewhere. boxes: [(frame, x, y, w, h)]."""
+    frames = [np.full((size, size), 255, np.uint8) for _ in range(count)]
+    for f, x, y, w, h in boxes:
+        frames[f][y:y + h, x:x + w] = PLACEHOLDER
+    return [fr.tobytes() for fr in frames]
+
+
+def spr_bytes(frames, palette, size=ATLAS_SIZE):
+    """An IDSP version 2 sprite laid out as Valve's HUD sheets are (parallel,
+    alpha-test: index 255 cut out, synctype 1, origin at the frame's centre):
+    one single frame of `size` x `size` indices per entry of `frames`."""
+    if not frames or len(palette) != 768 or any(len(f) != size * size for f in frames):
+        raise ValueError("frames must be size x size indices, the palette 768 bytes")
+    head = struct.pack("<4s3if3ifi", b"IDSP", 2, 2, 3, math.hypot(size, size) / 2, size, size, len(frames), 0.0, 1)
+    head += struct.pack("<h", 256) + palette
+    return head + b"".join(struct.pack("<5i", 0, -(size // 2), size // 2, size, size) + f for f in frames)
+
+
+def table_text(rects, frames):
+    """The rect table the hook reads: a header line, then `name frame x y w h`
+    per icon (stock px of the atlas's frames), sorted by name."""
+    lines = [f"// DoD Studio's kill-feed atlas (#1022), written by killfeed_icons.py --even.",
+             f"// ds_hud_deathmsg layout even draws each icon from sprites/{ATLAS_NAME}.spr: name frame x y w h.",
+             f"{ATLAS_NAME} {ATLAS_TABLE_VERSION} {frames}"]
+    lines += [f"{n} {f} {x} {y} {w} {h}" for n, (f, x, y, w, h) in sorted(rects.items())]
+    return "\n".join(lines) + "\n"
+
+
+def write_whole(path, data):
+    """`data` (bytes) to `path` via `<path>.part`, so only a whole file ever
+    has the real name."""
+    part = path + ".part"
+    with open(part, "wb") as f:
+        f.write(data)
+    os.replace(part, path)
+
+
+def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print):
+    """The even layout's atlas for the style in force: every kill-feed icon of
+    the game in its box (even_layout; KEEP_UPSCALE icons from the HD sheets,
+    kept_icon), packed into ATLAS_SIZE frames. Writes the HD frames
+    (`<ATLAS_NAME>_<n>_<hash>.tga`) into `out_dir` (dodstudio_hd/sprites/
+    <style>), and the sprite and rect table into `sprite_dir` (default
+    <game>_addon/sprites). Returns how many icons the atlas holds."""
+    import hdcommon as C
+    import styles as S
+    style = S.style_from_env()
+    dod = C.dod_dir()
+    sheets_dir = sheets_dir or out_dir
+    hd = os.path.dirname(os.path.dirname(os.path.abspath(sheets_dir)))
+    models_dir = os.path.join(hd, "models", style)
+    if sprite_dir is None:
+        sprite_dir = os.path.join(C.game_root(), C.game_folder() + "_addon", "sprites")
+    record_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(out_dir))), RECORD)
+    record = load_record(record_path)
+    spr_path = os.path.join(sprite_dir, ATLAS_NAME + ".spr")
+    txt_path = os.path.join(sprite_dir, ATLAS_NAME + ".txt")
+    entry = record.get(style, {}).get(ATLAS_NAME) or {}
+    if not force and entry.get("version") == [VERSION, EVEN_VERSION] and os.path.exists(spr_path) \
+            and file_sha(spr_path) == entry.get("spr_sha") \
+            and entry.get("frames") and all(os.path.exists(os.path.join(out_dir, t)) for t in entry["frames"]):
+        log(f"{ATLAS_NAME}: the even layout's atlas is already built (v{VERSION}.{EVEN_VERSION})")
+        return len(entry.get("icons", []))
+
+    entries = hud_entries(dod)
+    names = killfeed_names(entries)
+    unknown = [n for n in names if n not in ICONS and n not in KEEP_UPSCALE]
+    if unknown:
+        log(f"kill-feed icons with no model in the table, left out of the atlas: {', '.join(unknown)}")
+    names = [n for n in names if n not in unknown]
+    sheets = {}
+
+    def hd_sheet(sheet):
+        if sheet not in sheets:
+            fw, fh, idx, pal, _ = sheet_frame(dod, sheet)
+            tga = os.path.join(sheets_dir, f"{C.file_stem_name(sheet)}_0_{C.fnv1a32(idx, pal):08x}.tga")
+            src = tga + ".bak" if os.path.exists(tga + ".bak") else tga  # the upscale under the painted icons
+            img = load_rgba(src) if os.path.exists(src) else None
+            if img is not None and (img.shape[1] % fw or img.shape[1] // fw != img.shape[0] // fh):
+                img = None
+            sheets[sheet] = (img, img.shape[1] // fw if img is not None else 0)
+        return sheets[sheet]
+
+    imgs, sizes, keys = {}, {}, {}
+    for step, n in enumerate(names, 1):
+        if n in ICONS:
+            img, info = render_icon(dod, n, ICONS[n], style, models_dir, scale=4, log=log, layout=even_layout(n))
+            if img is None:
+                log(f"  {n}: {info}, left out of the atlas (the even layout draws Valve's)")
+            else:
+                key = n
+                imgs[key], sizes[key] = img, tuple(info["rect"])
+                keys[n] = key
+                log(f"  {n}: {info['rect'][0]}x{info['rect'][1]}, {info['k']} px per unit (Valve's {info['k_valve']})")
+        else:
+            sheet4, f = hd_sheet(entries[n][0])
+            if sheet4 is None or f != 4:
+                log(f"  {n}: no 4x HD sheet for {entries[n][0]} in {sheets_dir}, left out of the atlas")
+            else:
+                key = "kept " + " ".join(map(str, entries[n]))  # d_skull and d_world are one drawing
+                if key not in imgs:
+                    imgs[key], sizes[key] = kept_icon(dod, n, sheet4, f)
+                keys[n] = key
+                log(f"  {n}: {sizes[key][0]}x{sizes[key][1]}, the #733 upscale ({KEEP_UPSCALE[n]})")
+        print(f"@@progress {step} of {len(names)} kill-feed icons", flush=True)
+    if not keys:
+        log("no kill-feed icon could go into the atlas; nothing written")
+        return 0
+
+    spots, count = pack(sizes)
+    if count > ATLAS_MAX_FRAMES:
+        raise ValueError(f"the atlas needs {count} frames, the hook reads {ATLAS_MAX_FRAMES}")
+    rects = {n: (spots[k][0], spots[k][1], spots[k][2], *sizes[k]) for n, k in keys.items()}
+    scale = 4
+    frames4 = [np.zeros((ATLAS_SIZE * scale, ATLAS_SIZE * scale, 4)) for _ in range(count)]
+    for k, (f, x, y) in spots.items():
+        w, h = sizes[k]
+        frames4[f][y * scale:(y + h) * scale, x * scale:(x + w) * scale] = imgs[k]
+    pal = atlas_palette()
+    stock = placeholder_frames([(f, x, y, *sizes[k]) for k, (f, x, y) in spots.items()], count)
+
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(sprite_dir, exist_ok=True)
+    tgas = []
+    for i, (fr4, idx) in enumerate(zip(frames4, stock)):
+        name = f"{ATLAS_NAME}_{i}_{C.fnv1a32(idx, pal):08x}.tga"
+        C.save_output(to_image(bleed(fr4)), os.path.join(out_dir, name))
+        tgas.append(name)
+    for old in glob.glob(os.path.join(glob.escape(out_dir), ATLAS_NAME + "_*.tga")):
+        if os.path.basename(old) not in tgas:  # an older geometry's frames: their key matches nothing now
+            os.remove(old)
+    spr = spr_bytes(stock, pal)
+    if os.path.exists(spr_path) and file_sha(spr_path) != hashlib.sha256(spr).hexdigest():
+        log(f"{ATLAS_NAME}.spr: the rects changed, so atlases built for other styles need building again")
+    write_whole(spr_path, spr)
+    write_whole(txt_path, table_text(rects, count).encode("ascii"))
+    record.setdefault(style, {})[ATLAS_NAME] = {"version": [VERSION, EVEN_VERSION], "spr_sha": file_sha(spr_path),
+                                                "frames": tgas, "icons": sorted(rects)}
+    tmp = record_path + ".part"
+    with open(tmp, "w", encoding="utf-8") as fh_:
+        json.dump(record, fh_, indent=1, sort_keys=True)
+    os.replace(tmp, record_path)
+    log(f"{ATLAS_NAME}: {len(rects)} icon(s) in {count} frame(s); {', '.join(tgas)} in {out_dir}; "
+        f"{ATLAS_NAME}.spr and .txt in {sprite_dir}")
+    return len(rects)
+
+
 # â”€â”€ engine simulation, for the review sheets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
@@ -1985,7 +2287,14 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--review")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--even", action="store_true")
+    ap.add_argument("--sheets")
+    ap.add_argument("--sprite-dir")
     args = ap.parse_args()
+    if args.even:
+        n = build_even(args.out_dir, sprite_dir=args.sprite_dir, sheets_dir=args.sheets, force=args.force)
+        print(f"{n} kill-feed icon(s) in the even layout's atlas")
+        return
     only = {n.strip() for n in args.only.split(",") if n.strip()} or None
     n = build(args.out_dir, only=only, review=args.review, force=args.force)
     print(f"painted {n} kill-feed icon(s) into {args.out_dir}")

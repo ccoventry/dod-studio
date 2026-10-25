@@ -33,7 +33,12 @@ runtime proves they land on the instructions the Rust assumes. This does:
      lookup reads) and nothing between writing `eax`/`ebx`; `edx` is written
      before it is next read; nothing branches into the span; and `[ebx+8]` /
      `[ebx+0xc]`, the stub's top and bottom, are what the line step
-     subtracts.
+     subtracts. That same `ebx` is the index the stub stores for the icon
+     draw (`ICON_INDEX`, the even layout, #1022).
+ 10. The even layout's names (#1022): `CHud::VidInit` allocates
+     `[gHUD+NAMES_IN_HUD] = new[SPRITE_NAME_LEN * m_iSpriteCount]` right after
+     the rects, and copies each `hud.txt` name into its entry with a
+     `SPRITE_NAME_LEN`-byte `strncpy` (`even.rs`' `SPRITE_NAME_LEN`).
 
 Usage:
     python goldsrc-hooks/tools/verify_killfeed_scale_offsets.py [client.dll] [game-folder ...]
@@ -58,6 +63,7 @@ import verify_killfeed_font_offsets as font  # noqa: E402
 
 HERE = Path(__file__).resolve().parent.parent / "src"
 SCALE_RS = HERE / "deathmsg" / "scale.rs"
+EVEN_RS = HERE / "deathmsg" / "even.rs"
 FONT_RS = HERE / "deathmsg" / "font.rs"
 HUDELEMENT_RS = HERE / "hudelement.rs"
 
@@ -220,6 +226,22 @@ def check_client(dll):
           f"VidInit allocates m_rgrcRects as new[16 * m_iSpriteCount] (count at gHUD+{count_in_hud:#x}): {window}")
     handles = next((i for i, t in enumerate(seq) if t == f"mov dword ptr [esi + {rects_in_hud - 4:#x}], eax"), None)
     check(handles is not None and handles < store, "and m_rghSprites, the dword before it, just before")
+
+    # -- 10. the names the even layout reads (#1022) ---------------------------
+    names_in_hud = rust_const(scale_src, "NAMES_IN_HUD")
+    name_len = rust_const(EVEN_RS.read_text(encoding="utf-8"), "SPRITE_NAME_LEN")
+    check(names_in_hud == rects_in_hud + 4, f"m_rgszSpriteNames (gHUD+{names_in_hud:#x}) is the dword after the rects")
+    names_store = next((i for i, t in enumerate(seq) if t == f"mov dword ptr [esi + {names_in_hud:#x}], eax"), None)
+    window = seq[names_store - 6:names_store] if names_store else []
+    stride = name_len == 24 and "lea edx, [eax + eax*2]" in window and "shl edx, 3" in window
+    check(names_store is not None and store is not None and names_store > store and stride
+          and f"mov eax, dword ptr [esi + {count_in_hud:#x}]" in window and any(t.startswith("call ") for t in window),
+          f"VidInit allocates m_rgszSpriteNames as new[{name_len} * m_iSpriteCount] after the rects: {window}")
+    copies = [i for i, t in enumerate(seq) if t == f"mov eax, dword ptr [esi + {names_in_hud:#x}]"]
+    strncpy = [i for i in copies if f"push {name_len:#x}" in seq[i - 16:i]
+               and "push eax" in seq[i:i + 4] and any(t.startswith("call ") for t in seq[i:i + 4])]
+    check(len(strncpy) == 1, f"and copies each name into it with a {name_len}-byte strncpy (push {name_len:#x} ... call): "
+          f"{[seq[i - 16:i + 4] for i in copies]}")
 
     # -- 5. the wrect_t field order ---------------------------------------------
     after_first_read = [f"{decoded[r].mnemonic} {decoded[r].op_str}" for r in sorted(decoded) if found + reads[0] < r < found + reads[0] + 0x20]

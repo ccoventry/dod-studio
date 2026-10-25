@@ -4,7 +4,8 @@
 > Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
 > `ds_hud_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
 > plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
-> `font` (§6, #562) and `scale` (§7, #728) came later, in `deathmsg/`.
+> `font` (§6, #562), `scale` (§7, #728) and `layout` (§8, #1022) came later,
+> in `deathmsg/`.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -678,3 +679,52 @@ are is down to the alpha the sheet carries.
 `tools/verify_killfeed_scale_offsets.py` checks the three operands, the
 line-start detour's span and registers, the field offsets, the stride, the
 vftable slot and that both installs ship the same `client.dll`.
+
+## 8. One box height for every icon (`layout even`, #1022)
+
+`hud.txt`'s `d_*` rects are 9 to 34 rows tall, so even at one scale each line
+of the feed steps differently, and the guns' barrels sit at different heights.
+`layout even` gives every icon a box 26 stock rows tall, every long gun's
+barrel top on row 8, nothing cut: a long gun is as wide as Valve's drawing,
+and shrinks with its barrel kept on the line when its magazine or bipod
+would hang below the box (the MP40 and MP44 to 71%); pistols and launchers
+keep their size, moved onto the line (the launchers and the Bren move up or
+down as little as fits); knives, the spade and grenades keep their size,
+centred; the seven icons with no model (`d_skull`, the close-ups, the
+composites) keep their #733 upscale, centred, shrunk only when taller than
+26 rows.
+
+§7's rect copy already decides each line's anchor, advance and step, so a
+26-row box per icon gives every line one step. But the engine samples the
+texture from that same rect, and the 256×256 `weapons<N>` sheets are packed
+too tight: 27 of the 35 modelled icons can't grow to 26 rows without reading
+the icon below. So the icons go into an atlas of our own, built by
+`goldsrc-hooks/tools/hd/killfeed_icons.py --even`:
+
+- `sprites/dodstudio_killfeed.spr` (in `dod_addon`, which the engine searches
+  first with `-addons`): 256×256 alpha-test frames laid out like Valve's
+  sheets, whose own pixels are only grey boxes;
+- `sprites/dodstudio_killfeed.txt` beside it: `name frame x y w h` per icon;
+- the HD frames, `dodstudio_hd\sprites\<style>\dodstudio_killfeed_<n>_<hash>.tga`,
+  keyed like every HD sprite frame. The placeholder depends on the boxes
+  alone, so every style's frames share one sprite.
+
+`goldsrc-hooks/src/deathmsg/even.rs` checks both files (bounds, frame count,
+format) before the engine is handed the sprite, loads it with the engine's
+`SPR_Load` once per level load, and gives each sprite index its box by name:
+`gHUD.m_rgszSpriteNames` (`gHUD+0x190`, `new char[24 * m_iSpriteCount]` in
+`VidInit`, `client+0x21cb4`, each `hud.txt` name `strncpy`'d into 24 bytes at
+`+0x21d4a`). §7's copy then holds each box, scaled; the line-start stub also
+stores the line's sprite index (`ebx` before the shift), so the icon draw
+knows exactly which entry it draws, and draws that box of the atlas
+(`SPR_Set` to the atlas with the game's colour, the engine's
+`SPR_DrawHoles`, blended as a soft weapons sheet, the game's sprite set back)
+under the same matrix as §7. The copy is in use at S = 1 too, and the names
+are centred on the 26-row line as with a scale.
+
+It draws only while every frame of the atlas went up with its HD file this
+session and `ds_hd_enabled` is 1; otherwise -- no atlas, a bad file, HD off,
+no atlas built for the style -- the feed is the game's own, exactly as with
+`layout default`. Nothing in `hw.dll` is touched, and the sprite calls go
+through `gEngfuncs`, so both engine builds take the same path.
+`tools/verify_killfeed_scale_offsets.py` also checks the names field.

@@ -725,5 +725,96 @@ class RecordTest(unittest.TestCase):
             self.assertEqual(K.load_record(p), {"ultrasharp": {}})
 
 
+class EvenLayoutTest(unittest.TestCase):
+    """The even layout's atlas (#1022): which rule each icon gets, the
+    packing, and the sprite and table the hook reads."""
+
+    def test_every_icon_gets_the_rule_its_class_has(self):
+        self.assertLessEqual(K.LONG_GUNS | K.PISTOLS | K.LAUNCHERS, set(K.ICONS))
+        self.assertEqual(len(K.LONG_GUNS), 21)
+        for name in K.ICONS:
+            lay = K.even_layout(name)
+            self.assertEqual(lay.height, K.EVEN_HEIGHT, name)
+            if name in K.LONG_GUNS:
+                self.assertEqual((lay.barrel_row, lay.size), (K.EVEN_BARREL_ROW, "width"), name)
+            elif name in K.PISTOLS or name in K.LAUNCHERS:
+                self.assertEqual((lay.barrel_row, lay.size), (K.EVEN_BARREL_ROW, "natural"), name)
+            else:  # knives, the spade, grenades: their own size, centred
+                self.assertTrue(K.NOT_LEVELLED.search(name), name)
+                self.assertEqual((lay.barrel_row, lay.size), (None, "natural"), name)
+            self.assertEqual(lay.below, "move" if name in K.MOVE_TO_FIT else "shrink", name)
+        self.assertEqual(K.MOVE_TO_FIT, {"d_bren", "d_bazooka", "d_pschreck", "d_piat"})
+
+    def test_pack_keeps_boxes_apart_and_inside_their_frame(self):
+        sizes = {f"d_{i}": (30 + (i * 37) % 60, 26) for i in range(40)}
+        spots, count = K.pack(sizes)
+        self.assertEqual(set(spots), set(sizes))
+        self.assertGreater(count, 1)
+        g = K.ATLAS_GAP
+        for k, (f, x, y) in spots.items():
+            w, h = sizes[k]
+            self.assertTrue(0 <= f < count)
+            self.assertTrue(x >= g and y >= g and x + w + g <= K.ATLAS_SIZE and y + h + g <= K.ATLAS_SIZE, k)
+            for k2, (f2, x2, y2) in spots.items():
+                if k2 == k or f2 != f:
+                    continue
+                w2, h2 = sizes[k2]
+                apart = x + w + g <= x2 or x2 + w2 + g <= x or y + h + g <= y2 or y2 + h2 + g <= y
+                self.assertTrue(apart, f"{k} and {k2} closer than the gap")
+        # The same sizes always pack the same way, whatever order they come in.
+        again, _ = K.pack(dict(reversed(list(sizes.items()))))
+        self.assertEqual(again, spots)
+
+    def test_pack_refuses_a_box_bigger_than_a_frame(self):
+        with self.assertRaises(ValueError):
+            K.pack({"d_big": (K.ATLAS_SIZE, 26)})
+        with self.assertRaises(ValueError):
+            K.pack({"d_none": (0, 26)})
+
+    def test_the_sprite_reads_back_as_valves_sheets_are(self):
+        from goldsrc import Sprite
+        boxes = [(0, 2, 2, 71, 26), (1, 2, 2, 30, 26)]
+        frames = K.placeholder_frames(boxes, 2)
+        pal = K.atlas_palette()
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, K.ATLAS_NAME + ".spr")
+            K.write_whole(p, K.spr_bytes(frames, pal))
+            s = Sprite(p)
+        self.assertEqual((s.type, s.tex_format, s.width, s.height, s.numframes), (2, 3, 256, 256, 2))
+        self.assertEqual(s.palette, pal)
+        self.assertEqual([f[:3] for f in s.frames], [(0, 256, 256), (1, 256, 256)])
+        ind = np.frombuffer(s.frames[0][3], np.uint8).reshape(256, 256)
+        self.assertTrue((ind[2:28, 2:73] == K.PLACEHOLDER).all())
+        self.assertEqual(int((ind != 255).sum()), 71 * 26, "only the boxes show")
+        with self.assertRaises(ValueError):
+            K.spr_bytes([b"\0" * 10], pal)
+
+    def test_the_placeholder_depends_on_the_rects_alone(self):
+        # The HD key is a hash of these bytes, so any style's build with the
+        # same rects names its frames the same.
+        a = K.placeholder_frames([(0, 2, 2, 71, 26)], 1)
+        self.assertEqual(a, K.placeholder_frames([(0, 2, 2, 71, 26)], 1))
+        self.assertNotEqual(a, K.placeholder_frames([(0, 2, 2, 72, 26)], 1))
+
+    def test_the_table_lists_each_icon_once_with_a_header(self):
+        text = K.table_text({"d_mp44": (0, 2, 2, 59, 26), "d_colt": (1, 2, 30, 30, 26)}, 2)
+        lines = [l for l in text.splitlines() if not l.startswith("//")]
+        self.assertEqual(lines, [f"{K.ATLAS_NAME} {K.ATLAS_TABLE_VERSION} 2", "d_colt 1 2 30 30 26",
+                                 "d_mp44 0 2 2 59 26"])
+        text.encode("ascii")
+
+    def test_fit_box_shrinks_only_a_taller_icon_and_centres_it(self):
+        img = np.ones((34 * 4, 72 * 4, 4))
+        out, (w, h) = K.fit_box(img, 72, 34, 26, 4)
+        self.assertEqual((w, h), (56, 26), "72 x 26/34 = 55.06, rounded up")
+        self.assertEqual(out.shape, (26 * 4, 56 * 4, 4))
+        self.assertGreater(out[..., 3].sum(), 0.95 * 26 * 4 * 55 * 4)
+        small = np.ones((20 * 4, 84 * 4, 4))
+        out, (w, h) = K.fit_box(small, 84, 20, 26, 4)
+        self.assertEqual((w, h), (84, 26))
+        rows = np.nonzero(out[..., 3].any(1))[0]
+        self.assertEqual((rows.min(), rows.max() + 1), (12, 92), "20 rows centred in 26, at 4x")
+
+
 if __name__ == "__main__":
     unittest.main()
