@@ -609,6 +609,8 @@ pub fn poll() {
     crate::demo_scope::poll();
     crate::run_in_background::poll();
     crate::pov_live_bob::poll();
+    // A float compare unless ds_view_show_own_blood changed (#1035).
+    crate::own_blood::poll();
     crate::map_sounds::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
@@ -778,6 +780,9 @@ fn status_text() -> String {
     }
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
+    }
+    if let Some(blood) = crate::own_blood::status_line() {
+        lines.push(blood);
     }
     lines.push(crate::player_overrides::status());
     if let Some(sprays) = crate::spray_hltv::status_line() {
@@ -1759,6 +1764,9 @@ pub fn install() {
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
         crate::pov_live_bob::set_log_cvar(log);
     }
+    if let Some(blood) = register(crate::own_blood::NAME, "0") {
+        crate::own_blood::set_cvar(blood);
+    }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
             family.set_cvar(mute);
@@ -1947,6 +1955,7 @@ mod tests {
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
+            crate::own_blood::NAME,
             crate::map_sounds::VICTORY_MUSIC_NAME,
             crate::map_sounds::FLAG_CAPTURE_NAME,
             crate::map_sounds::LOG_NAME,
@@ -1971,6 +1980,7 @@ mod tests {
             crate::center_text::NAME,
             crate::spectator_text::NAME,
             crate::strafe_twitch::NAME,
+            crate::own_blood::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")
