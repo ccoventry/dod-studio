@@ -741,6 +741,19 @@ async fn index_demo_players(
     .await
 }
 
+/// Which of `paths` already have their players (answered here, all at once),
+/// which still need a read, and which sit on a cloud drive with no cache
+/// entry (#992). Opens no demo, so it never downloads one.
+#[tauri::command]
+async fn lookup_demo_players(
+    paths: Vec<String>,
+) -> Result<native::player_index::PlayerLookup, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(native::player_index::lookup_players(&paths))
+    }))
+    .await
+}
+
 /// One `analyzer_progress` event. The path lets the page ignore an earlier
 /// click's analysis still running beside this one; `cached` says the demo
 /// is read from the analyzer cache, with no frames to count.
@@ -1039,6 +1052,7 @@ pub fn run() {
             load_project_session,
             files_exist,
             index_demo_players,
+            lookup_demo_players,
             default_projects_dir,
             locate_missing_demos,
             changed_demos,
