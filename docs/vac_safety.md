@@ -12,6 +12,16 @@ injected, what protects each one, and what is still open. It doesn't try to
 say whether any particular action would or wouldn't get an account banned. The
 rules below are deliberately cautious.
 
+Everything DoD Studio does happens offline: the game it starts plays demos and
+never joins a server, and as Valve describes VAC, it acts when a game connects
+to a VAC-secured server. Valve publishes that rule, not what VAC checks or when
+it bans, so everything here is best effort, and what happens once you connect
+from a game with the DLL loaded is outside the project's control. You use DoD
+Studio at your own risk: a banned account is yours to carry, not the project's
+(the README's "Use at your own risk" section, and the MIT licence's no-warranty
+clause). Valve's own page is the authority, Valve Anti-Cheat (VAC) System on
+Steam Support: <https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74>
+
 ## The rules
 
 1. **Only play demos in a game DoD Studio started.** Never join a game server
