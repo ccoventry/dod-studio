@@ -2547,6 +2547,14 @@ export const STRINGS = {
       if (reason === 'closed') return `The game closed: ${answered}.`;
       return `Review ended (${reason}): ${answered}.`;
     },
+    // #880: the game refused something DoD Studio sent while a review runs.
+    refusedToast: (command) => {
+      const name = String(command || '').toLowerCase();
+      let what = 'do that';
+      if (['viewdemo', 'playdemo', 'timedemo', 'ds_demo_reload'].includes(name)) what = 'load the preview';
+      else if (name.startsWith('ds_demo_seek') || name === 'dem_jump') what = 'jump to that time';
+      return `A review is running in the game, so it didn't ${what}. End the review first (Stop), then try again.`;
+    },
   },
 
   IPC: {

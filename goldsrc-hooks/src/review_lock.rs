@@ -249,6 +249,51 @@ pub fn lockable_in(line: &str) -> Vec<String> {
     out
 }
 
+/// The events-pipe label that tells Studio the game refused a line it sent
+/// (#880), naming the first locked command in it. Studio's
+/// `native::review_queue::parse_event` reads it as a `refused` review event.
+pub fn refused_label(command: &str) -> String {
+    format!("REVIEW_REFUSED\t{command}")
+}
+
+/// The locked commands in a line Studio sent over the game's pipe, which is
+/// refused whole when there are any: Studio's lines are one command each, and
+/// half a line run is worse than none. Empty while no review runs.
+pub fn refused_from_studio(locked: bool, line: &str) -> Vec<String> {
+    if locked {
+        lockable_in(line)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Refuses a line Studio sent during a review (#880): the console gets the
+/// same note a typed command gets, and Studio, when it is reading the events
+/// pipe, gets [`refused_label`] so it can say so. The line never reaches the
+/// command buffer, so it can't use up one of the review's own
+/// [`let_through`] names. Returns whether it was refused.
+pub fn refuse_from_studio(line: &str) -> bool {
+    let refused = refused_from_studio(locked(), line);
+    let Some(first) = refused.first() else {
+        return false;
+    };
+    for name in &refused {
+        crate::commands::console_print(&console_note(name));
+    }
+    unsafe {
+        crate::debug::report(&format!(
+            "review_lock: refused \"{}\" from Studio during a review",
+            line.escape_debug()
+        ))
+    };
+    // Unread, a queued line would reach the next reader, maybe a later
+    // review's: only say it to a Studio listening now.
+    if crate::events::studio_connected() {
+        crate::events::send(&refused_label(first));
+    }
+    true
+}
+
 /// The review's own locked commands, queued and not yet run. Commands run
 /// on the game's main thread; the lock is never held across a call out.
 static OWN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -507,6 +552,39 @@ mod tests {
         assert_eq!(own.len(), 1);
         // A command the lock doesn't cover always runs.
         assert!(!decide(true, &mut own, "ds_ui_panel"));
+    }
+
+    /// Launch Preview's `viewdemo` and a seek are refused whole during a
+    /// review; nothing is refused without one, or for an unlocked command.
+    #[test]
+    fn studio_lines_are_refused_whole_during_a_review() {
+        assert_eq!(
+            refused_from_studio(true, "viewdemo \"../a b/demo\""),
+            ["viewdemo"]
+        );
+        assert_eq!(
+            refused_from_studio(true, "ds_demo_seek_to 1850"),
+            ["ds_demo_seek_to"]
+        );
+        assert_eq!(
+            refused_from_studio(true, "echo a; spec_mode 4"),
+            ["spec_mode"]
+        );
+        assert!(refused_from_studio(false, "viewdemo x").is_empty());
+        for line in [
+            "ds_ui_panel highlights",
+            "ds_player_overrides 1",
+            "ds_demo_review stop",
+            "ds_demo_review start \"C:/q.tsv\"",
+        ] {
+            assert!(refused_from_studio(true, line).is_empty(), "{line}");
+        }
+    }
+
+    /// Studio's `native::review_queue` parses this exact line.
+    #[test]
+    fn the_refused_label_names_the_command() {
+        assert_eq!(refused_label("viewdemo"), "REVIEW_REFUSED\tviewdemo");
     }
 
     #[test]
