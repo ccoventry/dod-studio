@@ -74,6 +74,7 @@ use crate::names::console_name;
 use crate::scan;
 
 mod backdrop;
+mod colour;
 mod even;
 mod font;
 mod name_cap;
@@ -1291,16 +1292,17 @@ fn usage() -> String {
          \x20                               magazines and bipods shown, every line one step\n\
          \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
          \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n\
-         \x20 {COMMAND} outline <0..{}> [r g b] [alpha]\n\
+         \x20 {COMMAND} outline <0..{}> [colour] [alpha]\n\
          \x20                               outline the names that many px (default black, 255)\n\
          \x20 {COMMAND} outline default    no outline\n\
-         \x20 {COMMAND} background <alpha> [r g b] [padding]\n\
+         \x20 {COMMAND} background <alpha> [colour] [padding]\n\
          \x20                               a box behind each line (default black, padding {})\n\
          \x20 {COMMAND} background team <alpha> [padding]\n\
          \x20                               a box behind each name, a dark shade of its team's colour\n\
-         \x20 {COMMAND} background allies|axis <r g b>|default\n\
+         \x20 {COMMAND} background allies|axis <colour>|default\n\
          \x20                               that team's box colour (allies covers the British)\n\
-         \x20 {COMMAND} background default no boxes, team colours back to the shade\n",
+         \x20 {COMMAND} background default no boxes, team colours back to the shade\n\
+         \x20                               a colour is r g b (0..255 each) or hex, #0a286e or #0af\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,

@@ -46,8 +46,7 @@ pub(super) const MAX_PADDING: i32 = 64;
 /// exactly the line's height.
 const LINE_GAP: i32 = 2;
 
-/// An `r g b` colour, each 0..=255.
-pub(super) type Rgb = (i32, i32, i32);
+use super::colour::{self, Rgb};
 
 const BLACK: Rgb = (0, 0, 0);
 
@@ -71,12 +70,13 @@ pub(super) enum Team {
 pub(super) enum Background {
     /// `background default`.
     Off,
-    /// `background <alpha> [r g b] [padding]`: one box per line.
+    /// `background <alpha> [r g b | #rrggbb] [padding]`: one box per line.
     Line { alpha: i32, rgb: Rgb, padding: i32 },
     /// `background team <alpha> [padding]`: one box per name, in a dark
     /// shade of its team's colour.
     Team { alpha: i32, padding: i32 },
-    /// `background allies|axis <r g b>`, or `default` (`None`) for the shade.
+    /// `background allies|axis <r g b | #rrggbb>`, or `default` (`None`) for
+    /// the shade.
     TeamColour(Team, Option<Rgb>),
 }
 
@@ -244,20 +244,6 @@ pub(super) unsafe fn name_box_at(
     unsafe { fill(rect, rgb, alpha) };
 }
 
-/// A colour argument: three numbers 0..=255.
-fn parse_rgb(words: &[String]) -> Result<Rgb, String> {
-    let [r, g, b] = words else {
-        return Err("a colour is three numbers, r g b, each 0..255".to_string());
-    };
-    let one = |w: &String| -> Result<i32, String> {
-        match w.parse::<i32>() {
-            Ok(v) if (0..=255).contains(&v) => Ok(v),
-            _ => Err(format!("colour: expected 0..255, got {w:?}")),
-        }
-    };
-    Ok((one(r)?, one(g)?, one(b)?))
-}
-
 fn parse_in(word: &str, what: &str, range: std::ops::RangeInclusive<i32>) -> Result<i32, String> {
     match word.parse::<i32>() {
         Ok(v) if range.contains(&v) => Ok(v),
@@ -269,8 +255,9 @@ fn parse_in(word: &str, what: &str, range: std::ops::RangeInclusive<i32>) -> Res
     }
 }
 
-/// The arguments after `outline`: `<0..4> [r g b] [alpha]`, or `default`
-/// (off). Returns the width, colour and alpha.
+/// The arguments after `outline`: `<0..4> [colour] [alpha]`, or `default`
+/// (off), where a colour is `r g b` or `#rrggbb` ([`colour`]). Returns the
+/// width, colour and alpha.
 pub(super) fn parse_outline(rest: &[String]) -> Result<(i32, Rgb, i32), String> {
     if let [only] = rest
         && only.eq_ignore_ascii_case("default")
@@ -279,19 +266,18 @@ pub(super) fn parse_outline(rest: &[String]) -> Result<(i32, Rgb, i32), String> 
     }
     let Some((px, more)) = rest.split_first() else {
         return Err(format!(
-            "need a width, 0..{MAX_OUTLINE} px, then r g b and alpha if you like, or default"
+            "need a width, 0..{MAX_OUTLINE} px, then a colour (r g b or #rrggbb) and alpha if you like, or default"
         ));
     };
     let px = parse_in(px, "width", 0..=MAX_OUTLINE)?;
-    match more {
-        [] => Ok((px, BLACK, 255)),
-        [r, g, b] => Ok((px, parse_rgb(&[r.clone(), g.clone(), b.clone()])?, 255)),
-        [r, g, b, a] => Ok((
-            px,
-            parse_rgb(&[r.clone(), g.clone(), b.clone()])?,
-            parse_in(a, "alpha", 0..=255)?,
-        )),
-        _ => Err("expected outline <width> [r g b] [alpha]".to_string()),
+    if more.is_empty() {
+        return Ok((px, BLACK, 255));
+    }
+    let (rgb, after) = colour::take(more)?;
+    match after {
+        [] => Ok((px, rgb, 255)),
+        [a] => Ok((px, rgb, parse_in(a, "alpha", 0..=255)?)),
+        _ => Err("expected outline <width> [r g b | #rrggbb] [alpha]".to_string()),
     }
 }
 
@@ -324,22 +310,24 @@ pub(super) fn parse_background(rest: &[String]) -> Result<Background, String> {
             };
             match more {
                 [d] if d.eq_ignore_ascii_case("default") => Ok(Background::TeamColour(team, None)),
-                _ => Ok(Background::TeamColour(team, Some(parse_rgb(more)?))),
+                _ => Ok(Background::TeamColour(team, Some(colour::exactly(more)?))),
             }
         }
         _ => {
             let alpha = parse_in(first, "alpha", 0..=255)?;
             let (rgb, padding) = match more {
                 [] => (BLACK, DEFAULT_PADDING),
-                [p] => (BLACK, parse_in(p, "padding", 0..=MAX_PADDING)?),
-                [_, _, _] => (parse_rgb(more)?, DEFAULT_PADDING),
-                [r, g, b, p] => (
-                    parse_rgb(&[r.clone(), g.clone(), b.clone()])?,
-                    parse_in(p, "padding", 0..=MAX_PADDING)?,
-                ),
-                _ => {
-                    return Err("expected background <alpha> [r g b] [padding]".to_string());
-                }
+                // One number alone is the padding; one hex word is a colour.
+                [p] if !colour::is_hex_word(p) => (BLACK, parse_in(p, "padding", 0..=MAX_PADDING)?),
+                _ => match colour::take(more)? {
+                    (rgb, []) => (rgb, DEFAULT_PADDING),
+                    (rgb, [p]) => (rgb, parse_in(p, "padding", 0..=MAX_PADDING)?),
+                    _ => {
+                        return Err(
+                            "expected background <alpha> [r g b | #rrggbb] [padding]".to_string()
+                        );
+                    }
+                },
             };
             Ok(Background::Line {
                 alpha,
@@ -399,7 +387,7 @@ pub(super) fn set_background(asked: Background) -> String {
             PADDING.store(padding, Ordering::Relaxed);
             MODE.store(MODE_TEAM, Ordering::Relaxed);
             format!(
-                "background = a box behind each name in a dark shade of its team's colour (or `background allies|axis <r g b>`), alpha {alpha}, padding {padding} px, from the next frame"
+                "background = a box behind each name in a dark shade of its team's colour (or `background allies|axis <r g b | #rrggbb>`), alpha {alpha}, padding {padding} px, from the next frame"
             )
         }
         Background::TeamColour(team, rgb) => {
@@ -681,6 +669,72 @@ mod tests {
         assert!(parse_outline(&argv(&["1", "0", "0", "256"])).is_err());
         assert!(parse_outline(&argv(&["1", "0", "0", "0", "300"])).is_err());
         assert!(parse_outline(&argv(&[])).is_err());
+    }
+
+    #[test]
+    fn outline_colours_can_be_hex_with_or_without_an_alpha_after() {
+        assert_eq!(
+            parse_outline(&argv(&["2", "#ffffff"])),
+            Ok((2, (255, 255, 255), 255))
+        );
+        assert_eq!(
+            parse_outline(&argv(&["3", "#0a141e", "128"])),
+            Ok((3, (10, 20, 30), 128))
+        );
+        assert_eq!(
+            parse_outline(&argv(&["1", "#fff", "64"])),
+            Ok((1, (255, 255, 255), 64))
+        );
+        assert_eq!(
+            parse_outline(&argv(&["1", "0a141e"])),
+            Ok((1, (10, 20, 30), 255))
+        );
+        assert!(parse_outline(&argv(&["1", "#0a141"])).is_err(), "5 digits");
+        assert!(parse_outline(&argv(&["1", "#0a141x"])).is_err());
+        assert!(
+            parse_outline(&argv(&["1", "#fff", "300"])).is_err(),
+            "alpha"
+        );
+        assert!(parse_outline(&argv(&["1", "#fff", "64", "1"])).is_err());
+    }
+
+    #[test]
+    fn background_colours_can_be_hex_with_or_without_a_padding_after() {
+        let line = |alpha, rgb, padding| {
+            Ok(Background::Line {
+                alpha,
+                rgb,
+                padding,
+            })
+        };
+        assert_eq!(
+            parse_background(&argv(&["150", "#141428"])),
+            line(150, (20, 20, 40), 4)
+        );
+        assert_eq!(
+            parse_background(&argv(&["150", "#141428", "6"])),
+            line(150, (20, 20, 40), 6)
+        );
+        assert_eq!(
+            parse_background(&argv(&["150", "141428"])),
+            line(150, (20, 20, 40), 4),
+            "six digits are a colour, never a padding"
+        );
+        // One plain number is still the padding.
+        assert_eq!(parse_background(&argv(&["150", "8"])), line(150, BLACK, 8));
+        assert_eq!(
+            parse_background(&argv(&["allies", "#0a286e"])),
+            Ok(Background::TeamColour(Team::Allies, Some((10, 40, 110))))
+        );
+        assert_eq!(
+            parse_background(&argv(&["axis", "#600"])),
+            Ok(Background::TeamColour(Team::Axis, Some((0x66, 0, 0))))
+        );
+        assert!(parse_background(&argv(&["allies", "#0a286e", "4"])).is_err());
+        assert!(parse_background(&argv(&["allies", "#0a28"])).is_err());
+        assert!(parse_background(&argv(&["150", "#14142g"])).is_err());
+        assert!(parse_background(&argv(&["150", "#141428", "65"])).is_err());
+        assert!(parse_background(&argv(&["150", "#141428", "6", "1"])).is_err());
     }
 
     #[test]

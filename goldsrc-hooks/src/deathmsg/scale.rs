@@ -288,10 +288,7 @@ pub(super) fn right_margin(screen_width: i32, text_tall: i32) -> i32 {
 /// `layout default` and no outline or background the kill feed is the game's
 /// own, right margin included.
 pub(super) fn layout_is_ours() -> bool {
-    !is_unity(scale())
-        || font::tall() != 0
-        || super::even::ready()
-        || super::backdrop::active()
+    !is_unity(scale()) || font::tall() != 0 || super::even::ready() || super::backdrop::active()
 }
 
 /// The height of the line `Draw` is on, for text `text_tall` px tall: the

@@ -150,12 +150,14 @@ HLAE's own
 | `ds_hud_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
 | `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it. It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
 | `ds_hud_deathmsg layout default` | the game's own boxes and spacing, with whatever icons the sheets hold (the default) |
-| `ds_hud_deathmsg outline <0..4> [r g b] [alpha]` | outline every name that many px (default black, alpha 255), drawn as the name repeated around itself before the coloured pass; works with the game's font (always opaque there: the engine's text call takes no alpha) and with `font`. `0` is off |
+| `ds_hud_deathmsg outline <0..4> [colour] [alpha]` | outline every name that many px (default black, alpha 255), drawn as the name repeated around itself before the coloured pass; works with the game's font (always opaque there: the engine's text call takes no alpha) and with `font`. `0` is off |
 | `ds_hud_deathmsg outline default` | no outline (the default) |
-| `ds_hud_deathmsg background <alpha> [r g b] [padding]` | one translucent box behind each line, from the killer's name to the victim's, `alpha` 0..255, colour default black, `padding` 0..64 px sideways (default 4); the box is the line's height, 2 px short so two lines' boxes don't overlap |
+| `ds_hud_deathmsg background <alpha> [colour] [padding]` | one translucent box behind each line, from the killer's name to the victim's, `alpha` 0..255, colour default black, `padding` 0..64 px sideways (default 4); the box is the line's height, 2 px short so two lines' boxes don't overlap |
 | `ds_hud_deathmsg background team <alpha> [padding]` | a box behind each name instead, in a dark shade (a quarter) of that name's team colour; the icon gets none |
-| `ds_hud_deathmsg background allies <r g b>` / `background axis <r g b>` | that team's box colour for `background team` (`allies` covers the British, who are team 1 on a British map); `background allies default` goes back to the shade |
+| `ds_hud_deathmsg background allies <colour>` / `background axis <colour>` | that team's box colour for `background team` (`allies` covers the British, who are team 1 on a British map); `background allies default` goes back to the shade |
 | `ds_hud_deathmsg background default` | no boxes (the default), and `allies`/`axis` back to the shade |
+
+A `colour` for `outline` and `background` is three numbers `r g b`, each 0..255 (`10 40 110`), or one hex colour: `#0a286e`, the short `#0af` (each digit doubled, so `#00aaff`), or six digits without the `#` (`0a286e`). Three digits need their `#`, since `255` on its own is a number. The `#` works from the console and from a cfg line alike, e.g. `ds_hud_deathmsg background allies #0a286e`.
 
 A `block` id is any of:
 
