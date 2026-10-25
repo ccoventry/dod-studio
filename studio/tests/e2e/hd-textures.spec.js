@@ -289,7 +289,7 @@ test('build progress, the finished line, and cancel', async ({ page }) => {
   await page.evaluate(() => window.__mockEmit('hd_build_progress', {
     step: 5, steps: 10, style: 'plain', asset_type: 'world', line: null, elapsed_secs: 75,
   }));
-  await expect(page.locator('#hd-build-progress')).toHaveText('Step 5 of 10: plain, Map textures (1m 15s so far)');
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 5 of 10: plain, Map textures (1 min 15 s so far)');
   // Four steps done fill 40%, and the block slides over step 5's 40-50%.
   await expect(page.locator('#hd-build-bar')).not.toHaveClass(/indeterminate/);
   await expect(page.locator('#hd-build-bar .progress-bar-fill')).toHaveAttribute('style', /width: 40%/);
@@ -308,7 +308,7 @@ test('build progress, the finished line, and cancel', async ({ page }) => {
 
   await page.click('#hd-build-btn');
   await page.evaluate(() => window.__finishBuild.resolve({ steps: 10, elapsed_secs: 200, log_path: 'C:/x/build_all.log' }));
-  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 10 steps in 3m 20s. Every step's counts are in C:/x/build_all.log.");
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 10 steps in 3 min 20 s. Every step's counts are in C:/x/build_all.log.");
 });
 
 test('the build clock counts on between reports, and stops with the build', async ({ page }) => {
@@ -320,14 +320,14 @@ test('the build clock counts on between reports, and stops with the build', asyn
   await page.evaluate(() => window.__mockEmit('hd_build_progress', {
     step: 1, steps: 5, style: 'plain', asset_type: 'sky', line: null, elapsed_secs: 0,
   }));
-  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (0s so far)');
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (0.0 s so far)');
   await page.clock.runFor(52_000);
-  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (52s so far)');
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (52.0 s so far)');
 
   await page.evaluate(() => window.__finishBuild.resolve({ steps: 5, elapsed_secs: 53, log_path: 'C:/x/build_all.log' }));
-  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53s. Every step's counts are in C:/x/build_all.log.");
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53.0 s. Every step's counts are in C:/x/build_all.log.");
   await page.clock.runFor(5_000);
-  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53s. Every step's counts are in C:/x/build_all.log.");
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53.0 s. Every step's counts are in C:/x/build_all.log.");
 });
 
 test('rows follow the style order, custom styles after, overrides last; nothing built is one row', async ({ page }) => {

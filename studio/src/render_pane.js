@@ -32,7 +32,8 @@ import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js'
 import { queueSummaryText, batchEndStatus } from './render_batch_status.js';
 import { scanMergeMessage } from './render_scan_summary.js';
 import { rowsOf, batchFrames, secondsLeft, renderingLine, scanEndLine, createRenderBatch } from './render_batch_progress.js';
-import { createClock, durationWords, hideBar, showBar } from './progress_view.js';
+import { createClock, hideBar, showBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
@@ -829,7 +830,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         notify(kind, title, summary);
       }
     }
-    const end = batchEndStatus(finished, failed, cancelled, batch.length > 0 ? durationWords(ended.ms) : null);
+    const end = batchEndStatus(finished, failed, cancelled, batch.length > 0 ? durationTextMs(ended.ms) : null);
     if (!scanRunning) setRenderStatus(renderStatusEl, end.text, end.status);
   });
 
@@ -1010,6 +1011,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         const ok = await themedConfirm(STRINGS.RENDER.clearQueueConfirmMessage(rendering), {
           title: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_TITLE,
           confirmLabel: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_BUTTON,
+          destructive: true,
         });
         if (!ok) return;
       }
