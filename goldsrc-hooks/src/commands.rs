@@ -114,10 +114,40 @@ pub(crate) fn console_print(text: &str) {
     let Some(engfuncs) = engine::engfuncs() else {
         return;
     };
-    let Ok(c_text) = CString::new(text) else {
-        return;
-    };
-    unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
+    // The engine cuts one print at about 1 KB: `ds_hud_deathmsg`'s usage
+    // stopped mid-word after ~1000 bytes (#1021). So long text goes over in
+    // pieces, split after a newline where it can be.
+    for piece in console_pieces(text, CONSOLE_PIECE) {
+        let Ok(c_text) = CString::new(piece) else {
+            return;
+        };
+        unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
+    }
+}
+
+/// Bytes per `pfnConsolePrint` call, under the engine's ~1 KB cut.
+const CONSOLE_PIECE: usize = 900;
+
+/// `text` in pieces of at most `max` bytes, each ending after a newline when
+/// there is one in reach, never inside a UTF-8 character.
+fn console_pieces(text: &str, max: usize) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while rest.len() > max {
+        let mut cut = max;
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if let Some(newline) = rest[..cut].rfind('\n') {
+            cut = newline + 1;
+        }
+        pieces.push(&rest[..cut]);
+        rest = &rest[cut..];
+    }
+    if !rest.is_empty() || pieces.is_empty() {
+        pieces.push(rest);
+    }
+    pieces
 }
 
 /// Registers one cvar and checks the engine handed back what was asked for.
@@ -1845,6 +1875,19 @@ pub fn install() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_console_text_splits_after_newlines_and_loses_nothing() {
+        let text = "aaaa\nbbbb\ncccc\n";
+        assert_eq!(console_pieces(text, 11), vec!["aaaa\nbbbb\n", "cccc\n"]);
+        assert_eq!(console_pieces("short", 900), vec!["short"]);
+        let long = "x".repeat(25);
+        let pieces = console_pieces(&long, 10);
+        assert_eq!(pieces.concat(), long);
+        assert!(pieces.iter().all(|p| p.len() <= 10));
+        let wide = "é".repeat(10);
+        assert_eq!(console_pieces(&wide, 5).concat(), wide);
+    }
 
     /// A tripwire, not a style check. `FCVAR_ARCHIVE` would have the engine
     /// write these into the user's `config.cfg`, and the pipeline's standing
