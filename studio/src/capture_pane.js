@@ -866,7 +866,7 @@ function initClearPreviewsModal() {
       const checked = document.querySelectorAll('.clear-previews-row-cb:checked');
       const pathsToDelete = Array.from(checked).map(cb => cb.dataset.path);
       if (pathsToDelete.length === 0) return;
-      if (!(await themedConfirm(STRINGS.CAPTURE.deletePreviewsConfirm(pathsToDelete.length)))) return;
+      if (!(await themedConfirm(STRINGS.CAPTURE.deletePreviewsConfirm(pathsToDelete.length), { destructive: true }))) return;
 
       deleteBtn.disabled = true;
       try {

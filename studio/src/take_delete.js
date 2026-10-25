@@ -57,6 +57,7 @@ export function confirmContent(sizes, formatSize, queued = 0) {
     })),
     footer,
     confirmLabel: STRINGS.RENDER.DELETE_TAKE_CONFIRM_BUTTON,
+    destructive: true,
   };
 }
 

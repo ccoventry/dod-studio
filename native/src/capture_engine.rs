@@ -840,8 +840,8 @@ pub fn spawn_capture_engine(
                         Ok(Some(status)) => {
                             launcher_exit_logged = true;
                             log_markdown(&format!(
-                                "[HLAE] Launcher exited after {:.1}s (status: {:?}) — expected handoff behaviour, not a crash by itself",
-                                start_time.elapsed().as_secs_f32(),
+                                "[HLAE] Launcher exited after {} (status: {:?}) — expected handoff behaviour, not a crash by itself",
+                                crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                                 status
                             ));
                         }
@@ -911,7 +911,7 @@ pub fn spawn_capture_engine(
                             if console_log_len(&log_path) == log_len_before_launch {
                                 log_markdown(&format!(
                                     "⚠️ **The engine is not writing its console log.** `{}` is unchanged \
-                                     {:.0}s after the game started, so dod-studio is getting no console \
+                                     {} after the game started, so dod-studio is getting no console \
                                      markers from it.\n\n\
                                      Per-demo progress, fast-forward-to-clip notifications, crash \
                                      detection and OBS capture all read that log — without it they do \
@@ -924,7 +924,7 @@ pub fn spawn_capture_engine(
                                      the file open, or HLAE may not be passing the flag through to the \
                                      game.",
                                     log_path.display(),
-                                    CONDEBUG_WRITE_GRACE.as_secs_f32(),
+                                    crate::utils::duration_text::duration_text(CONDEBUG_WRITE_GRACE.as_secs_f64()),
                                 ));
                             }
                         }
@@ -944,9 +944,9 @@ pub fn spawn_capture_engine(
                     }
                     if let Some(dialog) = crate::sys::dialogs::error_dialogs(&game_pids, &launcher_pids).into_iter().next() {
                         log_markdown(&format!(
-                            "[HLAE] Error box from PID {} after {:.1}s: {}",
+                            "[HLAE] Error box from PID {} after {}: {}",
                             dialog.pid,
-                            start_time.elapsed().as_secs_f32(),
+                            crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                             dialog.full_text()
                         ));
                         failure_reason = Some(dialog.summary());
@@ -979,7 +979,7 @@ pub fn spawn_capture_engine(
                 }
 
                 if cancel_token.load(Ordering::Relaxed) {
-                    log_markdown(&format!("[HLAE] Cancelled by user after {:.1}s", start_time.elapsed().as_secs_f32()));
+                    log_markdown(&format!("[HLAE] Cancelled by user after {}", crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64())));
                     // A cancel in the first few seconds catches the launcher
                     // still injecting into hl.exe. Killing only hl.exe then
                     // leaves HLAE open on "AfxHook error, Code: 1" (seen
@@ -1002,8 +1002,8 @@ pub fn spawn_capture_engine(
                         && hl_alive && since.elapsed() > marker_stall_deadline(longest_marker_gap) {
                             let never_started = last_marker_at.is_none();
                             log_markdown(&format!(
-                                "[HLAE] No console markers for {:.0}s with hl.exe still running — treating the batch as stalled. {}",
-                                since.elapsed().as_secs_f32(),
+                                "[HLAE] No console markers for {} with hl.exe still running — treating the batch as stalled. {}",
+                                crate::utils::duration_text::duration_text(since.elapsed().as_secs_f64()),
                                 if never_started {
                                     "Playback never produced a single marker, so the demo most likely failed to load."
                                 } else {
@@ -1040,8 +1040,8 @@ pub fn spawn_capture_engine(
                         exit_trigger.exists(),
                     );
                     log_markdown(&format!(
-                        "[HLAE] Batch complete after {:.1}s (via {}) — taskkilling hl.exe",
-                        start_time.elapsed().as_secs_f32(),
+                        "[HLAE] Batch complete after {} (via {}) — taskkilling hl.exe",
+                        crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                         via
                     ));
                     kill_hl_exe_and_wait(&mut sys);
@@ -1060,8 +1060,8 @@ pub fn spawn_capture_engine(
                     && !exit_trigger.exists()
                 {
                     log_markdown(&format!(
-                        "[HLAE] hl.exe never came up after the launcher exited ({:.1}s elapsed) — treating as failure",
-                        start_time.elapsed().as_secs_f32()
+                        "[HLAE] hl.exe never came up after the launcher exited ({} elapsed) — treating as failure",
+                        crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64())
                     ));
                     failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat".into());
                     break;
@@ -1083,8 +1083,8 @@ pub fn spawn_capture_engine(
                     && !pipe_batch_complete_seen
                 {
                     log_markdown(&format!(
-                        "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
-                        start_time.elapsed().as_secs_f32()
+                        "[HLAE] hl.exe is gone with no exit trigger after {} — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
+                        crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64())
                     ));
                     // The hook DLL's crash recorder says whether it was a
                     // crash, where, and on which map; a known one is
@@ -1145,9 +1145,9 @@ pub fn spawn_capture_engine(
                     // in the file. Said out loud rather than silently printed
                     // as if it were a length.
                     log_markdown(&format!(
-                        "- [obs] {} ({:.1}s{}) -> {}",
+                        "- [obs] {} ({}{}) -> {}",
                         block.take_folder.display(),
-                        block.seconds,
+                        crate::utils::duration_text::duration_text(f64::from(block.seconds)),
                         if block.salvaged { " of recording, salvaged — the file is shorter" } else { "" },
                         block.video.display()
                     ));

@@ -89,11 +89,11 @@ describe('scanCapToast (#531)', () => {
 
 describe('AUDITOR.doneStatus', () => {
   it('counts demos inside archives apart from the loose ones (#929)', () => {
-    expect(STRINGS.AUDITOR.doneStatus(3, 0, '0.0', 82))
+    expect(STRINGS.AUDITOR.doneStatus(3, 0, '0.0 s', 82))
       .toBe('Done in 0.0 s: 3 demos checked and 82 inside archives, 0 with copies.');
   });
 
   it('leaves archives out when none were looked inside', () => {
-    expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
+    expect(STRINGS.AUDITOR.doneStatus(1, 0, '0.4 s')).toBe('Done in 0.4 s: 1 demo checked, 0 with copies.');
   });
 });

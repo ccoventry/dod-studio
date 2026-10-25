@@ -987,6 +987,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         const ok = await themedConfirm(STRINGS.RENDER.clearQueueConfirmMessage(rendering), {
           title: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_TITLE,
           confirmLabel: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_BUTTON,
+          destructive: true,
         });
         if (!ok) return;
       }
