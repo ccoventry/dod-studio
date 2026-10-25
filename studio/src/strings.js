@@ -2505,7 +2505,8 @@ export const STRINGS = {
     PICK_NO_PLAYERS: 'No HLTV highlights in the queue',
     PICK_ADD_TEAM: 'Add a team…',
     PICK_ADD_TEAM_TITLE: 'Adds every player of a team from the Teams list: whoever played on its side in an HLTV demo, or has its tag in their name.',
-    PICK_NO_TEAMS: 'No teams in the HLTV demos',
+    // Short enough for the list's fixed 160 px; its tooltip says where teams come from.
+    PICK_NO_TEAMS: 'No teams',
     pickTeamOption: (name, count) => `${name} (${count} player${count === 1 ? '' : 's'})`,
     PICK_NONE: 'Nobody picked yet',
     PICK_REMOVE: 'Take this player out',
