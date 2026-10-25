@@ -88,6 +88,7 @@ the death cam).
 | `ds_ui_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `ds_ui_resizable_windows` | `1` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `ds_ui_remember_layout` | `1` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
+| `ds_ui_menu_background_keep_shape` | `1` | the main menu's background keeps its shape on the pre-Anniversary build: one scale for both axes, centred, cropped to fill the screen, as the 25th Anniversary build draws it, instead of stretched. No effect on the Anniversary build. A `dodstudio_menu*.png`/`.tga` in `dod_addon\resource\background` is drawn instead of the stock tiles on both builds, the one closest to the screen's shape, fitted the same way | `goldsrc-hooks/src/menu_background.rs`, #1045 |
 
 The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 `hw.dll` (#370).

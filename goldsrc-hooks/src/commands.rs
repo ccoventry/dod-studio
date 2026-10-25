@@ -606,6 +606,8 @@ pub fn poll() {
     crate::frame_esc::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::engine_buttons::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::menu_background::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
     // two while both of its settings are off.
     window_layout::poll();
@@ -836,6 +838,9 @@ fn status_text() -> String {
     }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
+    }
+    if let Some(background) = crate::menu_background::status_line() {
+        lines.push(background);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);
@@ -1402,6 +1407,14 @@ unsafe extern "C" fn cmd_console_in_panel() {
     );
 }
 
+unsafe extern "C" fn cmd_menu_background_keep_shape() {
+    handle_toggle(
+        crate::menu_background::KEEP_SHAPE_NAME,
+        &crate::menu_background::KEEP_SHAPE,
+        crate::menu_background::status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1697,6 +1710,18 @@ pub fn install() {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
         }
+    }
+
+    // On by default: the pre-Anniversary build then fits the menu picture
+    // the way the 25th Anniversary build already does, cropped rather than
+    // squashed, so both look the same (#1045). Read by menu_background's
+    // draw, so it needs no poll.
+    match register(crate::menu_background::KEEP_SHAPE_NAME, "1") {
+        Some(cvar) => crate::menu_background::set_cvar(cvar),
+        None => add_command(
+            crate::menu_background::KEEP_SHAPE_NAME,
+            cmd_menu_background_keep_shape,
+        ),
     }
 
     // Both on by default: the window is how DoD
