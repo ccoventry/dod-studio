@@ -23,6 +23,53 @@ export function wasRendered(job) {
 }
 
 /**
+ * When a take's clip was finished, from its rows in the list, or `null` when
+ * it isn't (#644). The same rule as #716's automatic cleanup
+ * (`take_cleanup::finished_at`): every stream of the take (both halves of a
+ * HUD pair) has a last render attempt, by start time, that finished, and that
+ * clip file is still on disk. A row waiting or rendering (a Retry queues a
+ * finished take again) keeps the take unfinished. The time is the latest of
+ * those attempts' start times. #716 reads the streams from the take folder;
+ * here they are the take's rows, since this only picks rows to tick and
+ * Delete Take still asks before anything goes.
+ */
+export function takeFinishedAt(takeJobs) {
+  if (!takeJobs?.length) return null;
+  let latest = 0;
+  for (const j of takeJobs) {
+    if (j.status === JOB_STATUS.QUEUED || j.status === JOB_STATUS.RENDERING) return null;
+    let last = null;
+    for (const h of j.history || []) {
+      if (!last || (h.started_unix_ms || 0) > (last.started_unix_ms || 0)) last = h;
+    }
+    if (!last || last.outcome !== 'finished' || !last.output_exists) return null;
+    latest = Math.max(latest, last.started_unix_ms || 0);
+  }
+  return latest;
+}
+
+/**
+ * The take folders whose clips are finished (`takeFinishedAt`), and, with
+ * `minAgeMs`, finished at least that long before `nowMs`.
+ */
+export function finishedTakeFolders(allJobs, { minAgeMs = 0, nowMs = Date.now() } = {}) {
+  const byTake = new Map();
+  for (const j of allJobs || []) {
+    if (!j.take_folder) continue;
+    if (!byTake.has(j.take_folder)) byTake.set(j.take_folder, []);
+    byTake.get(j.take_folder).push(j);
+  }
+  const out = new Set();
+  for (const [folder, takeJobs] of byTake) {
+    const at = takeFinishedAt(takeJobs);
+    // No age asked: a start time ahead of this clock (another PC's, or
+    // before the clock was set back) still counts.
+    if (at !== null && (minAgeMs <= 0 || nowMs - at >= minAgeMs)) out.add(folder);
+  }
+  return out;
+}
+
+/**
  * The ids and take folders each bulk button acts on, from the ticked jobs
  * and the whole list (`busy` takes come from the whole list: a take with a
  * HUD pair is two rows, and either one rendering keeps the take, like the
@@ -122,6 +169,11 @@ export function createRenderSelection({ getJobs, onChange } = {}) {
     selectAll: () => setAll(() => true),
     selectNone: () => setAll(() => false),
     selectUnrendered: () => setAll((j) => !wasRendered(j)),
+    /** Ticks every row of each finished take, and only those (#644). */
+    selectFinished: (opts) => {
+      const folders = finishedTakeFolders(jobs(), opts);
+      setAll((j) => folders.has(j.take_folder));
+    },
     tickedJobs,
     counts,
     targets: () => bulkTargets(tickedJobs(), jobs()),
