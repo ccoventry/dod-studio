@@ -2745,7 +2745,7 @@ export const STRINGS = {
         : `Done in ${duration}: ${captured} of ${total} ${clips} captured`;
     },
     startLog: () => '[capture] started',
-    endLog: (outcome, seconds, captured, total) => `[capture] ${outcome} after ${seconds} s${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
+    endLog: (outcome, elapsed, captured, total) => `[capture] ${outcome} after ${elapsed}${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to
