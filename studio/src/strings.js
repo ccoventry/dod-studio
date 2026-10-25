@@ -640,9 +640,7 @@ export const STRINGS = {
     deletePreviewsConfirm: (n) => `Permanently delete ${n} orphaned preview demo(s)?`,
     deletedPreviews: (n) => `Deleted ${n} orphaned preview demo(s).`,
     deletionFailed: (e) => `Deletion failed: ${e}`,
-    CAPTURING_DEFAULT: 'Capturing',
     CAPTURING_ELLIPSIS_DEFAULT: 'Capturing...',
-    capturingWithName: (status, name) => `${status}: ${name}`,
     // #643: the batch's time left, after the status line.
     timeLeftMinutes: (minutes) => ` · about ${minutes} min left`,
     TIME_LEFT_UNDER_A_MINUTE: ' · under a minute left',
@@ -652,7 +650,6 @@ export const STRINGS = {
     CAPTURE_ERROR_TEXT_DEFAULT: 'Capture failed',
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
-    COMPLETED: 'Completed',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
     takesFoundMissing: (captured, total) => `${captured}/${total} takes found on disk — ${total - captured} missing.`,
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -2728,6 +2725,19 @@ export const STRINGS = {
   // ── progress_view.js: what every long job's progress line shares (#951)
   PROGRESS: {
     elapsedSuffix: (clock) => ` · ${clock}`,
+  },
+
+  // ── capture_progress.js: the capture batch's footer line and bar (#952)
+  CAPTURE_PROGRESS: {
+    done: (duration, captured, total) => {
+      if (total == null) return `Done in ${duration}`;
+      const clips = total === 1 ? 'clip' : 'clips';
+      return captured === total
+        ? `Done in ${duration}: ${total} ${clips} captured`
+        : `Done in ${duration}: ${captured} of ${total} ${clips} captured`;
+    },
+    startLog: () => '[capture] started',
+    endLog: (outcome, seconds, captured, total) => `[capture] ${outcome} after ${seconds} s${total == null ? '' : `: ${captured} of ${total} clip(s) captured`}`,
   },
 
   // ── scan_progress.js: what every scan reading demos one by one adds to
