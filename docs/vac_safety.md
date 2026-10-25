@@ -19,7 +19,8 @@ it bans, so everything here is best effort, and what happens once you connect
 from a game with the DLL loaded is outside the project's control. You use DoD
 Studio at your own risk: a banned account is yours to carry, not the project's
 (the README's "Use at your own risk" section, and the MIT licence's no-warranty
-clause).
+clause). Valve's own page is the authority:
+[Valve Anti-Cheat (VAC) System](https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74).
 
 ## The rules
 
