@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   elapsedText, secondsText, lastRunKey, readLastRun, rememberLastRun, againstLastRun,
-  showBar, hideBar, createClock,
+  showBar, hideBar, createClock, durationWords,
 } from './progress_view.js';
 
 // A `.progress-bar-container` with its fill, enough for showBar/hideBar.
@@ -98,5 +98,15 @@ describe('progress_view (#951)', () => {
     expect(clock.suffix()).toBe('');
     vi.advanceTimersByTime(3_000);
     expect(redraw).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('durationWords (#952)', () => {
+  it('reads seconds, then minutes and seconds, then hours', () => {
+    expect(durationWords(2_140)).toBe('2.1 s');
+    expect(durationWords(42_400)).toBe('42 s');
+    expect(durationWords(372_000)).toBe('6 min 12 s');
+    expect(durationWords(3_900_000)).toBe('1 h 5 min');
+    expect(durationWords(-5)).toBe('0.0 s');
   });
 });

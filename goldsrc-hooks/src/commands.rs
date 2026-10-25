@@ -114,10 +114,40 @@ pub(crate) fn console_print(text: &str) {
     let Some(engfuncs) = engine::engfuncs() else {
         return;
     };
-    let Ok(c_text) = CString::new(text) else {
-        return;
-    };
-    unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
+    // The engine cuts one print at about 1 KB: `ds_hud_deathmsg`'s usage
+    // stopped mid-word after ~1000 bytes (#1021). So long text goes over in
+    // pieces, split after a newline where it can be.
+    for piece in console_pieces(text, CONSOLE_PIECE) {
+        let Ok(c_text) = CString::new(piece) else {
+            return;
+        };
+        unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
+    }
+}
+
+/// Bytes per `pfnConsolePrint` call, under the engine's ~1 KB cut.
+const CONSOLE_PIECE: usize = 900;
+
+/// `text` in pieces of at most `max` bytes, each ending after a newline when
+/// there is one in reach, never inside a UTF-8 character.
+fn console_pieces(text: &str, max: usize) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while rest.len() > max {
+        let mut cut = max;
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if let Some(newline) = rest[..cut].rfind('\n') {
+            cut = newline + 1;
+        }
+        pieces.push(&rest[..cut]);
+        rest = &rest[cut..];
+    }
+    if !rest.is_empty() || pieces.is_empty() {
+        pieces.push(rest);
+    }
+    pieces
 }
 
 /// Registers one cvar and checks the engine handed back what was asked for.
@@ -545,6 +575,9 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // ds_hud_hide_clan_text changes.
     crate::clan_text::poll();
+    // ds_player_change_name: who each slot is and which rename wins, for the
+    // GetPlayerInfo detour to read; keeps the SayText handler prepended.
+    crate::player_names::poll();
     // ds_hud_hide_center_text: its filter rides on clan_text's TextMsg
     // handler, so this only follows the cvar.
     crate::center_text::poll();
@@ -553,6 +586,9 @@ pub fn poll() {
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
+    // Keeps the weapon list off screen in demo playback with hud_fastswitch 1:
+    // one code byte, checked each frame.
+    crate::weapon_list::poll();
     // Follows ds_hd_enabled / ds_hd_style, then notes what each map
     // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -609,6 +645,8 @@ pub fn poll() {
     crate::demo_scope::poll();
     crate::run_in_background::poll();
     crate::pov_live_bob::poll();
+    // A float compare unless ds_view_show_own_blood changed (#1035).
+    crate::own_blood::poll();
     crate::map_sounds::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
@@ -779,7 +817,13 @@ fn status_text() -> String {
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
+    if let Some(blood) = crate::own_blood::status_line() {
+        lines.push(blood);
+    }
     lines.push(crate::player_overrides::status());
+    if let Some(renames) = crate::player_names::status_line() {
+        lines.push(renames);
+    }
     if let Some(sprays) = crate::spray_hltv::status_line() {
         lines.push(sprays);
     }
@@ -854,6 +898,9 @@ fn status_text() -> String {
     }
     if let Some(voice_menus) = crate::voice_menus::status_line() {
         lines.push(voice_menus);
+    }
+    if let Some(weapon_list) = crate::weapon_list::status_line() {
+        lines.push(weapon_list);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1573,6 +1620,7 @@ pub fn install() {
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
     add_command(crate::spray::NAME, crate::spray::command);
+    add_command(crate::player_names::NAME, crate::player_names::command);
 
     // Standalone, like `ds_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1759,6 +1807,9 @@ pub fn install() {
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
         crate::pov_live_bob::set_log_cvar(log);
     }
+    if let Some(blood) = register(crate::own_blood::NAME, "0") {
+        crate::own_blood::set_cvar(blood);
+    }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
             family.set_cvar(mute);
@@ -1839,6 +1890,19 @@ pub fn install() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_console_text_splits_after_newlines_and_loses_nothing() {
+        let text = "aaaa\nbbbb\ncccc\n";
+        assert_eq!(console_pieces(text, 11), vec!["aaaa\nbbbb\n", "cccc\n"]);
+        assert_eq!(console_pieces("short", 900), vec!["short"]);
+        let long = "x".repeat(25);
+        let pieces = console_pieces(&long, 10);
+        assert_eq!(pieces.concat(), long);
+        assert!(pieces.iter().all(|p| p.len() <= 10));
+        let wide = "é".repeat(10);
+        assert_eq!(console_pieces(&wide, 5).concat(), wide);
+    }
 
     /// A tripwire, not a style check. `FCVAR_ARCHIVE` would have the engine
     /// write these into the user's `config.cfg`, and the pipeline's standing
@@ -1947,6 +2011,7 @@ mod tests {
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
+            crate::own_blood::NAME,
             crate::map_sounds::VICTORY_MUSIC_NAME,
             crate::map_sounds::FLAG_CAPTURE_NAME,
             crate::map_sounds::LOG_NAME,
@@ -1971,6 +2036,7 @@ mod tests {
             crate::center_text::NAME,
             crate::spectator_text::NAME,
             crate::strafe_twitch::NAME,
+            crate::own_blood::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")
