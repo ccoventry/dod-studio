@@ -21,6 +21,8 @@
 //! - `EMPTY`: attack presses while the server's clip is 0 and no reload runs
 //!   (real empty clicks);
 //! - `IDMAP`: which fire script each weapon id fired with;
+//! - `STANDIN` / `SIM`: the rounds `ds_sound_fix_pov_dry_fire` would play,
+//!   each checked against the unrecorded shots;
 //! - `SUMMARY` per demo and weapon, `TOTAL` per weapon.
 //!
 //!     cargo run --release -p analysis --example pov_dry_fire_survey -- <demo>...
@@ -34,6 +36,41 @@ use std::collections::{BTreeMap, HashMap};
 /// after, belongs to that shot.
 const EVENT_BEFORE: f32 = 0.45;
 const EVENT_AFTER: f32 = 0.05;
+/// The guns `pov_dry_fire` plays a round for, by DoD weapon id, and their
+/// fire scripts (its `SCRIPTS`).
+const GUNS: &[(u8, &str)] = &[
+    (3, "colt"),
+    (4, "luger"),
+    (5, "garand"),
+    (6, "scopedkar"),
+    (7, "thompson"),
+    (8, "mp44"),
+    (9, "spring"),
+    (10, "kar"),
+    (11, "bar"),
+    (12, "mp40"),
+    (17, "mg42"),
+    (18, "30cal"),
+    (20, "m1carbine"),
+    (21, "mg34"),
+    (22, "greasegun"),
+    (23, "fg42"),
+    (24, "k43"),
+    (25, "enfield"),
+    (26, "sten"),
+    (27, "bren"),
+    (28, "webley"),
+    (35, "fg42"),
+    (36, "m1carbine"),
+    (38, "scopedenfield"),
+];
+
+/// The hook's `PAIRING_SECONDS`.
+const PAIRING_SECONDS: f32 = 0.5;
+
+fn gun_name(id: u8) -> Option<&'static str> {
+    GUNS.iter().find(|(g, _)| *g == id).map(|(_, name)| *name)
+}
 /// "Right after a reload": the attack press within this long of the reload
 /// finishing on the server.
 const AFTER_RELOAD: f32 = 0.5;
@@ -129,6 +166,15 @@ fn main() {
         let mut press_delay = 0f32;
         // Full args of each client event, by index into `events`.
         let mut event_args: Vec<(i32, i32, i32)> = Vec::new();
+        // Every `CurWeapon`: (time, active, weapon id, clip), and where it
+        // and each client event sit in the file. The order, not the clock:
+        // a demo's clock can step back (a map restart).
+        let mut cur_weapon: Vec<(f32, u8, u8, u8)> = Vec::new();
+        let mut cur_weapon_at: Vec<usize> = Vec::new();
+        let mut event_at: Vec<usize> = Vec::new();
+        let mut order = 0usize;
+        // Every `DeathMsg`: (time, victim's entity index).
+        let mut deaths: Vec<(f32, u8)> = Vec::new();
 
         for entry in &demo.directory.entries {
             for frame in &entry.frames {
@@ -139,6 +185,8 @@ fn main() {
                         {
                             events.push((svc_time, name.clone(), ev.args.entity_index));
                             event_args.push((ev.args.iparam1, ev.args.bparam1, ev.args.bparam2));
+                            order += 1;
+                            event_at.push(order);
                         }
                     }
                     FrameData::NetworkMessage(bt) => {
@@ -160,6 +208,20 @@ fn main() {
                             continue;
                         };
                         for m in msgs {
+                            if let NetMessage::UserMessage(um) = m
+                                && clean(&String::from_utf8_lossy(&um.name)) == "CurWeapon"
+                                && let [active, id, clip, ..] = um.data[..]
+                            {
+                                cur_weapon.push((svc_time, active, id, clip));
+                                order += 1;
+                                cur_weapon_at.push(order);
+                            }
+                            if let NetMessage::UserMessage(um) = m
+                                && clean(&String::from_utf8_lossy(&um.name)) == "DeathMsg"
+                                && let [_, victim, ..] = um.data[..]
+                            {
+                                deaths.push((svc_time, victim));
+                            }
                             let NetMessage::EngineMessage(em) = m else {
                                 continue;
                             };
@@ -295,25 +357,95 @@ fn main() {
             }
             matched.push((*id, s, best.is_some()));
         }
+        // The hook's own decision (`goldsrc-hooks/src/pov_dry_fire.rs`) run
+        // over this demo: the rounds it would play, against the server shots
+        // above that had no recorder event.
+        let unpredicted: Vec<f32> = matched
+            .iter()
+            .filter(|(id, _, predicted)| {
+                !predicted && u8::try_from(*id).ok().and_then(gun_name).is_some()
+            })
+            .map(|(_, s, _)| s.t)
+            .collect();
+        let mut standins: Vec<(f32, u8, u8, u8, u32)> = Vec::new();
+        let mut last: Option<(u8, u8)> = None;
+        // When each recorded shot not yet paired with a round was heard.
+        let mut heard: std::collections::VecDeque<f32> = std::collections::VecDeque::new();
+        let mut next_event = 0usize;
+        for (&(t, active, id, clip), &at) in cur_weapon.iter().zip(&cur_weapon_at) {
+            while next_event < events.len() && event_at[next_event] < at {
+                // Every `Dem_Event` is the recording player's own, whatever
+                // his slot: the hook reads it live.
+                if heard.len() == 8 {
+                    heard.pop_front();
+                }
+                heard.push_back(events[next_event].0);
+                next_event += 1;
+            }
+            // A weapon put away or taken (a switch, death, the round's end).
+            if active == 0 {
+                last = None;
+                continue;
+            }
+            let before = last.replace((id, clip));
+            let fired = match before {
+                Some((w, c)) if w == id && clip + 1 == c => 1,
+                _ => 0,
+            };
+            if fired == 0 {
+                continue;
+            }
+            // Too old to be this round's (or from before a clock step back).
+            heard.retain(|&h| t >= h && t - h <= PAIRING_SECONDS);
+            let missing = if heard.pop_front().is_some() {
+                0
+            } else {
+                fired
+            };
+            if missing > 0 && gun_name(id).is_some() {
+                standins.push((t, id, before.map_or(0, |b| b.1), clip, missing));
+            }
+        }
+        let mut false_standins = 0;
+        for &(t, id, from, to, n) in &standins {
+            let real = unpredicted.iter().any(|u| (t - u).abs() < 0.3);
+            if !real {
+                false_standins += 1;
+            }
+            let died = deaths
+                .iter()
+                .any(|&(d, victim)| i32::from(victim) == recorder && (t - d).abs() < 1.0);
+            println!(
+                "STANDIN\t{short}\t{t:.3}\tid{id}\t{from}->{to}\t{n}\t{}\t{}",
+                if real {
+                    "matches an unrecorded shot"
+                } else {
+                    "NO unrecorded shot near"
+                },
+                if died { "recorder died" } else { "-" }
+            );
+        }
+        println!(
+            "SIM\t{short}\tstand-ins {}\tunrecorded shots {}\tstand-ins with no unrecorded shot {false_standins}",
+            standins.len(),
+            unpredicted.len()
+        );
         // Which fire script each weapon id fired with, for the hook's table.
         for (id, scripts) in &script_of {
             for (script, n) in scripts {
                 println!("IDMAP\t{id}\t{script}\t{n}");
             }
         }
+        // By id, not by the script its events used: a rocket or a grenade
+        // firing next to a gun's event would otherwise take the gun's name.
         let weapon = |id: u32| -> String {
-            script_of
-                .get(&id)
-                .and_then(|m| m.iter().max_by_key(|(_, n)| **n).map(|(s, _)| s.clone()))
-                .map(|s| {
-                    s.trim_start_matches("events/weapons/")
-                        .trim_end_matches(".sc")
-                        .to_string()
-                })
-                .unwrap_or_else(|| format!("id{id}"))
+            u8::try_from(id)
+                .ok()
+                .and_then(gun_name)
+                .map_or_else(|| format!("id{id}"), str::to_string)
         };
         for (id, s, predicted) in &matched {
-            // No fire script matched: a grenade or another thrown weapon.
+            // Not a gun: a grenade, a rocket, a knife.
             if weapon(*id).starts_with("id") {
                 continue;
             }
