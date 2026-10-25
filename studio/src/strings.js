@@ -759,6 +759,13 @@ export const STRINGS = {
     CLEAR_QUEUE_CONFIRM_BUTTON: 'Stop and clear',
     SELECT_UNRENDERED_BUTTON: 'Select unrendered',
     SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
+    SELECT_FINISHED_BUTTON: 'Select finished',
+    SELECT_FINISHED_TITLE: 'Tick only the takes whose clips are done: the last render of each part finished and the clip file is still there. Then Delete Take folders clears them in one go.',
+    FINISHED_AGE_TITLE: 'Which finished takes Select finished ticks: all of them, or only those rendered at least this long ago.',
+    FINISHED_AGE_ANY: 'of any age',
+    FINISHED_AGE_DAY: 'over a day old',
+    FINISHED_AGE_WEEK: 'over a week old',
+    FINISHED_AGE_MONTH: 'over a month old',
     SELECT_ALL_CB_TITLE: 'Tick or untick every row',
     SELECT_ROW_TITLE: 'Tick this row for Cancel, Retry, Remove and Delete Take folders below',
     selectedCount: (ticked, total) => `${ticked} of ${total} selected`,
@@ -1125,7 +1132,10 @@ export const STRINGS = {
     // #437: every demo a player appears in.
     PLAYER_PLACEHOLDER: 'Player',
     PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
-    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    playersReading: (done, total) => `Reading players: ${done} / ${total} not read yet`,
+    // #992: the one quick lookup of the players already read.
+    PLAYERS_LOOKING: 'Looking up players…',
+    playersInCloud: (n) => `Players not read for ${n} demo${n === 1 ? '' : 's'} on a cloud drive (reading one downloads it). Cache all reads them.`,
     ROLE_RECORDED: 'recorded it',
     ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',
@@ -2981,6 +2991,10 @@ export const STRINGS = {
     crosshairAddFailed: (why) => `Couldn't add the crosshair: ${why}`,
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
+  },
+  // A file dialog that is slow to appear (dialog_wait.js).
+  FILE_DIALOG: {
+    OPENING: 'Opening the file dialog… Windows can take a few seconds the first time.',
   },
   // Dropping demos and folders from Windows (#530): demo_drop.js.
   DROP: {

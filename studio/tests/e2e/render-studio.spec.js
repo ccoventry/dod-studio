@@ -509,6 +509,30 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
   });
 
+  test('Select finished ticks the finished takes for Delete Take folders (#644)', async ({ page }) => {
+    await gotoHarness(page);
+    const recent = [{ ...rendered[0], started_unix_ms: Date.now() - 1000 }];
+    await emitSnapshot(page, [
+      job({ id: '0' }),
+      job({ id: '1', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
+      job({ id: '2', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_03_b0\\take0000', history: recent }),
+    ]);
+    await expect(page.locator('#render-select-finished-btn')).toBeEnabled();
+
+    await page.locator('#render-select-finished-btn').click();
+    await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (2)');
+
+    // Over a day old: only the 2023 render.
+    await page.locator('#render-finished-age-select').selectOption('86400000');
+    await page.locator('#render-select-finished-btn').click();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (1)');
+  });
+
   test('the finish toast counts only the rows this batch rendered', async ({ page }) => {
     await gotoHarness(page);
     const before = [

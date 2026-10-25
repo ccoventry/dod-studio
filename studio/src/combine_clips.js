@@ -7,6 +7,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
+import { whileDialogOpens } from './dialog_wait.js';
 import { combinePlan, combineClips, combineCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -187,11 +188,11 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
     if (!plan || clips.length < 2) return;
     let output;
     try {
-      output = await save({
+      output = await whileDialogOpens(() => save({
         title: STRINGS.COMBINE.SAVE_TITLE,
         defaultPath: defaultOutput(clips[0], plan.stream_copy),
         filters: [{ name: STRINGS.COMBINE.VIDEO_FILTER, extensions: VIDEO_EXTENSIONS }],
-      });
+      }));
     } catch (err) {
       console.error('Choosing where to save the combined video failed:', err);
       return;
