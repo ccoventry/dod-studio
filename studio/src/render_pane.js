@@ -505,6 +505,10 @@ function syncSelectionControls() {
   if (countEl) countEl.textContent = STRINGS.RENDER.selectedCount(ticked, total);
   const unrenderedBtn = document.querySelector('#render-select-unrendered-btn');
   if (unrenderedBtn) unrenderedBtn.disabled = total === 0;
+  for (const id of ['#render-select-finished-btn', '#render-finished-age-select']) {
+    const el = document.querySelector(id);
+    if (el) el.disabled = total === 0;
+  }
 
   const setButton = (id, count, label, title, disabled = count === 0) => {
     const btn = document.querySelector(id);
@@ -674,6 +678,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (e.target.checked) selection.selectAll(); else selection.selectNone();
   });
   document.querySelector('#render-select-unrendered-btn')?.addEventListener('click', () => selection.selectUnrendered());
+  // #644: tick the finished takes, of any age or older than the age picked.
+  document.querySelector('#render-select-finished-btn')?.addEventListener('click', () => {
+    const minAgeMs = Number(document.querySelector('#render-finished-age-select')?.value) || 0;
+    selection.selectFinished({ minAgeMs });
+  });
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
