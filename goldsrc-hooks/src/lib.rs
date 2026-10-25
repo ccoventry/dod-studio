@@ -51,6 +51,10 @@
 //!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
+//! - `player_names`: the `ds_player_change_name add|list|remove|clear`
+//!   command -- rename a player everywhere their name shows during playback,
+//!   by SteamID, slot or `self`, for one demo or all, through a detour of
+//!   client.dll's `pfnGetPlayerInfo` (#1021).
 //! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `ds_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -272,6 +276,7 @@ mod particle_hide;
 mod patch;
 mod pe;
 mod player_crosshair;
+mod player_names;
 mod player_overrides;
 mod player_table;
 mod pmove_guard;

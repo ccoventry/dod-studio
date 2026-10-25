@@ -16,7 +16,7 @@ start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
 **Scope:** the surface actually on `dev` today: forty-eight cvars and
-fifteen commands. Entries still in open PRs are not listed -- update this file as
+sixteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
@@ -96,13 +96,16 @@ The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 Always a command rather than a cvar when it has subcommands or a variable
 argument count, which a cvar's single value can't hold.
 
-A command (or subcommand) that takes more than three values, or any
-optional ones, names its parameters: each value follows its name
-(`killer 3`, `at 7:42`), and the named parts can come in any order. A
-row of positional values would need `-` placeholders for the ones left
-out, and nobody remembers which slot is which. Short commands with a fixed
-shape stay positional (`scale 2`, `block <id>...`, `fake <killer>
-<victim> <weapon>`). An unknown name is refused, and the message names it.
+**Named parameters.** A command (or subcommand) that takes more than three
+values, or any optional ones, names its parameters: each value follows its
+name (`killer 3`, `at 7:42`, `id <player> in <demo> to <name>`), and the
+named parts can come in any order. A row of positional values would need
+`-` placeholders for the ones left out, and nobody remembers which slot is
+which (#1021). Short commands with a fixed shape stay positional
+(`scale 2`, `block <id>...`, `fake <killer> <victim> <weapon>`). A value
+with spaces goes in quotes; GoldSrc's console can't put `"` or `;` inside
+one. An unknown name is refused, and the message names it, so a typo never
+silently does something else.
 
 ### `ds_debug_status`
 
@@ -449,6 +452,53 @@ capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a
 batch draws recorded sprays and would only change the file on disk.
 Source: `goldsrc-hooks/src/spray.rs`, `goldsrc-hooks/src/spray_hltv.rs`
 (offsets checked by `goldsrc-hooks/tools/verify_hltv_spray_offsets.py`).
+
+### `ds_player_change_name`
+
+Renames a player everywhere their name shows during playback: the kill
+feed, the scoreboard, the aim-at-teammate name, the voice icon, chat, the
+capture lines and the join and team lines (#1021). The demo files stay as
+they are.
+
+```
+ds_player_change_name add id <slot | SteamID | self> [in <demo>[,<demo>...]] to <new name>
+ds_player_change_name list
+ds_player_change_name remove <n>
+ds_player_change_name clear
+```
+
+- **`id`**: a SteamID in any form `ds_hud_deathmsg block` takes
+  (`STEAM_0:1:5550002`, `[U:1:11100005]`, `7656119...`; `ds_hud_deathmsg
+  players` lists them), a slot (1-32), or `self`, the recording player of a
+  POV demo. Bots have no SteamID, so they go by slot.
+- **`in`**: one demo, a comma list, or `*` patterns, matched against the
+  loaded demo's file name without `.dem` (`in wsod25_r03_*`). Without `in`,
+  every demo.
+- **`to`**: the new name, up to 63 characters; quoted when it has spaces or
+  any of `: , ( ) { } '`. No `%`. Unquoted, the console splits a name at
+  `:` and `,` and loses the spaces beside them (`dicE[: :]Alex` arrives as
+  `dicE[::]Alex`), so the pieces are glued back with a warning that shows
+  the name as it now reads.
+- `self` or a slot without `in` gets a warning, not a refusal: "self is a
+  different player in each POV demo; add `in <demo>` or use a SteamID".
+- Refused, with the reason: `add` without `id` and `to`, any unknown word, a
+  value given twice, a bad id, a name too long.
+- When two renames match one player, one with `in` wins over one without,
+  then the one added last. `add` with the same `id` and `in` again changes
+  that rename's name instead of adding another.
+- `list` numbers the renames and says who each one renames in the demo
+  playing now; `remove <n>` takes that number.
+
+How: a detour of `client.dll`'s copy of `pfnGetPlayerInfo` (slot 21), which
+hands out the new name; the names the hook itself looks up go through the
+engine's own table, so SteamID matching always sees the real player. The
+server wrote the sender's name into each chat line, so `SayText` is rewritten
+too (the game then colours the new name, since it finds the detour's name in
+the line), and a `TextMsg` argument equal to a renamed player's real name
+(`*<name> joined Axis`) is swapped. A name over 31 characters lifts the kill
+feed's copy cap (`strncpy(..., 32)` into its 64-byte fields) to 63; checked by
+`goldsrc-hooks/tools/verify_killfeed_name_cap_offsets.py`. Source:
+`goldsrc-hooks/src/player_names.rs`, `goldsrc-hooks/src/deathmsg/name_cap.rs`.
 
 ### `ds_map_hide_asset`
 
