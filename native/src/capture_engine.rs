@@ -1147,7 +1147,7 @@ pub fn spawn_capture_engine(
                     log_markdown(&format!(
                         "- [obs] {} ({}{}) -> {}",
                         block.take_folder.display(),
-                        crate::utils::duration_text::duration_text(f64::from(block.seconds)),
+                        crate::utils::duration_text::duration_text(block.seconds),
                         if block.salvaged { " of recording, salvaged — the file is shorter" } else { "" },
                         block.video.display()
                     ));
