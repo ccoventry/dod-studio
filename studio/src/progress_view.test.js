@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  elapsedText, secondsText, lastRunKey, readLastRun, rememberLastRun, againstLastRun,
-  showBar, hideBar, createClock, durationWords,
+  elapsedText, lastRunKey, readLastRun, rememberLastRun, againstLastRun,
+  showBar, hideBar, createClock,
 } from './progress_view.js';
 
 // A `.progress-bar-container` with its fill, enough for showBar/hideBar.
@@ -28,13 +28,11 @@ function fakeStorage(entries = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe('progress_view (#951)', () => {
-  it('times a job as m:ss, and its end to a tenth of a second', () => {
+  it('times a running job as m:ss', () => {
     expect(elapsedText(0)).toBe('0:00');
     expect(elapsedText(6_800)).toBe('0:06');
     expect(elapsedText(75_000)).toBe('1:15');
     expect(elapsedText(-5)).toBe('0:00');
-    expect(secondsText(6_840)).toBe('6.8');
-    expect(secondsText(undefined)).toBe('0.0');
   });
 
   it('keys a last run by its area and paths, in any order and case', () => {
@@ -101,12 +99,3 @@ describe('progress_view (#951)', () => {
   });
 });
 
-describe('durationWords (#952)', () => {
-  it('reads seconds, then minutes and seconds, then hours', () => {
-    expect(durationWords(2_140)).toBe('2.1 s');
-    expect(durationWords(42_400)).toBe('42 s');
-    expect(durationWords(372_000)).toBe('6 min 12 s');
-    expect(durationWords(3_900_000)).toBe('1 h 5 min');
-    expect(durationWords(-5)).toBe('0.0 s');
-  });
-});

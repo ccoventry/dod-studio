@@ -1,5 +1,5 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
@@ -28,7 +28,7 @@ import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.j
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
-import { timeLeftSuffix } from './capture_time_left.js';
+import { createCaptureProgress, endKind } from './capture_progress.js';
 import { refreshAfterTyping } from './input_refresh.js';
 
 let listeningForExternalErrors = false;
@@ -43,11 +43,8 @@ let capturingInFlight = false;
 // Start Capture's checks before the batch (#953): while they run,
 // refreshLaunchGuard() leaves Start greyed out too.
 let precheck = null;
-// The batch's time left (#643): the last estimate, the status line it goes
-// after, and the timer that counts it down between clip boundaries.
-let timeLeft = null;
-let timeLeftStatus = '';
-let timeLeftTimer = null;
+// The batch's footer line and bar (#952), with its time left (#643).
+let captureProgress = null;
 
 /** Whether a capture batch is running right now (#545's close prompt). */
 export function isCaptureRunning() {
@@ -866,7 +863,7 @@ function initClearPreviewsModal() {
       const checked = document.querySelectorAll('.clear-previews-row-cb:checked');
       const pathsToDelete = Array.from(checked).map(cb => cb.dataset.path);
       if (pathsToDelete.length === 0) return;
-      if (!(await themedConfirm(STRINGS.CAPTURE.deletePreviewsConfirm(pathsToDelete.length)))) return;
+      if (!(await themedConfirm(STRINGS.CAPTURE.deletePreviewsConfirm(pathsToDelete.length), { destructive: true }))) return;
 
       deleteBtn.disabled = true;
       try {
@@ -887,7 +884,6 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   const cancelBtn = document.querySelector('#cancel-batch-btn');
   const statusEl = document.querySelector('#batch-status');
   const progressContainer = document.querySelector('#capture-progress-container');
-  const progressBar = document.querySelector('#capture-progress-bar');
 
   // No "keep the game focused" reminder: every batch turns on
   // ds_capture_run_in_background, so a game behind other windows or minimised
@@ -898,6 +894,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
   currentGetState = getState;
   precheck = createCapturePrecheck({ startBtn, statusEl, progressContainer, refreshStart: () => refreshLaunchGuard() });
+  captureProgress = createCaptureProgress({ statusEl, container: progressContainer, log: logFrontendEvent });
   initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
@@ -1042,63 +1039,35 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const payload = event.payload || {};
       if (payload.running) {
         // The first running report of a batch: the last one's results go.
-        if (!capturingInFlight) {
-          batchStarted();
-          timeLeft = null;
-        }
+        // A Cancel clears capturingInFlight before the takes are checked,
+        // and that check still reports as running: it is the same batch.
+        if (!capturingInFlight && !captureProgress.isRunning()) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
-        if (progressBar) {
-          if (payload.index !== undefined && payload.total && payload.total > 0) {
-            const pct = Math.min(100, Math.round((payload.index / payload.total) * 100));
-            progressBar.style.width = `${pct}%`;
-          } else {
-            progressBar.style.width = '50%';
-          }
-        }
-        const statusText = payload.name ? STRINGS.CAPTURE.capturingWithName(payload.status || STRINGS.CAPTURE.CAPTURING_DEFAULT, payload.name) : (payload.status || STRINGS.CAPTURE.CAPTURING_ELLIPSIS_DEFAULT);
-        // Only clip boundaries carry an estimate; the last one counts down in
-        // between (a launch or a demo load sends none).
-        if (payload.seconds_left != null) timeLeft = { seconds: payload.seconds_left, at: Date.now() };
-        timeLeftStatus = statusText;
-        setStatusLine(statusEl, statusText + timeLeftSuffix(timeLeft, Date.now()));
-        if (!timeLeftTimer) {
-          timeLeftTimer = setInterval(() => {
-            if (capturingInFlight && timeLeft) setStatusLine(statusEl, timeLeftStatus + timeLeftSuffix(timeLeft, Date.now()));
-          }, 15000);
-        }
+        captureProgress.update(payload);
         if (startBtn) startBtn.disabled = true;
-        if (cancelBtn) cancelBtn.disabled = false;
+        // The game has closed once the takes are checked: nothing to cancel.
+        if (cancelBtn) cancelBtn.disabled = payload.stage === 'checking';
       } else {
         capturingInFlight = false;
-        timeLeft = null;
-        if (timeLeftTimer) {
-          clearInterval(timeLeftTimer);
-          timeLeftTimer = null;
-        }
+        // The line says how it ended; the toasts below say it too.
+        captureProgress.end(payload);
         setBatchRunning(false);
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
         if (currentOnBatchFinished) currentOnBatchFinished();
-        batchEnded(
-          payload.error ? 'error' : payload.status === 'Cancelled' ? 'cancelled' : 'completed',
-          uiStatusText(payload.status),
-        );
+        const kind = endKind(payload);
+        batchEnded(kind, uiStatusText(payload.status));
 
-        if (payload.error) {
+        if (kind === 'error') {
           // Without the engine's pointers at the log (#534); the log has them.
           const errorBody = STRINGS.CAPTURE.captureErrorToast(uiStatusText(payload.status) || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
           showToast(errorBody, "error");
-          setStatusLine(statusEl, STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT));
           notify('error', STRINGS.NOTIFICATIONS.CAPTURES_ERROR_TITLE, errorBody);
-        } else if (payload.status === "Cancelled") {
+        } else if (kind === 'cancelled') {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
-          if (progressBar) progressBar.style.width = '0%';
-          setStatusLine(statusEl, STRINGS.CAPTURE.CANCELLED);
         } else {
           showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
-          if (progressBar) progressBar.style.width = '100%';
-          setStatusLine(statusEl, STRINGS.CAPTURE.COMPLETED);
           notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
         }
       }
@@ -1560,7 +1529,6 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         .then(() => {
           showToast(STRINGS.CAPTURE.BATCH_QUEUED_TOAST, "success");
           setBatchRunning(true);
-          if (progressBar) progressBar.style.width = '10%';
         })
         .catch((err) => {
           console.error("IPC Execution Error (start_capture_batch):", err);
@@ -1579,7 +1547,6 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       cancelBtn.disabled = true;
       cancelCaptureBatch()
         .then(() => {
-          if (progressBar) progressBar.style.width = '0%';
           capturingInFlight = false;
           refreshLaunchGuard();
         })

@@ -50,7 +50,15 @@
 //!    height (`bottom - top`, so the scaled one) in [`ICON_TALL`]. The killer's
 //!    name is drawn before the icon, so this is the only point where the
 //!    line's height is known in time to centre both names on it
-//!    ([`name_draw_y`], used by `font`'s name draws).
+//!    ([`name_draw_y`], used by `font`'s name draws). It also stores the
+//!    sprite index itself in [`ICON_INDEX`], so the icon draw knows exactly
+//!    which `hud.txt` entry it is drawing.
+//!
+//! `layout even` (#1022, [`super::even`]) puts a box of DoD Studio's own atlas
+//! in the copy for each kill-feed icon the atlas holds, 26 rows tall at
+//! S = 1, so every line steps the same; [`hook::draw_holes`] then draws that
+//! box of the atlas instead of the game's rect. The copy is in use at S = 1
+//! too while it draws.
 //!
 //! A vftable wrapper around `Draw` with a per-call swap of the table slot
 //! would do the same, but `hudelement` owns that vftable slot (it refuses a
@@ -95,6 +103,13 @@ pub(super) const MAX_SCALE: f32 = 8.0;
 /// `[this+0x18c] = new[16 * [this+0x10]]` (`client+0x21c9c..+0x21cae`).
 const RECTS_IN_HUD: usize = 0x18c;
 const SPRITE_COUNT_IN_HUD: usize = 0x10;
+/// `m_rgszSpriteNames`, right after the rects: `VidInit` allocates
+/// `[this+0x190] = new[24 * [this+0x10]]` (`+0x21cb4..+0x21cc6`) and
+/// `strncpy`s each `hud.txt` name into its 24 bytes (`+0x21d1b..+0x21d4a`).
+/// The even layout finds each kill-feed icon's box by these names (#1022).
+const NAMES_IN_HUD: usize = 0x190;
+
+const _: () = assert!(NAMES_IN_HUD == RECTS_IN_HUD + 4);
 
 /// The two `mov eax, [gHUD.m_rgrcRects]` in `Draw`, as offsets from
 /// `font::PATTERN`'s match (`client+0x2b002`): `+0x2b017` and `+0x2b097`.
@@ -186,6 +201,24 @@ fn find_unscaled(scaled: WRect, copy: &[WRect], stock: &[WRect]) -> Option<WRect
         .map(|(_, s)| *s)
 }
 
+/// What the copy holds for a sprite whose game rect is `stock`: the even
+/// layout's box (#1022) scaled when it has one, else the game's rect scaled.
+pub(super) fn copy_rect(stock: WRect, atlas: Option<super::even::AtlasBox>, s: f32) -> WRect {
+    match atlas {
+        Some(b) => super::even::line_rect(b, s),
+        None => scale_rect(stock, s),
+    }
+}
+
+/// The sprite index of the line `Draw` is drawing: `index`, the stub's, when
+/// the copy holds exactly `drawn` there. Anything else (the stub not run
+/// yet, an index past the copy, a rect that isn't the copy's) is `None`, and
+/// the draw falls back to matching rects.
+fn line_entry(index: i32, drawn: WRect, copy: &[WRect]) -> Option<usize> {
+    let i = usize::try_from(index).ok()?;
+    (copy.get(i) == Some(&drawn)).then_some(i)
+}
+
 /// The line step `font`'s stub applies: the taller of the icon and the font.
 pub(super) fn line_step(icon_height: i32, font_tall: i32) -> i32 {
     icon_height.max(font_tall)
@@ -215,15 +248,24 @@ pub(super) fn name_y(y: i32, icon_height: i32, font_tall: i32, text_tall: i32) -
 /// [`AtomicI32::as_ptr`] goes into the stub.
 static ICON_TALL: AtomicI32 = AtomicI32::new(0);
 
+/// The sprite index of the line `Draw` is on (the notice's `iId`), as the
+/// line-start stub stored it; -1 until the stub ran. Written by game code,
+/// like [`ICON_TALL`].
+static ICON_INDEX: AtomicI32 = AtomicI32::new(-1);
+
 /// The y `font`'s name draws use on a line that starts at `y`, for text
-/// `text_tall` px tall: the game's own `y` at scale 1 with no font (stock
-/// top-aligned names), else [`name_y`] on the current line.
+/// `text_tall` px tall: the game's own `y` while the layout is the game's
+/// (stock top-aligned names), else [`name_y`] on the current line.
 pub(super) fn name_draw_y(y: i32, text_tall: i32) -> i32 {
-    let font_tall = font::tall();
-    if is_unity(scale()) && font_tall == 0 {
+    if !layout_is_ours() {
         return y;
     }
-    name_y(y, ICON_TALL.load(Ordering::Relaxed), font_tall, text_tall)
+    name_y(
+        y,
+        ICON_TALL.load(Ordering::Relaxed),
+        font::tall(),
+        text_tall,
+    )
 }
 
 /// The gap between the victim's name and the screen's right edge, for a
@@ -241,16 +283,17 @@ pub(super) fn right_margin(screen_width: i32, text_tall: i32) -> i32 {
     (screen_width.max(0) / 160).max(text_tall.max(0) / 4)
 }
 
-/// Whether the layout differs from the game's: a scale or a font in force.
-/// At scale 1 with no font the kill feed is the game's own, right margin
-/// included.
+/// Whether the layout differs from the game's: a scale, a font or the even
+/// layout in force. At scale 1 with no font and `layout default` the kill
+/// feed is the game's own, right margin included.
 pub(super) fn layout_is_ours() -> bool {
-    !is_unity(scale()) || font::tall() != 0
+    !is_unity(scale()) || font::tall() != 0 || super::even::ready()
 }
 
 /// The line-start stub, hand-assembled:
 ///
 /// ```asm
+/// mov [ICON_INDEX], ebx        ; the line's sprite index, before the shift
 /// shl ebx, 4                   ; stolen: the sprite index as a byte offset
 /// mov edx, [ebx+eax+0xc]       ; rect.bottom, from the array Draw reads
 /// sub edx, [ebx+eax+8]         ; - rect.top
@@ -261,9 +304,11 @@ pub(super) fn layout_is_ours() -> bool {
 ///
 /// The rect is the one `Draw` reads at `[ebx+eax]` and `[ebx+eax+4]` right
 /// after, so the stub reads nothing the game would not.
-fn line_stub(icon_tall: usize, resume: usize) -> Vec<u8> {
+fn line_stub(icon_index: usize, icon_tall: usize, resume: usize) -> Vec<u8> {
     let (shl, add) = LINE_STOLEN.split_at(3);
-    let mut code = shl.to_vec();
+    let mut code = vec![0x89, 0x1d]; // mov [abs32], ebx
+    code.extend_from_slice(&(icon_index as u32).to_le_bytes());
+    code.extend_from_slice(shl);
     code.extend_from_slice(&[0x8b, 0x54, 0x03, 0x0c]); // mov edx, [ebx+eax+0xc]
     code.extend_from_slice(&[0x2b, 0x54, 0x03, 0x08]); // sub edx, [ebx+eax+8]
     code.extend_from_slice(&[0x89, 0x15]); // mov [abs32], edx
@@ -343,6 +388,8 @@ mod hook {
     static SEEN_STOCK: AtomicUsize = AtomicUsize::new(0);
     static SEEN_COUNT: AtomicUsize = AtomicUsize::new(0);
     static SEEN_SCALE: AtomicU32 = AtomicU32::new(0);
+    /// `even::key` the copy was built for: 0 for the game's rects.
+    static SEEN_EVEN: AtomicU32 = AtomicU32::new(0);
     /// The scaled copy: its first rect, and how many it has room for. Never
     /// freed while a smaller one might still be `RECTS` (a count change
     /// leaks the old copy, as `max`'s buffer does; `VidInit` allocates once).
@@ -402,15 +449,38 @@ mod hook {
         Some((array, count.max(0) as usize))
     }
 
-    /// Points `RECTS` at what `Draw` should read for the scale in force,
-    /// rebuilding the copy when the game's array, its count or the scale
-    /// changed. Cheap when nothing did: three loads and compares.
+    /// `gHUD.m_rgszSpriteNames` and the sprite count, once the operands are
+    /// read: `count` names of [`super::super::even::SPRITE_NAME_LEN`] bytes.
+    pub(in crate::deathmsg) fn sprite_names() -> Option<(usize, usize)> {
+        let field = RECTS_FIELD.load(Ordering::Acquire);
+        let (_, count) = stock()?;
+        if count > MAX_SPRITES {
+            return None;
+        }
+        // Safety: the dword after `m_rgrcRects` in the same `CHud`
+        // (`NAMES_IN_HUD`, checked by tools/verify_killfeed_scale_offsets.py).
+        let names = unsafe { *((field - RECTS_IN_HUD + NAMES_IN_HUD) as *const usize) };
+        Some((names, count))
+    }
+
+    /// Whether the operands, the icon draw and the line-start stub are ours.
+    pub(in crate::deathmsg) fn installed() -> bool {
+        INSTALLED_BASE.load(Ordering::Acquire) != 0
+            && LINE_BASE.load(Ordering::Acquire) != 0
+            && ORIGINAL_DRAW_HOLES.load(Ordering::Acquire) != 0
+    }
+
+    /// Points `RECTS` at what `Draw` should read for the scale and layout in
+    /// force, rebuilding the copy when the game's array, its count, the scale
+    /// or the even layout's boxes changed. Cheap when nothing did: a few
+    /// loads and compares.
     pub(super) fn sync_rects() {
         let Some((array, count)) = stock() else {
             return;
         };
         let s = scale();
-        if is_unity(s) || array == 0 || count == 0 {
+        let even = super::super::even::key();
+        if (is_unity(s) && even == 0) || array == 0 || count == 0 {
             RECTS.store(array, Ordering::Release);
             return;
         }
@@ -428,17 +498,20 @@ mod hook {
         let unchanged = SEEN_STOCK.load(Ordering::Relaxed) == array
             && SEEN_COUNT.load(Ordering::Relaxed) == count
             && SEEN_SCALE.load(Ordering::Relaxed) == s.to_bits()
+            && SEEN_EVEN.load(Ordering::Relaxed) == even
             && COPY.load(Ordering::Relaxed) != 0;
         if !unchanged {
-            rebuild(array, count, s);
+            rebuild(array, count, s, even);
         }
         RECTS.store(COPY.load(Ordering::Acquire), Ordering::Release);
     }
 
-    /// Fills the copy with the game's rects scaled by `s`. The same thread
-    /// that runs `Draw` (the engine's) calls this, from the console command
-    /// or the per-frame poll, so no draw is reading the copy meanwhile.
-    fn rebuild(array: usize, count: usize, s: f32) {
+    /// Fills the copy with the game's rects scaled by `s`, or, while the even
+    /// layout draws (`even` non-zero), each atlas icon's box scaled by `s`.
+    /// The same thread that runs `Draw` (the engine's) calls this, from the
+    /// console command or the per-frame poll, so no draw is reading the copy
+    /// meanwhile.
+    fn rebuild(array: usize, count: usize, s: f32, even: u32) {
         if COPY_CAP.load(Ordering::Relaxed) < count || COPY.load(Ordering::Relaxed) == 0 {
             let block = vec![WRect::default(); count].into_boxed_slice();
             let ptr = Box::leak(block).as_mut_ptr() as usize;
@@ -451,12 +524,93 @@ mod hook {
         let copy = unsafe {
             std::slice::from_raw_parts_mut(COPY.load(Ordering::Relaxed) as *mut WRect, count)
         };
-        for (c, r) in copy.iter_mut().zip(stock) {
-            *c = scale_rect(*r, s);
+        for (i, (c, r)) in copy.iter_mut().zip(stock).enumerate() {
+            let atlas = if even == 0 {
+                None
+            } else {
+                super::super::even::box_for(i)
+            };
+            *c = copy_rect(*r, atlas, s);
         }
         SEEN_STOCK.store(array, Ordering::Relaxed);
         SEEN_COUNT.store(count, Ordering::Relaxed);
         SEEN_SCALE.store(s.to_bits(), Ordering::Relaxed);
+        SEEN_EVEN.store(even, Ordering::Relaxed);
+    }
+
+    /// The copy and the game's array it was made from, while `Draw` reads
+    /// the copy.
+    fn copy_in_use() -> Option<(&'static [WRect], &'static [WRect])> {
+        let copy_ptr = COPY.load(Ordering::Acquire);
+        let stock_ptr = SEEN_STOCK.load(Ordering::Relaxed);
+        let count = SEEN_COUNT.load(Ordering::Relaxed);
+        if copy_ptr == 0
+            || stock_ptr == 0
+            || count == 0
+            || RECTS.load(Ordering::Relaxed) != copy_ptr
+        {
+            return None;
+        }
+        // Safety: both hold `count` rects (see `rebuild`); the copy is never
+        // freed, and the game's array lives as long as `CHud`.
+        unsafe {
+            Some((
+                std::slice::from_raw_parts(copy_ptr as *const WRect, count),
+                std::slice::from_raw_parts(stock_ptr as *const WRect, count),
+            ))
+        }
+    }
+
+    /// Draws the even layout's box `b` for the icon whose game rect is
+    /// `game`, S times bigger about the icon's corner. The atlas's frames
+    /// went up soft (`even` checks it before it draws), so the draw blends
+    /// as a soft weapons sheet's does.
+    unsafe fn draw_from_atlas(
+        original: DrawHolesFn,
+        b: super::super::even::AtlasBox,
+        game: WRect,
+        (x, y): (i32, i32),
+        s: f32,
+    ) {
+        use crate::hud_sprites::Wrect;
+        let wrect = |r: WRect| Wrect {
+            left: r.left,
+            right: r.right,
+            top: r.top,
+            bottom: r.bottom,
+        };
+        let (rect, game_rect) = (wrect(b.rect), wrect(game));
+        let draw = || unsafe {
+            crate::hud_sprites::draw_holes_instead(
+                super::super::even::handle(),
+                super::super::even::sprite_path(),
+                b.frame as i32,
+                (x, y),
+                &rect,
+                &game_rect,
+                true,
+            )
+        };
+        // The game's rect at the box's place, should the hooks be gone.
+        let fallback = || unsafe { original(0, x, y, &game) };
+        if is_unity(s) {
+            if !draw() {
+                fallback();
+            }
+            return;
+        }
+        let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
+        // Safety: inside the HUD draw, on the engine's thread.
+        let zoomed = unsafe {
+            crate::gl_zoom::about(cx, cy, s, || {
+                if !draw() {
+                    fallback();
+                }
+            })
+        };
+        if !zoomed && !draw() {
+            fallback();
+        }
     }
 
     /// Stands in for `pfnSPR_DrawHoles` at the icon draw.
@@ -473,6 +627,21 @@ mod hook {
             unsafe { original(frame, x, y, prc) };
             return;
         }
+        // Safety: `Draw`'s stack copy of the rect it read from `RECTS`.
+        let drawn = unsafe { *prc };
+        // The line's own entry, by the stub's index, whenever `Draw` reads the
+        // copy: exact, where matching rects could find another sprite's.
+        let line = copy_in_use().and_then(|(copy, stock)| {
+            line_entry(ICON_INDEX.load(Ordering::Relaxed), drawn, copy).map(|i| (i, stock[i]))
+        });
+        if let Some((i, game)) = line
+            && let Some(b) = super::super::even::box_for(i)
+        {
+            let y = icon_y(y, drawn.bottom - drawn.top, font::tall());
+            // Safety: inside the HUD draw, on the engine's thread.
+            unsafe { draw_from_atlas(original, b, game, (x, y), s) };
+            return;
+        }
         if is_unity(s) {
             // The game's rect at the game's size; only a taller font moves
             // the icon, down to the line's middle.
@@ -487,22 +656,11 @@ mod hook {
             unsafe { original(frame, x, y, prc) };
             return;
         }
-        // Safety: `Draw`'s stack copy of one of our rects.
-        let scaled = unsafe { *prc };
-        let unscaled = {
-            let count = SEEN_COUNT.load(Ordering::Relaxed);
-            let copy_ptr = COPY.load(Ordering::Acquire);
-            let stock_ptr = SEEN_STOCK.load(Ordering::Relaxed);
-            if copy_ptr != 0 && stock_ptr != 0 && count != 0 {
-                // Safety: both arrays hold `count` rects (see `rebuild`).
-                let copy = unsafe { std::slice::from_raw_parts(copy_ptr as *const WRect, count) };
-                let stock = unsafe { std::slice::from_raw_parts(stock_ptr as *const WRect, count) };
-                find_unscaled(scaled, copy, stock)
-            } else {
-                None
-            }
-        }
-        .unwrap_or_else(|| unscale_rect(scaled, s));
+        let scaled = drawn;
+        let unscaled = line
+            .map(|(_, game)| game)
+            .or_else(|| copy_in_use().and_then(|(copy, stock)| find_unscaled(scaled, copy, stock)))
+            .unwrap_or_else(|| unscale_rect(scaled, s));
         let y = icon_y(y, scaled.bottom - scaled.top, font::tall());
         let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
         // Safety: inside the HUD draw, on the engine's thread.
@@ -607,7 +765,11 @@ mod hook {
                 ));
             }
             LINE_RESUME.store(at + LINE_STOLEN.len(), Ordering::Release);
-            let stub = line_stub(ICON_TALL.as_ptr() as usize, LINE_RESUME.as_ptr() as usize);
+            let stub = line_stub(
+                ICON_INDEX.as_ptr() as usize,
+                ICON_TALL.as_ptr() as usize,
+                LINE_RESUME.as_ptr() as usize,
+            );
             // Safety: the span was checked byte for byte, and nothing in Draw
             // branches into it (tools/verify_killfeed_scale_offsets.py).
             let detour = unsafe { crate::detour::install(at, LINE_STOLEN.len(), &stub) }?;
@@ -734,7 +896,26 @@ pub(super) fn poll() {
 }
 
 #[cfg(target_arch = "x86")]
-pub(super) use hook::ensure_installed;
+pub(super) use hook::{ensure_installed, sprite_names};
+
+/// Points `Draw` at the rects for the scale and layout in force now, after
+/// `layout` changed (#1022).
+pub(super) fn refresh() {
+    #[cfg(target_arch = "x86")]
+    hook::sync_rects();
+}
+
+/// Whether the kill feed's operands, icon draw and line-start stub are ours.
+pub(super) fn installed() -> bool {
+    #[cfg(target_arch = "x86")]
+    {
+        hook::installed()
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        false
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -899,8 +1080,14 @@ mod tests {
 
     #[test]
     fn the_line_stub_reproduces_the_stolen_bytes_around_the_height_store() {
-        let code = line_stub(0x1111_1111, 0x2222_2222);
-        assert_eq!(&code[..3], &LINE_STOLEN[..3], "shl ebx, 4 first");
+        let code = line_stub(0x3333_3333, 0x1111_1111, 0x2222_2222);
+        assert_eq!(
+            &code[..6],
+            &[0x89, 0x1d, 0x33, 0x33, 0x33, 0x33],
+            "mov [ICON_INDEX], ebx: the index, before the shift"
+        );
+        let code = &code[6..];
+        assert_eq!(&code[..3], &LINE_STOLEN[..3], "shl ebx, 4 next");
         assert_eq!(
             &code[3..11],
             &[0x8b, 0x54, 0x03, 0x0c, 0x2b, 0x54, 0x03, 0x08],
@@ -913,6 +1100,59 @@ mod tests {
         // The stub's reads are the rect's top and bottom.
         assert_eq!(std::mem::offset_of!(WRect, top), 8);
         assert_eq!(std::mem::offset_of!(WRect, bottom), 0xc);
+    }
+
+    #[test]
+    fn the_line_is_known_by_the_stubs_index_only_when_the_copy_agrees() {
+        let copy = [SKULL, scale_rect(GARAND, 2.0), SKULL];
+        assert_eq!(line_entry(1, copy[1], &copy), Some(1));
+        assert_eq!(line_entry(2, SKULL, &copy), Some(2), "not the first match");
+        assert_eq!(
+            line_entry(1, SKULL, &copy),
+            None,
+            "a rect the copy doesn't hold there"
+        );
+        assert_eq!(line_entry(-1, SKULL, &copy), None, "the stub not run yet");
+        assert_eq!(line_entry(3, SKULL, &copy), None, "past the copy");
+    }
+
+    #[test]
+    fn an_atlas_box_replaces_the_game_rect_in_the_copy() {
+        use super::super::even::AtlasBox;
+        // d_mp44 as the POST atlas holds it: 59 x 26 at 2,2 of frame 1.
+        let mp44 = AtlasBox {
+            frame: 1,
+            rect: WRect {
+                left: 2,
+                right: 61,
+                top: 2,
+                bottom: 28,
+            },
+        };
+        let stock_mp44 = WRect {
+            left: 167,
+            right: 167 + 89,
+            top: 23,
+            bottom: 23 + 25,
+        };
+        assert_eq!(copy_rect(stock_mp44, Some(mp44), 1.0), mp44.rect);
+        let big = copy_rect(stock_mp44, Some(mp44), 2.5);
+        assert_eq!((big.right - big.left, big.bottom - big.top), (148, 65));
+        assert_eq!(
+            copy_rect(stock_mp44, None, 2.5),
+            scale_rect(stock_mp44, 2.5)
+        );
+        assert_eq!(
+            copy_rect(stock_mp44, None, 1.0),
+            stock_mp44,
+            "no box: the game's"
+        );
+    }
+
+    #[test]
+    fn the_names_follow_the_rects_in_chud() {
+        assert_eq!(NAMES_IN_HUD - RECTS_IN_HUD, 4);
+        assert_eq!(super::super::even::SPRITE_NAME_LEN, 24);
     }
 
     #[test]

@@ -575,6 +575,9 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // ds_hud_hide_clan_text changes.
     crate::clan_text::poll();
+    // ds_player_change_name: who each slot is and which rename wins, for the
+    // GetPlayerInfo detour to read; keeps the SayText handler prepended.
+    crate::player_names::poll();
     // ds_hud_hide_center_text: its filter rides on clan_text's TextMsg
     // handler, so this only follows the cvar.
     crate::center_text::poll();
@@ -635,6 +638,8 @@ pub fn poll() {
     crate::spectator_follow::poll();
     // While a review runs, the viewer's clicks don't move its camera (#826).
     crate::spectator_buttons::poll();
+    // ...and the console can't move its demo or camera (#855).
+    crate::review_lock::console::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     crate::overview_speaker::poll();
@@ -642,6 +647,8 @@ pub fn poll() {
     crate::demo_scope::poll();
     crate::run_in_background::poll();
     crate::pov_live_bob::poll();
+    // A float compare unless ds_view_show_own_blood changed (#1035).
+    crate::own_blood::poll();
     crate::map_sounds::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
@@ -817,7 +824,13 @@ fn status_text() -> String {
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
+    if let Some(blood) = crate::own_blood::status_line() {
+        lines.push(blood);
+    }
     lines.push(crate::player_overrides::status());
+    if let Some(renames) = crate::player_names::status_line() {
+        lines.push(renames);
+    }
     if let Some(sprays) = crate::spray_hltv::status_line() {
         lines.push(sprays);
     }
@@ -1615,6 +1628,8 @@ pub fn install() {
     crate::demo_reload::install();
     crate::connect_guard::install();
     crate::events::install();
+    // The rest of what a review locks is wrapped by its poll as it appears.
+    crate::review_lock::console::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
@@ -1623,6 +1638,7 @@ pub fn install() {
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
     add_command(crate::spray::NAME, crate::spray::command);
+    add_command(crate::player_names::NAME, crate::player_names::command);
 
     // Standalone, like `ds_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1814,6 +1830,9 @@ pub fn install() {
     }
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
         crate::pov_live_bob::set_log_cvar(log);
+    }
+    if let Some(blood) = register(crate::own_blood::NAME, "0") {
+        crate::own_blood::set_cvar(blood);
     }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
@@ -2016,6 +2035,7 @@ mod tests {
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
+            crate::own_blood::NAME,
             crate::map_sounds::VICTORY_MUSIC_NAME,
             crate::map_sounds::FLAG_CAPTURE_NAME,
             crate::map_sounds::LOG_NAME,
@@ -2041,6 +2061,7 @@ mod tests {
             crate::spectator_text::NAME,
             crate::strafe_twitch::NAME,
             missing_shots::RESTORE_NAME,
+            crate::own_blood::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")

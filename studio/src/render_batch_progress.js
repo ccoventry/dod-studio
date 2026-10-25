@@ -8,7 +8,8 @@
 
 import { STRINGS } from './strings.js';
 import { JOB_STATUS } from './render_jobs.js';
-import { createClock, durationWords, secondsText } from './progress_view.js';
+import { createClock } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 
 /// `jobs` that are in the batch `ids`.
 export function rowsOf(jobs, ids) {
@@ -60,7 +61,7 @@ export function renderingLine(rows, seconds) {
 export function scanEndLine(summary, ms) {
   const R = STRINGS.RENDER;
   const { total = 0, added = 0, refreshed = 0, gone = 0, gone_queued: goneQueued = 0 } = summary || {};
-  const seconds = secondsText(ms);
+  const seconds = durationTextMs(ms);
   if (total === 0 && gone === 0) return R.noTakesFoundIn(seconds);
   const parts = [];
   if (added > 0) parts.push(R.scanNewShort(added));
@@ -117,7 +118,7 @@ export function createRenderBatch({ redraw = () => {}, log = () => {}, now = () 
         cancelled: count(JOB_STATUS.CANCELLED),
       };
       if (wasRunning) {
-        log(STRINGS.RENDER.batchEndLog(secondsText(ms), result.finished, result.failed, result.cancelled));
+        log(STRINGS.RENDER.batchEndLog(durationTextMs(ms), result.finished, result.failed, result.cancelled));
       }
       return result;
     },

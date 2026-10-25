@@ -14,7 +14,7 @@ import { pickedMultiMapDemos } from './queue_multimap.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { splitProgressView } from './split_progress.js';
 import { SPLIT_SHARE, nest, placed, queueProgress } from './queue_progress.js';
-import { secondsText } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 import { applyCarriedWork, carryReport, matchSplitHighlights } from './split_carry.js';
 import { renameUidsInTakeIndex } from './take_index.js';
 import { updateStreakVisuals } from './detail_pane.js';
@@ -94,7 +94,7 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
       });
       carryWork(demo, written);
     } finally {
-      progress.end(job, STRINGS.MAIN.queueSplitDoneLine(secondsText(progress.ms(job)), 1));
+      progress.end(job, STRINGS.MAIN.queueSplitDoneLine(durationTextMs(progress.ms(job)), 1));
     }
     return true;
   }
@@ -125,7 +125,7 @@ export function createQueueSplit({ getDemos, removeDemo, scan, getTakeIndex, ref
           if (await splitQueuedDemo(d, { within, head })) done += 1;
         }
       } finally {
-        progress.end(job, STRINGS.MAIN.queueSplitDoneLine(secondsText(progress.ms(job)), done));
+        progress.end(job, STRINGS.MAIN.queueSplitDoneLine(durationTextMs(progress.ms(job)), done));
       }
     }
     return 'handled';

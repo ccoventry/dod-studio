@@ -526,7 +526,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       if (demoIsTracked) {
         const proceed = currentOnRequestTrackedDeleteConfirm
           ? await currentOnRequestTrackedDeleteConfirm(demo)
-          : await themedConfirm(STRINGS.WORKSPACE.removeDemoConfirm(demo.name || demo.path));
+          : await themedConfirm(STRINGS.WORKSPACE.removeDemoConfirm(demo.name || demo.path), { destructive: true });
         if (!proceed) return;
       }
       // Re-resolve the index by identity rather than trusting the closured

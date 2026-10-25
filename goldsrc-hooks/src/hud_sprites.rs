@@ -234,9 +234,12 @@ unsafe extern "C" fn hook_spr_load(name: *const c_char) -> i32 {
         if crate::player_crosshair::Sheet::of(&path) == crate::player_crosshair::Sheet::Custom {
             crate::player_crosshair::hud_reloaded();
         }
-        // The kill feed's shared rows, from hud.txt, once (#841).
+        // The kill feed's shared rows, from hud.txt, once (#841). A kill-feed
+        // sheet loading is also the HUD loading its sheets again, which the
+        // even layout's atlas follows (#1022).
         if crate::hud_sprite_edges::sheet_of_path(&path).is_some() {
             crate::hud_sprite_edges::load_trims(hud_icons);
+            HUD_LOADS.fetch_add(1, Ordering::Relaxed);
         }
         if let Ok(mut map) = HANDLES.write() {
             match map.iter_mut().find(|(h, _)| *h == handle) {
@@ -369,8 +372,73 @@ unsafe extern "C" fn hook_spr_draw_additive(frame: i32, x: i32, y: i32, prc: *co
     unsafe { draw_through(&REAL_SPR_DRAW_ADDITIVE, frame, x, y, prc) };
 }
 
+/// How many `weapons<N>` sheet loads [`hook_spr_load`] has seen: it moves at
+/// every level load, when the HUD loads its sheets again and handles loaded
+/// before may name other sprites.
+static HUD_LOADS: AtomicU32 = AtomicU32::new(0);
+
+/// [`HUD_LOADS`], for a module that keeps a handle of its own.
+pub fn hud_generation() -> u32 {
+    HUD_LOADS.load(Ordering::Relaxed)
+}
+
+/// Whether the five `SPR_*` hooks are in.
+pub fn installed() -> bool {
+    INSTALLED_AT.load(Ordering::Acquire) != 0
+        && !REAL_SPR_SET.load(Ordering::Acquire).is_null()
+        && !REAL_SPR_DRAW_HOLES.load(Ordering::Acquire).is_null()
+}
+
+/// Draws `rect` of frame `frame` of sprite `handle` with the engine's
+/// `SPR_DrawHoles`, in place of the draw of `game_rect` the game asked for
+/// with the sprite it set last (the kill feed's even layout draws its own
+/// atlas, #1022): nothing when that draw would be hidden
+/// (`ds_map_hide_asset`, by the game's sheet or icon, or by `sheet`, the
+/// stand-in's path), blended as a soft sheet's draw when `blend`, and the
+/// game's sprite and colour set back after. Returns `false`, drawing
+/// nothing, when the hooks aren't in.
+///
+/// # Safety
+///
+/// Only from a HUD draw, on the engine's thread with its GL context current.
+pub unsafe fn draw_holes_instead(
+    handle: i32,
+    sheet: &str,
+    frame: i32,
+    (x, y): (i32, i32),
+    rect: &Wrect,
+    game_rect: &Wrect,
+    blend: bool,
+) -> bool {
+    let (set, draw) = (
+        REAL_SPR_SET.load(Ordering::Acquire),
+        REAL_SPR_DRAW_HOLES.load(Ordering::Acquire),
+    );
+    if set.is_null() || draw.is_null() {
+        return false;
+    }
+    if skip_draw(game_rect) || crate::hide_asset::should_hide(sheet, DrawnAs::HudSprite) {
+        return true;
+    }
+    let set: SprSetFn = unsafe { std::mem::transmute(set) };
+    let draw: SprDrawFn = unsafe { std::mem::transmute(draw) };
+    let [r, g, b] = CURRENT_RGB.each_ref().map(|c| c.load(Ordering::Relaxed));
+    // Safety: the engine's own calls, from a HUD draw.
+    unsafe {
+        set(handle, r, g, b);
+        if blend {
+            crate::hud_sprite_edges::draw_blended(|| draw(frame, x, y, rect));
+        } else {
+            draw(frame, x, y, rect);
+        }
+        set(CURRENT_HANDLE.load(Ordering::Relaxed), r, g, b);
+    }
+    true
+}
+
 /// Loads a sprite with the engine's own `SPR_Load` for the crosshair
-/// (`player_crosshair`), past [`hook_spr_load`] so loading `customXHair.spr`
+/// (`player_crosshair`) and the kill feed's even-layout atlas
+/// (`deathmsg::even`), past [`hook_spr_load`] so loading `customXHair.spr`
 /// for a row doesn't count as the HUD reloading. 0 when the hooks aren't in
 /// or the engine refused it. Called from `HUD_Frame`, on the game's thread.
 pub fn load_sprite(path: &str) -> i32 {
