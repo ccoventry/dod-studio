@@ -1,5 +1,6 @@
-//! `ds_sound_fix_pov_dry_fire`: plays the recorder's shots that a POV demo
-//! fired but never recorded a sound for (#1029).
+//! Plays the recorder's shots that a POV demo fired but never recorded a
+//! sound for (#1029): the "POV demo, the recorder" path of
+//! `ds_sound_restore_gunshots` (`missing_shots`' module docs, #1036).
 //!
 //! ## What goes wrong
 //!
@@ -50,9 +51,13 @@
 //! more than one round (a weapon taken at the round's end) and the first
 //! message after a weapon is put away (a switch, a death).
 //!
-//! POV demos only (`IsPlayingback()` and not `IsSpectateOnly()`); an HLTV
-//! demo's lost shots are `missing_shots`' (`ds_spec_match_pov`). `2` also logs
-//! every shot it pairs or plays.
+//! POV demos only (`missing_shots::Playing::clip_recorder`); an HLTV demo's
+//! lost shots, and a POV demo's other players', are `missing_shots`' own
+//! path. `ds_sound_restore_gunshots 2` also logs every shot it pairs or
+//! plays.
+//!
+//! Nothing here plays an empty-gun click: a real empty press drops no clip,
+//! and #1036 chose not to add one.
 //!
 //! ## What it cannot do
 //!
@@ -62,13 +67,10 @@
 //! - Play a round at the moment the trigger went down: it plays when the
 //!   server's clip count arrives, about when the server fired it.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 
-use crate::engine::{self, ClEntityS, CvarSPartial};
+use crate::engine::{self, ClEntityS};
 use crate::missing_shots::{self, EventArgs};
-use crate::names::console_name;
-
-pub const NAME: &str = console_name!("sound_fix_pov_dry_fire");
 
 /// The user message the server sends the recorder after each round.
 pub const MESSAGE: &str = "CurWeapon";
@@ -167,7 +169,6 @@ fn pairs_with(heard: &[f32], now: f32) -> Option<usize> {
         .map(|(slot, _)| slot)
 }
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
 static EVERY_SHOT: AtomicBool = AtomicBool::new(false);
 
@@ -189,22 +190,17 @@ static PLAYED: AtomicU32 = AtomicU32::new(0);
 static PAIRED: AtomicU32 = AtomicU32::new(0);
 static NO_HANDLER: AtomicU32 = AtomicU32::new(0);
 
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 fn report(line: &str) {
-    unsafe { crate::debug::report(&format!("pov_dry_fire: {line}")) };
+    unsafe { crate::debug::report(&format!("pov_recorder_shots: {line}")) };
 }
 
-fn playing_pov_demo() -> bool {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return false;
-    };
-    let api = engfuncs.p_demo_api;
-    !api.is_null()
-        && unsafe { ((*api).is_playingback)() } != 0
-        && unsafe { (engfuncs.is_spectate_only)() } == 0
+/// The recorder's entity index while a POV demo plays, else `None`: the
+/// routing is `missing_shots`', so the two paths never disagree on what is
+/// playing.
+fn recorder() -> Option<i32> {
+    missing_shots::playing_now()
+        .clip_recorder()
+        .map(|recorder| recorder as i32)
 }
 
 fn local_player() -> Option<&'static ClEntityS> {
@@ -246,10 +242,10 @@ fn continuous(now: f32) -> bool {
 /// A recorded `_shoot` sample was just played for `entity`. Called from
 /// `fire_sounds`' `EV_PlaySound` hook, on the engine thread.
 pub fn on_shot_sound(entity: i32) {
-    if !WANTED.load(Ordering::Relaxed) || missing_shots::standing_in() || !playing_pov_demo() {
+    if !WANTED.load(Ordering::Relaxed) || missing_shots::standing_in() {
         return;
     }
-    if local_player().is_none_or(|local| local.index != entity) {
+    if recorder() != Some(entity) {
         return;
     }
     let Some(now) = clock().filter(|t| *t != 0.0) else {
@@ -262,7 +258,7 @@ pub fn on_shot_sound(entity: i32) {
 /// One `CurWeapon` the server sent the recorder: `active, weapon id, clip`.
 /// Called from the hooked handler (here or `msglog`'s), before the game's.
 pub(crate) fn on_cur_weapon(payload: &[u8]) {
-    if !WANTED.load(Ordering::Relaxed) || !playing_pov_demo() {
+    if !WANTED.load(Ordering::Relaxed) || recorder().is_none() {
         return;
     }
     let [active, weapon, clip, ..] = *payload else {
@@ -342,14 +338,10 @@ fn install_hook() {
 
 /// Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    let value = if cvar.is_null() {
-        0.0
-    } else {
-        unsafe { (*cvar).value }
-    };
+    // `ds_sound_restore_gunshots`, the one switch for every gunshot path.
+    let value = missing_shots::level();
     let wanted = value != 0.0;
-    EVERY_SHOT.store(value >= 2.0, Ordering::Relaxed);
+    EVERY_SHOT.store(missing_shots::logs_every_round(value), Ordering::Relaxed);
     if WANTED.swap(wanted, Ordering::Relaxed) != wanted {
         report(if wanted {
             "on: a POV recorder's unrecorded shots get their fire sound"
@@ -358,7 +350,7 @@ pub fn poll() {
         });
         forget();
     }
-    if !wanted || !playing_pov_demo() {
+    if !wanted || recorder().is_none() {
         LAST_FRAME.store(0, Ordering::Relaxed);
         forget();
         return;
@@ -430,7 +422,7 @@ pub fn status_line() -> Option<String> {
     let played = PLAYED.load(Ordering::Relaxed);
     (WANTED.load(Ordering::Relaxed) || played != 0).then(|| {
         format!(
-            "{NAME}: {played} unrecorded POV shot(s) played, {} had their own sound, {} skipped (no fire handler)",
+            "the POV recorder's gunshots: {played} with no recorded sound played, {} had their own sound, {} skipped (no fire handler)",
             PAIRED.load(Ordering::Relaxed),
             NO_HANDLER.load(Ordering::Relaxed),
         )

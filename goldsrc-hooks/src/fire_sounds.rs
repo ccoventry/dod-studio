@@ -12,7 +12,7 @@
 //!   held trigger that the body animation cannot show;
 //! - `missing_shots` uses it to tell a round that came with its fire event
 //!   from one the recording lost;
-//! - `pov_dry_fire` the same for a POV recorder's own rounds.
+//! - `pov_recorder_shots` the same for a POV recorder's own rounds.
 //!
 //! The sound itself is passed through untouched.
 //!
@@ -73,7 +73,7 @@ unsafe extern "C" fn hook_ev_play_sound(
         SHOTS.fetch_add(1, Ordering::Relaxed);
         crate::anim_fix::on_weapon_fired(ent);
         crate::missing_shots::on_shot_sound(ent);
-        crate::pov_dry_fire::on_shot_sound(ent);
+        crate::pov_recorder_shots::on_shot_sound(ent);
     }
     let real = REAL_EV_PLAY_SOUND.load(Ordering::Acquire);
     // Safety: the engine's own function, captured at install.

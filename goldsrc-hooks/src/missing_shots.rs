@@ -39,17 +39,32 @@
 //!   `_shoot` sample with its entity. A restart waits one frame for its own
 //!   event; one that arrives, either side of it, cancels the stand-in.
 //!
-//! While an HLTV demo plays (`IsSpectateOnly()`), with `ds_spec_match_pov 1`.
-//! Off by default. `2` also logs every round it plays, not only the first
-//! twenty.
+//! ## One switch, a path per kind of demo
+//!
+//! [`NAME`] (`ds_sound_restore_gunshots`, default 1; `2` also logs every
+//! round played, not only the first twenty) picks what runs from what is
+//! playing ([`Playing::paths`]), the way `ds_map_hide_asset` picks its hook
+//! from what it hides (#1036):
+//!
+//! - **HLTV demo** (`IsSpectateOnly()`): this module, every player.
+//! - **POV demo, other players:** this module, every player but the
+//!   recorder (below).
+//! - **POV demo, the recorder:** `pov_recorder_shots`, from the clip count
+//!   the server sends him (#1029). His rounds are his client's own predicted
+//!   events, which never pass `EV_PlaySound` before the restart is seen.
+//! - **Live play:** nothing.
+//!
+//! It was part of `ds_spec_match_pov` until #1036, which keeps the rest of
+//! matching POV (viewmodel animations, crosshair, eye height, gun lowering)
+//! and has no say over gunshots any more.
 //!
 //! ## POV demos: the other players
 //!
 //! A POV demo loses other players' rounds the same way: about one in seven
 //! that the recorder saw fired has no fire event (14.4% of 518,947 rounds in
 //! view, 361 demos from 27 recorders, #1036), and in game they play nothing.
-//! So while a POV demo plays, with [`RESTORE_NAME`] on (default 1), the same
-//! detection runs for every player but the recorder, with two differences:
+//! So while a POV demo plays, the same detection runs for every player but
+//! the recorder, with two differences:
 //!
 //! - **Only players in the latest update.** A POV recording carries only the
 //!   players the recorder could see; one out of view keeps the state it was
@@ -66,7 +81,7 @@
 //!
 //! The recorder's own rounds are left alone here: they reach the demo as the
 //! client's own predicted events, not from the server, and need another
-//! signal (the clip count, #1029).
+//! signal, the clip count (`pov_recorder_shots`, #1029).
 //!
 //! ## What it cannot do
 //!
@@ -91,14 +106,9 @@ use crate::engine::{
 };
 use crate::names::console_name;
 
-/// The cvar the HLTV path follows, for its own messages. Registered in
-/// `commands.rs`.
-const NAME: &str = crate::names::SPEC_MATCH_POV;
-
-/// The switch for the POV path (other players' rounds). NAME PENDING the
-/// user's decision (#1036): a combined gunshot setting, which the
-/// recorder's own rounds (#1029) may join.
-pub const RESTORE_NAME: &str = console_name!("sound_restore_gunshots");
+/// The one switch for every path (see the module docs). Registered in
+/// `commands.rs`; `pov_recorder_shots` reads it through [`level`].
+pub const NAME: &str = console_name!("sound_restore_gunshots");
 
 /// How long before its restart a real shot can be heard and still be that
 /// round's, in a POV demo. The measured spread is 1-20 ms (see the module
@@ -106,7 +116,7 @@ pub const RESTORE_NAME: &str = console_name!("sound_restore_gunshots");
 const POV_HEARD_BEFORE_SECONDS: f64 = 0.025;
 
 /// `event_args_t` (`common/event_args.h`), what a fire handler is passed.
-/// `pov_dry_fire` builds them too.
+/// `pov_recorder_shots` builds them too.
 #[repr(C)]
 #[derive(Default)]
 pub(crate) struct EventArgs {
@@ -272,54 +282,54 @@ const TRACKING_GAP_SECONDS: f64 = 0.5;
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
-/// `ds_spec_match_pov 2`: a log line for every round, not only the first
-/// few. For checking a session against the offline probe.
+/// [`NAME`] `2`: a log line for every round, not only the first few. For
+/// checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
-/// What to do when there is no cvar to read: the fallback command's value.
-static WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(false);
+/// [`NAME`] when it could not be a cvar: the fallback command's value. On,
+/// as the cvar's default is.
+pub static WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(true);
 
-/// Sets the switch on the path where cvar registration failed and the
-/// command handler holds the value instead.
-pub fn set_without_a_cvar(wanted: bool) {
-    WITHOUT_A_CVAR.store(wanted, Ordering::Relaxed);
-}
-
-/// [`RESTORE_NAME`], the POV path's switch.
-static RESTORE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-/// [`RESTORE_NAME`] when it could not be a cvar: the fallback command's
-/// value. On, as the cvar's default is.
-pub static RESTORE_WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(true);
-
-/// Called by `commands.rs` once [`RESTORE_NAME`] is registered.
-pub fn set_restore_cvar(cvar: *mut CvarSPartial) {
-    RESTORE_CVAR.store(cvar, Ordering::Release);
-}
-
-/// Whether [`RESTORE_NAME`] is on, for `ds_debug_status`.
-pub fn restore_enabled() -> bool {
-    switch_value(&RESTORE_CVAR, &RESTORE_WITHOUT_A_CVAR) != 0.0
-}
-
-/// A switch's value: its cvar, or the fallback toggle without one.
-fn switch_value(cvar: &AtomicPtr<CvarSPartial>, without: &AtomicBool) -> f32 {
-    let cvar = cvar.load(Ordering::Acquire);
+/// [`NAME`]'s value: its cvar, or the fallback toggle without one. `0` off,
+/// `1` on, `2` on and logging every round, on every path.
+pub(crate) fn level() -> f32 {
+    let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
-        f32::from(u8::from(without.load(Ordering::Relaxed)))
+        f32::from(u8::from(WITHOUT_A_CVAR.load(Ordering::Relaxed)))
     } else {
         // Safety: the engine owns the cvar for the session.
         unsafe { (*cvar).value }
     }
 }
 
-/// What kind of demo is playing, which decides the switch and the players.
+/// Whether [`NAME`] is on, for `ds_debug_status`.
+pub fn enabled() -> bool {
+    level() != 0.0
+}
+
+/// Whether a [`level`] asks for a log line for every round.
+pub(crate) fn logs_every_round(level: f32) -> bool {
+    level >= 2.0
+}
+
+/// What kind of demo is playing, which decides the paths and the players.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Playing {
-    /// No demo, or one whose recorder can't be named.
+pub(crate) enum Playing {
+    /// Live play, no demo, or a POV demo whose recorder can't be named.
     Nothing,
-    /// An HLTV demo: every player, `ds_spec_match_pov`.
+    /// An HLTV demo.
     Hltv,
-    /// A POV demo: every player but the recorder, [`RESTORE_NAME`].
+    /// A POV demo recorded by player `recorder`.
     Pov { recorder: usize },
+}
+
+/// Which restorations run for a kind of demo, with [`NAME`] on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Paths {
+    /// This module's body-restart path, for the players [`Playing::tracks`]
+    /// names.
+    pub(crate) bodies: bool,
+    /// `pov_recorder_shots`' clip-drop path, for the recorder.
+    pub(crate) recorders_clip: bool,
 }
 
 impl Playing {
@@ -332,30 +342,40 @@ impl Playing {
         }
     }
 
-    /// The cvar that switches this path, and its name for the log. With no
-    /// demo playing it is the HLTV one, which is how it read before the POV
-    /// path existed.
-    fn switch(
-        self,
-    ) -> (
-        &'static AtomicPtr<CvarSPartial>,
-        &'static AtomicBool,
-        &'static str,
-    ) {
+    /// The paths this kind of demo runs (the module docs say why).
+    pub(crate) fn paths(self) -> Paths {
         match self {
-            Playing::Pov { .. } => (&RESTORE_CVAR, &RESTORE_WITHOUT_A_CVAR, RESTORE_NAME),
-            Playing::Nothing | Playing::Hltv => (&CVAR, &WITHOUT_A_CVAR, NAME),
+            Playing::Nothing => Paths {
+                bodies: false,
+                recorders_clip: false,
+            },
+            Playing::Hltv => Paths {
+                bodies: true,
+                recorders_clip: false,
+            },
+            Playing::Pov { .. } => Paths {
+                bodies: true,
+                recorders_clip: true,
+            },
         }
     }
 
-    /// Whether player `slot`'s rounds are this path's to restore.
+    /// Whether player `slot`'s rounds are the body path's to restore.
     fn tracks(self, slot: usize) -> bool {
         match self {
             Playing::Nothing => false,
             Playing::Hltv => true,
             // The recorder's own rounds are the client's predicted events,
-            // which this signal can't pair (#1029).
+            // which this signal can't pair: `pov_recorder_shots`' (#1029).
             Playing::Pov { recorder } => slot != recorder,
+        }
+    }
+
+    /// The POV recorder whose rounds the clip-drop path restores, if any.
+    pub(crate) fn clip_recorder(self) -> Option<usize> {
+        match self {
+            Playing::Pov { recorder } if self.paths().recorders_clip => Some(recorder),
+            _ => None,
         }
     }
 }
@@ -503,7 +523,7 @@ pub(crate) fn next_spread() -> f32 {
 
 /// Calls `client.dll`'s own fire handler for the `event` script (a name in
 /// [`WEAPONS`]) with `args`, as a stand-in: the sound it makes is not taken
-/// for a recorded round, here or in `pov_dry_fire`. False when the client
+/// for a recorded round, here or in `pov_recorder_shots`. False when the client
 /// registered no handler for that script.
 pub(crate) fn play_fire_event(event: &str, args: &mut EventArgs) -> bool {
     let Some(weapon) = WEAPONS.iter().position(|(e, _)| *e == event) else {
@@ -632,6 +652,12 @@ fn forget_everyone() {
     }
 }
 
+/// What is playing now. For `pov_recorder_shots` too, whose callbacks run
+/// between frames.
+pub(crate) fn playing_now() -> Playing {
+    engine::engfuncs().map_or(Playing::Nothing, playing)
+}
+
 fn playing(engfuncs: &ClEngineFuncsPartial) -> Playing {
     let api = engfuncs.p_demo_api;
     if api.is_null() || unsafe { ((*api).is_playingback)() } == 0 {
@@ -669,16 +695,15 @@ fn latest_update(engfuncs: &ClEngineFuncsPartial) -> i32 {
 
 /// Called every frame from `commands::poll`.
 pub fn poll() {
-    let playing = engine::engfuncs().map_or(Playing::Nothing, playing);
-    let (cvar, without, name) = playing.switch();
-    let value = switch_value(cvar, without);
+    let playing = playing_now();
+    let value = level();
     let wanted = value != 0.0;
-    EVERY_ROUND.store(value >= 2.0, Ordering::Relaxed);
+    EVERY_ROUND.store(logs_every_round(value), Ordering::Relaxed);
     let switched = WANTED.swap(wanted, Ordering::Relaxed) != wanted;
     if switched {
         unsafe {
             crate::debug::report(&format!(
-                "missing_shots: {} ({name})",
+                "missing_shots: {} ({NAME})",
                 if wanted {
                     "restoring lost gunshots"
                 } else {
@@ -688,7 +713,8 @@ pub fn poll() {
         };
     }
     // A different kind of demo, or another recorder: nothing tracked carries.
-    if switched || PLAYING.swap(playing.code(), Ordering::Relaxed) != playing.code() {
+    let changed = PLAYING.swap(playing.code(), Ordering::Relaxed) != playing.code();
+    if switched || changed {
         forget_everyone();
     }
     if !wanted {
@@ -700,7 +726,7 @@ pub fn poll() {
 
     let now = engine::client_time();
     let last = f64::from_bits(LAST_POLL.swap(now.to_bits(), Ordering::Relaxed));
-    if playing == Playing::Nothing || now - last > TRACKING_GAP_SECONDS {
+    if !playing.paths().bodies || now - last > TRACKING_GAP_SECONDS {
         forget_everyone();
         return;
     }
@@ -1156,15 +1182,42 @@ mod tests {
         assert!(!Playing::Nothing.tracks(11));
     }
 
-    /// Each kind of demo reads its own switch, so `ds_spec_match_pov` still
-    /// alone decides HLTV demos.
+    /// #1036's routing: an HLTV demo restores every player from the body,
+    /// a POV demo the other players from the body and the recorder from his
+    /// clip, live play nothing.
     #[test]
-    fn each_kind_of_demo_reads_its_own_switch() {
-        assert_eq!(Playing::Hltv.switch().2, NAME);
-        assert_eq!(Playing::Nothing.switch().2, NAME);
-        assert_eq!(Playing::Pov { recorder: 3 }.switch().2, RESTORE_NAME);
-        assert_eq!(RESTORE_NAME, "ds_sound_restore_gunshots");
-        // A change of recorder is a change of demo.
+    fn each_kind_of_demo_runs_its_own_paths() {
+        let paths = |bodies, recorders_clip| Paths {
+            bodies,
+            recorders_clip,
+        };
+        assert_eq!(Playing::Hltv.paths(), paths(true, false));
+        assert_eq!(Playing::Pov { recorder: 11 }.paths(), paths(true, true));
+        assert_eq!(Playing::Nothing.paths(), paths(false, false));
+        // The clip path is the recorder's, and only in a POV demo.
+        assert_eq!(Playing::Pov { recorder: 11 }.clip_recorder(), Some(11));
+        assert_eq!(Playing::Hltv.clip_recorder(), None);
+        assert_eq!(Playing::Nothing.clip_recorder(), None);
+    }
+
+    /// One cvar for every path; `ds_spec_match_pov` decides none of them.
+    #[test]
+    fn one_switch_for_every_path() {
+        assert_eq!(NAME, "ds_sound_restore_gunshots");
+        assert_ne!(NAME, crate::names::SPEC_MATCH_POV);
+        assert!(!logs_every_round(0.0));
+        assert!(!logs_every_round(1.0));
+        assert!(logs_every_round(2.0));
+    }
+
+    /// Without a cvar the setting is on, as the cvar's default is.
+    #[test]
+    fn the_fallback_starts_on() {
+        assert!(WITHOUT_A_CVAR.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_change_of_recorder_is_a_change_of_demo() {
         assert_ne!(
             Playing::Pov { recorder: 3 }.code(),
             Playing::Pov { recorder: 4 }.code()
