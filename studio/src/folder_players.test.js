@@ -72,6 +72,25 @@ describe('createFolderPlayers', () => {
     expect(players.status()).toBe('cloud 2');
   });
 
+  it('drops the cloud line as soon as Cache all starts on those demos', async () => {
+    const caching = new Set();
+    const { players, deps } = setup({
+      caching,
+      lookup: async () => ({ found: [], to_read: [], in_cloud: ['g1.dem', 'g2.dem'] }),
+    });
+    await players.start(['g1.dem', 'g2.dem']);
+    expect(players.status()).toBe('cloud 2');
+    // Cache all clicked: its first event, before any demo is cached.
+    caching.add('g1.dem').add('g2.dem');
+    deps.onChange.mockClear();
+    await players.onCacheProgress({ finished: false });
+    expect(deps.onChange).toHaveBeenCalledTimes(1);
+    expect(players.status()).toBe('');
+    // Later events of the same run don't redraw for it again.
+    await players.onCacheProgress({ finished: false });
+    expect(deps.onChange).toHaveBeenCalledTimes(1);
+  });
+
   it('a failed lookup reads every demo, as before', async () => {
     const { players, walks } = setup({ lookup: async () => null });
     await players.start(['a.dem', 'b.dem']);

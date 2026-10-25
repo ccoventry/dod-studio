@@ -47,6 +47,7 @@ export function createFolderPlayers({
   let lookingTimer = null;
   let inCloud = new Set();
   let leftForCache = new Set(); // queued in Cache all, not read here
+  let runSeen = false; // a Cache all run has sent its first event
 
   const stopLooking = () => {
     looking = false;
@@ -141,6 +142,15 @@ export function createFolderPlayers({
 
   /** A `demo_cache_progress` event from Cache all. */
   async function onCacheProgress(progress) {
+    if (progress.finished) {
+      runSeen = false;
+    } else if (!runSeen) {
+      runSeen = true;
+      // The cloud line leaves out the demos the run has queued: redraw it
+      // now, not when the first one is cached (on a cloud drive, after its
+      // whole download).
+      if (inCloud.size > 0) onChange();
+    }
     // Cache all reads the demos now: stop reading the ones it has queued
     // here, so no demo is analysed twice. They come in as it caches them.
     if (!progress.finished && walking) {
