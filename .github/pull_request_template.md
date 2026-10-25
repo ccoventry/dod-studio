@@ -10,4 +10,9 @@ Examples:
   Release note: none
 -->
 Release note: <one plain-language line for players, or "none">
+<!--
+Optional: when this PR renames or changes something an earlier PR in the same
+release added, uncomment and fill this so the release shows only this PR's note:
+Supersedes release note: #NN, #NN
+-->
 
