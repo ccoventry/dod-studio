@@ -346,8 +346,12 @@ async fn cancel_capture_batch(state: tauri::State<'_, CaptureManager>) -> Result
 /// Writes one line to today's activity log from the frontend. Exists for
 /// events that have no other Tauri command to piggyback logging on — the
 /// Master Demo Queue's Clear Untracked/Selected/All and row-delete actions
-/// are pure frontend array mutations with nothing else calling into Rust.
-#[tauri::command]
+/// are pure frontend array mutations with nothing else calling into Rust —
+/// and every toast (#873). Off the window's thread: each line is flushed to
+/// disk under the log's lock, which a capture's own logging can hold while
+/// the disk is busy with frames. `logFrontendEvent` sends one line at a time,
+/// so a burst (a rescan's carry report) still lands in order.
+#[tauri::command(async)]
 fn log_frontend_event(message: String) {
     native::log_markdown(&message);
 }
