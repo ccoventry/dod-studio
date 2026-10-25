@@ -32,7 +32,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
 
 use analysis::cache::DemoPlayers;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use super::*;
 
@@ -74,9 +74,20 @@ static CHOSEN_SHOWN: Mutex<Option<String>> = Mutex::new(None);
 /// The text of the list row under the mouse while the list is open.
 static HOVERED: Mutex<Option<String>> = Mutex::new(None);
 
+/// How tall the open list's rows were when last measured (0: not yet).
+static ROW_TALL: AtomicI32 = AtomicI32::new(0);
+
 /// Roughly how wide a character of the window's font is, in pixels: what
 /// the picked-players line is cut to fit by.
 const CHAR_WIDE: i32 = 7;
+
+/// How tall a list row is where [`CHAR_WIDE`] and `place_menu_width`'s six
+/// pixels a character hold: the pre-Anniversary GameUI, whose font doesn't
+/// scale. The 25th Anniversary GameUI scales its font and rows with the
+/// screen (44 px rows at 2560x1440, where the list cut its entries short and
+/// the help line ran off the window), so the open list's widths are scaled
+/// by its rows' height (#781).
+const UNSCALED_ROW_TALL: i32 = 22;
 
 /// The picked players as one line of at most `room` characters: as many
 /// names as fit, then how many more there are.
@@ -177,8 +188,47 @@ pub(super) fn hovered_help(wide: i32) -> Option<String> {
     let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
     let (_, all) = names.as_ref()?;
     let choice = entry_for(all, &picked, &row)?;
-    let room = ((wide - 8) / CHAR_WIDE).max(20) as usize;
+    let room = help_room(wide, ROW_TALL.load(Ordering::Acquire));
     Some(names_help(choice, room))
+}
+
+/// How many characters fit the help line `wide` pixels wide, when the open
+/// list's rows are `row_tall` tall.
+fn help_room(wide: i32, row_tall: i32) -> usize {
+    ((wide - 8) / scaled(CHAR_WIDE, row_tall).max(1)).max(20) as usize
+}
+
+/// `px`, a width counted for the unscaled font, at a font whose list rows
+/// are `row_tall` tall (0: not measured yet, left as it is).
+fn scaled(px: i32, row_tall: i32) -> i32 {
+    if row_tall <= 0 {
+        return px;
+    }
+    px.saturating_mul(row_tall) / UNSCALED_ROW_TALL
+}
+
+/// How wide the open list is for its longest label of `longest` characters
+/// at rows `row_tall` tall: wide enough for the label and the scroll bar, no
+/// wider than the tab's `room` past the box, never narrower than the box.
+fn list_width(longest: usize, box_wide: i32, room: i32, row_tall: i32) -> i32 {
+    scaled(place_menu_width(longest, 0, i32::MAX), row_tall)
+        .min(room)
+        .max(box_wide)
+}
+
+/// How tall the open list's rows are: the first visible `MenuItem`'s height.
+unsafe fn row_tall(vgui: &Vgui, menu: *mut c_void, item_vftable: usize) -> Option<i32> {
+    unsafe {
+        vgui.child_list(vpanel_of(menu))
+            .into_iter()
+            .filter(|&c| vgui.visible(c))
+            .filter(|&c| {
+                let item = vgui.object(c);
+                !item.is_null() && *(item as *const usize) == item_vftable
+            })
+            .map(|c| vgui.rect(c).3)
+            .find(|&tall| tall > 0)
+    }
 }
 
 /// The text of the list row under the mouse, if it is one of the menu's
@@ -211,17 +261,30 @@ unsafe fn row_under_mouse(vgui: &Vgui, menu: *mut c_void, item_vftable: usize) -
 /// Widens the open list past the 170 px box to fit its longest entry, as far
 /// as the tab has room right of the box. Every frame while open, since the
 /// box narrows its menu to itself each time it opens (as the Go to list).
-unsafe fn widen(vgui: &Vgui, page: Vpanel, combo: *mut c_void, menu: *mut c_void, all: &[Choice]) {
+/// The text's width scales with the rows' height, since the 25th
+/// Anniversary GameUI scales its font with the screen.
+unsafe fn widen(
+    vgui: &Vgui,
+    page: Vpanel,
+    combo: *mut c_void,
+    menu: *mut c_void,
+    item_vftable: usize,
+    all: &[Choice],
+) {
     unsafe {
         let longest = all
             .iter()
             .map(|c| c.label.chars().count())
             .max()
             .unwrap_or(0);
+        if let Some(tall) = row_tall(vgui, menu, item_vftable) {
+            ROW_TALL.store(tall, Ordering::Release);
+        }
+        let tall = ROW_TALL.load(Ordering::Acquire);
         let (x, _, w, _) = vgui.rect(vpanel_of(combo));
         let (_, _, page_w, _) = vgui.rect(page);
         let set_width: ListIntVoidFn = slot(menu, MENU_SLOT_SET_FIXED_WIDTH);
-        set_width(menu, place_menu_width(longest, w, page_w - x - 8));
+        set_width(menu, list_width(longest, w, page_w - x - 8, tall));
     }
 }
 
@@ -443,9 +506,10 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         let open = vgui.visible(vpanel_of(menu));
         let was_open = WAS_OPEN.swap(open, Ordering::AcqRel);
         if open {
-            widen(vgui, page, combo, menu, all);
+            let item_vftable = base + build.menu_item_vftable;
+            widen(vgui, page, combo, menu, item_vftable, all);
             *HOVERED.lock().unwrap_or_else(|e| e.into_inner()) =
-                row_under_mouse(vgui, menu, base + build.menu_item_vftable);
+                row_under_mouse(vgui, menu, item_vftable);
         }
         // A name clicked in the list: the list closed itself and the box holds
         // that name. It joins the picked players and the box empties for the
@@ -671,6 +735,25 @@ mod tests {
         assert_eq!(names_help(a, 5), "a, also: 4 other names");
         let solo = entry_for(&all, &[], "solo").unwrap();
         assert_eq!(names_help(solo, 100), "solo: no other names in these demos");
+    }
+
+    /// #781: the 25th Anniversary GameUI's font scales with the screen (44 px
+    /// rows at 2560x1440 against the pre-Anniversary 22), and the list and
+    /// the help line's room scale with it.
+    #[test]
+    fn the_list_and_the_help_line_scale_with_the_font() {
+        // Pre-Anniversary rows, or not measured yet: six pixels a character.
+        assert_eq!(list_width(50, 170, 2000, 22), 332);
+        assert_eq!(list_width(50, 170, 2000, 0), 332);
+        // Anniversary at 2560x1440: twice as wide, still within the tab.
+        assert_eq!(list_width(50, 170, 2000, 44), 664);
+        assert_eq!(list_width(200, 170, 1000, 44), 1000);
+        assert_eq!(list_width(5, 170, 1000, 44), 170);
+        // The help line fits half as many characters at twice the font.
+        assert_eq!(help_room(1408, 22), 200);
+        assert_eq!(help_room(1408, 44), 100);
+        assert_eq!(help_room(1408, 0), 200);
+        assert_eq!(help_room(100, 44), 20);
     }
 
     #[test]
