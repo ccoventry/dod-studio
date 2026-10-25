@@ -36,6 +36,7 @@ import { createClock, hideBar, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
+import { whileDialogOpens } from './dialog_wait.js';
 import { notify } from './os_notifications.js';
 import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
@@ -643,10 +644,10 @@ async function exportMarkerList(getTakeIndex, getAllDemos) {
     showToast(STRINGS.RENDER.EXPORT_MARKERS_NONE, 'info');
     return;
   }
-  const path = await save({
+  const path = await whileDialogOpens(() => save({
     defaultPath: 'dod_markers.csv',
     filters: [{ name: 'CSV', extensions: ['csv'] }],
-  }).catch((err) => {
+  })).catch((err) => {
     console.error('Save dialog failed:', err);
     return null;
   });

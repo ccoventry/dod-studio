@@ -2989,6 +2989,10 @@ export const STRINGS = {
     FROM_DEMO_OPTION: 'From the demo',
     FROM_DEMO_TITLE: "The spray the demo saved for this player, drawn as it is. When the demo saved none (they joined before the recording, or any HLTV demo), the fallback for players not listed in that demo type; and when that is \"Their own spray\" too, no spray.",
   },
+  // A file dialog that is slow to appear (dialog_wait.js).
+  FILE_DIALOG: {
+    OPENING: 'Opening the file dialog… Windows can take a few seconds the first time.',
+  },
   // Dropping demos and folders from Windows (#530): demo_drop.js.
   DROP: {
     skippedToast: (names) => {
