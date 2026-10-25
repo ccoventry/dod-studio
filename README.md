@@ -98,11 +98,17 @@ You use DoD Studio at your own risk. A lost demo or a banned account is yours
 to carry, not the project's. The MIT licence says the same in its own words:
 the software is provided as is, without warranty of any kind.
 
-Valve's own pages are the authority on VAC, not this README:
-[Valve Anti-Cheat (VAC) System](https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74)
-(what VAC is, when a ban applies, and that bans are permanent) and the
-[Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/)
-(the rules of the account itself). Read them before you decide what to run.
+Valve's own pages are the authority on VAC, not this README. The addresses are
+written out so you can see where each one goes before you click, or type it
+into your browser yourself:
+
+- Valve Anti-Cheat (VAC) System, on Steam Support: what VAC is, when a ban
+  applies, and that bans are permanent.
+  <https://help.steampowered.com/en/faqs/view/571A-97DA-70E9-FF74>
+- Steam Subscriber Agreement: the rules of the account itself.
+  <https://store.steampowered.com/subscriber_agreement/>
+
+Read them before you decide what to run.
 
 ---
 
