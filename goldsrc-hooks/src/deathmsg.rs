@@ -60,7 +60,8 @@
 //!
 //! `font` -- the names in a font of our own -- lives in [`font`] (#562), and
 //! `scale` -- the icons S times bigger, lines spaced to match -- in [`scale`]
-//! (#728).
+//! (#728), and `layout even` -- every icon in a box of one height, from DoD
+//! Studio's own atlas -- in [`even`] (#1022).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -72,6 +73,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
+mod even;
 mod font;
 mod name_cap;
 mod replace;
@@ -1097,6 +1099,8 @@ pub fn poll() {
         install_hook();
     }
     font::poll();
+    // Before `scale`, whose copy follows what the even layout finds.
+    even::poll();
     scale::poll();
 }
 
@@ -1281,7 +1285,11 @@ fn usage() -> String {
          \x20 {COMMAND} font default       the game's own font again\n\
          \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
          \x20                               lines spaced and right-aligned to match (default 1)\n\
-         \x20 {COMMAND} scale default      the game's own size again\n",
+         \x20 {COMMAND} scale default      the game's own size again\n\
+         \x20 {COMMAND} layout even        every weapon icon in a box of one height, full\n\
+         \x20                               magazines and bipods shown, every line one step\n\
+         \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
+         \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,
@@ -1304,10 +1312,11 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}, replacing {}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, blocking {block}, replacing {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
+        even::describe(),
         match replace::count() {
             0 => "nothing".to_string(),
             1 => "1 kill line (replace list)".to_string(),
@@ -1436,6 +1445,19 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} scale: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} scale: {why}\n"),
+            }
+        }
+        "layout" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe(), usage());
+            }
+            match even::parse_args(rest) {
+                Ok(layout) => match even::apply(layout) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} layout: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} layout: {why}\n"),
             }
         }
         "fake" => {

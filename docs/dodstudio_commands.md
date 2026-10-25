@@ -123,7 +123,8 @@ state, not the state from before that line ran.
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
 one by hand, changes the names' font, or scales the weapon icons. It also
 changes or hides one recorded kill (`replace`, #1021). The font
-(#562) and the scale (#728) take effect on the next frame. HLAE's own
+(#562), the scale (#728) and the layout (#1022) take effect on the next frame.
+HLAE's own
 `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
@@ -146,6 +147,8 @@ changes or hides one recorded kill (`replace`, #1021). The font
 | `ds_hud_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 | `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale` or `font` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
 | `ds_hud_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
+| `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it. It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
+| `ds_hud_deathmsg layout default` | the game's own boxes and spacing, with whatever icons the sheets hold (the default) |
 
 A `block` id is any of:
 
