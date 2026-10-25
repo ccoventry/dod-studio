@@ -21,6 +21,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
 
 ## The hook DLL (`goldsrc-hooks`)
+- [goldsrc-hooks/README.md](../goldsrc-hooks/README.md) — what each module does, how to build the DLL and test it in the game.
 - [dodstudio_commands.md](dodstudio_commands.md) — every `ds_*` cvar and command. Also the source of the wiki's Commands page.
 - [goldsrc_client_dll_internals.md](goldsrc_client_dll_internals.md) — how DoD's `client.dll` is wired and how the hook reaches it.
 - [goldsrc_client_dll_survey.md](goldsrc_client_dll_survey.md) — what in `client.dll` can be controlled.

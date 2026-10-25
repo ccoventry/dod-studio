@@ -66,6 +66,12 @@ Both release workflows build their release body with `.github/scripts/release_no
 
 One plain-language line for players. The optional prefix (`New:`, `Fixed:`, `Changed:`) picks the group; without one, a `bug` label means Fixed, `enhancement` means New, and anything else is Changed. `none` (or an empty or unfilled line) means internal work: the PR appears only in the full list. Only the first such line in a body counts, and HTML comments are ignored, so the template's guidance never becomes a note.
 
+**The `Supersedes release note:` line.** When a PR renames or changes something an earlier PR in the same release added, its body can say so (v0.2.0's notes otherwise named the `dodstudio_*` commands that #719 had renamed to `ds_*`):
+
+    Supersedes release note: #710, #731
+
+Matched like the `Release note:` line (case-insensitive, `notes` too, bold or list forms); numbers with or without `#`, separated by commas or spaces; several such lines add up. Each listed PR that is in the same release range is dropped from the notes and from the full PR list, and this PR's own note stands for it. Chains collapse: if A supersedes B and B supersedes C, only A shows. A listed PR outside the range already shipped, so its note is already out: the script prints a notice and drops nothing. A superseding PR with no note of its own (or `none`) still drops the PRs it lists, with a warning naming the notes lost. Every drop is logged to the job log (`release notes: #731 dropped: superseded by #1013`).
+
 **What the script does:**
 1. **Previous tag.** The highest stable `vX.Y.Z` tag on `origin`: for experimental, the latest one (never `experimental-latest`); for stable, the highest one below the version being released (`--before`). Only tags on the remote count, since a local clone can also carry the upstream dod-tools tags (`v0.2.0` .. `v0.10.0`), which are not this project's releases. `--from` overrides it.
 2. **PRs in the range.** Every `Merge pull request #N` merge commit in `<previous tag>..<target>`, not just first-parent ones (so a stable release on `main` reaches the PRs that landed on `dev`, and a PR merged into another PR's branch counts too), plus squash merges (`... (#N)`) on the target's first-parent history. The range works for experimental even though the last stable tag sits on `main`, not `dev`: the release merge's second parent is `dev`'s tip at that release, so everything shipped is excluded. Release plumbing PRs (`dev` → `main` cutovers and `main` → `dev` syncs) are dropped.
