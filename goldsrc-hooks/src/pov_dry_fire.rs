@@ -28,9 +28,10 @@
 //!
 //! The server tells the recorder its clip after every shot (`CurWeapon`,
 //! `active, weapon id, clip`). A drop of one round in the held weapon's clip
-//! is a round the server fired. The recorder's own events come 22-102 ms
-//! before it (398 ms at most in 7,000 shots) and never after, so each drop is
-//! paired with the oldest recorded shot sound of the last
+//! is a round the server fired. The recorder's own events come before it
+//! (median 55-73 ms by weapon, 95% within 133 ms, 429 ms at most, over
+//! 33,700 shots; 30 came up to 50 ms after, in MP40 and Thompson bursts), so
+//! each drop is paired with the oldest recorded shot sound of the last
 //! [`PAIRING_SECONDS`]; a drop with none gets a stand-in: the weapon's own
 //! fire handler in `client.dll`, called for the recorder with the arguments
 //! its recorded events carry ([`event_args`]). That plays the sound, the
@@ -73,8 +74,8 @@ pub const NAME: &str = console_name!("sound_fix_pov_dry_fire");
 pub const MESSAGE: &str = "CurWeapon";
 
 /// A recorded shot sound this long before a clip drop can belong to it. The
-/// survey's longest gap was 0.40 s, with `CurWeapon` up to 64 ms behind the
-/// client data; 0.5 and 0.75 pair the same rounds over the 153 demos.
+/// survey's longest gap was 0.43 s; 0.5 and 0.75 play the same false rounds
+/// over the 153 demos, and 0.5 misses fewer real ones.
 const PAIRING_SECONDS: f32 = 0.5;
 
 /// A gap in the clock this long between frames is a seek, a pause or a new
