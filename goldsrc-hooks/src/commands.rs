@@ -583,6 +583,9 @@ pub fn poll() {
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
+    // Keeps the weapon list off screen in demo playback with hud_fastswitch 1:
+    // one code byte, checked each frame.
+    crate::weapon_list::poll();
     // Follows ds_hd_enabled / ds_hd_style, then notes what each map
     // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -884,6 +887,9 @@ fn status_text() -> String {
     }
     if let Some(voice_menus) = crate::voice_menus::status_line() {
         lines.push(voice_menus);
+    }
+    if let Some(weapon_list) = crate::weapon_list::status_line() {
+        lines.push(weapon_list);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);

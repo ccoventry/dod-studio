@@ -535,6 +535,10 @@ Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
 `slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
 or `engine <console command>`. See `src/studio_panel.rs` (#408).
 
+## Stock settings the hook extends
+
+- **`hud_fastswitch 1` also keeps the weapon list hidden in demo playback (#1032).** A POV demo replays the player's number keys, and the game's own `SelectSlot` opens the weapon list even with fast switch when the key's slot holds two weapons. In DoD that happens to the grenade key after a primed grenade is caught with USE: the caught one becomes a weapon of its own beside the class's grenade. While a demo plays with `hud_fastswitch 1`, the hook skips drawing the list (one code byte in `CHudAmmo::DrawWeaponList`); the weapon still switches as recorded. With `hud_fastswitch 0` playback shows the list as the player saw it, and live play is unchanged either way. `ds_debug_status` gets a `weapon list:` line once it has hidden it. `goldsrc-hooks/src/weapon_list.rs`.
+
 ## Renamed from `dodstudio_` (#555)
 
 Every name above used to start `dodstudio_`. #555 renamed all 60: the prefix is
