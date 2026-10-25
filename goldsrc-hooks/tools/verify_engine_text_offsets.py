@@ -39,9 +39,6 @@ Both patched calls:
  12. `pfnTextMessageGet` is `gEngfuncs` slot 25: five calls through it, each
      popping one argument, and one reads `[eax+0x28]` (the text) from the
      result.
- 13. The `VGUIMenu` and `MOTD` thunks in `msglog.rs`'s table are referenced
-     once each (their `pfnHookUserMsg` registration) and never called
-     directly, so dropping the messages (`vgui_menus.rs`) is the only way in.
 
 Every pattern and offset is read out of the Rust rather than restated.
 
@@ -329,23 +326,6 @@ def check_client(path: Path, check):
     reads_text = any(b"\x8b\x40\x28" in image.img[s + 6 : s + 16] for s in sites)
     check(len(sites) == 5 and popped, f"slot 25 has 5 calls, each popping one argument: {[hex(s) for s in sites]}")
     check(reads_text, "one reads [eax+0x28], the text, from the result")
-    msglog = (SRC / "msglog.rs").read_text(encoding="utf-8")
-    for message in ("VGUIMenu", "MOTD"):
-        mt = re.search(rf'\("{message}", (0x[0-9a-f]+)\)', msglog)
-        if not check(mt is not None, f"msglog.rs has a thunk for {message}"):
-            continue
-        thunk = int(mt.group(1), 16)
-        refs = []
-        ptr = struct.pack("<I", image.base + thunk)
-        j = image.img.find(ptr)
-        while j >= 0:
-            refs.append(j)
-            j = image.img.find(ptr, j + 1)
-        direct = [a for a, mn, t in image.sweep() if t == thunk]
-        check(
-            len(refs) == 1 and not direct,
-            f"{message}'s thunk +{thunk:#x} is referenced once (+{refs[0] if refs else 0:#x}) and never called directly",
-        )
 
 
 def main() -> int:

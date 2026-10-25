@@ -585,8 +585,6 @@ pub fn poll() {
     crate::spectator_text::poll();
     // ds_hud_hide_server_text: one hw.dll call, byte-checked each frame.
     crate::server_hud_text::poll();
-    // ds_hud_hide_menus: VGUIMenu and MOTD hooks, re-prepended each frame.
-    crate::vgui_menus::poll();
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
@@ -904,9 +902,6 @@ fn status_text() -> String {
     }
     if let Some(server_hud_text) = crate::server_hud_text::status_line() {
         lines.push(server_hud_text);
-    }
-    if let Some(menus) = crate::vgui_menus::status_line() {
-        lines.push(menus);
     }
     if let Some(voice_menus) = crate::voice_menus::status_line() {
         lines.push(voice_menus);
@@ -1775,9 +1770,6 @@ pub fn install() {
     if let Some(server_hud_text) = register(crate::server_hud_text::NAME, "0") {
         crate::server_hud_text::set_cvar(server_hud_text);
     }
-    if let Some(menus) = register(crate::vgui_menus::NAME, "0") {
-        crate::vgui_menus::set_cvar(menus);
-    }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
         crate::voice_menus::set_cvar(voice_menus);
     }
@@ -2027,7 +2019,6 @@ mod tests {
             crate::center_text::NAME,
             crate::spectator_text::NAME,
             crate::server_hud_text::NAME,
-            crate::vgui_menus::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
@@ -2058,7 +2049,6 @@ mod tests {
             crate::center_text::NAME,
             crate::spectator_text::NAME,
             crate::server_hud_text::NAME,
-            crate::vgui_menus::NAME,
             crate::strafe_twitch::NAME,
             crate::own_blood::NAME,
         ];

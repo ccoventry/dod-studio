@@ -188,8 +188,6 @@
 //! - `server_hud_text`: the `ds_hud_hide_server_text` cvar -- hide
 //!   server plugins' coloured HUD messages (`TE_TEXTMESSAGE`) by pointing one
 //!   `hw.dll` call at a filter, per engine build (#677).
-//! - `vgui_menus`: the `ds_hud_hide_menus` cvar -- drop the team menu,
-//!   class menu and MOTD a POV demo replays, during demos only (#677).
 //! - `hw_call_site`: one `call rel32` in `hw.dll` found per engine build and
 //!   rewritten while a setting is on (`engine_center_print`,
 //!   `server_hud_text`).
@@ -323,7 +321,6 @@ mod streaks;
 mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
-mod vgui_menus;
 mod voice;
 mod voice_menus;
 mod weapon_list;

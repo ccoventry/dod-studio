@@ -951,13 +951,6 @@ pub fn set_per_frame_callback(callback: fn()) {
     }
 }
 
-/// Whether the engine's own `HUD_Frame` drives the per-frame callback, rather
-/// than the fallback timer thread: then `client.dll`'s `HUD_Init` has run and
-/// the callback is on the game's thread.
-pub fn hud_frame_driving() -> bool {
-    HUD_FRAME_DRIVING.load(Ordering::Acquire)
-}
-
 fn run_per_frame_callback() {
     if let Some(prologue) = PER_FRAME_PROLOGUE.get() {
         prologue();
@@ -1163,15 +1156,6 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
 /// is all either caller needs.
 static DEMO_ELAPSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Whether a demo is playing: `pDemoAPI->IsPlayingback()`. False before
-/// `client.dll` is up, and in live play.
-pub fn playing_demo() -> bool {
-    engfuncs().is_some_and(|engfuncs| {
-        let api = engfuncs.p_demo_api;
-        // Safety: the engine's own demo API table, checked for null.
-        !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
-    })
-}
 /// The engine's own client clock (`cl.time`), which the game's HUD timers
 /// (kill feed, centre text, the clan countdown) run on; `None` before the
 /// engine is ready.
