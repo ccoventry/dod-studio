@@ -19,7 +19,7 @@ import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres }
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
 import { analyzerLoadingView, analyzerLoadingHtml } from './analyzer_loading.js';
-import { clockFloor as formatMMSS } from './time_format.js';
+import { clockFloor as formatMMSS, durationText } from './time_format.js';
 import { initDemoCache } from './demo_cache.js';
 import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
@@ -155,11 +155,7 @@ function teamLabel(team, alliesAreBritish) {
 function durSecs(d) { return d ? (d.secs || 0) + (d.nanos || 0) / 1e9 : 0; }
 
 function formatDuration(totalSecs) {
-  totalSecs = Math.max(0, Math.floor(totalSecs || 0));
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  const s = totalSecs % 60;
-  return STRINGS.ANALYZER.durationLong(h, m, s);
+  return durationText(totalSecs);
 }
 
 function formatGameTime(totalSecs) {
@@ -1489,7 +1485,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.MATCH_SCORE_TITLE}</div><div class="stat-value">${p.stats[0]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.KILLS_TITLE}</div><div class="stat-value">${p.stats[1]}</div></div>
       <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.DEATHS_TITLE}</div><div class="stat-value">${p.stats[2]}</div><div class="stat-badge" style="color:${kd >= 1 ? '#22c55e' : '#ef4444'};">${kd.toFixed(2)} ${STRINGS.ANALYZER.KD_BADGE_LABEL}</div></div>
-      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${STRINGS.ANALYZER.secondsSuffix(avgLife.toFixed(1))}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(minLife.toFixed(0), maxLife.toFixed(0))}</div></div>
+      <div class="analyzer-stat-card"><div class="stat-title">${STRINGS.ANALYZER.AVG_LIFESPAN_TITLE}</div><div class="stat-value">${durationText(avgLife)}</div><div class="stat-badge text-muted">${STRINGS.ANALYZER.minMaxBadge(durationText(minLife), durationText(maxLife))}</div></div>
     </div>
 
     <div class="analyzer-stacked-sections">
@@ -1597,7 +1593,7 @@ function renderKillStreaksTable(container, p) {
         <td>${idx + 1}</td>
         <td>${kills.length}</td>
         <td>${formatGameTime(startSecs)}</td>
-        <td>${STRINGS.ANALYZER.secondsSuffix(durationSecs.toFixed(1))}</td>
+        <td>${durationText(durationSecs)}</td>
       </tr>
       <tr><td></td><td colspan="3" style="font-size:0.85em;color:#aaa;">${esc(weaponSummary)}</td></tr>
       ${sub}`;

@@ -17,6 +17,7 @@ import { estimateSeconds, formatDuration, rescanTimeLine, getScanReadRate } from
 import { fileNameOf, folderOf } from './path_display.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { durationTextMs } from './time_format.js';
 
 /** Over this many seconds in all, each session can be skipped for now. */
 export const SKIP_OVER_SECS = 60;
@@ -136,7 +137,7 @@ export function overallFraction(weights, i, frac) {
   return Math.min(1, (before + f * (weights[i] || 0)) / total);
 }
 
-const secs = (ms) => (Math.max(0, ms) / 1000).toFixed(1);
+const secs = durationTextMs;
 
 /**
  * Works through `rows`: logs the skipped and missing ones, then backs up,

@@ -819,6 +819,15 @@ button.primary-btn:hover:not(:disabled) {
   background: var(--primary-hover);
 }
 
+/* A button that deletes, recycles, overwrites or throws work away: red
+   text and border, as Clear All and Move to Recycle Bin are. The themed
+   confirm's OK takes it only for those (#880); every other confirm is
+   primary-btn. */
+button.danger-btn {
+  color: #ff5555;
+  border-color: #ff5555;
+}
+
 /* A text box's clear button (clearable_input.js, #529): an × at its
    right-hand end, shown only while the box has text. */
 .clearable-input {

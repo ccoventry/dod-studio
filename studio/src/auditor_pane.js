@@ -12,7 +12,8 @@ import {
   withAuditOrder, shownFiles, keptChanged, markNotCopies, isNotCopy,
   auditFoldersKey, canDelete, copiesToDelete, backupChip, backedUpWithout,
 } from './audit_duplicates.js';
-import { createClock, readLastRun, rememberLastRun, secondsText, showBar } from './progress_view.js';
+import { createClock, readLastRun, rememberLastRun, showBar } from './progress_view.js';
+import { durationTextMs } from './time_format.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
 /// copies in it are kept first and never start ticked. `onSettingsChange`
@@ -147,7 +148,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
 
       try {
         const outcome = await runDemoAudit(paths, allDrives, queued, lookInZips);
-        const seconds = secondsText(clock.ms());
+        const seconds = durationTextMs(clock.ms());
         currentAuditResults = withAuditOrder(outcome?.groups);
         backedUp = outcome?.cancelled ? [] : (outcome?.backed_up ?? []);
         renderAuditResults({ resetTicks: true });
@@ -495,7 +496,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
     const question = permanent
       ? STRINGS.AUDITOR.deletePermanentlyConfirm(filesToDelete.length)
       : STRINGS.AUDITOR.recycleConfirm(filesToDelete.length);
-    if (!(await themedConfirm(question))) return;
+    if (!(await themedConfirm(question, { destructive: true }))) return;
 
     deleting = { permanent };
     setDeleteButtons(filesToDelete.length);
