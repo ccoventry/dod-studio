@@ -1017,6 +1017,27 @@ export async function enginePacketEntityLimit(gamePath) {
     });
 }
 
+/** The menu-size setting's state for an install (#985): `{ applies, on,
+ *  foreign, path }`, or null when it can't be read (menu_scale_setting.js
+ *  then disables the box). */
+export async function menuScaleStatus(gamePath, gameFolder) {
+  return invoke("menu_scale_status", { gamePath, gameFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (menu_scale_status):", err);
+      return null;
+    });
+}
+
+/** Writes or removes Studio's scheme copy in `<game>_addon\resource` (#985).
+ *  Throws; the caller toasts and puts the box back. */
+export async function setMenuScale(gamePath, gameFolder, on) {
+  return invoke("set_menu_scale", { gamePath, gameFolder, on })
+    .catch((err) => {
+      console.error("IPC Execution Error (set_menu_scale):", err);
+      throw err;
+    });
+}
+
 // ── Combine Clips (#107) ───────────────────────────────────────────────────
 
 export async function combinePlan(clips, ffmpegPath) {
