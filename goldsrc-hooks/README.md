@@ -388,7 +388,8 @@ or `--keep-console` grabs it as it is (#894).
 ## Status
 
 Per-feature details, and what is live-proven versus established by static
-analysis only, are in each module's `//!` doc and the linked `docs/` pages.
+analysis only, are in each module's `//!` doc and the linked `docs/` pages
+(listed under "The hook DLL" in the [docs index](../docs/README.md)).
 `tools/` holds a verifier per patched site, which checks the Rust constants
 against a real `client.dll` or `hw.dll`.
 
@@ -399,7 +400,7 @@ not the crosshairs, which stay stock -- the latter uploaded with mipmaps so they
 `dodstudio_hd` folder (`dod_addon`, or `dod` from before #415), `ds_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
-those files; see its README. It works the same on the 25th Anniversary
+those files; see its [README](tools/hd/README.md). It works the same on the 25th Anniversary
 `hw.dll` (#370), from that build's own offsets
 (`tools/verify_texture_hires_offsets.py --anniversary`).
 
