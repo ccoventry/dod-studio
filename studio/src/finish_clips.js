@@ -39,7 +39,7 @@ export function finishCodecFor(mode, codecs) {
     : mode === 'direct_to_video' ? codecs.video
       : codecs.frames;
   const renderTab = {
-    codec: codecs.renderCodec || 'prores',
+    codec: codecs.renderCodec || 'prores_422',
     customArgs: codecs.renderCodec === 'custom' ? (codecs.renderCustomArgs || '') : '',
   };
   if (!pick || pick === FINISH_CODEC_RENDER_TAB) return renderTab;
@@ -271,7 +271,7 @@ function readSettings() {
       obs: value('#config-finish-codec-obs', 'source_copy'),
       video: value('#config-finish-codec-video', FINISH_CODEC_RENDER_TAB),
       frames: value('#config-finish-codec-frames', FINISH_CODEC_RENDER_TAB),
-      renderCodec: value('#render-codec-select', 'prores'),
+      renderCodec: value('#render-codec-select', 'prores_422'),
       renderCustomArgs: document.querySelector('#render-custom-codec-input')?.value?.trim() || '',
     },
     renderFps: parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300,

@@ -70,7 +70,7 @@ let exportDirsSource = null;
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
-  return document.querySelector('#render-codec-select')?.value || 'prores';
+  return document.querySelector('#render-codec-select')?.value || 'prores_422';
 }
 
 /** The batch panel's current Custom-codec FFmpeg args text, if any. */

@@ -15,7 +15,8 @@ pub enum RenderCodec {
     /// every settings file, preset and autosave written before the other
     /// profiles existed means HQ by it.
     ProRes,
-    /// ProRes 422 (Apple's "standard"): about 2/3 of HQ's size.
+    /// ProRes 422 (Apple's "standard"): about 2/3 of HQ's size, looking the
+    /// same in a game capture. The default for new installs.
     ProRes422,
     /// ProRes 422 LT: about half of HQ's size.
     ProResLt,
@@ -63,13 +64,13 @@ pub struct RenderConfig {
 
 impl RenderCodec {
     /// Maps the frontend's codec-select string values to the enum used by
-    /// `run_render_job`. Unrecognized values fall back to ProRes, matching
-    /// `studio`'s prior `codec_args_and_ext()` default.
+    /// `run_render_job`. An empty or unrecognized value falls back to the
+    /// default for new installs, ProRes 422; `"prores"` is HQ and stays HQ.
     pub fn from_str_id(id: &str) -> Self {
         match id {
             "h264" => Self::H264Software,
             "h264_nvenc" => Self::NvencH264,
-            "prores_422" => Self::ProRes422,
+            "prores" => Self::ProRes,
             "prores_lt" => Self::ProResLt,
             "prores_4444" => Self::ProRes4444,
             "dnxhr" => Self::DnxHr,
@@ -77,7 +78,7 @@ impl RenderCodec {
             "uncompressed" => Self::Uncompressed,
             "custom" => Self::Custom,
             "source_copy" => Self::SourceCopy,
-            _ => Self::ProRes,
+            _ => Self::ProRes422,
         }
     }
 
@@ -142,7 +143,7 @@ impl Default for RenderConfig {
             source_folder: "".to_string(),
             export_directories: Vec::new(),
             fps: 300,
-            target_codec: RenderCodec::ProRes,
+            target_codec: RenderCodec::ProRes422,
             custom_codec_args: String::new(),
             max_concurrent_renders: 2,
         }
@@ -212,10 +213,12 @@ mod tests {
     }
 
     #[test]
-    fn test_from_str_id_unrecognized_falls_back_to_prores() {
+    fn test_from_str_id_unrecognized_falls_back_to_prores_422() {
         assert_eq!(
             RenderCodec::from_str_id("not_a_real_codec"),
-            RenderCodec::ProRes
+            RenderCodec::ProRes422
         );
+        assert_eq!(RenderCodec::from_str_id(""), RenderCodec::ProRes422);
+        assert_eq!(RenderConfig::default().target_codec, RenderCodec::ProRes422);
     }
 }
