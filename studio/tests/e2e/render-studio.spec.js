@@ -292,6 +292,25 @@ test.describe('Custom codec', () => {
     await expect(page.locator('#render-custom-codec-group')).toBeHidden();
   });
 
+  test('the hint under the picker says what each ProRes choice is for', async ({ page }) => {
+    await gotoHarness(page);
+    const hint = page.locator('#render-codec-hint');
+    await expect(hint).toBeVisible();
+    // ProRes 422 is the first option, as in the app.
+    await expect(page.locator('#render-codec-select')).toHaveValue('prores_422');
+    await expect(hint).toContainText('Recommended for most videos');
+
+    await page.selectOption('#render-codec-select', 'prores');
+    await expect(hint).toContainText('the largest of the three 422 choices');
+    await expect(hint).not.toContainText('default');
+
+    await page.selectOption('#render-codec-select', 'prores_lt');
+    await expect(hint).toContainText('About half the size of HQ');
+
+    await page.selectOption('#render-codec-select', 'dnxhr');
+    await expect(hint).toBeHidden();
+  });
+
   test('Scan is refused when Custom is selected with no args entered', async ({ page }) => {
     await gotoHarness(page);
     await page.evaluate(() => { window.__testCaptureLocations = ['C:\\captures']; });
