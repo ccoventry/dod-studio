@@ -39,9 +39,49 @@
 //!   `_shoot` sample with its entity. A restart waits one frame for its own
 //!   event; one that arrives, either side of it, cancels the stand-in.
 //!
-//! Only while an HLTV demo plays (`IsSpectateOnly()`), and only with
-//! `ds_spec_match_pov 1`. Off by default. `2` also logs every round it
-//! plays, not only the first twenty.
+//! ## One switch, a path per kind of demo
+//!
+//! [`NAME`] (`ds_sound_restore_gunshots`, default 1; `2` also logs every
+//! round played, not only the first twenty) picks what runs from what is
+//! playing ([`Playing::paths`]), the way `ds_map_hide_asset` picks its hook
+//! from what it hides (#1036):
+//!
+//! - **HLTV demo** (`IsSpectateOnly()`): this module, every player.
+//! - **POV demo, other players:** this module, every player but the
+//!   recorder (below).
+//! - **POV demo, the recorder:** `pov_recorder_shots`, from the clip count
+//!   the server sends him (#1029). His rounds are his client's own predicted
+//!   events, which never pass `EV_PlaySound` before the restart is seen.
+//! - **Live play:** nothing.
+//!
+//! It was part of `ds_spec_match_pov` until #1036, which keeps the rest of
+//! matching POV (viewmodel animations, crosshair, eye height, gun lowering)
+//! and has no say over gunshots any more.
+//!
+//! ## POV demos: the other players
+//!
+//! A POV demo loses other players' rounds the same way: about one in seven
+//! that the recorder saw fired has no fire event (14.4% of 518,947 rounds in
+//! view, 361 demos from 27 recorders, #1036), and in game they play nothing.
+//! So while a POV demo plays, the same detection runs for every player but
+//! the recorder, with two differences:
+//!
+//! - **Only players in the latest update.** A POV recording carries only the
+//!   players the recorder could see; one out of view keeps the state it was
+//!   last sent, and coming back into view would look like a restart. A
+//!   player whose `messagenum` is not the newest is forgotten until seen
+//!   again.
+//! - **A slightly wider window for an event that came first.** Over the same
+//!   361 demos, 97.2% of the rounds that kept their event had it in the very
+//!   message the restart came in, and 0.2% one message (1-20 ms) before it;
+//!   6 of 444,099 came after. So a real shot heard up to
+//!   [`POV_HEARD_BEFORE_SECONDS`] before the restart, or on the frame before
+//!   it, is that round's (see [`had_its_event`]). Anything further away is a
+//!   neighbouring round of the burst (80-200 ms), and does not count.
+//!
+//! The recorder's own rounds are left alone here: they reach the demo as the
+//! client's own predicted events, not from the server, and need another
+//! signal, the clip count (`pov_recorder_shots`, #1029).
 //!
 //! ## What it cannot do
 //!
@@ -64,26 +104,34 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicU64, 
 use crate::engine::{
     self, ClEngineFuncsPartial, ClEntityS, CvarSPartial, EventHandlerFn, ModelSPartial,
 };
+use crate::names::console_name;
 
-/// The cvar this follows, for its own messages. Registered in `commands.rs`.
-const NAME: &str = crate::names::SPEC_MATCH_POV;
+/// The one switch for every path (see the module docs). Registered in
+/// `commands.rs`; `pov_recorder_shots` reads it through [`level`].
+pub const NAME: &str = console_name!("sound_restore_gunshots");
+
+/// How long before its restart a real shot can be heard and still be that
+/// round's, in a POV demo. The measured spread is 1-20 ms (see the module
+/// docs); a neighbouring round of a burst is 80 ms or more away.
+const POV_HEARD_BEFORE_SECONDS: f64 = 0.025;
 
 /// `event_args_t` (`common/event_args.h`), what a fire handler is passed.
+/// `pov_recorder_shots` builds them too.
 #[repr(C)]
 #[derive(Default)]
-struct EventArgs {
-    flags: i32,
-    entindex: i32,
-    origin: [f32; 3],
-    angles: [f32; 3],
-    velocity: [f32; 3],
-    ducking: i32,
-    fparam1: f32,
-    fparam2: f32,
-    iparam1: i32,
-    iparam2: i32,
-    bparam1: i32,
-    bparam2: i32,
+pub(crate) struct EventArgs {
+    pub(crate) flags: i32,
+    pub(crate) entindex: i32,
+    pub(crate) origin: [f32; 3],
+    pub(crate) angles: [f32; 3],
+    pub(crate) velocity: [f32; 3],
+    pub(crate) ducking: i32,
+    pub(crate) fparam1: f32,
+    pub(crate) fparam2: f32,
+    pub(crate) iparam1: i32,
+    pub(crate) iparam2: i32,
+    pub(crate) bparam1: i32,
+    pub(crate) bparam2: i32,
 }
 
 const _: () = assert!(size_of::<EventArgs>() == 72);
@@ -234,16 +282,129 @@ const TRACKING_GAP_SECONDS: f64 = 0.5;
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
-/// `ds_spec_match_pov 2`: a log line for every round, not only the first
-/// few. For checking a session against the offline probe.
+/// [`NAME`] `2`: a log line for every round, not only the first few. For
+/// checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
-/// What to do when there is no cvar to read: the fallback command's value.
-static WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(false);
+/// [`NAME`] when it could not be a cvar: the fallback command's value. On,
+/// as the cvar's default is.
+pub static WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(true);
 
-/// Sets the switch on the path where cvar registration failed and the
-/// command handler holds the value instead.
-pub fn set_without_a_cvar(wanted: bool) {
-    WITHOUT_A_CVAR.store(wanted, Ordering::Relaxed);
+/// [`NAME`]'s value: its cvar, or the fallback toggle without one. `0` off,
+/// `1` on, `2` on and logging every round, on every path.
+pub(crate) fn level() -> f32 {
+    let cvar = CVAR.load(Ordering::Acquire);
+    if cvar.is_null() {
+        f32::from(u8::from(WITHOUT_A_CVAR.load(Ordering::Relaxed)))
+    } else {
+        // Safety: the engine owns the cvar for the session.
+        unsafe { (*cvar).value }
+    }
+}
+
+/// Whether [`NAME`] is on, for `ds_debug_status`.
+pub fn enabled() -> bool {
+    level() != 0.0
+}
+
+/// Whether a [`level`] asks for a log line for every round.
+pub(crate) fn logs_every_round(level: f32) -> bool {
+    level >= 2.0
+}
+
+/// What kind of demo is playing, which decides the paths and the players.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Playing {
+    /// Live play, no demo, or a POV demo whose recorder can't be named.
+    Nothing,
+    /// An HLTV demo.
+    Hltv,
+    /// A POV demo recorded by player `recorder`.
+    Pov { recorder: usize },
+}
+
+/// Which restorations run for a kind of demo, with [`NAME`] on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Paths {
+    /// This module's body-restart path, for the players [`Playing::tracks`]
+    /// names.
+    pub(crate) bodies: bool,
+    /// `pov_recorder_shots`' clip-drop path, for the recorder.
+    pub(crate) recorders_clip: bool,
+}
+
+impl Playing {
+    /// For noticing a change between frames.
+    fn code(self) -> i32 {
+        match self {
+            Playing::Nothing => 0,
+            Playing::Hltv => 1,
+            Playing::Pov { recorder } => 100 + recorder as i32,
+        }
+    }
+
+    /// The paths this kind of demo runs (the module docs say why).
+    pub(crate) fn paths(self) -> Paths {
+        match self {
+            Playing::Nothing => Paths {
+                bodies: false,
+                recorders_clip: false,
+            },
+            Playing::Hltv => Paths {
+                bodies: true,
+                recorders_clip: false,
+            },
+            Playing::Pov { .. } => Paths {
+                bodies: true,
+                recorders_clip: true,
+            },
+        }
+    }
+
+    /// Whether player `slot`'s rounds are the body path's to restore.
+    fn tracks(self, slot: usize) -> bool {
+        match self {
+            Playing::Nothing => false,
+            Playing::Hltv => true,
+            // The recorder's own rounds are the client's predicted events,
+            // which this signal can't pair: `pov_recorder_shots`' (#1029).
+            Playing::Pov { recorder } => slot != recorder,
+        }
+    }
+
+    /// The POV recorder whose rounds the clip-drop path restores, if any.
+    pub(crate) fn clip_recorder(self) -> Option<usize> {
+        match self {
+            Playing::Pov { recorder } if self.paths().recorders_clip => Some(recorder),
+            _ => None,
+        }
+    }
+}
+
+static PLAYING: AtomicI32 = AtomicI32::new(0);
+
+/// Whether a restart seen on frame `now` (at playback time `now_at`) came
+/// with its own fire event: a real shot of that player's heard on frame
+/// `heard` (zero for none) at `heard_at`. A restart this says no to waits one
+/// more frame for an event behind it (`on_shot_sound`), then gets its
+/// stand-in.
+///
+/// Either side of one frame, as in an HLTV demo; in a POV demo also anything
+/// up to [`POV_HEARD_BEFORE_SECONDS`] before, the measured spread of an event
+/// that came a message ahead of its restart.
+fn had_its_event(playing: Playing, heard: u32, heard_at: f64, now: u32, now_at: f64) -> bool {
+    if heard_with(heard, now) {
+        return true;
+    }
+    matches!(playing, Playing::Pov { .. })
+        && heard != 0
+        && (0.0..=POV_HEARD_BEFORE_SECONDS).contains(&(now_at - heard_at))
+}
+
+/// Whether a player is in the update the client last read: an entity left
+/// out of it keeps the state it was last sent (`messagenum` is the update it
+/// came in).
+fn in_latest_update(messagenum: i32, latest: i32) -> bool {
+    messagenum == latest
 }
 
 // What each player's body was last seen doing.
@@ -257,6 +418,8 @@ static PENDING: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
 /// The frame number a real shot was heard on and not yet paired with a
 /// restart. Zero for none.
 static HEARD: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+/// The playback time (`engine::client_time`, as bits) [`HEARD`] was set at.
+static HEARD_AT: [AtomicU64; SLOTS] = [const { AtomicU64::new(0) }; SLOTS];
 /// The weapon each player holds, and the one before it, as [`WEAPONS`]
 /// indices, or -1.
 static HELD_NOW: [AtomicI32; SLOTS] = [const { AtomicI32::new(-1) }; SLOTS];
@@ -327,7 +490,7 @@ fn restarted(before: (i32, f32), now: (i32, f32)) -> bool {
 /// ones: each wrapped into +-180, and the pitch turned back from the third
 /// of it, negated, that a player's entity state carries. The engine's own
 /// `CL_ParseEvent` does the same.
-fn event_angles(state: [f32; 3]) -> [f32; 3] {
+pub(crate) fn event_angles(state: [f32; 3]) -> [f32; 3] {
     let wrap = |a: f32| {
         let a = a % 360.0;
         if a > 180.0 {
@@ -349,13 +512,45 @@ fn heard_with(heard: u32, now: u32) -> bool {
 
 /// The next stand-in spread value, in `-SPREAD..=SPREAD`. A xorshift step:
 /// nothing here needs to be unpredictable, only not the same every round.
-fn next_spread() -> f32 {
+pub(crate) fn next_spread() -> f32 {
     let mut x = SPREAD_SEED.load(Ordering::Relaxed);
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
     SPREAD_SEED.store(x, Ordering::Relaxed);
     ((x >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0) * SPREAD
+}
+
+/// Calls `client.dll`'s own fire handler for the `event` script (a name in
+/// [`WEAPONS`]) with `args`, as a stand-in: the sound it makes is not taken
+/// for a recorded round, here or in `pov_recorder_shots`. False when the client
+/// registered no handler for that script.
+pub(crate) fn play_fire_event(event: &str, args: &mut EventArgs) -> bool {
+    let Some(weapon) = WEAPONS.iter().position(|(e, _)| *e == event) else {
+        return false;
+    };
+    let handler = HANDLERS[weapon].load(Ordering::Acquire);
+    if handler.is_null() {
+        return false;
+    }
+    // Safety: a handler `client.dll` registered for exactly this script,
+    // called on the engine thread with the argument block it expects.
+    let handler: EventHandlerFn = unsafe { std::mem::transmute(handler) };
+    STANDING_IN.store(true, Ordering::Relaxed);
+    unsafe { handler((args as *mut EventArgs).cast()) };
+    STANDING_IN.store(false, Ordering::Relaxed);
+    true
+}
+
+/// Whether `event` names one of [`WEAPONS`].
+#[cfg(test)]
+pub(crate) fn is_known_script(event: &str) -> bool {
+    WEAPONS.iter().any(|(e, _)| *e == event)
+}
+
+/// Whether a stand-in's handler is running right now.
+pub(crate) fn standing_in() -> bool {
+    STANDING_IN.load(Ordering::Relaxed)
 }
 
 /// The engine's own `pfnHookEvent`, while it is wrapped.
@@ -438,6 +633,7 @@ pub fn on_shot_sound(entity: i32) {
         return;
     }
     HEARD[slot].store(FRAME_NUMBER.load(Ordering::Relaxed), Ordering::Relaxed);
+    HEARD_AT[slot].store(engine::client_time().to_bits(), Ordering::Relaxed);
 }
 
 fn forget(slot: usize) {
@@ -456,24 +652,55 @@ fn forget_everyone() {
     }
 }
 
-fn playing_hltv_demo(engfuncs: &ClEngineFuncsPartial) -> bool {
+/// What is playing now. For `pov_recorder_shots` too, whose callbacks run
+/// between frames.
+pub(crate) fn playing_now() -> Playing {
+    engine::engfuncs().map_or(Playing::Nothing, playing)
+}
+
+fn playing(engfuncs: &ClEngineFuncsPartial) -> Playing {
     let api = engfuncs.p_demo_api;
-    !api.is_null()
-        && unsafe { ((*api).is_playingback)() } != 0
-        && unsafe { (engfuncs.is_spectate_only)() } != 0
+    if api.is_null() || unsafe { ((*api).is_playingback)() } == 0 {
+        return Playing::Nothing;
+    }
+    if unsafe { (engfuncs.is_spectate_only)() } != 0 {
+        return Playing::Hltv;
+    }
+    // Safety: the engine's own accessor; a demo is playing, so a level is
+    // loaded, and the pointer is checked before it is read.
+    let local = unsafe { (engfuncs.get_local_player)() } as usize;
+    if local == 0 || !crate::crash::readable(local, 4) {
+        return Playing::Nothing;
+    }
+    // Safety: `cl_entity_t` starts with its index, readable as checked.
+    let recorder = unsafe { *(local as *const i32) };
+    usize::try_from(recorder)
+        .ok()
+        .filter(|i| (1..SLOTS).contains(i))
+        .map_or(Playing::Nothing, |recorder| Playing::Pov { recorder })
+}
+
+/// The newest update any player came in, in a POV demo: the recorder's own
+/// entity is in every one.
+fn latest_update(engfuncs: &ClEngineFuncsPartial) -> i32 {
+    (1..SLOTS)
+        .filter_map(|slot| {
+            // Safety: the engine's own accessor, null for an empty slot.
+            let entity = unsafe { (engfuncs.get_entity_by_index)(slot as i32).as_ref() }?;
+            (entity.player != 0).then_some(entity.curstate.messagenum)
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    let value = if cvar.is_null() {
-        f32::from(u8::from(WITHOUT_A_CVAR.load(Ordering::Relaxed)))
-    } else {
-        unsafe { (*cvar).value }
-    };
+    let playing = playing_now();
+    let value = level();
     let wanted = value != 0.0;
-    EVERY_ROUND.store(value >= 2.0, Ordering::Relaxed);
-    if WANTED.swap(wanted, Ordering::Relaxed) != wanted {
+    EVERY_ROUND.store(logs_every_round(value), Ordering::Relaxed);
+    let switched = WANTED.swap(wanted, Ordering::Relaxed) != wanted;
+    if switched {
         unsafe {
             crate::debug::report(&format!(
                 "missing_shots: {} ({NAME})",
@@ -484,6 +711,10 @@ pub fn poll() {
                 }
             ))
         };
+    }
+    // A different kind of demo, or another recorder: nothing tracked carries.
+    let changed = PLAYING.swap(playing.code(), Ordering::Relaxed) != playing.code();
+    if switched || changed {
         forget_everyone();
     }
     if !wanted {
@@ -495,13 +726,19 @@ pub fn poll() {
 
     let now = engine::client_time();
     let last = f64::from_bits(LAST_POLL.swap(now.to_bits(), Ordering::Relaxed));
-    if !playing_hltv_demo(engfuncs) || now - last > TRACKING_GAP_SECONDS {
+    if !playing.paths().bodies || now - last > TRACKING_GAP_SECONDS {
         forget_everyone();
         return;
     }
     let frame_number = FRAME_NUMBER.fetch_add(1, Ordering::Relaxed) + 1;
+    let pov = matches!(playing, Playing::Pov { .. });
+    let latest = if pov { latest_update(engfuncs) } else { 0 };
 
     for slot in 1..SLOTS {
+        if !playing.tracks(slot) {
+            forget(slot);
+            continue;
+        }
         // Safety: the engine's own accessor, null for an empty slot.
         let entity: *mut ClEntityS = unsafe { (engfuncs.get_entity_by_index)(slot as i32) };
         if entity.is_null() {
@@ -512,6 +749,12 @@ pub fn poll() {
         // this is the engine's own thread.
         let entity = unsafe { &*entity };
         if entity.player == 0 {
+            forget(slot);
+            continue;
+        }
+        // Out of the recorder's view: what it shows is old, and coming back
+        // must not look like a restart.
+        if pov && !in_latest_update(entity.curstate.messagenum, latest) {
             forget(slot);
             continue;
         }
@@ -580,7 +823,14 @@ pub fn poll() {
                         CLIP_ROUND[slot].store(round + 1, Ordering::Relaxed);
                     }
                 }
-                if heard_with(HEARD[slot].swap(0, Ordering::Relaxed), frame_number) {
+                let heard_at = f64::from_bits(HEARD_AT[slot].load(Ordering::Relaxed));
+                if had_its_event(
+                    playing,
+                    HEARD[slot].swap(0, Ordering::Relaxed),
+                    heard_at,
+                    frame_number,
+                    now,
+                ) {
                     HAD_EVENT.fetch_add(1, Ordering::Relaxed);
                 } else {
                     let held = [
@@ -886,6 +1136,99 @@ mod tests {
         assert!(heard_with(10, 11));
         assert!(!heard_with(10, 12), "an older shot is another round");
         assert!(!heard_with(0, 1), "zero is no shot at all");
+    }
+
+    /// An HLTV demo pairs by frames alone, as it always has: a shot heard
+    /// three frames back is another round, however close in time.
+    #[test]
+    fn hltv_pairs_a_round_with_its_event_by_frames_alone() {
+        let hltv = Playing::Hltv;
+        assert!(had_its_event(hltv, 10, 5.000, 10, 5.000));
+        assert!(had_its_event(hltv, 10, 5.000, 11, 5.004));
+        assert!(!had_its_event(hltv, 10, 5.000, 13, 5.012));
+        assert!(!had_its_event(hltv, 0, 0.0, 13, 0.010), "no shot heard");
+    }
+
+    /// The measured POV spread: 97.2% of events in the restart's own message,
+    /// 0.2% one message (1-20 ms) ahead of it, the next round of a burst
+    /// 80 ms or more away.
+    #[test]
+    fn pov_pairs_an_event_up_to_one_message_ahead_and_no_further() {
+        let pov = Playing::Pov { recorder: 11 };
+        // Same message, read just before or just after.
+        assert!(had_its_event(pov, 40, 12.000, 40, 12.000));
+        assert!(had_its_event(pov, 40, 12.000, 41, 12.007));
+        // A message ahead, at 300 fps: six frames, 20 ms.
+        assert!(had_its_event(pov, 40, 12.000, 46, 12.020));
+        assert!(had_its_event(pov, 40, 12.000, 47, 12.024));
+        // The burst's previous round, 100 ms back: this round lost its event.
+        assert!(!had_its_event(pov, 40, 12.000, 70, 12.100));
+        assert!(!had_its_event(pov, 40, 12.000, 50, 12.030));
+        // No shot heard at all, whatever the clock says.
+        assert!(!had_its_event(pov, 0, 0.0, 3, 0.010));
+        // A time from before a seek back is not "just before".
+        assert!(!had_its_event(pov, 40, 12.000, 45, 11.990));
+    }
+
+    /// The recorder's rounds are left to #1029's path; everyone else's are
+    /// restored in a POV demo, and everyone's in an HLTV one.
+    #[test]
+    fn pov_leaves_the_recorder_alone() {
+        let pov = Playing::Pov { recorder: 11 };
+        assert!(!pov.tracks(11));
+        assert!(pov.tracks(10));
+        assert!(pov.tracks(13));
+        assert!(Playing::Hltv.tracks(11));
+        assert!(!Playing::Nothing.tracks(11));
+    }
+
+    /// #1036's routing: an HLTV demo restores every player from the body,
+    /// a POV demo the other players from the body and the recorder from his
+    /// clip, live play nothing.
+    #[test]
+    fn each_kind_of_demo_runs_its_own_paths() {
+        let paths = |bodies, recorders_clip| Paths {
+            bodies,
+            recorders_clip,
+        };
+        assert_eq!(Playing::Hltv.paths(), paths(true, false));
+        assert_eq!(Playing::Pov { recorder: 11 }.paths(), paths(true, true));
+        assert_eq!(Playing::Nothing.paths(), paths(false, false));
+        // The clip path is the recorder's, and only in a POV demo.
+        assert_eq!(Playing::Pov { recorder: 11 }.clip_recorder(), Some(11));
+        assert_eq!(Playing::Hltv.clip_recorder(), None);
+        assert_eq!(Playing::Nothing.clip_recorder(), None);
+    }
+
+    /// One cvar for every path; `ds_spec_match_pov` decides none of them.
+    #[test]
+    fn one_switch_for_every_path() {
+        assert_eq!(NAME, "ds_sound_restore_gunshots");
+        assert_ne!(NAME, crate::names::SPEC_MATCH_POV);
+        assert!(!logs_every_round(0.0));
+        assert!(!logs_every_round(1.0));
+        assert!(logs_every_round(2.0));
+    }
+
+    /// Without a cvar the setting is on, as the cvar's default is.
+    #[test]
+    fn the_fallback_starts_on() {
+        assert!(WITHOUT_A_CVAR.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_change_of_recorder_is_a_change_of_demo() {
+        assert_ne!(
+            Playing::Pov { recorder: 3 }.code(),
+            Playing::Pov { recorder: 4 }.code()
+        );
+        assert_ne!(Playing::Hltv.code(), Playing::Nothing.code());
+    }
+
+    #[test]
+    fn a_player_left_out_of_the_update_is_not_watched() {
+        assert!(in_latest_update(812, 812));
+        assert!(!in_latest_update(790, 812));
     }
 
     #[test]
