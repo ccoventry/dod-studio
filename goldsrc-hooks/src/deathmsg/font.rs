@@ -645,6 +645,16 @@ static INSTALLED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// The engine font's height as its length call last reported it, for
 /// centring the names drawn in it; 0 until a line was measured.
 static ENGINE_TALL: AtomicI32 = AtomicI32::new(0);
+/// Whether our font was made with `shadow`; false for the game's.
+static SHADOW: AtomicBool = AtomicBool::new(false);
+
+/// How far our font's drop shadow reaches right of the name's ink: vgui2's
+/// shadow is the glyph again 1 px right and down, and the killer's name
+/// measured 1 px nearer the icon with it than without (POST, Bahnschrift
+/// SemiBold 32). 0 for the game's font, whose look is the scheme's.
+pub(super) fn shadow_px() -> i32 {
+    i32::from(SHADOW.load(Ordering::Relaxed))
+}
 
 /// Our font's height in pixels, 0 while the game's font is in use: the floor
 /// the step stub applies, so `scale` centres the icon on the same line height
@@ -1418,6 +1428,7 @@ mod hook {
             FALLBACK.store(0, Ordering::Release);
             FONT.store(0, Ordering::Release);
             FONT_TALL.store(0, Ordering::Release);
+            SHADOW.store(false, Ordering::Relaxed);
             if let Ok(mut held) = SPEC.lock() {
                 *held = None;
             }
@@ -1491,6 +1502,7 @@ mod hook {
         // Height first: the stub reads it, and a draw with the new handle
         // must not step by the old one.
         FONT_TALL.store(tall.max(0), Ordering::Release);
+        SHADOW.store(spec.shadow, Ordering::Relaxed);
         FONT.store(handle, Ordering::Release);
         let outline = if spec.outline {
             " (outline: this engine's font renderer has none, so it is drawn without; `outline <px>` draws one)"

@@ -46,8 +46,9 @@
 //! the tool trims every box to its icon's visible columns, so with
 //! `gap default` each name sits as far from every icon's art as the game puts
 //! it from a rifle's. `gap <px>` makes both spaces `px` screen pixels instead,
-//! counted from the name's outline when one is drawn, so a 2 px outline
-//! doesn't eat into it ([`gap_extras`]). The killer's side goes into its
+//! counted from the name's outline when one is drawn, and on the killer's
+//! side from our font's drop shadow, so neither eats into it
+//! ([`gap_extras`]). The killer's side goes into its
 //! width and draw (`font`'s killer sites, only on a line whose icon is in the
 //! atlas), the victim's into the box's advance ([`line_rect`]), so a line
 //! with no killer gets only the victim's.
@@ -355,14 +356,15 @@ static GAP: AtomicI32 = AtomicI32::new(GAP_DEFAULT);
 
 /// What the line adds to the game's spacing for `gap` (`None`: the game's):
 /// (after the killer's name, after the icon), in screen px. `outline` is how
-/// far the names' outline reaches past their text, which the gap is counted
-/// from.
-pub(super) fn gap_extras(gap: Option<i32>, outline: i32) -> (i32, i32) {
+/// far the names' outline reaches past their text, and `shadow` how far a
+/// drop shadow reaches right of it (the killer's side only: the victim's
+/// shadow falls away from the icon); the gap is counted from those.
+pub(super) fn gap_extras(gap: Option<i32>, outline: i32, shadow: i32) -> (i32, i32) {
     match gap {
         None => (0, 0),
         Some(g) => {
             let edge = g + outline.max(0);
-            (edge - GAME_GAP_BEFORE, edge)
+            (edge + shadow.max(0) - GAME_GAP_BEFORE, edge)
         }
     }
 }
@@ -374,7 +376,11 @@ fn gap() -> Option<i32> {
 
 /// [`gap_extras`] for the gap and outline in force.
 pub(super) fn extras() -> (i32, i32) {
-    gap_extras(gap(), super::backdrop::outline().0)
+    gap_extras(
+        gap(),
+        super::backdrop::outline().0,
+        super::font::shadow_px(),
+    )
 }
 
 /// The argument after `gap`: `0..=MAX_GAP` px, or `default` (`None`).
@@ -1031,22 +1037,24 @@ mod tests {
     #[test]
     fn a_gap_is_the_same_both_sides_counted_from_the_outline() {
         // The game's: nothing added to its 5 px before the icon and none after.
-        assert_eq!(gap_extras(None, 0), (0, 0));
+        assert_eq!(gap_extras(None, 0, 0), (0, 0));
         assert_eq!(
-            gap_extras(None, 2),
+            gap_extras(None, 2, 1),
             (0, 0),
-            "an outline alone moves nothing"
+            "an outline or a shadow alone moves nothing"
         );
         // 14 px: the killer's 5 becomes 14, the victim gets 14.
-        assert_eq!(gap_extras(Some(14), 0), (9, 14));
+        assert_eq!(gap_extras(Some(14), 0, 0), (9, 14));
         // A 2 px outline reaches 2 px past each name: the gap starts there.
-        assert_eq!(gap_extras(Some(14), 2), (11, 16));
+        assert_eq!(gap_extras(Some(14), 2, 0), (11, 16));
+        // A shadow reaches right: the killer's side only.
+        assert_eq!(gap_extras(Some(14), 2, 1), (12, 16));
         // 0 pulls the icon up to the killer's name, 5 px nearer than the game.
-        assert_eq!(gap_extras(Some(0), 0), (-GAME_GAP_BEFORE, 0));
+        assert_eq!(gap_extras(Some(0), 0, 0), (-GAME_GAP_BEFORE, 0));
         // So a line is as wide as its names, its icon and twice the visible gap.
-        for (g, outline) in [(0, 0), (6, 1), (14, 2), (MAX_GAP, 4)] {
-            let (before, after) = gap_extras(Some(g), outline);
-            assert_eq!(GAME_GAP_BEFORE + before - outline, g);
+        for (g, outline, shadow) in [(0, 0, 0), (6, 1, 1), (14, 2, 1), (MAX_GAP, 4, 0)] {
+            let (before, after) = gap_extras(Some(g), outline, shadow);
+            assert_eq!(GAME_GAP_BEFORE + before - outline - shadow, g);
             assert_eq!(after - outline, g);
         }
     }

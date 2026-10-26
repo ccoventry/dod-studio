@@ -800,7 +800,10 @@ through it.
 
 `ds_hud_deathmsg gap <px>` sets both spaces to `px` screen pixels, counted
 from the names' outline when one is drawn (an outline is drawn around the
-name's text and reaches `outline` px past it on both sides, into the gap).
+name's text and reaches `outline` px past it on both sides, into the gap),
+and on the killer's side from our `font`'s drop shadow, which reaches 1 px
+right of the ink (measured: the killer's name 1 px nearer the icon with
+`shadow` than without, the victim's side unchanged).
 The killer's side goes into the killer's width call and the end its draw
 returns (the two `font` sites, `+0x2b04e` and `+0x2b089`, only on a line
 whose icon is in the atlas: the line-start stub has stored the line's sprite
