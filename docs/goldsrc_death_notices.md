@@ -608,6 +608,27 @@ fullwidth letters as ASCII), so it is drawn in the chosen face; anything else
 stays as it is, drawn in Tahoma and measured as drawn. The game's own font
 gets the same forms while the six sites are the hook's.
 
+**But the face can be given what it has (#1054).** The split is the font
+manager's, not Windows': the surface's `AddGlyphSetToFont` (slot 60) drops
+its range arguments, and the manager gives the whole range only to `Marlett`
+(its one "foreign language capable" face) and to `Tahoma` itself. The
+handle's glyph set is an amalgam, a `CUtlVector` of `{low, high, CWin32Font*}`
+ranges where `GetFontForChar` takes the first that holds the character
+(PRE `+0xd2420`, POST `+0x26fdf0`). So `font.rs` raises the first range of its
+own fresh handle from `0xff` to `0xffff` (only when the two ranges are
+exactly the manager's split) and draws each name in runs: the face's handle
+for the characters the face has (`GetFontUnicodeRanges`), a `Tahoma` handle
+for the rest. Bahnschrift then draws `Łukasz`, Cyrillic, Greek, Vietnamese,
+`™` and `€` itself; `★`, CJK and emoji, which it lacks, stay Tahoma's. The
+compatibility forms apply only to characters the face lacks. The manager is
+found through slot 60's thunk (`call FontManager; mov ecx, eax; call ...`,
+`FontManager()` being `mov eax, imm32; ret` on both builds), and
+`verify_killfeed_font_offsets.py` checks the layout on both.
+
+The engine's own string draw (`EngineFont`; PRE `hw+0x6be0`) goes through the
+same manager, so it has the same split, and it also turns every character
+`iswprint` rejects into a space.
+
 **A font cannot be changed in place.** `CFontManager::AddGlyphSetToFont` (PRE
 `+0xcfd70`, POST `+0x26cb10`) returns false for a handle that already has a
 glyph set, and the interface has no `DeleteFont`. So `font` creates a new
