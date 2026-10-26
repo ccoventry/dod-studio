@@ -11,7 +11,17 @@ pub enum RenderCodec {
     /// docs/archive/tauri_parity_audit.md Area 5) to keep both software and NVENC
     /// H.264 as separate, explicit options rather than picking one.
     H264Software,
+    /// ProRes 422 HQ. Keeps the plain name (and the `"prores"` id) because
+    /// every settings file, preset and autosave written before the other
+    /// profiles existed means HQ by it.
     ProRes,
+    /// ProRes 422 (Apple's "standard"): about 2/3 of HQ's size.
+    ProRes422,
+    /// ProRes 422 LT: about half of HQ's size.
+    ProResLt,
+    /// ProRes 4444 without alpha, for the main picture. The HUD stream's
+    /// 4444 with alpha is separate and doesn't follow this choice.
+    ProRes4444,
     DnxHr,
     /// Lossless. Pairs with the AVI container, HuffYUV's native home and the
     /// one every decoder actually expects it in.
@@ -59,6 +69,9 @@ impl RenderCodec {
         match id {
             "h264" => Self::H264Software,
             "h264_nvenc" => Self::NvencH264,
+            "prores_422" => Self::ProRes422,
+            "prores_lt" => Self::ProResLt,
+            "prores_4444" => Self::ProRes4444,
             "dnxhr" => Self::DnxHr,
             "huffyuv" => Self::HuffYuv,
             "uncompressed" => Self::Uncompressed,
@@ -80,7 +93,26 @@ impl RenderCodec {
             Self::Uncompressed => "uncompressed",
             Self::Custom => "custom",
             Self::ProRes => "prores",
+            Self::ProRes422 => "prores_422",
+            Self::ProResLt => "prores_lt",
+            Self::ProRes4444 => "prores_4444",
             Self::SourceCopy => "source_copy",
+        }
+    }
+
+    /// `prores_ks`'s `-profile:v` and the pixel format for a ProRes choice,
+    /// with its expected size next to HQ's at the same frame size, for the
+    /// render reservation before a render of that profile has finished
+    /// (`renderer::job_reservation_estimate`). Measured on a 300 fps
+    /// 2560x1440 game capture: 422 0.67x, LT 0.47x, 4444 1.47x (from an HQ
+    /// copy, so slightly low); Apple's target rates give the same ratios.
+    pub fn prores_profile(self) -> Option<(&'static str, &'static str, f64)> {
+        match self {
+            Self::ProRes => Some(("hq", "yuv422p10le", 1.0)),
+            Self::ProRes422 => Some(("standard", "yuv422p10le", 0.67)),
+            Self::ProResLt => Some(("lt", "yuv422p10le", 0.47)),
+            Self::ProRes4444 => Some(("4444", "yuv444p10le", 1.5)),
+            _ => None,
         }
     }
 
@@ -94,7 +126,10 @@ impl RenderCodec {
             Self::HuffYuv => "HuffYUV",
             Self::Uncompressed => "Uncompressed",
             Self::Custom => "Custom",
-            Self::ProRes => "ProRes",
+            Self::ProRes => "ProRes HQ",
+            Self::ProRes422 => "ProRes 422",
+            Self::ProResLt => "ProRes LT",
+            Self::ProRes4444 => "ProRes 4444",
             Self::SourceCopy => "Skip (Keep Original)",
         }
     }
@@ -127,6 +162,9 @@ mod tests {
             RenderCodec::NvencH264,
             RenderCodec::H264Software,
             RenderCodec::ProRes,
+            RenderCodec::ProRes422,
+            RenderCodec::ProResLt,
+            RenderCodec::ProRes4444,
             RenderCodec::DnxHr,
             RenderCodec::HuffYuv,
             RenderCodec::Uncompressed,
@@ -134,7 +172,43 @@ mod tests {
             RenderCodec::SourceCopy,
         ] {
             assert_eq!(RenderCodec::from_str_id(codec.to_str_id()), codec);
+            // The enum's own serde form (RenderConfig, autosaves) too.
+            let json = serde_json::to_string(&codec).unwrap();
+            assert_eq!(serde_json::from_str::<RenderCodec>(&json).unwrap(), codec);
         }
+    }
+
+    /// Settings, presets and autosaves written before the other profiles
+    /// existed say "prores" (or `ProRes` in serde form): that stays HQ.
+    #[test]
+    fn old_prores_values_still_mean_hq() {
+        assert_eq!(RenderCodec::from_str_id("prores"), RenderCodec::ProRes);
+        assert_eq!(
+            serde_json::from_str::<RenderCodec>("\"ProRes\"").unwrap(),
+            RenderCodec::ProRes
+        );
+        assert_eq!(RenderCodec::ProRes.prores_profile().unwrap().0, "hq");
+    }
+
+    #[test]
+    fn each_prores_choice_has_its_own_profile() {
+        let profile = |c: RenderCodec| c.prores_profile().map(|(p, f, _)| (p, f));
+        assert_eq!(profile(RenderCodec::ProRes), Some(("hq", "yuv422p10le")));
+        assert_eq!(
+            profile(RenderCodec::ProRes422),
+            Some(("standard", "yuv422p10le"))
+        );
+        assert_eq!(profile(RenderCodec::ProResLt), Some(("lt", "yuv422p10le")));
+        // No alpha: the main picture is opaque; the HUD stream has its own.
+        assert_eq!(
+            profile(RenderCodec::ProRes4444),
+            Some(("4444", "yuv444p10le"))
+        );
+        assert_eq!(profile(RenderCodec::DnxHr), None);
+        let ratio = |c: RenderCodec| c.prores_profile().unwrap().2;
+        assert!(ratio(RenderCodec::ProResLt) < ratio(RenderCodec::ProRes422));
+        assert!(ratio(RenderCodec::ProRes422) < ratio(RenderCodec::ProRes));
+        assert!(ratio(RenderCodec::ProRes) < ratio(RenderCodec::ProRes4444));
     }
 
     #[test]

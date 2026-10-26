@@ -45,6 +45,7 @@ import { createTakeDelete, renderingTakeFolders, progressLine } from './take_del
 import { themedConfirm } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
+import { startCodecHint } from './codec_hint.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -1066,6 +1067,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // this runs, and the args input needs to be visible from the first paint.
   if (codecEl) codecEl.addEventListener('change', syncCustomCodecVisibility);
   syncCustomCodecVisibility();
+  startCodecHint(codecEl, document.querySelector('#render-codec-hint'));
 
   // Paints once at startup (before any snapshot has arrived, so before
   // anything could have changed) — the `render_jobs_snapshot` listener above

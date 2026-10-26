@@ -253,7 +253,10 @@ Frame-sequence and video takes with HUD streams become two rows: the full pictur
 
 | Codec | FFmpeg video | Container | Audio |
 |---|---|---|---|
-| ProRes 422 HQ (default) | `prores_ks -profile:v 3`, 10-bit 4:2:2 | `.mov` | PCM |
+| ProRes 422 HQ (default) | `prores_ks -profile:v hq`, 10-bit 4:2:2 | `.mov` | PCM |
+| ProRes 422 | `prores_ks -profile:v standard`, 10-bit 4:2:2 | `.mov` | PCM |
+| ProRes 422 LT | `prores_ks -profile:v lt`, 10-bit 4:2:2 | `.mov` | PCM |
+| ProRes 4444 | `prores_ks -profile:v 4444`, 10-bit 4:4:4, no alpha | `.mov` | PCM |
 | DNxHR HQ | `dnxhd -profile:v dnxhr_hq` | `.mov` | PCM |
 | HuffYUV | `huffyuv` | `.avi` | PCM |
 | Uncompressed | `rawvideo` | `.avi` | PCM |
@@ -261,6 +264,8 @@ Frame-sequence and video takes with HUD streams become two rows: the full pictur
 | H.264 (NVENC) | `h264_nvenc -cq 15` | `.mp4` | AAC 192k |
 | Custom | your arguments, unvalidated | `.mkv` | PCM |
 | Skip (OBS takes only) | no FFmpeg; the file is copied | source | — |
+
+Which ProRes to pick: on a 300 fps 2560x1440 capture, 422 came out at 67% of HQ's size and LT at 47%, with VMAF against the lossless capture of 99.3 (HQ), 98.6 (422) and 97.2 (LT), and no difference visible at 3x zoom. 422 suits most videos; LT gives up a little detail in fast motion and fine textures for half the size. 4444 keeps full colour detail at about 1.5x HQ (measured 1.47x), only worth it for heavy colour grading or small coloured text drawn into the picture; it has no transparency, since the HUD stream is always its own 4444 file with alpha whichever ProRes is picked. The Codec picker shows a one-line hint for each. Saved settings that say `prores` stay HQ. Before the first render of a ProRes profile finishes, its space reservation borrows another profile's measured size through these ratios, and Combine Clips re-encodes rather than copying clips of different ProRes profiles into one file.
 
 Each row shows its own codec and the FPS its frames are read at, "as captured" (the take's `dodstudio_take.json`) or "Render Settings" (a take without one), then status, speed, progress and size, with Cancel, Reset, Remove, View Log, Open Folder and Delete Take actions. A header click sorts the table, and a whole-batch progress bar sits above it. A scan stages a take whose stream was rendered before (a finished render in its history, #438, with the file still there) as Finished rather than Queued, so Start Render Batch (N) renders every Queued row and nothing twice; Retry queues a finished one again, and Cancel or Remove keeps a row out. Every row has a tick box (#70), ticked to begin with; the header tick box or Select unrendered sets them together, and the ticks survive a re-scan that adds takes. The other footer buttons act on the ticked rows and say on how many: Cancel (N), Retry (N), Remove (N) and Delete Take folders (N), plus Clear Queue, which empties the whole list and asks first when anything is rendering. **Export Marker List…** (next to Scan for Takes) saves a CSV with one row per captured or rendered highlight: its demo, player, kills, place in the demo, take and label, for lining clips up in an editor.
 

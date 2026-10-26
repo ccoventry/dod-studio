@@ -680,6 +680,14 @@ export const STRINGS = {
     PANEL_TITLE: 'Render Studio',
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
+    CODEC_PRORES_422: 'ProRes 422 (2/3 the size of HQ)',
+    CODEC_PRORES_LT: 'ProRes 422 LT (half the size of HQ)',
+    CODEC_PRORES_4444: 'ProRes 4444 (1.5x the size of HQ)',
+    // The line under the Codec picker for each ProRes choice (codec_hint.js).
+    CODEC_HINT_PRORES: 'The default. Looks the same as the capture; the largest of the three 422 choices.',
+    CODEC_HINT_PRORES_422: 'Recommended for most videos: looks the same as HQ in our tests, about 2/3 the size.',
+    CODEC_HINT_PRORES_LT: 'About half the size of HQ. Fine for game footage; a little more detail is lost in fast motion and fine textures.',
+    CODEC_HINT_PRORES_4444: 'Full colour detail, about 1.5x the size of HQ. Only worth it for heavy colour grading or small coloured text drawn into the picture. No transparency: the separate HUD stream always has its own.',
     CODEC_DNXHR: 'DNxHR HQ',
     // #438: each take's render history.
     TABLE_HEADER_HISTORY: 'History',

@@ -33,7 +33,8 @@ mod scan_merge;
 pub use scan_merge::ScanMergeSummary;
 use scan_merge::{NewJobSettings, ScannedTake, merge_scan};
 
-/// Codec is a string id ("prores" | "dnxhr" | "h264" | "h264_nvenc") mapped
+/// Codec is a string id ("prores" (HQ) | "prores_422" | "prores_lt" |
+/// "prores_4444" | "dnxhr" | "h264" | "h264_nvenc" | ...) mapped
 /// to `RenderCodec` via `RenderCodec::from_str_id` — see
 /// docs/archive/tauri_parity_audit.md Area 5 for why `h264`/software libx264 exists
 /// alongside dev's NVENC-only H.264 variant.
