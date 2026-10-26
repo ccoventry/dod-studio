@@ -774,3 +774,38 @@ compares the files with the ones it first handed the engine): the old pixels
 laid out by the new boxes would draw the wrong crops. Nothing in `hw.dll` is touched, and the sprite calls go
 through `gEngfuncs`, so both engine builds take the same path.
 `tools/verify_killfeed_scale_offsets.py` also checks the names field.
+
+### The space between the names and the icon (`gap`)
+
+`Draw` puts the icon 5 px after the end of the killer's name
+(`add eax, 5` at `client+0x2b092`, after `DrawConsoleString` returns) and the
+victim's name straight after the icon's advance, so any empty columns inside
+an icon's box are space between a name and its art. Atlas v1's boxes were
+cut to each render's own box, and the short icons kept much of it, in atlas
+px left/right: the PIAT 16/22, the spade 4/18, the Luger 3/17, the German
+knife 4/11, the stick grenade 4/9, against 0.5/0.5 for every long gun. At
+`scale 2.5` the stick grenade's names sat ~20 px further from its art than
+a Garand's.
+
+The engine draws a box from half a texel inside each edge (texture
+coordinates `(rect ± 0.5) / frame size`), so a long gun's 0.5 never shows.
+`killfeed_icons.py` (`EVEN_VERSION` 2, `trim_box`) now narrows every box to
+its icon's visible columns plus that half texel each side, the art centred
+to the HD pixel (at most 3/8 of a stock px of slack a side, under 1 screen
+px at `scale 2.5`); a box its art fills already keeps its size, and the rows
+are untouched (the barrel row, the centring). The trimming is the tool's
+because the tool has the pixels: the hook sees only the grey placeholder
+sprite and the box table, and the HD frames go to the GPU without passing
+through it.
+
+`ds_hud_deathmsg gap <px>` sets both spaces to `px` screen pixels, counted
+from the names' outline when one is drawn (an outline is drawn around the
+name's text and reaches `outline` px past it on both sides, into the gap).
+The killer's side goes into the killer's width call and the end its draw
+returns (the two `font` sites, `+0x2b04e` and `+0x2b089`, only on a line
+whose icon is in the atlas: the line-start stub has stored the line's sprite
+index by then), the victim's into the box's advance in §7's copy, so a line
+with no killer gets the victim's side only. `gap default` is the game's 5 px
+and nothing, which with the trimmed boxes is how far a rifle's names always
+sat. The names' own side bearings (the space a font leaves around a glyph,
+a pixel or two) stay as the font draws them.

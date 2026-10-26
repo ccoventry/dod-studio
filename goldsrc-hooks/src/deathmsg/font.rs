@@ -117,11 +117,16 @@ const PATTERN: &str = "8D 54 24 40 8D 44 24 30 52 50 51 FF 15 ?? ?? ?? ?? 8B 5C 
 /// Which engine call a redirected site makes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Call {
-    /// `pfnDrawConsoleString`, slot 27.
+    /// `pfnDrawConsoleString`, slot 27, for the victim's name.
     Draw,
+    /// The same call for the killer's name: where it ends is where `Draw`
+    /// puts the icon, 5 px on, so it also adds the killer's side of
+    /// `layout even`'s `gap` (`scale::killer_extra`).
+    KillerDraw,
     /// `pfnDrawSetTextColor`, slot 28.
     Color,
-    /// `pfnDrawConsoleStringLen`, slot 29.
+    /// `pfnDrawConsoleStringLen`, slot 29, for the killer's width (the
+    /// anchor's), plus the killer's side of the gap like [`Call::KillerDraw`].
     Len,
     /// The same call for the victim, the width the line is anchored by: it
     /// also reserves the right margin (`scale::right_margin`).
@@ -133,7 +138,7 @@ impl Call {
     /// same three.
     fn slot(self) -> usize {
         match self {
-            Call::Draw => 27,
+            Call::Draw | Call::KillerDraw => 27,
             Call::Color => 28,
             Call::Len | Call::VictimLen => 29,
         }
@@ -146,7 +151,7 @@ const SITES: &[(usize, Call)] = &[
     (0x0b, Call::VictimLen),
     (0x4c, Call::Len),
     (0x77, Call::Color),
-    (0x87, Call::Draw),
+    (0x87, Call::KillerDraw),
     (0x123, Call::Color),
     (0x133, Call::Draw),
 ];
@@ -754,8 +759,9 @@ mod hook {
     fn target_of(call: Call) -> usize {
         match call {
             Call::Draw => draw_string as engine::DrawConsoleStringFn as usize,
+            Call::KillerDraw => killer_draw as engine::DrawConsoleStringFn as usize,
             Call::Color => set_text_color as engine::DrawSetTextColorFn as usize,
-            Call::Len => string_len as engine::DrawConsoleStringLenFn as usize,
+            Call::Len => killer_len as engine::DrawConsoleStringLenFn as usize,
             Call::VictimLen => victim_len as engine::DrawConsoleStringLenFn as usize,
         }
     }
@@ -940,6 +946,24 @@ mod hook {
             flush(surface);
         }
         x + width
+    }
+
+    /// Stands in for `pfnDrawConsoleString` at the killer's name: [`draw_string`],
+    /// ending the killer's side of `gap` further on, which is where `Draw`
+    /// then puts the icon (5 px after the end it is handed).
+    unsafe extern "C" fn killer_draw(x: i32, y: i32, text: *const c_char) -> i32 {
+        unsafe { draw_string(x, y, text) }.saturating_add(super::super::scale::killer_extra())
+    }
+
+    /// Stands in for `pfnDrawConsoleStringLen` at the killer's width, which
+    /// `Draw` anchors the line by: [`string_len`], plus the killer's side of
+    /// `gap`, so the line ends where [`killer_draw`]'s extra leaves it.
+    unsafe extern "C" fn killer_len(text: *const c_char, width: *mut i32, height: *mut i32) {
+        unsafe { string_len(text, width, height) };
+        if !width.is_null() {
+            // Safety: the caller's out-parameter, which `string_len` just wrote.
+            unsafe { *width = (*width).saturating_add(super::super::scale::killer_extra()) };
+        }
     }
 
     /// Stands in for `pfnDrawSetTextColor` before each name: remembers the
