@@ -86,6 +86,17 @@
 //! is drawn in the chosen face rather than Tahoma's. The game's own font path
 //! gets the same forms while the sites are ours: its draw turns anything
 //! `iswprint` rejects into a space, so `⅞` showed as a blank there.
+//!
+//! The font manager's split is its own choice, not the face's: the surface's
+//! `AddGlyphSetToFont` drops the range arguments, and the manager makes the
+//! face's handle two ranges, 0..0xff from the face and 0x100..0xffff from
+//! Tahoma (only `Marlett` and `Tahoma` get the whole range). So once our
+//! handle is made, `hook::widen` raises its first range to 0xffff (one u32
+//! in the manager's data, and only when the two ranges are exactly that
+//! split), and the names draw in runs ([`font_runs`]): the face's handle for
+//! what the face has (`GetFontUnicodeRanges`, [`Coverage`]), a Tahoma handle
+//! for the rest, as before (#1054). A compatibility form is then used only
+//! for a character the face lacks: Bahnschrift's own `™` stays `™`.
 
 // The patching runs only in the 32-bit DLL; a host build (workspace clippy,
 // tests) keeps the tables and helpers for the unit tests alone.
