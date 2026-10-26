@@ -31,6 +31,9 @@ whole instructions of the kind the Rust assumes, so this does:
      for the four-int DrawSetTextColor, `ret 8` for DrawSetTextPos and
      DrawPrintText, `ret 0x24` for AddGlyphSetToFont, ...).
   7. `SupportsFeature(2)` (drop-shadow fonts) returns true.
+  8. The width `font.rs` sums is the one the draw advances by (#1052):
+     `DrawPrintText` calls only `DrawUnicodeChar` (slot 19), once per
+     character, and that calls `GetCharABCwide` (`GET_CHAR_ABC_WIDE`).
 
 Usage:
     python goldsrc-hooks/tools/verify_killfeed_font_offsets.py [client.dll] [game-folder ...]
@@ -72,9 +75,10 @@ SURFACE_RETS = {
     "CREATE_FONT": "ret",
     "ADD_GLYPH_SET_TO_FONT": "ret 0x24",
     "GET_FONT_TALL": "ret 4",
-    "GET_TEXT_SIZE": "ret 0x10",
+    "GET_CHAR_ABC_WIDE": "ret 0x14",
 }
 SUPPORTS_FEATURE_SLOT = 50
+DRAW_UNICODE_CHAR_SLOT = 19
 DROPSHADOW_FONTS = 2
 
 
@@ -101,7 +105,9 @@ def rust_sites(src):
 
 def rust_slots(src):
     body = re.search(r"impl Call \{.*?fn slot.*?\{(.*?)\n        \}", src, re.S).group(1)
-    return {c: int(s) for c, s in re.findall(r"Call::(\w+) => (\d+)", body)}
+    # An arm may name several calls: `Call::Len | Call::VictimLen => 29`.
+    return {c: int(s) for arm, s in re.findall(r"((?:Call::\w+(?: \| )?)+) => (\d+)", body)
+            for c in re.findall(r"Call::(\w+)", arm)}
 
 
 def rust_anchors(src):
@@ -380,6 +386,18 @@ def check_hw(game, src):
     check(rets == {"ret 4"}, f"ISurface slot {SUPPORTS_FEATURE_SLOT} (SupportsFeature) +{fn:#x} takes one argument: {sorted(rets)}")
     check("mov al, 1" in body and "xor al, al" in body,
           "SupportsFeature answers some features with `mov al, 1` and the rest with 0 (drop-shadow fonts, feature 2, are a yes on both builds -- see docs)")
+    # What the draw advances by is what `text_width` sums (#1052).
+    slots = rust_surface_slots(src)
+    vcalls = lambda body: [int(m.group(1), 16) // 4 for t in body  # noqa: E731
+                           for m in [re.fullmatch(r"call dword ptr \[e\w\w \+ (0x[0-9a-f]+)\]", t)] if m]
+    fn = hw.u32(vt + 4 * slots["DRAW_PRINT_TEXT"]) - hw.base
+    got = vcalls(hw.all_text(fn, 0x60))
+    check(got == [DRAW_UNICODE_CHAR_SLOT],
+          f"DrawPrintText +{fn:#x} makes one virtual call, DrawUnicodeChar (slot {DRAW_UNICODE_CHAR_SLOT}), in its loop: {got}")
+    fn = hw.u32(vt + 4 * DRAW_UNICODE_CHAR_SLOT) - hw.base
+    got = vcalls(hw.all_text(fn, 0x200))
+    check(slots["GET_CHAR_ABC_WIDE"] in got,
+          f"DrawUnicodeChar +{fn:#x} calls GetCharABCwide (slot {slots['GET_CHAR_ABC_WIDE']}): {got}")
     return ok
 
 

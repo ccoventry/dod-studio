@@ -577,14 +577,36 @@ font, `IScheme::GetFont("EngineFont", proportional)` of the default scheme
 `+0x230d71`). It sets the font, position and colour, converts the string
 with `ILocalize::ConvertANSIToUnicode` (`MultiByteToWideChar(CP_UTF8)`),
 prints it, and then **resets the colour to `con_color`**. The width is the sum
-of `GetCharABCwide` over the characters, the height `GetFontTall`.
+of `GetCharABCwide` over the characters, the height `GetFontTall`. The draw
+first turns every character `iswprint` rejects into a space (PRE `+0x6c42`;
+POST likewise), the length call does not, so a name holding `⅞` or `★` shows
+a blank there and measures a little wider than it draws.
 
 `ISurface` slots (slot 0 is the destructor; MSVC lays adjacent overloads out
 in reverse order), checked by `ret` size on both builds in
 `tools/verify_killfeed_font_offsets.py`: 13 `DrawSetTextFont`, 15
 `DrawSetTextColor(r,g,b,a)`, 16 `DrawSetTextPos`, 18 `DrawPrintText`, 21
 `DrawFlushText`, 59 `CreateFont`, 60 `AddGlyphSetToFont`, 62 `GetFontTall`,
-65 `GetTextSize`.
+63 `GetCharABCwide`.
+
+**Measure what is drawn, not `GetTextSize` (#1052).** `DrawPrintText` calls
+`DrawUnicodeChar` (slot 19) for every character, and that advances by the
+character's `GetCharABCwide` a+b+c. `GetTextSize` (slot 65) skips `&` and
+every character `iswprint` rejects (`⅞`, `★`, `™`, `€`, emoji halves: the
+CRT asks `GetStringTypeW`, and these symbols carry no print class), so it
+measured such a name short by those characters: the killer's name ran into
+the icon and the victim's off the screen. `font.rs` sums slot 63 over the
+characters it prints instead; the verify script checks both builds draw
+that way.
+
+**Past Latin-1 the face is not the face.** `AddGlyphSetToFont` gives the face
+asked for U+0000..U+00FF only and adds `Tahoma` for U+0100..U+FFFF (both
+builds), unless the face is `Tahoma`. So `⅞` in a `Bahnschrift` name was
+drawn in Tahoma. `font.rs` writes such a character as its Unicode
+compatibility form when that is plain Latin-1 (`⅞` as `7/8`, `™` as `TM`,
+fullwidth letters as ASCII), so it is drawn in the chosen face; anything else
+stays as it is, drawn in Tahoma and measured as drawn. The game's own font
+gets the same forms while the six sites are the hook's.
 
 **A font cannot be changed in place.** `CFontManager::AddGlyphSetToFont` (PRE
 `+0xcfd70`, POST `+0x26cb10`) returns false for a handle that already has a

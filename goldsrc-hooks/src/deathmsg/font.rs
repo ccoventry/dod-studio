@@ -68,11 +68,30 @@
 //! font manager knows an outline bit (0x200), and only the scheme loader of
 //! a later vgui2 does, so `outline` is accepted and said to do nothing; the
 //! `outline` subcommand draws one by hand (`backdrop.rs`).
+//!
+//! ## Characters past Latin-1 (#1052)
+//!
+//! The font manager (`CFontManager::AddGlyphSetToFont`, both builds) gives
+//! the face only U+0000..U+00FF and draws everything above from `Tahoma`,
+//! unless the face is `Tahoma` itself. And `GetTextSize` is not what
+//! `DrawPrintText` draws: it skips `&` and every character `iswprint`
+//! rejects (`⅞`, `★`, `™`, `€`, emoji halves), which `DrawUnicodeChar`
+//! still draws and advances past by its `GetCharABCwide` a+b+c. A name
+//! holding one measured short by that character, so the killer's ran into
+//! the icon and the victim's off the screen.
+//!
+//! So the width is that same a+b+c sum over the characters printed
+//! ([`drawn_width`]), and before that a character with a plain Latin-1
+//! compatibility form becomes it ([`push_compat_form`]: `⅞` is `7/8`), so it
+//! is drawn in the chosen face rather than Tahoma's. The game's own font path
+//! gets the same forms while the sites are ours: its draw turns anything
+//! `iswprint` rejects into a space, so `⅞` showed as a blank there.
 
 // The patching runs only in the 32-bit DLL; a host build (workspace clippy,
 // tests) keeps the tables and helpers for the unit tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
@@ -320,18 +339,149 @@ fn color_byte(component: f32) -> i32 {
     ((component * 255.0) as i32).clamp(0, 255)
 }
 
+/// The face the font manager draws U+0100 and up from, whatever the face
+/// asked for; given it, a face covers every character itself.
+const FALLBACK_FACE: &str = "Tahoma";
+
+const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+const ROMAN: [&str; 16] = [
+    "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "L", "C", "D", "M",
+];
+const ROMAN_SMALL: [&str; 16] = [
+    "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "l", "c", "d", "m",
+];
+
+/// Appends `c`'s Unicode compatibility form (NFKD) when that is plain
+/// Latin-1, which the chosen face draws itself, and says whether it did. Only
+/// forms that keep the meaning: fractions (`⅞` is `7/8`, the fraction slash
+/// read as `/`), super- and subscript digits, `™`, Roman numerals, Latin
+/// ligatures, fullwidth ASCII and the wide spaces. A letter with an accent
+/// keeps it: Tahoma draws `ł` well, and `l` would be another name.
+fn push_compat_form(c: char, out: &mut String) -> bool {
+    let cp = c as u32;
+    let at = |first: u32| (cp - first) as usize;
+    let form: &str = match cp {
+        0x2000..=0x200a | 0x202f | 0x205f | 0x3000 => " ",
+        0x2024 => ".",
+        0x2025 => "..",
+        0x2026 => "...",
+        0x2044 | 0x2215 => "/",
+        0x2070 => "0",
+        0x2071 => "i",
+        0x2074..=0x2079 => DIGITS[at(0x2070)],
+        0x207a | 0x208a => "+",
+        0x207b | 0x208b => "-",
+        0x207c | 0x208c => "=",
+        0x207d | 0x208d => "(",
+        0x207e | 0x208e => ")",
+        0x207f => "n",
+        0x2080..=0x2089 => DIGITS[at(0x2080)],
+        0x2116 => "No",
+        0x2120 => "SM",
+        0x2122 => "TM",
+        0x2150 => "1/7",
+        0x2151 => "1/9",
+        0x2152 => "1/10",
+        0x2153 => "1/3",
+        0x2154 => "2/3",
+        0x2155 => "1/5",
+        0x2156 => "2/5",
+        0x2157 => "3/5",
+        0x2158 => "4/5",
+        0x2159 => "1/6",
+        0x215a => "5/6",
+        0x215b => "1/8",
+        0x215c => "3/8",
+        0x215d => "5/8",
+        0x215e => "7/8",
+        0x215f => "1/",
+        0x2160..=0x216f => ROMAN[at(0x2160)],
+        0x2170..=0x217f => ROMAN_SMALL[at(0x2170)],
+        0x2189 => "0/3",
+        0xfb00 => "ff",
+        0xfb01 => "fi",
+        0xfb02 => "fl",
+        0xfb03 => "ffi",
+        0xfb04 => "ffl",
+        0xfb05 | 0xfb06 => "st",
+        // Fullwidth `!`..`~`, 0xfee0 above their ASCII.
+        0xff01..=0xff5e => {
+            out.push(char::from_u32(cp - 0xfee0).unwrap_or(c));
+            return true;
+        }
+        _ => return false,
+    };
+    out.push_str(form);
+    true
+}
+
+/// `text` with every character above Latin-1 that has a compatibility form
+/// ([`push_compat_form`]) replaced by it; borrowed when there is none.
+fn with_compat_forms(text: &str) -> Cow<'_, str> {
+    let Some(first) = text
+        .char_indices()
+        .find(|&(_, c)| c > '\u{ff}' && push_compat_form(c, &mut String::new()))
+        .map(|(i, _)| i)
+    else {
+        return Cow::Borrowed(text);
+    };
+    let mut out = String::with_capacity(text.len() + 8);
+    out.push_str(&text[..first]);
+    for c in text[first..].chars() {
+        if c <= '\u{ff}' || !push_compat_form(c, &mut out) {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// A name as the engine's own font gets it while the sites are ours: the
+/// compatibility forms, or `None` to pass the game's bytes on unchanged.
+/// Bytes that are not UTF-8 go on as they are; the engine converts them.
+fn engine_name(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.is_ascii() {
+        return None;
+    }
+    match with_compat_forms(std::str::from_utf8(bytes).ok()?) {
+        Cow::Borrowed(_) => None,
+        Cow::Owned(text) => Some(text.into_bytes()),
+    }
+}
+
 /// The engine's conversion, near enough: UTF-8 to UTF-16 (`ConvertANSIToUnicode`
 /// is `MultiByteToWideChar(CP_UTF8, ...)` on both builds), control characters
 /// drawn as spaces as the engine does with anything `iswprint` rejects, and a
-/// terminator for `GetTextSize`.
-fn to_wide(bytes: &[u8]) -> Vec<u16> {
+/// terminator. With `compat`, the characters with a Latin-1 compatibility
+/// form become it first ([`with_compat_forms`]).
+fn to_wide(bytes: &[u8], compat: bool) -> Vec<u16> {
     let text = String::from_utf8_lossy(bytes);
+    let text = if compat {
+        with_compat_forms(&text)
+    } else {
+        Cow::Borrowed(&*text)
+    };
     let mut out: Vec<u16> = text
         .encode_utf16()
         .map(|c| if c < 0x20 { 0x20 } else { c })
         .collect();
     out.push(0);
     out
+}
+
+/// What `DrawPrintText` advances past for `chars` (up to a terminator):
+/// `DrawUnicodeChar` moves on by each character's `GetCharABCwide` a+b+c on
+/// both builds, `&` and characters `iswprint` rejects included. `GetTextSize`
+/// skips those two, so it measured such a name short (#1052).
+fn drawn_width(chars: &[u16], mut abc: impl FnMut(u16) -> (i32, i32, i32)) -> i32 {
+    chars
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| {
+            let (a, b, c) = abc(c);
+            a.saturating_add(b).saturating_add(c)
+        })
+        .fold(0i32, i32::saturating_add)
+        .max(0)
 }
 
 /// The font in force, for `status` and the usage text.
@@ -350,6 +500,9 @@ static COLOR: AtomicI32 = AtomicI32::new(-1);
 /// The same colour as the game passed it, as `f32` bits, so the engine's
 /// own font can be given it again exactly after the outline's passes.
 static COLOR_F: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+/// Whether our font's names get their compatibility forms: false for a face
+/// that draws every character itself ([`FALLBACK_FACE`]).
+static COMPAT: AtomicBool = AtomicBool::new(true);
 /// Whether a failure has been logged, so the per-frame check says it once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// The `client.dll` the sites were rewritten in, 0 before.
@@ -403,7 +556,9 @@ mod hook {
     const SURFACE_CREATE_FONT: usize = 59;
     const SURFACE_ADD_GLYPH_SET_TO_FONT: usize = 60;
     const SURFACE_GET_FONT_TALL: usize = 62;
-    const SURFACE_GET_TEXT_SIZE: usize = 65;
+    /// What `DrawUnicodeChar` advances by (`call [eax+0xfc]` in it, both
+    /// builds); see [`drawn_width`].
+    const SURFACE_GET_CHAR_ABC_WIDE: usize = 63;
 
     type SetFontFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type SetPosFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32);
@@ -428,7 +583,9 @@ mod hook {
         i32,
     ) -> u32;
     type FontTallFn = unsafe extern "thiscall" fn(*mut c_void, u32) -> i32;
-    type TextSizeFn = unsafe extern "thiscall" fn(*mut c_void, u32, *const u16, *mut i32, *mut i32);
+    /// `(font, ch, &a, &b, &c)`.
+    type CharAbcFn =
+        unsafe extern "thiscall" fn(*mut c_void, u32, i32, *mut i32, *mut i32, *mut i32);
 
     /// The engine's `BaseUISurface`, once looked up.
     static SURFACE: AtomicUsize = AtomicUsize::new(0);
@@ -568,6 +725,9 @@ mod hook {
             let Some(e) = engine::engfuncs() else {
                 return x;
             };
+            // Kept alive past every engine call below that reads it.
+            let shown = engine_text(text);
+            let text = shown.as_ref().map_or(text, |s| s.as_ptr());
             if backdrop_on && !text.is_null() {
                 if backdrop::name_boxes() {
                     let (mut w, mut h) = (0, 0);
@@ -604,7 +764,10 @@ mod hook {
             return x;
         }
         // Safety: the game's own `szKiller`/`szVictim`, NUL-terminated by `MsgFunc_DeathMsg`.
-        let wide = to_wide(unsafe { CStr::from_ptr(text) }.to_bytes());
+        let wide = to_wide(
+            unsafe { CStr::from_ptr(text) }.to_bytes(),
+            COMPAT.load(Ordering::Relaxed),
+        );
         let (r, g, b) = name_rgb();
         let width = text_width(surface, font, &wide);
         if backdrop_on && backdrop::name_boxes() {
@@ -666,6 +829,8 @@ mod hook {
         let font = FONT.load(Ordering::Acquire);
         if font == 0 {
             if let Some(e) = engine::engfuncs() {
+                let shown = engine_text(text);
+                let text = shown.as_ref().map_or(text, |s| s.as_ptr());
                 unsafe { (e.pfn_draw_console_string_len)(text, width, height) };
                 // The engine font's height, for centring its names: the
                 // victim's width call starts every line, before either draw.
@@ -681,7 +846,10 @@ mod hook {
         let wide = if text.is_null() {
             vec![0u16]
         } else {
-            to_wide(unsafe { CStr::from_ptr(text) }.to_bytes())
+            to_wide(
+                unsafe { CStr::from_ptr(text) }.to_bytes(),
+                COMPAT.load(Ordering::Relaxed),
+            )
         };
         let w = text_width(surface, font, &wide);
         let h = FONT_TALL.load(Ordering::Relaxed);
@@ -696,15 +864,28 @@ mod hook {
         }
     }
 
-    /// `GetTextSize`'s width: the same per-character `GetCharABCwide` sum the
-    /// engine's own length call makes.
+    /// How far `DrawPrintText` moves on for `wide` in `font`: [`drawn_width`]
+    /// over the surface's own `GetCharABCwide`, the call `DrawUnicodeChar`
+    /// advances by. Not `GetTextSize`, which skips characters it still draws.
     fn text_width(surface: *mut c_void, font: u32, wide: &[u16]) -> i32 {
-        let (mut w, mut h) = (0i32, 0i32);
-        unsafe {
-            let size: TextSizeFn = slot(surface, SURFACE_GET_TEXT_SIZE);
-            size(surface, font, wide.as_ptr(), &mut w, &mut h);
+        // Safety: slot checked by ret size on both builds; the out-parameters are locals.
+        let abc: CharAbcFn = unsafe { slot(surface, SURFACE_GET_CHAR_ABC_WIDE) };
+        drawn_width(wide, |ch| {
+            let (mut a, mut b, mut c) = (0i32, 0i32, 0i32);
+            unsafe { abc(surface, font, i32::from(ch), &mut a, &mut b, &mut c) };
+            (a, b, c)
+        })
+    }
+
+    /// A name for the engine's own font with its compatibility forms
+    /// ([`engine_name`]), or `None` to pass the game's pointer on.
+    fn engine_text(text: *const c_char) -> Option<CString> {
+        if text.is_null() {
+            return None;
         }
-        w.max(0)
+        // Safety: the game's own `szKiller`/`szVictim`, NUL-terminated by `MsgFunc_DeathMsg`.
+        let bytes = engine_name(unsafe { CStr::from_ptr(text) }.to_bytes())?;
+        CString::new(bytes).ok()
     }
 
     /// Finds `Draw`'s span in the module at `base`, once per base.
@@ -888,6 +1069,10 @@ mod hook {
             }
             (handle, font_tall(surface, handle))
         };
+        COMPAT.store(
+            !spec.face.eq_ignore_ascii_case(FALLBACK_FACE),
+            Ordering::Relaxed,
+        );
         // Height first: the stub reads it, and a draw with the new handle
         // must not step by the old one.
         FONT_TALL.store(tall.max(0), Ordering::Release);
@@ -1134,13 +1319,120 @@ mod tests {
     #[test]
     fn names_become_terminated_utf16_with_controls_as_spaces() {
         assert_eq!(
-            to_wide(b"m00cat"),
+            to_wide(b"m00cat", true),
             vec![0x6d, 0x30, 0x30, 0x63, 0x61, 0x74, 0]
         );
         // UTF-8, as the engine converts it.
-        assert_eq!(to_wide("é".as_bytes()), vec![0xe9, 0]);
-        assert_eq!(to_wide(b"a\tb\x01"), vec![0x61, 0x20, 0x62, 0x20, 0]);
-        assert_eq!(to_wide(b""), vec![0]);
+        assert_eq!(to_wide("é".as_bytes(), true), vec![0xe9, 0]);
+        assert_eq!(to_wide(b"a\tb\x01", true), vec![0x61, 0x20, 0x62, 0x20, 0]);
+        assert_eq!(to_wide(b"", true), vec![0]);
+    }
+
+    fn wide(text: &str) -> String {
+        let units = to_wide(text.as_bytes(), true);
+        String::from_utf16(&units[..units.len() - 1]).unwrap()
+    }
+
+    #[test]
+    fn the_seven_eighths_name_is_drawn_in_the_chosen_face() {
+        // The WSOD25 player whose name broke the line (#1052): U+215E, e2 85 9e.
+        let name = "NoGo ! kroD- \u{215e}";
+        assert_eq!(&name.as_bytes()[name.len() - 3..], &[0xe2, 0x85, 0x9e]);
+        assert_eq!(wide(name), "NoGo ! kroD- 7/8");
+        assert!(wide(name).chars().all(|c| c <= '\u{ff}'));
+        // A Tahoma face draws it itself.
+        let units = to_wide(name.as_bytes(), false);
+        assert_eq!(units[units.len() - 2], 0x215e);
+        // And the engine's own font gets the same bytes.
+        assert_eq!(
+            engine_name(name.as_bytes()).as_deref(),
+            Some(&b"NoGo ! kroD- 7/8"[..])
+        );
+    }
+
+    #[test]
+    fn compatibility_forms_keep_the_meaning() {
+        for (from, to) in [
+            ("\u{215b}\u{215c}\u{215d}", "1/83/85/8"),
+            ("1\u{2044}2", "1/2"),
+            ("x\u{00b2}\u{2074}\u{2089}", "x\u{00b2}49"),
+            ("Brand\u{2122}", "BrandTM"),
+            ("\u{2163} \u{216b} \u{2170}", "IV XII i"),
+            ("\u{fb01}re", "fire"),
+            ("\u{ff21}\u{ff42}\u{ff10}\u{ff01}\u{3000}x", "Ab0! x"),
+            ("wait\u{2026}", "wait..."),
+            ("No\u{2116}1", "NoNo1"),
+        ] {
+            assert_eq!(wide(from), to, "{from:?}");
+        }
+    }
+
+    #[test]
+    fn characters_without_a_plain_form_are_left_alone() {
+        // Accented letters stay themselves (Tahoma draws them), as do symbols
+        // with no Latin-1 form, CJK and emoji: measured as drawn instead.
+        for name in [
+            "\u{0141}ukasz",
+            "\u{2605}ace\u{2605}",
+            "\u{4e2d}\u{6587}",
+            "\u{1f600}",
+            "\u{20ac}100",
+            "caf\u{e9} & bar \u{00bd}",
+        ] {
+            assert_eq!(wide(name), name, "{name:?}");
+            assert_eq!(engine_name(name.as_bytes()), None, "{name:?}");
+        }
+        assert!(matches!(with_compat_forms("m00cat"), Cow::Borrowed(_)));
+        assert_eq!(engine_name(b"m00cat"), None);
+        // Not UTF-8: the engine converts it as it always did.
+        assert_eq!(engine_name(b"bad \xe2\x85"), None);
+    }
+
+    #[test]
+    fn every_form_is_latin1_and_every_listed_character_has_one() {
+        for cp in (0x100..0x1_0000).filter_map(char::from_u32) {
+            let mut out = String::new();
+            if push_compat_form(cp, &mut out) {
+                assert!(!out.is_empty(), "{cp:?}");
+                assert!(
+                    out.chars().all(|c| (' '..='\u{ff}').contains(&c)),
+                    "{cp:?} -> {out:?}"
+                );
+            }
+        }
+        for c in ['\u{215e}', '\u{2044}', '\u{2122}', '\u{ff5e}', '\u{217f}'] {
+            assert!(push_compat_form(c, &mut String::new()), "{c:?}");
+        }
+        // Latin-1 itself is never rewritten.
+        for c in (0x20u8..=0xff).map(char::from) {
+            assert_eq!(wide(&c.to_string()), c.to_string());
+        }
+    }
+
+    #[test]
+    fn the_width_is_what_draw_print_text_advances_past() {
+        // A made-up font: 10 px a character, `&` and `⅞` included, with a
+        // negative a and c to show all three parts count.
+        let abc = |c: u16| {
+            if c == u16::from(b'i') {
+                (-1, 4, -1)
+            } else {
+                (1, 8, 1)
+            }
+        };
+        let units = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+        assert_eq!(drawn_width(&units("ab"), abc), 20);
+        assert_eq!(drawn_width(&units("a&b"), abc), 30, "GetTextSize skips &");
+        assert_eq!(
+            drawn_width(&units("kroD- \u{215e}"), abc),
+            70,
+            "nor a character iswprint rejects"
+        );
+        assert_eq!(drawn_width(&units("ii"), abc), 4);
+        assert_eq!(drawn_width(&units(""), abc), 0);
+        // Stops at the terminator, as the draw does.
+        assert_eq!(drawn_width(&[0x61, 0, 0x62], abc), 10);
+        assert_eq!(drawn_width(&units("i"), |_| (-5, 1, -5)), 0);
     }
 
     #[test]
