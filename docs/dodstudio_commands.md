@@ -165,7 +165,7 @@ HLAE's own
 | `ds_hud_deathmsg clear_on default` | neither (the default) |
 
 `clear_on restart` follows DoD's `RoundState` reset, the message that starts
-every round. In 177 WSOD25 demos (POV and HLTV) it came 3 s after every round
+every round. In 176 WSOD25 demos (POV and HLTV) it came 3 s after every round
 win (5 s on some servers), when a clan match went live (both teams ready, then
 the 10 s count), at the start of a recording, and every 20 s while a server
 said there were not enough players. A half that ends on the map's time limit

@@ -27,7 +27,7 @@
 //! - **restart**: `RoundState` 0, the reset that starts every new round. DoD
 //!   sends it ~3 s after a round win (5 s on some servers), when a clan match
 //!   goes live (both teams ready, the 10 s count), and every 20 s while a
-//!   server waits for players. Measured over 177 WSOD25 demos, POV and HLTV;
+//!   server waits for players. Measured over 176 WSOD25 demos, POV and HLTV;
 //!   the PR that added this lists the counts.
 //! - **death**: a `DeathMsg` whose victim is the player the view belongs to:
 //!   the recorder of a POV demo, or the player an HLTV demo watches in eye.
