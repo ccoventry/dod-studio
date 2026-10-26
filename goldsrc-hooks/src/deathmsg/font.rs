@@ -540,14 +540,31 @@ fn split_as_expected(ranges: [u32; 6]) -> bool {
 /// A name as the engine's own font gets it while the sites are ours: the
 /// compatibility forms, or `None` to pass the game's bytes on unchanged.
 /// Bytes that are not UTF-8 go on as they are; the engine converts them.
+/// Zero-width characters are dropped: the engine's draw makes every one a
+/// space (`iswprint` rejects them), so `zero\u{200b}width` read as two words
+/// (#1054).
 fn engine_name(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.is_ascii() {
         return None;
     }
-    match with_compat_forms(std::str::from_utf8(bytes).ok()?) {
-        Cow::Borrowed(_) => None,
-        Cow::Owned(text) => Some(text.into_bytes()),
+    let text = std::str::from_utf8(bytes).ok()?;
+    let shown: Cow<'_, str> = if text.chars().any(is_zero_width) {
+        Cow::Owned(text.chars().filter(|&c| !is_zero_width(c)).collect())
+    } else {
+        Cow::Borrowed(text)
+    };
+    if let Cow::Owned(swapped) = with_compat_forms(&shown) {
+        return Some(swapped.into_bytes());
     }
+    match shown {
+        Cow::Owned(text) => Some(text.into_bytes()),
+        Cow::Borrowed(_) => None,
+    }
+}
+
+/// Zero-width space, non-joiner, joiner, word joiner and BOM.
+fn is_zero_width(c: char) -> bool {
+    matches!(c, '\u{200b}'..='\u{200d}' | '\u{2060}' | '\u{feff}')
 }
 
 /// The engine's conversion, near enough: UTF-8 to UTF-16 (`ConvertANSIToUnicode`
@@ -1895,6 +1912,21 @@ mod tests {
             vec![(true, 0..1)],
             "stops at the terminator"
         );
+    }
+
+    #[test]
+    fn the_engine_font_loses_zero_width_characters_rather_than_drawing_spaces() {
+        assert_eq!(
+            engine_name("zero\u{200b}width\u{200d}join".as_bytes()).as_deref(),
+            Some(&b"zerowidthjoin"[..])
+        );
+        assert_eq!(
+            engine_name("\u{feff}a\u{2122}".as_bytes()).as_deref(),
+            Some(&b"aTM"[..])
+        );
+        // Combining marks stay: the engine blanks them, but dropping one
+        // changes the name.
+        assert_eq!(engine_name("Ze\u{301}ro".as_bytes()), None);
     }
 
     #[test]
