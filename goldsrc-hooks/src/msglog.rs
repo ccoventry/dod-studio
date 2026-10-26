@@ -261,6 +261,18 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
             return 1;
         }
     }
+    // ds_hud_deathmsg clear_on restart watches RoundState, and stands aside
+    // while this does.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case("RoundState"))
+        && size > 0
+        && !buf.is_null()
+    {
+        crate::deathmsg::on_round_state(unsafe {
+            std::slice::from_raw_parts(buf as *const u8, size as usize)
+        });
+    }
     // ds_sound_restore_gunshots reads CurWeapon's clip the same way, for a
     // POV recorder's own rounds (pov_recorder_shots).
     if name_str
