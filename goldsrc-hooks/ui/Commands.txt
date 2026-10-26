@@ -1,6 +1,6 @@
 SPECTATING (HLTV demos)
   ds_spec_match_pov 0/1
-      Make a spectated first-person view match the player's own recording: gun animations, lost gunshots, the crosshair, prone eye height, the gun lowering.
+      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone eye height, the gun lowering.
   ds_spec_lock 0/1
       Keep the camera on the player you are watching when they die.
   ds_spec_deathcam 0/1
@@ -85,6 +85,8 @@ SOUND
       Silence the music the map plays when a team wins the round.
   ds_sound_mute_flag_capture 0/1
       Silence the map's point-captured announcements, and also its objective-secured ones (dod_escape's).
+  ds_sound_restore_gunshots 0/1
+      HLTV and POV demos: play the gunshots a demo left silent, every player's, the recorder's too (on by default).
 
 DEMO PLAYBACK
   ds_demo_seek_to <time>

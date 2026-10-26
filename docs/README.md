@@ -33,7 +33,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_decals.md](goldsrc_decals.md) — clearing decals at runtime.
 - [goldsrc_ex_interp.md](goldsrc_ex_interp.md) — raising the interpolation ceiling.
 - [goldsrc_hltv_animation_fix.md](goldsrc_hltv_animation_fix.md) — gun animations in HLTV demos.
-- [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV demos lose.
+- [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV and POV demos lose (`ds_sound_restore_gunshots`).
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
 - [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — hiding any HUD element by name (`ds_hud_hide_element`), and why some are not offered.

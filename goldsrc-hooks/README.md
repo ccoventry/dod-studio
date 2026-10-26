@@ -14,19 +14,14 @@ they are `dod_movies`, `dod_movies_addon` and `dod_movies_downloads`.
 
 **Match POV** (`ds_spec_match_pov 1`, on by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts a session with it off): one switch for
-making a spectated first-person view look and sound like the player's own
-recording. Five things come on together, and anything else of that kind
-joins this switch rather than adding a command:
+making a spectated first-person view look like the player's own recording.
+Four things come on together, and anything else of that kind joins this
+switch rather than adding a command:
 
 - **Viewmodel animations**: the first-person weapon fires, reloads and draws,
   the MG42/MG34/BAR/Bren use the right bipod family, and grenades play the pin
   pull, the throw, and the catch and wind-up of a primed one. See
   `docs/goldsrc_hltv_animation_fix.md`.
-- **Missing gunshots**: an HLTV demo has no fire event for about 60% of the
-  rounds fired in some recordings, so they play with no sound, flash or
-  impact. Each one still restarts the shooter's body animation; this finds
-  them there and calls the weapon's own event handler. See
-  `docs/goldsrc_hltv_missing_gunshots.md`.
 - **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
   tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
   tile of `crosshairs.spr`, and hidden when the player's own would be while
@@ -43,6 +38,15 @@ joins this switch rather than adding a command:
   ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
+
+**Missing gunshots** (`ds_sound_restore_gunshots 1`, on by default; its own
+switch since #1036, because POV demos lose them too): an HLTV demo has no fire
+event for about 60% of the rounds fired in some recordings, and a POV demo for
+about 1 in 7 of the other players' rounds, so they play with no sound, flash
+or impact. Each one still restarts the shooter's body animation; this finds
+them there and calls the weapon's own event handler. The POV recorder's own
+shots that his game never predicted are found from the clip count the server
+sends him instead (#1029). See `docs/goldsrc_hltv_missing_gunshots.md`.
 
 Plus these control surfaces, always available and doing nothing until used
 (not every module is listed; [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
