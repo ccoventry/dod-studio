@@ -45,12 +45,15 @@
 
   <div id="render-settings-row">
     <select id="render-codec-select">
+      <option value="prores_422">ProRes 422 (2/3 the size of HQ)</option>
       <option value="prores">ProRes 422 HQ</option>
+      <option value="prores_lt">ProRes 422 LT (half the size of HQ)</option>
       <option value="dnxhr">DNxHR HQ</option>
       <option value="h264">H.264 (Software, MP4)</option>
       <option value="h264_nvenc">H.264 (NVENC GPU, MP4)</option>
       <option value="custom">Custom (paste FFmpeg args)</option>
     </select>
+    <p id="render-codec-hint" hidden></p>
     <div id="render-custom-codec-group" style="display: none;">
       <input type="text" id="render-custom-codec-input" />
     </div>
