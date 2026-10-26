@@ -112,6 +112,7 @@ mod tests {
         "sound_mute_victory_music",
         "sound_restore_gunshots",
         "spec_hide_text",
+        "ui_studio_background",
         "view_show_own_blood",
     ];
 

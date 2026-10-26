@@ -1,6 +1,7 @@
-//! The main menu's background picture (#1045): a whole image of our own, the
-//! one whose shape is closest to the screen's, and the stock tiles kept in
-//! shape on the pre-Anniversary build.
+//! The main menu's background (#1045), `ds_ui_studio_background`: DoD
+//! Studio's own picture, the one whose shape is closest to the screen's, or
+//! with none found, the stock tiles kept in shape on the pre-Anniversary
+//! build. At `0` the game draws its own background, untouched.
 //!
 //! ## How the game draws it
 //!
@@ -25,20 +26,31 @@
 //!
 //! ## What this does
 //!
-//! It points that one `call` (in `PaintBackground`, both builds) at
-//! [`draw`], which paints, in order of preference:
+//! While `ds_ui_studio_background` is `1` (the default), that one `call` (in
+//! `PaintBackground`, both builds) goes to [`draw`], which paints, in order
+//! of preference:
 //!
-//! 1. a whole image from `<game>_addon\resource\background\`, any file named
-//!    `dodstudio_menu*.png` or `.tga`: the one whose width over height is
-//!    closest to the screen's, scaled to cover the screen without changing
-//!    its shape (cropped like the Anniversary build crops). So a 4:3 and a
-//!    16:9 picture between them suit every screen, and one picture alone is
-//!    used everywhere. The hook reads and uploads it itself
+//! 1. a whole picture from the `menu_background\` folder beside this DLL
+//!    (Studio ships it with the DLL, so nothing goes into the game install),
+//!    any file named `dodstudio_menu*.png` or `.tga`: the one whose width
+//!    over height is closest to the screen's, scaled to cover the screen
+//!    without changing its shape (cropped like the Anniversary build crops).
+//!    So a 4:3 and a 16:9 picture between them suit every screen, and one
+//!    picture alone is used everywhere. The hook reads and uploads it itself
 //!    (`DrawSetTextureRGBA`), so no tiles, no layout file and no `-addons`
 //!    are needed;
-//! 2. with `ds_ui_menu_background_keep_shape 1` on the pre-Anniversary build,
-//!    the stock tiles fitted the way the Anniversary build fits them;
-//! 3. the game's own `DrawBackgroundImage`.
+//! 2. on the pre-Anniversary build, the game's own tiles fitted the way the
+//!    Anniversary build fits them;
+//! 3. the game's own `DrawBackgroundImage` (the Anniversary build, no
+//!    picture).
+//!
+//! At `0`, [`poll`] writes the game's own call back, so the game draws
+//! whatever it would without the hook (its layout, its tiles or a user's,
+//! stretched on the pre-Anniversary build). The setting is read every frame,
+//! so typing it takes effect on the next one, both ways. The folder is read
+//! again each time it goes from `0` to `1` (a directory listing and each
+//! file's first bytes), so a picture added while the game runs shows after
+//! a `0`/`1`.
 //!
 //! `tools/verify_menu_background_offsets.py` checks the call, the panel's
 //! fields and the surface slots against both `GameUI.dll`s.
@@ -47,46 +59,30 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::cell::UnsafeCell;
+#[cfg(target_arch = "x86")]
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::engine::CvarSPartial;
-use crate::hw_call_site::{CALL_LEN, call_bytes};
+use crate::demo_list_folders::Setting;
+#[cfg(any(test, target_arch = "x86"))]
+use crate::hw_call_site::CALL_LEN;
+use crate::hw_call_site::call_bytes;
 use crate::names::console_name;
 
-/// `ds_ui_menu_background_keep_shape 1` (default): the pre-Anniversary build
-/// fits the stock picture to the screen the way the 25th Anniversary build
-/// does, cropping instead of stretching. No effect on the Anniversary build,
-/// which already does.
-pub const KEEP_SHAPE_NAME: &str = console_name!("ui_menu_background_keep_shape");
+pub const NAME: &str = console_name!("ui_studio_background");
 
-/// The setting's flag when its cvar could not be registered.
-pub static KEEP_SHAPE: AtomicBool = AtomicBool::new(true);
-static KEEP_SHAPE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    KEEP_SHAPE_CVAR.store(cvar, Ordering::Release);
-}
-
-fn keep_shape() -> bool {
-    let cvar = KEEP_SHAPE_CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        KEEP_SHAPE.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
+/// `ds_ui_studio_background 1` (the default): DoD Studio's menu picture, or
+/// the stock tiles kept in shape. `0`: the game's own background, untouched.
+pub static SETTING: Setting = Setting::new(NAME, true);
 
 /// For the fallback toggle's bare-name query.
 pub fn status() -> String {
-    if keep_shape() {
-        "the menu background keeps its shape (cropped to fill the screen)".to_string()
-    } else {
-        "the menu background is drawn as the game draws it (stretched on the pre-Anniversary build)"
+    if SETTING.on() {
+        "the menu shows DoD Studio's background picture (or the game's own, kept in shape)"
             .to_string()
+    } else {
+        "the menu background is the game's own, drawn as the game draws it".to_string()
     }
 }
 
@@ -157,18 +153,23 @@ const SURFACE_DRAW_TEXTURED_RECT: usize = 29;
 const SURFACE_CREATE_NEW_TEXTURE_ID: usize = 31;
 const SURFACE_GET_SCREEN_SIZE: usize = 32;
 
-/// The images' folder under `<game>_addon`, and what their names start with.
-const FOLDER: [&str; 2] = ["resource", "background"];
+/// The pictures' folder beside this DLL, and what their names start with.
+pub(crate) const FOLDER: &str = "menu_background";
 const PREFIX: &str = "dodstudio_menu";
 /// Larger sides are refused: GL drivers of the game's era stop at 8192, and
 /// a 32-bit game has little room for the decoded copy.
 const MAX_SIDE: u32 = 8192;
 
+/// Set once `PaintBackground`'s call is found.
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+/// Set once the search is over, found or not, or a write failed.
 static DONE: AtomicBool = AtomicBool::new(false);
+/// Whether the call goes to [`draw`] now; only [`poll`] changes it.
+static PATCHED: AtomicBool = AtomicBool::new(false);
 /// Index into [`BUILDS`] plus one.
 static BUILD: AtomicUsize = AtomicUsize::new(0);
-/// The stock `DrawBackgroundImage`.
+/// The `call`'s address, and the stock `DrawBackgroundImage` it goes to.
+static SITE: AtomicUsize = AtomicUsize::new(0);
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
 static SURFACE: AtomicUsize = AtomicUsize::new(0);
 /// Set once the stock layout has been described in the log.
@@ -180,6 +181,7 @@ struct Candidate {
     path: PathBuf,
     width: u32,
     height: u32,
+    modified: Option<std::time::SystemTime>,
     /// The surface's texture id once uploaded; 0 before.
     texture: i32,
     /// Set when it could not be decoded, so it is not tried again.
@@ -190,6 +192,10 @@ struct Images {
     scanned: bool,
     list: Vec<Candidate>,
 }
+
+/// Set by [`poll`] each time the setting turns on, so the next draw reads
+/// the folder again.
+static RESCAN: AtomicBool = AtomicBool::new(false);
 
 struct Shared(UnsafeCell<Images>);
 // Safety: only `draw` touches it, and the engine calls that on its own
@@ -294,11 +300,49 @@ pub(crate) fn place_tile(
     }
 }
 
+/// `menu_background\` beside this DLL, wherever it was loaded from: Studio
+/// hands HLAE the DLL's own path (the bundled one, or a test build's under
+/// `local\test-<PR>\`), so the pictures beside it come with it.
 fn folder() -> PathBuf {
-    crate::game_folder::game_root()
-        .join(crate::game_folder::addon_name())
-        .join(FOLDER[0])
-        .join(FOLDER[1])
+    pictures_folder(own_dll_path().as_deref())
+}
+
+pub(crate) fn pictures_folder(dll: Option<&Path>) -> PathBuf {
+    dll.and_then(Path::parent)
+        .unwrap_or(Path::new("."))
+        .join(FOLDER)
+}
+
+/// This DLL's own file, found from an address inside it.
+#[cfg(windows)]
+fn own_dll_path() -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::LibraryLoader::{
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        GetModuleFileNameW, GetModuleHandleExW,
+    };
+    let mut module = std::ptr::null_mut();
+    // Safety: any address in this module names it; no reference is taken.
+    let found = unsafe {
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            own_dll_path as *const () as *const u16,
+            &mut module,
+        )
+    };
+    if found == 0 {
+        return None;
+    }
+    let mut name = vec![0u16; 1024];
+    // Safety: the buffer's length is passed.
+    let len = unsafe { GetModuleFileNameW(module, name.as_mut_ptr(), name.len() as u32) } as usize;
+    (len > 0 && len < name.len())
+        .then(|| PathBuf::from(std::ffi::OsString::from_wide(&name[..len])))
+}
+
+#[cfg(not(windows))]
+fn own_dll_path() -> Option<PathBuf> {
+    None
 }
 
 /// The candidates in `dir`, by name so the order is the same every run.
@@ -330,6 +374,7 @@ fn scan_folder(dir: &Path) -> Vec<Candidate> {
                     path: path.clone(),
                     width: w,
                     height: h,
+                    modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
                     texture: 0,
                     failed: false,
                 });
@@ -362,6 +407,7 @@ fn decode(path: &Path) -> Result<crate::texture_hires::Rgba, String> {
 /// Reads `*mut c_void`'s vftable slot `index`.
 ///
 /// Safety: `object` must be a live object with at least `index + 1` slots.
+#[cfg(target_arch = "x86")]
 unsafe fn slot<T: Copy>(object: *mut c_void, index: usize) -> T {
     unsafe {
         let vftable = *(object as *const *const usize);
@@ -369,15 +415,23 @@ unsafe fn slot<T: Copy>(object: *mut c_void, index: usize) -> T {
     }
 }
 
+#[cfg(target_arch = "x86")]
 type ColorFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32, i32, i32);
+#[cfg(target_arch = "x86")]
 type TextureFn = unsafe extern "thiscall" fn(*mut c_void, i32);
+#[cfg(target_arch = "x86")]
 type RectFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32, i32, i32);
+#[cfg(target_arch = "x86")]
 type NewTextureFn = unsafe extern "thiscall" fn(*mut c_void, u32) -> i32;
+#[cfg(target_arch = "x86")]
 type UploadFn = unsafe extern "thiscall" fn(*mut c_void, i32, *const u8, i32, i32, i32, i32);
+#[cfg(target_arch = "x86")]
 type ScreenSizeFn = unsafe extern "thiscall" fn(*mut c_void, *mut i32, *mut i32);
+#[cfg(target_arch = "x86")]
 type DrawFn = unsafe extern "thiscall" fn(*mut c_void);
 
 /// Paints `texture` over `rect`, untinted.
+#[cfg(target_arch = "x86")]
 unsafe fn paint(surface: *mut c_void, texture: i32, rect: (i32, i32, i32, i32)) {
     unsafe {
         let set_color: ColorFn = slot(surface, SURFACE_DRAW_SET_COLOR);
@@ -391,12 +445,36 @@ unsafe fn paint(surface: *mut c_void, texture: i32, rect: (i32, i32, i32, i32)) 
 
 /// The whole image for this screen, uploaded the first time it is picked.
 /// `None` when the folder holds none that loads.
+#[cfg(target_arch = "x86")]
 unsafe fn whole_image(surface: *mut c_void, screen: (i32, i32)) -> Option<(i32, u32, u32)> {
     // Safety: the engine thread only (see `Shared`).
     let images = unsafe { &mut *IMAGES.0.get() };
-    if !images.scanned {
+    // Taken every time, so the first scan also clears the flag the first
+    // patch set.
+    let rescan = RESCAN.swap(false, Ordering::AcqRel);
+    if !images.scanned || rescan {
         images.scanned = true;
-        images.list = scan_folder(&folder());
+        let mut list = scan_folder(&folder());
+        // A picture already uploaded keeps its texture while its file is
+        // unchanged; a changed one, or one that failed, is loaded again.
+        for found in &mut list {
+            if let Some(old) = images.list.iter().find(|old| {
+                old.path == found.path
+                    && old.modified == found.modified
+                    && (old.width, old.height) == (found.width, found.height)
+            }) {
+                found.texture = old.texture;
+            }
+        }
+        images.list = list;
+        if images.list.is_empty() {
+            unsafe {
+                crate::debug::report(&format!(
+                    "menu_background: no dodstudio_menu*.png/.tga in {} -- the game's own tiles",
+                    folder().display()
+                ))
+            };
+        }
     }
     loop {
         let sizes: Vec<(u32, u32)> = images
@@ -463,6 +541,7 @@ unsafe fn whole_image(surface: *mut c_void, screen: (i32, i32)) -> Option<(i32, 
 }
 
 /// The stock tiles, fitted. `false` when there is no layout to draw.
+#[cfg(target_arch = "x86")]
 unsafe fn fitted_tiles(
     panel: *mut c_void,
     build: &Build,
@@ -503,7 +582,8 @@ unsafe fn fitted_tiles(
     true
 }
 
-/// Stands in for `DrawBackgroundImage(this)`.
+/// Stands in for `DrawBackgroundImage(this)` while the setting is on.
+#[cfg(target_arch = "x86")]
 unsafe extern "thiscall" fn draw(panel: *mut c_void) {
     let original = ORIGINAL.load(Ordering::Acquire);
     let surface = SURFACE.load(Ordering::Acquire) as *mut c_void;
@@ -511,7 +591,9 @@ unsafe extern "thiscall" fn draw(panel: *mut c_void) {
         .load(Ordering::Acquire)
         .checked_sub(1)
         .and_then(|i| BUILDS.get(i));
-    if let (false, Some(build)) = (surface.is_null(), build) {
+    // Turned off this frame, before `poll` puts the stock call back: falls
+    // through to the game's own.
+    if let (true, false, Some(build)) = (SETTING.on(), surface.is_null(), build) {
         let mut screen = (0i32, 0i32);
         // Safety: the engine's surface, on the engine thread.
         unsafe {
@@ -519,17 +601,15 @@ unsafe extern "thiscall" fn draw(panel: *mut c_void) {
             size(surface, &mut screen.0, &mut screen.1);
             if !REPORTED_DRAW.swap(true, Ordering::Relaxed) {
                 crate::debug::report(&format!(
-                    "menu_background: first draw, {}x{} screen, keep shape {}",
-                    screen.0,
-                    screen.1,
-                    keep_shape()
+                    "menu_background: first draw, {}x{} screen",
+                    screen.0, screen.1
                 ));
             }
             if let Some((texture, w, h)) = whole_image(surface, screen) {
                 paint(surface, texture, cover(w, h, screen));
                 return;
             }
-            if !build.fits && keep_shape() && fitted_tiles(panel, build, surface, screen) {
+            if !build.fits && fitted_tiles(panel, build, surface, screen) {
                 return;
             }
         }
@@ -578,14 +658,9 @@ fn install() -> Result<String, String> {
         ORIGINAL.store(original, Ordering::Release);
         SURFACE.store(surface as usize, Ordering::Release);
         BUILD.store(index + 1, Ordering::Release);
-        let ours = call_bytes(call, draw as *const () as usize);
-        // Safety: one whole `call rel32`, written from the engine's thread
-        // between frames (`commands::poll`).
-        if !unsafe { crate::patch::write_code_bytes(call, &ours) } {
-            return Err("could not make PaintBackground's call writable".into());
-        }
+        SITE.store(call, Ordering::Release);
         return Ok(format!(
-            "menu_background: {} GameUI, PaintBackground +{:#x} now calls ours (stock +{:#x}); images from {}",
+            "menu_background: {} GameUI, PaintBackground's call at +{:#x} (stock +{:#x}); pictures from {}",
             build.name,
             call - gameui,
             original - gameui,
@@ -603,29 +678,76 @@ fn install() -> Result<String, String> {
     Err("only the 32-bit game has a GameUI.dll".into())
 }
 
-/// Installs once `GameUI.dll` is loaded. Runs every frame from
-/// `commands::poll`; one atomic load once the attempt is over.
+/// Finds `PaintBackground`'s call once `GameUI.dll` is loaded, then points
+/// it at [`draw`] while the setting is on and back at the game's own while
+/// it is off. Runs every frame from `commands::poll` (the one thread that
+/// writes code): a cvar read, and a write only when the setting changes.
 pub fn poll() {
-    if DONE.load(Ordering::Relaxed) {
+    if !INSTALLED.load(Ordering::Relaxed) {
+        if DONE.load(Ordering::Relaxed) {
+            return;
+        }
+        #[cfg(target_arch = "x86")]
+        {
+            use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
+            // Safety: a plain module lookup.
+            if unsafe { GetModuleHandleA(c"GameUI.dll".as_ptr() as *const u8) }.is_null() {
+                return; // not loaded yet: try again next frame
+            }
+        }
+        DONE.store(true, Ordering::Relaxed);
+        let message = match install() {
+            Ok(message) => {
+                INSTALLED.store(true, Ordering::Relaxed);
+                message
+            }
+            Err(why) => format!("menu_background: not installed -- {why}"),
+        };
+        unsafe { crate::debug::report(&message) };
+        if !INSTALLED.load(Ordering::Relaxed) {
+            return;
+        }
+    }
+    let on = SETTING.on();
+    if on == PATCHED.load(Ordering::Relaxed) {
         return;
     }
-    #[cfg(target_arch = "x86")]
-    {
-        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-        // Safety: a plain module lookup.
-        if unsafe { GetModuleHandleA(c"GameUI.dll".as_ptr() as *const u8) }.is_null() {
-            return; // not loaded yet: try again next frame
-        }
-    }
-    DONE.store(true, Ordering::Relaxed);
-    let message = match install() {
-        Ok(message) => {
-            INSTALLED.store(true, Ordering::Relaxed);
-            message
-        }
-        Err(why) => format!("menu_background: not installed -- {why}"),
+    let call = SITE.load(Ordering::Acquire);
+    let target = if on {
+        ours()
+    } else {
+        ORIGINAL.load(Ordering::Acquire)
     };
-    unsafe { crate::debug::report(&message) };
+    // Safety: one whole `call rel32` in GameUI's code, found by `install`.
+    if unsafe { crate::patch::write_code_bytes(call, &call_bytes(call, target)) } {
+        PATCHED.store(on, Ordering::Relaxed);
+        if on {
+            RESCAN.store(true, Ordering::Release);
+        }
+        unsafe {
+            crate::debug::report(if on {
+                "menu_background: on -- PaintBackground calls ours"
+            } else {
+                "menu_background: off -- PaintBackground's own call is back"
+            })
+        };
+    } else {
+        // Not retried every frame; the call is left as it is.
+        INSTALLED.store(false, Ordering::Relaxed);
+        unsafe {
+            crate::debug::report("menu_background: could not make PaintBackground's call writable")
+        };
+    }
+}
+
+#[cfg(target_arch = "x86")]
+fn ours() -> usize {
+    draw as *const () as usize
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn ours() -> usize {
+    0
 }
 
 /// The `ds_debug_status` line, or `None` when it isn't installed.
@@ -634,9 +756,14 @@ pub fn status_line() -> Option<String> {
         let images = unsafe { &*IMAGES.0.get() };
         let drawn = images.list.iter().filter(|c| c.texture != 0).count();
         format!(
-            "menu background: {} image(s) found, {drawn} loaded; keep shape {}",
+            "menu background: {}; {} picture(s) found in {}, {drawn} loaded",
+            if PATCHED.load(Ordering::Relaxed) {
+                "DoD Studio's"
+            } else {
+                "the game's own"
+            },
             images.list.len(),
-            if keep_shape() { "on" } else { "off" }
+            folder().display()
         )
     })
 }
@@ -697,6 +824,24 @@ mod tests {
         tga[2] = 1; // colour-mapped: not ours
         assert_eq!(image_size(&tga), None);
         assert_eq!(image_size(b"short"), None);
+    }
+
+    #[test]
+    fn pictures_sit_beside_the_dll() {
+        let dll = Path::new(r"C:\Studio\goldsrc-hooks\dodstudio_goldsrc_hooks.dll");
+        assert_eq!(
+            pictures_folder(Some(dll)),
+            Path::new(r"C:\Studio\goldsrc-hooks\menu_background")
+        );
+        assert_eq!(pictures_folder(None), Path::new(r".\menu_background"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_dll_finds_its_own_file() {
+        // In a test this module is the test executable itself.
+        let own = own_dll_path().expect("a path");
+        assert_eq!(own, std::env::current_exe().unwrap());
     }
 
     #[test]
