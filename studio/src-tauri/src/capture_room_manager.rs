@@ -472,7 +472,9 @@ impl CaptureRoom {
                     crate::take_cleanup_manager::RoomFor::Capture,
                     native::hlcr::take_cleanup::SpaceNeed {
                         targets: vec![existing_ancestor(&self.blocks[next].folder).to_path_buf()],
-                        needed_bytes: check.writing.saturating_add(check.next_bytes),
+                        // One target drive, so one piece: the block being
+                        // written and the next one both land on it.
+                        pieces: vec![check.writing.saturating_add(check.next_bytes)],
                         headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
                     },
                     Some(&self.cancel),
