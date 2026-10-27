@@ -34,7 +34,8 @@ mod scan_merge;
 pub use scan_merge::ScanMergeSummary;
 use scan_merge::{NewJobSettings, ScannedTake, merge_scan};
 
-/// Codec is a string id ("prores" | "dnxhr" | "h264" | "h264_nvenc") mapped
+/// Codec is a string id ("prores" (HQ) | "prores_422" | "prores_lt" |
+/// "prores_4444" | "dnxhr" | "h264" | "h264_nvenc" | ...) mapped
 /// to `RenderCodec` via `RenderCodec::from_str_id` — see
 /// docs/archive/tauri_parity_audit.md Area 5 for why `h264`/software libx264 exists
 /// alongside dev's NVENC-only H.264 variant.
@@ -493,11 +494,12 @@ impl RenderManager {
             .map(|j| j.clip.take_folder.clone())
     }
 
-    /// What the first jobs to start need on the export drives: the largest
-    /// `max_concurrent` estimates among the queued jobs, which is what
-    /// `run_render_job`'s drive routing checks as they start together. Later
-    /// jobs reserve from what finished renders actually wrote (#120).
-    pub(crate) fn first_wave_bytes(&self, max_concurrent: usize) -> u64 {
+    /// What the first jobs to start need on the export drives, one figure per
+    /// job, since each job writes to one drive: the largest `max_concurrent`
+    /// estimates among the queued jobs, which is what `run_render_job`'s drive
+    /// routing checks as they start together. Later jobs reserve from what
+    /// finished renders actually wrote (#120).
+    pub(crate) fn first_wave_pieces(&self, max_concurrent: usize) -> Vec<u64> {
         let mut estimates: Vec<u64> = self
             .jobs
             .lock()
@@ -507,10 +509,8 @@ impl RenderManager {
             .map(|j| job_reservation_estimate(&j.clip, j.codec, &j.custom_codec_args))
             .collect();
         estimates.sort_unstable_by(|a, b| b.cmp(a));
+        estimates.truncate(max_concurrent.max(1));
         estimates
-            .into_iter()
-            .take(max_concurrent.max(1))
-            .fold(0u64, u64::saturating_add)
     }
 
     /// Takes these takes' rows out of the list before their folders go to the
@@ -674,7 +674,10 @@ fn save_autosave(session: &RenderSessionData) {
     if let Ok(json) = serde_json::to_string_pretty(session)
         && let Err(e) = std::fs::write(autosave_path(), json)
     {
-        log::warn!("[render_autosave] Failed to write lockfile: {}", e);
+        log_markdown(&format!(
+            "[render_autosave] Failed to write lockfile: {}",
+            e
+        ));
     }
 }
 
@@ -1107,6 +1110,37 @@ pub async fn queue_render_batch(
     result
 }
 
+/// Scan for Takes' count of takes found, sent at most every ~33 ms (#954,
+/// CLAUDE.md's telemetry throttle): a folder of hundreds of takes used to
+/// send an event per take.
+#[derive(Default)]
+struct ScanCountThrottle {
+    found: u32,
+    sent: u32,
+    last_sent: Option<std::time::Instant>,
+}
+
+impl ScanCountThrottle {
+    /// One more take found at `now`: the count to send now, if any.
+    fn found_one(&mut self, now: std::time::Instant) -> Option<u32> {
+        self.found += 1;
+        let due = self
+            .last_sent
+            .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(33));
+        if !due {
+            return None;
+        }
+        self.last_sent = Some(now);
+        self.sent = self.found;
+        Some(self.found)
+    }
+
+    /// The count once the scan is done, when the last one sent was short.
+    fn last(&self) -> Option<u32> {
+        (self.found != self.sent).then_some(self.found)
+    }
+}
+
 async fn scan_and_merge(
     app: &AppHandle,
     state: &RenderManager,
@@ -1148,9 +1182,19 @@ async fn scan_and_merge(
                 // thread so the frontend gets live progress instead of the whole
                 // batch arriving at once when the scan finishes. Exits on its own
                 // once status_tx drops (scan_folder_background returns below).
+                // The line wants the count, not the names (#954): sent at most
+                // every ~33 ms, and once more at the end.
                 let status_thread = std::thread::spawn(move || {
-                    while let Ok(msg) = status_rx.recv() {
-                        let _ = scan_app.emit("render_scan_status", msg);
+                    let mut throttle = ScanCountThrottle::default();
+                    while status_rx.recv().is_ok() {
+                        if let Some(found) = throttle.found_one(std::time::Instant::now()) {
+                            let _ = scan_app
+                                .emit("render_scan_status", serde_json::json!({ "found": found }));
+                        }
+                    }
+                    if let Some(found) = throttle.last() {
+                        let _ = scan_app
+                            .emit("render_scan_status", serde_json::json!({ "found": found }));
                     }
                 });
 
@@ -1298,7 +1342,7 @@ pub async fn start_queued_render(
     if crate::take_cleanup_manager::makes_room(&app) && !config.export_directories.is_empty() {
         let need = native::hlcr::take_cleanup::SpaceNeed {
             targets: config.export_directories.clone(),
-            needed_bytes: state.first_wave_bytes(config.max_concurrent_renders),
+            pieces: state.first_wave_pieces(config.max_concurrent_renders),
             headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
         };
         let cleanup_app = app.clone();
@@ -1987,6 +2031,20 @@ mod tests {
         assert_eq!(concurrency_cap(4, true), 1);
         assert_eq!(concurrency_cap(0, false), 1);
         assert_eq!(concurrency_cap(0, true), 1);
+    }
+
+    #[test]
+    fn the_scan_count_is_sent_at_most_every_33_ms_and_once_at_the_end() {
+        let start = std::time::Instant::now();
+        let at = |ms: u64| start + std::time::Duration::from_millis(ms);
+        let mut throttle = ScanCountThrottle::default();
+        assert_eq!(throttle.found_one(at(0)), Some(1));
+        assert_eq!(throttle.found_one(at(10)), None);
+        assert_eq!(throttle.found_one(at(20)), None);
+        assert_eq!(throttle.found_one(at(40)), Some(4));
+        assert_eq!(throttle.last(), None, "the last count went out already");
+        assert_eq!(throttle.found_one(at(50)), None);
+        assert_eq!(throttle.last(), Some(5));
     }
 
     fn attempt(stream: &str, outcome: RenderOutcome, path: &str) -> RenderAttempt {

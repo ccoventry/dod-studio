@@ -8,18 +8,21 @@
 /// instead of naive arrival-order first-fit where an earlier small clip can
 /// strand a later large one on a drive that would otherwise have fit it.
 ///
-/// Mutates `drive_free` in place (bytes consumed per drive) and advances
-/// `*active_drive_idx` to the last drive used, biasing the next call (e.g. the
-/// next demo's blocks) to keep filling it. Returns `(block_index, drive_index)`
-/// pairs in allocation order, or `Err(block_index)` for the first block that
-/// couldn't fit anywhere.
+/// Drive `i` draws on `volume_free[volume_of_drive[i]]`: folders on one volume
+/// share one budget, so a second folder on a full drive is skipped like the
+/// first (#774). Mutates `volume_free` in place (bytes consumed per volume) and
+/// advances `*active_drive_idx` to the last drive used, biasing the next call
+/// (e.g. the next demo's blocks) to keep filling it. Returns
+/// `(block_index, drive_index)` pairs in allocation order, or
+/// `Err(block_index)` for the first block that couldn't fit anywhere.
 pub(super) fn allocate_blocks_first_fit_decreasing(
     block_estimates: &[u64],
-    drive_free: &mut [u64],
+    volume_of_drive: &[usize],
+    volume_free: &mut [u64],
     active_drive_idx: &mut usize,
     threshold: u64,
 ) -> Result<Vec<(usize, usize)>, usize> {
-    let num_drives = drive_free.len();
+    let num_drives = volume_of_drive.len();
 
     let mut allocation_order: Vec<usize> = (0..block_estimates.len()).collect();
     allocation_order.sort_by_key(|&i| std::cmp::Reverse(block_estimates[i]));
@@ -37,8 +40,9 @@ pub(super) fn allocate_blocks_first_fit_decreasing(
                 break;
             }
 
-            if drive_free[current_drive_idx] >= clip_byte_estimate + threshold {
-                drive_free[current_drive_idx] -= clip_byte_estimate;
+            let free = &mut volume_free[volume_of_drive[current_drive_idx]];
+            if *free >= clip_byte_estimate + threshold {
+                *free -= clip_byte_estimate;
                 result.push((block_index, current_drive_idx));
                 *active_drive_idx = current_drive_idx;
                 allocated = true;

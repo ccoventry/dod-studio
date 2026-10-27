@@ -28,9 +28,23 @@ export function clockLong(seconds) {
   return h ? `${h}:${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}` : mss(s);
 }
 
-/** Whole seconds of a running job as `4m 05s`, or `45s` under a minute. */
-export function elapsedWords(secs) {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m ? `${m}m ${pad2(s)}s` : `${s}s`;
+/** How long something took or lasts, the one way Studio writes it (#880):
+ *  `2.1 s` under a minute (one decimal, a space before the unit), then whole
+ *  seconds as `6 min 12 s` and `1 h 2 min 3 s`. Missing or negative reads
+ *  `0.0 s`. Clock positions (`m:ss`) and estimates ("about 4 min") are
+ *  written their own way. */
+export function durationText(seconds) {
+  const x = Math.max(0, Number(seconds) || 0);
+  const tenths = Math.round(x * 10);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} s`;
+  const whole = Math.round(x);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  return `${h ? `${h} h ` : ''}${m} min ${s} s`;
+}
+
+/** {@link durationText} for milliseconds (a job's clock). */
+export function durationTextMs(ms) {
+  return durationText((Number(ms) || 0) / 1000);
 }

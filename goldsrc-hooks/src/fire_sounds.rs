@@ -1,5 +1,5 @@
-//! Watches DoD's weapon-fire sounds go past, and tells the two modules that
-//! need to know a shot was fired and by whom.
+//! Watches DoD's weapon-fire sounds go past, and tells the modules that need
+//! to know a shot was fired and by whom.
 //!
 //! Every DoD 1.3 weapon's firing sample is named `<weapon>_shoot.wav`
 //! (checked against the game's own sound files: garand_shoot, kar_shoot,
@@ -11,7 +11,8 @@
 //! - `anim_fix` animates the in-eye viewmodel from it, for the rounds of a
 //!   held trigger that the body animation cannot show;
 //! - `missing_shots` uses it to tell a round that came with its fire event
-//!   from one the recording lost.
+//!   from one the recording lost;
+//! - `pov_recorder_shots` the same for a POV recorder's own rounds.
 //!
 //! The sound itself is passed through untouched.
 //!
@@ -72,6 +73,7 @@ unsafe extern "C" fn hook_ev_play_sound(
         SHOTS.fetch_add(1, Ordering::Relaxed);
         crate::anim_fix::on_weapon_fired(ent);
         crate::missing_shots::on_shot_sound(ent);
+        crate::pov_recorder_shots::on_shot_sound(ent);
     }
     let real = REAL_EV_PLAY_SOUND.load(Ordering::Acquire);
     // Safety: the engine's own function, captured at install.

@@ -101,7 +101,7 @@ test('the step line shows from the click: checking the clips, joining, then how 
   await expect(page.locator('#combine-progress-fill')).toHaveAttribute('style', /width: 50%/);
 
   await page.evaluate(() => window.__finishCombine.resolve());
-  await expect(page.locator('#combine-status')).toHaveText(/^Saved in \d+s\.$/);
+  await expect(page.locator('#combine-status')).toHaveText(/^Saved in (\d+\.\d s|\d+ min \d+ s)\.$/);
   await expect(page.locator('#combine-progress')).toHaveAttribute('hidden');
 });
 

@@ -28,12 +28,21 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// machine under capture load, not an expectation.
 const RECORD_START_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long the first `StartRecord` gets before it is sent again (see
+/// `ObsClient::start_record`): ample against the measured 59-85 ms, short
+/// enough that a retried start still lands inside the 1 s lead.
+const RECORD_START_FIRST_WAIT: Duration = Duration::from_millis(750);
+
 /// How long to wait for the output file to be finalised after `StopRecord`.
 ///
 /// Measured at ~1.06 s consistently. Worth noting that number is longer than
 /// HLAE's `MIN_TAKE_SEPARATION_SECONDS` (0.5 s), which is why this path has
 /// its own, `OBS_TAKE_SEPARATION_SECONDS`.
 const RECORD_STOP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// What a refused start says (see `ObsClient::start_record`).
+pub const START_REFUSED: &str = "OBS did not start recording. OBS's own window says why \
+     (often the recording encoder or folder); fix it in OBS and run the batch again";
 
 /// Socket read timeout. Nothing waits on a single read; the timeout only makes
 /// the read loop interruptible so an overall deadline can be enforced.
@@ -561,6 +570,59 @@ impl ObsClient {
     // its own dedicated thing instead of switching into whatever the user
     // picked.
 
+    /// Delays (positive) or advances (negative) an audio source against the
+    /// picture, in milliseconds.
+    pub fn set_input_audio_sync_offset(&mut self, name: &str, ms: i64) -> Result<(), ObsError> {
+        self.request(
+            "SetInputAudioSyncOffset",
+            json!({ "inputName": name, "inputAudioSyncOffset": ms }),
+        )?;
+        Ok(())
+    }
+
+    /// OBS's own version, e.g. `32.2.2`.
+    pub fn obs_version(&mut self) -> Result<String, ObsError> {
+        Ok(self.request("GetVersion", json!({}))?["obsVersion"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    /// A setting of the current profile: `(value, OBS's default for it)`.
+    /// Either is empty when unset. The default is worth having: for the
+    /// encoder it is the one OBS itself picked for this PC's hardware.
+    pub fn profile_parameter(
+        &mut self,
+        category: &str,
+        name: &str,
+    ) -> Result<(String, String), ObsError> {
+        let v = self.request(
+            "GetProfileParameter",
+            json!({ "parameterCategory": category, "parameterName": name }),
+        )?;
+        let text = |key: &str| v[key].as_str().unwrap_or_default().to_string();
+        Ok((text("parameterValue"), text("defaultParameterValue")))
+    }
+
+    /// Writes a setting of the current profile. OBS's outputs read most of
+    /// these only when they are rebuilt (see `provision::ensure_recording_settings`).
+    pub fn set_profile_parameter(
+        &mut self,
+        category: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), ObsError> {
+        self.request(
+            "SetProfileParameter",
+            json!({
+                "parameterCategory": category,
+                "parameterName": name,
+                "parameterValue": value,
+            }),
+        )?;
+        Ok(())
+    }
+
     /// Creates a profile. Fails if one by this name already exists —
     /// callers check `profile_list()` first.
     pub fn create_profile(&mut self, name: &str) -> Result<(), ObsError> {
@@ -727,13 +789,51 @@ impl ObsClient {
     /// recording begins at `RecordStateChanged: OBS_WEBSOCKET_OUTPUT_STARTED` —
     /// measured 59-85 ms later. Returning before that would put the clip's
     /// first frames outside the file.
+    ///
+    /// OBS accepts `StartRecord` even when the recording then fails to start.
+    /// Measured on OBS 32.2.2, twice:
+    /// - an encoder setting changed without rebuilding the outputs: the
+    ///   request succeeded, OBS opened a "Failed to start recording" box and
+    ///   nothing was recorded;
+    /// - a `StartRecord` sent the moment the previous file was finalised (a
+    ///   block whose `STOP_RECORD` was missed, so stop and start came back to
+    ///   back): accepted and ignored, no box.
+    ///
+    /// So a start that doesn't happen is sent once more, and when OBS still
+    /// answers "not recording", that is OBS refusing, not the connection
+    /// failing: no reconnect, and the batch is told why.
     pub fn start_record(&mut self) -> Result<(), ObsError> {
-        self.request("StartRecord", json!({}))?;
-        self.wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STARTED", RECORD_START_TIMEOUT)
-            .ok_or_else(|| {
-                ObsError::Transport("OBS never reported that recording started".into())
-            })?;
-        Ok(())
+        for (attempt, wait) in [RECORD_START_FIRST_WAIT, RECORD_START_TIMEOUT]
+            .into_iter()
+            .enumerate()
+        {
+            if let Err(e) = self.request("StartRecord", json!({})) {
+                // A slow first start that began after all is "output running".
+                if attempt == 0 || e.is_transport() || !self.is_recording().unwrap_or(false) {
+                    return Err(e);
+                }
+                return Ok(());
+            }
+            if self
+                .wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STARTED", wait)
+                .is_some()
+            {
+                return Ok(());
+            }
+            match self.is_recording() {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(_) => {
+                    return Err(ObsError::Transport(
+                        "OBS never reported that recording started".into(),
+                    ));
+                }
+            }
+        }
+        Err(ObsError::Request {
+            request: "StartRecord".into(),
+            detail: START_REFUSED.into(),
+        })
     }
 
     /// Stops recording and returns the finished file's path.
@@ -959,6 +1059,64 @@ mod tests {
         };
         assert!(!other.to_string().contains("rejected the password"));
         assert!(other.to_string().contains("4008"));
+    }
+
+    /// A `StartRecord` OBS accepts but never starts gets exactly one more,
+    /// and one that starts first time is never sent twice.
+    #[test]
+    fn a_start_obs_ignored_is_sent_once_more_and_never_twice_when_it_started() {
+        use super::super::fake_obs::{Reply, serve};
+
+        let mut starts = 0;
+        let mut recording = false;
+        let obs = serve(move |kind, _| match kind {
+            "StartRecord" => {
+                starts += 1;
+                if starts == 1 {
+                    return Reply::ok(json!({}));
+                }
+                recording = true;
+                Reply::ok(json!({})).then_record_state("OBS_WEBSOCKET_OUTPUT_STARTED")
+            }
+            "GetRecordStatus" => Reply::ok(json!({ "outputActive": recording })),
+            _ => Reply::ok(json!({})),
+        });
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        client.start_record().expect("the second start records");
+        assert_eq!(obs.sent("StartRecord"), 2);
+
+        let obs = serve(|kind, _| match kind {
+            "StartRecord" => Reply::ok(json!({})).then_record_state("OBS_WEBSOCKET_OUTPUT_STARTED"),
+            _ => Reply::ok(json!({})),
+        });
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        client.start_record().expect("starts");
+        assert_eq!(obs.sent("StartRecord"), 1);
+    }
+
+    /// A first start that was only slow is running by the retry, which OBS
+    /// answers "output running": that is a recording, not a failure.
+    #[test]
+    fn a_slow_first_start_counts_when_the_retry_finds_it_running() {
+        use super::super::fake_obs::{Reply, serve};
+
+        let mut starts = 0;
+        let obs = serve(move |kind, _| match kind {
+            "StartRecord" => {
+                starts += 1;
+                if starts == 1 {
+                    Reply::ok(json!({}))
+                } else {
+                    Reply::err("The output is already running.")
+                }
+            }
+            // Not yet at the first check, running by the second.
+            "GetRecordStatus" => Reply::ok(json!({ "outputActive": starts > 1 })),
+            _ => Reply::ok(json!({})),
+        });
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        client.start_record().expect("the slow start counts");
+        assert_eq!(obs.sent("StartRecord"), 2);
     }
 
     /// OBS needs ~1.06s to finalise a file; HLAE's merge guard is 0.5s. If

@@ -33,6 +33,11 @@ describe('finishCodecFor', () => {
     expect(finishCodecFor('obs', { ...c, obs: 'h264' })).toEqual({ codec: 'h264', customArgs: '' });
   });
 
+  it('falls back to ProRes 422 when the Render tab has no codec', () => {
+    expect(finishCodecFor('frame_sequence', codecs({ renderCodec: '' })).codec).toBe('prores_422');
+    expect(finishCodecFor('frame_sequence', codecs({ renderCodec: 'prores' })).codec).toBe('prores');
+  });
+
   it('picks each mode its own codec', () => {
     const c = codecs({ obs: 'h264_nvenc', video: 'prores', frames: 'h264' });
     expect(finishCodecFor('obs', c).codec).toBe('h264_nvenc');

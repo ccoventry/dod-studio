@@ -16,7 +16,7 @@ start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
 **Scope:** the surface actually on `dev` today: forty-eight cvars and
-fifteen commands. Entries still in open PRs are not listed -- update this file as
+sixteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
@@ -36,7 +36,7 @@ the death cam).
 
 | cvar | default | what it does | doc |
 | --- | --- | --- | --- |
-| `ds_spec_match_pov` | `1` (on) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` at launch | one switch for making a spectated first-person view look and sound like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the gunshots an HLTV demo has no fire event for (about 60% of rounds in some recordings), restored with their sound, muzzle flash, tracer and impact; and the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `ds_hud_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; and the gun lowering off screen while they sprint, jump, go prone, crawl or climb a ladder, as their own does (`goldsrc-hooks/src/spectator_gun.rs`). All five stand down while a POV demo plays, which is the recording they match (#613); live play and HLTV demos are unaffected. `2` also logs every restored gunshot. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
+| `ds_spec_match_pov` | `1` (on) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` at launch | one switch for making a spectated first-person view look like the player's own recording. It turns on four things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `ds_hud_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; and the gun lowering off screen while they sprint, jump, go prone, crawl or climb a ladder, as their own does (`goldsrc-hooks/src/spectator_gun.rs`). All four stand down while a POV demo plays, which is the recording they match (#613); live play and HLTV demos are unaffected. The gunshots a demo lost are not part of it any more: they are `ds_sound_restore_gunshots`, in HLTV and POV demos alike (#1036). So a config that sets `ds_spec_match_pov 0` to silence the restored gunshots now needs `ds_sound_restore_gunshots 0` as well, and the "log every restored gunshot" that `ds_spec_match_pov 2` used to turn on is `ds_sound_restore_gunshots 2`. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `ds_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `ds_debug_log_gun_lowered` | `0` | R&D (#704): logs each time the first-person gun goes down or comes back up, with the demo player's clock: in a POV demo from `client.dll`'s own flag, in HLTV in-eye from `ds_spec_match_pov`'s copy with its reason (sprinting, prone transition, crawling, in the air, on a ladder). In a POV demo it reads `client.dll`'s own lowering sum (`g_ihidexhair`), not the gun that is drawn, so it misses POV's lowering on a jump or crouch-jump: check the drawn frames before calling a POV-vs-HLTV difference real | `goldsrc-hooks/src/gun_log.rs` |
 | `ds_debug_log_spectator_target` | `0` | logs who the spectator HUD thinks is being followed next to the entity the engine renders a viewmodel for, whenever either changes (issue #206) | `goldsrc-hooks/src/spectator_target.rs` |
@@ -44,6 +44,7 @@ the death cam).
 | `ds_sound_mute_voice_commands` | `0` | silences "fire in the hole!" and the rest, without touching the game's own `.wav` files; subtitles and speaker icons still show | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
 | `ds_sound_mute_victory_music` | `0` | silences the victory music a map plays to everyone when a team wins the round, without touching the game's `.wav` files or the demo; every other sound plays, the capture announcements too (`ds_sound_mute_flag_capture`). It acts on the next one the server sends, so music already playing finishes. It reads each map's own victory music from the map as it loads (what its round-end wiring plays, `no_winner.wav` for a round with no winner included), so a custom map with its own file names is muted too; a list of 37 file names from the 250 maps in both movie installs also applies, for a map it can't read. dod_vicenza's `uswin` / `germanwin` are also placed as ambient sounds there, and are its victory music too (#284) | `goldsrc-hooks/src/map_sounds.rs` |
 | `ds_sound_mute_flag_capture` | `0` | silences the point-captured announcements a map plays, and also the objective-secured ones some maps play the same way (dod_escape's `usobjectivesecure`), without touching the game's `.wav` files or the demo; every other sound plays, the victory music too (`ds_sound_mute_victory_music`). It acts on the next one the server sends. It reads each map's own capture sounds from the map as it loads (its control points' sound settings), so a custom map with its own file names is muted too; a list of 61 file names from the 250 maps in both movie installs also applies, for a map it can't read (#284) | `goldsrc-hooks/src/map_sounds.rs` |
+| `ds_sound_restore_gunshots` | `1` | plays the gunshots a demo fired but has no sound for, with their sound, muzzle flash, tracer and impact, from the weapon's own fire code. It picks how by what is playing (#1036). **HLTV demos:** every player's rounds with no fire event, found from the shooter's body restarting its fire animation (about 60% of rounds in some recordings). **POV demos, other players:** the same, for every player in the recorder's view; about 1 in 7 of their rounds has no fire event (14% over 361 demos from 27 recorders). **POV demos, the recorder:** his own shots the server fired but his game never predicted, found from the clip count the server sends him (`CurWeapon`), about 1 shot in 360; it plays a little over half of them and leaves the rest silent rather than risk doubling a shot (#1029). A round whose own sound arrives plays only that, and a real empty-gun press is left as it is. Live play is unaffected. `2` also logs every restored round. Not part of `ds_spec_match_pov` (it was until #1036): a config that turned that off to silence restored gunshots needs this at `0` too | [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), `goldsrc-hooks/src/pov_recorder_shots.rs` |
 | `ds_hud_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_crosshair.md`](goldsrc_crosshair.md) |
 | `ds_spec_hide_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
 | `ds_spec_hide_text` | `0` | hides the two lines the game prints when the view becomes a spectator camera: the camera mode's name, centred just above the bottom bar ("Locked Chase Cam", "Free Chase Cam", "Free Look", "First Person", `#Spec_Mode1`..`4`), and the green "Press DUCK for Spectator Menu" (`#Spec_Duck`). Both show in a POV demo when the player dies, and in HLTV when the camera mode changes. The mode name comes twice, from the game itself and as a `TextMsg` the server sent; both go. Every other centre-print and HUD message still shows. A line already on screen when it's turned on stays until it times out (#677) | `goldsrc-hooks/src/spectator_text.rs` |
@@ -60,13 +61,16 @@ the death cam).
 | `ds_hud_overview_hide_speaker` | `0` | leaves the speaker icon (`mapsprites/speakerIcon.spr`) off the players' icons on the overview map, so the sprite needs no blanking; the player icons stay, unlike `ds_hud_overview_players 4`. What makes the game draw it (a player talking or using a voice command) is a guess (#677) | `goldsrc-hooks/src/overview_speaker.rs` |
 | `ds_view_hide_headshot_red_screen` | `0` | POV demos: drops the red screen flash (a server `ScreenFade` of (128,0,0) at alpha 200, flags 0) that comes with every hit on the player's head hitbox, fatal or not, grenades included (#606). The black fades (the clear at respawn, the end of the map) still play | `goldsrc-hooks/src/screen_effects.rs` |
 | `ds_view_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (amplitude 16 for 1 s; no WSOD25 map has an `env_shake`) (#606), and takes the shake the recorder's client already put into the recorded view back out of it (#910) | same |
+| `ds_view_show_own_blood` | `0` | POV demos: shows the recording player's own blood when they're hit, which the game skips this close to the camera. DoD draws no blood puff closer than 32 units to the view (`EV_BloodPuff`), and the recorder's own wounds land a few units below the eye, so the demo has them (25-58 per demo in 6 demos from 6 recorders) and the game never draws them; a puff 27 units away drew at 60 fps and not at 300, by chance (#1018). The value picks the cut: `0` the game's own 32, `1` 24, `2` 16 (most sprays, without the blocky close-ups), `3` 8, `4` 0 (everything; under about 16 units a puff covers a third of the screen with blocky pixels and a pale haze). Switches live; a value past 4 gives 4, below 0 gives 0, with a console line. Only the blood-puff cut changes (#1035) | `goldsrc-hooks/src/own_blood.rs` |
 | `ds_hud_show_scope` | `1` | shows the sniper scope while a demo plays. The game turns it off for playback (`CHudScope::DrawTriApiScope` skips its draw when `IsPlayingback()`). A POV demo shows the recorder's own scope whenever they zoomed. Watching in-eye, the game always picks the Springfield's scope; with this on it is the watched player's rifle: the scoped K98 and scoped FG42 get `scope_k43`, the Springfield `scope_spring`, the scoped Enfield `scope_enfield` (that one only when the game's scoped-weapon flag is set, which an HLTV viewer may not have). Still only while the view is zoomed (#307). The round scope keeps its size and everything outside its frame is black, at any FOV: DoD sizes the frame for the view it expects, so `gl_widescreen_yfov 1` (25th Anniversary) or a wider `mirv_fov` used to show the map around it; demos only, live play keeps the game's own scope (#799) | `goldsrc-hooks/src/demo_scope.rs`, `goldsrc-hooks/src/demo_scope/fill.rs`, [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md) |
 | `ds_player_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `ds_player_fix_model_flicker` | `1` | player models hold still from the frame an HLTV demo's clock steps back until it passes the last frame they were drawn on (one frame at normal speed, a few at 1/4 speed). The step back otherwise turns a strafing player's model round for that frame, several times a second, so his upper body flickers (#927). It happens under `viewdemo` at a frame rate above the demo's packet rate. A switch of its own, not part of `ds_spec_match_pov`: it is a bug in how the game draws a model, which HLTV only shows more often, not a difference in what an HLTV demo records. Stands down in a POV demo, where the clock (almost) never steps back | `goldsrc-hooks/src/strafe_twitch.rs`, [`goldsrc_dod_quirks.md`](goldsrc_dod_quirks.md) |
 | `ds_hud_hide_voice_menus` | `0` | hides the numbered menus a POV demo's player picked voice commands and hand signals from: the three voice-command menus (`voice_menu1`-`3`, which the server sends as `ShowMenu` with the nine `#Menu_*Voice*` keys) and the command menu `+commandmenu` opens, where the hand signals are. The menus still take the recorded number presses, so weapon switches replay as recorded; other `ShowMenu` text menus (server plugin votes) still show. While on, `+commandmenu` doesn't open in live play either. Turning it on or off with a voice menu up hides or shows it at once | `goldsrc-hooks/src/voice_menus.rs` |
+| `ds_hud_hide_hints` | `1` | hides DoD's auto-help hint box, the tip with a soldier's head in the top-left corner that a POV demo shows wherever its player recorded with `_ah 1`. The viewer's own `_ah` can't stop it: `client.dll` never reads `_ah`, and the hint is a flagged `HudText` message in the demo. Stubs `DoDViewport::ShowHint`, the one thing that opens the box, so ordinary `HudText` (map text, DoD's prompts) still shows. On by default: it is the recorder's tutorial and tells a viewer nothing. Turning it on also closes a hint already on screen. Applies in live play too (#286) | `goldsrc-hooks/src/hint_panel.rs` |
 | `ds_hud_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `ds_hud_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
-| `ds_hud_hide_center_text` | `0` | hides the text the server prints in the middle of the screen: every `TextMsg` to `HUD_PRINTCENTER` (destination 4), such as match plugins' `print_center` countdowns and notices. Chat, joins and leaves (destination 3) still show. Turning it on also ends the centre line showing at that moment. Takes the server's copy of the spectator camera mode's name too, but not the game's own (`ds_spec_hide_text` hides both); doesn't reach the clan countdown (`ds_hud_hide_clan_text`) or the engine's own `svc_centerprint` (#677) | `goldsrc-hooks/src/center_text.rs` |
+| `ds_hud_hide_center_text` | `0` | hides the text the server prints in the middle of the screen, whichever way it sends it: every `TextMsg` to `HUD_PRINTCENTER` (destination 4), such as match plugins' `print_center` countdowns and notices, and the engine's own `svc_centerprint`, which `hw.dll` draws itself (one call in its handler becomes `nop`s, per engine build). Chat, joins and leaves (destination 3) still show. Turning it on also ends a `TextMsg` centre line showing at that moment; an engine one stays for its last `scr_centertime`. Takes the server's copy of the spectator camera mode's name too, but not the game's own (`ds_spec_hide_text` hides both); doesn't reach the clan countdown (`ds_hud_hide_clan_text`) (#677) | `goldsrc-hooks/src/center_text.rs`, `goldsrc-hooks/src/engine_center_print.rs` |
+| `ds_hud_hide_server_text` | `0` | hides the coloured HUD messages server plugins put on screen (`set_hudmessage`/`show_hudmessage`: KTP's "Match Pending" and ready lists, practice-mode banners, stats lines). They arrive as `TE_TEXTMESSAGE`, which the engine hands to every `HudText` handler, so no message hook can drop them: one call in `hw.dll`'s `TE_TEXTMESSAGE` handler goes through a filter instead, per engine build. A line the loaded map declares on its own `game_text` still shows, and so does everything on the `HudText` message itself (map text, DoD's prompts). A line already on screen fades out on its own (#677) | `goldsrc-hooks/src/server_hud_text.rs` |
 | `ds_demo_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
 | `ds_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites (world and HUD, #728), decals, detail textures and skies from `dodstudio_hd`, and player sprays from PNGs in `logos` (`ds_player_spray`). `ds_debug_status` counts each kind's loads and replacements (HUD sprites apart from world sprites). A change applies to what loads next -- walls, detail and skies from the next map, models, sprites and decals already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `ds_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `ds_hd_enabled` | same |
@@ -82,6 +86,7 @@ the death cam).
 | `ds_ui_demo_list_count_subfolders` | `0` | a folder row's demo count on the Demos tab includes its subfolders (the Settings tab's "Include subfolders"); `0` counts only the demos directly in it, and a folder with none there but some deeper reads "0 here, 12 inside" (Hide empty folders keeps it, since empty means none at any depth). Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
 | `ds_ui_demo_list_show_counts` | `0` (counting every folder slows the window on a big library) | folders are counted in the background, and folder rows on the Demos tab end in "(N demos)" (the game's own Load Demo window shows no counts either way). `0` counts nothing at all, so a folder opens with no progress bar and no second fill; `ds_ui_demo_list_hide_empty` and `_count_subfolders` need the counts, so they do nothing then and their Settings boxes hide | same, #787 |
 | `ds_demo_other_drives` | `1` | `viewdemo` and `playdemo` open a demo on another drive by its full path, as in `viewdemo "D:/folder/demo"`. The first time a drive is named its root (`D:\`) is added as a search path, last and under the hook's own path ID, and the rest of the path is opened under it; the game's own files are never looked for there. `0` leaves such a name to the game, which does not find it (the Anniversary file system asserts on the `:` and closes the game) | `goldsrc-hooks/src/demo_other_drives.rs`, #776 |
+| `ds_demo_show_load_progress` | `1` | while `viewdemo` is still reading a demo, the stock VCR bar shows a percent and a progress bar where its time label sits (the buffered span over the demo's own playback length, the Playback tab's number), hidden again once the console says "Demo file completely loaded.". Only on the bar layout DoD Studio's launch writes to `dod_addon\resource\DemoPlayerDialog.res` (`native/src/demo_bar_res.rs`, from the user's own `dod\resource` one or the stock `valve` one, never written back), so a game started without `-addons` or without Studio shows nothing; does nothing while `ds_ui_viewdemo_in_panel` is on, since the Playback tab shows it then | `goldsrc-hooks/src/demo_bar_progress.rs`, #465 |
 | `ds_ui_viewdemo_in_panel` | `1` | `viewdemo` opens the DoD Studio window (`ds_ui_panel`) on its Playback tab, which takes the VCR bar's time slider and time label; the stock bar stays off screen while this is on, with the window open or closed (ESC → DoD Studio opens the window again); `0` brings the stock bar back | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `ds_ui_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `ds_ui_resizable_windows` | `1` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
@@ -94,6 +99,17 @@ The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 
 Always a command rather than a cvar when it has subcommands or a variable
 argument count, which a cvar's single value can't hold.
+
+**Named parameters.** A command (or subcommand) that takes more than three
+values, or any optional ones, names its parameters: each value follows its
+name (`killer 3`, `at 7:42`, `id <player> in <demo> to <name>`), and the
+named parts can come in any order. A row of positional values would need
+`-` placeholders for the ones left out, and nobody remembers which slot is
+which (#1021). Short commands with a fixed shape stay positional
+(`scale 2`, `block <id>...`, `fake <killer> <victim> <weapon>`). A value
+with spaces goes in quotes; GoldSrc's console can't put `"` or `;` inside
+one. An unknown name is refused, and the message names it, so a typo never
+silently does something else.
 
 ### `ds_debug_status`
 
@@ -109,8 +125,11 @@ state, not the state from before that line ran.
 ### `ds_hud_deathmsg`
 
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
-one by hand, changes the names' font, or scales the weapon icons. The font
-(#562) and the scale (#728) take effect on the next frame. HLAE's own
+one by hand, changes the names' font, or scales the weapon icons. It also
+changes or hides one recorded kill (`replace`, #1021), and empties the feed
+now, at a new round or when the watched player dies (`clear`). The font
+(#562), the scale (#728), the layout (#1022) and the gap take effect on the next frame.
+HLAE's own
 `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
@@ -126,10 +145,38 @@ one by hand, changes the names' font, or scales the weapon icons. The font
 | `ds_hud_deathmsg block clear` | stop hiding anything |
 | `ds_hud_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `ds_hud_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
-| `ds_hud_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font (`scale` sizes the icon); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
+| `ds_hud_deathmsg replace [killer <id>] [victim <id>] [at <time>] [in <demo>[,<demo>...]] with [killer <id>] [victim <id>] [weapon <weapon>]` | change one kill-feed line as it arrives (see below) |
+| `ds_hud_deathmsg replace ... with hide` | hide just that line |
+| `ds_hud_deathmsg replace list` / `remove <n>` / `clear` | list the lines (numbered), drop one, or drop them all |
+| `ds_hud_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font (`scale` sizes the icon); each name keeps its team colour. Past Latin-1 the face draws the characters it has (Bahnschrift: accented Latin, Cyrillic, Greek, `™`, `€`) and Tahoma the rest, as the game would; a missing one with a plain form is written that way instead (`⅞` as `7/8`) and stays in the face. The `outline` flag is accepted but this engine's font renderer has none: use the `outline` subcommand |
 | `ds_hud_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
-| `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale` or `font` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
+| `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale`, `font`, `outline` or `background` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
 | `ds_hud_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
+| `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it; each box is only as wide as its icon's art, so the names sit as close to a stick grenade as to a rifle (`gap` sets that space). It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
+| `ds_hud_deathmsg layout default` | the game's own boxes and spacing, with whatever icons the sheets hold (the default) |
+| `ds_hud_deathmsg gap <0..64>` | with `layout even`: that many screen px (not scaled by `scale`) between each name and the icon's art, on both sides, from the next frame on. Counted from the name's `outline` when one is drawn, and on the killer's side from the `font`'s `shadow` (1 px), so the visible space stays the same with them on; the names' own side bearings (a px or two per glyph) stay as the font draws them. The atlas's boxes are trimmed to each icon's art (atlas v2, `killfeed_icons.py --even`), so it is the same for a stick grenade as for a rifle; an atlas built before keeps each icon's empty columns |
+| `ds_hud_deathmsg gap default` | the game's spacing: 5 px between the killer's name and the icon, none between the icon and the victim's name (the default); with the trimmed atlas that is how far every icon now sits, as a rifle always did |
+| `ds_hud_deathmsg outline <0..4> [colour] [alpha]` | outline every name that many px (default black, alpha 255), drawn as the name repeated around itself before the coloured pass; works with the game's font (always opaque there: the engine's text call takes no alpha) and with `font`. `0` is off |
+| `ds_hud_deathmsg outline default` | no outline (the default) |
+| `ds_hud_deathmsg background <alpha> [colour] [padding]` | one translucent box behind each line, from the killer's name to the victim's, `alpha` 0..255, colour default black, `padding` 0..64 px sideways (default 4); the box is the line's height, 2 px short so two lines' boxes don't overlap |
+| `ds_hud_deathmsg background team <alpha> [padding]` | a box behind each name instead, in a dark shade (a quarter) of that name's team colour; the icon gets none |
+| `ds_hud_deathmsg background allies <colour>` / `background axis <colour>` | that team's box colour for `background team` (`allies` covers the British, who are team 1 on a British map); `background allies default` goes back to the shade |
+| `ds_hud_deathmsg background default` | no boxes (the default), and `allies`/`axis` back to the shade |
+| `ds_hud_deathmsg clear` | empty the kill feed now (each line goes on the next frame, the way an expired one does); works in Scheduled Commands at a tick |
+| `ds_hud_deathmsg clear_on restart <0\|1> [delay]` | at every new round, `delay` seconds later (default 0, up to 600), clear the lines that were up when it restarted; lines that arrive during the delay stay (see below) |
+| `ds_hud_deathmsg clear_on death <0\|1> [delay]` | when the player the view belongs to dies (a POV demo's recorder, or the player an HLTV demo watches in eye), `delay` seconds later, clear the lines up at the death, that death's own line included; later lines stay |
+| `ds_hud_deathmsg clear_on default` | neither (the default) |
+
+`clear_on restart` follows DoD's `RoundState` reset, the message that starts
+every round. In 176 WSOD25 demos (POV and HLTV) it came 3 s after every round
+win (5 s on some servers), when a clan match went live (both teams ready, then
+the 10 s count), at the start of a recording, and every 20 s while a server
+said there were not enough players. A half that ends on the map's time limit
+sends none: the map changes, and the next demo starts with an empty feed. A
+single flag capture sends none either, and a full cap's own lines stay up
+through the win: they go at the restart.
+
+A `colour` for `outline` and `background` is three numbers `r g b`, each 0..255 (`10 40 110`), or one hex colour: `#0a286e`, the short `#0af` (each digit doubled, so `#00aaff`), or six digits without the `#` (`0a286e`). Three digits need their `#`, since `255` on its own is a number. The `#` works from the console and from a cfg line alike, e.g. `ds_hud_deathmsg background allies #0a286e`.
 
 A `block` id is any of:
 
@@ -148,6 +195,46 @@ A `block` id is any of:
 Mix them freely. `ds_hud_deathmsg block !self !76561197975574370` shows
 only your own frags in both kinds of demo: in a POV demo both entries point
 at you, and in an HLTV demo `self` drops out and the SteamID finds you.
+
+#### `replace`: change or hide one kill (#1021)
+
+`replace` rewrites a recorded kill's line in the kill feed: who got it, who
+died, or the weapon. The motivating case is a kill the recorder stole from a
+teammate, shown as the teammate's:
+
+    ds_hud_deathmsg replace killer self victim STEAM_0:0:5550001 at 7:42 in dice-wsod25_r03 with killer STEAM_0:1:5550002
+
+- **Before `with`: which kill.** `killer` and `victim` take an id as `block`
+  does (a slot, a SteamID in any form, or `self`); at least one of them is
+  needed, so a slip can't change every kill. `at` is the demo bar's clock
+  (the one `ds_demo_seek_to` takes), as `m:ss`, `h:mm:ss` or seconds, and
+  matches within 2 s. `in` takes a demo file name, a comma list, or `*`
+  patterns (`wsod25_r03_*`), compared with the loaded demo's file name
+  without its folder or `.dem`; without `in` the line applies to every demo.
+  A part left out matches any.
+- **After `with`: what changes.** `killer <id>`, `victim <id>`, `weapon
+  <weapon>` (the names `fake` takes, or `1..43`); a part left out stays as
+  recorded. Or `hide` alone, which hides just that line. The names' colours
+  follow the new killer's and victim's teams.
+- **Named, any order**, per the rule above.
+- **Refused, with the reason:** no `killer` or `victim` before `with`;
+  nothing after `with`; no `with`; a word given twice; an unknown word,
+  named in the message.
+- **Warned, not refused:** `self` or a slot without `in`, since each is a
+  different player in each demo ("self is a different player in each POV
+  demo; add `in <demo>` or use a SteamID").
+- **The kill feed only**, and the console's kill line with it. The
+  scoreboard's frags, the POV effects (red screen, kill sound) and the demo
+  file are untouched. A new killer or victim has to be in the demo; when
+  they aren't, the line shows as recorded and the console says so once.
+- The first line that matches a kill decides. `block` then filters the
+  feed as `replace` left it. `fake` lines are not changed. The same line
+  sent twice (a batch's Initial Commands run again for every demo) is kept
+  once.
+- A kill played again after a seek matches again. During a stepped forward
+  seek the world clock runs up to one 5 s step ahead of the kills being
+  read, so the match then allows that whole step. Under `playdemo`, which
+  has no demo bar, `at` uses the client's clock instead (not measured).
 
 ### `ds_hud_hide_element`
 
@@ -259,7 +346,13 @@ sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 answer from the console, for key binds. Bare prints where the review is.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
-move the camera off the highlight's player (#826).
+move the camera off the highlight's player (#826), and the console refuses
+the commands that move the demo or the camera (seeks, `dem_*`, `viewdemo`
+and other loads, `stop`, `disconnect`, `spec_mode`, `ds_spec_target`,
+`spec_autodirector`, `mirv_input`, ...) with one line saying so; a typed
+`host_framerate` or `spec_autodirector_internal` is put back
+(#855). The lists are in `src/review_lock.rs`; `ds_demo_review` itself
+always works.
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
 pipe. See `src/review.rs`.
 
@@ -405,6 +498,53 @@ batch draws recorded sprays and would only change the file on disk.
 Source: `goldsrc-hooks/src/spray.rs`, `goldsrc-hooks/src/spray_hltv.rs`
 (offsets checked by `goldsrc-hooks/tools/verify_hltv_spray_offsets.py`).
 
+### `ds_player_change_name`
+
+Renames a player everywhere their name shows during playback: the kill
+feed, the scoreboard, the aim-at-teammate name, the voice icon, chat, the
+capture lines and the join and team lines (#1021). The demo files stay as
+they are.
+
+```
+ds_player_change_name add id <slot | SteamID | self> [in <demo>[,<demo>...]] to <new name>
+ds_player_change_name list
+ds_player_change_name remove <n>
+ds_player_change_name clear
+```
+
+- **`id`**: a SteamID in any form `ds_hud_deathmsg block` takes
+  (`STEAM_0:1:5550002`, `[U:1:11100005]`, `7656119...`; `ds_hud_deathmsg
+  players` lists them), a slot (1-32), or `self`, the recording player of a
+  POV demo. Bots have no SteamID, so they go by slot.
+- **`in`**: one demo, a comma list, or `*` patterns, matched against the
+  loaded demo's file name without `.dem` (`in wsod25_r03_*`). Without `in`,
+  every demo.
+- **`to`**: the new name, up to 63 characters; quoted when it has spaces or
+  any of `: , ( ) { } '`. No `%`. Unquoted, the console splits a name at
+  `:` and `,` and loses the spaces beside them (`dicE[: :]Alex` arrives as
+  `dicE[::]Alex`), so the pieces are glued back with a warning that shows
+  the name as it now reads.
+- `self` or a slot without `in` gets a warning, not a refusal: "self is a
+  different player in each POV demo; add `in <demo>` or use a SteamID".
+- Refused, with the reason: `add` without `id` and `to`, any unknown word, a
+  value given twice, a bad id, a name too long.
+- When two renames match one player, one with `in` wins over one without,
+  then the one added last. `add` with the same `id` and `in` again changes
+  that rename's name instead of adding another.
+- `list` numbers the renames and says who each one renames in the demo
+  playing now; `remove <n>` takes that number.
+
+How: a detour of `client.dll`'s copy of `pfnGetPlayerInfo` (slot 21), which
+hands out the new name; the names the hook itself looks up go through the
+engine's own table, so SteamID matching always sees the real player. The
+server wrote the sender's name into each chat line, so `SayText` is rewritten
+too (the game then colours the new name, since it finds the detour's name in
+the line), and a `TextMsg` argument equal to a renamed player's real name
+(`*<name> joined Axis`) is swapped. A name over 31 characters lifts the kill
+feed's copy cap (`strncpy(..., 32)` into its 64-byte fields) to 63; checked by
+`goldsrc-hooks/tools/verify_killfeed_name_cap_offsets.py`. Source:
+`goldsrc-hooks/src/player_names.rs`, `goldsrc-hooks/src/deathmsg/name_cap.rs`.
+
 ### `ds_map_hide_asset`
 
 `ds_map_hide_asset` stops the game drawing an asset -- a sprite, model
@@ -490,6 +630,10 @@ the first time and never overwritten. The empty `...Slot` controls in
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
 `slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
 or `engine <console command>`. See `src/studio_panel.rs` (#408).
+
+## Stock settings the hook extends
+
+- **`hud_fastswitch 1` also keeps the weapon list hidden in demo playback (#1032).** A POV demo replays the player's number keys, and the game's own `SelectSlot` opens the weapon list even with fast switch when the key's slot holds two weapons. In DoD that happens to the grenade key after a primed grenade is caught with USE: the caught one becomes a weapon of its own beside the class's grenade. While a demo plays with `hud_fastswitch 1`, the hook skips drawing the list (one code byte in `CHudAmmo::DrawWeaponList`); the weapon still switches as recorded. With `hud_fastswitch 0` playback shows the list as the player saw it, and live play is unchanged either way. `ds_debug_status` gets a `weapon list:` line once it has hidden it. `goldsrc-hooks/src/weapon_list.rs`.
 
 ## Renamed from `dodstudio_` (#555)
 

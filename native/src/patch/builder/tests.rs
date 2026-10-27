@@ -375,7 +375,7 @@ fn in_obs_mode_normal_speed_puts_back_the_pinned_fps() {
     )
     .expect("helper cfg written");
     assert!(
-        cfg.contains("; fps_override 1; fps_max 120; gl_vsync 1\""),
+        cfg.contains("; fps_override 1; fps_max 240; gl_vsync 0\""),
         "{cfg}"
     );
 }
@@ -736,7 +736,7 @@ fn the_movie_modes_record_aliases_are_unchanged_by_agr_mode() {
     }
     assert_eq!(
         record_alias_lines(&config_in_mode(crate::patch::CaptureMode::Obs)),
-        "alias sys_record_start \"stopsound\"\n\
+        "alias sys_record_start \"echo [dod-studio] OBS_MODE_NO_HLAE_START\"\n\
          alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
     );
     for mode in [
@@ -964,7 +964,7 @@ fn keep_game_behind_sets_stay_behind_and_never_the_speed() {
 }
 
 #[test]
-fn obs_mode_pins_fps_override_and_fps_max_to_obs_capture_fps() {
+fn obs_mode_has_the_game_draw_at_twice_obs_capture_fps_with_vsync_off() {
     let mut config = PatcherConfig::default();
     config.capture_mode = crate::patch::CaptureMode::Obs;
     config.capture_fps = 300; // must not leak into fps_max — see below
@@ -975,9 +975,24 @@ fn obs_mode_pins_fps_override_and_fps_max_to_obs_capture_fps() {
         "expected fps_override 1, got: {commands:?}"
     );
     assert!(
-        commands.iter().any(|c| c == "fps_max 120"),
-        "expected fps_max 120 (from obs_capture_fps, not capture_fps), got: {commands:?}"
+        commands.iter().any(|c| c == "fps_max 240"),
+        "expected fps_max 240 (twice obs_capture_fps, not capture_fps), got: {commands:?}"
     );
+    assert!(
+        commands.iter().any(|c| c == "gl_vsync 0"),
+        "expected gl_vsync 0, got: {commands:?}"
+    );
+}
+
+#[test]
+fn obs_game_fps_max_stays_inside_the_engine_cap() {
+    let mut config = PatcherConfig::default();
+    config.obs_capture_fps = 60;
+    assert_eq!(obs_game_fps_max(&config), 120);
+    config.obs_capture_fps = 600;
+    assert_eq!(obs_game_fps_max(&config), 1000);
+    config.obs_capture_fps = 0;
+    assert_eq!(obs_game_fps_max(&config), 120);
 }
 
 #[test]
@@ -1753,6 +1768,7 @@ fn test_ffd_allocation_succeeds_where_arrival_order_would_strand_a_block() {
 
     let assignments = allocate_blocks_first_fit_decreasing(
         &block_estimates,
+        &[0, 1],
         &mut drive_free,
         &mut active_drive_idx,
         0,
@@ -1776,12 +1792,57 @@ fn test_ffd_allocation_fails_when_no_drive_has_room() {
 
     let result = allocate_blocks_first_fit_decreasing(
         &block_estimates,
+        &[0, 1],
         &mut drive_free,
         &mut active_drive_idx,
         0,
     );
 
     assert_eq!(result, Err(0));
+}
+
+/// #774: two capture folders on one drive share its free space. With room
+/// for one block, the second block must not land on the other folder as if
+/// the drive's space were there twice.
+#[test]
+fn test_ffd_two_folders_on_one_drive_share_one_budget() {
+    let block_estimates = vec![10u64, 10u64];
+    let mut volume_free = vec![15u64];
+    let mut active_drive_idx = 0usize;
+
+    let result = allocate_blocks_first_fit_decreasing(
+        &block_estimates,
+        &[0, 0],
+        &mut volume_free,
+        &mut active_drive_idx,
+        0,
+    );
+
+    assert_eq!(result, Err(1));
+}
+
+/// #774, through the planner: `group_by_volume` maps two folders on one
+/// drive to one budget, so the allocator sees the drive's space once.
+#[cfg(windows)]
+#[test]
+fn test_two_capture_folders_on_one_drive_get_one_block_of_room() {
+    let dirs = vec![
+        std::path::PathBuf::from(r"C:\a"),
+        std::path::PathBuf::from(r"C:\b"),
+    ];
+    let (volume_of_drive, mut volume_free) = crate::sys::disk::group_by_volume(&dirs, |_| 15);
+    let mut active_drive_idx = 0usize;
+
+    let result = allocate_blocks_first_fit_decreasing(
+        &[10, 10],
+        &volume_of_drive,
+        &mut volume_free,
+        &mut active_drive_idx,
+        0,
+    );
+
+    assert_eq!(result, Err(1));
+    assert_eq!(volume_free, vec![5]);
 }
 
 /// A regression guard for #198's fix -- `workspace_guard_drop_actually_
@@ -1925,4 +1986,23 @@ fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
     let merged = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 3.0);
     assert!(merged <= estimate_batch_capture_bytes(&streaks, &config));
     assert_eq!(estimate_batch_capture_bytes(&[], &config), 0);
+
+    // Per drive (#716): the two that merge are one block, billed at both
+    // estimates; one far later, and another player's, are blocks of their own.
+    assert_eq!(
+        estimate_batch_capture_blocks(&streaks, &config),
+        vec![2 * one]
+    );
+    let mut other_player = streak(1000, 1200);
+    other_player.player_index = 1;
+    let spread = vec![
+        streak(2500, 2700),
+        streak(1000, 1200),
+        other_player,
+        streak(1100, 1300),
+    ];
+    let mut blocks = estimate_batch_capture_blocks(&spread, &config);
+    blocks.sort_unstable();
+    assert_eq!(blocks, vec![one, one, 2 * one]);
+    assert!(estimate_batch_capture_blocks(&[], &config).is_empty());
 }

@@ -12,7 +12,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [hlae_protocols.md](hlae_protocols.md) — launching HLAE, how a batch ends, checking a take.
 - [command_tiers.md](command_tiers.md) — which commands Initial and Scheduled Commands refuse, warn about or ignore, and why.
 - [direct_to_video_capture.md](direct_to_video_capture.md) — capturing straight to video with `mirv_movie_ffmpeg`.
-- [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: how it is driven, measurements, failure modes, open questions.
+- [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: the settings Studio gives OBS, OBS measured against HLAE, how it is driven, failure modes, open questions.
 
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
@@ -33,7 +33,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_decals.md](goldsrc_decals.md) — clearing decals at runtime.
 - [goldsrc_ex_interp.md](goldsrc_ex_interp.md) — raising the interpolation ceiling.
 - [goldsrc_hltv_animation_fix.md](goldsrc_hltv_animation_fix.md) — gun animations in HLTV demos.
-- [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV demos lose.
+- [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV and POV demos lose (`ds_sound_restore_gunshots`).
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
 - [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — hiding any HUD element by name (`ds_hud_hide_element`), and why some are not offered.

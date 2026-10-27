@@ -235,6 +235,11 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     if record.is_null() {
         return EXCEPTION_CONTINUE_SEARCH;
     }
+    // A write that `patch` re-arms and resumes, when this handler went into
+    // the chain ahead of patch's (#1059): not a crash.
+    if unsafe { crate::patch::is_mendable_fault(info) } {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     let code = unsafe { (*record).ExceptionCode } as u32;
     if code == BREAKPOINT {
         let address = unsafe { (*record).ExceptionAddress } as usize;

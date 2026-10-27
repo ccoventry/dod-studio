@@ -102,12 +102,18 @@ mod tests {
         "debug_log_gun_lowered",
         "debug_log_server_sounds",
         "debug_log_view_bob",
+        "demo_show_load_progress",
         "hud_hide_center_text",
+        "hud_hide_hints",
+        "hud_hide_server_text",
         "hud_overview_hide_speaker",
+        "player_change_name",
         "player_fix_model_flicker",
         "sound_mute_flag_capture",
         "sound_mute_victory_music",
+        "sound_restore_gunshots",
         "spec_hide_text",
+        "view_show_own_blood",
     ];
 
     #[test]

@@ -54,6 +54,9 @@ describe('suggestions (#215)', () => {
     expect(tierNote('mirv_movie_filename', { scheduled: false }).level).toBe('noop');
     expect(tierNote('exec', { scheduled: true, seeks: false }).level).toBe('noop');
     expect(tierNote('sensitivity', { scheduled: true })).toBeNull();
+    // #1021: an ordinary user command, in Initial and Scheduled alike.
+    expect(tierNote('ds_player_change_name', { scheduled: false })).toBeNull();
+    expect(tierNote('ds_player_change_name', { scheduled: true })).toBeNull();
   });
 
   it("knows the fast-forward's cvars (#724): r_norefresh refused, fps_max honoured in Initial, short-lived scheduled", () => {

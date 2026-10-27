@@ -346,7 +346,8 @@ fn remove_finished(app: &AppHandle, finished_takes: Vec<String>, report: bool) {
 }
 
 /// Before a job: with "Only when space is needed", deletes the oldest finished
-/// takes on the job's drives until `need` fits. Blocking.
+/// takes on the drive that needs them until every piece of `need` fits on a
+/// drive of its own. Blocking.
 ///
 /// `cancel` stops it between takes. `on_step(line, done, total)` gets each
 /// progress line as it is emitted, for a caller with its own status line (the
@@ -410,7 +411,7 @@ pub(crate) fn make_room(
             available_bytes,
         } => {
             log_markdown(&format!(
-                "[take-cleanup] Making room for {}: it needs {} on its drives, and deleting every finished take there would give only {}. No takes were deleted.",
+                "[take-cleanup] Making room for {}: it needs {} free on one drive, and deleting every finished take on its drives would leave at most {} on any one. No takes were deleted.",
                 why.job(),
                 format_gb(needed_bytes),
                 format_gb(available_bytes)

@@ -37,6 +37,7 @@ const CLEAN_CLIPS: &[&str] = &[
     "ds_spec_hide_text 1",
     "ds_hud_hide_scoreboard 1",
     "ds_hud_hide_voice_menus 1",
+    "ds_hud_hide_hints 1",
     "ds_hud_hide_crosshair 0",
     "ds_hud_hide_map_text 1",
     "ds_hud_hide_clan_text 1",

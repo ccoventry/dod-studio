@@ -91,7 +91,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
     const keepGameBehind = document.querySelector('#config-keep-game-behind')?.checked ?? true;
 
-    const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
+    const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores_422';
     const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
