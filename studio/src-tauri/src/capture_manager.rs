@@ -3393,6 +3393,13 @@ pub async fn close_running_game(pid: u32) -> Result<(), String> {
     .await
 }
 
+/// What "Launch OBS" passes OBS. `--disable-updater` stops OBS's "New update
+/// available" box, which otherwise opens in front of the user's windows while
+/// a batch keeps the game behind them (#645). Not `--minimize-to-tray`: OBS's
+/// websocket works from the tray (measured, OBS 32.2.2), but this button is
+/// there to open OBS, often to set that websocket up in the first place.
+const OBS_LAUNCH_ARGS: &[&str] = &["--disable-updater"];
+
 /// Launches OBS Studio from the configured `obs_exe_path`, spawn-and-forget —
 /// same shape as `launch_standalone_game`, minus the whole HLAE/hl.exe
 /// process-building step, since this just starts the user's own program.
@@ -3425,6 +3432,7 @@ pub async fn launch_obs(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(parent) = Path::new(&obs_exe_path).parent() {
             cmd.current_dir(parent);
         }
+        cmd.args(OBS_LAUNCH_ARGS);
         cmd.spawn().map_err(crate::messages::failed_to_launch_obs)?;
         Ok(())
     }))
@@ -3647,6 +3655,14 @@ mod tests {
     use super::*;
     use crate::test_support::Scratch;
     use native::patch::PatchStage;
+
+    /// OBS's update box opens in front of the user's windows; the minimised
+    /// tray start would hide the window this button exists to open.
+    #[test]
+    fn launch_obs_disables_the_updater_and_keeps_the_window() {
+        assert!(OBS_LAUNCH_ARGS.contains(&"--disable-updater"));
+        assert!(!OBS_LAUNCH_ARGS.contains(&"--minimize-to-tray"));
+    }
 
     /// The running-game check compares against what a launch would use: the
     /// caller's unsaved values over the saved settings, blanks ignored (#666).
