@@ -56,6 +56,12 @@ The demo Studio's OBS capture test plays (#646), bundled with the app under
 - **The test records** 1:32 to 2:30: 1:32-1:52 has 11 grenades and 6 kills,
   2:10-2:30 has 6 grenades and 6 kills.
 - **Size:** 6.5 MB.
+- **Still lighter to encode than a detailed map:** on an RTX 3070 Ti at OBS
+  Quality High it holds 200 fps where a real `dod_harrington` match fails at
+  165. So "Find my highest steady FPS" recommends one ladder step below the
+  highest rate that held on this demo (`recommendedRate` in
+  `studio/src/obs_capture_test_logic.js`); on a player's own demo it
+  recommends the highest steady rate itself.
 
 **Tests that use it:** `desktop-studio`'s `obs_test_manager` tests (the file
 is there, and its highlights fill `BUNDLED_WINDOW`), and `hl-demo-auditor`'s

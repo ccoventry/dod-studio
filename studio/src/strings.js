@@ -3213,7 +3213,7 @@ export const STRINGS = {
         "Records about a minute of a demo that comes with DoD Studio, through a normal batch at your OBS Capture FPS and OBS Quality, then says whether this PC keeps up: frames OBS skipped or missed, frames the game didn't draw in time, and whether the clip has sound. The game opens for about a minute and a half; the clip is deleted afterwards.",
     LADDER_BUTTON: 'Find my highest steady FPS',
     LADDER_BUTTON_TITLE:
-        'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. About a minute and a half per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
+        'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. On the bundled demo it recommends one step below that, for maps that are busier to encode. About a minute and a half per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
     LONG_LABEL: '1-minute clips',
     LONG_TITLE: "Longer clips catch a PC that slows down as it warms up. On one of your own demos each rate takes about 40 s longer; the bundled demo's clip is about a minute already.",
     STOP_BUTTON: 'Stop test',
@@ -3255,7 +3255,14 @@ export const STRINGS = {
     SOUND_MISSING: "Sound: the clip has no sound track. Check OBS's [DoD-Studio] Game Audio source.",
     SOUND_SILENT: "Sound: the clip is silent. Check that OBS's [DoD-Studio] Game Audio source isn't muted.",
     COUNTERS_UNREAD: "OBS's own frame counters couldn't be read, so only the clip itself was checked.",
-    ladderBest: (rate, quality) => `Highest steady rate at OBS Quality ${quality}: ${rate} fps.`,
+    ladderBest: (best, recommended, quality) =>
+        `Steady up to ${best} fps at OBS Quality ${quality} on this demo. Recommended: ${recommended} fps (one step lower, for busier maps).`,
+    ladderBestEdge: (rate, quality) =>
+        `Steady only at ${rate} fps at OBS Quality ${quality} on this demo. Recommended: ${rate} fps, but it's at the edge: busier maps may not hold it.`,
+    ladderBestOwn: (rate, quality) =>
+        `Steady up to ${rate} fps at OBS Quality ${quality} on your demo (its busiest stretch). Recommended: ${rate} fps.`,
+    LADDER_MARGIN_WHY:
+        "Why lower: the bundled demo is lighter to encode than maps with more detail (on an RTX 3070 Ti it held 200 fps at High, where a dod_harrington match failed at 165). Test one of your own demos for a tighter number.",
     LADDER_NONE: 'No rate held steady, not even 60 fps.',
     ladderFirstFail: (rate, level, cause) => `${rate} fps: ${level}, ${cause}.`,
     ladderAllPassed: (rate) => `Every rate up to ${rate} fps held.`,

@@ -83,10 +83,14 @@ test('one test clip runs as an OBS batch at the current settings, shows its step
   expect(deleted.takeFolder).toBe(`D:\\captures\\${batch.payload.session_id}\\dodstudio_benchmark_anzio_b0`);
 });
 
-test('the ladder climbs until a rate clearly fails, reports the highest steady one and can apply it', async ({ page }) => {
+test('the ladder climbs until a rate clearly fails and recommends one step below the highest steady one', async ({ page }) => {
   await gotoHarness(page, { verdicts: { 165: notSteady } });
   await page.click('#obs-fps-ladder-btn');
-  await expect(page.locator('#obs-test-result')).toContainText('Highest steady rate at OBS Quality High: 144 fps.', { timeout: 10000 });
+  await expect(page.locator('#obs-test-result')).toContainText(
+    'Steady up to 144 fps at OBS Quality High on this demo. Recommended: 120 fps (one step lower, for busier maps).',
+    { timeout: 10000 },
+  );
+  await expect(page.locator('#obs-test-result')).toContainText('Why lower: the bundled demo is lighter to encode');
   await expect(page.locator('#obs-test-result')).toContainText("165 fps: Not sustainable, OBS's encoder couldn't keep up.");
   const rates = (await invocations(page, 'start_capture_batch')).map((a) => a.payload.obs_capture_fps);
   expect(rates).toEqual([60, 120, 144, 165]);
@@ -95,20 +99,36 @@ test('the ladder climbs until a rate clearly fails, reports the highest steady o
   await expect.poll(async () => (await invocations(page, 'obs_test_connection')).length).toBeGreaterThan(1);
   const last = (await invocations(page, 'obs_test_connection')).pop();
   expect(last.obsCaptureFps).toBe(144);
-  // The field already says 144: nothing to apply.
-  await expect(page.locator('#obs-test-apply-btn')).toHaveJSProperty('hidden', true);
+  // The button offers the recommended rate, not the highest steady one.
+  await expect(page.locator('#obs-test-apply-btn')).toHaveText('Use 120 fps');
 });
 
-test('"Use N fps" sets OBS Capture FPS to the highest steady rate', async ({ page }) => {
-  await gotoHarness(page, { verdicts: { 144: notSteady } });
+test('"Use N fps" sets OBS Capture FPS to the recommended rate', async ({ page }) => {
+  await gotoHarness(page, { verdicts: { 200: notSteady } });
   await page.check('#obs-test-long');
   await page.click('#obs-fps-ladder-btn');
-  await expect(page.locator('#obs-test-apply-btn')).toHaveText('Use 120 fps', { timeout: 10000 });
+  await expect(page.locator('#obs-test-apply-btn')).toHaveText('Use 165 fps', { timeout: 10000 });
+  // The table still shows every rate tried, the highest steady one included.
+  await expect(page.locator('#obs-test-rows tr')).toHaveCount(6);
+  await expect(page.locator('#obs-test-rows tr').nth(4).locator('td').first()).toHaveText('180');
   expect((await invocations(page, 'obs_test_clip'))[0]).toEqual({ seconds: 60, demo: null });
   await page.click('#obs-test-apply-btn');
-  await expect(page.locator('#config-obs-capture-fps')).toHaveValue('120');
-  await expect(page.locator('#obs-test-result')).toContainText('OBS Capture FPS is now 120.');
+  await expect(page.locator('#config-obs-capture-fps')).toHaveValue('165');
+  await expect(page.locator('#obs-test-result')).toContainText('OBS Capture FPS is now 165.');
   expect(await page.evaluate(() => window.__persisted)).toBe(1);
+});
+
+test("on the player's own demo the ladder recommends the highest steady rate itself", async ({ page }) => {
+  await gotoHarness(page, { verdicts: { 180: notSteady } });
+  await page.evaluate(() => { window.__mockInvokeHandlers['plugin:dialog|open'] = () => 'D:/demos/match.dem'; });
+  await page.click('#obs-test-demo-pick-btn');
+  await page.click('#obs-fps-ladder-btn');
+  await expect(page.locator('#obs-test-result')).toContainText(
+    'Steady up to 165 fps at OBS Quality High on your demo (its busiest stretch). Recommended: 165 fps.',
+    { timeout: 10000 },
+  );
+  await expect(page.locator('#obs-test-result')).not.toContainText('Why lower');
+  await expect(page.locator('#obs-test-apply-btn')).toHaveText('Use 165 fps');
 });
 
 test('an open game stops the test before any batch', async ({ page }) => {

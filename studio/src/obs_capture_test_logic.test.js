@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FPS_LADDER, LEVEL, pct, lowerRate, adviceFor, adviceText, ladderStops, highestSteady,
-  firstFailure, ladderSummary, stepLines, testSessionId, soundText, gameText, gameCell,
+  firstFailure, ladderSummary, recommendedRate, stepLines, testSessionId, soundText, gameText, gameCell,
 } from './obs_capture_test_logic.js';
 
 const v = (level, cause = 'none', extra = {}) => ({
@@ -57,12 +57,42 @@ describe('obs capture test logic', () => {
     expect(highestSteady(results)).toBe(165);
     expect(firstFailure(results).rate).toBe(180);
     const lines = ladderSummary(results, 'high');
-    expect(lines[0]).toBe('Highest steady rate at OBS Quality High: 165 fps.');
-    expect(lines[1]).toContain('180 fps: Not sustainable');
+    expect(lines[0]).toBe('Steady up to 165 fps at OBS Quality High on this demo. Recommended: 144 fps (one step lower, for busier maps).');
+    expect(lines[1]).toContain('dod_harrington');
+    expect(lines[2]).toContain('180 fps: Not sustainable');
     expect(highestSteady([{ rate: 60, verdict: v(LEVEL.NOT_STEADY) }])).toBeNull();
-    expect(ladderSummary([{ rate: 60, verdict: v(LEVEL.NOT_STEADY, 'encoder') }], 'standard')[0]).toContain('not even 60');
+    const none = ladderSummary([{ rate: 60, verdict: v(LEVEL.NOT_STEADY, 'encoder') }], 'standard');
+    expect(none[0]).toContain('not even 60');
+    expect(none.join('\n')).not.toContain('Recommended');
     const all = FPS_LADDER.map((rate) => ({ rate, verdict: v(LEVEL.STEADY) }));
-    expect(ladderSummary(all, 'standard')[1]).toContain('Every rate up to 240');
+    expect(ladderSummary(all, 'standard')[0]).toContain('Recommended: 200 fps');
+    expect(ladderSummary(all, 'standard')[2]).toContain('Every rate up to 240');
+  });
+
+  it('recommends one ladder step below the highest steady rate on the bundled demo', () => {
+    const upTo = (top) => FPS_LADDER.filter((r) => r <= top).map((rate) => ({ rate, verdict: v(LEVEL.STEADY) }));
+    expect(recommendedRate(upTo(200))).toEqual({ best: 200, rate: 180, margin: 'step' });
+    expect(recommendedRate(upTo(144))).toEqual({ best: 144, rate: 120, margin: 'step' });
+    expect(recommendedRate(upTo(240))).toEqual({ best: 240, rate: 200, margin: 'step' });
+    // Only the lowest step held: recommend it, and say it's at the edge.
+    expect(recommendedRate(upTo(60))).toEqual({ best: 60, rate: 60, margin: 'edge' });
+    const edge = ladderSummary([...upTo(60), { rate: 120, verdict: v(LEVEL.NOT_STEADY, 'encoder') }], 'high');
+    expect(edge[0]).toBe("Steady only at 60 fps at OBS Quality High on this demo. Recommended: 60 fps, but it's at the edge: busier maps may not hold it.");
+    expect(recommendedRate([{ rate: 60, verdict: v(LEVEL.NOT_STEADY) }])).toBeNull();
+  });
+
+  it("recommends the highest steady rate itself on the player's own demo", () => {
+    const results = [
+      { rate: 60, verdict: v(LEVEL.STEADY) },
+      { rate: 120, verdict: v(LEVEL.STEADY) },
+      { rate: 144, verdict: v(LEVEL.STEADY) },
+      { rate: 165, verdict: v(LEVEL.NOT_STEADY, 'encoder') },
+    ];
+    expect(recommendedRate(results, { ownDemo: true })).toEqual({ best: 144, rate: 144, margin: 'none' });
+    const lines = ladderSummary(results, 'high', { ownDemo: true });
+    expect(lines[0]).toBe('Steady up to 144 fps at OBS Quality High on your demo (its busiest stretch). Recommended: 144 fps.');
+    expect(lines.join('\n')).not.toContain('dod_harrington');
+    expect(lines[1]).toContain('165 fps: Not sustainable');
   });
 
   it("writes one clip's result", () => {

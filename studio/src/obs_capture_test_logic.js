@@ -113,12 +113,40 @@ export function firstFailure(results) {
   return results.find((r) => r.rate > best && r.verdict && r.verdict.level !== LEVEL.STEADY) || null;
 }
 
-/** The ladder's summary lines. */
-export function ladderSummary(results, quality) {
+/**
+ * The rate "Find my highest steady FPS" recommends: `{ best, rate, margin }`,
+ * or null when nothing held. On the bundled demo it is one ladder step below
+ * the highest steady rate (`margin: 'step'`), or that rate itself when it is
+ * the lowest step (`margin: 'edge'`): the bundled anzio stretch is lighter to
+ * encode than maps with more detail (#1067: it held 200 fps at High on an
+ * RTX 3070 Ti, a dod_harrington match failed at 165). On the player's own
+ * demo the test already recorded its busiest stretch, so the highest steady
+ * rate is the recommendation (`margin: 'none'`).
+ */
+export function recommendedRate(results, { ownDemo = false } = {}) {
   const best = highestSteady(results);
-  const lines = [best == null
-    ? STRINGS.OBS_TEST.LADDER_NONE
-    : STRINGS.OBS_TEST.ladderBest(best, qualityName(quality))];
+  if (best == null) return null;
+  if (ownDemo) return { best, rate: best, margin: 'none' };
+  const below = FPS_LADDER.filter((r) => r < best);
+  if (!below.length) return { best, rate: best, margin: 'edge' };
+  return { best, rate: below[below.length - 1], margin: 'step' };
+}
+
+/** The ladder's summary lines; `ownDemo` when "Use another demo…" picked one. */
+export function ladderSummary(results, quality, { ownDemo = false } = {}) {
+  const rec = recommendedRate(results, { ownDemo });
+  const q = qualityName(quality);
+  const lines = [];
+  if (!rec) {
+    lines.push(STRINGS.OBS_TEST.LADDER_NONE);
+  } else if (rec.margin === 'none') {
+    lines.push(STRINGS.OBS_TEST.ladderBestOwn(rec.best, q));
+  } else if (rec.margin === 'edge') {
+    lines.push(STRINGS.OBS_TEST.ladderBestEdge(rec.best, q), STRINGS.OBS_TEST.LADDER_MARGIN_WHY);
+  } else {
+    lines.push(STRINGS.OBS_TEST.ladderBest(rec.best, rec.rate, q), STRINGS.OBS_TEST.LADDER_MARGIN_WHY);
+  }
+  const best = rec?.best ?? null;
   const fail = firstFailure(results);
   if (fail) {
     lines.push(STRINGS.OBS_TEST.ladderFirstFail(fail.rate, levelName(fail.verdict.level), causeName(fail.verdict.cause)));

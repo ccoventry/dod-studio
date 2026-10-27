@@ -20,7 +20,7 @@ import { numberField } from './number_field.js';
 import { pickPath } from './pick_path.js';
 import { STRINGS } from './strings.js';
 import {
-  FPS_LADDER, CLIP_SECONDS, pct, levelName, ladderStops, highestSteady, ladderSummary, stepLines, testSessionId,
+  FPS_LADDER, CLIP_SECONDS, pct, levelName, ladderStops, recommendedRate, ladderSummary, stepLines, testSessionId,
   gameCell, FRAME_TIMES_ON, FRAME_TIMES_OFF,
 } from './obs_capture_test_logic.js';
 
@@ -262,6 +262,7 @@ export function createObsCaptureTest({ getState, persist }) {
   ladderBtn.addEventListener('click', async () => {
     if (running || !(await begin())) return;
     const q = quality();
+    const ownDemo = !!panel.dataset.demo;
     const results = [];
     try {
       for (let i = 0; i < FPS_LADDER.length && !stopRequested; i++) {
@@ -271,15 +272,15 @@ export function createObsCaptureTest({ getState, persist }) {
         if (r.verdict) addRow(r);
         if (ladderStops(results)) break;
       }
-      const lines = ladderSummary(results, q);
+      const lines = ladderSummary(results, q, { ownDemo });
       const err = results.find((r) => r.error);
       if (err) lines.push(STRINGS.OBS_TEST.failed(err.error));
-      const best = highestSteady(results);
-      showResult(lines, best == null ? 'not_steady' : 'steady');
+      const rec = recommendedRate(results, { ownDemo });
+      showResult(lines, rec == null ? 'not_steady' : 'steady');
       const current = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-      if (best != null && best !== current) {
-        applyRate = best;
-        applyBtn.textContent = STRINGS.OBS_TEST.applyButton(best);
+      if (rec != null && rec.rate !== current) {
+        applyRate = rec.rate;
+        applyBtn.textContent = STRINGS.OBS_TEST.applyButton(rec.rate);
         applyBtn.hidden = false;
       }
     } finally {
