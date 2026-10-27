@@ -17,9 +17,10 @@ self.onmessage = async ({ data }) => {
     const analysis = analyzeDemo(bytes, report);
     self.postMessage({ id, type: 'done', analysis });
   } catch (err) {
-    // A trap (RuntimeError) means the instance may be broken; the page then
-    // replaces this worker. A parse error comes back as a plain string.
-    const fatal = err instanceof WebAssembly.RuntimeError || err instanceof WebAssembly.CompileError;
+    // A parse error comes back from Rust as a plain string. Anything else (a
+    // trap, a stack overflow's RangeError, the wasm failing to load) may
+    // leave this instance broken, so the page replaces the worker.
+    const fatal = typeof err !== 'string';
     self.postMessage({ id, type: 'error', error: String(err), fatal });
   }
 };

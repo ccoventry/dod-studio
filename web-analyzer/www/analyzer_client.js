@@ -6,7 +6,9 @@ export const CANCELLED = 'cancelled';
 
 /**
  * `analyze(file, onPct)` resolves with the analysis or rejects with the
- * error text; one demo at a time, in call order. `cancel()` stops the demo
+ * error text. Send one demo at a time (main.js waits for each): the worker
+ * reads files asynchronously, so overlapping calls may finish out of order.
+ * `cancel()` stops the demo
  * being parsed (a sync wasm call can't be interrupted, so the worker is
  * replaced) and rejects everything pending with CANCELLED.
  */
@@ -29,8 +31,11 @@ export function createAnalyzerClient(makeWorker) {
 
   function ensureWorker() {
     if (worker) return worker;
-    worker = makeWorker();
-    worker.onmessage = ({ data }) => {
+    const w = makeWorker();
+    worker = w;
+    // Events still queued from a worker already replaced are ignored.
+    w.onmessage = ({ data }) => {
+      if (worker !== w) return;
       const p = pending.get(data.id);
       if (!p) return;
       if (data.type === 'progress') {
@@ -43,18 +48,19 @@ export function createAnalyzerClient(makeWorker) {
         return;
       }
       p.reject(data.error);
-      // A wasm trap (out of memory, a panic) can leave the allocator
-      // mid-update, so the next demo gets a fresh instance: failAll drops
+      // A wasm trap (out of memory, a panic) or a failed load can leave the
+      // instance broken, so the next demo gets a fresh one: failAll drops
       // this worker, and with it anything already queued behind this demo.
       // A parse error is an ordinary result and keeps the instance.
       if (data.fatal) failAll(data.error);
     };
     // The worker script or the wasm failed to load, or the worker died.
-    worker.onerror = (e) => {
+    w.onerror = (e) => {
       e?.preventDefault?.();
+      if (worker !== w) return;
       failAll(e?.message || 'The analyzer worker stopped');
     };
-    return worker;
+    return w;
   }
 
   return {

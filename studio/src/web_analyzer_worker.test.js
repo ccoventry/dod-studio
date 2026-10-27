@@ -94,6 +94,19 @@ describe('createAnalyzerClient', () => {
     });
   });
 
+  it('an error event from a replaced worker does not touch the new one', async () => {
+    const { made, make } = fakeWorkers();
+    const client = createAnalyzerClient(make);
+    const p = client.analyze({ name: 'slow.dem' });
+    client.cancel();
+    await expect(p).rejects.toBe(CANCELLED);
+    const q = client.analyze({ name: 'new.dem' });
+    made[0].onerror({ message: 'terminated', preventDefault() {} });
+    expect(made[1].terminated).toBe(false);
+    made[1].reply({ id: made[1].posted[0].id, type: 'done', analysis: 'fresh' });
+    await expect(q).resolves.toBe('fresh');
+  });
+
   it('a worker that fails to load rejects with its message', async () => {
     const { made, make } = fakeWorkers();
     const client = createAnalyzerClient(make);
