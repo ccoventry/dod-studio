@@ -502,10 +502,22 @@ or `libx264` CRF 14 when FFmpeg can't open NVENC (probed once per FFmpeg path). 
 NVENC cut measured PSNR 43 dB against the original; a whole 3-clip batch (64 s of footage) finished
 in 24 s with the three jobs running at once. Audio is re-encoded to AAC at 320 kb/s.
 
-**Measured accuracy** (POST, 60 fps, OBS 33.0.0, each finished clip against the HLAE take of the
-same clip at 300 fps, by matching pictures): see the table below.
+**Measured accuracy** (2026-10-27, POST, 60 fps, OBS 33.0.0, m00cat's three WSOD25 clips: each
+finished clip against the HLAE take of the same clip at 300 fps, matching every moving frame near
+each end to the HLAE frame that looks most like it, so good to ~3 ms). "Head left" is how much
+earlier than HLAE's first frame the finished clip starts; "end" is the same at the clip's end.
 
-TRIM_TABLE
+| Batch | Start delay used | Head left (3 clips) | End (3 clips) | Length against HLAE |
+|---|---|---|---|---|
+| untrimmed (before #84) | — | 870-897 ms | 60-67 ms of tail | +0.94-0.96 s |
+| 3 (OBS at 960 ms audio buffering) | 26 ms | +20, 0, +13 ms | +17, -3, +10 ms | within 1 frame |
+| 4 (OBS restarted, 298 ms buffering) | 26 ms | +20, +7, +13 ms | +20, +3, +13 ms | within 1 frame |
+| 7 (the PR's value) | **16 ms** | **+3, 0, 0 ms** | **0, -3, +3 ms** | within 1 frame |
+
+Across all 25 measurements (5 batches, both ends), the delay that would have been exact ranged 6 to
+30 ms, mean 16: so with 16 ms a cut lands within 14 ms of HLAE's frame, under one frame at 60 fps.
+One PC, one game build (POST) and one encoder (NVENC); another PC's start delay is unmeasured, and
+an error there shows as a constant few ms of head or a frame cut short, never the 0.9 s head.
 
 ---
 
