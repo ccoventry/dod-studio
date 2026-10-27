@@ -608,6 +608,9 @@ pub fn poll() {
     crate::frame_esc::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::engine_buttons::poll();
+    // Finds GameUI's call once, then a cvar read a frame; writes the call
+    // only when ds_ui_studio_background changes.
+    crate::menu_background::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
     // two while both of its settings are off.
     window_layout::poll();
@@ -849,6 +852,9 @@ fn status_text() -> String {
     }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
+    }
+    if let Some(background) = crate::menu_background::status_line() {
+        lines.push(background);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);
@@ -1424,6 +1430,15 @@ unsafe extern "C" fn cmd_console_in_panel() {
     );
 }
 
+/// Only registered when `ds_ui_studio_background` could not be a cvar.
+unsafe extern "C" fn cmd_studio_background() {
+    handle_toggle(
+        crate::menu_background::NAME,
+        &crate::menu_background::SETTING.fallback,
+        crate::menu_background::status,
+    );
+}
+
 /// Only registered when `ds_demo_show_load_progress` could not be a cvar.
 unsafe extern "C" fn cmd_show_load_progress() {
     handle_toggle(
@@ -1728,6 +1743,14 @@ pub fn install() {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
         }
+    }
+
+    // On by default: DoD Studio's own menu picture, or the stock tiles kept
+    // in shape on the pre-Anniversary build (#1045). `menu_background::poll`
+    // reads it every frame and puts the game's own call back at 0.
+    match register(crate::menu_background::NAME, "1") {
+        Some(cvar) => crate::menu_background::SETTING.set_cvar(cvar),
+        None => add_command(crate::menu_background::NAME, cmd_studio_background),
     }
 
     // Both on by default: the window is how DoD

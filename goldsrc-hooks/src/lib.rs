@@ -136,6 +136,10 @@
 //! - `window_layout`: the `ds_ui_resizable_windows` and
 //!   `ds_ui_remember_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
+//! - `menu_background`: `ds_ui_studio_background` -- the main menu's
+//!   background, a whole `dodstudio_menu*` picture from the
+//!   `menu_background` folder beside this DLL picked by the screen's shape,
+//!   or the stock tiles kept in shape (#1045).
 //! - `studio_panel`: `ds_ui_panel` -- DoD Studio's own window in the game,
 //!   a GameUI `Frame` with real tabs (a `PropertySheet` of `PropertyPage`s)
 //!   and VCR buttons, each tab laid out by its own `.res` (#408, plan item 4).
@@ -273,6 +277,7 @@ mod lightmap_gamma;
 mod list_panel;
 mod map_sounds;
 mod map_text;
+mod menu_background;
 mod missing_shots;
 mod msglog;
 mod names;
