@@ -58,7 +58,7 @@ pub const TAKE_FILE: &str = "dodstudio_take.json";
 /// Whether a directory entry is one of ours, and so must not be mistaken for
 /// captured output. `take_folder_has_content` asks this.
 pub fn is_metadata(file_name: &std::ffi::OsStr) -> bool {
-    file_name.eq_ignore_ascii_case(TAKE_FILE)
+    file_name.eq_ignore_ascii_case(TAKE_FILE) || file_name.eq_ignore_ascii_case(TAKE_FILE_PARTIAL)
 }
 
 /// How far up from a take folder to look. HLAE nests its own `take0000` inside
@@ -206,28 +206,42 @@ pub struct RenderAttempt {
 /// failed because a metadata file could not be written, so callers log the
 /// error and carry on.
 pub fn write(block_folder: &Path, meta: &SessionMeta) -> std::io::Result<()> {
+    let _guard = HISTORY_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    save(&block_folder.join(TAKE_FILE), meta)
+}
+
+/// Written beside the file and renamed over it, so a reader never sees a
+/// half-written file: a render starting while the batch writes the capture
+/// settings read one as unreadable and finished its OBS take untrimmed.
+const TAKE_FILE_PARTIAL: &str = "dodstudio_take.json.partial";
+
+fn save(path: &Path, meta: &SessionMeta) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(meta)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(block_folder.join(TAKE_FILE), json)
+    let partial = path.with_file_name(TAKE_FILE_PARTIAL);
+    std::fs::write(&partial, json)?;
+    std::fs::rename(&partial, path)
 }
 
 /// Writes a take's capture settings like `write`, keeping the OBS trim the
 /// batch already recorded in that folder (`record_obs_trim`): the capture
 /// settings are written after the batch, the trim while it runs.
 pub fn write_capture_settings(block_folder: &Path, meta: &SessionMeta) -> std::io::Result<()> {
+    let _guard = HISTORY_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let path = block_folder.join(TAKE_FILE);
     let existing_trim = std::fs::read(block_folder.join(TAKE_FILE))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<SessionMeta>(&bytes).ok())
         .and_then(|old| old.obs_trim);
     match existing_trim {
-        Some(trim) if meta.obs_trim.is_none() => write(
-            block_folder,
+        Some(trim) if meta.obs_trim.is_none() => save(
+            &path,
             &SessionMeta {
                 obs_trim: Some(trim),
                 ..meta.clone()
             },
         ),
-        _ => write(block_folder, meta),
+        _ => save(&path, meta),
     }
 }
 
@@ -323,9 +337,7 @@ fn update(take_folder: &Path, change: impl FnOnce(&mut SessionMeta)) -> std::io:
     };
     meta.format = FORMAT;
     change(&mut meta);
-    let json = serde_json::to_vec_pretty(&meta)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, json)
+    save(&path, &meta)
 }
 
 /// Records an attempt as it starts (outcome `Started`).
@@ -724,6 +736,30 @@ mod tests {
         assert_eq!(obs_trim(&take), Some(trim(0.93, Some(12.5))));
     }
 
+    /// A render that reads the take while the batch writes its capture
+    /// settings must still see the trim: a reader that caught the file half
+    /// written once finished an OBS take untrimmed.
+    #[test]
+    fn a_reader_never_sees_the_trim_missing_while_the_file_is_rewritten() {
+        let (_root, block, take) =
+            block_with_take("trim_race", "session_x", "dodstudio_chain_01_b0");
+        record_obs_trim(&block, trim(0.9, Some(10.0))).expect("trim");
+        let writer_block = block.clone();
+        let writer = std::thread::spawn(move || {
+            for _ in 0..200 {
+                write_capture_settings(&writer_block, &SessionMeta::new("session_x", 60))
+                    .expect("settings");
+            }
+        });
+        let mut reads = 0;
+        while !writer.is_finished() || reads < 200 {
+            assert_eq!(obs_trim(&take), Some(trim(0.9, Some(10.0))));
+            reads += 1;
+        }
+        writer.join().unwrap();
+        assert!(!block.join(TAKE_FILE_PARTIAL).exists());
+    }
+
     /// A take captured before #84, or by another mode, has no trim and its
     /// file is the same as before; a file with one still reads in an older
     /// shape's place (no format bump).
@@ -780,6 +816,7 @@ mod tests {
         // report a capture that never happened.
         assert!(is_metadata(std::ffi::OsStr::new(TAKE_FILE)));
         assert!(is_metadata(std::ffi::OsStr::new("DODSTUDIO_TAKE.JSON")));
+        assert!(is_metadata(std::ffi::OsStr::new(TAKE_FILE_PARTIAL)));
         assert!(!is_metadata(std::ffi::OsStr::new("00000.bmp")));
         assert!(!is_metadata(std::ffi::OsStr::new("sound.wav")));
     }

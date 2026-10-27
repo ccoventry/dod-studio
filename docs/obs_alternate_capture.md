@@ -477,7 +477,7 @@ starts and stops on the clip's own frames.
 **What is recorded.** `ObsSession` notes when `StartRecord` reported the recording started
 (`OUTPUT_STARTED`), and stamps the `START_RECORD` and `STOP_RECORD` markers as they arrive
 (`Marker::received`, taken on the reader thread). Each marker's place in the file is its arrival
-time since the start, less a fixed `RECORDING_START_DELAY_SECONDS` (35 ms, measured) and, for a
+time since the start, less a fixed `RECORDING_START_DELAY_SECONDS` (40 ms, measured) and, for a
 marker read from `qconsole.log`, the log's 30 ms (`native/src/obs/trim.rs`). Both ends go into the
 take's `dodstudio_take.json` as `obs_trim` (`start_seconds`, `end_seconds`, `fps`). It is an
 optional field, not a format bump: a take captured before it, or one whose `START_RECORD` was
