@@ -124,7 +124,7 @@ pub fn copy_all(plan: &[SourceCopy]) -> Result<(), String> {
             ));
         }
         crate::log_markdown(&format!(
-            "📋 **Copied for the batch** — `{}` is on another drive than the game, so it plays from `{}` ({:.0} MB); the copy goes when the batch ends",
+            "📋 **Copied for the batch** — `{}` can't be played where it is (on another drive with a hook DLL older than #779, or a path viewdemo can't open), so it plays from `{}` ({:.0} MB); the copy goes when the batch ends",
             item.source.display(),
             item.copy.display(),
             item.bytes as f64 / (1024.0 * 1024.0)
