@@ -78,13 +78,19 @@ fn full_path_arg(base: &[String], target: &[String]) -> Option<String> {
 }
 
 /// `arg` without `.dem`, when it fits the engine's buffer and holds nothing
-/// that would end the console argument early or start a second command.
+/// that would end the console argument early or start a second command, and
+/// is all ASCII.
 fn safe_arg(mut arg: String) -> Option<String> {
     if arg.to_ascii_lowercase().ends_with(".dem") {
         arg.truncate(arg.len() - 4);
     }
-    let safe =
-        !arg.is_empty() && arg.len() <= MAX_DEMO_ARG && !arg.contains(['"', ';', '\n', '\r']);
+    // ASCII only: `viewdemo` lower-cases the name byte by byte before opening
+    // it, which breaks any other character (`Grüße` became `gr???e`, and
+    // "Coudn't open demo file", measured on POST, #779).
+    let safe = !arg.is_empty()
+        && arg.is_ascii()
+        && arg.len() <= MAX_DEMO_ARG
+        && !arg.contains(['"', ';', '\n', '\r']);
     safe.then_some(arg)
 }
 
@@ -195,8 +201,23 @@ mod tests {
     fn another_drive_goes_by_its_full_path() {
         let base = parts(r"C:\Games\Half-Life\dod");
         assert_eq!(
-            full_path_arg(&base, &parts(r"H:\WSOD 25\Grüße\x.dem")).as_deref(),
-            Some("H:/WSOD 25/Grüße/x")
+            full_path_arg(&base, &parts(r"H:\WSOD 25\demos\x.dem")).as_deref(),
+            Some("H:/WSOD 25/demos/x")
+        );
+        // viewdemo can't open a name with anything but ASCII, on any drive.
+        assert_eq!(full_path_arg(&base, &parts(r"H:\Grüße\x.dem")), None);
+        assert_eq!(
+            relative_arg(&base, &parts(r"C:\Games\Half-Life\dod\Grüße.dem")),
+            None
+        );
+        // A non-ASCII folder the game and the demo share is not in the path.
+        assert_eq!(
+            relative_arg(
+                &parts(r"C:\Spiele\Größe\dod"),
+                &parts(r"C:\Spiele\Größe\dod\x.dem")
+            )
+            .as_deref(),
+            Some("x")
         );
         // A demo at the drive's root.
         assert_eq!(

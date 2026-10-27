@@ -363,6 +363,13 @@ fn viewdemo_line_with(
     if path.contains('"') {
         return Err(format!("{demo} has a quote in its path"));
     }
+    // `viewdemo` lower-cases the name byte by byte before opening it, which
+    // breaks every non-ASCII character (#779, measured on POST).
+    if !path.is_ascii() {
+        return Err(format!(
+            "{demo} has a character viewdemo can't open (letters, digits and punctuation without accents only)"
+        ));
+    }
     if path.len() > MAX_DEMO_ARG {
         return Err(format!(
             "{demo} has too long a path for viewdemo ({} characters, {MAX_DEMO_ARG} at most)",
@@ -1153,8 +1160,13 @@ mod tests {
     fn a_demo_on_another_drive_goes_by_its_full_path_when_the_hook_opens_it() {
         let dod = r"C:\Steam\common\Half-Life\dod";
         assert_eq!(
-            viewdemo_line_with(dod, r"F:\WSOD 25\Grüße\m.dem", Ok(())).unwrap(),
-            "viewdemo \"F:/WSOD 25/Grüße/m.dem\"\n"
+            viewdemo_line_with(dod, r"F:\WSOD 25\demos\m.dem", Ok(())).unwrap(),
+            "viewdemo \"F:/WSOD 25/demos/m.dem\"\n"
+        );
+        assert!(
+            viewdemo_line_with(dod, r"F:\Grüße\m.dem", Ok(()))
+                .unwrap_err()
+                .contains("can't open")
         );
         // A demo at the drive's root.
         assert_eq!(
