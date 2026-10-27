@@ -14,8 +14,9 @@ Checks, per client.dll:
      `push esi`, loads the hint panel from `[esi+HINT_PANEL_OFFSET]`, and
      leaves through `jmp [edx+SET_VISIBLE_SLOT*4]` (`SetVisible`, which
      returns `ret 4`) with no `ret` of its own before it.
-  4. One pointer to it sits in `.rdata` (the viewport's vftable), at slot 5
-     of its table, and `MsgFunc_HudText` calls slot 5 (`[edx+0x14]`) on
+  4. One pointer to it sits in `.rdata`, 5 slots past the start of the run of
+     code pointers it belongs to (a vftable's start, found by walking back;
+     not tied to the object by RTTI), and `MsgFunc_HudText` calls slot 5 (`[edx+0x14]`) on
      `gViewPortInterface` (`VIEWPORT_CALL`, read for closing an open hint)
      for a flagged message.
   5. No `call`/`jmp rel32` or short/near conditional jump in `.text` lands

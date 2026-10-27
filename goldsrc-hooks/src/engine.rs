@@ -860,6 +860,13 @@ static TIMER_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by the `HUD_Frame` trampoline the first time the engine actually
 /// renders a frame through us; retires the fallback timer thread.
 static HUD_FRAME_DRIVING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the per-frame callbacks run on the engine's own thread (from
+/// `HUD_Frame`), so they may call into VGUI, rather than on the fallback timer
+/// thread.
+pub(crate) fn hud_frame_driving() -> bool {
+    HUD_FRAME_DRIVING.load(Ordering::Acquire)
+}
 /// Held while the per-frame callbacks run, so the timer thread and
 /// `HUD_Frame` can never run them at the same time, even in the moment a late
 /// hook takes over. A try-lock: whoever finds it taken skips that frame

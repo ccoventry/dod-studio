@@ -36,8 +36,9 @@
 //! written back at 0, the way `spectator_text.rs` keeps its own.
 //!
 //! Like `crosshair.rs`, the decision comes from the bytes every frame: a
-//! re-loaded `client.dll` is patched again. Turning the cvar on also closes a
-//! hint already up (`SetVisible(false)` on the viewport's hint panel, the
+//! re-loaded `client.dll` is patched again. Turning the cvar on after it was
+//! off also closes a hint already up (not at launch, when none can be, and
+//! only from the engine's own thread) (`SetVisible(false)` on the viewport's hint panel, the
 //! slot `ShowHint` itself shows it through): its own timer can leave it up
 //! for many seconds after a seek.
 //!
@@ -100,6 +101,9 @@ static TOUCHED: AtomicBool = AtomicBool::new(false);
 static HIDDEN_NOW: AtomicBool = AtomicBool::new(false);
 /// Whether a failure has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
+/// Set while hints could open (the stub was off), so switching on closes a
+/// hint on screen only when there can be one.
+static COULD_SHOW: AtomicBool = AtomicBool::new(false);
 
 /// Called by `commands.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
@@ -113,6 +117,11 @@ fn pack(bytes: [u8; 3]) -> u32 {
 fn unpack(packed: u32) -> [u8; 3] {
     let b = packed.to_le_bytes();
     [b[0], b[1], b[2]]
+}
+
+/// [`PATTERN`] as it reads with [`HIDDEN`] over its first three bytes.
+fn stubbed_pattern() -> String {
+    format!("C2 04 00{}", &PATTERN["A1 ?? ??".len()..])
 }
 
 /// `ShowHint`'s address in the module at `base`, scanning once per module.
@@ -133,6 +142,16 @@ fn resolve(base: usize) -> Result<usize, String> {
         Ok(found) => found,
         Err(why) => {
             FAILED_BASE.store(base, Ordering::Release);
+            // The stub over the start hides the stock `A1`; its first two
+            // operand bytes are gone, so there is nothing to restore from.
+            let stubbed = stubbed_pattern();
+            if unsafe { scan::find_unique(base, &stubbed) }.is_ok() {
+                return Err(
+                    "DoDViewport::ShowHint is already stubbed (C2 04 00) by an earlier load; \
+                     restart the game to get hints back"
+                        .into(),
+                );
+            }
             return Err(format!("could not find DoDViewport::ShowHint -- {why}"));
         }
     };
@@ -212,8 +231,12 @@ pub fn poll() {
     let wanted = unsafe { (*cvar).value } != 0.0;
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);
-    } else if !TOUCHED.load(Ordering::Relaxed) {
-        return;
+    } else {
+        // Off (never stubbed, or put back below): a hint may open.
+        COULD_SHOW.store(true, Ordering::Relaxed);
+        if !TOUCHED.load(Ordering::Relaxed) {
+            return;
+        }
     }
     let Some(base) = engine::client_module_base() else {
         return;
@@ -222,8 +245,15 @@ pub fn poll() {
         Ok(wrote) => {
             COMPLAINED.store(false, Ordering::Relaxed);
             HIDDEN_NOW.store(wanted, Ordering::Relaxed);
+            // Only a switch-on after hints could open has one to close: the
+            // default's first apply at launch has none, and VGUI is only
+            // called from the engine's own thread.
+            let close = wrote
+                && wanted
+                && COULD_SHOW.swap(false, Ordering::Relaxed)
+                && engine::hud_frame_driving();
             if wrote {
-                let closed = match wanted.then(|| close_open_hint(base)) {
+                let closed = match close.then(|| close_open_hint(base)) {
                     Some(Err(why)) => format!("; a hint on screen stays up: {why}"),
                     _ => String::new(),
                 };
@@ -303,6 +333,16 @@ mod tests {
             VIEWPORT_CALL.ends_with(&format!("FF 52 {:02X}", 5 * 4)),
             "slot 5, ShowHint"
         );
+    }
+
+    #[test]
+    fn the_stubbed_pattern_is_the_pattern_with_ret_4_in_front() {
+        let stubbed = stubbed_pattern();
+        let a: Vec<&str> = PATTERN.split_whitespace().collect();
+        let b: Vec<&str> = stubbed.split_whitespace().collect();
+        assert_eq!(a.len(), b.len());
+        assert_eq!(&b[..3], &["C2", "04", "00"]);
+        assert_eq!(&a[3..], &b[3..]);
     }
 
     #[test]

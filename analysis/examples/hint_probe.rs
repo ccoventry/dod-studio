@@ -64,9 +64,13 @@ fn main() {
                 }
             }
         }
-        println!("== {path}: {} hint(s)", hints.len());
+        let what = if all { "HudText message(s)" } else { "hint(s)" };
+        println!("== {path}: {} {what}", hints.len());
         for line in hints.iter().take(40) {
             println!("{line}");
+        }
+        if hints.len() > 40 {
+            println!("  ... and {} more", hints.len() - 40);
         }
     }
 }
