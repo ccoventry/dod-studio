@@ -62,9 +62,6 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows_sys::Win32::System::Memory::{
-    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
-};
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
 
 use crate::pe;
@@ -1340,18 +1337,9 @@ pub(crate) unsafe fn patch_gengfuncs_slot(
         if was.is_null() {
             return Err(format!("slot {slot} is null"));
         }
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            at as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
+        if !crate::patch::write_pointer(at, hook, crate::patch::After::Restore) {
             return Err(format!("slot {slot} could not be made writable"));
         }
-        *at = hook;
-        VirtualProtect(at as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
         Ok(was)
     }
 }
@@ -1386,19 +1374,14 @@ unsafe fn watch_client_commands() {
     REAL_CLIENT_CMD.store(real, Ordering::Release);
 
     unsafe {
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
+        if !crate::patch::write_pointer(
+            slot,
+            hook_client_cmd as *mut c_void,
+            crate::patch::After::Restore,
+        ) {
             crate::debug::report("client-cmd watch: couldn't make the slot writable; not watching");
             return;
         }
-        *slot = hook_client_cmd as *mut c_void;
-        VirtualProtect(slot as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
         crate::debug::report(&format!(
             "client-cmd watch: gEngfuncs at {gengfuncs:p}, pfnClientCmd was {real:p} -- now logging what client.dll runs"
         ));
@@ -1791,27 +1774,9 @@ fn hook_import(
 
     unsafe {
         real_store.store(*slot, Ordering::Release);
-
-        let mut old_protect: PAGE_PROTECTION_FLAGS = 0;
-        let ok = VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old_protect,
-        );
-        if ok == 0 {
-            return false;
-        }
-        *slot = replacement;
-        VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            old_protect,
-            &mut old_protect,
-        );
+        // Left writable: HLAE hooks imports on this page too (#1059).
+        crate::patch::write_pointer(slot, replacement, crate::patch::After::LeaveWritable)
     }
-
-    true
 }
 
 /// Installs both `hw.dll` IAT hooks: `LoadLibraryA` (to learn `client.dll`'s
