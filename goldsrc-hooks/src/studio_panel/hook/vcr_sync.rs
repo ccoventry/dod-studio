@@ -105,6 +105,12 @@ fn slider_values(now: f64, start: f64, end: f64) -> (i32, i32, i32) {
 
 /// Every frame. Cheap when there is no demo or the bar shows.
 pub(super) unsafe fn update(vgui: &Vgui) {
+    // It runs from the first frame, and reading the demo player's clock
+    // during start-up crashed DemoPlayer.dll (`schedule.rs`); `viewdemo`
+    // loads Core.dll, so without it there is no demo to follow.
+    if module(c"Core.dll").is_none() {
+        return;
+    }
     let Some(clock) = crate::demo_seek::clock() else {
         return;
     };
