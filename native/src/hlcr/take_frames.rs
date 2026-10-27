@@ -364,7 +364,13 @@ pub async fn extract_frame(
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     let _ = std::fs::remove_file(out);
-    let run = run_ffmpeg(ffmpeg, &frame_args(input, out, FRAME_WIDTH), cancel, FFMPEG_TIMEOUT).await?;
+    let run = run_ffmpeg(
+        ffmpeg,
+        &frame_args(input, out, FRAME_WIDTH),
+        cancel,
+        FFMPEG_TIMEOUT,
+    )
+    .await?;
     if !run.success {
         return Err(crate::messages::combine_failed(run.stderr.trim()));
     }
@@ -422,8 +428,13 @@ pub async fn make_sheet(
             let picks = sequence_picks(files.len(), SHEET_FRAMES);
             for (i, &index) in picks.iter().enumerate() {
                 let file = format!("frame_{i}.jpg");
-                extract_frame(ffmpeg, &FrameInput::File(&files[index]), &dir.join(&file), &cancel)
-                    .await?;
+                extract_frame(
+                    ffmpeg,
+                    &FrameInput::File(&files[index]),
+                    &dir.join(&file),
+                    &cancel,
+                )
+                .await?;
                 sheet.frames.push(SheetFrame {
                     file,
                     frame: Some(index as u64),
@@ -441,8 +452,13 @@ pub async fn make_sheet(
             let picks = video_picks(duration, SHEET_FRAMES);
             for (i, &secs) in picks.iter().enumerate() {
                 let file = format!("frame_{i}.jpg");
-                extract_frame(ffmpeg, &FrameInput::VideoAt(video, secs), &dir.join(&file), &cancel)
-                    .await?;
+                extract_frame(
+                    ffmpeg,
+                    &FrameInput::VideoAt(video, secs),
+                    &dir.join(&file),
+                    &cancel,
+                )
+                .await?;
                 sheet.frames.push(SheetFrame {
                     file,
                     frame: rate.map(|r| (secs * r).round() as u64),
@@ -456,7 +472,8 @@ pub async fn make_sheet(
     let text = serde_json::to_string_pretty(&sheet).map_err(|e| e.to_string())?;
     let part = dir.join(format!("{MANIFEST_FILE}.part"));
     std::fs::write(&part, text).map_err(|e| crate::messages::labeled(part.display(), e))?;
-    std::fs::rename(&part, &manifest).map_err(|e| crate::messages::labeled(manifest.display(), e))?;
+    std::fs::rename(&part, &manifest)
+        .map_err(|e| crate::messages::labeled(manifest.display(), e))?;
     Ok((sheet, false))
 }
 
@@ -504,7 +521,16 @@ mod tests {
     fn only_a_bare_folder_name_is_a_stream() {
         assert!(is_plain_stream_name("all"));
         assert!(is_plain_stream_name("hudColor"));
-        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "C:", "dodstudio_preview"] {
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            "C:",
+            "dodstudio_preview",
+        ] {
             assert!(!is_plain_stream_name(bad), "{bad}");
         }
     }
@@ -630,13 +656,22 @@ mod tests {
         };
         let video = take.join("all").join("video.avi");
         make(&[
-            "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=3",
-            "-c:v", "mjpeg", video.to_str().unwrap(),
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=320x180:rate=30:duration=3",
+            "-c:v",
+            "mjpeg",
+            video.to_str().unwrap(),
         ]);
         std::fs::create_dir_all(take.join("hudcolor")).unwrap();
         make(&[
-            "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=0.4",
-            "-start_number", "0",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=320x180:rate=30:duration=0.4",
+            "-start_number",
+            "0",
             take.join("hudcolor").join("%05d.bmp").to_str().unwrap(),
         ]);
 
@@ -655,9 +690,11 @@ mod tests {
         assert_eq!(sheet.fps, Some(30.0));
         let mid = sheet.middle().unwrap();
         assert!((mid.secs.unwrap() - 1.5).abs() < 0.1);
-        assert!(frame_data_uri(&cache_dir(&take, "all").join(&mid.file))
-            .unwrap()
-            .starts_with("data:image/jpeg;base64,/9j/"));
+        assert!(
+            frame_data_uri(&cache_dir(&take, "all").join(&mid.file))
+                .unwrap()
+                .starts_with("data:image/jpeg;base64,/9j/")
+        );
 
         let (again, cached) = make_sheet(&ffmpeg, &take, "all", None, cancel.clone(), |_, _| {})
             .await
@@ -667,9 +704,16 @@ mod tests {
         assert_eq!(again.frames.len(), sheet.frames.len());
         assert_eq!(again.frames[8].frame, Some(85));
 
-        let (seq, _) = make_sheet(&ffmpeg, &take, "hudcolor", Some(30.0), cancel.clone(), |_, _| {})
-            .await
-            .unwrap();
+        let (seq, _) = make_sheet(
+            &ffmpeg,
+            &take,
+            "hudcolor",
+            Some(30.0),
+            cancel.clone(),
+            |_, _| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(seq.kind, "sequence");
         assert_eq!(seq.frames.len(), 9);
         assert_eq!(seq.middle().unwrap().frame, Some(6));

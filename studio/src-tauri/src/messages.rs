@@ -364,6 +364,16 @@ pub fn job_still_rendering(job_id: &str) -> String {
     format!("Job {} is still rendering — cancel it first", job_id)
 }
 
+// ── take_preview_manager.rs (#1069) ─────────────────────────────────────
+
+pub fn take_not_listed_for_preview(take_folder: &str) -> String {
+    format!("{take_folder} isn't in the Render tab's list, so no pictures were made")
+}
+
+pub fn take_preview_empty(take_folder: &str) -> String {
+    format!("No pictures were made from {take_folder}")
+}
+
 // ── take_delete_manager.rs (#644) ───────────────────────────────────────
 
 pub fn take_not_listed(take_folder: &str) -> String {

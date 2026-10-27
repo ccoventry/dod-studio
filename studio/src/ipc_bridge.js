@@ -773,6 +773,36 @@ export async function deleteTakeFolders(takeFolders) {
     });
 }
 
+/** Take pictures (#1069): makes a take stream's frames when they aren't
+ *  cached yet and resolves to `{ uri, cached }`, the middle frame as a data
+ *  URI. Rejects with "cancelled" when `cancelTakePreviews` stopped it. */
+export async function takePreviewThumb(takeFolder, stream, fps) {
+  return invoke("take_preview_thumb", { takeFolder, stream, fps })
+    .catch((err) => {
+      if (err !== 'cancelled') console.error("IPC Execution Error (take_preview_thumb):", err);
+      throw err;
+    });
+}
+
+/** Every frame of a take stream's contact sheet: `{ kind, duration_secs,
+ *  fps, frames: [{ uri, frame, secs }] }`. */
+export async function takePreviewSheet(takeFolder, stream, fps) {
+  return invoke("take_preview_sheet", { takeFolder, stream, fps })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_preview_sheet):", err);
+      throw err;
+    });
+}
+
+/** Stops the take-picture pass running now, if any. */
+export async function cancelTakePreviews() {
+  return invoke("cancel_take_previews")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_take_previews):", err);
+      throw err;
+    });
+}
+
 export async function setRenderJobCodec(jobId, codec, customCodecArgs) {
   return invoke("set_render_job_codec", { jobId, codec, customCodecArgs: customCodecArgs ?? null })
     .catch((err) => {

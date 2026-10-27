@@ -34,6 +34,7 @@ mod render_manager;
 mod review_manager;
 mod settings_manager;
 mod take_delete_manager;
+mod take_preview_manager;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -933,6 +934,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
         .manage(RenderManager::new())
+        .manage(take_preview_manager::TakePreviewManager::default())
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
@@ -1039,6 +1041,9 @@ pub fn run() {
             clear_render_queue,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
+            take_preview_manager::take_preview_thumb,
+            take_preview_manager::take_preview_sheet,
+            take_preview_manager::cancel_take_previews,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,

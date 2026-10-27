@@ -4123,3 +4123,67 @@ button.setup-skip:hover:not(:disabled) {
   border: 1px solid var(--border-accent);
   border-radius: 4px;
 }
+
+/* Take pictures (#1069): the Render tab's thumbnail, its hover and the
+   contact sheet. 16:9, the shape every capture here is. */
+.rj-thumb {
+  display: block;
+  width: 64px;
+  height: 36px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  cursor: zoom-in;
+}
+
+.rj-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  cursor: default;
+}
+
+.take-preview-hover {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  border: 1px solid var(--border-accent);
+  background: var(--bg-panel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.take-preview-hover img {
+  display: block;
+  width: 480px;
+  max-width: 50vw;
+  height: auto;
+}
+
+.take-sheet-content {
+  max-width: 1200px;
+  padding: 20px;
+}
+
+.take-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.take-sheet-grid figure {
+  margin: 0;
+}
+
+.take-sheet-grid img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-color);
+}
+
+.take-sheet-grid figcaption {
+  font-size: 0.85em;
+  opacity: 0.8;
+  margin-top: 2px;
+}
