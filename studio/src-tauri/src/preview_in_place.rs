@@ -60,7 +60,9 @@ pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Resul
     let launcher = cmd
         .spawn()
         .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
-    log::info!("[preview] in place: launched the game for \"{arg}\" (no patched copy)");
+    native::log_markdown(&format!(
+        "[preview] in place: launched the game for \"{arg}\" (no patched copy)"
+    ));
     crate::capture_manager::watch_for_error_dialogs(app, launcher);
     let lines = preview_lines(arg);
     std::thread::spawn(move || {
@@ -76,7 +78,9 @@ pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Resul
 fn open_highlights_later(pid: u32) {
     std::thread::sleep(TAB_AFTER);
     let sent = send_console_commands(pid, &[OPEN_HIGHLIGHTS.to_string()]);
-    log::info!("[preview] in place: {OPEN_HIGHLIGHTS} -> pid {pid}: {sent:?}");
+    native::log_markdown(&format!(
+        "[preview] in place: {OPEN_HIGHLIGHTS} -> pid {pid}: {sent:?}"
+    ));
 }
 
 /// Sends the preview to a running game. `Ok(Some(line))` when one took it,
@@ -89,9 +93,9 @@ pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String
             .map_err(crate::messages::failed_to_send_to_running_game)?
         {
             Sent::Delivered => {
-                log::info!(
+                native::log_markdown(&format!(
                     "[preview] in place: sent \"{viewdemo}\" to the running game (pid {pid})"
-                );
+                ));
                 std::thread::spawn(move || open_highlights_later(pid));
                 return Ok(Some(viewdemo));
             }
@@ -119,13 +123,16 @@ pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
                 // is what lets the Highlights tab know the demo.
                 std::thread::sleep(SETTLE);
                 let sent = send_console_commands(pid, lines);
-                log::info!("[preview] in place: {lines:?} -> pid {pid}: {sent:?}");
+                native::log_markdown(&format!(
+                    "[preview] in place: {} -> pid {pid}: {sent:?}",
+                    lines.join("; ")
+                ));
                 return matches!(sent, Ok(Sent::Delivered)).then_some(pid);
             }
         }
     }
-    log::warn!(
-        "[preview] in place: the game never opened its command pipe; the preview was not started"
+    native::log_markdown(
+        "[preview] in place: the game never opened its command pipe; the preview was not started",
     );
     None
 }

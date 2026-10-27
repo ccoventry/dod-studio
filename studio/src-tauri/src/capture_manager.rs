@@ -1157,7 +1157,7 @@ pub async fn start_capture_batch_impl(
         // highlight tick with it and crash the game minutes in (#196). Stop
         // before anything is patched.
         if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks) {
-            log::error!("{}", e);
+            log_markdown(&format!("[capture] {}", e));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -1188,7 +1188,7 @@ pub async fn start_capture_batch_impl(
         ) {
             Ok(v) => v,
             Err(e) => {
-                log::error!("build_batch_queue failed: {}", e);
+                log_markdown(&format!("[capture] build_batch_queue failed: {}", e));
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
                 let _ = app_handle_clone.emit(
@@ -1231,7 +1231,7 @@ pub async fn start_capture_batch_impl(
         }
 
         if patch_jobs.is_empty() {
-            log::warn!("build_batch_queue produced no jobs");
+            log_markdown("[capture] build_batch_queue produced no jobs");
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -1440,7 +1440,7 @@ pub async fn start_capture_batch_impl(
         let failure = first_error.lock().unwrap_or_else(|p| p.into_inner()).take();
 
         if let Some((source_demo, e)) = failure {
-            log::error!("Failed to patch {}: {}", source_demo, e);
+            log_markdown(&format!("[capture] Failed to patch {}: {}", source_demo, e));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -2514,7 +2514,10 @@ pub async fn scan_directory_impl(
             if missing.len() == paths.len() {
                 return Err(crate::messages::scan_path_not_found(&missing[0]));
             }
-            log::warn!("Scan skipped paths that no longer exist: {:?}", missing);
+            log_markdown(&format!(
+                "[scan] Skipped paths that no longer exist: {}",
+                missing.join(", ")
+            ));
         }
 
         // ── Phase 1: collect all .dem file paths ─────────────────────────────
@@ -2767,7 +2770,7 @@ pub async fn scan_directory_impl(
                         }
                         let scanned = scan_demo_for_highlights_with_analysis(file);
                         if let Err(reason) = &scanned {
-                            log::warn!("Scan skipped {}: {}", file.display(), reason);
+                            log_markdown(&format!("[scan] Skipped {}: {}", file.display(), reason));
                             skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
                                 idx,
                                 file_name.clone(),
@@ -3156,7 +3159,9 @@ pub async fn send_preview_to_running_game(
             .map_err(crate::messages::failed_to_send_to_running_game)?
             {
                 native::sys::game_remote::Sent::Delivered => {
-                    log::info!("[preview] sent \"{command}\" to the running game (pid {pid})");
+                    log_markdown(&format!(
+                        "[preview] sent \"{command}\" to the running game (pid {pid})"
+                    ));
                     return Ok(Some(command));
                 }
                 native::sys::game_remote::Sent::NotListening => continue,
@@ -3503,7 +3508,10 @@ pub fn kill_engine_processes() -> Result<(), String> {
     let sys = native::sys::process::snapshot();
     for process in sys.processes().values() {
         if native::sys::process::is_named(process, ENGINE_PROCESS_NAMES) && !process.kill() {
-            log::warn!("Failed to kill engine process pid={}", process.pid());
+            log_markdown(&format!(
+                "[engine] Failed to kill engine process pid={}",
+                process.pid()
+            ));
         }
     }
     Ok(())

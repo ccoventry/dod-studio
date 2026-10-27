@@ -176,20 +176,20 @@ impl CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::new] Failed to pre-clean exit_trigger {:?}: {}",
-                exit_trigger,
+            log_markdown(&format!(
+                "[cleanup] Failed to pre-clean exit_trigger {}: {}",
+                exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Err(e) = std::fs::remove_dir(&session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::new] Failed to pre-clean session_junction {:?}: {}",
-                session_junction,
+            log_markdown(&format!(
+                "[cleanup] Failed to pre-clean session_junction {}: {}",
+                session_junction.display(),
                 e
-            );
+            ));
         }
         Self {
             exit_trigger,
@@ -228,20 +228,20 @@ impl Drop for CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::drop] Failed to remove exit_trigger {:?}: {}",
-                self.exit_trigger,
+            log_markdown(&format!(
+                "[cleanup] Failed to remove exit_trigger {}: {}",
+                self.exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::drop] Failed to remove session_junction {:?}: {}",
-                self.session_junction,
+            log_markdown(&format!(
+                "[cleanup] Failed to remove session_junction {}: {}",
+                self.session_junction.display(),
                 e
-            );
+            ));
         }
 
         if let Some(game_root) = self.exit_trigger.parent() {
@@ -290,7 +290,6 @@ pub fn spawn_capture_engine(
             macro_rules! log_crash_abort {
                 ($tx:expr, $msg:expr) => {
                     {
-                        log::error!("{}", $msg);
                         crate::log_markdown(&$msg);
                         let _ = $tx.send(EngineEvent::Error(
                             format!("Capture Engine Aborted — {} (see View Logs for details)", $msg)
@@ -514,7 +513,7 @@ pub fn spawn_capture_engine(
                     let local_dest = demos_dir.join(&demo_filename);
                     match std::fs::copy(&job.patched_demo_path, &local_dest) {
                         Ok(_) => log_markdown(&format!("- [IO] Saved local copy to demos/{}", demo_filename)),
-                        Err(e) => log::warn!("Failed to save local patched copy to {}: {}", local_dest.display(), e),
+                        Err(e) => log_markdown(&format!("- [IO] Failed to save local patched copy to {}: {}", local_dest.display(), e)),
                     }
                 }
 
@@ -1212,14 +1211,12 @@ pub fn spawn_capture_engine(
             let _ = tx.send(EngineEvent::Finished("Batch Queue".into()));
 
             let autosave_path = crate::shared::paths::get_appdata_dir().join(".autosave.json");
-            if let Err(e) = std::fs::remove_file(&autosave_path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
-                }
-            } else {
-                // Nothing writes `.autosave.json` yet (#20), so a file found
-                // here is a stray, not recovery state: removed quietly (#352).
-                log::debug!("[autosave] removed a stray .autosave.json");
+            // Nothing writes `.autosave.json` yet (#20), so a file found here
+            // is a stray, not recovery state: removed quietly (#352).
+            if let Err(e) = std::fs::remove_file(&autosave_path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                log_markdown(&format!("[autosave] Failed to remove .autosave.json: {}", e));
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);

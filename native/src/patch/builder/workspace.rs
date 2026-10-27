@@ -27,11 +27,11 @@ impl Drop for WorkspaceGuard {
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[WorkspaceGuard::drop] Failed to remove session_junction {:?}: {}",
-                self.session_junction,
+            crate::log_markdown(&format!(
+                "[cleanup] Failed to remove session_junction {}: {}",
+                self.session_junction.display(),
                 e
-            );
+            ));
         }
         // Unlink every dod_pool_N and _route_N junction. `remove_dir` unlinks a
         // junction without touching what it points at, and NotFound is expected
@@ -44,11 +44,11 @@ impl Drop for WorkspaceGuard {
             if let Err(e) = std::fs::remove_dir(junction)
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                log::warn!(
-                    "[WorkspaceGuard::drop] Failed to remove pool junction {:?}: {}",
-                    junction,
+                crate::log_markdown(&format!(
+                    "[cleanup] Failed to remove pool junction {}: {}",
+                    junction.display(),
                     e
-                );
+                ));
             }
         }
         // Signal dirs (DOD_STUDIO_EXIT_TRIGGER) are directories, not files.
@@ -56,11 +56,11 @@ impl Drop for WorkspaceGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[WorkspaceGuard::drop] Failed to remove exit_trigger {:?}: {}",
-                self.exit_trigger,
+            crate::log_markdown(&format!(
+                "[cleanup] Failed to remove exit_trigger {}: {}",
+                self.exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Some(game_root) = self.exit_trigger.parent() {
             crate::shared::paths::clear_capture_scratch(
