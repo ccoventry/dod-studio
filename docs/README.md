@@ -12,7 +12,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [hlae_protocols.md](hlae_protocols.md) — launching HLAE, how a batch ends, checking a take.
 - [command_tiers.md](command_tiers.md) — which commands Initial and Scheduled Commands refuse, warn about or ignore, and why.
 - [direct_to_video_capture.md](direct_to_video_capture.md) — capturing straight to video with `mirv_movie_ffmpeg`.
-- [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: how it is driven, measurements, failure modes, open questions.
+- [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: the settings Studio gives OBS, OBS measured against HLAE, how it is driven, failure modes, open questions.
 
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
