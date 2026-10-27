@@ -305,8 +305,25 @@ fn answer_label(h: &Highlight, verdict: Verdict) -> String {
 }
 
 /// The `viewdemo` line for `demo`, a full path, from the game's `dod`
-/// folder: `viewdemo` takes a path from there, `..` included.
+/// folder: `viewdemo` takes a path from there, `..` included. A demo on
+/// another drive goes by its full path, `D:/folder/demo.dem`, when
+/// `demo_other_drives` can open it (#776, #779).
 pub(crate) fn viewdemo_line(dod_dir: &str, demo: &str) -> Result<String, String> {
+    viewdemo_line_with(dod_dir, demo, crate::demo_other_drives::ready())
+}
+
+/// The longest `viewdemo` argument: the engine copies it into a 256-byte
+/// buffer. Studio checks the path without `.dem` against 240
+/// (`native::preview_in_place::MAX_DEMO_ARG`); this one has it.
+const MAX_DEMO_ARG: usize = 244;
+
+/// [`viewdemo_line`], with `other_drives` whether a full path with a drive
+/// letter opens now (`Err` says why not).
+fn viewdemo_line_with(
+    dod_dir: &str,
+    demo: &str,
+    other_drives: Result<(), String>,
+) -> Result<String, String> {
     let split = |p: &str| -> Vec<String> {
         p.split(['\\', '/'])
             .filter(|s| !s.is_empty() && *s != ".")
@@ -316,21 +333,41 @@ pub(crate) fn viewdemo_line(dod_dir: &str, demo: &str) -> Result<String, String>
     let base = split(dod_dir);
     let target = split(demo);
     let same = |a: &String, b: &String| a.eq_ignore_ascii_case(b);
-    if base.is_empty() || target.is_empty() || !same(&base[0], &target[0]) {
-        return Err(format!(
-            "{demo} is on another drive than the game, and viewdemo opens only demos it can reach from the game's folder"
-        ));
+    if base.is_empty() || target.is_empty() {
+        return Err(format!("{demo} is not a full path"));
     }
-    let common = base
-        .iter()
-        .zip(&target)
-        .take_while(|(a, b)| same(a, b))
-        .count();
-    let mut parts: Vec<String> = vec!["..".to_string(); base.len() - common];
-    parts.extend(target[common..].iter().cloned());
-    let path = parts.join("/");
+    let path = if same(&base[0], &target[0]) {
+        let common = base
+            .iter()
+            .zip(&target)
+            .take_while(|(a, b)| same(a, b))
+            .count();
+        let mut parts: Vec<String> = vec!["..".to_string(); base.len() - common];
+        parts.extend(target[common..].iter().cloned());
+        parts.join("/")
+    } else {
+        let has_letter =
+            matches!(target[0].as_bytes(), [letter, b':'] if letter.is_ascii_alphabetic());
+        if !has_letter || target.len() < 2 {
+            return Err(format!(
+                "{demo} is on another drive than the game, and viewdemo opens only demos it can reach from the game's folder or by a drive letter"
+            ));
+        }
+        if let Err(why) = other_drives {
+            return Err(format!(
+                "{demo} is on another drive than the game, and {why}"
+            ));
+        }
+        target.join("/")
+    };
     if path.contains('"') {
         return Err(format!("{demo} has a quote in its path"));
+    }
+    if path.len() > MAX_DEMO_ARG {
+        return Err(format!(
+            "{demo} has too long a path for viewdemo ({} characters, {MAX_DEMO_ARG} at most)",
+            path.len()
+        ));
     }
     Ok(format!("viewdemo \"{path}\"\n"))
 }
@@ -1110,10 +1147,36 @@ mod tests {
             viewdemo_line(dod, r"C:\Users\me\Downloads\m.dem").unwrap(),
             "viewdemo \"../../../../Users/me/Downloads/m.dem\"\n"
         );
+    }
+
+    #[test]
+    fn a_demo_on_another_drive_goes_by_its_full_path_when_the_hook_opens_it() {
+        let dod = r"C:\Steam\common\Half-Life\dod";
+        assert_eq!(
+            viewdemo_line_with(dod, r"F:\WSOD 25\Grüße\m.dem", Ok(())).unwrap(),
+            "viewdemo \"F:/WSOD 25/Grüße/m.dem\"\n"
+        );
+        // A demo at the drive's root.
+        assert_eq!(
+            viewdemo_line_with(dod, "d:/m.dem", Ok(())).unwrap(),
+            "viewdemo \"d:/m.dem\"\n"
+        );
+        let off = viewdemo_line_with(dod, r"F:\Downloads\m.dem", Err("it is off".into()));
         assert!(
-            viewdemo_line(dod, r"F:\Downloads\m.dem")
+            off.unwrap_err()
+                .contains("another drive than the game, and it is off")
+        );
+        // No drive letter to open it by: a network path.
+        assert!(
+            viewdemo_line_with(dod, r"\\server\share\m.dem", Ok(()))
                 .unwrap_err()
                 .contains("another drive")
+        );
+        let long = format!(r"F:\{}\m.dem", "d".repeat(240));
+        assert!(
+            viewdemo_line_with(dod, &long, Ok(()))
+                .unwrap_err()
+                .contains("too long")
         );
     }
 

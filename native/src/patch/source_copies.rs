@@ -1,10 +1,13 @@
 //! Demos on another drive than the game, copied as they are into the game's
-//! `dod` folder for a Seek Between Clips batch (#434). `viewdemo` only opens
-//! a demo it can reach by a relative path from that folder, and a relative
-//! path can't cross drive letters; a demo on the game's drive is played where
-//! it is (`preview_in_place::viewdemo_arg`). The copies are the batch's own
-//! scratch: `capture_engine`'s cleanup guard removes them however the batch
-//! ends, and the next batch removes any an aborted one left behind.
+//! `dod` folder for a Seek Between Clips batch (#434), when the hook DLL is
+//! older than #779. A demo on the game's drive is played where it is, by a
+//! path relative to that folder (`preview_in_place::viewdemo_arg`). One on
+//! another drive has no such path: a hook DLL from #779 on sends it to
+//! `viewdemo` by its full path (`preview_in_place::hook_plays_other_drives`),
+//! so nothing is copied; an older DLL can't, and gets a copy. The copies are
+//! the batch's own scratch: `capture_engine`'s cleanup guard removes them
+//! however the batch ends, and the next batch removes any an aborted one left
+//! behind.
 
 use std::path::{Path, PathBuf};
 
@@ -68,15 +71,21 @@ pub fn plan_with<'a>(
     Ok(plan)
 }
 
-/// [`plan_with`] against the filesystem.
+/// [`plan_with`] against the filesystem. With `other_drives` (the hook DLL
+/// plays another drive's demo by its full path) only a demo `viewdemo` can't
+/// reach either way is copied: a path too long or with a character the
+/// console can't take.
 pub fn plan<'a>(
     dod_dir: &Path,
     demos: impl IntoIterator<Item = &'a str>,
+    other_drives: bool,
 ) -> Result<Vec<SourceCopy>, String> {
     plan_with(
         dod_dir,
         demos,
-        |demo| crate::preview_in_place::viewdemo_arg(dod_dir, demo).is_some(),
+        |demo| {
+            crate::preview_in_place::viewdemo_arg_any_drive(dod_dir, demo, other_drives).is_some()
+        },
         |demo| {
             std::fs::metadata(demo)
                 .map(|m| m.len())

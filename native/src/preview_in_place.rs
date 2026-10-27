@@ -4,9 +4,12 @@
 //! with a bookmark per highlight.
 //!
 //! This is the pure half: where `viewdemo` finds a demo, and what to send.
-//! It can't always: a demo on another drive than the game has no path
-//! relative to the game's folder, and the engine copies `viewdemo`'s argument
-//! into a 256-byte buffer. Those previews stay patched.
+//! A demo on the game's drive goes by a path relative to the game's folder.
+//! One on another drive has none; a hook DLL from #779 on opens it by its
+//! full path, `viewdemo "D:/folder/demo"` (goldsrc-hooks
+//! `demo_other_drives`, #776), and for an older DLL the preview stays
+//! patched. The engine copies `viewdemo`'s argument into a 256-byte buffer,
+//! so a longer path stays patched too.
 
 use std::path::{Component, Path};
 
@@ -25,6 +28,64 @@ pub fn viewdemo_arg(mod_dir: &Path, demo: &Path) -> Option<String> {
     let base = normal_components(&std::fs::canonicalize(mod_dir).ok()?)?;
     let target = normal_components(&std::fs::canonicalize(demo).ok()?)?;
     relative_arg(&base, &target)
+}
+
+/// The bytes a hook DLL that plays another drive's demo by its full path
+/// carries (goldsrc-hooks `demo_other_drives::FULL_PATH_MARKER`, #779): its
+/// batch, review and Go send such a demo to `viewdemo` as `D:/folder/demo`.
+pub const HOOK_FULL_PATH_MARKER: &str = "ds-viewdemo-full-path-779";
+
+/// The line that turns the hook's other-drive opens on, sent ahead of a
+/// demo played by its full path in case the player turned them off.
+pub const OTHER_DRIVES_ON: &str = "ds_demo_other_drives 1";
+
+/// Whether the hook DLL at `dll` plays a demo on another drive by its full
+/// path ([`HOOK_FULL_PATH_MARKER`]). An older DLL, or one that can't be
+/// read, doesn't.
+pub fn hook_plays_other_drives(dll: &Path) -> bool {
+    let needle = HOOK_FULL_PATH_MARKER.as_bytes();
+    std::fs::read(dll).is_ok_and(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+}
+
+/// [`viewdemo_arg`], and with `other_drives` (the hook DLL plays another
+/// drive's demo, [`hook_plays_other_drives`]) a demo on another drive by
+/// its full path, `D:/folder/demo`.
+pub fn viewdemo_arg_any_drive(mod_dir: &Path, demo: &Path, other_drives: bool) -> Option<String> {
+    let base = normal_components(&std::fs::canonicalize(mod_dir).ok()?)?;
+    let target = normal_components(&std::fs::canonicalize(demo).ok()?)?;
+    relative_arg(&base, &target).or_else(|| {
+        other_drives
+            .then(|| full_path_arg(&base, &target))
+            .flatten()
+    })
+}
+
+/// Whether `arg` names a demo by a drive letter, `D:/...`.
+pub fn is_full_path_arg(arg: &str) -> bool {
+    matches!(arg.as_bytes(), [letter, b':', b'/', ..] if letter.is_ascii_alphabetic())
+}
+
+/// `target` on another drive than `base`, by its full path: `D:/folder/demo`.
+/// `None` on the same drive (that goes by [`relative_arg`]), without a drive
+/// letter (a network path), or for a name [`safe_arg`] refuses.
+fn full_path_arg(base: &[String], target: &[String]) -> Option<String> {
+    let drive = target.first()?;
+    let has_letter = matches!(drive.as_bytes(), [letter, b':'] if letter.is_ascii_alphabetic());
+    if !has_letter || target.len() < 2 || base.first()?.eq_ignore_ascii_case(drive) {
+        return None;
+    }
+    safe_arg(target.join("/"))
+}
+
+/// `arg` without `.dem`, when it fits the engine's buffer and holds nothing
+/// that would end the console argument early or start a second command.
+fn safe_arg(mut arg: String) -> Option<String> {
+    if arg.to_ascii_lowercase().ends_with(".dem") {
+        arg.truncate(arg.len() - 4);
+    }
+    let safe =
+        !arg.is_empty() && arg.len() <= MAX_DEMO_ARG && !arg.contains(['"', ';', '\n', '\r']);
+    safe.then_some(arg)
 }
 
 /// The components of an absolute path, the `\\?\` prefix folded away.
@@ -58,18 +119,23 @@ fn relative_arg(base: &[String], target: &[String]) -> Option<String> {
     let mut parts: Vec<String> =
         std::iter::repeat_n("..".to_string(), base.len() - common).collect();
     parts.extend(target[common..].iter().cloned());
-    let mut arg = parts.join("/");
-    if arg.to_ascii_lowercase().ends_with(".dem") {
-        arg.truncate(arg.len() - 4);
-    }
-    let safe =
-        !arg.is_empty() && arg.len() <= MAX_DEMO_ARG && !arg.contains(['"', ';', '\n', '\r']);
-    safe.then_some(arg)
+    safe_arg(parts.join("/"))
 }
 
 /// What the game is sent (or started with) for a preview of `arg`.
 pub fn viewdemo_line(arg: &str) -> String {
     format!("viewdemo \"{arg}\"")
+}
+
+/// The console lines a preview of `arg` sends: [`viewdemo_line`], after
+/// [`OTHER_DRIVES_ON`] for a demo on another drive.
+pub fn preview_lines(arg: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    if is_full_path_arg(arg) {
+        lines.push(OTHER_DRIVES_ON.to_string());
+    }
+    lines.push(viewdemo_line(arg));
+    lines
 }
 
 #[cfg(test)]
@@ -123,6 +189,69 @@ mod tests {
             viewdemo_line("../demos/k4 philly/x"),
             r#"viewdemo "../demos/k4 philly/x""#
         );
+    }
+
+    #[test]
+    fn another_drive_goes_by_its_full_path() {
+        let base = parts(r"C:\Games\Half-Life\dod");
+        assert_eq!(
+            full_path_arg(&base, &parts(r"H:\WSOD 25\Grüße\x.dem")).as_deref(),
+            Some("H:/WSOD 25/Grüße/x")
+        );
+        // A demo at the drive's root.
+        assert_eq!(
+            full_path_arg(&base, &parts(r"D:\x.DEM")).as_deref(),
+            Some("D:/x")
+        );
+        // The game's own drive goes by the relative path, not this.
+        assert_eq!(full_path_arg(&base, &parts(r"c:\demos\x.dem")), None);
+        assert_eq!(full_path_arg(&base, &parts(r"D:\a;quit.dem")), None);
+        let long = format!(r"D:\{}\x.dem", "d".repeat(240));
+        assert_eq!(full_path_arg(&base, &parts(&long)), None);
+    }
+
+    #[test]
+    fn a_full_path_preview_turns_the_hooks_other_drives_on_first() {
+        assert!(is_full_path_arg("D:/x"));
+        assert!(!is_full_path_arg("../../x"));
+        assert!(!is_full_path_arg("x"));
+        assert_eq!(
+            preview_lines("D:/demos/x"),
+            [OTHER_DRIVES_ON, r#"viewdemo "D:/demos/x""#]
+        );
+        assert_eq!(preview_lines("../x"), [r#"viewdemo "../x""#]);
+    }
+
+    #[test]
+    fn the_marker_is_the_hooks_own() {
+        let hook = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../goldsrc-hooks/src/demo_other_drives.rs");
+        let source = std::fs::read_to_string(&hook).unwrap();
+        assert!(
+            source.contains(&format!(
+                "pub const FULL_PATH_MARKER: &str = \"{HOOK_FULL_PATH_MARKER}\";"
+            )),
+            "{} has another marker",
+            hook.display()
+        );
+        assert!(source.contains(&format!(
+            "console_name!(\"{}\")",
+            OTHER_DRIVES_ON
+                .trim_start_matches("ds_")
+                .trim_end_matches(" 1")
+        )));
+    }
+
+    #[test]
+    fn a_dll_says_whether_it_plays_other_drives() {
+        let dir = crate::test_support::Scratch::new("hook_marker");
+        let new = dir.join("new.dll");
+        let old = dir.join("old.dll");
+        std::fs::write(&new, format!("MZ..{HOOK_FULL_PATH_MARKER}..")).unwrap();
+        std::fs::write(&old, b"MZ..ds_demo_other_drives..").unwrap();
+        assert!(hook_plays_other_drives(&new));
+        assert!(!hook_plays_other_drives(&old));
+        assert!(!hook_plays_other_drives(&dir.join("missing.dll")));
     }
 
     #[test]
