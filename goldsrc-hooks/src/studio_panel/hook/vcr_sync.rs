@@ -1,6 +1,7 @@
 //! Keeps the VCR bar's time slider in step with playback while the bar is
-//! hidden, so the first ESC after a second `viewdemo` doesn't throw playback
-//! back to the demo's start and pause it (#663; stock DoD does it too).
+//! hidden, so the first ESC after a second `viewdemo`, or after a demo started
+//! from the launch line, doesn't throw playback back to the demo's start
+//! (#663; stock DoD does it too).
 //!
 //! ## What GameUI does
 //!
@@ -26,6 +27,14 @@
 //! that think would do with nothing dragged: the slider's range to the demo's
 //! span, its value to the current second, and `m_iLastValue` to match. The
 //! first think after ESC then finds nothing changed.
+//!
+//! It runs whether or not our window was ever opened. A demo started from the
+//! launch line (`+viewdemo`, as previews and batches start one) plays before
+//! the `viewdemo` wrapper is in, so the window never opens; while this ran
+//! only with the window built, the first ESC of such a game seeked to the
+//! demo's first whole second (traced on both builds: `SetWorldTime(293.00)`
+//! from 812 s on PRE, `SetWorldTime(4.00)` from 739 s on POST), and the
+//! player's gap skip then carried it to the first playback frame.
 //!
 //! The dialog's fields are per GameUI build ([`BUILDS`]); before writing, the
 //! dialog's player pointer must be the demo player's own interface, and the
