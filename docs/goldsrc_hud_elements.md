@@ -209,7 +209,7 @@ clock along with the flags/capture-progress row it's named for -- there is no
 way to keep one and drop the other without patching inside the function.
 
 It does **not** reach the VGUI2 spectator bars (`goldsrc_spectator_bars.md`) or the auto-help panel
-(#286). Those are not HUD elements and are not on this list. It also does not
+(#286, `ds_hud_hide_hints`). Those are not HUD elements and are not on this list. It also does not
 reach the overview map, a mortar aiming HUD, or the sniper scope -- see the
 five exclusions above, none of which turned out to be drawn by any `Draw`
 override at all.
