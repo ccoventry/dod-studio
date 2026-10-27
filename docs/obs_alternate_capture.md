@@ -134,7 +134,9 @@ hook moves on to the next clip, the missed `STOP_RECORD` closes the take at the 
 and OBS ignored the `StartRecord` sent right after that stop (now sent again once).
 
 **OBS's own boxes come to the front**: "Failed to start recording" (above) and "New update
-available" when OBS starts with update checks on (OBS Settings → General).
+available" when OBS starts with update checks on (OBS Settings → General). Studio's Launch OBS, and
+its automatic start before a batch, pass `--disable-updater`, so an OBS Studio starts never shows
+the second; an OBS started any other way still can.
 
 ---
 
