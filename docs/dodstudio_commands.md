@@ -125,7 +125,8 @@ state, not the state from before that line ran.
 
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
 one by hand, changes the names' font, or scales the weapon icons. It also
-changes or hides one recorded kill (`replace`, #1021). The font
+changes or hides one recorded kill (`replace`, #1021), and empties the feed
+now, at a new round or when the watched player dies (`clear`). The font
 (#562), the scale (#728), the layout (#1022) and the gap take effect on the next frame.
 HLAE's own
 `mirv_deathmsg` supports only
@@ -160,6 +161,19 @@ HLAE's own
 | `ds_hud_deathmsg background team <alpha> [padding]` | a box behind each name instead, in a dark shade (a quarter) of that name's team colour; the icon gets none |
 | `ds_hud_deathmsg background allies <colour>` / `background axis <colour>` | that team's box colour for `background team` (`allies` covers the British, who are team 1 on a British map); `background allies default` goes back to the shade |
 | `ds_hud_deathmsg background default` | no boxes (the default), and `allies`/`axis` back to the shade |
+| `ds_hud_deathmsg clear` | empty the kill feed now (each line goes on the next frame, the way an expired one does); works in Scheduled Commands at a tick |
+| `ds_hud_deathmsg clear_on restart <0\|1> [delay]` | at every new round, `delay` seconds later (default 0, up to 600), clear the lines that were up when it restarted; lines that arrive during the delay stay (see below) |
+| `ds_hud_deathmsg clear_on death <0\|1> [delay]` | when the player the view belongs to dies (a POV demo's recorder, or the player an HLTV demo watches in eye), `delay` seconds later, clear the lines up at the death, that death's own line included; later lines stay |
+| `ds_hud_deathmsg clear_on default` | neither (the default) |
+
+`clear_on restart` follows DoD's `RoundState` reset, the message that starts
+every round. In 176 WSOD25 demos (POV and HLTV) it came 3 s after every round
+win (5 s on some servers), when a clan match went live (both teams ready, then
+the 10 s count), at the start of a recording, and every 20 s while a server
+said there were not enough players. A half that ends on the map's time limit
+sends none: the map changes, and the next demo starts with an empty feed. A
+single flag capture sends none either, and a full cap's own lines stay up
+through the win: they go at the restart.
 
 A `colour` for `outline` and `background` is three numbers `r g b`, each 0..255 (`10 40 110`), or one hex colour: `#0a286e`, the short `#0af` (each digit doubled, so `#00aaff`), or six digits without the `#` (`0a286e`). Three digits need their `#`, since `255` on its own is a number. The `#` works from the console and from a cfg line alike, e.g. `ds_hud_deathmsg background allies #0a286e`.
 
