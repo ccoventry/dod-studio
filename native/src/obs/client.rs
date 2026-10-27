@@ -1061,6 +1061,64 @@ mod tests {
         assert!(other.to_string().contains("4008"));
     }
 
+    /// A `StartRecord` OBS accepts but never starts gets exactly one more,
+    /// and one that starts first time is never sent twice.
+    #[test]
+    fn a_start_obs_ignored_is_sent_once_more_and_never_twice_when_it_started() {
+        use super::super::fake_obs::{Reply, serve};
+
+        let mut starts = 0;
+        let mut recording = false;
+        let obs = serve(move |kind, _| match kind {
+            "StartRecord" => {
+                starts += 1;
+                if starts == 1 {
+                    return Reply::ok(json!({}));
+                }
+                recording = true;
+                Reply::ok(json!({})).then_record_state("OBS_WEBSOCKET_OUTPUT_STARTED")
+            }
+            "GetRecordStatus" => Reply::ok(json!({ "outputActive": recording })),
+            _ => Reply::ok(json!({})),
+        });
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        client.start_record().expect("the second start records");
+        assert_eq!(obs.sent("StartRecord"), 2);
+
+        let obs = serve(|kind, _| match kind {
+            "StartRecord" => Reply::ok(json!({})).then_record_state("OBS_WEBSOCKET_OUTPUT_STARTED"),
+            _ => Reply::ok(json!({})),
+        });
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        client.start_record().expect("starts");
+        assert_eq!(obs.sent("StartRecord"), 1);
+    }
+
+    /// A first start that was only slow is running by the retry, which OBS
+    /// answers "output running": that is a recording, not a failure.
+    #[test]
+    fn a_slow_first_start_counts_when_the_retry_finds_it_running() {
+        use super::super::fake_obs::{Reply, serve};
+
+        let mut starts = 0;
+        let obs = serve(move |kind, _| match kind {
+            "StartRecord" => {
+                starts += 1;
+                if starts == 1 {
+                    Reply::ok(json!({}))
+                } else {
+                    Reply::err("The output is already running.")
+                }
+            }
+            // Not yet at the first check, running by the second.
+            "GetRecordStatus" => Reply::ok(json!({ "outputActive": starts > 1 })),
+            _ => Reply::ok(json!({})),
+        });
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        client.start_record().expect("the slow start counts");
+        assert_eq!(obs.sent("StartRecord"), 2);
+    }
+
     /// OBS needs ~1.06s to finalise a file; HLAE's merge guard is 0.5s. If
     /// this ever drops below the OBS finalise time, takes start disappearing.
     #[test]

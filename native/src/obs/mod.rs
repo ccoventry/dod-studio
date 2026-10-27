@@ -30,6 +30,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod client;
+#[cfg(test)]
+mod fake_obs;
 pub mod log_tail;
 pub mod pipe_tail;
 pub mod provision;

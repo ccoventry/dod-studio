@@ -88,6 +88,10 @@ pub fn ensure_dod_studio_setup(
             "⚠️ **OBS** — couldn't set the `{PROFILE_NAME}` profile's recording quality ({e}). \
              Clips record at whatever OBS's Settings → Output has for it."
         ));
+        // A failure between the rebuild's two switches leaves OBS on the
+        // other profile, often the user's own, and everything below writes to
+        // whichever profile is current.
+        ensure_on_own_profile(client)?;
     }
     client.set_video_settings(width, height, fps_num, fps_den)?;
     let previous_scene = ensure_scene_and_sources(client, width, height)?;
@@ -117,6 +121,16 @@ fn ensure_profile(client: &mut ObsClient) -> Result<Option<String>, ObsError> {
         "🎬 **OBS** — switched to profile `{PROFILE_NAME}` (restored afterwards)."
     ));
     Ok(Some(current))
+}
+
+/// Switches back to `PROFILE_NAME` if OBS is on any other profile, and fails
+/// if it can't: provisioning must never write the user's own profile.
+fn ensure_on_own_profile(client: &mut ObsClient) -> Result<(), ObsError> {
+    let (_, current) = client.profile_list()?;
+    if current != PROFILE_NAME {
+        client.set_profile(PROFILE_NAME)?;
+    }
+    Ok(())
 }
 
 /// The recording settings DoD Studio's profile records with (#645), as
@@ -315,6 +329,86 @@ fn ensure_scene_item(client: &mut ObsClient, source: &str, existed: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obs::fake_obs::{FakeObs, Reply, serve};
+    use std::sync::{Arc, Mutex};
+
+    /// An OBS on the user's own profile, with ours recording "Same as
+    /// stream", whose switch back to ours fails `failed_returns` times. Gives
+    /// the profile each `SetVideoSettings` landed on.
+    fn obs_whose_switch_back_fails(failed_returns: usize) -> (FakeObs, Arc<Mutex<Vec<String>>>) {
+        let video_writes = Arc::new(Mutex::new(Vec::new()));
+        let writes = Arc::clone(&video_writes);
+        let mut current = "Mine".to_string();
+        let mut switches_to_ours = 0;
+        let obs = serve(move |kind, data| match kind {
+            "GetProfileList" => Reply::ok(json!({
+                "profiles": ["Mine", PROFILE_NAME],
+                "currentProfileName": current,
+            })),
+            "SetCurrentProfile" => {
+                let to = data["profileName"].as_str().unwrap_or_default();
+                if to == PROFILE_NAME {
+                    switches_to_ours += 1;
+                    // The first is ensure_profile's; the rest come back from
+                    // the rebuild's switch away.
+                    if switches_to_ours > 1 && switches_to_ours - 1 <= failed_returns {
+                        return Reply::err("profile switch failed");
+                    }
+                }
+                current = to.to_string();
+                Reply::ok(json!({}))
+            }
+            "GetVersion" => Reply::ok(json!({ "obsVersion": "32.2.2" })),
+            "GetProfileParameter" => {
+                let value = match data["parameterName"].as_str() {
+                    Some("RecQuality") => "Stream",
+                    _ => "",
+                };
+                Reply::ok(json!({ "parameterValue": value, "defaultParameterValue": "" }))
+            }
+            "SetVideoSettings" => {
+                writes.lock().unwrap().push(current.clone());
+                Reply::ok(json!({}))
+            }
+            _ => Reply::ok(json!({})),
+        });
+        (obs, video_writes)
+    }
+
+    /// The quality rebuild switches to the user's profile and back; when the
+    /// way back fails, the video settings must still land on ours.
+    #[test]
+    fn a_failed_switch_back_never_writes_the_users_profile() {
+        let (obs, video_writes) = obs_whose_switch_back_fails(1);
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        let result = ensure_dod_studio_setup(&mut client, 2560, 1440, 120, 1).expect("provisions");
+        assert_eq!(result.previous_profile.as_deref(), Some("Mine"));
+        assert_eq!(
+            *video_writes.lock().unwrap(),
+            vec![PROFILE_NAME.to_string()]
+        );
+
+        let (obs, video_writes) = obs_whose_switch_back_fails(usize::MAX);
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        assert!(ensure_dod_studio_setup(&mut client, 2560, 1440, 120, 1).is_err());
+        assert!(video_writes.lock().unwrap().is_empty());
+    }
+
+    /// The settings that changed are written, then OBS switches away and
+    /// back so it rebuilds its outputs with them.
+    #[test]
+    fn changed_settings_are_written_and_applied_by_a_round_trip() {
+        let (obs, video_writes) = obs_whose_switch_back_fails(0);
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        ensure_dod_studio_setup(&mut client, 2560, 1440, 120, 1).expect("provisions");
+        assert_eq!(
+            *video_writes.lock().unwrap(),
+            vec![PROFILE_NAME.to_string()]
+        );
+        assert_eq!(obs.sent("SetCurrentProfile"), 3);
+        assert!(obs.sent("SetProfileParameter") >= 1);
+        assert_eq!(obs.sent("SetInputAudioSyncOffset"), 1);
+    }
 
     fn value<'a>(wanted: &'a [(&str, &str, String)], name: &str) -> Option<&'a str> {
         wanted
