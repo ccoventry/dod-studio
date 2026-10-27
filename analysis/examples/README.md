@@ -30,6 +30,7 @@ documented in its own `//!` header.
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `round_restart_probe` | When does a demo start a new round (`RoundState`), and what led to it: a win, a clan match going live, a wait for players? |
 | `voice_menu_probe` | When does a POV demo show a voice menu (`ShowMenu`) or open the command menu, on the viewdemo clock? |
+| `hint_probe` | Where does a POV demo open DoD's auto-help hint panel (a flagged `HudText`, #286), on the viewdemo clock? `--all` lists every `HudText` |
 | `weapon_list_probe` | Which recorded weapon keys open the weapon-selection list in playback, and was it open on the recorder's screen (#1032)? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
 | `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
