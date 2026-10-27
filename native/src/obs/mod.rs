@@ -37,6 +37,7 @@ pub mod pipe_tail;
 pub mod provision;
 pub mod recover;
 pub mod session;
+pub mod trim;
 
 pub use client::{ObsClient, ObsError};
 pub use log_tail::{LogTailer, Marker, MarkerGate, MarkerKind};

@@ -88,6 +88,55 @@ pub struct SessionMeta {
     /// Absent unless `capture_mode` is `"agr"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agr_fps: Option<i32>,
+    /// Where the clip sits inside an OBS take's recording (#84). Absent for
+    /// every other mode, and for an OBS take captured before it existed,
+    /// which then renders untrimmed as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obs_trim: Option<ObsTrim>,
+}
+
+/// Where the clip sits inside an OBS recording, in seconds from the file's
+/// start (#84). OBS starts recording about a second before the clip and stops
+/// a moment after it; `obs::trim` places both ends from OBS's frame clock and
+/// the game's own markers.
+///
+/// A new optional field rather than a format bump: older builds still read
+/// the file (they ignore the field), and a take without it renders untrimmed.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct ObsTrim {
+    /// The clip's first frame: the game frame HLAE would have started on.
+    pub start_seconds: f64,
+    /// Where the clip ends, when the stop was seen; `None` keeps the file to
+    /// its end (a salvaged take, or a missed `STOP_RECORD`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_seconds: Option<f64>,
+    /// OBS's frame rate for the recording, which the cut is rounded to.
+    pub fps: f64,
+}
+
+impl ObsTrim {
+    /// The trim when it makes sense, else `None`: a hand-edited or damaged
+    /// file must never cut a clip to nothing.
+    pub fn validated(self) -> Option<Self> {
+        let start_ok = self.start_seconds.is_finite() && self.start_seconds >= 0.0;
+        let fps_ok = self.fps.is_finite() && self.fps > 0.0;
+        let end_ok = self
+            .end_seconds
+            .is_none_or(|end| end.is_finite() && end > self.start_seconds);
+        (start_ok && fps_ok && end_ok).then_some(self)
+    }
+
+    /// The clip's length, when its end is known.
+    pub fn length_seconds(&self) -> Option<f64> {
+        self.end_seconds.map(|end| end - self.start_seconds)
+    }
+
+    /// Where FFmpeg's seek goes: half a frame before the start, so its
+    /// accurate seek (which keeps the first frame at or after the seek point)
+    /// lands on the frame nearest the start rather than the one after it.
+    pub fn seek_seconds(&self) -> f64 {
+        (self.start_seconds - 0.5 / self.fps).max(0.0)
+    }
 }
 
 impl SessionMeta {
@@ -99,6 +148,7 @@ impl SessionMeta {
             renders: Vec::new(),
             capture_mode: None,
             agr_fps: None,
+            obs_trim: None,
         }
     }
 
@@ -159,6 +209,37 @@ pub fn write(block_folder: &Path, meta: &SessionMeta) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(meta)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(block_folder.join(TAKE_FILE), json)
+}
+
+/// Writes a take's capture settings like `write`, keeping the OBS trim the
+/// batch already recorded in that folder (`record_obs_trim`): the capture
+/// settings are written after the batch, the trim while it runs.
+pub fn write_capture_settings(block_folder: &Path, meta: &SessionMeta) -> std::io::Result<()> {
+    let existing_trim = std::fs::read(block_folder.join(TAKE_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<SessionMeta>(&bytes).ok())
+        .and_then(|old| old.obs_trim);
+    match existing_trim {
+        Some(trim) if meta.obs_trim.is_none() => write(
+            block_folder,
+            &SessionMeta {
+                obs_trim: Some(trim),
+                ..meta.clone()
+            },
+        ),
+        _ => write(block_folder, meta),
+    }
+}
+
+/// Records where the clip sits in an OBS take's recording (#84), creating the
+/// take's file when it has none yet. Best-effort, like `write`.
+pub fn record_obs_trim(take_folder: &Path, trim: ObsTrim) -> std::io::Result<()> {
+    update(take_folder, |meta| meta.obs_trim = Some(trim))
+}
+
+/// The OBS trim recorded for a take, when it has a usable one.
+pub fn obs_trim(take_folder: &Path) -> Option<ObsTrim> {
+    read_for_take(take_folder)?.obs_trim?.validated()
 }
 
 /// The capture settings recorded for a take, or `None` when there are none.
@@ -227,6 +308,12 @@ fn update_history(
     take_folder: &Path,
     change: impl FnOnce(&mut Vec<RenderAttempt>),
 ) -> std::io::Result<()> {
+    update(take_folder, |meta| change(&mut meta.renders))
+}
+
+/// Applies `change` to a take's file and saves it, creating it in the block
+/// folder when there is none (`history_file`).
+fn update(take_folder: &Path, change: impl FnOnce(&mut SessionMeta)) -> std::io::Result<()> {
     let _guard = HISTORY_WRITE.lock().unwrap_or_else(|p| p.into_inner());
     let Some((path, mut meta)) = history_file(take_folder) else {
         return Err(std::io::Error::new(
@@ -235,7 +322,7 @@ fn update_history(
         ));
     };
     meta.format = FORMAT;
-    change(&mut meta.renders);
+    change(&mut meta);
     let json = serde_json::to_vec_pretty(&meta)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, json)
@@ -607,6 +694,83 @@ mod tests {
         std::fs::create_dir_all(&deep).expect("dirs");
         write(&root, &SessionMeta::new("s", 120)).expect("write");
         assert_eq!(read_for_take(&deep), None);
+    }
+
+    fn trim(start: f64, end: Option<f64>) -> ObsTrim {
+        ObsTrim {
+            start_seconds: start,
+            end_seconds: end,
+            fps: 60.0,
+        }
+    }
+
+    /// #84: the batch records the trim while it runs, the capture settings
+    /// are written after it, and neither loses the other.
+    #[test]
+    fn an_obs_trim_round_trips_and_survives_the_capture_settings() {
+        let (_root, block, take) =
+            block_with_take("obs_trim", "session_x", "dodstudio_chain_01_b0");
+        record_obs_trim(&block, trim(0.93, Some(12.5))).expect("trim");
+        assert_eq!(obs_trim(&take), Some(trim(0.93, Some(12.5))));
+
+        write_capture_settings(&block, &SessionMeta::new("session_x", 60)).expect("settings");
+        let meta = read_for_take(&take).expect("meta");
+        assert_eq!(meta.capture_fps, 60);
+        assert_eq!(meta.session_id, "session_x");
+        assert_eq!(meta.obs_trim, Some(trim(0.93, Some(12.5))));
+
+        // A render's history keeps it too.
+        record_render_start(&take, &attempt_at(1, "all")).expect("history");
+        assert_eq!(obs_trim(&take), Some(trim(0.93, Some(12.5))));
+    }
+
+    /// A take captured before #84, or by another mode, has no trim and its
+    /// file is the same as before; a file with one still reads in an older
+    /// shape's place (no format bump).
+    #[test]
+    fn a_take_without_a_trim_reads_as_before() {
+        let (_root, block, take) = block_with_take("no_trim", "session_x", "dodstudio_chain_01_b0");
+        std::fs::write(
+            block.join(TAKE_FILE),
+            r#"{"format":2,"session_id":"s","capture_fps":120}"#,
+        )
+        .expect("write");
+        assert_eq!(obs_trim(&take), None);
+        assert_eq!(read_for_take(&take).map(|m| m.capture_fps), Some(120));
+        let json = serde_json::to_value(SessionMeta::new("s", 60)).unwrap();
+        assert!(json.get("obs_trim").is_none());
+
+        let with = format!(
+            r#"{{"format":{FORMAT},"session_id":"s","capture_fps":60,"obs_trim":{{"start_seconds":0.9,"fps":60.0}}}}"#
+        );
+        std::fs::write(block.join(TAKE_FILE), with).expect("write");
+        assert_eq!(obs_trim(&take), Some(trim(0.9, None)));
+    }
+
+    /// A damaged or hand-edited trim never cuts a clip to nothing.
+    #[test]
+    fn a_trim_that_makes_no_sense_is_ignored() {
+        assert!(trim(0.9, Some(10.0)).validated().is_some());
+        assert!(trim(0.9, None).validated().is_some());
+        assert!(trim(-0.1, None).validated().is_none());
+        assert!(trim(f64::NAN, None).validated().is_none());
+        assert!(trim(5.0, Some(5.0)).validated().is_none());
+        assert!(trim(5.0, Some(f64::INFINITY)).validated().is_none());
+        assert!(
+            ObsTrim {
+                fps: 0.0,
+                ..trim(0.9, None)
+            }
+            .validated()
+            .is_none()
+        );
+        assert_eq!(trim(0.5, Some(2.0)).length_seconds(), Some(1.5));
+    }
+
+    #[test]
+    fn the_cut_goes_half_a_frame_early_and_never_before_zero() {
+        assert!((trim(0.9, None).seek_seconds() - (0.9 - 1.0 / 120.0)).abs() < 1e-12);
+        assert_eq!(trim(0.001, None).seek_seconds(), 0.0);
     }
 
     #[test]

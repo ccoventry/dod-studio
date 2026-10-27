@@ -260,12 +260,21 @@ pub async fn run_render_job(
     // so there is nothing to join against a wav.
     let wav_file: Option<PathBuf> = clip.wav_file.as_ref().map(|w| take_folder.join(w));
     let is_hud = clip.clip_type == "hud_only";
+    // Where the clip sits in an OBS take's recording (#84): every codec cuts
+    // the head and tail OBS records around it. Keep as captured too, which
+    // then can't be a plain copy (`trimmed_copy_video_args`).
+    let obs_trim = if clip.video_file.is_some() && clip.wav_file.is_none() && !is_hud {
+        super::take_meta::obs_trim(&take_folder)
+    } else {
+        None
+    };
+    let is_plain_copy = is_source_copy && obs_trim.is_none();
 
     let is_global = config.ffmpeg_path == "ffmpeg";
 
     // Initial validations. Skip mode never spawns FFmpeg, so a misconfigured
     // FFmpeg path must not block a plain file copy.
-    if !is_source_copy && !is_global && (!ffmpeg_path.exists() || !ffmpeg_path.is_file()) {
+    if !is_plain_copy && !is_global && (!ffmpeg_path.exists() || !ffmpeg_path.is_file()) {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
@@ -485,7 +494,7 @@ pub async fn run_render_job(
         .unwrap_or_default()
         .to_string_lossy();
 
-    if is_source_copy {
+    if is_plain_copy {
         // Validated above: video_file and a non-hud clip_type are guaranteed here.
         let video_name = clip.video_file.as_deref().unwrap_or_default();
         let source_video = take_folder.join(&clip.img_folder).join(video_name);
@@ -578,6 +587,11 @@ pub async fn run_render_job(
     // Not `'static`: the Custom arm below borrows from `config.custom_codec_args`,
     // an owned `String` that lives only as long as this function call.
     let mut codec_args: Vec<&str> = Vec::new();
+    let trimmed_copy_args = if is_source_copy {
+        trimmed_copy_video_args(&config.ffmpeg_path).await
+    } else {
+        &[]
+    };
     let file_ext = if is_hud {
         codec_args.extend_from_slice(&[
             "-c:v",
@@ -666,6 +680,12 @@ pub async fn run_render_job(
             // job, if some future edit ever broke that invariant. Failing
             // loudly through the normal update channel costs nothing today
             // and is safe if it ever turns out to be reachable.
+            // Keep as captured on a take with a trim: the cut can't be a
+            // stream copy (`trimmed_copy_video_args`).
+            super::config::RenderCodec::SourceCopy if obs_trim.is_some() => {
+                codec_args.extend_from_slice(trimmed_copy_args);
+                ".mp4"
+            }
             super::config::RenderCodec::SourceCopy => {
                 let _ = tx.send(RenderUpdate::Finished(
                     job_id.clone(),
@@ -686,7 +706,10 @@ pub async fn run_render_job(
     // AAC sidesteps the whole box-tag mess and is the standard choice for MP4
     // audio; every other codec here (ProRes/DNxHD's .mov, HuffYUV/rawvideo's
     // .avi) stays lossless PCM since none of them are .mp4.
-    let audio_codec_args: &[&str] = if file_ext == ".mp4" {
+    let audio_codec_args: &[&str] = if is_source_copy {
+        // OBS's own AAC, re-encoded once, at a rate that loses nothing audible.
+        &["-c:a", "aac", "-b:a", "320k"]
+    } else if file_ext == ".mp4" {
         &["-c:a", "aac", "-b:a", "192k"]
     } else {
         &["-c:a", "pcm_s16le"]
@@ -722,6 +745,9 @@ pub async fn run_render_job(
     // sequence pattern, and the branches are mutually exclusive.
     let hud_color_input: String;
     let hud_alpha_input: String;
+    // An OBS take's cut (#84), as input options.
+    let trim_seek: String;
+    let trim_length: String;
 
     // `-framerate` is deliberately absent for these. It tells FFmpeg how to
     // interpret an untimed image sequence; a video carries its own timing, and
@@ -768,6 +794,24 @@ pub async fn run_render_job(
             // needed — FFmpeg's default stream selection already picks one
             // video and one audio stream out of it.
             video_input = format!("{}/{}", clip.img_folder, video);
+            if let Some(trim) = obs_trim {
+                // Before `-i`: FFmpeg's accurate seek, frame-exact on a
+                // re-encode. `-t` as an input option counts from the seek.
+                trim_seek = format!("{:.4}", trim.seek_seconds());
+                cmd_args.extend(["-ss", trim_seek.as_str()]);
+                if let Some(length) = trim.length_seconds() {
+                    trim_length = format!("{length:.4}");
+                    cmd_args.extend(["-t", trim_length.as_str()]);
+                }
+                crate::log_markdown(&format!(
+                    "[render] job {} — cutting the OBS take to its clip: from {:.3}s{} (#84)",
+                    job_id,
+                    trim.start_seconds,
+                    trim.length_seconds()
+                        .map(|l| format!(", {l:.3}s long"))
+                        .unwrap_or_else(|| " to the end of the file".to_string())
+                ));
+            }
             cmd_args.extend(vec!["-i", &video_input]);
         }
     } else if clip_type == "hud_only" {
@@ -910,6 +954,9 @@ pub async fn run_render_job(
     let mut reader = BufReader::new(stdout_handle);
     let mut line = String::new();
 
+    // A video take has no frame count to measure against; a trimmed OBS take
+    // knows its length, so its progress is the time written against that.
+    let expected_seconds = obs_trim.and_then(|t| t.length_seconds());
     let mut current_fps = "0".to_string();
     let mut current_speed = "0x".to_string();
 
@@ -951,6 +998,12 @@ pub async fn run_render_job(
                                             (current_frame * 100).checked_div(clip.frame_count)
                                     {
                                         let percent = std::cmp::min(100, ratio) as u32;
+                                        let _ = tx.send(RenderUpdate::Progress(job_id.clone(), percent));
+                                    }
+                                }
+                                "out_time_us" if clip.frame_count == 0 => {
+                                    if let (Some(total), Ok(us)) = (expected_seconds, val.parse::<i64>()) {
+                                        let percent = progress_percent(us as f64 / 1e6, total);
                                         let _ = tx.send(RenderUpdate::Progress(job_id.clone(), percent));
                                     }
                                 }
@@ -1049,6 +1102,106 @@ pub async fn run_render_job(
             let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
         }
     }
+}
+
+/// How far along a render is, in whole percent, from the seconds written so
+/// far against the seconds expected.
+fn progress_percent(written: f64, total: f64) -> u32 {
+    if !(total > 0.0) || !written.is_finite() {
+        return 0;
+    }
+    (written / total * 100.0).clamp(0.0, 100.0) as u32
+}
+
+/// The same quality OBS records at in Studio's profile (CQP 16), on NVENC.
+const TRIMMED_COPY_NVENC: &[&str] = &[
+    "-c:v",
+    "h264_nvenc",
+    "-preset",
+    "p5",
+    "-tune",
+    "hq",
+    "-rc",
+    "constqp",
+    "-qp",
+    "16",
+    "-pix_fmt",
+    "yuv420p",
+];
+
+/// The fallback without an NVIDIA encoder: about as fast here, smaller, a
+/// little softer (`docs/obs_alternate_capture.md`).
+const TRIMMED_COPY_X264: &[&str] = &[
+    "-c:v", "libx264", "-preset", "fast", "-crf", "14", "-pix_fmt", "yuv420p",
+];
+
+/// The video encode for Keep as captured on an OBS take with a trim (#84).
+///
+/// A stream copy can only cut on a keyframe, and OBS's Simple output puts one
+/// every 250 frames (about 4 s at 60 fps, measured), against a head of about
+/// 0.9 s: a copy would keep the whole head. The keyframe interval can't be set
+/// over obs-websocket in Simple mode, and splicing a re-encoded first GOP onto
+/// copied packets breaks on the encoders' differing parameter sets. So the cut
+/// is a re-encode at OBS's own quality, NVENC when FFmpeg can open it, which
+/// measured about as fast as the copy's disk time for a 20 s clip.
+///
+/// Probed once per FFmpeg path, with a one-frame encode.
+async fn trimmed_copy_video_args(ffmpeg: &str) -> &'static [&'static str] {
+    static NVENC_WORKS: std::sync::OnceLock<Mutex<HashMap<String, bool>>> =
+        std::sync::OnceLock::new();
+    let cache = NVENC_WORKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let known = cache.lock().ok().and_then(|c| c.get(ffmpeg).copied());
+    let works = match known {
+        Some(works) => works,
+        None => {
+            let works = encoder_opens(ffmpeg, "h264_nvenc").await;
+            if let Ok(mut c) = cache.lock() {
+                c.insert(ffmpeg.to_string(), works);
+            }
+            works
+        }
+    };
+    if works {
+        TRIMMED_COPY_NVENC
+    } else {
+        TRIMMED_COPY_X264
+    }
+}
+
+/// Whether FFmpeg can open `encoder` on this machine: one black frame,
+/// thrown away. A build listing NVENC without an NVIDIA GPU fails here.
+async fn encoder_opens(ffmpeg: &str, encoder: &str) -> bool {
+    let mut cmd = Command::new(ffmpeg);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+    cmd.kill_on_drop(true);
+    cmd.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=256x256:r=60",
+        "-frames:v",
+        "1",
+        "-c:v",
+        encoder,
+        "-f",
+        "null",
+        "-",
+    ]);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+    let Ok(mut child) = cmd.spawn() else {
+        return false;
+    };
+    // Dropping the child on a timeout kills it (`kill_on_drop`).
+    matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(15), child.wait()).await,
+        Ok(Ok(status)) if status.success()
+    )
 }
 
 /// The main picture's `-c:v` args for a ProRes choice; empty for any other

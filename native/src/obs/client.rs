@@ -345,6 +345,17 @@ impl ObsClient {
             .unwrap_or(false))
     }
 
+    /// How much the running recording holds, in ms: obs-websocket's
+    /// `outputDuration`, which is its frame count times the frame time, so it
+    /// steps once per frame (`obs::trim`). `None` while nothing is recording.
+    pub fn record_output_ms(&mut self) -> Result<Option<u64>, ObsError> {
+        let status = self.request("GetRecordStatus", json!({}))?;
+        if !status["outputActive"].as_bool().unwrap_or(false) {
+            return Ok(None);
+        }
+        Ok(status["outputDuration"].as_u64())
+    }
+
     /// Whether OBS is streaming right now.
     pub fn is_streaming(&mut self) -> Result<bool, ObsError> {
         Ok(self.request("GetStreamStatus", json!({}))?["outputActive"]

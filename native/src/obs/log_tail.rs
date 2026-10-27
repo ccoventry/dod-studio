@@ -105,6 +105,10 @@ pub struct Marker {
     /// True when it came over the game's events pipe (`pipe_tail`) rather
     /// than from `qconsole.log`.
     pub via_pipe: bool,
+    /// When Studio read it: OBS mode places the clip's start and end in the
+    /// recording from this (`obs::trim`), so it is stamped by the reader
+    /// thread, not when the capture loop gets round to the marker.
+    pub received: std::time::Instant,
 }
 
 /// Which source's markers go on to the capture loop (#434).
@@ -276,6 +280,7 @@ pub(crate) fn parse_marker(line: &str) -> Option<Marker> {
         tick: parse_tick(&label),
         label,
         via_pipe: false,
+        received: std::time::Instant::now(),
     })
 }
 

@@ -25,6 +25,7 @@ use crate::patch::ObsConfig;
 use super::client::{ObsClient, ObsError, ObsPreflight};
 use super::log_tail::{Marker, MarkerKind};
 use super::provision;
+use super::trim::FrameClock;
 use super::{STOP_MARKER, TRIGGER_MARKER};
 
 /// Stream folder a single-stream OBS take lands in.
@@ -53,6 +54,8 @@ pub struct RecordedBlock {
     /// however long the failure took to notice. Measured: 11.0s reported
     /// against a 4.2s file. Check `salvaged` before trusting it as a duration.
     pub seconds: f64,
+    /// Where the clip sits in the file (#84), when its start was placed.
+    pub trim: Option<crate::hlcr::take_meta::ObsTrim>,
     /// Recovered from disk after the connection died, rather than handed over
     /// by a clean `StopRecord`. The file is playable but truncated, and its
     /// tail is damaged where the muxer was interrupted.
@@ -95,6 +98,11 @@ pub struct ObsSession {
     /// since the counters themselves are cumulative across the whole OBS
     /// process, not scoped to one recording.
     frame_stats_baseline: Option<(i64, i64)>,
+    /// OBS's output frame rate, which `obs::trim` reads its frame clock at.
+    fps: f64,
+    /// Where the current block's clip starts in its recording, in seconds,
+    /// once its `START_RECORD` has been placed (#84).
+    clip_start: Option<f64>,
     pub recorded: Vec<RecordedBlock>,
     pub skipped: Vec<String>,
 }
@@ -168,6 +176,8 @@ impl ObsSession {
                 previous_scene,
                 previous_profile,
                 frame_stats_baseline: None,
+                fps: preflight.fps,
+                clip_start: None,
                 recorded: Vec::new(),
                 skipped: Vec::new(),
             },
@@ -193,9 +203,74 @@ impl ObsSession {
     pub fn on_marker(&mut self, marker: &Marker) {
         match marker.kind {
             k if k == TRIGGER_MARKER => self.begin_block(),
-            k if k == STOP_MARKER => self.end_block(),
+            MarkerKind::StartRecord => self.place_clip_start(marker),
+            k if k == STOP_MARKER => self.end_block_at(Some(marker)),
             MarkerKind::BatchComplete => self.end_block(),
             _ => {}
+        }
+    }
+
+    /// How long a burst of `GetRecordStatus` may run: long enough to see the
+    /// frame count step at least once at any rate down to 30 fps.
+    const CLOCK_BURST: std::time::Duration = std::time::Duration::from_millis(45);
+    /// A burst ends early once the first frame is placed this closely.
+    const CLOCK_SETTLED_SECONDS: f64 = 0.001;
+
+    /// Places the recording's frame clock against Studio's clock with a short
+    /// burst of `GetRecordStatus` answers (`obs::trim::FrameClock`), then
+    /// places `marker` in the recording: seconds from the file's start, the
+    /// clock's uncertainty either way, and how many answers it took. `None`
+    /// when OBS didn't say.
+    fn place(&mut self, marker: &Marker) -> Option<(f64, f64, u32)> {
+        let anchor = self.active_since?;
+        let mut clock = FrameClock::new(self.fps)?;
+        let burst_end = std::time::Instant::now() + Self::CLOCK_BURST;
+        {
+            let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
+            let client = guard.as_mut()?;
+            while std::time::Instant::now() < burst_end
+                && !clock.settled(Self::CLOCK_SETTLED_SECONDS)
+            {
+                let sent = anchor.elapsed().as_secs_f64();
+                let Ok(Some(output_ms)) = client.record_output_ms() else {
+                    break;
+                };
+                let received = anchor.elapsed().as_secs_f64();
+                clock.add(sent, received, output_ms);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let arrived = marker
+            .received
+            .checked_duration_since(anchor)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let at = clock.position(arrived, !marker.via_pipe)?;
+        let (_, error) = clock.first_frame()?;
+        Some((at, error, clock.samples()))
+    }
+
+    fn place_clip_start(&mut self, marker: &Marker) {
+        if self.active.is_none() || self.clip_start.is_some() {
+            return;
+        }
+        match self.place(marker) {
+            Some((at, error, samples)) => {
+                log_markdown(&format!(
+                    "[obs] clip starts {at:.3}s into the recording (±{:.1} ms, {samples} answers{})",
+                    error * 1000.0,
+                    if marker.via_pipe {
+                        ""
+                    } else {
+                        ", marker from qconsole.log"
+                    }
+                ));
+                self.clip_start = Some(at);
+            }
+            None => log_markdown(
+                "⚠️ **OBS** — couldn't place this clip's start in the recording; it will be \
+                 finished untrimmed.",
+            ),
         }
     }
 
@@ -265,6 +340,35 @@ impl ObsSession {
     }
 
     fn end_block(&mut self) {
+        self.end_block_at(None);
+    }
+
+    /// Ends the block; `stop` is the `STOP_RECORD` marker when that is what
+    /// ended it, which places the clip's end before the recording stops.
+    fn end_block_at(&mut self, stop: Option<&Marker>) {
+        if self.active.is_none() {
+            return;
+        }
+        let clip_end = stop.and_then(|m| self.place(m)).map(|(at, _, _)| at);
+        let trim = self.clip_start.take().and_then(|start| {
+            crate::hlcr::take_meta::ObsTrim {
+                start_seconds: start,
+                end_seconds: clip_end.filter(|&end| end > start),
+                fps: self.fps,
+            }
+            .validated()
+        });
+        if let Some(t) = trim {
+            log_markdown(&format!(
+                "[obs] clip ends {}",
+                t.end_seconds
+                    .map(|e| format!(
+                        "{e:.3}s into the recording ({:.3}s long)",
+                        e - t.start_seconds
+                    ))
+                    .unwrap_or_else(|| "where the recording does (no STOP_RECORD placed)".into())
+            ));
+        }
         let Some(dest) = self.active.take() else {
             return;
         };
@@ -296,10 +400,18 @@ impl ObsSession {
                             video.display()
                         ));
                         let take_folder = take_folder_of(&dest);
+                        // The file stops where the recording was cut off, so
+                        // only its start is known.
+                        let trim = trim.map(|t| crate::hlcr::take_meta::ObsTrim {
+                            end_seconds: None,
+                            ..t
+                        });
+                        record_trim(&take_folder, trim);
                         self.recorded.push(RecordedBlock {
                             take_folder,
                             video,
                             seconds,
+                            trim,
                             salvaged: true,
                         });
                     }
@@ -319,10 +431,12 @@ impl ObsSession {
         match fold_into_take(Path::new(&path), &dest) {
             Ok(video) => {
                 let take_folder = take_folder_of(&dest);
+                record_trim(&take_folder, trim);
                 self.recorded.push(RecordedBlock {
                     take_folder,
                     video,
                     seconds,
+                    trim,
                     salvaged: false,
                 });
             }
@@ -453,6 +567,22 @@ impl ObsSession {
             }
         }
         *guard = None;
+    }
+}
+
+/// Saves where the clip sits in its recording into the take's
+/// `dodstudio_take.json`, which the finish step cuts by (#84). Best-effort: a
+/// take that can't carry it is finished untrimmed, as before.
+fn record_trim(take_folder: &Path, trim: Option<crate::hlcr::take_meta::ObsTrim>) {
+    let Some(trim) = trim else {
+        return;
+    };
+    if let Err(e) = crate::hlcr::take_meta::record_obs_trim(take_folder, trim) {
+        log_markdown(&format!(
+            "⚠️ **OBS** — couldn't save where the clip starts in {} ({e}); it will be finished \
+             untrimmed.",
+            take_folder.display()
+        ));
     }
 }
 
@@ -601,6 +731,84 @@ mod tests {
             let out = fold_into_take(&rec, &dest).unwrap();
             assert_eq!(out.file_name().unwrap(), want);
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #84 end to end against a stand-in OBS whose recording's first frame
+    /// went out 70 ms after `StartRecord`: the clip's start and end are placed
+    /// from the markers' arrival times and saved into the take's file.
+    #[test]
+    fn a_blocks_clip_is_placed_in_its_recording_and_saved_with_the_take() {
+        use super::super::fake_obs::{Reply, serve};
+        use serde_json::json;
+        use std::time::{Duration, Instant};
+
+        let root = scratch("trim");
+        let block = root.join("dodstudio_chain_01_b0");
+        let dest = block.join(TAKE_FOLDER).join(STREAM_FOLDER);
+        std::fs::create_dir_all(&dest).unwrap();
+        let recorded = dest.join("2026-10-26 22-00-00.mp4");
+        std::fs::write(&recorded, b"x").unwrap();
+
+        // As if StartRecord went out two seconds ago, so the bursts run well
+        // into the recording, as they do in a batch.
+        let anchor = Instant::now() - Duration::from_secs(2);
+        let first_frame = anchor + Duration::from_millis(70);
+        let path = recorded.to_string_lossy().into_owned();
+        let obs = serve(move |kind, _| match kind {
+            "GetRecordStatus" => {
+                let frames = Instant::now()
+                    .checked_duration_since(first_frame)
+                    .map(|d| (d.as_secs_f64() * 60.0).floor() as u64 + 1)
+                    .unwrap_or(0);
+                Reply::ok(json!({
+                    "outputActive": true,
+                    "outputDuration": frames * 16_666_667 / 1_000_000,
+                }))
+            }
+            "StopRecord" => Reply::ok(json!({ "outputPath": path }))
+                .then_record_state("OBS_WEBSOCKET_OUTPUT_STOPPED"),
+            _ => Reply::ok(json!({})),
+        });
+        let client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        let mut session = ObsSession {
+            client: Arc::new(Mutex::new(Some(client))),
+            cfg: ObsConfig::default(),
+            dead: false,
+            refused: None,
+            take_folders: vec![block.clone()],
+            next_block: 1,
+            active: Some(dest.clone()),
+            active_since: Some(anchor),
+            previous_scene: None,
+            previous_profile: None,
+            frame_stats_baseline: None,
+            fps: 60.0,
+            clip_start: None,
+            recorded: Vec::new(),
+            skipped: Vec::new(),
+        };
+        let marker = |line: &str, at_ms: u64| Marker {
+            via_pipe: true,
+            received: anchor + Duration::from_millis(at_ms),
+            ..super::super::log_tail::parse_marker(line).unwrap()
+        };
+        session.on_marker(&marker("[dod-studio] START_RECORD - Tick 100", 1000));
+        session.on_marker(&marker("[dod-studio] STOP_RECORD - Tick 700", 11_000));
+
+        let trim = session.recorded[0].trim.expect("the clip was placed");
+        let half_frame = 0.5 / 60.0;
+        let start = 1.0 - 0.07 + super::super::trim::CAPTURE_DELAY_SECONDS;
+        assert!((trim.start_seconds - start).abs() < half_frame, "{trim:?}");
+        let end = trim.end_seconds.expect("the end was placed");
+        assert!((end - start - 10.0).abs() < half_frame, "{trim:?}");
+        let saved = crate::hlcr::take_meta::obs_trim(&block).expect("saved with the take");
+        assert!((saved.start_seconds - trim.start_seconds).abs() < 1e-9);
+        assert_eq!(
+            saved.end_seconds.map(|e| (e * 1e6).round()),
+            Some((end * 1e6).round())
+        );
+        drop(session);
         let _ = std::fs::remove_dir_all(&root);
     }
 

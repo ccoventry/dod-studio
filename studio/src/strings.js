@@ -893,7 +893,7 @@ export const STRINGS = {
     CODEC_VIDEO_LABEL: 'Video clips:',
     CODEC_FRAMES_LABEL: 'Frame sequence clips:',
     CODEC_TITLE: 'What each finished clip is saved as, for batches captured in this mode.',
-    CODEC_KEEP: 'Keep as captured (copy, seconds)',
+    CODEC_KEEP: 'Keep as captured, cut to the clip (seconds)',
     CODEC_RENDER_TAB: 'Same as the Codec setting above',
     progressStatus: (finished, total, rendering) =>
       `Finishing clips: ${finished} of ${total}${rendering > 0 ? `, ${rendering} in progress` : ''}`,

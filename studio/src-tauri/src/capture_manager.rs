@@ -884,7 +884,7 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
 
     for block in blocks.iter().filter(|b| b.captured) {
         let folder = Path::new(&block.take_folder);
-        if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
+        if let Err(e) = native::hlcr::take_meta::write_capture_settings(folder, &meta) {
             log_markdown(&format!(
                 "[take-verify] could not record capture settings at {} — {}. Render Studio will \
                  not be able to warn about an FPS mismatch for this take.",
