@@ -128,6 +128,8 @@ async function askBeforeClose({
     title: s.NOT_STARTED_TITLE,
     confirmLabel: s.CANCEL_AND_CLOSE_BUTTON,
     cancelLabel: s.KEEP_OPEN_BUTTON,
+    // Red: yes cancels the batch, so its captures never happen (#880).
+    destructive: true,
   });
   if (!close) return false;
   // Cancelled, the batch closes the game and records itself as cancelled,

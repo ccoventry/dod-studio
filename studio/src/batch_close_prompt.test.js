@@ -69,6 +69,8 @@ describe('closing Studio during a batch (#545)', () => {
     expect(dialog.calls).toHaveLength(1);
     expect(dialog.calls[0].message).toBe(s.MESSAGE);
     expect(dialog.calls[0].opts.confirmLabel).toBe(s.CLOSE_BUTTON);
+    // The batch carries on without Studio: nothing is thrown away.
+    expect(dialog.calls[0].opts.destructive).toBeFalsy();
     expect(b.cancelBatch).not.toHaveBeenCalled();
   });
 
@@ -106,6 +108,7 @@ describe('closing Studio during a batch (#545)', () => {
     expect(titles()).toEqual([s.WAIT_TITLE, s.NOT_STARTED_TITLE, s.WAIT_TITLE]);
     expect(dialog.calls[1].message).toBe(s.NOT_STARTED_MESSAGE);
     expect(dialog.calls[1].opts.confirmLabel).toBe(s.CANCEL_AND_CLOSE_BUTTON);
+    expect(dialog.calls[1].opts.destructive).toBe(true);
     expect(dialog.calls[2].message).toBe(s.CANCELLING);
     expect(dialog.calls[2].opts.hideCancel).toBe(true);
     expect(b.cancelBatch).toHaveBeenCalledTimes(1);
