@@ -38,6 +38,20 @@
 //! It is followed every frame from `deathmsg::poll`, on the engine's thread:
 //! `ds_hd_enabled 0` gives the game's layout from the next frame. The files
 //! are read once per level load, never per frame.
+//!
+//! ## The gap between the names and the icon
+//!
+//! `Draw` puts the icon 5 px after the killer's name (`add eax, 5`,
+//! `client+0x2b092`) and the victim's name right after the icon's box, and
+//! the tool trims every box to its icon's visible columns, so with
+//! `gap default` each name sits as far from every icon's art as the game puts
+//! it from a rifle's. `gap <px>` makes both spaces `px` screen pixels instead,
+//! counted from the name's outline when one is drawn, and on the killer's
+//! side from our font's drop shadow, so neither eats into it
+//! ([`gap_extras`]). The killer's side goes into its
+//! width and draw (`font`'s killer sites, only on a line whose icon is in the
+//! atlas), the victim's into the box's advance ([`line_rect`]), so a line
+//! with no killer gets only the victim's.
 
 // The loading runs only in the 32-bit DLL; a host build keeps the parsing
 // and the maths for the unit tests.
@@ -319,10 +333,90 @@ pub(super) fn boxes_by_index(names: &[u8], count: usize, table: &Table) -> Vec<O
 }
 
 /// The rect `scale`'s copy holds for a line drawn from `b` at scale `s`: the
-/// box's size scaled, its corner the box's (the line layout reads only the
-/// size; the draw reads the box itself from [`box_for`]).
-pub(super) fn line_rect(b: AtlasBox, s: f32) -> WRect {
-    super::scale::scale_rect(b.rect, s)
+/// box's size scaled, its corner the box's, `after` px wider on the right
+/// for the victim's side of the gap. The line layout reads only the size
+/// (the icon's advance, so the victim's name moves right by `after`); the
+/// draw reads the box itself from [`box_for`].
+pub(super) fn line_rect(b: AtlasBox, s: f32, after: i32) -> WRect {
+    let mut r = super::scale::scale_rect(b.rect, s);
+    r.right += after.max(0);
+    r
+}
+
+/// The space `Draw` leaves between the killer's name and the icon
+/// (`add eax, 5` after the name's draw, `client+0x2b092`); it leaves none
+/// between the icon and the victim's name.
+pub(super) const GAME_GAP_BEFORE: i32 = 5;
+/// The `gap` range, in screen pixels.
+pub(super) const MAX_GAP: i32 = 64;
+/// `gap default`.
+const GAP_DEFAULT: i32 = -1;
+/// The gap asked for, in screen px; [`GAP_DEFAULT`] for the game's spacing.
+static GAP: AtomicI32 = AtomicI32::new(GAP_DEFAULT);
+
+/// What the line adds to the game's spacing for `gap` (`None`: the game's):
+/// (after the killer's name, after the icon), in screen px. `outline` is how
+/// far the names' outline reaches past their text, and `shadow` how far a
+/// drop shadow reaches right of it (the killer's side only: the victim's
+/// shadow falls away from the icon); the gap is counted from those.
+pub(super) fn gap_extras(gap: Option<i32>, outline: i32, shadow: i32) -> (i32, i32) {
+    match gap {
+        None => (0, 0),
+        Some(g) => {
+            let edge = g + outline.max(0);
+            (edge + shadow.max(0) - GAME_GAP_BEFORE, edge)
+        }
+    }
+}
+
+/// The gap in force, `None` for the game's spacing.
+fn gap() -> Option<i32> {
+    Some(GAP.load(Ordering::Relaxed)).filter(|&g| g >= 0)
+}
+
+/// [`gap_extras`] for the gap and outline in force.
+pub(super) fn extras() -> (i32, i32) {
+    gap_extras(
+        gap(),
+        super::backdrop::outline().0,
+        super::font::shadow_px(),
+    )
+}
+
+/// The argument after `gap`: `0..=MAX_GAP` px, or `default` (`None`).
+pub(super) fn parse_gap(rest: &[String]) -> Result<Option<i32>, String> {
+    let [arg] = rest else {
+        return Err(format!("expected 0..={MAX_GAP} (px) or default"));
+    };
+    if arg.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    match arg.parse::<i32>() {
+        Ok(g) if (0..=MAX_GAP).contains(&g) => Ok(Some(g)),
+        _ => Err(format!("expected 0..={MAX_GAP} (px) or default, got {arg}")),
+    }
+}
+
+/// Makes `gap` the gap. The reply is what the console prints.
+pub(super) fn set_gap(gap: Option<i32>) -> String {
+    GAP.store(gap.unwrap_or(GAP_DEFAULT), Ordering::Relaxed);
+    super::scale::refresh();
+    let applies = if WANT_EVEN.load(Ordering::Relaxed) {
+        ""
+    } else {
+        " (it applies with layout even)"
+    };
+    format!("{}{applies}", describe_gap())
+}
+
+/// What `status` says about the gap.
+pub(super) fn describe_gap() -> String {
+    match gap() {
+        None => {
+            format!("gap = default (the game's: {GAME_GAP_BEFORE} px before the icon, none after)")
+        }
+        Some(g) => format!("gap = {g} px each side of the icon"),
+    }
 }
 
 /// Why the even layout isn't drawing, as `status` says it.
@@ -916,15 +1010,53 @@ mod tests {
                 .boxes
                 .iter()
                 .map(|(_, b)| {
-                    let r = line_rect(*b, s);
+                    let r = line_rect(*b, s, 18);
                     r.bottom - r.top
                 })
                 .collect();
             assert!(steps.iter().all(|&h| h == steps[0]), "scale {s}: {steps:?}");
         }
-        let mp44 = line_rect(t.boxes[1].1, 2.5);
+        let mp44 = line_rect(t.boxes[1].1, 2.5, 0);
         assert_eq!((mp44.right - mp44.left, mp44.bottom - mp44.top), (148, 65));
         assert_eq!(super::super::scale::line_step(65, 33), 65);
+    }
+
+    #[test]
+    fn gap_arguments_parse_as_typed() {
+        assert_eq!(parse_gap(&argv(&["14"])), Ok(Some(14)));
+        assert_eq!(parse_gap(&argv(&["0"])), Ok(Some(0)));
+        assert_eq!(parse_gap(&argv(&["64"])), Ok(Some(64)));
+        assert_eq!(parse_gap(&argv(&["DEFAULT"])), Ok(None));
+        assert!(parse_gap(&argv(&[])).is_err());
+        assert!(parse_gap(&argv(&["-1"])).is_err());
+        assert!(parse_gap(&argv(&["65"])).is_err());
+        assert!(parse_gap(&argv(&["1.5"])).is_err());
+        assert!(parse_gap(&argv(&["14", "px"])).is_err());
+    }
+
+    #[test]
+    fn a_gap_is_the_same_both_sides_counted_from_the_outline() {
+        // The game's: nothing added to its 5 px before the icon and none after.
+        assert_eq!(gap_extras(None, 0, 0), (0, 0));
+        assert_eq!(
+            gap_extras(None, 2, 1),
+            (0, 0),
+            "an outline or a shadow alone moves nothing"
+        );
+        // 14 px: the killer's 5 becomes 14, the victim gets 14.
+        assert_eq!(gap_extras(Some(14), 0, 0), (9, 14));
+        // A 2 px outline reaches 2 px past each name: the gap starts there.
+        assert_eq!(gap_extras(Some(14), 2, 0), (11, 16));
+        // A shadow reaches right: the killer's side only.
+        assert_eq!(gap_extras(Some(14), 2, 1), (12, 16));
+        // 0 pulls the icon up to the killer's name, 5 px nearer than the game.
+        assert_eq!(gap_extras(Some(0), 0, 0), (-GAME_GAP_BEFORE, 0));
+        // So a line is as wide as its names, its icon and twice the visible gap.
+        for (g, outline, shadow) in [(0, 0, 0), (6, 1, 1), (14, 2, 1), (MAX_GAP, 4, 0)] {
+            let (before, after) = gap_extras(Some(g), outline, shadow);
+            assert_eq!(GAME_GAP_BEFORE + before - outline - shadow, g);
+            assert_eq!(after - outline, g);
+        }
     }
 
     #[test]

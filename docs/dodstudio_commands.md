@@ -125,8 +125,9 @@ state, not the state from before that line ran.
 
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
 one by hand, changes the names' font, or scales the weapon icons. It also
-changes or hides one recorded kill (`replace`, #1021). The font
-(#562), the scale (#728) and the layout (#1022) take effect on the next frame.
+changes or hides one recorded kill (`replace`, #1021), and empties the feed
+now, at a new round or when the watched player dies (`clear`). The font
+(#562), the scale (#728), the layout (#1022) and the gap take effect on the next frame.
 HLAE's own
 `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
@@ -150,14 +151,29 @@ HLAE's own
 | `ds_hud_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 | `ds_hud_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match (with `scale`, `font`, `outline` or `background` in force they keep 1/160 of the screen's width clear of the right edge, or a quarter of the text's height when that is more, so a big last letter or a drop shadow is not cut), the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
 | `ds_hud_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
-| `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it. It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
+| `ds_hud_deathmsg layout even` | every weapon icon in a box 26 rows tall (times `scale`), from the next frame on: every long gun's barrel on one line and its full magazine and bipod shown (a gun that doesn't fit is drawn smaller, its barrel kept on the line), pistols and launchers at their own size on that line, knives and grenades centred, so every line steps the same and the names are centred on it; each box is only as wide as its icon's art, so the names sit as close to a stick grenade as to a rifle (`gap` sets that space). It draws from DoD Studio's own atlas (`sprites\dodstudio_killfeed.spr` in `dod_addon`, built by `killfeed_icons.py --even`) and only while HD is on (`ds_hd_enabled 1`) and that atlas went up with its HD files; otherwise it says why in the status and the game's layout stays. Works at `scale 1` with no `font` too |
 | `ds_hud_deathmsg layout default` | the game's own boxes and spacing, with whatever icons the sheets hold (the default) |
+| `ds_hud_deathmsg gap <0..64>` | with `layout even`: that many screen px (not scaled by `scale`) between each name and the icon's art, on both sides, from the next frame on. Counted from the name's `outline` when one is drawn, and on the killer's side from the `font`'s `shadow` (1 px), so the visible space stays the same with them on; the names' own side bearings (a px or two per glyph) stay as the font draws them. The atlas's boxes are trimmed to each icon's art (atlas v2, `killfeed_icons.py --even`), so it is the same for a stick grenade as for a rifle; an atlas built before keeps each icon's empty columns |
+| `ds_hud_deathmsg gap default` | the game's spacing: 5 px between the killer's name and the icon, none between the icon and the victim's name (the default); with the trimmed atlas that is how far every icon now sits, as a rifle always did |
 | `ds_hud_deathmsg outline <0..4> [colour] [alpha]` | outline every name that many px (default black, alpha 255), drawn as the name repeated around itself before the coloured pass; works with the game's font (always opaque there: the engine's text call takes no alpha) and with `font`. `0` is off |
 | `ds_hud_deathmsg outline default` | no outline (the default) |
 | `ds_hud_deathmsg background <alpha> [colour] [padding]` | one translucent box behind each line, from the killer's name to the victim's, `alpha` 0..255, colour default black, `padding` 0..64 px sideways (default 4); the box is the line's height, 2 px short so two lines' boxes don't overlap |
 | `ds_hud_deathmsg background team <alpha> [padding]` | a box behind each name instead, in a dark shade (a quarter) of that name's team colour; the icon gets none |
 | `ds_hud_deathmsg background allies <colour>` / `background axis <colour>` | that team's box colour for `background team` (`allies` covers the British, who are team 1 on a British map); `background allies default` goes back to the shade |
 | `ds_hud_deathmsg background default` | no boxes (the default), and `allies`/`axis` back to the shade |
+| `ds_hud_deathmsg clear` | empty the kill feed now (each line goes on the next frame, the way an expired one does); works in Scheduled Commands at a tick |
+| `ds_hud_deathmsg clear_on restart <0\|1> [delay]` | at every new round, `delay` seconds later (default 0, up to 600), clear the lines that were up when it restarted; lines that arrive during the delay stay (see below) |
+| `ds_hud_deathmsg clear_on death <0\|1> [delay]` | when the player the view belongs to dies (a POV demo's recorder, or the player an HLTV demo watches in eye), `delay` seconds later, clear the lines up at the death, that death's own line included; later lines stay |
+| `ds_hud_deathmsg clear_on default` | neither (the default) |
+
+`clear_on restart` follows DoD's `RoundState` reset, the message that starts
+every round. In 176 WSOD25 demos (POV and HLTV) it came 3 s after every round
+win (5 s on some servers), when a clan match went live (both teams ready, then
+the 10 s count), at the start of a recording, and every 20 s while a server
+said there were not enough players. A half that ends on the map's time limit
+sends none: the map changes, and the next demo starts with an empty feed. A
+single flag capture sends none either, and a full cap's own lines stay up
+through the win: they go at the restart.
 
 A `colour` for `outline` and `background` is three numbers `r g b`, each 0..255 (`10 40 110`), or one hex colour: `#0a286e`, the short `#0af` (each digit doubled, so `#00aaff`), or six digits without the `#` (`0a286e`). Three digits need their `#`, since `255` on its own is a number. The `#` works from the console and from a cfg line alike, e.g. `ds_hud_deathmsg background allies #0a286e`.
 

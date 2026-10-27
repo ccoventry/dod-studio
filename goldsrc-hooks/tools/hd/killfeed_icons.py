@@ -73,7 +73,9 @@ which version of the icons, so a finished sheet is skipped.
 
 --even builds the atlas `ds_hud_deathmsg layout even` draws from instead
 (#1022, build_even): every kill-feed icon in a box EVEN_HEIGHT rows tall,
-each long gun's barrel top on one row, nothing cut. It leaves the sheets
+each long gun's barrel top on one row, nothing cut, each box only as wide as
+its icon's visible columns (trim_box), so the names sit as far from a stick
+grenade's art as from a rifle's. It leaves the sheets
 alone, and so the default layout.
 
 usage: python killfeed_icons.py <sprites out_dir> [--only d_kar,d_mp40]
@@ -1871,7 +1873,7 @@ EVEN_HEIGHT = 26
 EVEN_BARREL_ROW = 8
 # Bump when the even atlas's look or rule changes: a style's atlas built by
 # an older one is built again.
-EVEN_VERSION = 1
+EVEN_VERSION = 2  # 2: each box trimmed to its icon's visible columns (trim_box)
 ATLAS_NAME = "dodstudio_killfeed"
 ATLAS_TABLE_VERSION = 1
 ATLAS_SIZE = 256  # stock px per frame side, as Valve's sheets: 1024 at 4x, gl_max_size 1024 as theirs
@@ -1930,6 +1932,34 @@ def fit_box(img, w, h, height, scale):
     out[max(oy, 0):max(oy, 0) + min(ih, out.shape[0]), max(ox, 0):max(ox, 0) + min(iw, out.shape[1])] = \
         img[max(-oy, 0):max(-oy, 0) + min(ih, out.shape[0]), max(-ox, 0):max(-ox, 0) + min(iw, out.shape[1])]
     return out, (box_w, height)
+
+
+VISIBLE_ALPHA = 4 / 255  # a column with no texel at least this opaque is empty
+
+
+def trim_box(img, size, scale, visible=VISIBLE_ALPHA):
+    """A box narrowed to the icon's visible columns, so the kill feed's names
+    sit the same distance from every icon's art: `img` (RGBA float at
+    `scale`x) of `size` (box w, box h) stock px. The engine draws a box from
+    half a texel inside each edge (texture coordinates `(rect +- 0.5) /
+    frame size`), so the visible columns go in the middle of a box one stock
+    px wider than they are, centred to the HD pixel: at most 3/8 of a stock
+    px of slack is left on each side. Rows are untouched (barrel row,
+    centring). A box whose art already fills it keeps its size; nothing
+    visible is cut. (rgba, (box w, box h))."""
+    w, h = size
+    cols = np.nonzero((img[..., 3] >= visible).any(0))[0]
+    if not len(cols):
+        return img, size
+    c0, c1 = int(cols.min()), int(cols.max()) + 1
+    ink = c1 - c0
+    new_w = int(math.ceil(ink / scale - 1e-9)) + 1
+    if new_w >= w:
+        return img, size
+    out = np.zeros((img.shape[0], new_w * scale, 4))
+    left = (new_w * scale - ink) // 2
+    out[:, left:left + ink] = img[:, c0:c1]
+    return out, (new_w, h)
 
 
 def kept_icon(dod, name, sheet4, scale, height=EVEN_HEIGHT):
@@ -2098,6 +2128,8 @@ def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print
     if not keys:
         log("no kill-feed icon could go into the atlas; nothing written")
         return 0
+    for k in imgs:
+        imgs[k], sizes[k] = trim_box(imgs[k], sizes[k], 4)
 
     spots, count = pack(sizes)
     if count > ATLAS_MAX_FRAMES:
