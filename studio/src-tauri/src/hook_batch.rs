@@ -121,5 +121,7 @@ pub fn prepare(
     Ok(RuntimeBatch {
         file: path,
         source_copies: copies.into_iter().map(|c| c.copy).collect(),
+        // Set by the caller for a batch in the open game (#725).
+        reuse_game: None,
     })
 }

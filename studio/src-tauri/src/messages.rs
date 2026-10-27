@@ -246,6 +246,14 @@ pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
     format!("Reading {demo} again for its clip times ({index} of {total})")
 }
 
+/// A batch that was to run in the open game (#725) but has to be patched,
+/// which only a fresh game can play. `why` says why it can't seek.
+pub fn batch_needs_fresh_game(why: &str) -> String {
+    format!(
+        "This batch has to be patched ({why}), and a patched batch needs a fresh game. Close Day of Defeat and start the batch again."
+    )
+}
+
 /// The activity-log line when a Seek Between Clips batch falls back to
 /// patching and some of its Initial or Scheduled Commands are ones the
 /// game's demo filter drops (#679), or `None` when there are none.

@@ -23,6 +23,9 @@ pub mod installs;
 pub mod junction;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod minimize;
+/// The DLLs a running process has loaded: which hook DLL a game has (#725).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod modules;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod packet_limit;
 #[cfg(not(target_arch = "wasm32"))]

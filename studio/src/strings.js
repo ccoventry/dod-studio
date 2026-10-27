@@ -264,7 +264,7 @@ export const STRINGS = {
     // outright, but not until every demo in the queue has been patched, so the
     // work is already done by the time the error box appears.
     TITLE_BATCH: 'Day of Defeat Is Already Running',
-    BODY_BATCH: 'The Half-Life engine is already running (hl.exe / hlae.exe). Day of Defeat allows only one instance, so the batch would patch every demo and then fail to launch. Close the running game first, or force a relaunch to close it now.',
+    BODY_BATCH: 'The Half-Life engine is already running (hl.exe / hlae.exe), and this batch can\'t run in it (the activity log says why). Day of Defeat allows only one instance. Close the running game first, or force a relaunch to close it now.',
     FORCE_RELAUNCH_BUTTON: 'Force Relaunch',
     COPY_VIEW_COMMAND_BUTTON: 'Copy View Command',
     CANCEL_BUTTON: 'Cancel',
@@ -669,6 +669,7 @@ export const STRINGS = {
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
     BATCH_QUEUED_TOAST: 'Batch capture queued successfully!',
+    BATCH_IN_OPEN_GAME_TOAST: 'Running the batch in the game that is already open. It stays open afterwards.',
     startBatchError: (err) => `Error starting batch: ${err}`,
     CANCELLING_BATCH_TOAST: 'Cancelling batch...',
     EMPTY_DASH: '—',

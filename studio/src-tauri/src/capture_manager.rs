@@ -204,6 +204,10 @@ pub struct CapturePayload {
     /// `PatcherConfig::hook_runs_batch`: on unless the payload says otherwise.
     #[serde(default = "native::patch::types::default_hook_runs_batch")]
     pub hook_runs_batch: bool,
+    /// The open game to run the batch in instead of launching one (#725),
+    /// from `running_game_for_batch`. Only a Seek Between Clips batch can.
+    #[serde(default)]
+    pub reuse_game_pid: Option<u32>,
     /// `PatcherConfig::keep_game_behind`.
     #[serde(default = "crate::settings_manager::default_keep_game_behind")]
     pub keep_game_behind: bool,
@@ -1108,6 +1112,8 @@ pub async fn start_capture_batch_impl(
         *slot = Some(patcher_config.clone());
     }
 
+    let reuse_game_pid = payload.reuse_game_pid;
+
     // ── Convert IPC streaks → native CaptureStreak ────────────────────────────
     let raw_streaks: Vec<CaptureStreak> = payload
         .streaks
@@ -1247,7 +1253,27 @@ pub async fn start_capture_batch_impl(
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
             match crate::hook_batch::prepare(&patch_jobs, &planned_streaks, &patcher_config) {
-                Ok(batch) => Some(batch),
+                Ok(mut batch) => {
+                    batch.reuse_game = reuse_game_pid;
+                    Some(batch)
+                }
+                // A patched batch starts the game on its first demo, so it
+                // can't run in the open game the frontend picked (#725).
+                Err(why) if reuse_game_pid.is_some() => {
+                    let status = crate::messages::batch_needs_fresh_game(&why);
+                    log_markdown(&format!("⚠️ **Batch not started** — {status}"));
+                    let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                    *running = false;
+                    let _ = app_handle_clone.emit(
+                        "capture_status",
+                        serde_json::json!({
+                            "running": false,
+                            "error": true,
+                            "status": status
+                        }),
+                    );
+                    return;
+                }
                 Err(why) => {
                     log_markdown(&format!(
                         "ℹ️ **This batch is patched instead of seeking between clips** — {why}"
@@ -3378,6 +3404,53 @@ pub async fn check_running_game(
     .await
 }
 
+/// The open game a capture batch can run in instead of Force Relaunch
+/// (#725), by PID, or `None` when it needs a fresh game. The activity log
+/// says why not (`native::patch::batch_reuse`).
+#[tauri::command]
+pub async fn running_game_for_batch(
+    app: tauri::AppHandle,
+    request: Option<LaunchRequest>,
+    capture_mode: String,
+    hook_runs_batch: bool,
+) -> Result<Option<u32>, String> {
+    let launch = launch_config(&saved_settings(&app), &request.unwrap_or_default());
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        use native::patch::batch_reuse::{ReuseFacts, game_to_reuse};
+        let running = native::patch::launch_settings::check_running_game(&launch.launch_settings());
+        let pid = match &running {
+            RunningGameCheck::Match { pid } | RunningGameCheck::Mismatch { pid, .. } => Some(*pid),
+            RunningGameCheck::None => None,
+        };
+        let modules = pid.and_then(native::sys::modules::loaded_modules);
+        let pipe_answers = pid.is_some_and(|pid| {
+            matches!(
+                native::sys::game_remote::send_console_commands(pid, &[]),
+                Ok(native::sys::game_remote::Sent::Delivered)
+            )
+        });
+        let hook_dll = launch.goldsrc_hooks_dll();
+        let verdict = game_to_reuse(&ReuseFacts {
+            hook_runs_batch,
+            capture_mode: native::patch::CaptureMode::from_str_id(&capture_mode),
+            running: &running,
+            hook_dll: hook_dll.as_deref(),
+            modules: modules.as_deref(),
+            pipe_answers,
+        });
+        match &verdict {
+            Ok(pid) => log_markdown(&format!(
+                "[launch] The batch runs in the game that is already open (PID {pid}) (#725)"
+            )),
+            Err(why) => log_markdown(&format!(
+                "[launch] The open game can't take the batch — {why}; asking to start it again"
+            )),
+        }
+        Ok(verdict.ok())
+    }))
+    .await
+}
+
 /// How long a game gets to close before the restart gives up.
 const CLOSE_GAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -4375,6 +4448,7 @@ mod tests {
             obs_password: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
+            reuse_game_pid: None,
             keep_game_behind: true,
             streaks: Vec::new(),
             pre_roll_seconds: 2.0,

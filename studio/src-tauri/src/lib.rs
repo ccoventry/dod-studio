@@ -1011,6 +1011,7 @@ pub fn run() {
             check_engine_processes,
             kill_engine_processes,
             capture_manager::check_running_game,
+            capture_manager::running_game_for_batch,
             capture_manager::close_running_game,
             steam_state,
             start_steam,
