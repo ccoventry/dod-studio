@@ -53,6 +53,21 @@ fn bundled_demo(app: &tauri::AppHandle) -> Option<PathBuf> {
         .into_iter()
         .chain(std::iter::once(repo))
         .find(|p| p.is_file())
+        .map(|p| without_verbatim_prefix(&p))
+}
+
+/// `p` without Windows' `\\?\` prefix, which `resource_dir` can give: the
+/// hook's batch hands the path to `viewdemo`, which reads `\\?\C:\...` as no
+/// drive at all and skips the demo.
+fn without_verbatim_prefix(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        p.to_path_buf()
+    }
 }
 
 /// The clip a test records: `seconds` of the bundled demo with the most kills
@@ -234,6 +249,24 @@ mod tests {
         );
         assert!(is_test_session("obs_test_1"));
         assert!(!is_test_session("session_obs_test_1"));
+    }
+
+    #[test]
+    fn the_verbatim_prefix_goes() {
+        assert_eq!(
+            without_verbatim_prefix(Path::new(
+                r"\\?\C:\Program Files\DoD Studio\obs-test\ci_fixture.dem"
+            )),
+            PathBuf::from(r"C:\Program Files\DoD Studio\obs-test\ci_fixture.dem")
+        );
+        assert_eq!(
+            without_verbatim_prefix(Path::new(r"\\?\UNC\server\share\a.dem")),
+            PathBuf::from(r"\\server\share\a.dem")
+        );
+        assert_eq!(
+            without_verbatim_prefix(Path::new(r"D:\a.dem")),
+            PathBuf::from(r"D:\a.dem")
+        );
     }
 
     #[test]

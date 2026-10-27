@@ -184,6 +184,13 @@ export function createObsCaptureTest({ getState, persist }) {
           { command: FRAME_TIMES_OFF, relation: 'After', offset_seconds: clip.post_roll },
         ],
       };
+      // `data-fps-max` sets the game's fps_max for the clip in place of OBS
+      // mode's own (twice the rate): also not in the UI, it is how other
+      // rules are measured against that one. Before the recording starts and
+      // after the pre-roll's `sys_normal_speed` puts the usual one back.
+      if (panel.dataset.fpsMax) {
+        payload.custom_commands.push({ command: `fps_max ${panel.dataset.fpsMax}`, relation: 'Before', offset_seconds: clip.pre_roll + 1.5 });
+      }
       const conn = obsConnection();
       await obsTestWatchStart(conn.host, conn.port, conn.password);
       const { status, takes } = await runBatch(payload, rate, prefix);
