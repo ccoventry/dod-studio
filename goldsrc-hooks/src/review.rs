@@ -662,6 +662,8 @@ fn key_action(action: crate::review_keys::Action) {
         Action::No => answer(Verdict::No),
         Action::Replay => replay(),
         Action::Back => back(),
+        Action::Next => next(),
+        Action::Stop => stop(),
     }
 }
 
@@ -893,6 +895,31 @@ fn back() {
     }
 }
 
+/// The next highlight without answering this one.
+fn next() {
+    let mut guard = lock();
+    if guard.is_none() {
+        say("no review running");
+    }
+    advance(&mut guard);
+}
+
+/// Ends the review; every answer so far is already in Studio.
+fn stop() {
+    if let Some(review) = lock().take() {
+        // Stopped inside a gap: the demo plays on at normal speed.
+        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+            let _ = crate::demo_seek::set_time_scale(1.0);
+        }
+        crate::events::send("REVIEW_END\tstopped");
+        crate::spectator_follow::hold_for_review(false);
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        say("stopped");
+    } else {
+        say("no review running");
+    }
+}
+
 const USAGE: &str = "start \"<queue file>\" | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
 
 /// `ds_demo_review <what>`.
@@ -913,13 +940,7 @@ pub unsafe extern "C" fn command() {
         "maybe" => answer(Verdict::Maybe),
         "no" => answer(Verdict::No),
         "replay" => replay(),
-        "next" => {
-            let mut guard = lock();
-            if guard.is_none() {
-                say("no review running");
-            }
-            advance(&mut guard);
-        }
+        "next" => next(),
         "back" => back(),
         "range" => {
             let mut guard = lock();
@@ -953,20 +974,7 @@ pub unsafe extern "C" fn command() {
             review.queue[at].note = clean_note(&rest_of_line(2));
             GENERATION.fetch_add(1, Ordering::Relaxed);
         }
-        "stop" => {
-            if let Some(review) = lock().take() {
-                // Stopped inside a gap: the demo plays on at normal speed.
-                if matches!(review.phase, Phase::Playing { fast: true, .. }) {
-                    let _ = crate::demo_seek::set_time_scale(1.0);
-                }
-                crate::events::send("REVIEW_END\tstopped");
-                crate::spectator_follow::hold_for_review(false);
-                GENERATION.fetch_add(1, Ordering::Relaxed);
-                say("stopped");
-            } else {
-                say("no review running");
-            }
-        }
+        "stop" => stop(),
         other => say(&format!("unknown \"{other}\" -- {NAME} {USAGE}")),
     }
 }

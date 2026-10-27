@@ -5,14 +5,18 @@
 //!
 //! ## The keys
 //!
-//! Y Yes, M Maybe, N No, R Replay, B Back. ESC brings up the menu as
-//! always, and the review opens the DoD Studio window on its Review tab with
-//! it, for the kill range and the note: vgui2 takes ESC before any client
-//! hook sees it (seen live on PRE), so the review watches the menu come up
-//! instead (`review::poll`). The letter keys are taken only while the review is paused at a highlight's end waiting for an
-//! answer ([`AWAITING`]) and `ds_ui_review_keys` is on; at any other time
-//! every key goes to the game as before. A taken key never reaches its
-//! bind (Y is `messagemode` in DoD's default config).
+//! One key for each of the Review tab's buttons, in its order ([`KEYS_LIST`]):
+//! Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop. Next has no
+//! letter of its own (N is No), so it takes Space, the "press Space to go
+//! on" key, which only skips: B brings the highlight back. ESC brings up the
+//! menu as always, and the review opens the DoD Studio window on its Review
+//! tab with it, for the kill range and the note: vgui2 takes ESC before any
+//! client hook sees it (seen live on PRE), so the review watches the menu
+//! come up instead (`review::poll`). The keys are taken only while the
+//! review is paused at a highlight's end waiting for an answer
+//! ([`AWAITING`]) and `ds_ui_review_keys` is on; at any other time every key
+//! goes to the game as before. A taken key never reaches its bind (Y is
+//! `messagemode`, Space `+jump` and S `+moveback` in DoD's default config).
 //!
 //! The keys come through `client.dll`'s `HUD_Key_Event` (slot 34 of its
 //! `cldll_func_t` table), which returns 0 to swallow a key. The engine's
@@ -47,7 +51,7 @@ use crate::demo_list_folders::Setting;
 use crate::names::console_name;
 
 /// `ds_ui_review_keys 1` (default): at a highlight's end the review waits
-/// on the game screen for Y, M, N, R or B instead of opening the Review
+/// on the game screen for Y, M, N, R, B, Space or S instead of opening the Review
 /// tab, which ESC opens. `0` opens the tab, as before #660.
 pub static KEYS: Setting = Setting::new(console_name!("ui_review_keys"), true);
 /// `ds_ui_review_info 1` (default): while a highlight loads and plays, the
@@ -57,7 +61,8 @@ pub static INFO: Setting = Setting::new(console_name!("ui_review_info"), true);
 
 pub fn keys_status() -> String {
     if KEYS.on() {
-        "at a highlight's end, Y M N R B answer it on screen, ESC opens the Review tab".to_string()
+        "at a highlight's end, Y M N R B Space S answer it on screen, ESC opens the Review tab"
+            .to_string()
     } else {
         "at a highlight's end, the Review tab opens for the answer".to_string()
     }
@@ -79,6 +84,8 @@ pub(crate) enum Action {
     No,
     Replay,
     Back,
+    Next,
+    Stop,
 }
 
 impl Action {
@@ -87,34 +94,50 @@ impl Action {
     }
 
     fn from_code(code: u32) -> Option<Action> {
-        ACTIONS.iter().copied().find(|a| a.code() == code)
+        KEYS_LIST
+            .iter()
+            .map(|k| k.action)
+            .find(|a| a.code() == code)
     }
 }
 
-const ACTIONS: [Action; 5] = [
-    Action::Yes,
-    Action::Maybe,
-    Action::No,
-    Action::Replay,
-    Action::Back,
+/// One key: the engine's key number, its name on the box, the button's word
+/// and what it does.
+pub(crate) struct Key {
+    code: i32,
+    pub label: &'static str,
+    pub word: &'static str,
+    action: Action,
+}
+
+/// The keys, in the Review tab's button order (`ui/Review.res`), which the
+/// box lists them in too. The engine's key number for a letter is its
+/// lower-case ASCII code, for Space 32.
+pub(crate) const KEYS_LIST: [Key; 7] = [
+    key(b'y', "Y", "Yes", Action::Yes),
+    key(b'm', "M", "Maybe", Action::Maybe),
+    key(b'n', "N", "No", Action::No),
+    key(b'r', "R", "Replay", Action::Replay),
+    key(b'b', "B", "Back", Action::Back),
+    key(b' ', "Space", "Next", Action::Next),
+    key(b's', "S", "Stop", Action::Stop),
 ];
 
-/// The keys, in [`ACTIONS`]' order: the engine's key number for a letter is
-/// its lower-case ASCII code.
-const KEY_CODES: [i32; 5] = [
-    b'y' as i32,
-    b'm' as i32,
-    b'n' as i32,
-    b'r' as i32,
-    b'b' as i32,
-];
+const fn key(code: u8, label: &'static str, word: &'static str, action: Action) -> Key {
+    Key {
+        code: code as i32,
+        label,
+        word,
+        action,
+    }
+}
 
-/// The action a key stands for, and its place in [`KEY_CODES`].
+/// The action a key stands for, and its place in [`KEYS_LIST`].
 fn action_for(key: i32) -> Option<(usize, Action)> {
-    KEY_CODES
+    KEYS_LIST
         .iter()
-        .position(|&k| k == key)
-        .map(|i| (i, ACTIONS[i]))
+        .position(|k| k.code == key)
+        .map(|i| (i, KEYS_LIST[i].action))
 }
 
 /// Set by the review's poll while it waits for an answer with
@@ -122,7 +145,7 @@ fn action_for(key: i32) -> Option<(usize, Action)> {
 static AWAITING: AtomicBool = AtomicBool::new(false);
 /// The action a key asked for, for the next poll; 0 for none.
 static PENDING: AtomicU32 = AtomicU32::new(0);
-/// One bit per key in [`KEY_CODES`] whose press was taken and not yet
+/// One bit per key in [`KEYS_LIST`] whose press was taken and not yet
 /// released.
 static HELD: AtomicU32 = AtomicU32::new(0);
 
@@ -192,14 +215,7 @@ pub(crate) fn publish(panel: Option<Panel>, awaiting: bool) {
     }
 }
 
-/// A segment of the keys line: the key, in the key colour, then its word.
-pub(crate) const KEY_LINE: [(&str, &str); 5] = [
-    ("Y", "Yes"),
-    ("M", "Maybe"),
-    ("N", "No"),
-    ("R", "Replay"),
-    ("B", "Back"),
-];
+/// The line under the keys: the key, in the key colour, then what it does.
 pub(crate) const ESC_LINE: (&str, &str) = ("ESC", "kill range and note");
 
 /// Draws the box. Runs after `client.dll`'s own `HUD_Redraw`, every frame.
@@ -221,7 +237,7 @@ pub unsafe fn draw() {
 mod draw {
     use std::ffi::CString;
 
-    use super::{ESC_LINE, KEY_LINE, Panel};
+    use super::{ESC_LINE, KEYS_LIST, Panel};
 
     const WHITE: (f32, f32, f32) = (1.0, 1.0, 1.0);
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
@@ -248,10 +264,11 @@ mod draw {
         }
         if panel.keys {
             let mut keys = Vec::new();
-            for (i, (key, word)) in KEY_LINE.iter().enumerate() {
-                let gap = if i == 0 { "" } else { "     " };
-                keys.extend(run(&format!("{gap}{key}"), KEY));
-                keys.extend(run(&format!(" {word}"), WHITE));
+            // Each key in the key colour, then its button's word.
+            for (i, k) in KEYS_LIST.iter().enumerate() {
+                let gap = if i == 0 { "" } else { "    " };
+                keys.extend(run(&format!("{gap}{}", k.label), KEY));
+                keys.extend(run(&format!(" {}", k.word), WHITE));
             }
             lines.push(keys);
             let mut esc = Vec::new();
@@ -369,7 +386,7 @@ mod tests {
 
     #[test]
     fn each_key_has_its_own_action() {
-        let keys: Vec<_> = b"ymnrb"
+        let keys: Vec<_> = b"ymnrb s"
             .iter()
             .map(|&k| action_for(k as i32).map(|(_, a)| a))
             .collect();
@@ -380,21 +397,66 @@ mod tests {
                 Some(Action::Maybe),
                 Some(Action::No),
                 Some(Action::Replay),
-                Some(Action::Back)
+                Some(Action::Back),
+                Some(Action::Next),
+                Some(Action::Stop)
             ]
         );
         // Upper case never comes from the engine; Shift is its own key.
         assert_eq!(action_for(b'Y' as i32), None);
-        for a in ACTIONS {
-            assert_eq!(Action::from_code(a.code()), Some(a));
+        for k in &KEYS_LIST {
+            assert_eq!(Action::from_code(k.action.code()), Some(k.action));
         }
         assert_eq!(Action::from_code(0), None);
     }
 
     #[test]
-    fn the_keys_line_names_every_letter_key() {
-        let letters: String = KEY_LINE.iter().map(|(k, _)| *k).collect();
-        let codes: String = KEY_CODES[..5].iter().map(|&k| k as u8 as char).collect();
-        assert_eq!(letters.to_ascii_lowercase(), codes);
+    fn next_and_stop_are_taken_only_while_the_review_waits() {
+        let space = b' ' as i32;
+        let s = b's' as i32;
+        // Space is +jump and S +moveback while a highlight plays.
+        assert_eq!(decide(true, space, false, 0), (false, None, 0));
+        assert_eq!(decide(true, s, false, 0), (false, None, 0));
+        assert_eq!(
+            decide(true, space, true, 0),
+            (true, Some(Action::Next), 1 << 5)
+        );
+        assert_eq!(decide(true, s, true, 0), (true, Some(Action::Stop), 1 << 6));
+        // Next held past the move on: its release is taken, not +jump's.
+        assert_eq!(decide(false, space, false, 1 << 5), (true, None, 0));
+    }
+
+    #[test]
+    fn every_key_and_label_is_its_own() {
+        for (i, a) in KEYS_LIST.iter().enumerate() {
+            for b in &KEYS_LIST[i + 1..] {
+                assert_ne!(a.code, b.code, "{} and {}", a.label, b.label);
+                assert_ne!(a.label, b.label);
+                assert_ne!(a.action, b.action);
+            }
+            // A letter's name on the box is the letter itself.
+            if a.label.len() == 1 {
+                assert_eq!(a.label.to_ascii_lowercase().as_bytes()[0] as i32, a.code);
+            }
+        }
+        // The held set has a bit for each key.
+        assert!(KEYS_LIST.len() <= 32);
+    }
+
+    #[test]
+    fn the_keys_follow_the_review_tabs_buttons() {
+        // Review.res lists its buttons in order; the box lists the keys in
+        // the same order, each under the button's own word.
+        let res = include_str!("../ui/Review.res");
+        let mut at = 0;
+        for k in &KEYS_LIST {
+            let label = format!("\"labelText\"\t\t\"{}\"", k.word);
+            let found = res[at..]
+                .find(&label)
+                .unwrap_or_else(|| panic!("no {} button after the previous key's", k.word));
+            at += found + label.len();
+        }
+        // And no button is left without a key.
+        assert_eq!(res.matches("\"Button\"").count(), KEYS_LIST.len());
     }
 }
