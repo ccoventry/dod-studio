@@ -58,7 +58,13 @@ pub fn job_reservation_estimate(clip: &ClipData, codec: RenderCodec, custom_args
     }
     let raw = estimate_reservation_bytes(clip);
     rate_key(clip, codec, custom_args)
-        .and_then(|key| learned_rates().lock().ok()?.get(&key).copied())
+        .and_then(|key| {
+            let rates = learned_rates().lock().ok()?;
+            rates
+                .get(&key)
+                .copied()
+                .or_else(|| prores_rate_from_another_profile(&rates, &key, codec))
+        })
         .map(|bytes_per_frame| {
             let learned = bytes_per_frame * LEARNED_RATE_MARGIN * clip.frame_count as f64;
             (learned.ceil() as u64).min(raw)
@@ -72,7 +78,9 @@ pub fn job_reservation_estimate(clip: &ClipData, codec: RenderCodec, custom_args
 // ratios. Each codec's real bytes per frame are measured from renders that
 // finished, per frame size (a 4K ProRes frame is not a 720p one), and later
 // jobs reserve that plus a margin. The first clip of a kind keeps the
-// uncompressed estimate. Kept for the whole app session: a codec's rate at a
+// uncompressed estimate, except a ProRes profile, which borrows another
+// profile's measured rate through their size ratio (the one place a ratio is
+// written down). Kept for the whole app session: a codec's rate at a
 // frame size doesn't change between batches.
 
 /// Head-room over the largest rate seen, since footage varies from clip to
@@ -108,6 +116,38 @@ fn rate_key(clip: &ClipData, codec: RenderCodec, custom_args: &str) -> Option<Ra
     })
 }
 
+/// The ProRes profiles differ mostly in their target rate, so before the
+/// first render of one profile finishes, another profile's rate at the same
+/// frame size, scaled by the two profiles' size ratio
+/// (`RenderCodec::prores_profile`), is a far better guess than the raw
+/// estimate. The largest such figure wins, like `record_output_size`.
+fn prores_rate_from_another_profile(
+    rates: &HashMap<RateKey, f64>,
+    key: &RateKey,
+    codec: RenderCodec,
+) -> Option<f64> {
+    if key.hud {
+        return None;
+    }
+    let (_, _, ratio) = codec.prores_profile()?;
+    [
+        RenderCodec::ProRes,
+        RenderCodec::ProRes422,
+        RenderCodec::ProResLt,
+        RenderCodec::ProRes4444,
+    ]
+    .into_iter()
+    .filter_map(|other| {
+        let (_, _, other_ratio) = other.prores_profile()?;
+        let other_key = RateKey {
+            codec: other.to_str_id().to_string(),
+            ..key.clone()
+        };
+        Some(rates.get(&other_key)? / other_ratio * ratio)
+    })
+    .reduce(f64::max)
+}
+
 /// Largest bytes per frame seen for each key this session.
 fn learned_rates() -> &'static Mutex<HashMap<RateKey, f64>> {
     static RATES: std::sync::OnceLock<Mutex<HashMap<RateKey, f64>>> = std::sync::OnceLock::new();
@@ -126,6 +166,38 @@ fn record_output_size(clip: &ClipData, codec: RenderCodec, custom_args: &str, by
         let entry = rates.entry(key).or_insert(rate);
         *entry = entry.max(rate);
     }
+}
+
+/// The reservation ledger's key for an export directory: its volume, so
+/// folders on one drive share one reservation total (#774); the directory
+/// itself when it has no drive or share prefix.
+fn ledger_key(dir: &Path) -> PathBuf {
+    crate::sys::disk::volume_key(dir)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dir.to_path_buf())
+}
+
+/// Reserves `amount` on the first of `dirs` whose volume has more than
+/// `amount + margin` free once the ledger's reservations there are taken off.
+/// Returns that directory, what was already reserved on its volume, and its
+/// live free space.
+fn try_reserve(
+    ledger: &mut HashMap<PathBuf, u64>,
+    dirs: &[PathBuf],
+    amount: u64,
+    margin: u64,
+    mut free_of: impl FnMut(&Path) -> u64,
+) -> Option<(PathBuf, u64, u64)> {
+    for dir in dirs {
+        let key = ledger_key(dir);
+        let live_free = free_of(dir);
+        let already_reserved = *ledger.get(&key).unwrap_or(&0);
+        if live_free.saturating_sub(already_reserved) > amount + margin {
+            *ledger.entry(key).or_insert(0) += amount;
+            return Some((dir.clone(), already_reserved, live_free));
+        }
+    }
+    None
 }
 
 /// RAII release for a JIT export-drive reservation claimed in
@@ -319,31 +391,29 @@ pub async fn run_render_job(
     let mut selected_export_dir: Option<PathBuf> = None;
     {
         let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
-        for dir in &config.export_directories {
-            let live_free = crate::sys::disk::get_available_bytes(dir);
-            let already_reserved = *ledger.get(dir).unwrap_or(&0);
-            if live_free.saturating_sub(already_reserved)
-                > reservation_estimate + SAFETY_MARGIN_BYTES
-            {
-                *ledger.entry(dir.clone()).or_insert(0) += reservation_estimate;
-                selected_export_dir = Some(dir.clone());
-                // Shows this job's own estimate against what else was already
-                // reserved on this drive *before* this job's own addition, so
-                // concurrent jobs' numbers are directly comparable in the log —
-                // this is what made it possible to confirm live, under a real
-                // concurrent batch, that the ledger correctly reflects other
-                // in-flight jobs' reservations rather than every job seeing the
-                // same live free-space number.
-                crate::log_markdown(&format!(
-                    "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
-                    job_id,
-                    reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
-                    dir,
-                    already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
-                    live_free as f64 / (1024.0 * 1024.0 * 1024.0),
-                ));
-                break;
-            }
+        if let Some((dir, already_reserved, live_free)) = try_reserve(
+            &mut ledger,
+            &config.export_directories,
+            reservation_estimate,
+            SAFETY_MARGIN_BYTES,
+            crate::sys::disk::get_available_bytes,
+        ) {
+            // Shows this job's own estimate against what else was already
+            // reserved on this drive *before* this job's own addition, so
+            // concurrent jobs' numbers are directly comparable in the log —
+            // this is what made it possible to confirm live, under a real
+            // concurrent batch, that the ledger correctly reflects other
+            // in-flight jobs' reservations rather than every job seeing the
+            // same live free-space number.
+            crate::log_markdown(&format!(
+                "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
+                job_id,
+                reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
+                dir,
+                already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
+                live_free as f64 / (1024.0 * 1024.0 * 1024.0),
+            ));
+            selected_export_dir = Some(dir);
         }
     }
     let Some(output_folder) = selected_export_dir.clone() else {
@@ -362,7 +432,7 @@ pub async fn run_render_job(
     // see `ReservationGuard`'s own doc comment.
     let _reservation_guard = selected_export_dir.as_ref().map(|dir| ReservationGuard {
         ledger: reservations.clone(),
-        dir: dir.clone(),
+        dir: ledger_key(dir),
         amount: reservation_estimate,
         job_id: job_id.clone(),
     });
@@ -541,15 +611,11 @@ pub async fn run_render_job(
                 ]);
                 ".mp4"
             }
-            super::config::RenderCodec::ProRes => {
-                codec_args.extend_from_slice(&[
-                    "-c:v",
-                    "prores_ks",
-                    "-profile:v",
-                    "3",
-                    "-pix_fmt",
-                    "yuv422p10le",
-                ]);
+            codec @ (super::config::RenderCodec::ProRes
+            | super::config::RenderCodec::ProRes422
+            | super::config::RenderCodec::ProResLt
+            | super::config::RenderCodec::ProRes4444) => {
+                codec_args.extend(prores_args(codec));
                 ".mov"
             }
             super::config::RenderCodec::DnxHr => {
@@ -985,6 +1051,22 @@ pub async fn run_render_job(
     }
 }
 
+/// The main picture's `-c:v` args for a ProRes choice; empty for any other
+/// codec. The HUD stream never comes here: it is always 4444 with alpha.
+fn prores_args(codec: RenderCodec) -> Vec<&'static str> {
+    match codec.prores_profile() {
+        Some((profile, pix_fmt, _)) => vec![
+            "-c:v",
+            "prores_ks",
+            "-profile:v",
+            profile,
+            "-pix_fmt",
+            pix_fmt,
+        ],
+        None => Vec::new(),
+    }
+}
+
 /// Opaque wake-lock guard for a render batch's duration. Wrapped so
 /// `studio/src-tauri` never needs `keepawake` as a direct
 /// dependency — `native` already depends on it (see
@@ -1117,6 +1199,30 @@ mod tests {
         }
     }
 
+    /// #774: a reservation on C:\a comes off what C:\b has, so with room for
+    /// one job on C: the second goes to D:, and to nowhere once D: is full.
+    #[cfg(windows)]
+    #[test]
+    fn reservations_on_one_folder_reduce_its_drives_other_folders() {
+        let mut ledger = HashMap::new();
+        let free = |p: &Path| if p.starts_with(r"C:\") { 15 } else { 12 };
+        let c_only = [PathBuf::from(r"C:\a"), PathBuf::from(r"C:\b")];
+        let with_d = [
+            PathBuf::from(r"C:\a"),
+            PathBuf::from(r"C:\b"),
+            PathBuf::from(r"D:\x"),
+        ];
+
+        let first = try_reserve(&mut ledger, &c_only, 10, 0, free);
+        assert_eq!(first.map(|r| r.0), Some(PathBuf::from(r"C:\a")));
+        assert_eq!(try_reserve(&mut ledger, &c_only, 10, 0, free), None);
+        let second = try_reserve(&mut ledger, &with_d, 10, 0, free);
+        assert_eq!(second.map(|r| r.0), Some(PathBuf::from(r"D:\x")));
+        assert_eq!(try_reserve(&mut ledger, &with_d, 10, 0, free), None);
+        assert_eq!(ledger.get(Path::new("c:")), Some(&10));
+        assert_eq!(ledger.get(Path::new("d:")), Some(&10));
+    }
+
     /// #120: the first clip of a kind reserves the raw estimate; once one
     /// has finished, later ones reserve its real rate plus the margin,
     /// never more than raw, and only for the same codec and frame size.
@@ -1164,6 +1270,214 @@ mod tests {
             job_reservation_estimate(&big, RenderCodec::DnxHr, ""),
             1234 * 568 * 3 * 10
         );
+    }
+
+    #[test]
+    fn each_prores_choice_renders_with_its_own_profile() {
+        let args = |c: RenderCodec| prores_args(c).join(" ");
+        assert_eq!(
+            args(RenderCodec::ProRes),
+            "-c:v prores_ks -profile:v hq -pix_fmt yuv422p10le"
+        );
+        assert_eq!(
+            args(RenderCodec::ProRes422),
+            "-c:v prores_ks -profile:v standard -pix_fmt yuv422p10le"
+        );
+        assert_eq!(
+            args(RenderCodec::ProResLt),
+            "-c:v prores_ks -profile:v lt -pix_fmt yuv422p10le"
+        );
+        assert_eq!(
+            args(RenderCodec::ProRes4444),
+            "-c:v prores_ks -profile:v 4444 -pix_fmt yuv444p10le"
+        );
+        assert_eq!(args(RenderCodec::DnxHr), "");
+    }
+
+    /// Each ProRes profile learns its own rate; until it has one, it borrows
+    /// another profile's through their size ratio. Other codecs never do.
+    #[test]
+    fn a_prores_profile_borrows_another_profiles_rate_until_it_has_its_own() {
+        // A frame size no other test uses, since the rates are session-wide.
+        let clip = sized_clip(1236, 571, 100, "single");
+        let raw = 1236 * 571 * 3 * 100;
+        assert_eq!(
+            job_reservation_estimate(&clip, RenderCodec::ProResLt, ""),
+            raw
+        );
+        // HQ wrote 1000 bytes a frame.
+        record_output_size(&clip, RenderCodec::ProRes, "", 100_000);
+        let expect = |ratio: f64| (1000.0 * ratio * LEARNED_RATE_MARGIN * 100.0).ceil() as u64;
+        assert_eq!(
+            job_reservation_estimate(&clip, RenderCodec::ProRes, ""),
+            expect(1.0)
+        );
+        assert_eq!(
+            job_reservation_estimate(&clip, RenderCodec::ProRes422, ""),
+            expect(0.67)
+        );
+        assert_eq!(
+            job_reservation_estimate(&clip, RenderCodec::ProResLt, ""),
+            expect(0.47)
+        );
+        assert_eq!(
+            job_reservation_estimate(&clip, RenderCodec::ProRes4444, ""),
+            expect(1.5)
+        );
+        // LT's own measured rate wins over the borrowed one.
+        record_output_size(&clip, RenderCodec::ProResLt, "", 30_000);
+        assert_eq!(
+            job_reservation_estimate(&clip, RenderCodec::ProResLt, ""),
+            (300.0 * LEARNED_RATE_MARGIN * 100.0).ceil() as u64
+        );
+        // Not for another codec, nor the HUD stream.
+        assert_eq!(job_reservation_estimate(&clip, RenderCodec::DnxHr, ""), raw);
+        let hud = sized_clip(1236, 571, 100, "hud_only");
+        assert_eq!(
+            job_reservation_estimate(&hud, RenderCodec::ProRes422, ""),
+            raw
+        );
+    }
+
+    /// Renders a generated 2560x1440 Ut Video take with every ProRes choice
+    /// through `run_render_job` and reads back each file's profile with
+    /// ffprobe. Needs FFmpeg: `DOD_FFMPEG` is the path to ffmpeg.exe, with
+    /// ffprobe.exe beside it. Prints each file's size next to HQ's.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    async fn prores_choices_render_with_their_profile() {
+        let ffmpeg = PathBuf::from(
+            std::env::var("DOD_FFMPEG").expect("DOD_FFMPEG must name ffmpeg.exe for this test"),
+        );
+        assert!(ffmpeg.is_file(), "no FFmpeg at {}", ffmpeg.display());
+        let ffprobe = ffmpeg.with_file_name(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        });
+        let root = scratch("prores_profiles");
+        let take_folder = root.join("demo").join("take0000");
+        let stream = take_folder.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        let export_dir = root.join("export");
+        std::fs::create_dir_all(&export_dir).unwrap();
+        let frames = 150usize;
+        let made = std::process::Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+            ])
+            .arg(format!(
+                "testsrc2=size=2560x1440:rate=300:duration={}",
+                frames as f64 / 300.0
+            ))
+            .args(["-pix_fmt", "rgb24", "-c:v", "utvideo"])
+            .arg(stream.join("video.avi"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let made = std::process::Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+            ])
+            .arg(format!(
+                "sine=frequency=440:duration={}",
+                frames as f64 / 300.0
+            ))
+            .arg(take_folder.join("sound.wav"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+
+        let mut sizes = Vec::new();
+        for (codec, profile) in [
+            (RenderCodec::ProRes, "HQ"),
+            (RenderCodec::ProRes422, "Standard"),
+            (RenderCodec::ProResLt, "LT"),
+            (RenderCodec::ProRes4444, "4444"),
+        ] {
+            let clip = ClipData {
+                clip_name: Some(codec.to_str_id().to_string()),
+                take_folder: take_folder.to_string_lossy().into_owned(),
+                clip_type: "single".to_string(),
+                img_folder: "all".to_string(),
+                wav_file: Some("sound.wav".to_string()),
+                base_name: "t".to_string(),
+                frame_count: frames,
+                width: 2560,
+                height: 1440,
+                date: "-".to_string(),
+                video_file: Some("video.avi".to_string()),
+                alpha_folder: None,
+            };
+            let config = RenderConfig {
+                ffmpeg_path: ffmpeg.to_string_lossy().into_owned(),
+                target_codec: codec,
+                ..source_copy_config(&export_dir)
+            };
+            let (tx, rx) = mpsc::channel();
+            run_render_job(
+                "0".to_string(),
+                clip,
+                config,
+                tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Mutex::new(HashMap::new())),
+            )
+            .await;
+            let updates = drain(&rx);
+            assert_eq!(last_finished(&updates), Some((true, None)), "{:?}", updates);
+            let out = updates
+                .iter()
+                .find_map(|u| match u {
+                    RenderUpdate::OutputPath(_, p) => Some(p.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            let probe = std::process::Command::new(&ffprobe)
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name,profile,pix_fmt",
+                    "-of",
+                    "default=noprint_wrappers=1",
+                ])
+                .arg(&out)
+                .output()
+                .unwrap();
+            let report = String::from_utf8_lossy(&probe.stdout);
+            assert!(
+                report.lines().any(|l| l == format!("profile={profile}")),
+                "{codec:?}: {report}"
+            );
+            assert!(report.contains("codec_name=prores"), "{codec:?}: {report}");
+            sizes.push((codec, std::fs::metadata(&out).unwrap().len()));
+        }
+        let hq = sizes[0].1 as f64;
+        for (codec, size) in &sizes {
+            println!(
+                "{:?}: {} bytes, {:.2}x HQ (default ratio {})",
+                codec,
+                size,
+                *size as f64 / hq,
+                codec.prores_profile().unwrap().2
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn source_copy_config(export_dir: &Path) -> RenderConfig {

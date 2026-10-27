@@ -27,23 +27,33 @@
     <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
     <button id="clear-render-queue-btn" disabled>Clear Queue</button>
     <p id="render-status">Status: Waiting...</p>
+    <!-- #954: Scan for Takes' sliding block. -->
+    <div id="render-scan-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
     <div id="render-job-container"></div>
   </div>
 
   <!-- #70: the selection's own controls, copied from index.html. -->
   <div id="render-selection-row">
     <button id="render-select-unrendered-btn" disabled>Select unrendered</button>
+    <button id="render-select-finished-btn" disabled>Select finished</button>
+    <select id="render-finished-age-select" disabled>
+      <option value="0">of any age</option>
+      <option value="86400000">over a day old</option>
+    </select>
     <span id="render-selection-count">0 of 0 selected</span>
   </div>
 
   <div id="render-settings-row">
     <select id="render-codec-select">
+      <option value="prores_422">ProRes 422 (2/3 the size of HQ)</option>
       <option value="prores">ProRes 422 HQ</option>
+      <option value="prores_lt">ProRes 422 LT (half the size of HQ)</option>
       <option value="dnxhr">DNxHR HQ</option>
       <option value="h264">H.264 (Software, MP4)</option>
       <option value="h264_nvenc">H.264 (NVENC GPU, MP4)</option>
       <option value="custom">Custom (paste FFmpeg args)</option>
     </select>
+    <p id="render-codec-hint" hidden></p>
     <div id="render-custom-codec-group" style="display: none;">
       <input type="text" id="render-custom-codec-input" />
     </div>

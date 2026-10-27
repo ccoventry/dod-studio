@@ -28,7 +28,10 @@ documented in its own `//!` header.
 | `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
+| `round_restart_probe` | When does a demo start a new round (`RoundState`), and what led to it: a win, a clan match going live, a wait for players? |
 | `voice_menu_probe` | When does a POV demo show a voice menu (`ShowMenu`) or open the command menu, on the viewdemo clock? |
+| `hint_probe` | Where does a POV demo open DoD's auto-help hint panel (a flagged `HudText`, #286), on the viewdemo clock? `--all` lists every `HudText` |
+| `weapon_list_probe` | Which recorded weapon keys open the weapon-selection list in playback, and was it open on the recorder's screen (#1032)? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
 | `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
 | `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |
@@ -106,6 +109,8 @@ that panics the parser cannot take down the run:
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
 | `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |
 | `weapon_anim_probe` | What the engine does to the first-person viewmodel, read out of a demo. |
+| `pov_dry_fire_probe` | Around a POV recorder's shots: the recorded fire events, clip, buttons, `CurWeapon` and sounds (#1029). |
+| `pov_dry_fire_survey` | How many of a POV recorder's shots have no recorded fire event, per weapon, and the arguments the rest carry (#1029). |
 | `weapon_id_probe` | Tallies the weapon-ID byte of every `DeathMsg` across a folder of demos. |
 | `statusicon_probe` | Every `StatusIcon` message: icon name, enable/disable, colour. |
 | `statusvalue_probe` | Every `StatusValue` message, with the `viewdemo` window's timer. |

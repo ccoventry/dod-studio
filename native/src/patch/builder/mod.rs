@@ -48,15 +48,35 @@ fn record_alias_lines(config: &PatcherConfig) -> String {
              alias sys_record_stop \"mirv_recordmovie_stop\"\n"
                 .to_string()
         }
-        crate::patch::CaptureMode::Obs => "alias sys_record_start \"stopsound\"\n\
+        // No `stopsound` at the record start, unlike HLAE's modes: OBS has been
+        // recording for a second by then (it starts at AUDIO_SYNC, whose own
+        // `stopsound` clears the fast-forward's sound), and nothing changes
+        // the timestep here, so the stop would only cut the clip's sound.
+        // Measured (#645): with it, every OBS clip had ~250 ms of silence at
+        // its start; without it the sound runs on unbroken.
+        crate::patch::CaptureMode::Obs => {
+            "alias sys_record_start \"echo [dod-studio] OBS_MODE_NO_HLAE_START\"\n\
              alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
-            .to_string(),
+                .to_string()
+        }
         crate::patch::CaptureMode::Agr => format!(
             "alias sys_record_start \"host_framerate {}\"\n\
              alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
             agr_host_framerate(config)
         ),
     }
+}
+
+/// The `fps_max` OBS mode gives the game: twice OBS's rate (see
+/// `final_init_commands`), within the engine's own 1000 cap. A rate that
+/// isn't positive counts as 60, the OBS preflight's floor.
+pub(crate) fn obs_game_fps_max(config: &PatcherConfig) -> i32 {
+    let obs_fps = if config.obs_capture_fps > 0 {
+        config.obs_capture_fps
+    } else {
+        60
+    };
+    obs_fps.saturating_mul(2).min(1000)
 }
 
 /// The `host_framerate` that makes `mirv_agr` record at `effective_agr_fps`.
@@ -162,16 +182,21 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
     ));
 
     // OBS mode is real time: HLAE issues no `mirv_movie_start` at all, so
-    // `mirv_movie_fps` above is inert on this path — nothing reads it. What
-    // OBS actually records is however fast the engine renders, so that rate
-    // has to be pinned to the same `obs_capture_fps` OBS's own canvas is set
-    // to (obs::provision::ensure_dod_studio_setup), or the two drift against
-    // each other. `fps_override 1` first: GoldSrc's default `fps_max`
-    // ceiling (~100) is below what obs_capture_fps is commonly set to, and
-    // `fps_max` alone is silently clamped under that ceiling without it.
+    // `mirv_movie_fps` above is inert on this path — nothing reads it. OBS
+    // samples whatever frame the game last drew, once per frame of its own
+    // `obs_capture_fps` (obs::provision::ensure_dod_studio_setup), so the
+    // game has to draw faster than that: at exactly OBS's rate the two beat
+    // against each other and OBS repeats a frame every time the game is a
+    // little late. Measured (#645, POST, 120 fps): 1.5-2.1% repeated frames
+    // with `fps_max` at OBS's rate, 0.2-0.8% with the game drawing faster.
+    // Hence twice OBS's rate, and `gl_vsync 0`, since vsync would cap the
+    // game at the monitor's refresh, below OBS's rate on a 60 Hz screen.
+    // `fps_override 1` first: GoldSrc's default `fps_max` ceiling (~100) is
+    // below these, and `fps_max` alone is silently clamped under it.
     if config.capture_mode == crate::patch::CaptureMode::Obs {
         out.push("fps_override 1".to_string());
-        out.push(format!("fps_max {}", config.obs_capture_fps));
+        out.push(format!("fps_max {}", obs_game_fps_max(config)));
+        out.push("gl_vsync 0".to_string());
     }
 
     // The decal flush needs the ring set once, at demo load, and never again.
@@ -328,17 +353,18 @@ pub fn build_batch_queue(
     // ── AOT disk-space simulation ─────────────────────────────────────────────
     // Snapshot current free bytes for every configured capture directory so we
     // can route each clip to the drive with sufficient headroom at build time.
+    // Directories on one volume share one budget (#774).
     const FAILOVER_THRESHOLD: u64 = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES;
-    let mut drive_free: Vec<u64> = config
-        .capture_directories
-        .iter()
-        .map(|p| crate::sys::disk::get_available_bytes(p))
-        .collect();
+    let (mut volume_of_drive, mut drive_free) = crate::sys::disk::group_by_volume(
+        &config.capture_directories,
+        crate::sys::disk::get_available_bytes,
+    );
     let mut active_drive_idx: usize = 0;
     // If no capture directories are configured, fall back to a single sentinel
     // that has "unlimited" free space so existing single-drive behaviour is
     // preserved without an error.
     if drive_free.is_empty() {
+        volume_of_drive.push(0);
         drive_free.push(u64::MAX);
     }
 
@@ -675,6 +701,7 @@ pub fn build_batch_queue(
 
         let assignments = allocate_blocks_first_fit_decreasing(
             &block_estimates,
+            &volume_of_drive,
             &mut drive_free,
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
@@ -1188,7 +1215,7 @@ pub fn build_batch_queue(
                 .get(idx)
                 .map(|p| crate::patch::types::DriveHeadroom {
                     path: p.clone(),
-                    free_bytes: drive_free[idx],
+                    free_bytes: drive_free[volume_of_drive[idx]],
                 })
         })
         .collect();

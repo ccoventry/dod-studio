@@ -648,11 +648,17 @@ pub struct SvcStopSound {
 pub struct SvcPings {
     pub pings: Vec<PingS>,
 }
+/// One scoreboard entry of `svc_pings`. On the wire each entry is a 1-bit
+/// "more" flag, then the player's 0-based slot in 5 bits, ping in ms in 12 bits
+/// and loss in percent in 7 bits (`SV_EmitPings`; #1031).
 #[derive(Debug, Clone)]
 pub struct PingS {
     pub has_ping_data: bool,
+    /// 0-based client slot (5 bits), the same index as `SvcServerInfo::player_index`.
     pub player_id: Option<u8>,
-    pub ping: Option<u8>,
+    /// Milliseconds (12 bits).
+    pub ping: Option<u16>,
+    /// Percent (7 bits).
     pub loss: Option<u8>,
 }
 

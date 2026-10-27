@@ -652,6 +652,12 @@ impl PatcherConfig {
             goldsrc_hooks_dll,
         } = self.launch_settings();
 
+        // The demo bar's layout with the loading progress controls goes into
+        // `<game folder>_addon` here, rather than in any one caller, so every
+        // way the app starts the game (a batch, Launch Preview, Launch Game)
+        // ships it, and from the user's own layout as it is now (#465).
+        crate::demo_bar_res::prepare(&hl_exe, &game_folder);
+
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
         // `-hookDllPath` is repeatable on HLAE's `-customLoader` command line
@@ -768,18 +774,27 @@ impl PatcherConfig {
         // path that was tried.
         match &goldsrc_hooks_dll_str {
             Some(extra_dll) => {
-                log::info!("goldsrc-hooks: injecting {extra_dll}");
+                crate::log_markdown(&format!("goldsrc-hooks: injecting {extra_dll}"));
                 cmd.args(["-hookDllPath", extra_dll]);
             }
-            None => log::warn!(
-                "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                 ds_* console commands will be absent this session. Tried: override={:?}, \
-                 bundled default={:?}, legacy spot beside hlae.exe={:?}. In a dev build only the \
-                 override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
-                self.goldsrc_hooks_dll_path,
-                default_goldsrc_hooks_dll_path(),
-                hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll")),
-            ),
+            None => {
+                let shown = |p: Option<std::path::PathBuf>| {
+                    p.map_or_else(|| "none".to_string(), |p| p.display().to_string())
+                };
+                crate::log_markdown(&format!(
+                    "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
+                     ds_* console commands will be absent this session. Tried: override={}, \
+                     bundled default={}, legacy spot beside hlae.exe={}. In a dev build only the \
+                     override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
+                    shown(
+                        self.goldsrc_hooks_dll_path
+                            .as_ref()
+                            .map(std::path::PathBuf::from)
+                    ),
+                    shown(default_goldsrc_hooks_dll_path()),
+                    shown(hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))),
+                ));
+            }
         }
         cmd.args(["-programPath", &program_path_str, "-cmdLine", &cmd_line_str]);
         cmd.env("SteamAppId", "30");

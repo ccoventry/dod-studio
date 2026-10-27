@@ -48,12 +48,6 @@ export const STRINGS = {
 
     scoreboardHeading: (alliesLabel, alliesScore, cmp, axisScore) => `Scoreboard: ${alliesLabel} (${alliesScore}) ${cmp} Axis (${axisScore})`,
     compareGlyph: (a, b) => (a > b ? '>' : (a === b ? '=' : '<')),
-    durationLong: (h, m, s) => {
-      if (h > 0) return `${h}h ${m}m ${s}s`;
-      if (m > 0) return `${m}m ${s}s`;
-      return `${s}s`;
-    },
-    secondsSuffix: (n) => `${n}s`,
     megabytesLabel: (mb) => `${mb} MB`,
     KD_BADGE_LABEL: 'K/D',
     partialRecordingBoth: (fmt) => `Partial recording — demo started with ${fmt} remaining and ended before the match concluded.`,
@@ -98,7 +92,7 @@ export const STRINGS = {
     KILLS_TITLE: 'Kills',
     DEATHS_TITLE: 'Deaths',
     AVG_LIFESPAN_TITLE: 'Avg. Lifespan',
-    minMaxBadge: (min, max) => `Min: ${min}s / Max: ${max}s`,
+    minMaxBadge: (min, max) => `Min: ${min} / Max: ${max}`,
     WEAPON_BREAKDOWN_TITLE: 'Weapon Breakdown',
     COL_WEAPON: 'Weapon',
     COL_PCT_TOTAL: '% of Total',

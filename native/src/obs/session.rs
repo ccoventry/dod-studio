@@ -72,6 +72,10 @@ pub struct ObsSession {
     /// `SetRecordDirectory`, add a line to `skipped`, and the run would end
     /// looking successful with an empty take for every block.
     dead: bool,
+    /// Why OBS refused to record, when it did (`client::START_REFUSED`). Ends
+    /// the batch like `dead`, with this as the reason: every later block
+    /// would be refused the same way, each with another error box in OBS.
+    refused: Option<String>,
     /// Block take folders in the order the batch will record them — the same
     /// flattened order the capture manifest uses.
     take_folders: Vec<PathBuf>,
@@ -156,6 +160,7 @@ impl ObsSession {
                 client: Arc::new(Mutex::new(Some(client))),
                 cfg: cfg.clone(),
                 dead: false,
+                refused: None,
                 take_folders,
                 next_block: 0,
                 active: None,
@@ -388,10 +393,18 @@ impl ObsSession {
     /// The engine polls this and aborts the batch. Continuing would mean
     /// playing the demo to the end capturing nothing, then reporting success.
     pub fn is_dead(&self) -> bool {
-        self.dead
+        self.dead || self.refused.is_some()
+    }
+
+    /// Why OBS refused to start recording, when that is what ended the batch.
+    pub fn refused(&self) -> Option<&str> {
+        self.refused.as_deref()
     }
 
     fn note_failure(&mut self, message: String, e: &ObsError) {
+        if matches!(e, ObsError::Request { request, .. } if request == "StartRecord") {
+            self.refused = Some(e.to_string());
+        }
         self.skipped.push(message);
         if e.is_transport() {
             self.dead = true;
