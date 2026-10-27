@@ -536,7 +536,10 @@ fn save_autosave(session: &RenderSessionData) {
     if let Ok(json) = serde_json::to_string_pretty(session)
         && let Err(e) = std::fs::write(autosave_path(), json)
     {
-        log::warn!("[render_autosave] Failed to write lockfile: {}", e);
+        log_markdown(&format!(
+            "[render_autosave] Failed to write lockfile: {}",
+            e
+        ));
     }
 }
 
