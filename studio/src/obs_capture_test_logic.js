@@ -9,6 +9,10 @@ import { STRINGS } from './strings.js';
 /** native::obs::bench::FPS_LADDER. */
 export const FPS_LADDER = [60, 120, 144, 165, 180, 200, 240];
 
+/** native::obs::bench::FRAME_TIMES_ON / _OFF: the hook's frame-time recorder. */
+export const FRAME_TIMES_ON = 'ds_debug_record_frame_times 1';
+export const FRAME_TIMES_OFF = 'ds_debug_record_frame_times 0';
+
 /** Clip lengths, in seconds: the usual test, and the one for warm-up. */
 export const CLIP_SECONDS = { short: 20, long: 60 };
 
@@ -124,11 +128,26 @@ export function ladderSummary(results, quality) {
   return lines;
 }
 
+/** The game's own frame rate (the hook's recorder) as the panel's line. */
+export function gameText(game, rate) {
+  if (!game) return STRINGS.OBS_TEST.GAME_UNMEASURED;
+  const share = game.frames > 0 ? game.slower_than_obs / game.frames : 0;
+  return STRINGS.OBS_TEST.gameLine(
+    Math.round(game.avg_fps), Math.round(game.low1_fps), Math.round(game.low01_fps), pct(share), rate,
+  );
+}
+
+/** The game column: "average (1% low)". */
+export function gameCell(game) {
+  return game ? `${Math.round(game.avg_fps)} (${Math.round(game.low1_fps)})` : '-';
+}
+
 /** One clip's result as the panel's lines. */
-export function stepLines({ rate, verdict, file }, quality) {
+export function stepLines({ rate, verdict, file, game }, quality) {
   const lines = [STRINGS.OBS_TEST.verdictLine(rate, levelName(verdict.level), qualityName(quality))];
   if (verdict.level !== LEVEL.STEADY) lines.push(STRINGS.OBS_TEST.causeLine(causeName(verdict.cause)));
   lines.push(STRINGS.OBS_TEST.numbersLine(pct(verdict.skipped_share), pct(verdict.missed_share), pct(verdict.repeated_share)));
+  lines.push(gameText(game, rate));
   if (!verdict.counters_read) lines.push(STRINGS.OBS_TEST.COUNTERS_UNREAD);
   lines.push(soundText(verdict, file));
   lines.push(adviceText(adviceFor(verdict, rate, quality)));

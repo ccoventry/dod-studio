@@ -20,6 +20,7 @@ import { numberField } from './number_field.js';
 import { STRINGS } from './strings.js';
 import {
   FPS_LADDER, CLIP_SECONDS, pct, levelName, ladderStops, highestSteady, ladderSummary, stepLines, testSessionId,
+  gameCell, FRAME_TIMES_ON, FRAME_TIMES_OFF,
 } from './obs_capture_test_logic.js';
 
 /** How long after the batch's last status line its takes may still arrive. */
@@ -79,14 +80,14 @@ export function createObsCaptureTest({ getState, persist }) {
     resultEl.dataset.kind = kind;
   };
 
-  const addRow = ({ rate, verdict, file }) => {
+  const addRow = ({ rate, verdict, file, game }) => {
     table.hidden = false;
     const tr = document.createElement('tr');
     tr.dataset.level = verdict.level;
     const sound = verdict.sound === 'ok' ? STRINGS.OBS_TEST.SOUND_CELL_OK
       : verdict.sound === 'missing' ? STRINGS.OBS_TEST.SOUND_CELL_MISSING : STRINGS.OBS_TEST.SOUND_CELL_SILENT;
     [String(rate), levelName(verdict.level), pct(verdict.skipped_share), pct(verdict.missed_share),
-      pct(verdict.repeated_share), file?.audio_peak_db != null && verdict.sound === 'ok' ? `${sound} (${Number(file.audio_peak_db).toFixed(1)} dB)` : sound]
+      pct(verdict.repeated_share), gameCell(game), file?.audio_peak_db != null && verdict.sound === 'ok' ? `${sound} (${Number(file.audio_peak_db).toFixed(1)} dB)` : sound]
       .forEach((text) => {
         const td = document.createElement('td');
         td.textContent = text;
@@ -176,6 +177,12 @@ export function createObsCaptureTest({ getState, persist }) {
         pre_roll_seconds: clip.pre_roll,
         post_roll_seconds: clip.post_roll,
         session_id: testSessionId(rate),
+        // The hook times the game's own frames over the clip (#646).
+        custom_commands: [
+          ...(settings.custom_commands || []),
+          { command: FRAME_TIMES_ON, relation: 'Before', offset_seconds: clip.pre_roll },
+          { command: FRAME_TIMES_OFF, relation: 'After', offset_seconds: clip.post_roll },
+        ],
       };
       const conn = obsConnection();
       await obsTestWatchStart(conn.host, conn.port, conn.password);
@@ -193,7 +200,7 @@ export function createObsCaptureTest({ getState, persist }) {
       });
       let result;
       try {
-        result = await obsTestAnalyze(takeFolder, document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null);
+        result = await obsTestAnalyze(takeFolder, document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null, rate);
       } finally {
         unlistenProgress();
       }

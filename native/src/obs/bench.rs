@@ -451,6 +451,74 @@ pub async fn analyze_file(
     Ok(report)
 }
 
+/// The hook's frame-time recorder (`ds_debug_record_frame_times`), as the
+/// test turns it on and off around the clip.
+pub const FRAME_TIMES_ON: &str = "ds_debug_record_frame_times 1";
+pub const FRAME_TIMES_OFF: &str = "ds_debug_record_frame_times 0";
+
+/// The file the recorder writes, under `%APPDATA%\dod-studio`: the hook
+/// takes `APPDATA` from the game's environment, so this does too.
+pub fn frame_times_file() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("dod-studio").join("frame_times.txt"))
+}
+
+/// The game's own frame rate while the clip played, from the hook.
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+pub struct GameFrames {
+    pub frames: u64,
+    pub avg_fps: f64,
+    /// 1e6 / the 99th percentile frame time, the usual "1% low".
+    pub low1_fps: f64,
+    /// 1e6 / the 99.9th percentile frame time.
+    pub low01_fps: f64,
+    pub max_ms: f64,
+    /// Frames that took longer than one OBS frame.
+    pub slower_than_obs: u64,
+}
+
+impl GameFrames {
+    /// From the recorder's file: one microsecond count per line, `#` lines
+    /// skipped. `None` when it holds no frames.
+    pub fn from_file_text(text: &str, obs_fps: i32) -> Option<Self> {
+        let frames: Vec<u32> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .filter_map(|l| l.parse().ok())
+            .collect();
+        Self::of(&frames, obs_fps)
+    }
+
+    pub fn of(frames: &[u32], obs_fps: i32) -> Option<Self> {
+        if frames.is_empty() {
+            return None;
+        }
+        let mut sorted = frames.to_vec();
+        sorted.sort_unstable();
+        let total: u64 = sorted.iter().map(|&f| u64::from(f)).sum();
+        let pct = |p: f64| {
+            let i = ((sorted.len() as f64 * p).ceil() as usize).clamp(1, sorted.len()) - 1;
+            f64::from(sorted[i].max(1))
+        };
+        let interval_us = 1e6 / f64::from(obs_fps.max(1));
+        Some(Self {
+            frames: sorted.len() as u64,
+            avg_fps: sorted.len() as f64 * 1e6 / total.max(1) as f64,
+            low1_fps: 1e6 / pct(0.99),
+            low01_fps: 1e6 / pct(0.999),
+            max_ms: f64::from(*sorted.last().unwrap_or(&0)) / 1000.0,
+            slower_than_obs: sorted
+                .iter()
+                .filter(|&&f| f64::from(f) > interval_us)
+                .count() as u64,
+        })
+    }
+
+    pub fn slower_share(&self) -> f64 {
+        share(self.slower_than_obs as i64, self.frames as i64)
+    }
+}
+
 /// How a rate held up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -716,6 +784,35 @@ mod tests {
         assert_eq!(count_repeats(&ydif, 2), (7, 5, 3));
         assert_eq!(count_repeats(&ydif, 5), (4, 3, 3));
         assert_eq!(count_repeats(&[], 0), (0, 0, 0));
+    }
+
+    #[test]
+    fn the_hooks_frame_times_file() {
+        // goldsrc-hooks frame_times.rs writes this: a header, then one
+        // microsecond count per frame. 990 frames at 4 ms, 10 at 20 ms.
+        let mut text = String::from("# DoD Studio frame times\n# 1000 frames, ...\n");
+        for _ in 0..990 {
+            text.push_str("4000\n");
+        }
+        for _ in 0..10 {
+            text.push_str("20000\n");
+        }
+        let g = GameFrames::from_file_text(&text, 120).unwrap();
+        assert_eq!(g.frames, 1000);
+        assert_eq!(g.low1_fps, 250.0);
+        assert_eq!(g.low01_fps, 50.0);
+        assert_eq!(g.max_ms, 20.0);
+        // At 120 fps an OBS frame is 8.33 ms: only the 20 ms ones are slower.
+        assert_eq!(g.slower_than_obs, 10);
+        assert!((g.slower_share() - 0.01).abs() < 1e-9);
+        // At 300 fps (3.33 ms) every frame is.
+        assert_eq!(
+            GameFrames::from_file_text(&text, 300)
+                .unwrap()
+                .slower_than_obs,
+            1000
+        );
+        assert!(GameFrames::from_file_text("# nothing\n", 120).is_none());
     }
 
     #[test]

@@ -468,8 +468,8 @@ function obsTestCall(command, args) {
 /** The test clip: `seconds` of the bundled demo (or of `demo`). */
 export const obsTestClip = (seconds, demo) => obsTestCall('obs_test_clip', { seconds, demo: demo || null });
 export const obsTestWatchStart = (host, port, password) => obsTestCall('obs_test_watch_start', { host, port, password });
-/** Stops the watch, reads the take's video, returns `{ recording, file, verdict }`. */
-export const obsTestAnalyze = (takeFolder, ffmpegPath) => obsTestCall('obs_test_analyze', { takeFolder, ffmpegPath: ffmpegPath || null });
+/** Stops the watch, reads the take's video, returns `{ recording, file, verdict, game }`. */
+export const obsTestAnalyze = (takeFolder, ffmpegPath, obsFps) => obsTestCall('obs_test_analyze', { takeFolder, ffmpegPath: ffmpegPath || null, obsFps });
 export const obsTestCancel = () => obsTestCall('obs_test_cancel', {});
 export const obsTestDeleteTake = (takeFolder) => obsTestCall('obs_test_delete_take', { takeFolder });
 

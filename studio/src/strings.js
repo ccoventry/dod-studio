@@ -3242,6 +3242,9 @@ export const STRINGS = {
     adviceFps: (rate) => `Change one setting: lower OBS Capture FPS to ${rate}.`,
     adviceQuality: (quality) => `Change one setting: lower OBS Quality to ${quality}, or lower OBS Capture FPS.`,
     ADVICE_NONE: 'Nothing to change: OBS kept every frame.',
+    gameLine: (avg, low1, low01, slower, rate) =>
+        `The game itself: ${avg} fps average, 1% low ${low1} fps, 0.1% low ${low01} fps; ${slower} of its frames took longer than one ${rate} fps frame.`,
+    GAME_UNMEASURED: "The game's own frame rate wasn't measured: the hook DLL in use is older than this test.",
     soundOk: (peak) => `Sound: present, loudest moment ${peak} dB.`,
     SOUND_MISSING: "Sound: the clip has no sound track. Check OBS's [DoD-Studio] Game Audio source.",
     SOUND_SILENT: "Sound: the clip is silent. Check that OBS's [DoD-Studio] Game Audio source isn't muted.",
@@ -3258,6 +3261,7 @@ export const STRINGS = {
     COL_SKIPPED: 'Skipped (encoder)',
     COL_MISSED: 'Missed (rendering)',
     COL_REPEATED: 'Repeated (game)',
+    COL_GAME: 'Game fps (1% low)',
     COL_SOUND: 'Sound',
     SOUND_CELL_OK: 'yes',
     SOUND_CELL_MISSING: 'none',

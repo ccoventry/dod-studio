@@ -21,7 +21,8 @@ async function gotoHarness(page, { verdicts = {}, gameOpen = false, holdAnalyze 
       },
       obs_test_analyze: () => {
         const verdict = window.__verdicts[window.__lastRate] || { level: 'steady', cause: 'none', skipped_share: 0, missed_share: 0, repeated_share: 0.002, counters_read: true, sound: 'ok' };
-        const result = { recording: {}, file: { audio_peak_db: -3.2 }, verdict };
+        const game = { frames: 5000, avg_fps: 287.6, low1_fps: 240.4, low01_fps: 190.1, max_ms: 6.1, slower_than_obs: 0 };
+        const result = { recording: {}, file: { audio_peak_db: -3.2 }, verdict, game };
         if (!hold) return result;
         return new Promise((resolve) => { window.__finishAnalyze = () => resolve(result); });
       },
@@ -53,6 +54,8 @@ test('one test clip runs as an OBS batch at the current settings, shows its step
 
   await expect(page.locator('#obs-test-result')).toContainText('144 fps at OBS Quality High: Sustainable.');
   await expect(page.locator('#obs-test-result')).toContainText('loudest moment -3.2 dB');
+  await expect(page.locator('#obs-test-result')).toContainText('The game itself: 288 fps average, 1% low 240 fps');
+  await expect(page.locator('#obs-test-rows tr td').nth(5)).toHaveText('288 (240)');
   await expect(page.locator('#obs-test-result')).toContainText('Nothing to change');
   await expect(page.locator('#obs-test-rows tr')).toHaveCount(1);
   await expect(page.locator('#obs-capture-test-btn')).toBeEnabled();
@@ -67,6 +70,12 @@ test('one test clip runs as an OBS batch at the current settings, shows its step
     capture_directories: ['D:\\captures'],
   });
   expect(batch.payload.streaks).toHaveLength(1);
+  // The hook times the game's frames over exactly the clip.
+  expect(batch.payload.custom_commands).toEqual([
+    { command: 'ds_debug_record_frame_times 1', relation: 'Before', offset_seconds: 5.5 },
+    { command: 'ds_debug_record_frame_times 0', relation: 'After', offset_seconds: 5.5 },
+  ]);
+  expect((await invocations(page, 'obs_test_analyze'))[0].obsFps).toBe(144);
   expect(batch.payload.session_id).toMatch(/^obs_test_\d{8}_\d{6}_144fps$/);
   expect(await invocations(page, 'obs_test_clip')).toEqual([{ seconds: 20, demo: null }]);
   expect(await invocations(page, 'obs_test_watch_start')).toEqual([{ host: '127.0.0.1', port: 4455, password: 'pw' }]);

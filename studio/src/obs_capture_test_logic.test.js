@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FPS_LADDER, LEVEL, pct, lowerRate, adviceFor, adviceText, ladderStops, highestSteady,
-  firstFailure, ladderSummary, stepLines, testSessionId, soundText,
+  firstFailure, ladderSummary, stepLines, testSessionId, soundText, gameText, gameCell,
 } from './obs_capture_test_logic.js';
 
 const v = (level, cause = 'none', extra = {}) => ({
@@ -76,6 +76,14 @@ describe('obs capture test logic', () => {
     expect(unread.join('\n')).toContain("couldn't be read");
     expect(unread.join('\n')).toContain('silent');
     expect(soundText(v(LEVEL.STEADY, 'none', { sound: 'missing' }))).toContain('no sound track');
+    expect(unread.join('\n')).toContain('older than this test');
+  });
+
+  it("reports the game's own frame rate from the hook", () => {
+    const game = { frames: 1000, avg_fps: 239.6, low1_fps: 201.2, low01_fps: 98.7, max_ms: 14, slower_than_obs: 12 };
+    expect(gameText(game, 240)).toBe('The game itself: 240 fps average, 1% low 201 fps, 0.1% low 99 fps; 1.2% of its frames took longer than one 240 fps frame.');
+    expect(gameCell(game)).toBe('240 (201)');
+    expect(gameCell(null)).toBe('-');
   });
 
   it("names a test clip's session so the backend knows it", () => {

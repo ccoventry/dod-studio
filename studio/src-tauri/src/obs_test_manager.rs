@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use native::obs::bench::{self, FileReport, RecordingStats, StatsWatch, Verdict};
+use native::obs::bench::{self, FileReport, GameFrames, RecordingStats, StatsWatch, Verdict};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
@@ -107,6 +107,10 @@ pub fn obs_test_watch_start(
         host
     };
     let port = if port == 0 { 4455 } else { port };
+    // The last clip's frame times must not pass for this one's.
+    if let Some(file) = bench::frame_times_file() {
+        let _ = std::fs::remove_file(file);
+    }
     let watch = StatsWatch::start(format!("ws://{host}:{port}"), password);
     *state.watch.lock().unwrap_or_else(|p| p.into_inner()) = Some(watch);
 }
@@ -117,6 +121,15 @@ pub struct ObsTestResult {
     pub recording: RecordingStats,
     pub file: FileReport,
     pub verdict: Verdict,
+    /// The game's own frame rate from the hook (`ds_debug_record_frame_times`),
+    /// `None` when the hook wrote none (a hook DLL from before it).
+    pub game: Option<GameFrames>,
+}
+
+/// The game's frame times for the clip just recorded at `obs_fps`.
+fn read_game_frames(obs_fps: i32) -> Option<GameFrames> {
+    let text = std::fs::read_to_string(bench::frame_times_file()?).ok()?;
+    GameFrames::from_file_text(&text, obs_fps)
 }
 
 /// After the test batch: stops the watch, reads the take's recording and
@@ -127,6 +140,7 @@ pub async fn obs_test_analyze(
     state: tauri::State<'_, ObsTestManager>,
     take_folder: String,
     ffmpeg_path: Option<String>,
+    obs_fps: i32,
 ) -> Result<ObsTestResult, String> {
     let watch = state.watch.lock().unwrap_or_else(|p| p.into_inner()).take();
     let recording = match watch {
@@ -154,10 +168,16 @@ pub async fn obs_test_analyze(
     };
     let file = bench::analyze_file(&ffmpeg, &video, &cancel, &mut progress).await?;
     let verdict = bench::judge(&recording, &file);
+    // Written by the hook on its own thread when the clip's end turned the
+    // recorder off, long before the batch ended.
+    let game = tokio::task::spawn_blocking(move || read_game_frames(obs_fps))
+        .await
+        .unwrap_or_default();
     Ok(ObsTestResult {
         recording,
         file,
         verdict,
+        game,
     })
 }
 

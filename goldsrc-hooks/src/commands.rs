@@ -653,6 +653,8 @@ pub fn poll() {
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
     crate::demo_scope::poll();
     crate::run_in_background::poll();
+    // Times this frame while ds_debug_record_frame_times is on (#646).
+    crate::frame_times::poll();
     crate::pov_live_bob::poll();
     // A float compare unless ds_view_show_own_blood changed (#1035).
     crate::own_blood::poll();
@@ -1854,6 +1856,9 @@ pub fn install() {
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
     }
+    if let Some(times) = register(crate::frame_times::NAME, "0") {
+        crate::frame_times::set_cvar(times);
+    }
     if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
         crate::hlae_window::set_cloak_cvar(cloak);
     }
@@ -2067,6 +2072,7 @@ mod tests {
             crate::server_hud_text::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
+            crate::frame_times::NAME,
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
