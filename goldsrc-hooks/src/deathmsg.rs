@@ -74,12 +74,15 @@ use crate::names::console_name;
 use crate::scan;
 
 mod backdrop;
+mod clear;
 mod colour;
 mod even;
 mod font;
 mod name_cap;
 mod replace;
 mod scale;
+
+pub(crate) use clear::on_round_state;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -1031,6 +1034,18 @@ fn original_thunk() -> Option<engine::UserMsgHookFn> {
 /// engine handed us, so it behaves exactly as if we were not here. A changed
 /// one goes over as a copy: the engine's buffer is left as it was read.
 unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
+    let victim = (size >= 3 && !buf.is_null()).then(|| unsafe { *(buf as *const u8).add(1) });
+    let handled = unsafe { forward_death_msg(name, size, buf) };
+    // After the game has added the line, so `clear_on death` takes it too.
+    // The death happened whatever `replace` or `block` showed of it.
+    if let Some(victim) = victim {
+        clear::on_death(i32::from(victim));
+    }
+    handled
+}
+
+/// [`hooked_death_msg`]'s filtering and forwarding.
+unsafe fn forward_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
     let mut rewritten = None;
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
@@ -1097,9 +1112,13 @@ fn install_hook() {
 pub fn poll() {
     // `spec_deathcam` needs every kill noted, so the handler is kept
     // installed while that switch is on too, with an empty block list.
-    if HOOK_WANTED.load(Ordering::Relaxed) || crate::spectator_deathcam::enabled() {
+    if HOOK_WANTED.load(Ordering::Relaxed)
+        || crate::spectator_deathcam::enabled()
+        || clear::wants_death_msg()
+    {
         install_hook();
     }
+    clear::poll();
     font::poll();
     // Before `scale`, whose copy follows what the even layout finds.
     even::poll();
@@ -1292,6 +1311,9 @@ fn usage() -> String {
          \x20                               magazines and bipods shown, every line one step\n\
          \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
          \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n\
+         \x20 {COMMAND} gap <0..{}>           with layout even: px between each name (its\n\
+         \x20                               outline) and the icon's art, both sides\n\
+         \x20 {COMMAND} gap default        the game's spacing: {} px before the icon, none after\n\
          \x20 {COMMAND} outline <0..{}> [colour] [alpha]\n\
          \x20                               outline the names that many px (default black, 255)\n\
          \x20 {COMMAND} outline default    no outline\n\
@@ -1302,11 +1324,22 @@ fn usage() -> String {
          \x20 {COMMAND} background allies|axis <colour>|default\n\
          \x20                               that team's box colour (allies covers the British)\n\
          \x20 {COMMAND} background default no boxes, team colours back to the shade\n\
-         \x20                               a colour is r g b (0..255 each) or hex, #0a286e or #0af\n",
+         \x20                               a colour is r g b (0..255 each) or hex, #0a286e or #0af\n\
+         \x20 {COMMAND} clear              empty the kill feed now\n\
+         \x20 {COMMAND} clear_on restart <0|1> [delay]\n\
+         \x20                               at each new round, after delay s (default 0), clear\n\
+         \x20                               the lines that were up when it restarted\n\
+         \x20 {COMMAND} clear_on death <0|1> [delay]\n\
+         \x20                               when the watched player dies (POV: the recorder;\n\
+         \x20                               HLTV: the in-eye player), after delay s, clear the\n\
+         \x20                               lines up at the death, that one included\n\
+         \x20 {COMMAND} clear_on default   neither (the default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
         scale::MIN_SCALE,
         scale::MAX_SCALE,
+        even::MAX_GAP,
+        even::GAME_GAP_BEFORE,
         backdrop::MAX_OUTLINE,
         backdrop::DEFAULT_PADDING,
     )
@@ -1341,17 +1374,19 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, {}, blocking {block}, replacing {}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, {}, {}, blocking {block}, replacing {}, {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
         even::describe(),
+        even::describe_gap(),
         backdrop::describe(),
         match replace::count() {
             0 => "nothing".to_string(),
             1 => "1 kill line (replace list)".to_string(),
             n => format!("{n} kill lines (replace list)"),
         },
+        clear::describe(),
     )
 }
 
@@ -1451,6 +1486,17 @@ fn dispatch(argv: &[String]) -> String {
         }
         "players" => players(),
         "replace" => replace::command(&argv[2..]),
+        "clear" => clear::clear_now(),
+        "clear_on" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", clear::describe(), usage());
+            }
+            match clear::parse_clear_on(rest) {
+                Ok(asked) => format!("{COMMAND}: {}\n", clear::apply(asked)),
+                Err(why) => format!("{COMMAND} clear_on: {why}\n"),
+            }
+        }
         "font" => {
             let rest = &argv[2..];
             if rest.is_empty() {
@@ -1520,6 +1566,16 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} layout: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} layout: {why}\n"),
+            }
+        }
+        "gap" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe_gap(), usage());
+            }
+            match even::parse_gap(rest) {
+                Ok(gap) => format!("{COMMAND}: {}\n", even::set_gap(gap)),
+                Err(why) => format!("{COMMAND} gap: {why}\n"),
             }
         }
         "fake" => {

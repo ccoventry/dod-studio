@@ -28,6 +28,7 @@ documented in its own `//!` header.
 | `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
+| `round_restart_probe` | When does a demo start a new round (`RoundState`), and what led to it: a win, a clan match going live, a wait for players? |
 | `voice_menu_probe` | When does a POV demo show a voice menu (`ShowMenu`) or open the command menu, on the viewdemo clock? |
 | `weapon_list_probe` | Which recorded weapon keys open the weapon-selection list in playback, and was it open on the recorder's screen (#1032)? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
