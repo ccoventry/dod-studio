@@ -590,6 +590,8 @@ pub fn poll() {
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
+    // ds_hud_hide_hints: one code patch, byte-checked each frame.
+    crate::hint_panel::poll();
     // Keeps the weapon list off screen in demo playback with hud_fastswitch 1:
     // one code byte, checked each frame.
     crate::weapon_list::poll();
@@ -915,6 +917,9 @@ fn status_text() -> String {
     }
     if let Some(spectator_text) = crate::spectator_text::status_line() {
         lines.push(spectator_text);
+    }
+    if let Some(hints) = crate::hint_panel::status_line() {
+        lines.push(hints);
     }
     if let Some(server_hud_text) = crate::server_hud_text::status_line() {
         lines.push(server_hud_text);
@@ -1835,6 +1840,11 @@ pub fn install() {
     if let Some(server_hud_text) = register(crate::server_hud_text::NAME, "0") {
         crate::server_hud_text::set_cvar(server_hud_text);
     }
+    // On by default: the hint panel is the recorder's own tutorial and
+    // covers a corner of the shot (#286).
+    if let Some(hints) = register(crate::hint_panel::NAME, "1") {
+        crate::hint_panel::set_cvar(hints);
+    }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
         crate::voice_menus::set_cvar(voice_menus);
     }
@@ -2123,6 +2133,7 @@ mod tests {
             crate::center_text::NAME,
             crate::spectator_text::NAME,
             crate::server_hud_text::NAME,
+            crate::hint_panel::NAME,
             crate::strafe_twitch::NAME,
             missing_shots::NAME,
             crate::own_blood::NAME,
