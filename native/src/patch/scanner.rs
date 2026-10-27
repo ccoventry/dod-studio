@@ -141,7 +141,7 @@ fn leading_frame_times(
     Ok((frame_times, stopped || !truncated))
 }
 
-/// The Capture page's rows: one per highlight, as `analysis::highlights`
+/// The Highlights page's rows: one per highlight, as `analysis::highlights`
 /// defines them, each built on `demo` (the fields every row of the demo
 /// shares). Whose rows exist is decided here and nowhere later (#573):
 /// `Highlights::shown`, the same rule the in-game Highlights tab applies
@@ -627,7 +627,7 @@ mod tests {
         }
     }
 
-    /// How many rows the Capture page showed before #573: every highlight
+    /// How many rows the Highlights page showed before #573: every highlight
     /// with a known slot was scanned, and the frontend kept the recorder's
     /// slot's (`local_player_index`) when the demo had one.
     fn rows_before_573(analysis: &analysis::Analysis) -> usize {

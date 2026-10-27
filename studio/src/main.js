@@ -86,7 +86,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // the cleaned list is written back once after settings load.
   let pinnedListCleaned = false;
   let currentScannedDemos = [];
-  // The Setup window and the Capture page's checklist (#599): setup_wiring.js,
+  // The Setup window and the Highlights page's checklist (#599): setup_wiring.js,
   // created once everything it reads is wired, near the end of startup.
   let setup = null;
   let savedSetupDismissed = false;

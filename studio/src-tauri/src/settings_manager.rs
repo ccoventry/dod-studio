@@ -297,7 +297,7 @@ pub struct AppSettings {
     /// "Hide from this list" took off it. Only the list reads it.
     #[serde(default)]
     pub hidden_installs: Vec<String>,
-    /// The Capture page's Review controls (#623, #661, #665), kept across
+    /// The Highlights page's Review controls (#623, #661, #665), kept across
     /// restarts (`studio/src/review_settings.js`): which Review marks a
     /// review plays, the order, whether Yes also ticks the highlight for
     /// capture, and the fast-forward over long gaps.

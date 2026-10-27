@@ -96,6 +96,7 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    FILTER_ROW_LABEL: 'Filters',
     // #174: demos you can capture a player from (POV demos they recorded).
     PLAYER_FILTER_ALL: 'All players',
     PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
@@ -190,9 +191,8 @@ export const STRINGS = {
     // #441: the name the finished file gets.
     COL_CLIP_NAME: 'Clip Name',
     CLIP_NAME_INPUT_TITLE: 'The finished file is named after this. The grey name is the automatic one, from the template in Configuration > Render Output. Type your own to use it instead; clear it to go back.',
-    // Placeholder naming — "Capture"/"Render" is a stand-in until better
-    // names are picked (per #81 discussion), not a final decision.
-    SUBTAB_HIGHLIGHTS: 'Capture',
+    // The Studio sub-tabs (#117): pick the highlights, render the takes, set up.
+    SUBTAB_HIGHLIGHTS: 'Highlights',
     SUBTAB_RENDER: 'Render',
     SUBTAB_CONFIGURATION: 'Configuration',
     DEFAULT_TITLE: 'Highlight Details',
@@ -205,6 +205,8 @@ export const STRINGS = {
     LAUNCH_STANDALONE_BUTTON: 'Launch Game',
     LAUNCH_STANDALONE_TITLE: "Starts the game with DoD Studio, no demo loaded. Previews, reviews and capture batches use this game while it's open. Only close it when Studio asks.",
     MIN_KILLS_LABEL: 'Min Kills:',
+    // #127: it sits in the queue's filter row but narrows highlights, not demos.
+    MIN_KILLS_TITLE: 'Shows only highlights with at least this many kills, in Highlight Details and in Review highlights. The demo list itself is narrowed by the filters beside it.',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
     COL_ROW_NUM: 'Row #',
@@ -619,7 +621,7 @@ export const STRINGS = {
     },
     andNMore: (n) => `...and ${n} more`,
     PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
-    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Capture tab before starting a capture.',
+    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
@@ -2932,7 +2934,7 @@ export const STRINGS = {
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
   },
 
-  // ── First-run Setup window and the Capture page's checklist (#599) ──────
+  // ── First-run Setup window and the Highlights page's checklist (#599) ──────
   // Configuration > Players (#428): players_ui.js.
   PLAYERS: {
     USE_IN_GAME_LABEL: 'Use in the game',
@@ -3178,16 +3180,16 @@ export const STRINGS = {
 
     // Step 6: demos.
     DEMOS_TITLE: 'Add your demos',
-    DEMOS_INTRO: "DoD Studio scans a folder of .dem files for highlights. Your movie copy's dod folder is a good start; you can add more folders later from the Capture page.",
+    DEMOS_INTRO: "DoD Studio scans a folder of .dem files for highlights. Your movie copy's dod folder is a good start; you can add more folders later from the Highlights page.",
     DEMOS_FIELD: 'Demo folder',
     DEMOS_NONE: 'No folder picked yet.',
-    DEMOS_FINISH_NOTE: 'Finish scans this folder and opens the Capture page with your demos listed.',
+    DEMOS_FINISH_NOTE: 'Finish scans this folder and opens the Highlights page with your demos listed.',
     DEMOS_SCANNING: 'Scanning…',
     USE_SUGGESTED: 'Use this folder',
 
     // Footer.
     SKIP_SETUP: 'Skip setup for now',
-    SKIP_SETUP_TITLE: 'Close this window. The Capture page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
+    SKIP_SETUP_TITLE: 'Close this window. The Highlights page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
     BACK: 'Back',
     NEXT: 'Next',
     SKIP_STEP: 'Skip this step',

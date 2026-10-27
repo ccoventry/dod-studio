@@ -614,6 +614,27 @@ html.picking-path * {
   padding-bottom: 6px;
 }
 
+/* The Master Demo Queue's filters, a row of their own under its toolbar (#127). */
+.queue-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.queue-filter-row-label {
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.queue-filter-min-kills {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
 .panel-header h2, .panel-header h3 {
   font-size: 14px;
   font-weight: 600;
