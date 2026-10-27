@@ -725,7 +725,8 @@ def run(args):
     game_cmd = (f"-game {args.game} -insecure {mode} -w {args.width} -h {args.height} "
                 "-afxForceAlpha8 1 -condebug"
                 + (" -addons" if args.addons else "")
-                + (" -demoedit" if args.demoedit else ""))
+                + (" -demoedit" if args.demoedit else "")
+                + (f" {args.launch_args}" if args.launch_args else ""))
     probe_copy = None
     if args.demo and args.at_launch:
         # `+playdemo` at launch, as a batch without the hook DLL starts its primer: the demo
@@ -1013,6 +1014,9 @@ def main():
                    help="add -demoedit, as Studio's launch line does")
     p.add_argument("--fullscreen", action="store_true",
                    help="-full instead of -windowed (Studio always launches windowed)")
+    p.add_argument("--launch-args", default="",
+                   help="appended to the game's command line as given, e.g. Studio's "
+                        "-dodstudio_start_behind and +ds_capture_stay_behind 1 (#1059)")
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
     p.add_argument("--out", help="report folder (default: local/game-probe/<timestamp>)")
