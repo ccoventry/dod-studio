@@ -815,18 +815,27 @@ impl PatcherConfig {
         // path that was tried.
         match &goldsrc_hooks_dll_str {
             Some(extra_dll) => {
-                log::info!("goldsrc-hooks: injecting {extra_dll}");
+                crate::log_markdown(&format!("goldsrc-hooks: injecting {extra_dll}"));
                 cmd.args(["-hookDllPath", extra_dll]);
             }
-            None => log::warn!(
-                "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                 ds_* console commands will be absent this session. Tried: override={:?}, \
-                 bundled default={:?}, legacy spot beside hlae.exe={:?}. In a dev build only the \
-                 override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
-                self.goldsrc_hooks_dll_path,
-                default_goldsrc_hooks_dll_path(),
-                hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll")),
-            ),
+            None => {
+                let shown = |p: Option<std::path::PathBuf>| {
+                    p.map_or_else(|| "none".to_string(), |p| p.display().to_string())
+                };
+                crate::log_markdown(&format!(
+                    "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
+                     ds_* console commands will be absent this session. Tried: override={}, \
+                     bundled default={}, legacy spot beside hlae.exe={}. In a dev build only the \
+                     override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
+                    shown(
+                        self.goldsrc_hooks_dll_path
+                            .as_ref()
+                            .map(std::path::PathBuf::from)
+                    ),
+                    shown(default_goldsrc_hooks_dll_path()),
+                    shown(hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))),
+                ));
+            }
         }
         cmd.args(["-programPath", &program_path_str, "-cmdLine", &cmd_line_str]);
         cmd.env("SteamAppId", "30");
