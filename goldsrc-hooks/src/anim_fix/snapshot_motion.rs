@@ -53,6 +53,8 @@ const LADDER_SECONDS: f64 = 0.5;
 const STILL_SECONDS: f64 = 0.1;
 /// Smaller changes are not movement. Positions arrive in 1/32 units.
 const MOVED: f32 = 0.01;
+/// A longer gap between snapshots starts afresh: no speed is read across it.
+const GAP_SECONDS: f64 = 0.5;
 /// `MOVETYPE_FLY`: on a ladder.
 const MOVETYPE_FLY: i32 = 5;
 
@@ -65,9 +67,12 @@ struct Snapshot {
 #[derive(Debug, Default)]
 pub(super) struct SnapshotMotion {
     last: Option<Snapshot>,
-    /// Vertical speed over the newest interval, and the one before.
+    /// Vertical speed over the newest interval.
     climb: Option<f32>,
-    climb_before: Option<f32>,
+    /// How many intervals in a row have climbed at jump speed. A take-off is
+    /// the moment it reaches two, so a lift that keeps climbing past the
+    /// `AIR_SECONDS` limit doesn't take off again at once.
+    rising_run: u32,
     /// When the origin last changed, and when its height last did.
     moved_at: Option<f64>,
     height_changed_at: Option<f64>,
@@ -86,8 +91,9 @@ impl SnapshotMotion {
             if time == last.time {
                 return;
             }
-            // A clock that went backwards is a seek or a new demo.
-            if time < last.time {
+            // A clock that went backwards is a seek or a new demo; a long gap
+            // is a seek forward, or frames where nobody was watched.
+            if time < last.time || time - last.time > GAP_SECONDS {
                 self.reset();
             }
         }
@@ -100,7 +106,6 @@ impl SnapshotMotion {
                 if moved(2) {
                     self.height_changed_at = Some(time);
                 }
-                self.climb_before = self.climb;
                 self.climb = Some((origin[2] - last.origin[2]) / (time - last.time) as f32);
             }
             None => {
@@ -112,15 +117,14 @@ impl SnapshotMotion {
         if movetype == MOVETYPE_FLY {
             self.ladder_at = Some(time);
         }
+        self.rising_run = match self.climb {
+            Some(climb) if (RISE..=RISE_MAX).contains(&climb) => self.rising_run.saturating_add(1),
+            _ => 0,
+        };
         match (self.airborne_since, self.climb) {
             (None, Some(climb)) => {
                 let off_a_ladder = self.ladder_at.is_some_and(|at| time - at < LADDER_SECONDS);
-                let jumping = |c: Option<f32>| c.is_some_and(|c| (RISE..=RISE_MAX).contains(&c));
-                if body.starts_with("crouch_")
-                    && !off_a_ladder
-                    && jumping(Some(climb))
-                    && jumping(self.climb_before)
-                {
+                if body.starts_with("crouch_") && !off_a_ladder && self.rising_run == 2 {
                     self.airborne_since = Some(time);
                     self.falling = false;
                 }
@@ -334,6 +338,41 @@ mod tests {
         }
         assert!(s.in_the_air());
         s.snapshot(5.0, [0.0; 3], CROUCHED, WALK);
+        assert!(!s.in_the_air());
+    }
+
+    #[test]
+    fn a_lift_climbing_for_ever_lowers_it_once_at_most() {
+        let mut s = SnapshotMotion::default();
+        standing(&mut s, 10.0, CROUCHED);
+        let mut t = 10.0;
+        let mut z = 0.0;
+        while t < 13.0 {
+            z += 260.0 * DT as f32;
+            s.snapshot(t, [0.0, 0.0, z], CROUCHED, WALK);
+            if t > 10.0 + DT + AIR_SECONDS + DT {
+                assert!(!s.in_the_air(), "taken off again at {t}");
+            }
+            t += DT;
+        }
+    }
+
+    #[test]
+    fn a_long_gap_starts_afresh() {
+        let mut s = SnapshotMotion::default();
+        let prone = "prone_rifle_aim";
+        for i in 0..5 {
+            s.snapshot(
+                10.0 + f64::from(i) * DT,
+                [3.0 * i as f32, 0.0, 0.0],
+                prone,
+                WALK,
+            );
+        }
+        // Seconds later, somewhere else: nothing is read across the gap.
+        s.snapshot(20.0, [500.0, 0.0, -300.0], CROUCHED, WALK);
+        assert_eq!(s.climb, None);
+        assert!(!s.still());
         assert!(!s.in_the_air());
     }
 

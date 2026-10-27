@@ -591,6 +591,47 @@ mod tests {
     }
 
     #[test]
+    fn the_snapshots_end_a_crawl_and_catch_a_crouched_jump() {
+        let _statics = lock_statics();
+        forget();
+        let crawl = view("prone_rifle_aim", "prone_forward", "garand");
+        // Crawling: the origin moves, so the gait's word stands.
+        for i in 0..4 {
+            super::super::snapshot_motion::note_snapshot(
+                10.0 + f64::from(i) * 0.035,
+                [f32::from(i as u8) * 1.5, 0.0, 0.0],
+                "prone_rifle_aim",
+                3,
+            );
+        }
+        assert_eq!(hidden_because(&crawl, 10.11), Some(Hidden::Crawling));
+        // Stopped for over 0.1 s: up, though the gait still says crawl.
+        for i in 4..8 {
+            super::super::snapshot_motion::note_snapshot(
+                10.0 + f64::from(i) * 0.035,
+                [4.5, 0.0, 0.0],
+                "prone_rifle_aim",
+                3,
+            );
+        }
+        assert_eq!(hidden_because(&crawl, 10.25), None);
+
+        forget();
+        // A crouched take-off the body never shows as `jump`.
+        let crouched = view("crouch_bolt_aim", "dod_crawl", "k98");
+        for (i, z) in [0.0, 0.0, 0.0, 8.0, 16.0].into_iter().enumerate() {
+            super::super::snapshot_motion::note_snapshot(
+                20.0 + i as f64 * 0.035,
+                [0.0, 0.0, z],
+                "crouch_bolt_aim",
+                3,
+            );
+        }
+        assert_eq!(hidden_because(&crouched, 20.15), Some(Hidden::InTheAir));
+        forget();
+    }
+
+    #[test]
     fn every_reason_survives_the_trip_through_its_code() {
         for reason in Hidden::ALL {
             assert_eq!(Hidden::from_code(reason as u8), Some(reason));

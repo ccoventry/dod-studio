@@ -66,8 +66,8 @@ const SCALE: f32 = -0.7;
 /// The player's frames per second the steps are taken at: the median POV
 /// recorder's ramp (module docs).
 const STEPS_PER_SECOND: f32 = 200.0;
-/// The longest gap stepped in one go. Longer is a pause or a seek, not a
-/// frame, and moves the gun no further than a 10 fps frame would.
+/// The longest gap stepped in one go. Longer is a seek or the camera coming
+/// back into a player's eyes, not a frame, and moves the gun nothing.
 const LONGEST_FRAME: f32 = 0.1;
 
 /// Whether the spectated player's gun would be lowered this frame.
@@ -95,12 +95,20 @@ pub fn lowered() -> bool {
 /// up.
 pub fn reset() {
     OFFSCREEN.store(0f32.to_bits(), Ordering::Relaxed);
+    // The next frame starts the clock again rather than stepping the whole
+    // time the camera was elsewhere.
+    STEPPED_AT.store(0, Ordering::Relaxed);
 }
 
 /// DoD's step, scaled to `seconds` of the player's time: from one frame's
 /// offset to the next.
 fn step(offscreen: f32, lowered: bool, seconds: f32) -> f32 {
-    let frames = seconds.clamp(0.0, LONGEST_FRAME) * STEPS_PER_SECOND;
+    let seconds = if (0.0..=LONGEST_FRAME).contains(&seconds) {
+        seconds
+    } else {
+        0.0
+    };
+    let frames = seconds * STEPS_PER_SECOND;
     if lowered {
         (offscreen + STEP_DOWN * frames).min(MOST)
     } else {
@@ -219,11 +227,10 @@ mod tests {
 
     #[test]
     fn a_pause_or_a_clock_going_back_moves_it_little_or_not_at_all() {
-        // A seek forward moves it no further than one long frame.
-        assert_eq!(
-            step(0.0, true, 30.0),
-            STEP_DOWN * LONGEST_FRAME * STEPS_PER_SECOND
-        );
+        // A seek forward moves it nothing.
+        assert_eq!(step(0.0, true, 30.0), 0.0);
+        // A slow frame within the limit still steps in full.
+        assert_eq!(step(0.0, true, LONGEST_FRAME), 20.0);
         // A new demo's clock, behind the old one, moves it nothing.
         assert_eq!(step(20.0, true, -500.0), 20.0);
         assert_eq!(step(20.0, false, -500.0), 20.0);
