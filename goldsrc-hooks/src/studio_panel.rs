@@ -3984,6 +3984,13 @@ mod hook {
         demo_bar_progress::update();
         name_stock_demo_rows();
         load_strip::request_highlights();
+        // The stock bar's slider needs no window of ours either: a demo
+        // started from the launch line (previews, batches) plays before
+        // the viewdemo wrapper is in, so the window never opens, and the
+        // first ESC used to seek to the demo's start (#663).
+        if let Ok(vgui) = Vgui::get() {
+            unsafe { vcr_sync::update(&vgui) };
+        }
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0
@@ -3995,7 +4002,6 @@ mod hook {
         unsafe {
             console_to_tab(&vgui);
             refocus_console_entry(&vgui);
-            vcr_sync::update(&vgui);
             // After a viewdemo, open on Playback once the bar has appeared.
             if pending > 0 {
                 VIEWDEMO_PENDING.store(pending - 1, Ordering::Relaxed);
