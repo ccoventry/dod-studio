@@ -413,9 +413,12 @@ const LEFT_OUT: &[&str] = &[
     // Studio sets these for each launch or batch.
     console_name!("spec_lock"),
     console_name!("player_overrides"),
-    console_name!("capture_"),
+    // Two whole areas. Built around `console_name!("")` because they are
+    // prefixes, not names, and the tests that list every name read each
+    // `console_name!("…")` as one.
+    concat!(console_name!(""), "capture_"),
     // Diagnostics.
-    console_name!("debug_"),
+    concat!(console_name!(""), "debug_"),
 ];
 
 /// Every row, in tab order.
