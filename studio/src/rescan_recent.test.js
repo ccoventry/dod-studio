@@ -160,8 +160,8 @@ describe('the run', () => {
     expect(d.lines).toEqual([
       STRINGS.RESCAN_RECENT.skippedLog('b.json'),
       STRINGS.RESCAN_RECENT.missingLog('D:/p/gone.json'),
-      STRINGS.RESCAN_RECENT.doneLog('a.json', 1, '0.0', 'a.before-rescan-2026-10-23.json'),
-      STRINGS.RESCAN_RECENT.doneLog('c.json', 1, '0.0', 'c.before-rescan-2026-10-23.json'),
+      STRINGS.RESCAN_RECENT.doneLog('a.json', 1, '0.0 s', 'a.before-rescan-2026-10-23.json'),
+      STRINGS.RESCAN_RECENT.doneLog('c.json', 1, '0.0 s', 'c.before-rescan-2026-10-23.json'),
     ]);
     expect(d.lines.every((l) => l.startsWith('[rescan] '))).toBe(true);
   });
@@ -180,7 +180,7 @@ describe('the run', () => {
     const result = await rescanSessions(rows(), d);
     expect(d.calls.filter((c) => c[0] === 'save')).toEqual([['save', 'D:/p/c.json']]);
     expect(result).toMatchObject({ done: 1, failed: 1 });
-    expect(d.lines).toContain(STRINGS.RESCAN_RECENT.failedLog('a.json', '0.0', STRINGS.RESCAN_RECENT.SCAN_FAILED));
+    expect(d.lines).toContain(STRINGS.RESCAN_RECENT.failedLog('a.json', '0.0 s', STRINGS.RESCAN_RECENT.SCAN_FAILED));
   });
 
   it('a session replaced while it scanned (Ctrl+O, Ctrl+N) is not saved: the save would write over another file', async () => {
@@ -192,7 +192,7 @@ describe('the run', () => {
     const result = await rescanSessions(rows(), d);
     expect(d.calls.filter((c) => c[0] === 'save')).toEqual([['save', 'D:/p/c.json']]);
     expect(result).toMatchObject({ done: 1, failed: 1 });
-    expect(d.lines).toContain(STRINGS.RESCAN_RECENT.failedLog('a.json', '0.0', STRINGS.RESCAN_RECENT.SESSION_CHANGED));
+    expect(d.lines).toContain(STRINGS.RESCAN_RECENT.failedLog('a.json', '0.0 s', STRINGS.RESCAN_RECENT.SESSION_CHANGED));
   });
 
   it('a backup that fails stops that session before it is opened', async () => {

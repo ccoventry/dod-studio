@@ -107,9 +107,14 @@ fn ensure_listener(app: AppHandle, pid: u32) {
 /// given during a reconnect still arrives.
 fn listen(app: &AppHandle, pid: u32) {
     let name = game_remote::events_pipe_name(pid);
+    // The pipe reopens after every reader disconnect: one line says the
+    // listener found the game, not one per reconnect.
+    let mut said_reading = false;
     loop {
         if !native::sys::process::game_pids().contains(&pid) {
-            log::info!("[review] game {pid} has closed; no more answers to read");
+            native::log_markdown(&format!(
+                "[review] game {pid} has closed; no more answers to read"
+            ));
             let _ = app.emit(
                 EVENT,
                 native::review_queue::ReviewEvent::Ended {
@@ -122,11 +127,13 @@ fn listen(app: &AppHandle, pid: u32) {
             std::thread::sleep(RETRY);
             continue;
         };
-        log::info!("[review] reading answers from game {pid}");
+        if !std::mem::replace(&mut said_reading, true) {
+            native::log_markdown(&format!("[review] reading answers from game {pid}"));
+        }
         for bytes in BufReader::new(pipe).split(b'\n').map_while(Result::ok) {
             let line = String::from_utf8_lossy(&bytes);
             if let Some(event) = parse_event(&line) {
-                log::info!("[review] {}", line.trim());
+                native::log_markdown(&format!("[review] {}", line.trim()));
                 let _ = app.emit(EVENT, event);
             }
         }
@@ -190,7 +197,9 @@ pub async fn start_highlight_review(
             (pid, true)
         }
     };
-    log::info!("[review] {count} highlight(s) sent to game {pid} (launched: {launched})");
+    native::log_markdown(&format!(
+        "[review] {count} highlight(s) sent to game {pid} (launched: {launched})"
+    ));
     ensure_listener(app, pid);
     Ok(ReviewStarted {
         pid,

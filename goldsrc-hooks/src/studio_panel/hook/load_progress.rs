@@ -74,8 +74,9 @@ pub(super) unsafe fn update(vgui: &Vgui) {
 }
 
 /// How much of the playing demo the demo player has read, while it is still
-/// reading. Shared with the loading strip (#797), so both say the same, and
-/// worked out whatever tab is showing.
+/// reading. Shared with the loading strip (#797) and the stock bar's
+/// progress (`demo_bar_progress`), so all three say the same, and worked out
+/// whatever tab is showing.
 pub(super) fn demo_percent() -> Option<u32> {
     crate::demo_seek::buffered_while_loading().and_then(|buffered| {
         let length = length_of_current_demo()?;

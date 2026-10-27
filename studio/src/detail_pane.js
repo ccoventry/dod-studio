@@ -11,7 +11,7 @@ import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
-import { clockFloor, clockRound } from './time_format.js';
+import { clockFloor, clockRound, durationText } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
@@ -482,7 +482,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     }
 
     // Time matches the demo player's clock; see highlight_time.js (#464).
-    const durSecs = highlightDurationSeconds(streak, demo.tickrate).toFixed(1);
+    const durSecs = highlightDurationSeconds(streak, demo.tickrate);
     const timeStr = clockFloor(highlightStartSeconds(streak, demo.tickrate));
 
     // Details: precomputed weapon/timing chain from the backend
@@ -526,7 +526,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
       <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
       ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
-      <td style="padding: 8px;">${STRINGS.HIGHLIGHTS.secondsSuffix(durSecs)}</td>
+      <td style="padding: 8px;">${durationText(durSecs)}</td>
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>

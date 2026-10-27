@@ -69,7 +69,7 @@ fn catchable_in(dir: &Path) -> Vec<CaptureManifest> {
 /// them as a watched batch does, and rewrites its manifest as unwatched.
 fn catch_up_one(dir: &Path, manifest: CaptureManifest) -> CaughtUpBatch {
     // The batch ended long ago: no take is still being flushed.
-    let blocks = verify_capture_takes_settling(&manifest, None);
+    let blocks = verify_capture_takes_settling(&manifest, None, &mut |_| {});
     let captured = blocks.iter().filter(|b| b.captured).count();
     log_markdown(&format!(
         "[batch-catch-up] session {} ran while Studio was closed: {}/{} takes on disk",

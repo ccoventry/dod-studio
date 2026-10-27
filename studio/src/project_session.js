@@ -6,6 +6,7 @@
 
 import { save } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
+import { whileDialogOpens } from './dialog_wait.js';
 import { invoke } from '@tauri-apps/api/core';
 import { defaultProjectsDir } from './ipc_bridge.js';
 import { updateStreakVisuals } from './detail_pane.js';
@@ -138,10 +139,10 @@ export function createProjectSession({
     try {
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
-      const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
       // A first save is `.dodstudio`; a project opened from `.json` keeps
       // saving to that `.json` (#528, project_file_type.js).
-      const filePath = currentSessionPath || await save(projectSaveDialogOptions(projectsDir));
+      const filePath = currentSessionPath || await whileDialogOpens(async () =>
+        save(projectSaveDialogOptions(await defaultProjectsDir())));
       if (!filePath) return false;
 
       // No HLAE or hl.exe path: those are this PC's settings, not the
@@ -199,7 +200,8 @@ export function createProjectSession({
   const loadProjectBtn = document.querySelector('#load-project-btn');
 
   // Load Project Session. The button is disabled until the dialog returns;
-  // pickPath shows the busy cursor while it comes.
+  // pickPath shows the wait while it comes, the projects folder lookup
+  // included.
   loadProjectBtn?.addEventListener('click', async () => {
     if (choosing) return;
     choosing = true;
@@ -207,11 +209,10 @@ export function createProjectSession({
     let selected = null;
     try {
       if (!(await confirmReplaceProject())) return;
-      const projectsDir = await defaultProjectsDir();
       selected = await pickPath({
         field: 'project.open',
         current: currentSessionPath,
-        fallback: projectsDir,
+        fallback: () => defaultProjectsDir(),
         multiple: false,
         filters: PROJECT_OPEN_FILTERS,
       });

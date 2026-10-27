@@ -175,20 +175,20 @@ impl CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::new] Failed to pre-clean exit_trigger {:?}: {}",
-                exit_trigger,
+            log_markdown(&format!(
+                "[cleanup] Failed to pre-clean exit_trigger {}: {}",
+                exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Err(e) = std::fs::remove_dir(&session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::new] Failed to pre-clean session_junction {:?}: {}",
-                session_junction,
+            log_markdown(&format!(
+                "[cleanup] Failed to pre-clean session_junction {}: {}",
+                session_junction.display(),
                 e
-            );
+            ));
         }
         Self {
             exit_trigger,
@@ -227,20 +227,20 @@ impl Drop for CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::drop] Failed to remove exit_trigger {:?}: {}",
-                self.exit_trigger,
+            log_markdown(&format!(
+                "[cleanup] Failed to remove exit_trigger {}: {}",
+                self.exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::drop] Failed to remove session_junction {:?}: {}",
-                self.session_junction,
+            log_markdown(&format!(
+                "[cleanup] Failed to remove session_junction {}: {}",
+                self.session_junction.display(),
                 e
-            );
+            ));
         }
 
         if let Some(game_root) = self.exit_trigger.parent() {
@@ -292,7 +292,6 @@ pub fn spawn_capture_engine(
             macro_rules! log_crash_abort {
                 ($tx:expr, $msg:expr) => {
                     {
-                        log::error!("{}", $msg);
                         crate::log_markdown(&$msg);
                         let _ = $tx.send(EngineEvent::Error(
                             format!("Capture Engine Aborted — {} (see View Logs for details)", $msg)
@@ -516,7 +515,7 @@ pub fn spawn_capture_engine(
                     let local_dest = demos_dir.join(&demo_filename);
                     match std::fs::copy(&job.patched_demo_path, &local_dest) {
                         Ok(_) => log_markdown(&format!("- [IO] Saved local copy to demos/{}", demo_filename)),
-                        Err(e) => log::warn!("Failed to save local patched copy to {}: {}", local_dest.display(), e),
+                        Err(e) => log_markdown(&format!("- [IO] Failed to save local patched copy to {}: {}", local_dest.display(), e)),
                     }
                 }
 
@@ -696,7 +695,16 @@ pub fn spawn_capture_engine(
             // brightness and gamma (`game_handoff`). With the hook that demo
             // is dodstudio_chain_01 itself, without it the primer (#365). A
             // batch the hook runs starts the same way, with its batch file.
+            //
+            // OBS mode records the game's own sound output, which DirectSound
+            // silences while the game isn't the active window, so it plays
+            // through waveOut instead (`obs::GAME_ARGS`).
             let with_start = |args: &str| {
+                let args = &if config.capture_mode == crate::patch::CaptureMode::Obs {
+                    format!("{} {args}", crate::obs::GAME_ARGS)
+                } else {
+                    args.to_string()
+                };
                 if config.keep_game_behind {
                     format!("{} {args}", crate::patch::builder::START_BEHIND_ARG)
                 } else {
@@ -848,8 +856,8 @@ pub fn spawn_capture_engine(
                         Ok(Some(status)) => {
                             launcher_exit_logged = true;
                             log_markdown(&format!(
-                                "[HLAE] Launcher exited after {:.1}s (status: {:?}) — expected handoff behaviour, not a crash by itself",
-                                start_time.elapsed().as_secs_f32(),
+                                "[HLAE] Launcher exited after {} (status: {:?}) — expected handoff behaviour, not a crash by itself",
+                                crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                                 status
                             ));
                         }
@@ -921,7 +929,7 @@ pub fn spawn_capture_engine(
                             if console_log_len(&log_path) == log_len_before_launch {
                                 log_markdown(&format!(
                                     "⚠️ **The engine is not writing its console log.** `{}` is unchanged \
-                                     {:.0}s after the game started, so dod-studio is getting no console \
+                                     {} after the game started, so dod-studio is getting no console \
                                      markers from it.\n\n\
                                      Per-demo progress, fast-forward-to-clip notifications, crash \
                                      detection and OBS capture all read that log — without it they do \
@@ -934,7 +942,7 @@ pub fn spawn_capture_engine(
                                      the file open, or HLAE may not be passing the flag through to the \
                                      game.",
                                     log_path.display(),
-                                    CONDEBUG_WRITE_GRACE.as_secs_f32(),
+                                    crate::utils::duration_text::duration_text(CONDEBUG_WRITE_GRACE.as_secs_f64()),
                                 ));
                             }
                         }
@@ -954,9 +962,9 @@ pub fn spawn_capture_engine(
                     }
                     if let Some(dialog) = crate::sys::dialogs::error_dialogs(&game_pids, &launcher_pids).into_iter().next() {
                         log_markdown(&format!(
-                            "[HLAE] Error box from PID {} after {:.1}s: {}",
+                            "[HLAE] Error box from PID {} after {}: {}",
                             dialog.pid,
-                            start_time.elapsed().as_secs_f32(),
+                            crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                             dialog.full_text()
                         ));
                         failure_reason = Some(dialog.summary());
@@ -989,7 +997,7 @@ pub fn spawn_capture_engine(
                 }
 
                 if cancel_token.load(Ordering::Relaxed) {
-                    log_markdown(&format!("[HLAE] Cancelled by user after {:.1}s", start_time.elapsed().as_secs_f32()));
+                    log_markdown(&format!("[HLAE] Cancelled by user after {}", crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64())));
                     // A cancel in the first few seconds catches the launcher
                     // still injecting into hl.exe. Killing only hl.exe then
                     // leaves HLAE open on "AfxHook error, Code: 1" (seen
@@ -1012,8 +1020,8 @@ pub fn spawn_capture_engine(
                         && hl_alive && since.elapsed() > marker_stall_deadline(longest_marker_gap) {
                             let never_started = last_marker_at.is_none();
                             log_markdown(&format!(
-                                "[HLAE] No console markers for {:.0}s with hl.exe still running — treating the batch as stalled. {}",
-                                since.elapsed().as_secs_f32(),
+                                "[HLAE] No console markers for {} with hl.exe still running — treating the batch as stalled. {}",
+                                crate::utils::duration_text::duration_text(since.elapsed().as_secs_f64()),
                                 if never_started {
                                     "Playback never produced a single marker, so the demo most likely failed to load."
                                 } else {
@@ -1028,12 +1036,18 @@ pub fn spawn_capture_engine(
                             kill_hl_exe_and_wait(&mut sys);
                             break;
                         }
-                // OBS gone for good, after a reconnect was already tried.
-                // Continuing would play the demo to the end capturing nothing
-                // and then report the batch as finished.
-                if obs_session.as_ref().is_some_and(|s| s.is_dead()) {
-                    log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
-                    failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
+                // OBS gone for good, after a reconnect was already tried, or
+                // refusing to record (`ObsSession::refused`). Continuing would
+                // play the demo to the end capturing nothing and then report
+                // the batch as finished.
+                if let Some(session) = obs_session.as_ref().filter(|s| s.is_dead()) {
+                    if let Some(why) = session.refused() {
+                        log_markdown(&format!("[HLAE] {why} — aborting rather than finishing the batch with nothing recorded."));
+                        failure_reason = Some(why.to_string());
+                    } else {
+                        log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
+                        failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
+                    }
                     kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
@@ -1050,8 +1064,8 @@ pub fn spawn_capture_engine(
                         exit_trigger.exists(),
                     );
                     log_markdown(&format!(
-                        "[HLAE] Batch complete after {:.1}s (via {}) — taskkilling hl.exe",
-                        start_time.elapsed().as_secs_f32(),
+                        "[HLAE] Batch complete after {} (via {}) — taskkilling hl.exe",
+                        crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                         via
                     ));
                     kill_hl_exe_and_wait(&mut sys);
@@ -1070,8 +1084,8 @@ pub fn spawn_capture_engine(
                     && !exit_trigger.exists()
                 {
                     log_markdown(&format!(
-                        "[HLAE] hl.exe never came up after the launcher exited ({:.1}s elapsed) — treating as failure",
-                        start_time.elapsed().as_secs_f32()
+                        "[HLAE] hl.exe never came up after the launcher exited ({} elapsed) — treating as failure",
+                        crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64())
                     ));
                     failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat".into());
                     break;
@@ -1093,8 +1107,8 @@ pub fn spawn_capture_engine(
                     && !pipe_batch_complete_seen
                 {
                     log_markdown(&format!(
-                        "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
-                        start_time.elapsed().as_secs_f32()
+                        "[HLAE] hl.exe is gone with no exit trigger after {} — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
+                        crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64())
                     ));
                     // The hook DLL's crash recorder says whether it was a
                     // crash, where, and on which map; a known one is
@@ -1155,9 +1169,9 @@ pub fn spawn_capture_engine(
                     // in the file. Said out loud rather than silently printed
                     // as if it were a length.
                     log_markdown(&format!(
-                        "- [obs] {} ({:.1}s{}) -> {}",
+                        "- [obs] {} ({}{}) -> {}",
                         block.take_folder.display(),
-                        block.seconds,
+                        crate::utils::duration_text::duration_text(block.seconds),
                         if block.salvaged { " of recording, salvaged — the file is shorter" } else { "" },
                         block.video.display()
                     ));
@@ -1206,14 +1220,12 @@ pub fn spawn_capture_engine(
             let _ = tx.send(EngineEvent::Finished("Batch Queue".into()));
 
             let autosave_path = crate::shared::paths::get_appdata_dir().join(".autosave.json");
-            if let Err(e) = std::fs::remove_file(&autosave_path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
-                }
-            } else {
-                // Nothing writes `.autosave.json` yet (#20), so a file found
-                // here is a stray, not recovery state: removed quietly (#352).
-                log::debug!("[autosave] removed a stray .autosave.json");
+            // Nothing writes `.autosave.json` yet (#20), so a file found here
+            // is a stray, not recovery state: removed quietly (#352).
+            if let Err(e) = std::fs::remove_file(&autosave_path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                log_markdown(&format!("[autosave] Failed to remove .autosave.json: {}", e));
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);

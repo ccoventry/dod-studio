@@ -23,6 +23,9 @@ pub struct ClipInfo {
     pub path: String,
     pub duration_secs: f64,
     pub video_codec: String,
+    /// The codec tag FFmpeg prints beside the codec ("apch" for ProRes HQ,
+    /// "apcn" for 422, "apcs" for LT), when it prints one.
+    pub video_tag: Option<String>,
     pub pix_fmt: String,
     pub width: u32,
     pub height: u32,
@@ -76,6 +79,7 @@ pub fn parse_report(path: &str, report: &str) -> Option<ClipInfo> {
         } else if let Some(at) = line.find(": Video: ").filter(|_| !have_video) {
             let fields: Vec<&str> = split_fields(&line[at + 9..]);
             info.video_codec = first_word(fields.first()?);
+            info.video_tag = codec_tag(fields.first()?);
             info.pix_fmt = first_word(fields.get(1).copied().unwrap_or(""))
                 .trim_end_matches('(')
                 .to_string();
@@ -139,6 +143,12 @@ fn first_word(field: &str) -> String {
         .to_string()
 }
 
+/// "apch" out of `prores (HQ) (apch / 0x68637061)`.
+fn codec_tag(field: &str) -> Option<String> {
+    let (before, _) = field.split_once(" / 0x")?;
+    Some(before.rsplit('(').next()?.trim().to_string())
+}
+
 fn size_of(field: &str) -> Option<(u32, u32)> {
     let word = field.split_whitespace().next()?;
     let (w, h) = word.split_once('x')?;
@@ -155,8 +165,10 @@ fn parse_clock(text: &str) -> Option<f64> {
 }
 
 /// Whether `clips` can be joined without re-encoding: same container,
-/// video codec, size, frame rate and pixel format, and the same audio (or
-/// none on all of them).
+/// video codec and tag, size, frame rate and pixel format, and the same
+/// audio (or none on all of them). The tag keeps ProRes HQ and 422 clips,
+/// which share a codec and pixel format, out of one copied stream that the
+/// file would label with only the first clip's profile.
 pub fn can_stream_copy(clips: &[ClipInfo]) -> bool {
     let Some(first) = clips.first() else {
         return false;
@@ -169,6 +181,7 @@ pub fn can_stream_copy(clips: &[ClipInfo]) -> bool {
     clips.iter().all(|c| {
         ext(c) == ext(first)
             && c.video_codec == first.video_codec
+            && c.video_tag == first.video_tag
             && (c.width, c.height) == (first.width, first.height)
             && c.fps == first.fps
             && c.pix_fmt == first.pix_fmt
@@ -431,6 +444,7 @@ mod tests {
                 path: "a.mp4".into(),
                 duration_secs: 5.03,
                 video_codec: "h264".into(),
+                video_tag: Some("avc1".into()),
                 pix_fmt: "yuv420p".into(),
                 width: 1920,
                 height: 1080,
@@ -445,6 +459,7 @@ mod tests {
             (b.video_codec.as_str(), b.pix_fmt.as_str()),
             ("prores", "yuv422p10le")
         );
+        assert_eq!(b.video_tag.as_deref(), Some("apch"));
         assert_eq!((b.width, b.height, b.fps.as_str()), (1280, 720, "29.97"));
         assert_eq!(b.duration_secs, 62.5);
         assert_eq!(b.audio_codec, None);
@@ -470,8 +485,24 @@ mod tests {
         };
         assert!(!can_stream_copy(&[a.clone(), other_box]));
         let b = parse_report("b.mov", PRORES_SILENT).unwrap();
-        assert!(!can_stream_copy(&[a, b]));
+        assert!(!can_stream_copy(&[a, b.clone()]));
         assert!(!can_stream_copy(&[]));
+        // ProRes HQ and 422: same codec and pixel format, different profile.
+        let standard = parse_report(
+            "c.mov",
+            &PRORES_SILENT.replace(
+                "prores (HQ) (apch / 0x68637061)",
+                "prores (Standard) (apcn / 0x6E637061)",
+            ),
+        )
+        .unwrap();
+        assert_eq!(standard.video_tag.as_deref(), Some("apcn"));
+        assert!(!can_stream_copy(&[b.clone(), standard]));
+        let b2 = ClipInfo {
+            path: "d.mov".into(),
+            ..b.clone()
+        };
+        assert!(can_stream_copy(&[b, b2]));
     }
 
     #[test]

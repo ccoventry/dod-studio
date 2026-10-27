@@ -369,8 +369,10 @@ fn default_initial_delay() -> f32 {
 fn default_fast_forward_speed() -> f32 {
     0.05
 }
+/// A fresh install's codec. A saved `"prores"` is HQ and stays HQ; only a
+/// settings file without the field gets 422.
 fn default_render_codec() -> String {
-    "prores".to_string()
+    "prores_422".to_string()
 }
 fn default_render_fps() -> i32 {
     300
@@ -772,6 +774,8 @@ mod tests {
         assert_eq!(settings.finish_codec_obs, "source_copy");
         assert_eq!(settings.finish_codec_video, "render_tab");
         assert_eq!(settings.finish_codec_frames, "render_tab");
+        // No render_codec saved: today's default, ProRes 422.
+        assert_eq!(settings.render_codec, "prores_422");
         // Settings saved before #246 get today's worker count.
         assert_eq!(
             settings.scan_workers,
@@ -1075,6 +1079,22 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let restored: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.scan_read_bytes_per_sec, 140e6);
+    }
+
+    /// A fresh install renders ProRes 422; a saved codec, HQ's `"prores"`
+    /// included, is kept as it is.
+    #[test]
+    fn a_fresh_install_renders_prores_422_and_a_saved_codec_stays() {
+        assert_eq!(AppSettings::default().render_codec, "prores_422");
+        for saved in ["prores", "prores_lt", "dnxhr"] {
+            let original = AppSettings {
+                render_codec: saved.to_string(),
+                ..AppSettings::default()
+            };
+            let json = serde_json::to_string(&original).unwrap();
+            let restored: AppSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.render_codec, saved);
+        }
     }
 
     #[test]

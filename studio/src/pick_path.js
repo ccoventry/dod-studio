@@ -17,11 +17,14 @@
 // One dialog at a time, app-wide: a pick asked for while another is being
 // prepared or is open returns null without opening, as on Cancel. Getting a
 // dialog up can take seconds, and every Ctrl+O or Browse click in that wait
-// used to queue its own dialog, all appearing at once. The busy cursor shows
-// from the click until the dialog returns.
+// used to queue its own dialog, all appearing at once. dialog_wait.js shows
+// the wait from the click until the dialog returns; a `fallback` the caller
+// still has to ask the backend for is passed as a function, so that wait
+// covers it too.
 
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import { pickPathStates, pickUserFolders } from './ipc_bridge.js';
+import { setDialogWait } from './dialog_wait.js';
 
 /** Steam's usual library, for the game pickers before hl.exe is set. */
 export const STEAM_COMMON = 'C:\\Program Files (x86)\\Steam\\steamapps\\common';
@@ -131,17 +134,12 @@ export function folderToRemember(picked) {
   return parentOf(first) || null;
 }
 
-/** The busy cursor over the whole window (styles.css `html.picking-path`). */
-function showBusyCursor(on) {
-  if (typeof document === 'undefined') return;
-  document.documentElement.classList.toggle('picking-path', !!on);
-}
-
 /**
  * @param {object} deps
  *   open(options) the dialog; pathStates(paths) and userFolders() the
  *   backend's answers; getContext() { hlPath, gameFolder }; persist() saves
- *   settings after a remembered folder changes; setBusy(on) shows the wait.
+ *   settings after a remembered folder changes; setBusy(on) shows the wait
+ *   (dialog_wait.js).
  */
 export function createPickPath({
   // Looked up at call time, so a test mocking ipc_bridge.js without these
@@ -151,7 +149,7 @@ export function createPickPath({
   userFolders = () => pickUserFolders(),
   getContext = () => ({}),
   persist = async () => {},
-  setBusy = showBusyCursor,
+  setBusy = setDialogWait,
 } = {}) {
   const deps = { getContext, persist };
   let folders = {};
@@ -172,7 +170,8 @@ export function createPickPath({
   async function startPathFor({ field, current, directory, fallback }) {
     const kind = PICK_FIELDS[field] ?? null;
     const ctx = { ...(deps.getContext() || {}), userFolders: await loadUserFolders() };
-    const defaults = [fallback, ...defaultCandidates(kind, ctx)].filter(Boolean);
+    const first = typeof fallback === 'function' ? await fallback() : fallback;
+    const defaults = [first, ...defaultCandidates(kind, ctx)].filter(Boolean);
     const paths = [current || '', (field && folders[field]) || '', ...defaults];
     const states = await pathStates(paths);
     return chooseStartPath({ directory, states: Array.isArray(states) ? states : [] });
@@ -192,7 +191,8 @@ export function createPickPath({
   /**
    * `open(options)` started in the right folder.
    * @param {object} options  `field` the PICK_FIELDS id, `current` the
-   *   field's path now, `fallback` a default ahead of the field's own, and
+   *   field's path now, `fallback` a default ahead of the field's own (or
+   *   an async function returning it), and
    *   the dialog's options as they were. Null without opening while
    *   another pick is under way.
    */

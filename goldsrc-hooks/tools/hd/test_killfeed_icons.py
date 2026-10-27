@@ -211,6 +211,75 @@ class GeometryTest(unittest.TestCase):
         _, _, _, oy = K.place_barrel(tris, basis, fit, alpha, box, 3, cut=False)
         self.assertAlmostEqual(oy - 5.0, 3, delta=0.6)
 
+    def test_place_barrel_shrink_keeps_the_row_and_fits_the_magazine(self):
+        tris, basis, box = self.magazine_gun(), np.eye(3), (0, 0, 100, 40)
+        fit = K.fit_transform(tris, basis, box)
+        alpha = K.silhouette(tris, basis, *fit, 100, 40, ss=1)
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, shrink=True)
+        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)  # the barrel stays on its row
+        self.assertLessEqual(oy + ky * 6, 40 + 1e-6)  # the whole magazine inside
+        self.assertLess(kx, 5.0)  # ...by drawing the gun smaller
+        self.assertAlmostEqual(ox + kx * 10, 50)  # still centred across
+        # shrink wins over cut
+        self.assertEqual(K.place_barrel(tris, basis, fit, alpha, box, 10, cut=True, shrink=True), (kx, ky, ox, oy))
+        # a gun that already fits keeps the box's width
+        kx2, *_ = K.place_barrel(tris, basis, fit, alpha, (0, 0, 100, 400), 10, shrink=True)
+        self.assertAlmostEqual(kx2, 5.0)
+
+    def test_place_barrel_at_a_given_scale(self):
+        tris, basis, box = self.magazine_gun(), np.eye(3), (0, 0, 100, 40)
+        fit = K.fit_transform(tris, basis, box)
+        alpha = K.silhouette(tris, basis, *fit, 100, 40, ss=1)
+        kx, ky, ox, oy = K.place_barrel(tris, basis, fit, alpha, box, 10, shrink=True, k=3.0)
+        self.assertAlmostEqual(kx, 3.0)  # fits (7 x 3 = 21 rows): the scale is kept
+        self.assertAlmostEqual(oy - ky * 1.0, 10, delta=0.6)
+        kx, *_ = K.place_barrel(tris, basis, fit, alpha, box, 10, shrink=True, k=8.0)
+        self.assertLess(kx, 8.0)  # 6 below at 8 runs past the bottom: shrunk
+
+    def test_layout_shrinks_moves_or_cuts_a_gun_that_does_not_fit(self):
+        tris, basis = self.magazine_gun(), np.eye(3)
+        ref = K.fit_transform(tris, basis, (0, 0, 100, 40))
+        alpha = K.silhouette(tris, basis, *ref, 100, 40, ss=1)
+        box = (0, 0, 100, 30)
+        row = 6
+        k = 5.0  # 7 units tall x 5 = 35 rows: too tall for 30
+        shrunk = K.laid_out_fit(tris, basis, ref, alpha, box, K.Layout(barrel_row=row), k, True)
+        self.assertLess(shrunk[0], k)
+        self.assertAlmostEqual(shrunk[3] - shrunk[1] * 1.0, row, delta=0.6)  # barrel on the row
+        moved = K.laid_out_fit(tris, basis, ref, alpha, box, K.Layout(barrel_row=row, below="move"), 4.0, True)
+        self.assertAlmostEqual(moved[0], 4.0)  # 28 rows fit: same size...
+        self.assertLessEqual(moved[3] + moved[1] * 6, 30 + 1e-6)  # ...raised until the magazine ends inside
+        cut = K.laid_out_fit(tris, basis, ref, alpha, box, K.Layout(barrel_row=row, below="cut"), k, True)
+        self.assertAlmostEqual(cut[0], k)  # kept; what hangs below is cut later
+        self.assertAlmostEqual(cut[3] - cut[1] * 1.0, row, delta=0.6)
+
+    def test_layout_centres_a_blade_at_its_own_size(self):
+        tris, basis = [box_tris(0, 10, 0, 2)], np.eye(3)
+        ref = K.fit_transform(tris, basis, (0, 0, 40, 10))
+        alpha = K.silhouette(tris, basis, *ref, 40, 10, ss=1)
+        new = K.laid_out_fit(tris, basis, ref, alpha, (0, 0, 40, 26), K.Layout(barrel_row=8), ref[0], False)
+        self.assertAlmostEqual(new[0], ref[0])  # no barrel line for a blade, no growth into the tall box
+        self.assertAlmostEqual(new[3] - new[1] * 1.0, 13, delta=0.6)  # centred on the rect's height
+
+    def test_remap_moves_hand_set_places_with_the_gun(self):
+        ref, new = (2.0, 2.0, 10.0, 20.0), (1.0, 1.0, 4.0, 6.0)
+        self.assertEqual(K.remap(ref, new, 10.0, 20.0), (4.0, 6.0))  # the origin goes to the origin
+        self.assertEqual(K.remap(ref, new, 14.0, 22.0), (6.0, 7.0))  # offsets at half the size
+        icon = K.Icon(("x.mdl",), v_part=K.VPart("v.mdl", (2, 6), (2, 4, 4, 6)), cut_part=(2, 4, 6),
+                      skin_art=(K.SkinArt("t", (0, 0, 1, 1), (0, 0, 1, 1), (2.0, -4.0)),))
+        vp, arts, cut = K.remap_table(icon, (2.0, 2.0, 0.0, 0.0), (1.0, 1.0, 0.0, 0.0), scale=1)
+        self.assertEqual(vp.window, (1.0, 3.0))
+        self.assertEqual(vp.box, (1.0, 2.0, 2.0, 3.0))
+        self.assertEqual(cut, (1.0, 2.0, 3.0))
+        self.assertEqual(arts[0].offset, (1.0, -2.0))
+
+    def test_no_icon_shrinks_by_default(self):
+        # the MP44's shrink is one of the two options the user picks between
+        self.assertEqual({n for n, i in K.ICONS.items() if i.shrink_below}, set())
+        for name, icon in K.ICONS.items():
+            if icon.shrink_below:
+                self.assertIsNotNone(icon.barrel_top, f"{name}: shrink_below needs barrel_top")
+
     def test_see_through_mask_takes_the_dark_region_round_the_seed(self):
         ind = np.ones((8, 8), np.uint8)  # index 1: grey metal
         ind[2:5, 2:5] = 0  # a black hole
@@ -654,6 +723,132 @@ class RecordTest(unittest.TestCase):
             with open(p, "w") as f:
                 json.dump({"ultrasharp": {}}, f)
             self.assertEqual(K.load_record(p), {"ultrasharp": {}})
+
+
+class EvenLayoutTest(unittest.TestCase):
+    """The even layout's atlas (#1022): which rule each icon gets, the
+    packing, and the sprite and table the hook reads."""
+
+    def test_every_icon_gets_the_rule_its_class_has(self):
+        self.assertLessEqual(K.LONG_GUNS | K.PISTOLS | K.LAUNCHERS, set(K.ICONS))
+        self.assertEqual(len(K.LONG_GUNS), 21)
+        for name in K.ICONS:
+            lay = K.even_layout(name)
+            self.assertEqual(lay.height, K.EVEN_HEIGHT, name)
+            if name in K.LONG_GUNS:
+                self.assertEqual((lay.barrel_row, lay.size), (K.EVEN_BARREL_ROW, "width"), name)
+            elif name in K.PISTOLS or name in K.LAUNCHERS:
+                self.assertEqual((lay.barrel_row, lay.size), (K.EVEN_BARREL_ROW, "natural"), name)
+            else:  # knives, the spade, grenades: their own size, centred
+                self.assertTrue(K.NOT_LEVELLED.search(name), name)
+                self.assertEqual((lay.barrel_row, lay.size), (None, "natural"), name)
+            self.assertEqual(lay.below, "move" if name in K.MOVE_TO_FIT else "shrink", name)
+        self.assertEqual(K.MOVE_TO_FIT, {"d_bren", "d_bazooka", "d_pschreck", "d_piat"})
+
+    def test_pack_keeps_boxes_apart_and_inside_their_frame(self):
+        sizes = {f"d_{i}": (30 + (i * 37) % 60, 26) for i in range(40)}
+        spots, count = K.pack(sizes)
+        self.assertEqual(set(spots), set(sizes))
+        self.assertGreater(count, 1)
+        g = K.ATLAS_GAP
+        for k, (f, x, y) in spots.items():
+            w, h = sizes[k]
+            self.assertTrue(0 <= f < count)
+            self.assertTrue(x >= g and y >= g and x + w + g <= K.ATLAS_SIZE and y + h + g <= K.ATLAS_SIZE, k)
+            for k2, (f2, x2, y2) in spots.items():
+                if k2 == k or f2 != f:
+                    continue
+                w2, h2 = sizes[k2]
+                apart = x + w + g <= x2 or x2 + w2 + g <= x or y + h + g <= y2 or y2 + h2 + g <= y
+                self.assertTrue(apart, f"{k} and {k2} closer than the gap")
+        # The same sizes always pack the same way, whatever order they come in.
+        again, _ = K.pack(dict(reversed(list(sizes.items()))))
+        self.assertEqual(again, spots)
+
+    def test_pack_refuses_a_box_bigger_than_a_frame(self):
+        with self.assertRaises(ValueError):
+            K.pack({"d_big": (K.ATLAS_SIZE, 26)})
+        with self.assertRaises(ValueError):
+            K.pack({"d_none": (0, 26)})
+
+    def test_the_sprite_reads_back_as_valves_sheets_are(self):
+        from goldsrc import Sprite
+        boxes = [(0, 2, 2, 71, 26), (1, 2, 2, 30, 26)]
+        frames = K.placeholder_frames(boxes, 2)
+        pal = K.atlas_palette()
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, K.ATLAS_NAME + ".spr")
+            K.write_whole(p, K.spr_bytes(frames, pal))
+            s = Sprite(p)
+        self.assertEqual((s.type, s.tex_format, s.width, s.height, s.numframes), (2, 3, 256, 256, 2))
+        self.assertEqual(s.palette, pal)
+        self.assertEqual([f[:3] for f in s.frames], [(0, 256, 256), (1, 256, 256)])
+        ind = np.frombuffer(s.frames[0][3], np.uint8).reshape(256, 256)
+        self.assertTrue((ind[2:28, 2:73] == K.PLACEHOLDER).all())
+        self.assertEqual(int((ind != 255).sum()), 71 * 26, "only the boxes show")
+        with self.assertRaises(ValueError):
+            K.spr_bytes([b"\0" * 10], pal)
+
+    def test_the_placeholder_depends_on_the_rects_alone(self):
+        # The HD key is a hash of these bytes, so any style's build with the
+        # same rects names its frames the same.
+        a = K.placeholder_frames([(0, 2, 2, 71, 26)], 1)
+        self.assertEqual(a, K.placeholder_frames([(0, 2, 2, 71, 26)], 1))
+        self.assertNotEqual(a, K.placeholder_frames([(0, 2, 2, 72, 26)], 1))
+
+    def test_the_table_lists_each_icon_once_with_a_header(self):
+        text = K.table_text({"d_mp44": (0, 2, 2, 59, 26), "d_colt": (1, 2, 30, 30, 26)}, 2)
+        lines = [l for l in text.splitlines() if not l.startswith("//")]
+        self.assertEqual(lines, [f"{K.ATLAS_NAME} {K.ATLAS_TABLE_VERSION} 2", "d_colt 1 2 30 30 26",
+                                 "d_mp44 0 2 2 59 26"])
+        text.encode("ascii")
+
+    def test_trim_box_keeps_the_visible_columns_inside_the_drawn_half_texels(self):
+        # A stick grenade's box: 45 stock px, art from column 4 to 36 (at 4x:
+        # 16..144, with a faint edge column either side).
+        img = np.zeros((26 * 4, 45 * 4, 4))
+        img[40:60, 16:144, 3] = 1.0
+        img[50, 15, 3] = img[50, 144, 3] = 0.1
+        out, (w, h) = K.trim_box(img, (45, 26), 4)
+        self.assertEqual((w, h), (34, 26), "130 px at 4x is 32.5 stock px, +1 for the half texels")
+        self.assertEqual(out.shape, (26 * 4, 34 * 4, 4))
+        self.assertAlmostEqual(out[..., 3].sum(), img[..., 3].sum(), msg="nothing visible cut")
+        cols = np.nonzero(out[..., 3].any(0))[0]
+        # The engine shows a box from half a stock px (2 HD px) inside each edge.
+        self.assertGreaterEqual(cols.min(), 2)
+        self.assertLessEqual(cols.max() + 1, 34 * 4 - 2)
+        self.assertLessEqual(abs(cols.min() - (34 * 4 - cols.max() - 1)), 1, "centred")
+        rows = np.nonzero(out[..., 3].any(1))[0]
+        self.assertEqual((rows.min(), rows.max() + 1), (40, 60), "rows untouched")
+
+    def test_trim_box_leaves_a_box_its_art_fills(self):
+        # A long gun's art reaches to half a texel of each edge already.
+        img = np.zeros((26 * 4, 82 * 4, 4))
+        img[30:50, 2:82 * 4 - 2, 3] = 1.0
+        out, size = K.trim_box(img, (82, 26), 4)
+        self.assertEqual(size, (82, 26))
+        self.assertIs(out, img)
+        full = np.ones((26 * 4, 82 * 4, 4))
+        self.assertEqual(K.trim_box(full, (82, 26), 4)[1], (82, 26), "never wider")
+        empty = np.zeros((26 * 4, 30 * 4, 4))
+        self.assertEqual(K.trim_box(empty, (30, 26), 4)[1], (30, 26))
+        # Below the visible alpha a column is empty: a speck of 2/255 is trimmed away.
+        faint = np.zeros((26 * 4, 82 * 4, 4))
+        faint[30:50, 100:120, 3] = 1.0
+        faint[40, 0, 3] = 2 / 255
+        self.assertEqual(K.trim_box(faint, (82, 26), 4)[1], (6, 26))
+
+    def test_fit_box_shrinks_only_a_taller_icon_and_centres_it(self):
+        img = np.ones((34 * 4, 72 * 4, 4))
+        out, (w, h) = K.fit_box(img, 72, 34, 26, 4)
+        self.assertEqual((w, h), (56, 26), "72 x 26/34 = 55.06, rounded up")
+        self.assertEqual(out.shape, (26 * 4, 56 * 4, 4))
+        self.assertGreater(out[..., 3].sum(), 0.95 * 26 * 4 * 55 * 4)
+        small = np.ones((20 * 4, 84 * 4, 4))
+        out, (w, h) = K.fit_box(small, 84, 20, 26, 4)
+        self.assertEqual((w, h), (84, 26))
+        rows = np.nonzero(out[..., 3].any(1))[0]
+        self.assertEqual((rows.min(), rows.max() + 1), (12, 92), "20 rows centred in 26, at 4x")
 
 
 if __name__ == "__main__":
