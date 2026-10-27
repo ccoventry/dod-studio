@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<!--
+  Harness for the OBS capture test (#646): obs_capture_test.js with the OBS
+  settings and the test's panel copied from index.html, plus the fields
+  batchSettingsPayload reads. The backend is mocked per test
+  (obs-capture-test.spec.js): a start_capture_batch handler plays the
+  batch's events, and obs_test_analyze answers from window.__verdicts by rate.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OBS capture test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="hlae-path-input" value="C:\HLAE\hlae.exe" />
+  <input id="hl-path-input" value="C:\Games\Half-Life\hl.exe" />
+  <select id="config-capture-mode">
+    <option value="direct_to_video" selected>Direct to video</option>
+    <option value="obs">OBS</option>
+  </select>
+  <input type="text" id="config-obs-host" value="127.0.0.1" />
+  <input type="number" id="config-obs-port" value="4455" />
+  <input type="password" id="config-obs-password" value="pw" />
+  <button id="obs-test-btn">Test Connection</button>
+  <input type="number" id="config-obs-capture-fps" value="144" />
+  <select id="config-obs-recording-quality">
+    <option value="standard">Standard</option>
+    <option value="high" selected>High</option>
+  </select>
+  <div id="obs-status" style="display: none;"></div>
+  <div class="control-group obs-test-controls">
+    <button id="obs-capture-test-btn" data-str="OBS_TEST.TEST_BUTTON">Test OBS capture</button>
+    <button id="obs-fps-ladder-btn" data-str="OBS_TEST.LADDER_BUTTON">Find my highest steady FPS</button>
+    <label><input type="checkbox" id="obs-test-long" /> <span data-str="OBS_TEST.LONG_LABEL">1-minute clips</span></label>
+    <button id="obs-test-stop-btn" hidden data-str="OBS_TEST.STOP_BUTTON">Stop test</button>
+  </div>
+  <div id="obs-test-panel" class="obs-test-panel" hidden>
+    <p class="setting-hint" data-str="OBS_TEST.DEMO_NOTE"></p>
+    <div id="obs-test-step" class="obs-test-step"></div>
+    <div id="obs-test-bar" class="progress-bar-container" hidden><div id="obs-test-bar-fill" class="progress-bar-fill"></div></div>
+    <div id="obs-test-result" class="obs-test-result"></div>
+    <table id="obs-test-table" class="obs-test-table" hidden>
+      <thead><tr><th>OBS FPS</th><th>Result</th><th>Skipped</th><th>Missed</th><th>Repeated</th><th>Sound</th></tr></thead>
+      <tbody id="obs-test-rows"></tbody>
+    </table>
+    <button id="obs-test-apply-btn" hidden></button>
+  </div>
+  <script type="module">
+    import { createObsCaptureTest } from '/src/obs_capture_test.js';
+    import { applyStaticStrings } from '/src/apply_strings.js';
+    applyStaticStrings();
+    window.__persisted = 0;
+    createObsCaptureTest({
+      getState: () => ({ targetDrives: ['D:\\captures'] }),
+      persist: () => { window.__persisted += 1; },
+    });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

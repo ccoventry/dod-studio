@@ -58,7 +58,8 @@
       "../../goldsrc-hooks/tools/hd/my_styles.example.txt": "hd-scripts/my_styles.example.txt",
       "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md",
       "../../blender/*.py": "blender-scripts/",
-      "../../blender/README.md": "blender-scripts/README.md"
+      "../../blender/README.md": "blender-scripts/README.md",
+      "../../test-fixtures/ci_fixture.dem": "obs-test/ci_fixture.dem"
     }
   },
   "plugins": {

@@ -9,6 +9,7 @@ import { renderDetailView, initDetailPane } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
+import { createObsCaptureTest } from './obs_capture_test.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
@@ -379,6 +380,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives: folderPools.targetDrives(),
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, folderPools.updateExportPoolIndicator, captureDemosReady);
+  createObsCaptureTest({ getState: () => ({ targetDrives: folderPools.targetDrives() }), persist: () => persistAppSettings() });
   // Saving, renaming or deleting a profile changes its name in the capture
   // summary strip without touching a field the strip listens to.
   initCommandProfiles({

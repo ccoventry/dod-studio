@@ -176,6 +176,35 @@ pub fn obs_orphan_recovery_failed(err: impl Display) -> String {
     format!("OBS orphan recovery failed to run: {}", err)
 }
 
+// ── OBS capture test (#646) ──
+pub const OBS_TEST_NO_DEMO: &str = "The OBS capture test's demo isn't in DoD Studio's install folder. Reinstall DoD Studio to get it back.";
+
+pub fn obs_test_unreadable_demo(path: &Path, err: impl Display) -> String {
+    format!("Could not read the test demo {}: {err}", path.display())
+}
+
+pub fn obs_test_no_clip(path: &Path, seconds: f32) -> String {
+    format!(
+        "{} has no kill with {seconds:.0} s of demo around it to record.",
+        path.display()
+    )
+}
+
+pub fn obs_test_no_video(folder: &Path) -> String {
+    format!(
+        "OBS recorded no video into {}. Check OBS's own window for why.",
+        folder.display()
+    )
+}
+
+pub fn obs_test_not_a_test_folder(folder: &str) -> String {
+    format!("{folder} isn't an OBS capture test's folder, so it was not deleted.")
+}
+
+pub fn obs_test_delete_failed(folder: &Path, err: impl Display) -> String {
+    format!("Could not delete the test clip {}: {err}", folder.display())
+}
+
 pub fn failed_to_create_dod_directory(err: impl Display) -> String {
     format!(
         "Failed to create the game folder `{}` beside hl.exe: {}",

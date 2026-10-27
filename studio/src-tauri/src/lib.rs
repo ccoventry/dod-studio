@@ -23,6 +23,7 @@ mod match_group_cmd;
 mod menu_scale_manager;
 mod messages;
 mod movie_copy_manager;
+mod obs_test_manager;
 mod open_files;
 mod overview_manager;
 mod packet_limit_manager;
@@ -939,6 +940,7 @@ pub fn run() {
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
+        .manage(obs_test_manager::ObsTestManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
         .manage(hd_manager::HdManager::default())
@@ -1005,6 +1007,11 @@ pub fn run() {
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,
+            obs_test_manager::obs_test_clip,
+            obs_test_manager::obs_test_watch_start,
+            obs_test_manager::obs_test_analyze,
+            obs_test_manager::obs_test_cancel,
+            obs_test_manager::obs_test_delete_take,
             launch_obs,
             launch_standalone_game,
             read_cfg_commands,

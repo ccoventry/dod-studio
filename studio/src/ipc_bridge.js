@@ -456,6 +456,23 @@ export async function startCaptureBatch(payload) {
     });
 }
 
+// ── OBS capture test (#646) ─────────────────────────────────────────────────
+// Each rethrows: obs_capture_test.js shows the reason on its own panel.
+function obsTestCall(command, args) {
+  return invoke(command, args).catch((err) => {
+    console.error(`IPC Execution Error (${command}):`, err);
+    throw err;
+  });
+}
+
+/** The test clip: `seconds` of the bundled demo (or of `demo`). */
+export const obsTestClip = (seconds, demo) => obsTestCall('obs_test_clip', { seconds, demo: demo || null });
+export const obsTestWatchStart = (host, port, password) => obsTestCall('obs_test_watch_start', { host, port, password });
+/** Stops the watch, reads the take's video, returns `{ recording, file, verdict }`. */
+export const obsTestAnalyze = (takeFolder, ffmpegPath) => obsTestCall('obs_test_analyze', { takeFolder, ffmpegPath: ffmpegPath || null });
+export const obsTestCancel = () => obsTestCall('obs_test_cancel', {});
+export const obsTestDeleteTake = (takeFolder) => obsTestCall('obs_test_delete_take', { takeFolder });
+
 /** Patches the given demo's highlights into a single `<stem>_preview.dem`
  *  (BOOKMARK/director events at each highlight, regardless of selection or
  *  Min Kills — reuses an existing preview instead of regenerating one) and
