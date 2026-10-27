@@ -29,20 +29,27 @@ export function queueSummaryText(jobs) {
  * JOB_STATUS whose colour the line takes (the rows' own colours). All
  * cancelled → Cancelled; any failure → Finished with the counts, in the
  * failure colour; some cancelled → Finished with the counts; else Finished.
+ * With `duration` (how long the batch ran, in words, #954) a batch that
+ * rendered or failed anything says "Done in 7 min 40 s: 10 rendered".
  */
-export function batchEndStatus(finished, failed, cancelled) {
+export function batchEndStatus(finished, failed, cancelled, duration = null) {
   if (cancelled > 0 && finished === 0 && failed === 0) {
     return { text: STRINGS.RENDER.STATUS_CANCELLED, status: JOB_STATUS.CANCELLED };
   }
-  if (failed === 0 && cancelled === 0) {
+  if (failed === 0 && cancelled === 0 && (duration == null || finished === 0)) {
     return { text: STRINGS.RENDER.STATUS_FINISHED, status: JOB_STATUS.FINISHED };
   }
   const parts = [];
   if (finished > 0) parts.push(STRINGS.RENDER.countRendered(finished));
   if (failed > 0) parts.push(STRINGS.RENDER.countFailed(failed));
   if (cancelled > 0) parts.push(STRINGS.RENDER.countCancelled(cancelled));
+  let status = JOB_STATUS.FINISHED;
+  if (failed > 0) status = JOB_STATUS.ERROR;
+  else if (cancelled > 0) status = JOB_STATUS.CANCELLED;
   return {
-    text: STRINGS.RENDER.statusFinishedWith(parts.join(', ')),
-    status: failed > 0 ? JOB_STATUS.ERROR : JOB_STATUS.CANCELLED,
+    text: duration == null
+      ? STRINGS.RENDER.statusFinishedWith(parts.join(', '))
+      : STRINGS.RENDER.doneIn(duration, parts.join(', ')),
+    status,
   };
 }

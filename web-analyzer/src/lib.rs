@@ -2,6 +2,13 @@ use analysis::Analysis;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+mod heap;
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOC: heap::GrowInSteps = heap::GrowInSteps;
+
 #[wasm_bindgen(start)]
 fn init() {
     console_error_panic_hook::set_once();

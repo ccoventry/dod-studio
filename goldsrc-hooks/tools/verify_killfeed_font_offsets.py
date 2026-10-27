@@ -31,6 +31,17 @@ whole instructions of the kind the Rust assumes, so this does:
      for the four-int DrawSetTextColor, `ret 8` for DrawSetTextPos and
      DrawPrintText, `ret 0x24` for AddGlyphSetToFont, ...).
   7. `SupportsFeature(2)` (drop-shadow fonts) returns true.
+  8. The width `font.rs` sums is the one the draw advances by (#1052):
+     `DrawPrintText` calls only `DrawUnicodeChar` (slot 19), once per
+     character, and that calls `GetCharABCwide` (`GET_CHAR_ABC_WIDE`).
+  9. What `widen` assumes to give the face more than Latin-1 (#1054): the
+     AddGlyphSetToFont slot is `call FontManager; mov ecx, eax; call ...`,
+     and `FontManager()` is `mov eax, imm32; ret`.
+ 10. `CFontManager::AddGlyphSetToFont` adds the ranges 0..0xff and
+     0x100..0xffff (`split_as_expected`).
+ 11. Amalgams are 0x3c bytes (`AMALGAM_SIZE`), and `GetFontForChar` walks
+     12-byte `{low, high, font}` ranges counted at +0xc (`RANGE_SIZE`,
+     `VECTOR_COUNT_AT`).
 
 Usage:
     python goldsrc-hooks/tools/verify_killfeed_font_offsets.py [client.dll] [game-folder ...]
@@ -72,9 +83,10 @@ SURFACE_RETS = {
     "CREATE_FONT": "ret",
     "ADD_GLYPH_SET_TO_FONT": "ret 0x24",
     "GET_FONT_TALL": "ret 4",
-    "GET_TEXT_SIZE": "ret 0x10",
+    "GET_CHAR_ABC_WIDE": "ret 0x14",
 }
 SUPPORTS_FEATURE_SLOT = 50
+DRAW_UNICODE_CHAR_SLOT = 19
 DROPSHADOW_FONTS = 2
 
 
@@ -101,7 +113,9 @@ def rust_sites(src):
 
 def rust_slots(src):
     body = re.search(r"impl Call \{.*?fn slot.*?\{(.*?)\n        \}", src, re.S).group(1)
-    return {c: int(s) for c, s in re.findall(r"Call::(\w+) => (\d+)", body)}
+    # An arm may name several calls: `Call::Len | Call::VictimLen => 29`.
+    return {c: int(s) for arm, s in re.findall(r"((?:Call::\w+(?: \| )?)+) => (\d+)", body)
+            for c in re.findall(r"Call::(\w+)", arm)}
 
 
 def rust_anchors(src):
@@ -380,7 +394,81 @@ def check_hw(game, src):
     check(rets == {"ret 4"}, f"ISurface slot {SUPPORTS_FEATURE_SLOT} (SupportsFeature) +{fn:#x} takes one argument: {sorted(rets)}")
     check("mov al, 1" in body and "xor al, al" in body,
           "SupportsFeature answers some features with `mov al, 1` and the rest with 0 (drop-shadow fonts, feature 2, are a yes on both builds -- see docs)")
+    # What the draw advances by is what `text_width` sums (#1052).
+    slots = rust_surface_slots(src)
+    vcalls = lambda body: [int(m.group(1), 16) // 4 for t in body  # noqa: E731
+                           for m in [re.fullmatch(r"call dword ptr \[e\w\w \+ (0x[0-9a-f]+)\]", t)] if m]
+    fn = hw.u32(vt + 4 * slots["DRAW_PRINT_TEXT"]) - hw.base
+    got = vcalls(hw.all_text(fn, 0x60))
+    check(got == [DRAW_UNICODE_CHAR_SLOT],
+          f"DrawPrintText +{fn:#x} makes one virtual call, DrawUnicodeChar (slot {DRAW_UNICODE_CHAR_SLOT}), in its loop: {got}")
+    fn = hw.u32(vt + 4 * DRAW_UNICODE_CHAR_SLOT) - hw.base
+    got = vcalls(hw.all_text(fn, 0x200))
+    check(slots["GET_CHAR_ABC_WIDE"] in got,
+          f"DrawUnicodeChar +{fn:#x} calls GetCharABCwide (slot {slots['GET_CHAR_ABC_WIDE']}): {got}")
+    check_font_manager(hw, vt, slots, src, check)
     return ok
+
+
+def check_font_manager(hw, vt, slots, src, check):
+    """9-11 (#1054): what `widen` assumes about the font manager. `check`
+    records each result in the caller's verdict."""
+    thunk = hw.u32(vt + 4 * slots["ADD_GLYPH_SET_TO_FONT"]) - hw.base
+    code = hw.img[thunk:thunk + 0x40]
+    at = next((i for i in range(len(code) - 8)
+               if code[i] == 0xE8 and code[i + 5:i + 8] == b"\x8b\xc8\xe8"), None)
+    check(at is not None, f"AddGlyphSetToFont's thunk +{thunk:#x} is `call FontManager; mov ecx, eax; call ...`")
+    if at is None:
+        return
+    manager_fn = thunk + at + 5 + struct.unpack_from("<i", code, at + 1)[0]
+    body = hw.img[manager_fn:manager_fn + 6]
+    check(body[0] == 0xB8 and body[5] == 0xC3,
+          f"FontManager() +{manager_fn:#x} is `mov eax, imm32; ret` ({body.hex(' ')})")
+    # The second `call` is at `at + 7`, after `mov ecx, eax`.
+    add_glyph = thunk + at + 12 + struct.unpack_from("<i", code, at + 8)[0]
+    pushes = [t for t in hw.all_text(add_glyph, 0x220) if t.startswith("push 0x") or t == "push 0"]
+    pairs = {tuple(pushes[i:i + 2]) for i in range(len(pushes) - 1)}
+    check(("push 0xff", "push 0") in pairs and ("push 0xffff", "push 0x100") in pairs,
+          f"CFontManager::AddGlyphSetToFont +{add_glyph:#x} adds the ranges 0..0xff and 0x100..0xffff")
+    abc_thunk = hw.u32(vt + 4 * slots["GET_CHAR_ABC_WIDE"]) - hw.base
+    calls = [int(m.group(1), 16) - hw.base for t in hw.text(abc_thunk, 0x60)
+             for m in [re.fullmatch(r"call (0x[0-9a-f]+)", t)] if m]
+    check(len(calls) >= 2, f"GetCharABCwide's thunk +{abc_thunk:#x} calls FontManager() then the manager")
+    if len(calls) < 2:
+        return
+    abc = calls[1]
+    text = hw.all_text(abc, 0x100)
+    def stride_60(text):
+        # PRE: i*3, then *5, then <<2, with unrelated instructions between;
+        # Anniversary: (i<<4) - i, then *4 in the address.
+        for i, t in enumerate(text):
+            m = re.fullmatch(r"lea (\w+), \[(\w+) \+ \2\*2\]", t)
+            if m:
+                rest = text[i + 1:i + 8]
+                m5 = next((re.fullmatch(rf"lea (\w+), \[{m.group(1)} \+ {m.group(1)}\*4\]", u) for u in rest
+                           if re.fullmatch(rf"lea (\w+), \[{m.group(1)} \+ {m.group(1)}\*4\]", u)), None)
+                if m5 and f"shl {m5.group(1)}, 2" in rest:
+                    return True
+            m = re.fullmatch(r"shl (\w+), 4", t)
+            rest = text[i + 1:i + 5]
+            if m and any(re.fullmatch(rf"sub {m.group(1)}, \w+", u) for u in rest[:2]) \
+                    and any(re.fullmatch(rf"lea \w+, \[\w+ \+ {m.group(1)}\*4\]", u) for u in rest):
+                return True
+        return False
+    stride60 = stride_60(text)
+    check(stride60 and rust_const(src, "AMALGAM_SIZE") == 0x3C,
+          f"CFontManager::GetCharABCwide +{abc:#x} indexes the amalgams by 0x3c, as AMALGAM_SIZE says")
+
+    def walks(fn):
+        body = " | ".join(hw.all_text(fn, 0x100))
+        return bool("+ 0xc]" in body and re.search(r"add e\w\w, 0xc", body)
+                    and re.search(r"cmp e\w\w, dword ptr \[e\w\w(?: \+ e\w\w)?\]", body)
+                    and re.search(r"cmp e\w\w, dword ptr \[e\w\w(?: \+ e\w\w)? \+ 4\]", body))
+    direct = [int(m.group(1), 16) - hw.base for t in text for m in [re.fullmatch(r"call (0x[0-9a-f]+)", t)] if m]
+    finder = next((fn for fn in direct if walks(fn)), None)
+    check(finder is not None and rust_const(src, "RANGE_SIZE") == 12 and rust_const(src, "VECTOR_COUNT_AT") == 0xC,
+          f"GetFontForChar +{(finder or 0):#x} walks 12-byte ranges (low +0, high +4) counted at +0xc,"
+          " as RANGE_SIZE and VECTOR_COUNT_AT say")
 
 
 def main():

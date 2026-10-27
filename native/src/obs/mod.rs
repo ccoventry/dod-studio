@@ -30,6 +30,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod client;
+#[cfg(test)]
+mod fake_obs;
 pub mod log_tail;
 pub mod pipe_tail;
 pub mod provision;
@@ -66,3 +68,23 @@ pub const TRIGGER_MARKER: MarkerKind = MarkerKind::AudioSync;
 /// seventeen were clamped where blocks chained or highlights merged. An
 /// echo-driven stop is self-correcting and needs none of that.
 pub const STOP_MARKER: MarkerKind = MarkerKind::StopRecord;
+
+/// What OBS mode adds to the game's launch line (#645).
+///
+/// OBS records the sound the game plays, and through DirectSound, the
+/// engine's default, the game plays nothing while it isn't the active window:
+/// measured on POST, every clip of a batch kept behind other windows (the
+/// default) was digital silence. `-wavonly` makes the engine play through
+/// waveOut, which keeps playing behind other windows. Its cost is latency,
+/// which [`GAME_AUDIO_SYNC_OFFSET_MS`] takes back out.
+pub const GAME_ARGS: &str = "-wavonly";
+
+/// The sync offset `provision` gives the game audio source, in ms.
+///
+/// waveOut plays the game's sound about a quarter second after the frame it
+/// belongs to. Measured on POST against HLAE takes of the same three clips
+/// (sound.wav is timed from the frames, so it is the reference): OBS's sound
+/// was 241-299 ms late with no offset, and -36 to +5 ms with -270; on PRE,
+/// +20 to +29 ms with -270. All on one PC; another
+/// PC's waveOut latency may differ (#646).
+pub const GAME_AUDIO_SYNC_OFFSET_MS: i64 = -270;

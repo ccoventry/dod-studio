@@ -29,14 +29,16 @@ blue fill would darken every icon's edge in the smaller levels.
 
 Then, for the game's own sprites, the kill-feed weapon icons are rendered
 from the weapon models into the weapons sheets just made
-(killfeed_icons.py, #841); icons with no model keep the upscale.
+(killfeed_icons.py, #841); icons with no model keep the upscale. Then the
+atlas `ds_hud_deathmsg layout even` draws from (killfeed_icons.py --even,
+#1022): its HD frames here, its sprite and table in <game>_addon/sprites.
 
 usage: python sprites_hd.py <out_dir> [--no-hud] [--no-icons] [<source> ...]
   source: a .spr file, a folder of them, or a .txt list of .spr paths.
   With none, every sprite of the game (dod/ shadowing valve/), plus those of
   any HD_ALSO install, and the kill-feed icons.
   --no-hud: leave out the HUD sprites (as every build before #728 did).
-  --no-icons: keep the upscaled kill-feed icons.
+  --no-icons: keep the upscaled kill-feed icons (and build no even atlas).
 env:    HD_STYLE (default ultrasharp), HD_GAME, HD_ALSO, HD_WORK, HD_BATCH
 """
 import glob, os, re, sys
@@ -187,14 +189,22 @@ def main():
 
 
 def killfeed_icons(out_dir):
-    """The kill-feed icons from the weapon models (#841). A failure there
-    leaves the upscaled icons, never fails the sprites step."""
+    """The kill-feed icons from the weapon models (#841), then the atlas
+    `ds_hud_deathmsg layout even` draws from (#1022; under a minute). A
+    failure there leaves the upscaled icons, or the game's layout, never
+    fails the sprites step."""
     try:
         import killfeed_icons as K
         n = K.build(out_dir)
         print(f"painted {n} kill-feed icon(s) from the weapon models", flush=True)
     except Exception as e:  # noqa: BLE001 -- the upscaled sheets are already written
         print(f"kill-feed icons skipped, the upscaled ones stay: {type(e).__name__}: {e}", flush=True)
+        return
+    try:
+        n = K.build_even(out_dir)
+        print(f"{n} kill-feed icon(s) in the even layout's atlas", flush=True)
+    except Exception as e:  # noqa: BLE001 -- the sheets are written; layout even then keeps the game's layout
+        print(f"the even layout's atlas skipped: {type(e).__name__}: {e}", flush=True)
 
 
 if __name__ == "__main__":

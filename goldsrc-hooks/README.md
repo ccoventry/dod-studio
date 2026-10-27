@@ -14,19 +14,14 @@ they are `dod_movies`, `dod_movies_addon` and `dod_movies_downloads`.
 
 **Match POV** (`ds_spec_match_pov 1`, on by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts a session with it off): one switch for
-making a spectated first-person view look and sound like the player's own
-recording. Five things come on together, and anything else of that kind
-joins this switch rather than adding a command:
+making a spectated first-person view look like the player's own recording.
+Four things come on together, and anything else of that kind joins this
+switch rather than adding a command:
 
 - **Viewmodel animations**: the first-person weapon fires, reloads and draws,
   the MG42/MG34/BAR/Bren use the right bipod family, and grenades play the pin
   pull, the throw, and the catch and wind-up of a primed one. See
   `docs/goldsrc_hltv_animation_fix.md`.
-- **Missing gunshots**: an HLTV demo has no fire event for about 60% of the
-  rounds fired in some recordings, so they play with no sound, flash or
-  impact. Each one still restarts the shooter's body animation; this finds
-  them there and calls the weapon's own event handler. See
-  `docs/goldsrc_hltv_missing_gunshots.md`.
 - **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
   tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
   tile of `crosshairs.spr`, and hidden when the player's own would be while
@@ -43,6 +38,15 @@ joins this switch rather than adding a command:
   ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
+
+**Missing gunshots** (`ds_sound_restore_gunshots 1`, on by default; its own
+switch since #1036, because POV demos lose them too): an HLTV demo has no fire
+event for about 60% of the rounds fired in some recordings, and a POV demo for
+about 1 in 7 of the other players' rounds, so they play with no sound, flash
+or impact. Each one still restarts the shooter's body animation; this finds
+them there and calls the weapon's own event handler. The POV recorder's own
+shots that his game never predicted are found from the clip count the server
+sends him instead (#1029). See `docs/goldsrc_hltv_missing_gunshots.md`.
 
 Plus these control surfaces, always available and doing nothing until used
 (not every module is listed; [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
@@ -64,6 +68,11 @@ is the complete list):
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
   `src/msglog.rs`.
+- **Rename a player** (`ds_player_change_name add id <slot | SteamID | self>
+  [in <demo>,...] to <name>`, with `list`, `remove <n>` and `clear`): the new
+  name shows everywhere the old one did during playback -- kill feed (up to 63
+  characters), scoreboard, chat, join lines -- through a detour of
+  client.dll's `pfnGetPlayerInfo` (#1021). See `docs/dodstudio_commands.md`.
 - **Hide an asset** (`ds_map_hide_asset add <model-path>...`, with
   `list`, `del` and `clear`): suppresses specific world entities by model path
   (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`) -- an allow-list,
@@ -239,6 +248,13 @@ is the complete list):
   crate; a demo too big for the game's address space is refused, not tried).
   One `.res` per tab in `dod_addon\dodstudio_ui\` (`dod\dodstudio_ui\` without `-addons`), editable in
   build mode; never narrower than its tabs. See `src/studio_panel.rs`.
+- **Loading progress on the VCR bar** (`ds_demo_show_load_progress 1`, on
+  by default): while `viewdemo` is still reading a demo, the stock bar shows
+  `n%` and a progress bar where its time label sits, then hides them. The
+  controls come from the bar layout DoD Studio's launch writes to
+  `dod_addon\resource\DemoPlayerDialog.res` (its own copy of the user's, with
+  the two added), so a game started without `-addons` or without Studio shows
+  nothing. See `src/demo_bar_progress.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when

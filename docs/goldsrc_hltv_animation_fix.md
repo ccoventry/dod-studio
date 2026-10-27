@@ -4,7 +4,8 @@
 > Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
 > [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
 > Defaults **on** (0.2.0). It is one of the things `ds_spec_match_pov` turns
-> on (with the lost gunshots and the POV crosshair): `ds_spec_match_pov 1` in
+> on (with the POV crosshair; the lost gunshots are `ds_sound_restore_gunshots`
+> since #1036): `ds_spec_match_pov 1` in
 > the console, `+ds_spec_match_pov 1` on the launch line, or from any `.cfg`
 > the session execs. It had a cvar of its own,
 > `dodstudio_hltv_show_viewmodel_animations`, until 2026-10-01.
