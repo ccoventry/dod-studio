@@ -199,6 +199,9 @@ pub struct CapturePayload {
     pub obs_port: u16,
     #[serde(default)]
     pub obs_password: String,
+    /// `ObsRecordingQuality`'s id; empty or unknown is the default.
+    #[serde(default)]
+    pub obs_recording_quality: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
     /// `PatcherConfig::hook_runs_batch`: on unless the payload says otherwise.
@@ -483,6 +486,9 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
             payload.obs_port
         },
         password: payload.obs_password.clone(),
+        recording_quality: native::patch::ObsRecordingQuality::from_str_id(
+            &payload.obs_recording_quality,
+        ),
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
     cfg.hook_runs_batch = payload.hook_runs_batch;
@@ -595,7 +601,11 @@ pub async fn obs_test_connection(
     game_width: i32,
     game_height: i32,
     obs_capture_fps: i32,
+    obs_recording_quality: Option<String>,
 ) -> Result<ObsConnectionReport, String> {
+    let quality = native::patch::ObsRecordingQuality::from_str_id(
+        obs_recording_quality.as_deref().unwrap_or_default(),
+    );
     let resolved_host = if host.is_empty() {
         "127.0.0.1".to_string()
     } else {
@@ -633,6 +643,7 @@ pub async fn obs_test_connection(
             game_height,
             obs_capture_fps,
             1,
+            quality,
         ) {
             return ObsConnectionReport::failed(e);
         }
@@ -740,6 +751,8 @@ fn obs_config(host: String, port: u16, password: String) -> native::patch::ObsCo
         },
         port: if port == 0 { 4455 } else { port },
         password,
+        // Only connection checks and recovery use this; neither provisions.
+        recording_quality: Default::default(),
     }
 }
 
@@ -4365,6 +4378,7 @@ mod tests {
             obs_host: String::new(),
             obs_port: 0,
             obs_password: String::new(),
+            obs_recording_quality: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
             keep_game_behind: true,

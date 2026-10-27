@@ -129,6 +129,10 @@ pub struct AppSettings {
     /// switched off. Never logged — see `ObsConfig::redacted`.
     #[serde(default)]
     pub obs_password: String,
+    /// OBS mode's recording quality, `ObsRecordingQuality`'s id (#1060).
+    /// Empty (an older settings file) is the default, `standard`.
+    #[serde(default)]
+    pub obs_recording_quality: String,
     /// Path to `obs64.exe`/`obs.exe`, for the "Launch OBS" button. Spawn-and-
     /// forget, same as `launch_standalone_game` — OBS is the user's own
     /// software, not ours to manage, so nothing here tracks its lifecycle.
@@ -506,6 +510,7 @@ impl Default for AppSettings {
             obs_host: default_obs_host(),
             obs_port: default_obs_port(),
             obs_password: String::new(),
+            obs_recording_quality: String::new(),
             obs_exe_path: String::new(),
             auto_clear_logs: false,
             auto_clear_previews: false,

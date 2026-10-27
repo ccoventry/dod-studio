@@ -282,6 +282,7 @@ export async function runObsConnectionTest({ auto = false } = {}) {
       gameWidth: numberField('#config-res-width', 1280, { integer: true, positive: true }),
       gameHeight: numberField('#config-res-height', 720, { integer: true, positive: true }),
       obsCaptureFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+      obsRecordingQuality: document.querySelector('#config-obs-recording-quality')?.value || '',
     });
     renderObsReport(report);
   } catch (e) {
@@ -993,6 +994,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const el = document.querySelector(selector);
     if (el) el.addEventListener('input', () => notifySettingsChange());
   });
+  document.querySelector('#config-obs-recording-quality')
+    ?.addEventListener('change', () => notifySettingsChange());
   // Keeps the Timings tab's visual timeline (#150) in step with whichever
   // of these five fields was just edited.
   ['#config-pre-roll', '#config-post-roll', '#config-record-start-lead',
@@ -1342,6 +1345,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       obs_host: obsHostVal,
       obs_port: obsPortVal,
       obs_password: obsPasswordVal,
+      obs_recording_quality: document.querySelector('#config-obs-recording-quality')?.value || '',
       save_local_patched_copy: saveLocalPatchedCopyVal,
       hook_runs_batch: hookRunsBatchVal,
       keep_game_behind: keepGameBehindVal,

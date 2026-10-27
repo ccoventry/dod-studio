@@ -167,8 +167,8 @@ pub mod viewdemo_refresh;
 
 pub use types::{
     CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
-    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig, PatchJob,
-    PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
+    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
+    ObsRecordingQuality, PatchJob, PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

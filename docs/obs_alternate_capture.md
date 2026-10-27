@@ -63,9 +63,11 @@ utvideo, 300 fps.
 
 | Setting | Value | Why |
 |---|---|---|
-| Output mode | Simple | obs-websocket can write Simple mode's settings; Advanced mode keeps its encoder settings in `recordEncoder.json`, out of reach |
-| Recording quality | Indistinguishable (`HQ`) | constant QP: 16 on NVENC at 2560x1440, ~390 Mbps at 120 fps. A new profile records "Same as stream", **6 Mbps CBR** |
-| Encoder | the one OBS picked for this PC (the profile's default) | NVENC here; undoes a switch to x264 |
+| Output mode | **Advanced** with NVENC (OBS 31+), Simple otherwise | Simple mode's NVENC setup can't keep up with 120 fps at 1440p (#1060, below). Studio writes Advanced mode's encoder file itself |
+| Recording encoder (NVENC) | H.264, preset P4, single pass, no lookahead, no B-frames, constant QP from **OBS Quality** (Standard: 16) | holds 120 fps at 1440p; see "Encoder and quality" below |
+| Recording quality (Simple mode) | Indistinguishable (`HQ`) | constant QP: 16 on NVENC at 2560x1440. A new profile records "Same as stream", **6 Mbps CBR** |
+| Encoder | the one OBS picked for this PC (the profile's default) | NVENC here; undoes a switch to x264. On AMD, Intel or x264 Studio keeps Simple mode: their fast settings are unmeasured |
+| Colour | NV12 (I444 for Max), Rec. 709, limited range | OBS's defaults, and what the render step and editors read an H.264 file as |
 | Container | Hybrid MP4 (OBS 30.2+) | a killed OBS leaves a playable file; the finished file is a plain MP4 (VEGAS opens it) |
 | Replay buffer | off | |
 | Canvas and output | the game's resolution | as before |
@@ -75,8 +77,18 @@ utvideo, 300 fps.
 Settings written over obs-websocket only take effect when OBS rebuilds its outputs: changing the
 quality preset without that made the next `StartRecord` fail, with OBS's "Failed to start recording"
 box in front of the user's windows. So after a change Studio switches to another profile and back.
-Only Studio's own `[DoD-Studio]` profile is written. The keyframe interval can't be set in Simple
-mode (NVENC uses 250 frames, ~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway.
+Only Studio's own `[DoD-Studio]` profile is written. NVENC's keyframe interval stays at 250 frames
+(~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway.
+
+**How Studio writes Advanced mode's encoder settings.** obs-websocket can write a profile's
+`basic.ini` but not its `recordEncoder.json`, so Studio writes that file itself. It finds the
+profile's folder by writing a fresh marker (`[DoDStudio] ProvisionMarker`) through obs-websocket,
+which saves `basic.ini` at once, then looking for it under `%APPDATA%\obs-studio\basic\profiles\`
+and a portable OBS's `config\obs-studio\` beside each running `obs64.exe`. The profile round trip
+below then makes OBS read the file. If the folder isn't found, or OBS is older than 31 (its NVENC
+encoder named these settings differently), the profile stays in Simple mode, never Advanced mode on
+OBS's NVENC defaults (10 Mbps CBR). Picking "OBS's own" under OBS Quality switches it back to
+Simple mode too.
 
 The game side, OBS mode only: `fps_override 1; fps_max <2 x OBS FPS>; gl_vsync 0` in the helper cfg,
 and `-wavonly` on the launch line.
