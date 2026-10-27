@@ -42,8 +42,8 @@
 //! | bolt-rifle shot | a shot (body animation or fire sound) while holding one |
 //! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`) |
 //! | prone transition | 1.5s from the body entering `get_down` / `get_up` |
-//! | crawl | gait `prone_forward` (`dod_crawl` is the crouched walk) |
-//! | jump | body `jump`, from take-off until landing |
+//! | crawl | gait `prone_forward` while the origin moves (`dod_crawl` is the crouched walk; `snapshot_motion`) |
+//! | jump | body `jump`, from take-off until landing; a crouched take-off from the origin (`snapshot_motion`) |
 //! | ladder | `movetype` 5 |
 //! | weapon | the third-person model held |
 //! | MG deployed | body `sandbag_*` / `bipod_*` |
@@ -148,6 +148,7 @@ pub(super) fn forget() {
     PRONE_TRANSITION_AT.store(0, Ordering::Relaxed);
     IN_TRANSITION.store(0, Ordering::Relaxed);
     super::sprint_turn::forget();
+    super::snapshot_motion::forget();
 }
 
 /// Starts the prone timer on the frame the body enters `get_down` or
@@ -336,10 +337,11 @@ fn lowered_because(view: &View, now: f64) -> Option<Hidden> {
         if since(&PRONE_TRANSITION_AT, now).is_some_and(|s| s < PRONE_TRANSITION_SECONDS) {
             return Some(Hidden::ProneTransition);
         }
-        if gait == "prone_forward" {
+        // The server keeps the crawl gait up to 0.6 s after he stops.
+        if gait == "prone_forward" && !super::snapshot_motion::still() {
             return Some(Hidden::Crawling);
         }
-        if body == "jump" {
+        if body == "jump" || super::snapshot_motion::in_the_air() {
             return Some(Hidden::InTheAir);
         }
         if movetype == MOVETYPE_FLY {

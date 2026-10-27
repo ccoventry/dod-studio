@@ -36,8 +36,9 @@ switch rather than adding a command:
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
   ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
-  while spectating). Same speed as the game: 55 frames down, 19 back. See
-  `src/spectator_gun.rs`.
+  while spectating). Same speed as a typical POV recording, whatever the
+  capture rate: 55 steps down and 19 back at 200 steps a second, 0.28 s
+  and 0.09 s (#704). See `src/spectator_gun.rs`.
 
 **Missing gunshots** (`ds_sound_restore_gunshots 1`, on by default; its own
 switch since #1036, because POV demos lose them too): an HLTV demo has no fire
