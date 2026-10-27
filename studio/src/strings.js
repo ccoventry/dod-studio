@@ -2201,6 +2201,21 @@ export const STRINGS = {
     merged: (n) => `(+${n} more, recorded as one take)`,
     STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
     OPEN_FOLDER: 'Open folder',
+    // OBS mode's per-take frame loss (#172).
+    obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,
+    obsCellTitle: (skipped, frames, missed, rendered) => `OBS left out ${skipped} of ${frames} frames because the encoder couldn't keep up, and ${missed} of ${rendered} because it couldn't draw them in time. A few tenths of a percent is normal; past 5% the take looks choppy.`,
+    obsSummary: (lagging, clips, fix) => `OBS dropped frames in ${lagging} of ${clips} take${clips === 1 ? '' : 's'}. ${fix}`,
+  },
+
+  // ── obs_drop_rate.js: OBS mode's live drop rate (#172) ─────────────────
+  OBS_DROP_RATE: {
+    line: (clip, skippedPct, missedPct, recording) => `OBS, clip ${clip}${recording ? '' : ' done'}: ${skippedPct}% of frames skipped, ${missedPct}% missed`,
+    LINE_TITLE: "Frames OBS left out of this clip so far. Skipped: the encoder couldn't keep up. Missed: OBS couldn't draw them in time. A few tenths of a percent is normal; past 5% the clip looks choppy.",
+    lagging: (pct, encoder, fix) => `OBS is dropping ${pct}% of frames (${encoder ? "the encoder can't keep up" : "OBS can't draw them in time"}): the clip will be choppy. ${fix}`,
+    LAGGING_TITLE: 'Over the last 5 seconds. Each clip\'s total is in Last Batch when the batch ends.',
+    fix: (fps) => (fps > 60
+      ? 'Lower OBS Capture FPS to 60 (Configuration → Output Format) and capture again.'
+      : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────

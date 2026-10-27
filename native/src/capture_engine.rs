@@ -41,6 +41,9 @@ pub enum EngineEvent {
     /// clip_count), all 1-based. Same console-log source as DemoLoading.
     /// See issue #98.
     FastForwardToClip(u32, u32, u32, u32),
+    /// OBS mode: the frames OBS is losing, about once a second while a clip
+    /// records and once more with its totals when it ends (#172).
+    ObsDropRate(crate::obs::ObsDropReport),
 }
 
 /// Longest a batch may go without a console marker before OBS mode calls it
@@ -579,6 +582,8 @@ pub fn spawn_capture_engine(
             // folder.
             let obs_mode = config.capture_mode == crate::patch::CaptureMode::Obs;
             let mut obs_session: Option<crate::obs::ObsSession> = None;
+            // Stops when dropped, so an early return can't leave it polling.
+            let mut drop_poller: Option<crate::obs::DropPoller> = None;
             let (marker_tx, marker_rx) = std::sync::mpsc::channel::<crate::obs::Marker>();
             let tail_cancel = Arc::new(AtomicBool::new(false));
             // The log feeds the markers until the game's events pipe
@@ -614,6 +619,20 @@ pub fn spawn_capture_engine(
                         // this point on every exit path stops the recorder.
                         _cleanup_guard.obs = Some(session.stop_handle());
                         obs_session = Some(session);
+                        // The live drop rate (#172), on its own connection so
+                        // it never holds up a start or stop. Advice only: a
+                        // poller that can't start just means no figure.
+                        let drop_tx = tx.clone();
+                        drop_poller = crate::obs::DropPoller::spawn(
+                            config.obs.clone(),
+                            obs_take_folders.clone(),
+                            config.obs_capture_fps,
+                            Arc::clone(&cancel_token),
+                            move |report| {
+                                let _ = drop_tx.send(EngineEvent::ObsDropRate(report));
+                            },
+                        )
+                        .ok();
                     }
                     Err(e) => {
                         log_crash_abort!(tx, format!("OBS capture could not start — {}", e));
@@ -1145,6 +1164,11 @@ pub fn spawn_capture_engine(
                     session.on_marker(&marker);
                 }
                 session.finish();
+                // Before the batch reports it ended, so the last clip's
+                // totals reach the Last Batch panel.
+                if let Some(poller) = drop_poller.take() {
+                    poller.stop_and_wait();
+                }
                 log_markdown(&format!(
                     "🎥 **OBS capture** — {} block(s) recorded, {} skipped.",
                     session.recorded.len(),

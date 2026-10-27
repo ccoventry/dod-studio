@@ -30,6 +30,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod client;
+pub mod drop_rate;
 #[cfg(test)]
 mod fake_obs;
 pub mod log_tail;
@@ -39,6 +40,7 @@ pub mod recover;
 pub mod session;
 
 pub use client::{ObsClient, ObsError};
+pub use drop_rate::{DropPoller, FrameCounters, ObsDropReport};
 pub use log_tail::{LogTailer, Marker, MarkerGate, MarkerKind};
 pub use pipe_tail::PipeTailer;
 pub use provision::{PROFILE_NAME as OBS_PROFILE_NAME, SCENE_NAME as OBS_SCENE_NAME};

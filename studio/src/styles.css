@@ -1232,6 +1232,22 @@ button.danger-btn {
   overflow-wrap: anywhere;
 }
 
+/* OBS mode's live drop rate (#172), under the status line. */
+#obs-drop-rate {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+#obs-drop-rate[hidden] {
+  display: none;
+}
+
+#obs-drop-rate.lagging {
+  color: #ffb74d;
+  font-weight: 600;
+}
+
 #export-pool-free-indicator,
 #render-footer-pool-free,
 #footer-audit-summary {
@@ -1876,6 +1892,10 @@ button.danger-btn {
 
 .batch-results-row-ok td:first-child {
   color: #66bb6a;
+}
+
+.batch-results-obs-lagging {
+  color: #ffb74d;
 }
 
 /* The Commands tab's type-ahead (#215). */
