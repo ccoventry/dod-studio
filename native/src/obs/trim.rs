@@ -26,10 +26,10 @@
 /// seen by a marker from the game's events pipe.
 ///
 /// Measured on POST at 60 fps, OBS 33.0.0, against HLAE takes of the same
-/// three clips over four batches, at both ends of each clip
-/// (`docs/obs_alternate_capture.md`, "Cutting the head and tail"): 21-58 ms,
-/// mean 40, so a cut lands within about a frame at 60 fps either way.
-pub const RECORDING_START_DELAY_SECONDS: f64 = 0.040;
+/// three clips over five batches, at both ends of each clip
+/// (`docs/obs_alternate_capture.md`, "Cutting the head and tail"): 6-30 ms
+/// over 25 measurements, mean 16, so a cut lands within a frame at 60 fps.
+pub const RECORDING_START_DELAY_SECONDS: f64 = 0.016;
 
 /// How much later a marker read from `qconsole.log` arrives than one from the
 /// game's events pipe: the log is flushed and polled, the pipe is not.
