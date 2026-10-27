@@ -1311,6 +1311,9 @@ fn usage() -> String {
          \x20                               magazines and bipods shown, every line one step\n\
          \x20                               (needs HD and killfeed_icons.py --even's atlas), live\n\
          \x20 {COMMAND} layout default     the game's own boxes and spacing (default)\n\
+         \x20 {COMMAND} gap <0..{}>           with layout even: px between each name (its\n\
+         \x20                               outline) and the icon's art, both sides\n\
+         \x20 {COMMAND} gap default        the game's spacing: {} px before the icon, none after\n\
          \x20 {COMMAND} outline <0..{}> [colour] [alpha]\n\
          \x20                               outline the names that many px (default black, 255)\n\
          \x20 {COMMAND} outline default    no outline\n\
@@ -1335,6 +1338,8 @@ fn usage() -> String {
         font::MAX_TALL,
         scale::MIN_SCALE,
         scale::MAX_SCALE,
+        even::MAX_GAP,
+        even::GAME_GAP_BEFORE,
         backdrop::MAX_OUTLINE,
         backdrop::DEFAULT_PADDING,
     )
@@ -1369,11 +1374,12 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, {}, blocking {block}, replacing {}, {}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, {}, {}, {}, blocking {block}, replacing {}, {}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
         scale::describe(),
         even::describe(),
+        even::describe_gap(),
         backdrop::describe(),
         match replace::count() {
             0 => "nothing".to_string(),
@@ -1560,6 +1566,16 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} layout: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} layout: {why}\n"),
+            }
+        }
+        "gap" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", even::describe_gap(), usage());
+            }
+            match even::parse_gap(rest) {
+                Ok(gap) => format!("{COMMAND}: {}\n", even::set_gap(gap)),
+                Err(why) => format!("{COMMAND} gap: {why}\n"),
             }
         }
         "fake" => {

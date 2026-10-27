@@ -202,11 +202,29 @@ fn find_unscaled(scaled: WRect, copy: &[WRect], stock: &[WRect]) -> Option<WRect
 }
 
 /// What the copy holds for a sprite whose game rect is `stock`: the even
-/// layout's box (#1022) scaled when it has one, else the game's rect scaled.
-pub(super) fn copy_rect(stock: WRect, atlas: Option<super::even::AtlasBox>, s: f32) -> WRect {
+/// layout's box (#1022) scaled when it has one, `after` px wider for the
+/// victim's side of `gap`, else the game's rect scaled.
+pub(super) fn copy_rect(
+    stock: WRect,
+    atlas: Option<super::even::AtlasBox>,
+    s: f32,
+    after: i32,
+) -> WRect {
     match atlas {
-        Some(b) => super::even::line_rect(b, s),
+        Some(b) => super::even::line_rect(b, s, after),
         None => scale_rect(stock, s),
+    }
+}
+
+/// How much the killer's name grows by for the line `Draw` is on: the
+/// killer's side of `gap` (#1022) when the line's icon is drawn from the
+/// atlas, else 0. Read by `font`'s killer width and draw, which come after
+/// the line-start stub stored the line's sprite index.
+pub(super) fn killer_extra() -> i32 {
+    let index = ICON_INDEX.load(Ordering::Relaxed);
+    match usize::try_from(index).ok().and_then(super::even::box_for) {
+        Some(_) => super::even::extras().0,
+        None => 0,
     }
 }
 
@@ -399,6 +417,8 @@ mod hook {
     static SEEN_SCALE: AtomicU32 = AtomicU32::new(0);
     /// `even::key` the copy was built for: 0 for the game's rects.
     static SEEN_EVEN: AtomicU32 = AtomicU32::new(0);
+    /// The victim's side of `gap` the copy was built with.
+    static SEEN_AFTER: AtomicI32 = AtomicI32::new(0);
     /// The scaled copy: its first rect, and how many it has room for. Never
     /// freed while a smaller one might still be `RECTS` (a count change
     /// leaks the old copy, as `max`'s buffer does; `VidInit` allocates once).
@@ -504,23 +524,29 @@ mod hook {
             RECTS.store(array, Ordering::Release);
             return;
         }
+        let after = if even == 0 {
+            0
+        } else {
+            super::super::even::extras().1
+        };
         let unchanged = SEEN_STOCK.load(Ordering::Relaxed) == array
             && SEEN_COUNT.load(Ordering::Relaxed) == count
             && SEEN_SCALE.load(Ordering::Relaxed) == s.to_bits()
             && SEEN_EVEN.load(Ordering::Relaxed) == even
+            && SEEN_AFTER.load(Ordering::Relaxed) == after
             && COPY.load(Ordering::Relaxed) != 0;
         if !unchanged {
-            rebuild(array, count, s, even);
+            rebuild(array, count, s, even, after);
         }
         RECTS.store(COPY.load(Ordering::Acquire), Ordering::Release);
     }
 
     /// Fills the copy with the game's rects scaled by `s`, or, while the even
-    /// layout draws (`even` non-zero), each atlas icon's box scaled by `s`.
-    /// The same thread that runs `Draw` (the engine's) calls this, from the
-    /// console command or the per-frame poll, so no draw is reading the copy
-    /// meanwhile.
-    fn rebuild(array: usize, count: usize, s: f32, even: u32) {
+    /// layout draws (`even` non-zero), each atlas icon's box scaled by `s`
+    /// and `after` px wider (`gap`). The same thread that runs `Draw` (the
+    /// engine's) calls this, from the console command or the per-frame poll,
+    /// so no draw is reading the copy meanwhile.
+    fn rebuild(array: usize, count: usize, s: f32, even: u32, after: i32) {
         if COPY_CAP.load(Ordering::Relaxed) < count || COPY.load(Ordering::Relaxed) == 0 {
             let block = vec![WRect::default(); count].into_boxed_slice();
             let ptr = Box::leak(block).as_mut_ptr() as usize;
@@ -539,12 +565,13 @@ mod hook {
             } else {
                 super::super::even::box_for(i)
             };
-            *c = copy_rect(*r, atlas, s);
+            *c = copy_rect(*r, atlas, s, after);
         }
         SEEN_STOCK.store(array, Ordering::Relaxed);
         SEEN_COUNT.store(count, Ordering::Relaxed);
         SEEN_SCALE.store(s.to_bits(), Ordering::Relaxed);
         SEEN_EVEN.store(even, Ordering::Relaxed);
+        SEEN_AFTER.store(after, Ordering::Relaxed);
     }
 
     /// The copy and the game's array it was made from, while `Draw` reads
@@ -1147,17 +1174,31 @@ mod tests {
             top: 23,
             bottom: 23 + 25,
         };
-        assert_eq!(copy_rect(stock_mp44, Some(mp44), 1.0), mp44.rect);
-        let big = copy_rect(stock_mp44, Some(mp44), 2.5);
+        assert_eq!(copy_rect(stock_mp44, Some(mp44), 1.0, 0), mp44.rect);
+        let big = copy_rect(stock_mp44, Some(mp44), 2.5, 0);
         assert_eq!((big.right - big.left, big.bottom - big.top), (148, 65));
         assert_eq!(
-            copy_rect(stock_mp44, None, 2.5),
+            copy_rect(stock_mp44, None, 2.5, 0),
             scale_rect(stock_mp44, 2.5)
         );
         assert_eq!(
-            copy_rect(stock_mp44, None, 1.0),
+            copy_rect(stock_mp44, None, 1.0, 0),
             stock_mp44,
             "no box: the game's"
+        );
+        // The victim's side of a gap widens the advance after an atlas icon
+        // only: the box's corner and height stay, so the draw and the step
+        // don't move.
+        let gapped = copy_rect(stock_mp44, Some(mp44), 2.5, 16);
+        assert_eq!(
+            (gapped.left, gapped.top, gapped.bottom),
+            (big.left, big.top, big.bottom)
+        );
+        assert_eq!(gapped.right - gapped.left, 148 + 16);
+        assert_eq!(
+            copy_rect(stock_mp44, None, 2.5, 16),
+            scale_rect(stock_mp44, 2.5),
+            "the game's icons keep the game's spacing"
         );
     }
 

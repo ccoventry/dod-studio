@@ -803,6 +803,41 @@ class EvenLayoutTest(unittest.TestCase):
                                  "d_mp44 0 2 2 59 26"])
         text.encode("ascii")
 
+    def test_trim_box_keeps_the_visible_columns_inside_the_drawn_half_texels(self):
+        # A stick grenade's box: 45 stock px, art from column 4 to 36 (at 4x:
+        # 16..144, with a faint edge column either side).
+        img = np.zeros((26 * 4, 45 * 4, 4))
+        img[40:60, 16:144, 3] = 1.0
+        img[50, 15, 3] = img[50, 144, 3] = 0.1
+        out, (w, h) = K.trim_box(img, (45, 26), 4)
+        self.assertEqual((w, h), (34, 26), "130 px at 4x is 32.5 stock px, +1 for the half texels")
+        self.assertEqual(out.shape, (26 * 4, 34 * 4, 4))
+        self.assertAlmostEqual(out[..., 3].sum(), img[..., 3].sum(), msg="nothing visible cut")
+        cols = np.nonzero(out[..., 3].any(0))[0]
+        # The engine shows a box from half a stock px (2 HD px) inside each edge.
+        self.assertGreaterEqual(cols.min(), 2)
+        self.assertLessEqual(cols.max() + 1, 34 * 4 - 2)
+        self.assertLessEqual(abs(cols.min() - (34 * 4 - cols.max() - 1)), 1, "centred")
+        rows = np.nonzero(out[..., 3].any(1))[0]
+        self.assertEqual((rows.min(), rows.max() + 1), (40, 60), "rows untouched")
+
+    def test_trim_box_leaves_a_box_its_art_fills(self):
+        # A long gun's art reaches to half a texel of each edge already.
+        img = np.zeros((26 * 4, 82 * 4, 4))
+        img[30:50, 2:82 * 4 - 2, 3] = 1.0
+        out, size = K.trim_box(img, (82, 26), 4)
+        self.assertEqual(size, (82, 26))
+        self.assertIs(out, img)
+        full = np.ones((26 * 4, 82 * 4, 4))
+        self.assertEqual(K.trim_box(full, (82, 26), 4)[1], (82, 26), "never wider")
+        empty = np.zeros((26 * 4, 30 * 4, 4))
+        self.assertEqual(K.trim_box(empty, (30, 26), 4)[1], (30, 26))
+        # Below the visible alpha a column is empty: a speck of 2/255 is trimmed away.
+        faint = np.zeros((26 * 4, 82 * 4, 4))
+        faint[30:50, 100:120, 3] = 1.0
+        faint[40, 0, 3] = 2 / 255
+        self.assertEqual(K.trim_box(faint, (82, 26), 4)[1], (6, 26))
+
     def test_fit_box_shrinks_only_a_taller_icon_and_centres_it(self):
         img = np.ones((34 * 4, 72 * 4, 4))
         out, (w, h) = K.fit_box(img, 72, 34, 26, 4)
