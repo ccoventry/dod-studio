@@ -63,6 +63,8 @@ static REARMS: AtomicU32 = AtomicU32::new(0);
 /// runs on 32-bit, where exception dispatch is slower. A real writer's burst
 /// (HLAE hooking a few dozen imports) ends long before 4096.
 const MAX_REARMS: u32 = 4096;
+/// Re-arms since the DLL loaded, so a test can tell the handler really ran.
+static REARMS_EVER: AtomicU32 = AtomicU32::new(0);
 
 static HANDLER: Once = Once::new();
 
@@ -152,7 +154,7 @@ unsafe fn write_span(address: usize, len: usize, after: After, write: impl FnOnc
         // case its handler went in after this one).
         unsafe { AddVectoredExceptionHandler(1, Some(rearm_on_fault)) };
     });
-    let (_turn, waited) = match WRITE_LOCK.try_lock() {
+    let (turn, waited) = match WRITE_LOCK.try_lock() {
         Ok(turn) => (turn, false),
         Err(TryLockError::WouldBlock) => (
             WRITE_LOCK
@@ -185,6 +187,9 @@ unsafe fn write_span(address: usize, len: usize, after: After, write: impl FnOnc
         let mut discard: PAGE_PROTECTION_FLAGS = 0;
         unsafe { VirtualProtect(target, len, put_back, &mut discard) };
     }
+    // Before the log write, so a writer waiting on the frame path never waits
+    // on the disk too.
+    drop(turn);
 
     #[cfg(not(test))]
     if waited || rearms > 0 {
@@ -233,8 +238,9 @@ fn is_pending_write(fault: usize, thread: u32, start: usize, end: usize, owner: 
 }
 
 /// Whether this exception is a write fault on the span our writing thread
-/// declared: one [`rearm_on_fault`] mends rather than a crash. For the crash
-/// recorder, so it stays quiet about it.
+/// declared, and [`rearm_on_fault`] hasn't given up on that write: one it
+/// mends rather than a crash. For the crash recorder, so it stays quiet about
+/// it, and still records the one we give up on.
 ///
 /// Safety: `info` is the handler's argument, as Windows passed it.
 pub unsafe fn is_mendable_fault(info: *const EXCEPTION_POINTERS) -> bool {
@@ -250,6 +256,7 @@ pub unsafe fn is_mendable_fault(info: *const EXCEPTION_POINTERS) -> bool {
     }
     let params = unsafe { (*record).ExceptionInformation };
     params[0] == WRITE_FAULT
+        && REARMS.load(Ordering::Relaxed) < MAX_REARMS
         && is_pending_write(
             params[1],
             unsafe { GetCurrentThreadId() },
@@ -266,9 +273,8 @@ unsafe extern "system" fn rearm_on_fault(info: *mut EXCEPTION_POINTERS) -> i32 {
     if !unsafe { is_mendable_fault(info) } {
         return EXCEPTION_CONTINUE_SEARCH;
     }
-    if REARMS.fetch_add(1, Ordering::Relaxed) >= MAX_REARMS {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
+    REARMS.fetch_add(1, Ordering::Relaxed);
+    REARMS_EVER.fetch_add(1, Ordering::Relaxed);
     let start = PENDING_START.load(Ordering::Relaxed);
     let len = PENDING_END.load(Ordering::Relaxed) - start;
     let mut discard: PAGE_PROTECTION_FLAGS = 0;
@@ -281,6 +287,8 @@ unsafe extern "system" fn rearm_on_fault(info: *mut EXCEPTION_POINTERS) -> i32 {
         )
     } == 0
     {
+        // Given up: the crash recorder, if it runs after us, records it.
+        REARMS.store(MAX_REARMS, Ordering::Relaxed);
         return EXCEPTION_CONTINUE_SEARCH;
     }
     EXCEPTION_CONTINUE_EXECUTION
@@ -430,6 +438,11 @@ mod tests {
             }
             stop.store(true, Ordering::Relaxed);
         });
+        // Only this test makes a page go read-only mid-write.
+        assert!(
+            REARMS_EVER.load(Ordering::Relaxed) > 0,
+            "the race never fired"
+        );
     }
 
     /// Our own writers, two threads on one page, the way the start-up watch
