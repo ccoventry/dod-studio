@@ -137,6 +137,31 @@ pub async fn download_and_install_update(
 /// real installed build, unlike `npm run tauri dev`) apart from a genuine
 /// `--release` build, since both go through the same production Vite build
 /// and report `import.meta.env.DEV === false`.
+/// Earlier versions' release notes for the What's new window (#1013):
+/// GitHub's release list, saved in the app's data folder, or that saved copy
+/// when GitHub can't be read. `offline` reads only the saved copy, for a
+/// Studio whose update checks are off. Off the async runtime: it waits on the
+/// network.
+#[tauri::command]
+pub async fn release_history(
+    offline: bool,
+) -> Result<native::shared::release_history::History, String> {
+    use native::shared::release_history as history;
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let dir = native::shared::paths::get_appdata_dir();
+        if offline {
+            history::History {
+                releases: history::read_cache(&dir),
+                from_cache: true,
+                error: None,
+            }
+        } else {
+            history::fetch_or_cached(history::RELEASES_URL, &dir)
+        }
+    }))
+    .await
+}
+
 #[tauri::command]
 pub fn is_debug_build() -> bool {
     cfg!(debug_assertions)

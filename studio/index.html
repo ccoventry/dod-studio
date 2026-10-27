@@ -49,6 +49,8 @@
               </button>
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
+                <!-- #1013: whats_new.js. -->
+                <button class="menu-dropdown-item" id="whats-new-menu-btn" data-str="WHATS_NEW.MENU_ITEM" data-str-title="WHATS_NEW.MENU_ITEM_TITLE">What's New</button>
                 <button class="menu-dropdown-item" id="view-logs-btn" data-str="FOOTER.VIEW_LOGS_BUTTON" data-str-title="FOOTER.VIEW_LOGS_TITLE" title="Open today's activity log in Explorer">View Logs</button>
                 <button class="menu-dropdown-item" id="setup-menu-btn" data-str="SETUP.MENU_ITEM" data-str-title="SETUP.MENU_ITEM_TITLE">Setup…</button>
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
@@ -2076,6 +2078,11 @@
         <div id="update-progress-container" style="display: none; margin-top: 8px;">
           <progress id="update-progress-bar" max="100" value="0" style="width: 100%;"></progress>
         </div>
+        <!-- #1013: the pending update's notes, whats_new.js showPendingNotes. -->
+        <div id="update-modal-notes" class="update-modal-notes" hidden>
+          <h3 data-str="WHATS_NEW.PENDING_TITLE">What's in it</h3>
+          <div id="update-modal-notes-body" class="release-notes"></div>
+        </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button id="download-install-update-btn" style="display: none;" data-str="UPDATE_MODAL.DOWNLOAD_INSTALL_BUTTON">Download & Install</button>
           <button id="restart-to-apply-btn" style="display: none;" data-str="UPDATE_MODAL.RESTART_BUTTON">Restart to Apply</button>
@@ -2096,7 +2103,27 @@
           <a href="https://github.com/ccoventry/dod-studio" target="_blank" rel="noopener" data-str="ABOUT_MODAL.GITHUB_LINK">github.com/ccoventry/dod-studio</a>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
+          <button id="about-whats-new-btn" data-str="WHATS_NEW.ABOUT_BUTTON">What's new in this version</button>
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- What's new (#1013), whats_new.js: this version's notes from the
+         build, the others from GitHub's release list. -->
+    <div id="whats-new-modal" class="modal" style="display: none;">
+      <div class="modal-content whats-new-content">
+        <h2 data-str="WHATS_NEW.TITLE">What's New</h2>
+        <p id="whats-new-status" class="status-text whats-new-status" hidden></p>
+        <div class="whats-new-scroll">
+          <h3 id="whats-new-current-title" data-str="WHATS_NEW.THIS_VERSION_UNKNOWN">This version</h3>
+          <div id="whats-new-current" class="release-notes"></div>
+          <h3 id="whats-new-others-title" data-str="WHATS_NEW.OTHER_VERSIONS" hidden>Other versions</h3>
+          <div id="whats-new-others"></div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button id="whats-new-fetch-btn" data-str="WHATS_NEW.FETCH_BUTTON" data-str-title="WHATS_NEW.FETCH_TITLE" hidden>Read GitHub's list</button>
+          <button id="whats-new-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
     </div>

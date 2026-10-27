@@ -2648,6 +2648,34 @@ export const STRINGS = {
     GITHUB_LINK: 'github.com/ccoventry/dod-studio',
   },
 
+  // ── What's new window (#1013), whats_new.js ─────────────────────────────
+  WHATS_NEW: {
+    MENU_ITEM: "What's New",
+    MENU_ITEM_TITLE: "What changed in this version and the ones before it",
+    ABOUT_BUTTON: "What's new in this version",
+    TITLE: "What's New",
+    thisVersion: (v) => `This version: v${v}`,
+    THIS_VERSION_UNKNOWN: 'This version',
+    OTHER_VERSIONS: 'Other versions',
+    versionLabel: (v, experimental) => `v${v}${experimental ? ' (experimental)' : ''}`,
+    // The release body's <details> list of every pull request, folded.
+    everythingElse: (summary) => `Everything else: ${summary}`,
+    NO_NOTES: 'No notes were written for this version.',
+    NO_BUNDLED_NOTES: "This build doesn't carry its own notes (a build made on this PC has none). They show here once GitHub's release list is read.",
+    NO_NOTES_FOR_THIS_BUILD: "No notes for this build: it isn't a published version (a build made on this PC, or an experimental build GitHub has since replaced).",
+    FETCH_BUTTON: "Read GitHub's list",
+    FETCH_TITLE: "Reads the release notes of every version from GitHub. Update checks are off, so DoD Studio doesn't do it by itself.",
+    STATUS_READING: "Reading the release list from GitHub…",
+    STATUS_FAILED: "Couldn't read GitHub's release list, and none is saved from before. The reason is in the activity log.",
+    STATUS_SAVED_COPY: "Couldn't read GitHub's release list, so this is the copy saved last time. The reason is in the activity log.",
+    STATUS_OFFLINE_SAVED: 'Update checks are off, so this is the release list saved last time.',
+    STATUS_OFFLINE_NONE: "Update checks are off, so only this version's notes show.",
+    updatedTo: (v) => `DoD Studio updated to v${v}.`,
+    TOAST_ACTION: "See what's new",
+    // The update window: the pending update's notes, before installing it.
+    PENDING_TITLE: "What's in it",
+  },
+
   // ── Update check/install modal (issue #133) ──────────────────────────────
   UPDATE_MODAL: {
     TITLE: 'Check for Updates',
