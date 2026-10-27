@@ -53,7 +53,7 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
@@ -602,6 +602,7 @@ pub fn poll() {
     };
     drop(guard);
     crate::review_keys::publish(panel, awaiting);
+    watch_menu(awaiting);
 }
 
 /// "Highlight 3 of 12 | m00cat | 4 kills".
@@ -661,7 +662,28 @@ fn key_action(action: crate::review_keys::Action) {
         Action::No => answer(Verdict::No),
         Action::Replay => replay(),
         Action::Back => back(),
-        Action::OpenTab => open_tab(),
+    }
+}
+
+/// Whether the menu was up last frame, for [`menu_opens_tab`].
+static MENU_WAS_UP: AtomicBool = AtomicBool::new(false);
+
+/// Whether the menu just came up by itself, ESC's doing: up now and not a
+/// frame ago, with neither our window nor the console window in it.
+fn menu_opens_tab(was_up: bool, (menu, window, console): (bool, bool, bool)) -> bool {
+    menu && !was_up && !window && !console
+}
+
+/// While the review waits on screen for an answer, ESC's menu comes up with
+/// the Review tab in it, for the kill range and the note (#660).
+fn watch_menu(waiting_on_keys: bool) {
+    let Some(state) = crate::studio_panel::menu_state() else {
+        return;
+    };
+    let was_up = MENU_WAS_UP.swap(state.0, Ordering::Relaxed);
+    if waiting_on_keys && menu_opens_tab(was_up, state) {
+        trace("the menu came up while waiting for an answer: opening the Review tab");
+        open_tab();
     }
 }
 
@@ -1261,6 +1283,18 @@ mod tests {
         // A failed highlight has the Review tab open instead.
         review.phase = Phase::Failed("gone".into());
         assert_eq!(panel_view(&review), (None, false));
+    }
+
+    #[test]
+    fn only_a_menu_that_just_came_up_on_its_own_opens_the_review_tab() {
+        // ESC: the menu up, nothing in it.
+        assert!(menu_opens_tab(false, (true, false, false)));
+        // Already up last frame, or brought up around our window or the
+        // console window (the console key), or not up at all: left alone.
+        assert!(!menu_opens_tab(true, (true, false, false)));
+        assert!(!menu_opens_tab(false, (true, true, false)));
+        assert!(!menu_opens_tab(false, (true, false, true)));
+        assert!(!menu_opens_tab(false, (false, false, false)));
     }
 
     #[test]

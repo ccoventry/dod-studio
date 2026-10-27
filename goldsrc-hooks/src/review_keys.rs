@@ -5,9 +5,11 @@
 //!
 //! ## The keys
 //!
-//! Y Yes, M Maybe, N No, R Replay, B Back, and ESC opens the DoD Studio
-//! window on its Review tab, for the kill range and the note. They are
-//! taken only while the review is paused at a highlight's end waiting for an
+//! Y Yes, M Maybe, N No, R Replay, B Back. ESC brings up the menu as
+//! always, and the review opens the DoD Studio window on its Review tab with
+//! it, for the kill range and the note: vgui2 takes ESC before any client
+//! hook sees it (seen live on PRE), so the review watches the menu come up
+//! instead (`review::poll`). The letter keys are taken only while the review is paused at a highlight's end waiting for an
 //! answer ([`AWAITING`]) and `ds_ui_review_keys` is on; at any other time
 //! every key goes to the game as before. A taken key never reaches its
 //! bind (Y is `messagemode` in DoD's default config).
@@ -45,8 +47,8 @@ use crate::demo_list_folders::Setting;
 use crate::names::console_name;
 
 /// `ds_ui_review_keys 1` (default): at a highlight's end the review waits
-/// on the game screen for Y, M, N, R, B or ESC instead of opening the
-/// Review tab. `0` opens the tab, as before #660.
+/// on the game screen for Y, M, N, R or B instead of opening the Review
+/// tab, which ESC opens. `0` opens the tab, as before #660.
 pub static KEYS: Setting = Setting::new(console_name!("ui_review_keys"), true);
 /// `ds_ui_review_info 1` (default): while a highlight loads and plays, the
 /// box on screen says which one it is. The answer keys' box shows at a
@@ -77,8 +79,6 @@ pub(crate) enum Action {
     No,
     Replay,
     Back,
-    /// ESC: the Review tab, for the kill range and note.
-    OpenTab,
 }
 
 impl Action {
@@ -91,27 +91,22 @@ impl Action {
     }
 }
 
-const ACTIONS: [Action; 6] = [
+const ACTIONS: [Action; 5] = [
     Action::Yes,
     Action::Maybe,
     Action::No,
     Action::Replay,
     Action::Back,
-    Action::OpenTab,
 ];
 
-/// The engine's key number for ESC (`K_ESCAPE`); letters are their
-/// lower-case ASCII code.
-const K_ESCAPE: i32 = 27;
-
-/// The keys, in [`ACTIONS`]' order.
-const KEY_CODES: [i32; 6] = [
+/// The keys, in [`ACTIONS`]' order: the engine's key number for a letter is
+/// its lower-case ASCII code.
+const KEY_CODES: [i32; 5] = [
     b'y' as i32,
     b'm' as i32,
     b'n' as i32,
     b'r' as i32,
     b'b' as i32,
-    K_ESCAPE,
 ];
 
 /// The action a key stands for, and its place in [`KEY_CODES`].
@@ -345,10 +340,12 @@ mod tests {
         assert_eq!(decide(true, Y, false, 0), (false, None, 0));
         assert_eq!(decide(true, Y, true, 0), (true, Some(Action::Yes), 1));
         assert_eq!(
-            decide(true, K_ESCAPE, true, 0),
-            (true, Some(Action::OpenTab), 1 << 5)
+            decide(true, b'b' as i32, true, 0),
+            (true, Some(Action::Back), 1 << 4)
         );
-        // Any other key goes to the game, waiting or not.
+        // Any other key goes to the game, waiting or not; ESC included,
+        // which vgui2 takes before this hook anyway.
+        assert_eq!(decide(true, 27, true, 0), (false, None, 0));
         assert_eq!(decide(true, b'w' as i32, true, 0), (false, None, 0));
         assert_eq!(decide(true, b'e' as i32, true, 0), (false, None, 0));
     }
