@@ -310,6 +310,7 @@ mod scoreboard;
 mod screen_effects;
 mod server_hud_text;
 mod server_query;
+mod settings_tab;
 mod spectator_bars;
 mod spectator_buttons;
 mod spectator_chase_pvs;

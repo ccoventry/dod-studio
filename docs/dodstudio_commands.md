@@ -83,7 +83,7 @@ the death cam).
 | `ds_demo_fast_load` | `1` | `viewdemo` reads the demo into its world for up to 8 ms of each frame instead of the engine's 33 network packets a frame, so a demo loads faster while it plays on. A number above 1 is the budget in milliseconds (at most 100); `0` is the engine's own 33 packets. A frame always reads at least 33, so loading is never slower than stock. On by default: faster loading is a clear win for everyone (#798). The hook log has one `fast_load:` line per load with its time, packets and frame times; `playdemo` is unaffected | `goldsrc-hooks/src/fast_load.rs`, [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) §5 |
 | `ds_ui_demo_list_folders` | `1` | the Load Demo window, and the DoD Studio window's Demos tab, also list folders and open them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/`. The Load Demo window lists `../` to go up; the Demos tab has an Up button instead. in the Load Demo window `dod/` also lists each drive (`D:/`), whose folders come straight from the disk and whose demo rows are full paths (`viewdemo` takes them with `ds_demo_other_drives`); the Demos tab has Back, Forward and Up, a Go to dropdown (game folder, Studio's analysed demos: every demo in the analyzer cache as one list, This PC: every drive as one list, which Up opens from a drive and greys out on, drives, Studio's demo folders, folders visited lately), remembers its folder between sessions, and shows an icon per row (up, folder, drive, POV demo, HLTV demo) in a first column (#779) | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
 | `ds_ui_demo_list_hide_empty` | `0` | while folders are listed and counted (`ds_ui_demo_list_show_counts 1`), a folder with no demo anywhere inside it (any depth) is left out | `goldsrc-hooks/src/demo_list_folders.rs` |
-| `ds_ui_demo_list_count_subfolders` | `0` | a folder row's demo count on the Demos tab includes its subfolders (the Settings tab's "Include subfolders"); `0` counts only the demos directly in it, and a folder with none there but some deeper reads "0 here, 12 inside" (Hide empty folders keeps it, since empty means none at any depth). Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
+| `ds_ui_demo_list_count_subfolders` | `0` | a folder row's demo count on the Demos tab includes its subfolders (the Settings tab's "Counts include subfolders"); `0` counts only the demos directly in it, and a folder with none there but some deeper reads "0 here, 12 inside" (Hide empty folders keeps it, since empty means none at any depth). Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
 | `ds_ui_demo_list_show_counts` | `0` (counting every folder slows the window on a big library) | folders are counted in the background, and folder rows on the Demos tab end in "(N demos)" (the game's own Load Demo window shows no counts either way). `0` counts nothing at all, so a folder opens with no progress bar and no second fill; `ds_ui_demo_list_hide_empty` and `_count_subfolders` need the counts, so they do nothing then and their Settings boxes hide | same, #787 |
 | `ds_demo_other_drives` | `1` | `viewdemo` and `playdemo` open a demo on another drive by its full path, as in `viewdemo "D:/folder/demo"`. The first time a drive is named its root (`D:\`) is added as a search path, last and under the hook's own path ID, and the rest of the path is opened under it; the game's own files are never looked for there. `0` leaves such a name to the game, which does not find it (the Anniversary file system asserts on the `:` and closes the game) | `goldsrc-hooks/src/demo_other_drives.rs`, #776 |
 | `ds_demo_show_load_progress` | `1` | while `viewdemo` is still reading a demo, the stock VCR bar shows a percent and a progress bar where its time label sits (the buffered span over the demo's own playback length, the Playback tab's number), hidden again once the console says "Demo file completely loaded.". Only on the bar layout DoD Studio's launch writes to `dod_addon\resource\DemoPlayerDialog.res` (`native/src/demo_bar_res.rs`, from the user's own `dod\resource` one or the stock `valve` one, never written back), so a game started without `-addons` or without Studio shows nothing; does nothing while `ds_ui_viewdemo_in_panel` is on, since the Playback tab shows it then | `goldsrc-hooks/src/demo_bar_progress.rs`, #465 |
@@ -603,8 +603,24 @@ far each has got (`Loading: Demo 45%   Highlights 60%`, #797). A demo too big fo
 the game's memory (analysis takes about 12 times the demo's size; the
 pre-Anniversary game has under 1 GB free) is refused with a note to open it in
 the Demo Analyzer instead. On the
-Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
-shows the value and sets it when clicked (add more in build mode).
+Settings tab, every setting on this page a player would change is listed under
+its area's heading (Spectating, HUD, View, Players, Map, Sound, Demo playback,
+DoD Studio window, HD textures), with `hud_draw` and `r_drawviewmodel`; left out
+are what Studio sets itself (`ds_spec_lock`, `ds_capture_*`,
+`ds_player_overrides`) and `ds_debug_*` (#899). A control named `cvar_<name>`
+is bound to that cvar: a check box for on/off, a dropdown for the settings with
+a few values (`ds_hud_overview_players`, `ds_hud_overview_team_marker`,
+`ds_view_show_own_blood`, `ds_demo_fast_load`, `ds_demo_ex_interp_max`) and for
+`ds_hd_style` (the styles built on disk). It shows the live value, so a value a
+`.cfg` set shows, and a value none of a dropdown's entries has shows as itself.
+A click saves that one setting to `dodstudio_ui\settings.cfg` (never
+`config.cfg`), applied once when the game starts; Studio's Initial Commands,
+and any `.cfg` they `exec`, run at every demo load and win for the session,
+and never rewrite it. The tab scrolls with the mouse wheel or its ▲/▼ buttons
+when the window is too short for every row. The list lives in
+`goldsrc-hooks/src/settings_tab.rs` and `Settings.res` is generated from it: a
+new setting is one row there, and a test fails while `Commands.txt` has a
+setting the tab neither lists nor leaves out on purpose.
 `ds_ui_panel [1|0|reset|<tab>]`: bare opens or closes it, `1` opens, `0`
 closes, `reset` writes the default layouts back and rebuilds the window, and a
 tab's name (`ds_ui_panel highlights`) opens it on that tab. With
