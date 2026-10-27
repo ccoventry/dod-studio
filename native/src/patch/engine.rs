@@ -25,7 +25,6 @@ fn check_console_cmd_len(cmd: &str) -> std::io::Result<()> {
         cmd,
         cmd.len()
     );
-    log::error!("{}", msg);
     Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg))
 }
 
@@ -36,7 +35,6 @@ fn write_console_cmd(
     cmd: &str,
 ) -> std::io::Result<i32> {
     use std::io::Write;
-    log::debug!("Injecting Command: {} at tick: {}", cmd, tick);
     check_console_cmd_len(cmd)?;
     writer.write_all(&[3_u8])?;
     writer.write_all(&time.to_le_bytes())?;
