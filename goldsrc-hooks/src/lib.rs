@@ -83,6 +83,9 @@
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
 //!   demo's player opened.
+//! - `hint_panel`: the `ds_hud_hide_hints` cvar (on by default) -- keep
+//!   DoD's auto-help hint panel shut, which a POV demo recorded with `_ah 1`
+//!   opens and the viewer's own `_ah` can't stop (#286).
 //! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
 //!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
@@ -262,6 +265,7 @@ mod gl_zoom;
 mod gun_log;
 mod hand_signals;
 mod hide_asset;
+mod hint_panel;
 mod hlae_window;
 mod hltv_messages;
 mod hud_sprite_edges;

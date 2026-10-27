@@ -99,11 +99,11 @@ fn write_in(
             Some(path)
         }
         Err(e) => {
-            log::warn!(
+            native::log_markdown(&format!(
                 "Could not write the capture manifest to {}: {}",
                 dir.display(),
                 e
-            );
+            ));
             None
         }
     }

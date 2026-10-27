@@ -5,7 +5,7 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log::error!/eprintln!
+// as a toast/dialog string. Developer-only log_markdown/eprintln!
 // diagnostics stay inline at their call site, same as strings.js leaves
 // console.log/console.error alone. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
