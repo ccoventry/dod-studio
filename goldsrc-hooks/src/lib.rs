@@ -13,16 +13,11 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to install without them:
-//! - `ds_spec_match_pov`, one cvar over five modules, for making a
-//!   spectated first-person view look and sound like the player's own
-//!   recording:
+//! - `ds_spec_match_pov`, one cvar over four modules, for making a
+//!   spectated first-person view look like the player's own recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
 //!     reload, draw, idle, grenades -- which the engine otherwise leaves
 //!     static. Full design write-up in `docs/goldsrc_hltv_animation_fix.md`.
-//!   - `missing_shots`: an HLTV demo carries the fire event for well under
-//!     half the rounds fired; the rest are found from the shooter's body
-//!     animation restarting and get the weapon's own event handler called for
-//!     them (sound, flash, impact).
 //!   - `spectator_crosshair`: draw the spectator crosshair from the same
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
 //!     are drawn by different code paths and do not otherwise share a look.
@@ -30,6 +25,13 @@
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
 //!     player's own would (sprint, jump, prone, ladder).
+//! - `missing_shots` and `pov_recorder_shots`: `ds_sound_restore_gunshots`,
+//!   the gunshots a demo lost (#1036). An HLTV demo carries the fire event
+//!   for well under half the rounds fired, a POV demo for about six in seven
+//!   of the other players'; the rest are found from the shooter's body
+//!   animation restarting and get the weapon's own event handler called for
+//!   them (sound, flash, impact). A POV recorder's own unpredicted shots are
+//!   found from his clip count instead (#1029).
 //! - `strafe_twitch`: `ds_player_fix_model_flicker`, player models hold
 //!   still for the frame an HLTV demo's clock steps back, which would turn a
 //!   strafing model round (#927). Its own switch, on by default: a bug in how
@@ -38,8 +40,8 @@
 //!   when the watched player dies, as his recording shows it, instead of the
 //!   rolled view from his dead eyes. Its own switch: a movie wants it, a
 //!   shoutcast does not.
-//! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
-//!   gunshots through. It changes no sound.
+//! - `fire_sounds`: the `EV_PlaySound` hook `anim_fix` and the gunshot
+//!   modules hear gunshots through. It changes no sound.
 //! - `deathmsg`: the `ds_hud_deathmsg` command -- raise the four-line cap on
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
@@ -51,6 +53,10 @@
 //!   (renamed from `ds_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
+//! - `player_names`: the `ds_player_change_name add|list|remove|clear`
+//!   command -- rename a player everywhere their name shows during playback,
+//!   by SteamID, slot or `self`, for one demo or all, through a detour of
+//!   client.dll's `pfnGetPlayerInfo` (#1021).
 //! - `spectator_follow`: `ds_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `ds_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -77,6 +83,9 @@
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
 //!   demo's player opened.
+//! - `hint_panel`: the `ds_hud_hide_hints` cvar (on by default) -- keep
+//!   DoD's auto-help hint panel shut, which a POV demo recorded with `_ah 1`
+//!   opens and the viewer's own `_ah` can't stop (#286).
 //! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
 //!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
@@ -179,6 +188,14 @@
 //! - `spectator_text`: the `ds_spec_hide_text` cvar -- hide the
 //!   camera mode's name and the green "Press DUCK for Spectator Menu" when
 //!   the view becomes a spectator camera (#677).
+//! - `engine_center_print`: the `hw.dll` half of `ds_hud_hide_center_text`
+//!   -- the engine's own `svc_centerprint`, per engine build (#677).
+//! - `server_hud_text`: the `ds_hud_hide_server_text` cvar -- hide
+//!   server plugins' coloured HUD messages (`TE_TEXTMESSAGE`) by pointing one
+//!   `hw.dll` call at a filter, per engine build (#677).
+//! - `hw_call_site`: one `call rel32` in `hw.dll` found per engine build and
+//!   rewritten while a setting is on (`engine_center_print`,
+//!   `server_hud_text`).
 //! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -220,6 +237,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_bar_progress;
 mod demo_console_keys;
 mod demo_file;
 mod demo_list_folders;
@@ -232,6 +250,7 @@ mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
+mod engine_center_print;
 mod events;
 mod ex_interp;
 mod fast_load;
@@ -245,6 +264,7 @@ mod gl_zoom;
 mod gun_log;
 mod hand_signals;
 mod hide_asset;
+mod hint_panel;
 mod hlae_window;
 mod hltv_messages;
 mod hud_sprite_edges;
@@ -252,6 +272,7 @@ mod hud_sprite_lod;
 mod hud_sprites;
 mod hudelement;
 mod hull_trace_guard;
+mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
 mod map_sounds;
@@ -266,16 +287,19 @@ mod overview_map;
 mod overview_marker;
 mod overview_players;
 mod overview_speaker;
+mod own_blood;
 mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
 mod player_crosshair;
+mod player_names;
 mod player_overrides;
 mod player_table;
 mod pmove_guard;
 mod position;
 mod pov_live_bob;
+mod pov_recorder_shots;
 mod remote;
 mod review;
 mod review_lock;
@@ -284,6 +308,7 @@ mod scan;
 mod schedule;
 mod scoreboard;
 mod screen_effects;
+mod server_hud_text;
 mod server_query;
 mod spectator_bars;
 mod spectator_buttons;

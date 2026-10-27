@@ -49,8 +49,11 @@ function resolveAndClose(result) {
  * and a hover text). `footer`: an optional line after the list.
  * `focusConfirm`: the confirm button takes focus, so Enter picks it; only for
  * a question whose yes loses nothing.
+ * `destructive`: the confirm button is red, for a yes that deletes, recycles,
+ * overwrites or throws work away; every other confirm uses the accent colour
+ * (#880).
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, focusConfirm = false } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, focusConfirm = false, destructive = false } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
   if (detailsEl) {
@@ -76,7 +79,11 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
     footerEl.textContent = footer || '';
     footerEl.style.display = footer ? '' : 'none';
   }
-  if (okBtn) okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
+  if (okBtn) {
+    okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
+    okBtn.classList.toggle('danger-btn', !!destructive);
+    okBtn.classList.toggle('primary-btn', !destructive);
+  }
   if (cancelBtn) {
     cancelBtn.textContent = cancelLabel || STRINGS.THEMED_CONFIRM_MODAL.CANCEL_BUTTON;
     // `hideCancel`: a notice with one button, not a question.

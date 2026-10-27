@@ -293,6 +293,68 @@ mod test {
         );
     }
 
+    /// `svc_pings` splits each entry 5 (slot) + 12 (ping) + 7 (loss) bits
+    /// (#1031). The fixture's recorder pinged a steady ~26 ms with no loss;
+    /// these are the numbers `recording_quality_probe` (#1031's reference
+    /// split) gives for the same demo: 237 samples, median 26, p95 28, loss 0.
+    /// The re-encode test above covers the writer.
+    #[test]
+    fn a_real_recording_s_pings_are_the_scoreboard_s() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let demo = open_demo_from_bytes(&bytes).unwrap();
+
+        let mut recorder = None;
+        let (mut pings, mut losses, mut entries) = (vec![], vec![], 0);
+        // The recorder's slot comes from SvcServerInfo in the LOADING entry
+        // (0); pings are counted from the playback entries on, as in the probe.
+        for (entry, frame) in demo
+            .directory
+            .entries
+            .iter()
+            .enumerate()
+            .flat_map(|(k, e)| e.frames.iter().map(move |f| (k, f)))
+        {
+            let types::FrameData::NetworkMessage(network) = &frame.frame_data else {
+                continue;
+            };
+            let types::MessageData::Parsed(messages) = &network.1.messages else {
+                continue;
+            };
+            for message in messages {
+                let types::NetMessage::EngineMessage(m) = message else {
+                    continue;
+                };
+                match &**m {
+                    types::EngineMessage::SvcServerInfo(si) => recorder = Some(si.player_index),
+                    types::EngineMessage::SvcPings(p) if entry > 0 => {
+                        for e in p.pings.iter().filter(|e| e.has_ping_data) {
+                            let slot = e.player_id.unwrap();
+                            assert!(slot < 32, "slot {slot}");
+                            assert!(e.ping.unwrap() < 1000, "{e:?}");
+                            assert!(e.loss.unwrap() <= 100, "{e:?}");
+                            entries += 1;
+                            if Some(slot) == recorder {
+                                pings.push(e.ping.unwrap());
+                                losses.push(e.loss.unwrap());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(entries > pings.len(), "the bots' entries are read too");
+        assert_eq!(pings.len(), 237, "the recorder's ping samples");
+        pings.sort_unstable();
+        assert_eq!(pings[pings.len() / 2], 26, "median ping");
+        assert!(pings.iter().all(|p| (5..=60).contains(p)), "{pings:?}");
+        assert!(losses.iter().all(|l| *l == 0), "{losses:?}");
+    }
+
     /// The tolerant parse on damaged copies of `ci_fixture.dem` (#811), built
     /// here so CI runs them.
     mod tolerant_parse {

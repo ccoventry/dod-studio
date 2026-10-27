@@ -9,7 +9,7 @@ import { pickPath } from './pick_path.js';
 import { blenderStatus, blenderSetExe, blenderRun, blenderCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
-import { elapsedWords } from './time_format.js';
+import { durationText } from './time_format.js';
 import { blenderStartView, blenderFramesView } from './blender_progress.js';
 import { drawBar } from './step_bar.js';
 
@@ -180,9 +180,9 @@ export function initBlenderPane() {
         style: styleSelect.value,
         step,
       });
-      progressText.textContent = STRINGS.BLENDER.done(label, elapsedWords(outcome.elapsed_secs));
+      progressText.textContent = STRINGS.BLENDER.done(label, durationText(outcome.elapsed_secs));
       showResults(outcome);
-      showToast(STRINGS.BLENDER.done(label, elapsedWords(outcome.elapsed_secs)), 'success');
+      showToast(STRINGS.BLENDER.done(label, durationText(outcome.elapsed_secs)), 'success');
     } catch (err) {
       progressText.textContent = err === 'cancelled' ? STRINGS.BLENDER.CANCELLED : STRINGS.BLENDER.failed(label);
     } finally {

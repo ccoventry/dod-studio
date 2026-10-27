@@ -71,7 +71,8 @@ pub struct CacheProgress {
     /// done: the page's time left goes by bytes (#687).
     pub bytes_to_parse: u64,
     pub bytes_parsed: u64,
-    /// The demo just finished.
+    /// The demo just finished, its full path as given: the Analyzer's player
+    /// read matches it against the folder's demos (#992).
     pub last: Option<String>,
     /// The run is over: every demo done, or stopped.
     pub finished: bool,
@@ -278,7 +279,7 @@ fn cache_demos_with(
                                 ));
                             }
                         }
-                        p.last = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                        p.last = Some(path.to_string_lossy().into_owned());
                         p.clone()
                     };
                     on_progress(&snapshot);
@@ -340,6 +341,27 @@ mod tests {
         assert_eq!(seen.len(), 9);
         assert_eq!(seen[0].done, 0);
         assert!(seen.last().unwrap().finished);
+    }
+
+    #[test]
+    fn last_is_the_full_path_given() {
+        // The Analyzer's player read matches it against the folder's paths
+        // (#992), so a bare file name would never match.
+        let path = PathBuf::from(r"D:\demos\sub folder\a.dem");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_by_progress = seen.clone();
+        cache_demos_with(
+            vec![path.clone()],
+            uncached(1),
+            1,
+            Arc::new(AtomicBool::new(false)),
+            UpgradeProgress::default(),
+            move |p| seen_by_progress.lock().unwrap().push(p.clone()),
+            |_| Ok(false),
+        );
+        let seen = seen.lock().unwrap();
+        let expected = path.to_string_lossy().into_owned();
+        assert_eq!(seen[1].last.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
