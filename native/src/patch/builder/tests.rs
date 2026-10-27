@@ -375,7 +375,7 @@ fn in_obs_mode_normal_speed_puts_back_the_pinned_fps() {
     )
     .expect("helper cfg written");
     assert!(
-        cfg.contains("; fps_override 1; fps_max 120; gl_vsync 1\""),
+        cfg.contains("; fps_override 1; fps_max 240; gl_vsync 0\""),
         "{cfg}"
     );
 }
@@ -673,7 +673,7 @@ fn the_movie_modes_record_aliases_are_unchanged_by_agr_mode() {
     }
     assert_eq!(
         record_alias_lines(&config_in_mode(crate::patch::CaptureMode::Obs)),
-        "alias sys_record_start \"stopsound\"\n\
+        "alias sys_record_start \"echo [dod-studio] OBS_MODE_NO_HLAE_START\"\n\
          alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
     );
     for mode in [
@@ -901,7 +901,7 @@ fn keep_game_behind_sets_stay_behind_and_never_the_speed() {
 }
 
 #[test]
-fn obs_mode_pins_fps_override_and_fps_max_to_obs_capture_fps() {
+fn obs_mode_has_the_game_draw_at_twice_obs_capture_fps_with_vsync_off() {
     let mut config = PatcherConfig::default();
     config.capture_mode = crate::patch::CaptureMode::Obs;
     config.capture_fps = 300; // must not leak into fps_max — see below
@@ -912,9 +912,24 @@ fn obs_mode_pins_fps_override_and_fps_max_to_obs_capture_fps() {
         "expected fps_override 1, got: {commands:?}"
     );
     assert!(
-        commands.iter().any(|c| c == "fps_max 120"),
-        "expected fps_max 120 (from obs_capture_fps, not capture_fps), got: {commands:?}"
+        commands.iter().any(|c| c == "fps_max 240"),
+        "expected fps_max 240 (twice obs_capture_fps, not capture_fps), got: {commands:?}"
     );
+    assert!(
+        commands.iter().any(|c| c == "gl_vsync 0"),
+        "expected gl_vsync 0, got: {commands:?}"
+    );
+}
+
+#[test]
+fn obs_game_fps_max_stays_inside_the_engine_cap() {
+    let mut config = PatcherConfig::default();
+    config.obs_capture_fps = 60;
+    assert_eq!(obs_game_fps_max(&config), 120);
+    config.obs_capture_fps = 600;
+    assert_eq!(obs_game_fps_max(&config), 1000);
+    config.obs_capture_fps = 0;
+    assert_eq!(obs_game_fps_max(&config), 120);
 }
 
 #[test]

@@ -693,7 +693,16 @@ pub fn spawn_capture_engine(
             // brightness and gamma (`game_handoff`). With the hook that demo
             // is dodstudio_chain_01 itself, without it the primer (#365). A
             // batch the hook runs starts the same way, with its batch file.
+            //
+            // OBS mode records the game's own sound output, which DirectSound
+            // silences while the game isn't the active window, so it plays
+            // through waveOut instead (`obs::GAME_ARGS`).
             let with_start = |args: &str| {
+                let args = &if config.capture_mode == crate::patch::CaptureMode::Obs {
+                    format!("{} {args}", crate::obs::GAME_ARGS)
+                } else {
+                    args.to_string()
+                };
                 if config.keep_game_behind {
                     format!("{} {args}", crate::patch::builder::START_BEHIND_ARG)
                 } else {
@@ -1018,12 +1027,18 @@ pub fn spawn_capture_engine(
                             kill_hl_exe_and_wait(&mut sys);
                             break;
                         }
-                // OBS gone for good, after a reconnect was already tried.
-                // Continuing would play the demo to the end capturing nothing
-                // and then report the batch as finished.
-                if obs_session.as_ref().is_some_and(|s| s.is_dead()) {
-                    log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
-                    failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
+                // OBS gone for good, after a reconnect was already tried, or
+                // refusing to record (`ObsSession::refused`). Continuing would
+                // play the demo to the end capturing nothing and then report
+                // the batch as finished.
+                if let Some(session) = obs_session.as_ref().filter(|s| s.is_dead()) {
+                    if let Some(why) = session.refused() {
+                        log_markdown(&format!("[HLAE] {why} — aborting rather than finishing the batch with nothing recorded."));
+                        failure_reason = Some(why.to_string());
+                    } else {
+                        log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
+                        failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
+                    }
                     kill_hl_exe_and_wait(&mut sys);
                     break;
                 }

@@ -79,6 +79,16 @@ pub fn ensure_dod_studio_setup(
     fps_den: i32,
 ) -> Result<ProvisionResult, ObsError> {
     let previous_profile = ensure_profile(client)?;
+    // Before the video settings: rebuilding the outputs (see
+    // ensure_recording_settings) switches profiles, which reloads the
+    // profile's own canvas and frame rate. Best-effort: OBS still records if
+    // these can't be set, just at whatever quality the profile was left on.
+    if let Err(e) = ensure_recording_settings(client, previous_profile.as_deref()) {
+        log_markdown(&format!(
+            "⚠️ **OBS** — couldn't set the `{PROFILE_NAME}` profile's recording quality ({e}). \
+             Clips record at whatever OBS's Settings → Output has for it."
+        ));
+    }
     client.set_video_settings(width, height, fps_num, fps_den)?;
     let previous_scene = ensure_scene_and_sources(client, width, height)?;
     // Best-effort: muting a renamed or removed default input should not fail
@@ -107,6 +117,100 @@ fn ensure_profile(client: &mut ObsClient) -> Result<Option<String>, ObsError> {
         "🎬 **OBS** — switched to profile `{PROFILE_NAME}` (restored afterwards)."
     ));
     Ok(Some(current))
+}
+
+/// The recording settings DoD Studio's profile records with (#645), as
+/// `(category, name, value)` for `SetProfileParameter`.
+///
+/// - **Simple output mode**, because its settings live in the profile's
+///   `basic.ini`, which obs-websocket can write. Advanced mode keeps the
+///   encoder's settings in `recordEncoder.json`, which it can't.
+/// - **"Indistinguishable quality"** (`HQ`): constant QP (16 on NVENC at
+///   2560x1440, read from OBS 32.2.2's log), about 390 Mbps for a 120 fps
+///   clip. A new profile records "Same as stream" instead: 6 Mbps CBR, a
+///   sixtieth of that for the same clip.
+/// - **The encoder OBS picked for this PC** (`default_encoder`, OBS's own
+///   default for a new profile): the hardware encoder when there is one.
+///   Setting it back undoes a change to x264, which can't keep up with a
+///   high-rate capture on most CPUs.
+/// - **Hybrid MP4** where OBS has it (30.2 and later): a file OBS was killed
+///   while writing still plays to the moment it died, and the finished file is
+///   a plain MP4 every editor opens. Older OBS keeps whatever it had.
+/// - **No replay buffer**: it would hold the recording output.
+fn recording_settings(
+    obs_version: &str,
+    default_encoder: &str,
+) -> Vec<(&'static str, &'static str, String)> {
+    let mut wanted = vec![
+        ("Output", "Mode", "Simple".to_string()),
+        ("SimpleOutput", "RecQuality", "HQ".to_string()),
+        ("SimpleOutput", "RecRB", "false".to_string()),
+    ];
+    if !default_encoder.is_empty() {
+        wanted.push(("SimpleOutput", "RecEncoder", default_encoder.to_string()));
+    }
+    if version_at_least(obs_version, (30, 2)) {
+        wanted.push(("SimpleOutput", "RecFormat2", "hybrid_mp4".to_string()));
+    }
+    wanted
+}
+
+/// Whether `version` (`32.2.2`, `30.2.0-beta1`) is at least `min`.
+fn version_at_least(version: &str, min: (u32, u32)) -> bool {
+    let mut parts = version
+        .split(|c: char| !c.is_ascii_digit())
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(0);
+    (major, minor) >= min
+}
+
+/// Puts the profile's recording settings to [`recording_settings`], on the
+/// profile that is current (ours: called right after `ensure_profile`).
+///
+/// OBS reads them only when it rebuilds its outputs, and a write through
+/// obs-websocket doesn't rebuild them: measured on OBS 32.2.2, changing the
+/// quality preset that way made the next `StartRecord` fail with an error box
+/// in OBS. A profile switch rebuilds them, so after any change this switches
+/// to another profile and straight back. Nothing is written when everything
+/// already matches, which is every connect after the first.
+fn ensure_recording_settings(
+    client: &mut ObsClient,
+    previous_profile: Option<&str>,
+) -> Result<(), ObsError> {
+    let version = client.obs_version()?;
+    let (_, default_encoder) = client.profile_parameter("SimpleOutput", "RecEncoder")?;
+    let mut changed = Vec::new();
+    for (category, name, value) in recording_settings(&version, &default_encoder) {
+        let (current, default) = client.profile_parameter(category, name)?;
+        let effective = if current.is_empty() { default } else { current };
+        if effective != value {
+            client.set_profile_parameter(category, name, &value)?;
+            changed.push(format!("{name} {effective} → {value}"));
+        }
+    }
+    if changed.is_empty() {
+        return Ok(());
+    }
+    let (profiles, _) = client.profile_list()?;
+    let other = previous_profile
+        .map(str::to_string)
+        .or_else(|| profiles.into_iter().find(|p| p != PROFILE_NAME));
+    match other {
+        Some(other) => {
+            client.set_profile(&other)?;
+            client.set_profile(PROFILE_NAME)?;
+        }
+        None => log_markdown(&format!(
+            "⚠️ **OBS** — `{PROFILE_NAME}` is OBS's only profile, so its new recording settings \
+             apply from OBS's next start."
+        )),
+    }
+    log_markdown(&format!(
+        "🎬 **OBS** — set the `{PROFILE_NAME}` profile's recording settings: {}.",
+        changed.join(", ")
+    ));
+    Ok(())
 }
 
 fn ensure_scene_and_sources(
@@ -183,7 +287,11 @@ fn ensure_game_audio_source(client: &mut ObsClient) -> Result<(), ObsError> {
             settings,
         )?;
     }
-    ensure_scene_item(client, GAME_AUDIO_SOURCE, existed)
+    ensure_scene_item(client, GAME_AUDIO_SOURCE, existed)?;
+    // Best-effort, like the bounds above: a clip a quarter second out of sync
+    // still beats no clip.
+    let _ = client.set_input_audio_sync_offset(GAME_AUDIO_SOURCE, super::GAME_AUDIO_SYNC_OFFSET_MS);
+    Ok(())
 }
 
 /// Makes sure `source` is actually placed in `SCENE_NAME` — only relevant
@@ -202,4 +310,58 @@ fn ensure_scene_item(client: &mut ObsClient, source: &str, existed: bool) -> Res
         return Ok(()); // already placed here, nothing to do
     }
     client.create_scene_item(SCENE_NAME, source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn value<'a>(wanted: &'a [(&str, &str, String)], name: &str) -> Option<&'a str> {
+        wanted
+            .iter()
+            .find(|(_, n, _)| *n == name)
+            .map(|(_, _, v)| v.as_str())
+    }
+
+    /// "Same as stream" (a new profile's default) is 6 Mbps CBR: the profile
+    /// must ask for the constant-quality preset instead, in Simple mode,
+    /// whose settings obs-websocket can write.
+    #[test]
+    fn records_at_constant_quality_in_simple_mode() {
+        let wanted = recording_settings("32.2.2", "nvenc");
+        assert_eq!(value(&wanted, "Mode"), Some("Simple"));
+        assert_eq!(value(&wanted, "RecQuality"), Some("HQ"));
+        assert_eq!(value(&wanted, "RecRB"), Some("false"));
+    }
+
+    /// The encoder is whatever OBS picked for this PC, never one named here.
+    #[test]
+    fn keeps_the_encoder_obs_picked_for_this_pc() {
+        let amd = recording_settings("32.2.2", "amd");
+        assert_eq!(value(&amd, "RecEncoder"), Some("amd"));
+        let unknown = recording_settings("32.2.2", "");
+        assert_eq!(value(&unknown, "RecEncoder"), None);
+    }
+
+    /// Hybrid MP4 arrived in OBS 30.2; an older OBS keeps its container.
+    #[test]
+    fn hybrid_mp4_only_where_obs_has_it() {
+        assert_eq!(
+            value(&recording_settings("30.2.0", "nvenc"), "RecFormat2"),
+            Some("hybrid_mp4")
+        );
+        assert_eq!(
+            value(&recording_settings("31.0.0-beta1", "nvenc"), "RecFormat2"),
+            Some("hybrid_mp4")
+        );
+        assert_eq!(
+            value(&recording_settings("30.1.2", "nvenc"), "RecFormat2"),
+            None
+        );
+        assert_eq!(
+            value(&recording_settings("29.1.3", "nvenc"), "RecFormat2"),
+            None
+        );
+        assert_eq!(value(&recording_settings("?", "nvenc"), "RecFormat2"), None);
+    }
 }
