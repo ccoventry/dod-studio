@@ -392,7 +392,7 @@ export const STRINGS = {
     obsTestFailed: (err) => `OBS test failed: ${err}`,
     OBS_CAPTURE_FPS_LABEL: 'OBS Capture FPS:',
     OBS_CAPTURE_FPS_TITLE:
-        "OBS's own live recording rate (the game draws at twice it) — separate from Capture FPS above, which is non-real-time for the other two modes. Set above what your machine can sustain and OBS drops frames instead of falling behind, making the clip choppy or unusable. 120 held at 2560x1440 on an RTX 3070 Ti; 240 did not. Test a short capture first and watch for dropped-frame warnings before committing to a value.",
+        "OBS's own live recording rate (the game draws at twice it) — separate from Capture FPS above, which is non-real-time for the other two modes. Set above what your machine can sustain and OBS drops frames instead of falling behind, making the clip choppy or unusable. At 2560x1440 on an RTX 3070 Ti, 60 held; 120 is at the encoder's limit (held in one run, dropped 12-95% of frames in others). Test a short capture first and watch for dropped-frame warnings before committing to a value.",
     OBS_CAPTURE_FPS_WARNING:
         'Too high for your machine and OBS drops frames — test a short capture first.',
     OBS_ENABLE_HINT:

@@ -69,7 +69,7 @@ utvideo, 300 fps.
 | Container | Hybrid MP4 (OBS 30.2+) | a killed OBS leaves a playable file; the finished file is a plain MP4 (VEGAS opens it) |
 | Replay buffer | off | |
 | Canvas and output | the game's resolution | as before |
-| FPS | Configuration's OBS Capture FPS, **120** by default | 240 is not sustainable here (below) |
+| FPS | Configuration's OBS Capture FPS, **120** by default | 120 is at NVENC's limit at 1440p, 60 holds (below) |
 | `[DoD-Studio] Game Audio` sync offset | **-270 ms** | waveOut's latency, see the sound paragraph below |
 
 Settings written over obs-websocket only take effect when OBS rebuilds its outputs: changing the
@@ -102,15 +102,27 @@ aligned on their freeze patterns).
 program whose window isn't in front (HLAE's sound.wav is unaffected: it mixes its own). `-wavonly`
 plays through waveOut instead, which keeps playing; its cost is 241-299 ms of latency, which the
 source's -270 ms sync offset takes back out. A hook that keeps DirectSound playing behind other
-windows would keep the lower latency (not built). Measured on POST only.
+windows would keep the lower latency (not built). On PRE (2026-10-26, same clips, 60 fps) the
+sound was +20 to +29 ms from HLAE's with the same -270 ms, so one offset fits both builds on this
+PC; other PCs' waveOut latency is unmeasured (#646). OBS's sound sat about 14 dB below HLAE's
+sound.wav (mean -24..-26 dB against -10..-12 dB).
 
 **`stopsound` at the record start** (`sys_record_start`) left ~250 ms of silence one second into
 every OBS clip. OBS mode no longer sends it there; the `AUDIO_SYNC` one, which clears the
 fast-forward's sound just before OBS starts, stays.
 
 **240 fps does not hold** at 2560x1440 with Simple mode's encoder preset: OBS output about half the
-frames it drew and reported 95-98% skipped "due to encoding lag". 120 fps had none. HLAE's 300 fps
-and its blend-to-motion-blur use stay HLAE-only.
+frames it drew and reported 95-98% skipped "due to encoding lag". HLAE's 300 fps and its
+blend-to-motion-blur use stay HLAE-only.
+
+**120 fps is at the encoder's limit, not safely inside it.** It held in one POST run (above) and
+dropped 12% in the next; on 2026-10-26 evening it dropped 32-95% per clip in five more runs, on
+PRE and POST alike, with `fps_max` at 120 or 240 (so not the game's rate). NVENC sat at 99% the
+whole time. Simple mode's recording encoder is fixed at p5, `hq` tuning, quarter-resolution
+two-pass, 8-frame lookahead and 2 B-frames; ffmpeg with those settings on PRE footage managed
+136 fps on its own, so a game and OBS's own GPU work beside it leave nothing spare. The QP doesn't
+help (153-163 fps at QP 16-23, same preset). **60 fps held on PRE**: no skipped frames, 0-0.4% of
+frames repeated with the game moving.
 
 **OBS Game Capture records the game behind other windows**: its frames match HLAE's of the same
 moment. A minimised game is parked off-screen by `ds_capture_stay_behind`; not measured with OBS.

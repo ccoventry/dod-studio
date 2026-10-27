@@ -84,5 +84,7 @@ pub const GAME_ARGS: &str = "-wavonly";
 /// waveOut plays the game's sound about a quarter second after the frame it
 /// belongs to. Measured on POST against HLAE takes of the same three clips
 /// (sound.wav is timed from the frames, so it is the reference): OBS's sound
-/// was 241-299 ms late with no offset, and -36 to +5 ms with -270.
+/// was 241-299 ms late with no offset, and -36 to +5 ms with -270; on PRE,
+/// +20 to +29 ms with -270. All on one PC; another
+/// PC's waveOut latency may differ (#646).
 pub const GAME_AUDIO_SYNC_OFFSET_MS: i64 = -270;
