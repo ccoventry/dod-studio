@@ -9,9 +9,12 @@ import { STRINGS } from './strings.js';
  *  Master Queue's Clear Untracked/Selected/All and row-delete actions) that
  *  have no other IPC call to log from. Best-effort: logs to the console on
  *  failure rather than toasting, since a lost log line isn't worth
- *  interrupting the user over. */
+ *  interrupting the user over (every toast is logged here, #873).
+ *  One line at a time: the command runs off the window's thread, where two
+ *  lines sent at once could land in either order. */
+let logQueue = Promise.resolve();
 export function logFrontendEvent(message) {
-  invoke('log_frontend_event', { message }).catch((err) => {
+  logQueue = logQueue.then(() => invoke('log_frontend_event', { message })).catch((err) => {
     console.error("IPC Execution Error (log_frontend_event):", err);
   });
 }
@@ -1058,6 +1061,27 @@ export async function enginePacketEntityLimit(gamePath) {
     });
 }
 
+/** The menu-size setting's state for an install (#985): `{ applies, on,
+ *  foreign, path }`, or null when it can't be read (menu_scale_setting.js
+ *  then disables the box). */
+export async function menuScaleStatus(gamePath, gameFolder) {
+  return invoke("menu_scale_status", { gamePath, gameFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (menu_scale_status):", err);
+      return null;
+    });
+}
+
+/** Writes or removes Studio's scheme copy in `<game>_addon\resource` (#985).
+ *  Throws; the caller toasts and puts the box back. */
+export async function setMenuScale(gamePath, gameFolder, on) {
+  return invoke("set_menu_scale", { gamePath, gameFolder, on })
+    .catch((err) => {
+      console.error("IPC Execution Error (set_menu_scale):", err);
+      throw err;
+    });
+}
+
 // ── Combine Clips (#107) ───────────────────────────────────────────────────
 
 export async function combinePlan(clips, ffmpegPath) {
@@ -1199,6 +1223,16 @@ export async function pickUserFolders() {
     });
 }
 
+/** Whether one of Studio's dialog windows is on screen (dialog_wait.js). */
+export async function fileDialogShown() {
+  return invoke("file_dialog_shown")
+    .catch((err) => {
+      console.error("IPC Execution Error (file_dialog_shown):", err);
+      // Treated as shown, so a failing check never leaves the notice up.
+      return true;
+    });
+}
+
 /** Non-recursive `.dem` count for a single folder — used by the Explorer
  *  sidebar's Quick Links rows (Pinned/Recent/Local). */
 export async function countDemoFiles(path) {
@@ -1221,6 +1255,18 @@ export async function indexDemoPlayers(paths, requestId, lane) {
     .catch((err) => {
       console.error("IPC Execution Error (index_demo_players):", err);
       return 0;
+    });
+}
+
+/** Sorts a folder's demos for the player read without opening any (#992):
+ *  `found` (players already cached, with them), `to_read`, and `in_cloud`
+ *  (no cache entry, on a cloud drive: reading one downloads it). Null on
+ *  failure, so the caller reads every demo as before. */
+export async function lookupDemoPlayers(paths) {
+  return invoke("lookup_demo_players", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (lookup_demo_players):", err);
+      return null;
     });
 }
 

@@ -47,6 +47,19 @@ test('Stop asks the backend to stop, and a stopped run says where it stopped', a
   await expect(button).toHaveText('Cache all');
 });
 
+// #992: the Analyzer's player read leaves a running run's demos to it.
+test("isCaching names the running run's demos, and none once it ends", async ({ page }) => {
+  await gotoHarness(page);
+  const caching = (path) => page.evaluate((p) => window.__demoCache.isCaching(p), path);
+  await page.evaluate(() => { window.__demoPaths = ['a.dem', 'b.dem']; });
+  expect(await caching('a.dem')).toBe(false);
+  await page.locator('#analyzer-cache-all-btn').click();
+  expect(await caching('a.dem')).toBe(true);
+  expect(await caching('z.dem')).toBe(false);
+  await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 2, total: 2, already: 0, failed: 0, finished: true, cancelled: false }));
+  await expect.poll(() => caching('a.dem')).toBe(false);
+});
+
 test('an empty folder says so and starts nothing', async ({ page }) => {
   await gotoHarness(page);
   await page.evaluate(() => { window.__demoPaths = []; });

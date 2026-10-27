@@ -62,9 +62,6 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows_sys::Win32::System::Memory::{
-    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
-};
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
 
 use crate::pe;
@@ -199,6 +196,14 @@ pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: 
 /// hook wins, and `client.dll`'s own handler is still reachable by calling it
 /// directly. Verified in `hw.dll` at 0x1d1a830 (hook) and 0x1d1a660
 /// (dispatch), pre-Anniversary. See `deathmsg.rs`.
+///
+/// The engine's *by-name* dispatcher (`hw.dll+0x1a7c0` pre-Anniversary,
+/// `+0x1a9260` 25th Anniversary) is different: it calls **every** record
+/// whose name matches, newest first, and never stops early. Only messages the
+/// engine makes up itself go that way -- the `HudText` that `TE_TEXTMESSAGE`
+/// turns into (`CL_HudMessage`) is the one that matters -- so a hook cannot
+/// drop those: `client.dll`'s own record runs after it anyway (#677,
+/// `server_hud_text.rs`).
 /// `gEngfuncs.GetLocalPlayer` (slot 51). Returns the local player's
 /// `cl_entity_t`. Confirmed by the call site at `client.dll+0x20520`, a
 /// three-instruction thunk that calls this slot and immediately
@@ -211,6 +216,40 @@ pub type GetLocalPlayerFn = unsafe extern "C" fn() -> *mut c_void;
 /// `client.dll+0xb4ae`, which passes `(slot, &g_PlayerInfoList[slot])` with a
 /// 0x20-byte stride -- the `hud_player_info_t` that carries `m_nSteamID`.
 pub type GetPlayerInfoFn = unsafe extern "C" fn(slot: i32, info: *mut HudPlayerInfo);
+
+/// `gEngfuncs.pfnTextMessageGet` (slot 25): the `client_textmessage_t` for a
+/// `titles.txt` name, or for one of the engine's own `__NETMESSAGE__1..4`
+/// that a `TE_TEXTMESSAGE` fills in. Confirmed by DoD's own five calls through
+/// `gEngfuncs+0x64` (`CHudMessage` at `client.dll+0x25386`, `+0x25437`,
+/// `+0x254f8`, `CHudTextMessage` at `+0x4c10f`, `+0x4c1cb`): one string
+/// argument, popped by the caller, and the result's `+0x28` read as the text.
+pub type TextMessageGetFn = unsafe extern "C" fn(name: *const c_char) -> *const ClientTextMessage;
+
+/// `client_textmessage_t` (`common/cl_entity.h`'s neighbour `cdll_int.h`).
+/// Only `p_message` is read. Its offset is what `client.dll` reads after
+/// `pfnTextMessageGet` (`mov eax, [eax+0x28]`, `+0x4c11c`) and what the
+/// engine's `TE_TEXTMESSAGE` handler writes the text pointer to (`[esi+0x28]`,
+/// `hw.dll+0x23d8a` pre-Anniversary, `[edi+0x28]` at `+0x1b09f4` Anniversary).
+#[repr(C)]
+pub struct ClientTextMessage {
+    pub effect: i32,
+    pub colour1: [u8; 4],
+    pub colour2: [u8; 4],
+    pub x: f32,
+    pub y: f32,
+    pub fadein: f32,
+    pub fadeout: f32,
+    pub holdtime: f32,
+    pub fxtime: f32,
+    pub p_name: *const c_char,
+    pub p_message: *const c_char,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(std::mem::offset_of!(ClientTextMessage, p_name) == 0x24);
+    assert!(std::mem::offset_of!(ClientTextMessage, p_message) == 0x28);
+};
 
 /// `hud_player_info_t` (`cdll_int.h`), the Steam-era layout: 0x20 bytes, with
 /// `m_nSteamID` at +0x18. The size is what DoD's `client.dll` strides its
@@ -637,7 +676,8 @@ impl EngineStudioApiPartial {
 /// lists every field of the real struct in declaration order -- confirmed
 /// against it field-by-field. Every field up through `IsSpectateOnly` is
 /// present, in order, so the ones we actually use (`pfn_add_command`,
-/// `pfn_get_player_info`, `pfn_console_print`, `cmd_argc`, `cmd_argv`, `pfn_weapon_anim`,
+/// `pfn_get_player_info`, `pfn_text_message_get`, `pfn_console_print`, `cmd_argc`,
+/// `cmd_argv`, `pfn_weapon_anim`,
 /// `pfn_get_game_directory`, `pfn_get_level_name`, `p_event_api`,
 /// `is_spectate_only`) land at the
 /// correct byte offsets; everything else is kept as an opaque, untyped slot
@@ -663,7 +703,10 @@ pub struct ClEngineFuncsPartial {
     _slots_before_get_player_info: [*mut c_void; 2], // pfnServerCmd, pfnClientCmd
     /// Slot 21. See [`GetPlayerInfoFn`].
     pub pfn_get_player_info: GetPlayerInfoFn,
-    _slots_before_draw_console_string: [*mut c_void; 5], // pfnPlaySoundByName .. pfnDrawCharacter
+    _slots_before_text_message_get: [*mut c_void; 3], // pfnPlaySoundByName .. pfnAngleVectors
+    /// Slot 25. See [`TextMessageGetFn`].
+    pub pfn_text_message_get: TextMessageGetFn,
+    _slots_before_draw_console_string: [*mut c_void; 1], // pfnDrawCharacter
     /// Slot 27. See [`DrawConsoleStringFn`]; the kill feed's names go through
     /// it (`CHudDeathNotice::Draw`, `call [gEngfuncs+0x6c]` at
     /// `client.dll+0x2b089` and `+0x2b135`) (#562).
@@ -817,6 +860,13 @@ static TIMER_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by the `HUD_Frame` trampoline the first time the engine actually
 /// renders a frame through us; retires the fallback timer thread.
 static HUD_FRAME_DRIVING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the per-frame callbacks run on the engine's own thread (from
+/// `HUD_Frame`), so they may call into VGUI, rather than on the fallback timer
+/// thread.
+pub(crate) fn hud_frame_driving() -> bool {
+    HUD_FRAME_DRIVING.load(Ordering::Acquire)
+}
 /// Held while the per-frame callbacks run, so the timer thread and
 /// `HUD_Frame` can never run them at the same time, even in the moment a late
 /// hook takes over. A try-lock: whoever finds it taken skips that frame
@@ -1294,18 +1344,9 @@ pub(crate) unsafe fn patch_gengfuncs_slot(
         if was.is_null() {
             return Err(format!("slot {slot} is null"));
         }
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            at as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
+        if !crate::patch::write_pointer(at, hook, crate::patch::After::Restore) {
             return Err(format!("slot {slot} could not be made writable"));
         }
-        *at = hook;
-        VirtualProtect(at as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
         Ok(was)
     }
 }
@@ -1340,19 +1381,14 @@ unsafe fn watch_client_commands() {
     REAL_CLIENT_CMD.store(real, Ordering::Release);
 
     unsafe {
-        let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old,
-        ) == 0
-        {
+        if !crate::patch::write_pointer(
+            slot,
+            hook_client_cmd as *mut c_void,
+            crate::patch::After::Restore,
+        ) {
             crate::debug::report("client-cmd watch: couldn't make the slot writable; not watching");
             return;
         }
-        *slot = hook_client_cmd as *mut c_void;
-        VirtualProtect(slot as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
         crate::debug::report(&format!(
             "client-cmd watch: gEngfuncs at {gengfuncs:p}, pfnClientCmd was {real:p} -- now logging what client.dll runs"
         ));
@@ -1745,27 +1781,9 @@ fn hook_import(
 
     unsafe {
         real_store.store(*slot, Ordering::Release);
-
-        let mut old_protect: PAGE_PROTECTION_FLAGS = 0;
-        let ok = VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old_protect,
-        );
-        if ok == 0 {
-            return false;
-        }
-        *slot = replacement;
-        VirtualProtect(
-            slot as *mut c_void,
-            size_of::<*mut c_void>(),
-            old_protect,
-            &mut old_protect,
-        );
+        // Left writable: HLAE hooks imports on this page too (#1059).
+        crate::patch::write_pointer(slot, replacement, crate::patch::After::LeaveWritable)
     }
-
-    true
 }
 
 /// Installs both `hw.dll` IAT hooks: `LoadLibraryA` (to learn `client.dll`'s

@@ -70,6 +70,11 @@ pub mod match_groups;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
 
+/// The demo player bar's layout with the loading progress controls, written
+/// into `dod_addon` at every launch (#465).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_bar_res;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
@@ -94,6 +99,10 @@ pub mod overview;
 /// folder's sprites (#842).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod crosshair_import;
+/// Configuration › Paths: the Anniversary menus at the pre-Anniversary size,
+/// through a scheme copy in the addon folder (#985).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod menu_scale;
 /// Who is in a demo, from a small index beside the analyzer cache (#437).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod player_index;
@@ -530,6 +539,58 @@ mod activity_log_tests {
         assert!(path.exists(), "nothing was written to {}", path.display());
         let body = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(body.contains("activity log redirect probe"));
+    }
+
+    /// No logger backend is registered, so a `log::` macro in the desktop
+    /// app's code writes nowhere (#873). Its lines go through `log_markdown`.
+    #[test]
+    fn the_app_has_no_log_macros_that_write_nowhere() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let roots = [
+            manifest.join("src"),
+            manifest.join("../studio/src-tauri/src"),
+        ];
+        for root in &roots {
+            assert!(root.is_dir(), "{} is missing", root.display());
+        }
+        let mut found = Vec::new();
+        let mut stack: Vec<std::path::PathBuf> = roots.to_vec();
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                for (n, line) in text.lines().enumerate() {
+                    let code = line.trim_start();
+                    if code.starts_with("//") {
+                        continue;
+                    }
+                    let macro_call = ["trace", "debug", "info", "warn", "error"]
+                        .iter()
+                        .any(|level| code.contains(&format!("log::{level}!(")));
+                    // `log_markdown`'s own wasm32 branch, where a browser
+                    // console logger can pick it up.
+                    let wasm_branch = path == manifest.join("src").join("lib.rs")
+                        && code == concat!("log", "::info!(\"{}\", msg);");
+                    if macro_call && !wasm_branch {
+                        found.push(format!("{}:{}", path.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "log:: macros write nowhere in this app; use log_markdown: {found:?}"
+        );
     }
 }
 

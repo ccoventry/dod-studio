@@ -265,8 +265,8 @@ describe('Rename and Undo progress (#958)', () => {
 
   it('ends with how many, how long, and what failed', () => {
     const ok = { renamed: new Array(40).fill({}), failed: [] };
-    expect(renameDoneLine('apply', ok, '1.2')).toBe('Renamed 40 demos in 1.2 s.');
-    expect(renameDoneLine('undo', { renamed: [{}], failed: [{}, {}] }, '0.1'))
+    expect(renameDoneLine('apply', ok, '1.2 s')).toBe('Renamed 40 demos in 1.2 s.');
+    expect(renameDoneLine('undo', { renamed: [{}], failed: [{}, {}] }, '0.1 s'))
       .toBe("Put back 1 demo in 0.1 s. 2 couldn't be renamed.");
   });
 });

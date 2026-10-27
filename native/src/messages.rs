@@ -121,8 +121,11 @@ pub fn could_not_move_after_retries(
     last_err: impl Display,
 ) -> String {
     format!(
-        "could not move {} to {} after {:.1}s of retries: {}",
-        recorded, target, retry_secs, last_err
+        "could not move {} to {} after {} of retries: {}",
+        recorded,
+        target,
+        crate::utils::duration_text::duration_text(retry_secs),
+        last_err
     )
 }
 
@@ -518,10 +521,7 @@ mod tests {
         let last = "sharing violation";
         assert_eq!(
             could_not_move_after_retries(recorded, target, retry_secs, last),
-            format!(
-                "could not move {} to {} after {:.1}s of retries: {last}",
-                recorded, target, retry_secs
-            )
+            format!("could not move {recorded} to {target} after 5.0 s of retries: {last}")
         );
     }
 }

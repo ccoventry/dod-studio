@@ -4,7 +4,8 @@
 > Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
 > `ds_hud_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
 > plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
-> `font` (§6, #562) and `scale` (§7, #728) came later, in `deathmsg/`.
+> `font` (§6, #562), `scale` (§7, #728) and `layout` (§8, #1022) came later,
+> in `deathmsg/`.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -576,14 +577,57 @@ font, `IScheme::GetFont("EngineFont", proportional)` of the default scheme
 `+0x230d71`). It sets the font, position and colour, converts the string
 with `ILocalize::ConvertANSIToUnicode` (`MultiByteToWideChar(CP_UTF8)`),
 prints it, and then **resets the colour to `con_color`**. The width is the sum
-of `GetCharABCwide` over the characters, the height `GetFontTall`.
+of `GetCharABCwide` over the characters, the height `GetFontTall`. The draw
+first turns every character `iswprint` rejects into a space (PRE `+0x6c42`;
+POST likewise), the length call does not, so a name holding `⅞` or `★` shows
+a blank there and measures a little wider than it draws.
 
 `ISurface` slots (slot 0 is the destructor; MSVC lays adjacent overloads out
 in reverse order), checked by `ret` size on both builds in
 `tools/verify_killfeed_font_offsets.py`: 13 `DrawSetTextFont`, 15
 `DrawSetTextColor(r,g,b,a)`, 16 `DrawSetTextPos`, 18 `DrawPrintText`, 21
 `DrawFlushText`, 59 `CreateFont`, 60 `AddGlyphSetToFont`, 62 `GetFontTall`,
-65 `GetTextSize`.
+63 `GetCharABCwide`.
+
+**Measure what is drawn, not `GetTextSize` (#1052).** `DrawPrintText` calls
+`DrawUnicodeChar` (slot 19) for every character, and that advances by the
+character's `GetCharABCwide` a+b+c. `GetTextSize` (slot 65) skips `&` and
+every character `iswprint` rejects (`⅞`, `★`, `™`, `€`, emoji halves: the
+CRT asks `GetStringTypeW`, and these symbols carry no print class), so it
+measured such a name short by those characters: the killer's name ran into
+the icon and the victim's off the screen. `font.rs` sums slot 63 over the
+characters it prints instead; the verify script checks both builds draw
+that way.
+
+**Past Latin-1 the face is not the face.** `AddGlyphSetToFont` gives the face
+asked for U+0000..U+00FF only and adds `Tahoma` for U+0100..U+FFFF (both
+builds), unless the face is `Tahoma`. So `⅞` in a `Bahnschrift` name was
+drawn in Tahoma. `font.rs` writes such a character as its Unicode
+compatibility form when that is plain Latin-1 (`⅞` as `7/8`, `™` as `TM`,
+fullwidth letters as ASCII), so it is drawn in the chosen face; anything else
+stays as it is, drawn in Tahoma and measured as drawn. The game's own font
+gets the same forms while the six sites are the hook's.
+
+**But the face can be given what it has (#1054).** The split is the font
+manager's, not Windows': the surface's `AddGlyphSetToFont` (slot 60) drops
+its range arguments, and the manager gives the whole range only to `Marlett`
+(its one "foreign language capable" face) and to `Tahoma` itself. The
+handle's glyph set is an amalgam, a `CUtlVector` of `{low, high, CWin32Font*}`
+ranges where `GetFontForChar` takes the first that holds the character
+(PRE `+0xd2420`, POST `+0x26fdf0`). So `font.rs` raises the first range of its
+own fresh handle from `0xff` to `0xffff` (only when the two ranges are
+exactly the manager's split) and draws each name in runs: the face's handle
+for the characters the face has (`GetFontUnicodeRanges`), a `Tahoma` handle
+for the rest. Bahnschrift then draws `Łukasz`, Cyrillic, Greek, Vietnamese,
+`™` and `€` itself; `★`, CJK and emoji, which it lacks, stay Tahoma's. The
+compatibility forms apply only to characters the face lacks. The manager is
+found through slot 60's thunk (`call FontManager; mov ecx, eax; call ...`,
+`FontManager()` being `mov eax, imm32; ret` on both builds), and
+`verify_killfeed_font_offsets.py` checks the layout on both.
+
+The engine's own string draw (`EngineFont`; PRE `hw+0x6be0`) goes through the
+same manager, so it has the same split, and it also turns every character
+`iswprint` rejects into a space.
 
 **A font cannot be changed in place.** `CFontManager::AddGlyphSetToFont` (PRE
 `+0xcfd70`, POST `+0x26cb10`) returns false for a handle that already has a
@@ -678,3 +722,93 @@ are is down to the alpha the sheet carries.
 `tools/verify_killfeed_scale_offsets.py` checks the three operands, the
 line-start detour's span and registers, the field offsets, the stride, the
 vftable slot and that both installs ship the same `client.dll`.
+
+## 8. One box height for every icon (`layout even`, #1022)
+
+`hud.txt`'s `d_*` rects are 9 to 34 rows tall, so even at one scale each line
+of the feed steps differently, and the guns' barrels sit at different heights.
+`layout even` gives every icon a box 26 stock rows tall, every long gun's
+barrel top on row 8, nothing cut: a long gun is as wide as Valve's drawing,
+and shrinks with its barrel kept on the line when its magazine or bipod
+would hang below the box (the MP40 and MP44 to 71%); pistols and launchers
+keep their size, moved onto the line (the launchers and the Bren move up or
+down as little as fits); knives, the spade and grenades keep their size,
+centred; the seven icons with no model (`d_skull`, the close-ups, the
+composites) keep their #733 upscale, centred, shrunk only when taller than
+26 rows.
+
+§7's rect copy already decides each line's anchor, advance and step, so a
+26-row box per icon gives every line one step. But the engine samples the
+texture from that same rect, and the 256×256 `weapons<N>` sheets are packed
+too tight: 27 of the 35 modelled icons can't grow to 26 rows without reading
+the icon below. So the icons go into an atlas of our own, built by
+`goldsrc-hooks/tools/hd/killfeed_icons.py --even`:
+
+- `sprites/dodstudio_killfeed.spr` (in `dod_addon`, which the engine searches
+  first with `-addons`): 256×256 alpha-test frames laid out like Valve's
+  sheets, whose own pixels are only grey boxes;
+- `sprites/dodstudio_killfeed.txt` beside it: `name frame x y w h` per icon;
+- the HD frames, `dodstudio_hd\sprites\<style>\dodstudio_killfeed_<n>_<hash>.tga`,
+  keyed like every HD sprite frame. The placeholder depends on the boxes
+  alone, so every style's frames share one sprite.
+
+`goldsrc-hooks/src/deathmsg/even.rs` checks both files (bounds, frame count,
+format) before the engine is handed the sprite, loads it with the engine's
+`SPR_Load` once per level load, and gives each sprite index its box by name:
+`gHUD.m_rgszSpriteNames` (`gHUD+0x190`, `new char[24 * m_iSpriteCount]` in
+`VidInit`, `client+0x21cb4`, each `hud.txt` name `strncpy`'d into 24 bytes at
+`+0x21d4a`). §7's copy then holds each box, scaled; the line-start stub also
+stores the line's sprite index (`ebx` before the shift), so the icon draw
+knows exactly which entry it draws, and draws that box of the atlas
+(`SPR_Set` to the atlas with the game's colour, the engine's
+`SPR_DrawHoles`, blended as a soft weapons sheet, the game's sprite set back)
+under the same matrix as §7. The copy is in use at S = 1 too, and the names
+are centred on the 26-row line as with a scale.
+
+It draws only while every frame of the atlas went up with its HD file this
+session and `ds_hd_enabled` is 1; otherwise -- no atlas, a bad file, HD off,
+no atlas built for the style -- the feed is the game's own, exactly as with
+`layout default`. The engine keeps a sprite's first upload until it exits, so
+an atlas rebuilt while the game runs is refused until a restart (the hook
+compares the files with the ones it first handed the engine): the old pixels
+laid out by the new boxes would draw the wrong crops. Nothing in `hw.dll` is touched, and the sprite calls go
+through `gEngfuncs`, so both engine builds take the same path.
+`tools/verify_killfeed_scale_offsets.py` also checks the names field.
+
+### The space between the names and the icon (`gap`)
+
+`Draw` puts the icon 5 px after the end of the killer's name
+(`add eax, 5` at `client+0x2b092`, after `DrawConsoleString` returns) and the
+victim's name straight after the icon's advance, so any empty columns inside
+an icon's box are space between a name and its art. Atlas v1's boxes were
+cut to each render's own box, and the short icons kept much of it, in atlas
+px left/right: the PIAT 16/22, the spade 4/18, the Luger 3/17, the German
+knife 4/11, the stick grenade 4/9, against 0.5/0.5 for every long gun. At
+`scale 2.5` the stick grenade's names sat ~20 px further from its art than
+a Garand's.
+
+The engine draws a box from half a texel inside each edge (texture
+coordinates `(rect ± 0.5) / frame size`), so a long gun's 0.5 never shows.
+`killfeed_icons.py` (`EVEN_VERSION` 2, `trim_box`) now narrows every box to
+its icon's visible columns plus that half texel each side, the art centred
+to the HD pixel (at most 3/8 of a stock px of slack a side, under 1 screen
+px at `scale 2.5`); a box its art fills already keeps its size, and the rows
+are untouched (the barrel row, the centring). The trimming is the tool's
+because the tool has the pixels: the hook sees only the grey placeholder
+sprite and the box table, and the HD frames go to the GPU without passing
+through it.
+
+`ds_hud_deathmsg gap <px>` sets both spaces to `px` screen pixels, counted
+from the names' outline when one is drawn (an outline is drawn around the
+name's text and reaches `outline` px past it on both sides, into the gap),
+and on the killer's side from our `font`'s drop shadow, which reaches 1 px
+right of the ink (measured: the killer's name 1 px nearer the icon with
+`shadow` than without, the victim's side unchanged).
+The killer's side goes into the killer's width call and the end its draw
+returns (the two `font` sites, `+0x2b04e` and `+0x2b089`, only on a line
+whose icon is in the atlas: the line-start stub has stored the line's sprite
+index by then), the victim's into the box's advance in §7's copy, so a line
+with no killer gets the victim's side only. `gap default` is the game's 5 px
+and nothing, which with the trimmed boxes is how far a rifle's names always
+sat. The names' own side bearings (the space a font leaves around a glyph,
+a pixel or two) stay as the font draws them.

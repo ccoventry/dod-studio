@@ -40,20 +40,22 @@
 //!
 //! ## One switch for the spectator's first-person view
 //!
-//! `ds_spec_match_pov` drives five modules at once: the viewmodel's
-//! animations, the gunshots an HLTV demo lost, the spectator crosshair, the
-//! in-eye camera's height for a prone player, and the gun lowering off screen
-//! (`spectator_gun`). The strafing models that would turn round for a frame
-//! (`strafe_twitch`) have their own switch, `ds_player_fix_model_flicker`:
-//! that is a bug in how the game draws, which HLTV only shows more often
-//! (#927). The first three used to
-//! have a cvar of their own
+//! `ds_spec_match_pov` drives four modules at once: the viewmodel's
+//! animations, the spectator crosshair, the in-eye camera's height for a
+//! prone player, and the gun lowering off screen (`spectator_gun`). The
+//! strafing models that would turn round for a frame (`strafe_twitch`) have
+//! their own switch, `ds_player_fix_model_flicker`: that is a bug in how the
+//! game draws, which HLTV only shows more often (#927). The gunshots a demo
+//! lost have their own too, `ds_sound_restore_gunshots`: POV demos lose
+//! them as well, so it is not about matching POV, and it runs in both
+//! (#1036). The viewmodel's animations, the lost gunshots and the crosshair
+//! used to have a cvar of their own
 //! (`dodstudio_hltv_show_viewmodel_animations`,
 //! `dodstudio_hltv_play_missing_gunshots`, `dodstudio_match_pov_crosshair`).
-//! They all answer one question -- should a spectated first-person view look
-//! and sound like the player's own recording -- and nobody wanted one without
-//! the others, so a fix of that kind now joins this cvar instead of adding a
-//! name. `dodstudio_hltv_gunshots_fix` and
+//! What stays answers one question -- should a spectated first-person view
+//! look like the player's own recording -- and nobody wanted one part
+//! without the others, so a fix of that kind joins this cvar instead of
+//! adding a name. `dodstudio_hltv_gunshots_fix` and
 //! `dodstudio_hltv_gunshot_attenuation` went at the same time, for the
 //! opposite reason: making gunfire carry further than POV hears it is not
 //! matching POV (`fire_sounds.rs`).
@@ -73,7 +75,8 @@ use crate::{
     spectator_crosshair, spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
-/// Viewmodel animations, lost gunshots and the spectator crosshair together.
+/// Viewmodel animations, the spectator crosshair, eye height and gun lowering
+/// together.
 const SPEC_MATCH_POV_NAME: &str = crate::names::SPEC_MATCH_POV;
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
@@ -114,10 +117,40 @@ pub(crate) fn console_print(text: &str) {
     let Some(engfuncs) = engine::engfuncs() else {
         return;
     };
-    let Ok(c_text) = CString::new(text) else {
-        return;
-    };
-    unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
+    // The engine cuts one print at about 1 KB: `ds_hud_deathmsg`'s usage
+    // stopped mid-word after ~1000 bytes (#1021). So long text goes over in
+    // pieces, split after a newline where it can be.
+    for piece in console_pieces(text, CONSOLE_PIECE) {
+        let Ok(c_text) = CString::new(piece) else {
+            return;
+        };
+        unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
+    }
+}
+
+/// Bytes per `pfnConsolePrint` call, under the engine's ~1 KB cut.
+const CONSOLE_PIECE: usize = 900;
+
+/// `text` in pieces of at most `max` bytes, each ending after a newline when
+/// there is one in reach, never inside a UTF-8 character.
+fn console_pieces(text: &str, max: usize) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while rest.len() > max {
+        let mut cut = max;
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if let Some(newline) = rest[..cut].rfind('\n') {
+            cut = newline + 1;
+        }
+        pieces.push(&rest[..cut]);
+        rest = &rest[cut..];
+    }
+    if !rest.is_empty() || pieces.is_empty() {
+        pieces.push(rest);
+    }
+    pieces
 }
 
 /// Registers one cvar and checks the engine handed back what was asked for.
@@ -178,8 +211,8 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 
 /// Like `poll_flag`, but into the level `anim_fix` reads -- see
 /// `anim_fix::LEVEL`. Out-of-range values are clamped rather than refused, so
-/// `ds_spec_match_pov 2` (which also asks `missing_shots` to log every
-/// round) still means on here.
+/// an old `ds_spec_match_pov 2` still means on here (its "log every restored
+/// gunshot" is `ds_sound_restore_gunshots 2` now, #1036).
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
     if ptr.is_null() {
@@ -458,9 +491,8 @@ pub fn poll() {
     // null-checks it individually -- this outer guard is purely the fast
     // path that skips all nine checks at once when cvars never registered.
     if CVARS_LIVE.load(Ordering::Relaxed) {
-        // One cvar, three readers: the viewmodel's animations here, the
-        // spectator crosshair below, and `missing_shots::poll` further down,
-        // which holds the cvar itself.
+        // One cvar, several readers: the viewmodel's animations here, and
+        // the spectator crosshair and eye height below.
         poll_level(SPEC_MATCH_POV_NAME, &CVAR_SPEC_MATCH_POV, &anim_fix::LEVEL);
         poll_flag(
             HELD_MODELS_NAME,
@@ -545,14 +577,24 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // ds_hud_hide_clan_text changes.
     crate::clan_text::poll();
+    // ds_player_change_name: who each slot is and which rename wins, for the
+    // GetPlayerInfo detour to read; keeps the SayText handler prepended.
+    crate::player_names::poll();
     // ds_hud_hide_center_text: its filter rides on clan_text's TextMsg
     // handler, so this only follows the cvar.
     crate::center_text::poll();
     // ds_spec_hide_text: two code patches, byte-checked each frame.
     crate::spectator_text::poll();
+    // ds_hud_hide_server_text: one hw.dll call, byte-checked each frame.
+    crate::server_hud_text::poll();
     // Keeps the ShowMenu handler prepended and the voice and command menus
     // hidden while ds_hud_hide_voice_menus is on.
     crate::voice_menus::poll();
+    // ds_hud_hide_hints: one code patch, byte-checked each frame.
+    crate::hint_panel::poll();
+    // Keeps the weapon list off screen in demo playback with hud_fastswitch 1:
+    // one code byte, checked each frame.
+    crate::weapon_list::poll();
     // Follows ds_hd_enabled / ds_hd_style, then notes what each map
     // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -596,12 +638,17 @@ pub fn poll() {
     crate::world_shaders::poll();
     crate::gun_log::poll();
     crate::missing_shots::poll();
+    // Keeps the CurWeapon handler prepended during a POV demo and plays the
+    // rounds it found with no recorded sound.
+    crate::pov_recorder_shots::poll();
     crate::spectator_bars::poll();
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
     // While a review runs, the viewer's clicks don't move its camera (#826).
     crate::spectator_buttons::poll();
+    // ...and the console can't move its demo or camera (#855).
+    crate::review_lock::console::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     crate::overview_speaker::poll();
@@ -609,6 +656,8 @@ pub fn poll() {
     crate::demo_scope::poll();
     crate::run_in_background::poll();
     crate::pov_live_bob::poll();
+    // A float compare unless ds_view_show_own_blood changed (#1035).
+    crate::own_blood::poll();
     crate::map_sounds::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
@@ -694,7 +743,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -708,7 +757,6 @@ fn status_text() -> String {
     ];
     if anim_fix::enabled() {
         lines.push(format!("viewmodel animations: {}", anim_fix::status()));
-        lines.push(format!("gunshot sounds: {}", fire_sounds::status()));
         lines.push(format!(
             "spectator crosshair: {}",
             spectator_crosshair::status()
@@ -722,6 +770,15 @@ fn status_text() -> String {
         bit(crate::strafe_twitch::enabled()),
         crate::strafe_twitch::status()
     ));
+    lines.push(format!(
+        "{} = {} -- rounds an HLTV or POV demo has no fire event for are played (HLTV: every player; POV: the others from the body, the recorder from his clip)",
+        missing_shots::NAME,
+        bit(missing_shots::enabled()),
+    ));
+    // Both the animations and the gunshot pairing read this hook.
+    if anim_fix::enabled() || missing_shots::enabled() {
+        lines.push(format!("gunshot sounds: {}", fire_sounds::status()));
+    }
     if let Some(deathcam) = crate::spectator_deathcam::status_line() {
         lines.push(deathcam);
     }
@@ -779,7 +836,13 @@ fn status_text() -> String {
     if let Some(fast_load) = crate::fast_load::status_line() {
         lines.push(fast_load);
     }
+    if let Some(blood) = crate::own_blood::status_line() {
+        lines.push(blood);
+    }
     lines.push(crate::player_overrides::status());
+    if let Some(renames) = crate::player_names::status_line() {
+        lines.push(renames);
+    }
     if let Some(sprays) = crate::spray_hltv::status_line() {
         lines.push(sprays);
     }
@@ -815,6 +878,9 @@ fn status_text() -> String {
     }
     if let Some(shots) = missing_shots::status_line() {
         lines.push(shots);
+    }
+    if let Some(dry_fire) = crate::pov_recorder_shots::status_line() {
+        lines.push(dry_fire);
     }
     if let Some(bars) = crate::spectator_bars::status_line() {
         lines.push(bars);
@@ -852,8 +918,17 @@ fn status_text() -> String {
     if let Some(spectator_text) = crate::spectator_text::status_line() {
         lines.push(spectator_text);
     }
+    if let Some(hints) = crate::hint_panel::status_line() {
+        lines.push(hints);
+    }
+    if let Some(server_hud_text) = crate::server_hud_text::status_line() {
+        lines.push(server_hud_text);
+    }
     if let Some(voice_menus) = crate::voice_menus::status_line() {
         lines.push(voice_menus);
+    }
+    if let Some(weapon_list) = crate::weapon_list::status_line() {
+        lines.push(weapon_list);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -955,7 +1030,6 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
 unsafe extern "C" fn cmd_spec_match_pov() {
     handle_level(SPEC_MATCH_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
     let on = anim_fix::enabled();
-    missing_shots::set_without_a_cvar(on);
     if let Err(why) = spectator_crosshair::set_matching(on) {
         console_print(&format!(
             "{SPEC_MATCH_POV_NAME}: the spectator crosshair was not changed -- {why}\n"
@@ -1339,12 +1413,28 @@ unsafe extern "C" fn cmd_fix_model_flicker() {
     );
 }
 
+/// Only registered when `missing_shots::NAME` could not be a cvar.
+unsafe extern "C" fn cmd_restore_gunshots() {
+    handle_toggle(missing_shots::NAME, &missing_shots::WITHOUT_A_CVAR, || {
+        String::from("HLTV and POV demos: rounds with no fire event")
+    });
+}
+
 /// Only registered when `ds_ui_console_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
         crate::studio_panel::CONSOLE_NAME,
         &crate::studio_panel::CONSOLE_IN_PANEL,
         crate::studio_panel::console_status,
+    );
+}
+
+/// Only registered when `ds_demo_show_load_progress` could not be a cvar.
+unsafe extern "C" fn cmd_show_load_progress() {
+    handle_toggle(
+        crate::demo_bar_progress::NAME,
+        &crate::demo_bar_progress::SETTING.fallback,
+        crate::demo_bar_progress::status,
     );
 }
 
@@ -1565,6 +1655,8 @@ pub fn install() {
     crate::demo_reload::install();
     crate::connect_guard::install();
     crate::events::install();
+    // The rest of what a review locks is wrapped by its poll as it appears.
+    crate::review_lock::console::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
@@ -1573,6 +1665,7 @@ pub fn install() {
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
     add_command(crate::spray::NAME, crate::spray::command);
+    add_command(crate::player_names::NAME, crate::player_names::command);
 
     // Standalone, like `ds_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1652,6 +1745,12 @@ pub fn install() {
         Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
         None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
+    // On by default too: it only shows anything on the layout Studio's own
+    // launch ships, so nothing changes for a game started another way.
+    match register(crate::demo_bar_progress::NAME, "1") {
+        Some(cvar) => crate::demo_bar_progress::SETTING.set_cvar(cvar),
+        None => add_command(crate::demo_bar_progress::NAME, cmd_show_load_progress),
+    }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let spec_match_pov = register(SPEC_MATCH_POV_NAME, &anim_fix::level().to_string());
@@ -1710,6 +1809,14 @@ pub fn install() {
     if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
         crate::spectator_text::set_cvar(spectator_text);
     }
+    if let Some(server_hud_text) = register(crate::server_hud_text::NAME, "0") {
+        crate::server_hud_text::set_cvar(server_hud_text);
+    }
+    // On by default: the hint panel is the recorder's own tutorial and
+    // covers a corner of the shot (#286).
+    if let Some(hints) = register(crate::hint_panel::NAME, "1") {
+        crate::hint_panel::set_cvar(hints);
+    }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
         crate::voice_menus::set_cvar(voice_menus);
     }
@@ -1743,6 +1850,13 @@ pub fn install() {
         Some(flicker) => crate::strafe_twitch::set_cvar(flicker),
         None => add_command(crate::strafe_twitch::NAME, cmd_fix_model_flicker),
     }
+    // On by default: a round fired in view should be heard (#1036). One
+    // switch for every gunshot path, read by `missing_shots::poll` and
+    // `pov_recorder_shots::poll` themselves; `2` also logs every round.
+    match register(missing_shots::NAME, "1") {
+        Some(restore) => missing_shots::set_cvar(restore),
+        None => add_command(missing_shots::NAME, cmd_restore_gunshots),
+    }
     // On by default: a demo then shows the sniper scope the player saw.
     if let Some(scope) = register(crate::demo_scope::NAME, "1") {
         crate::demo_scope::set_cvar(scope);
@@ -1758,6 +1872,9 @@ pub fn install() {
     }
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
         crate::pov_live_bob::set_log_cvar(log);
+    }
+    if let Some(blood) = register(crate::own_blood::NAME, "0") {
+        crate::own_blood::set_cvar(blood);
     }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
@@ -1816,8 +1933,6 @@ pub fn install() {
     };
 
     CVAR_SPEC_MATCH_POV.store(spec_match_pov, Ordering::Relaxed);
-    // `missing_shots` reads the value itself: 2 asks it to log every round.
-    missing_shots::set_cvar(spec_match_pov);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
     CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
@@ -1839,6 +1954,19 @@ pub fn install() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_console_text_splits_after_newlines_and_loses_nothing() {
+        let text = "aaaa\nbbbb\ncccc\n";
+        assert_eq!(console_pieces(text, 11), vec!["aaaa\nbbbb\n", "cccc\n"]);
+        assert_eq!(console_pieces("short", 900), vec!["short"]);
+        let long = "x".repeat(25);
+        let pieces = console_pieces(&long, 10);
+        assert_eq!(pieces.concat(), long);
+        assert!(pieces.iter().all(|p| p.len() <= 10));
+        let wide = "é".repeat(10);
+        assert_eq!(console_pieces(&wide, 5).concat(), wide);
+    }
 
     /// A tripwire, not a style check. `FCVAR_ARCHIVE` would have the engine
     /// write these into the user's `config.cfg`, and the pipeline's standing
@@ -1877,21 +2005,25 @@ mod tests {
             SPEC_MATCH_POV_NAME,
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
-            // Its own switch (#927), listed whatever match_pov is.
+            // Their own switches (#927, #1036), listed whatever match_pov is.
             crate::strafe_twitch::NAME,
+            missing_shots::NAME,
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
         assert!(idle.contains("ds_hud_deathmsg"), "{idle}");
-        for part in [
-            "viewmodel animations:",
-            "gunshot sounds:",
-            "spectator crosshair:",
-        ] {
+        for part in ["viewmodel animations:", "spectator crosshair:"] {
             assert!(!idle.contains(part), "{part} reported while off:\n{idle}");
         }
+        // The gunshot hook's counters follow the gunshot switch, on by
+        // default, not match_pov.
+        assert_eq!(
+            idle.contains("gunshot sounds:"),
+            missing_shots::enabled(),
+            "{idle}"
+        );
 
-        // One switch turns all three on, and each then says what it is doing.
+        // One switch turns its parts on, and each then says what it is doing.
         anim_fix::LEVEL.store(1, Ordering::Relaxed);
         let on = status_text();
         for part in [
@@ -1942,11 +2074,13 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::server_hud_text::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
+            crate::own_blood::NAME,
             crate::map_sounds::VICTORY_MUSIC_NAME,
             crate::map_sounds::FLAG_CAPTURE_NAME,
             crate::map_sounds::LOG_NAME,
@@ -1970,7 +2104,11 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::server_hud_text::NAME,
+            crate::hint_panel::NAME,
             crate::strafe_twitch::NAME,
+            missing_shots::NAME,
+            crate::own_blood::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")

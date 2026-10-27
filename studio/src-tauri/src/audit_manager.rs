@@ -354,7 +354,10 @@ struct AuditTimes {
 fn audit_end_log(t: &AuditTimes) -> String {
     let total = t.walk_secs + t.key_secs;
     if t.cancelled {
-        return format!("[audit] cancelled after {total:.1} s");
+        return format!(
+            "[audit] cancelled after {}",
+            native::utils::duration_text::duration_text(total)
+        );
     }
     let zips = match t.zips {
         Some((zips, demos, backed_up)) => format!(
@@ -366,11 +369,12 @@ fn audit_end_log(t: &AuditTimes) -> String {
         None => String::new(),
     };
     format!(
-        "[audit] finished after {total:.1} s (walk {:.1} s, keys {:.1} s): {} demo(s) checked, \
+        "[audit] finished after {} (walk {}, keys {}): {} demo(s) checked, \
          {} group(s) with copies, {} copies, {:.2} GB; opened {} start(s), {} end(s), {} whole file(s), \
          the rest remembered{zips}",
-        t.walk_secs,
-        t.key_secs,
+        native::utils::duration_text::duration_text(total),
+        native::utils::duration_text::duration_text(t.walk_secs),
+        native::utils::duration_text::duration_text(t.key_secs),
         t.demos,
         t.groups,
         t.copies,
