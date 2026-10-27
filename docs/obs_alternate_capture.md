@@ -27,9 +27,9 @@
 >   the heaviest I/O configuration the pipeline has.
 > - Every obs-websocket request the design needs exists on the install tested.
 >
-> **Not built (as of 2026-10, unchanged):** the Render Studio trim pass (staging item 6, now
-> [#84](https://github.com/ccoventry/dod-studio/issues/84), open). The wall-clock/disk comparison
-> was measured on 2026-10-26: see "Standard settings, and OBS against HLAE".
+> **The head and tail trim** ([#84](https://github.com/ccoventry/dod-studio/issues/84)) is built:
+> see "Cutting the head and tail". The wall-clock/disk comparison was measured on 2026-10-26: see
+> "Standard settings, and OBS against HLAE".
 >
 > See "Measured against a live OBS". **One claim was refuted rather than confirmed:** the wall-clock
 > saving is small — the real prize is disk. See "What OBS actually buys".
@@ -76,7 +76,7 @@ Settings written over obs-websocket only take effect when OBS rebuilds its outpu
 quality preset without that made the next `StartRecord` fail, with OBS's "Failed to start recording"
 box in front of the user's windows. So after a change Studio switches to another profile and back.
 Only Studio's own `[DoD-Studio]` profile is written. The keyframe interval can't be set in Simple
-mode (NVENC uses 250 frames, ~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway.
+mode (NVENC uses 250 frames, ~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway, because a copy can only cut on a keyframe.
 
 The game side, OBS mode only: `fps_override 1; fps_max <2 x OBS FPS>; gl_vsync 0` in the helper cfg,
 and `-wavonly` on the launch line.
@@ -87,7 +87,7 @@ and `-wavonly` on the launch line.
 |---|---|---|---|
 | Batch wall clock, 3 clips | 6 min 6 s (the target drive's write speed was the limit) | 2 min 3 s | 1 min 55 s |
 | Disk written | 110 GB | 3.3 GB at CQP 16 (about 0.05 GB at 6 Mbps) | 3.3 GB |
-| Render step | needed (ProRes; ~17x the footage length at 300 fps, measured earlier) | optional: Source copy | optional: Source copy |
+| Render step | needed (ProRes; ~17x the footage length at 300 fps, measured earlier) | optional: Source copy | optional: Source copy (since #84 a short re-encode that cuts the head and tail) |
 | Frames OBS repeated with the game moving | 0 by construction | 1.5-2.1% | 0.07-0.37% |
 | OBS frames skipped (encoding or render lag) | n/a | 0 | 0 |
 | Sound | sound.wav, in sync | **silent** | -32 to +25 ms from HLAE's |
@@ -466,12 +466,46 @@ The design for this (the "Does Render Studio still run?" reasoning, and the [#82
 take via the shared `take_shape_is_renderable` predicate; `run_render_job` has a `RenderCodec::SourceCopy`
 branch (surfaced in Render Studio as a per-job "Skip" toggle, offered only for an OBS-shaped clip)
 that copies the OBS-written file straight into the export pool with no FFmpeg pass, and a plain
-single-video-input branch for the "render" case when `wav_file` is `None`. **The trim itself did not
-ship with this**: nothing on disk records how many seconds of pre-roll/post-roll head and tail an OBS
-block actually has, so "render" currently re-encodes the whole clip (codec conversion, export-pool
-routing, pipeline naming) without cutting the head/tail. That gap — and the capture-side metadata it
-needs — is tracked separately as
-[issue #84](https://github.com/ccoventry/dod-studio/issues/84).
+single-video-input branch for the "render" case when `wav_file` is `None`.
+
+### Cutting the head and tail (#84)
+
+Every OBS file starts about 0.9 s before the clip (recording starts at `AUDIO_SYNC`, so OBS is
+already writing when the clip's first frame comes) and runs on a moment past its end. An HLAE take
+starts and stops on the clip's own frames.
+
+**What is recorded.** `ObsSession` notes when `StartRecord` reported the recording started
+(`OUTPUT_STARTED`), and stamps the `START_RECORD` and `STOP_RECORD` markers as they arrive
+(`Marker::received`, taken on the reader thread). Each marker's place in the file is its arrival
+time since the start, less a fixed `RECORDING_START_DELAY_SECONDS` (35 ms, measured) and, for a
+marker read from `qconsole.log`, the log's 30 ms (`native/src/obs/trim.rs`). Both ends go into the
+take's `dodstudio_take.json` as `obs_trim` (`start_seconds`, `end_seconds`, `fps`). It is an
+optional field, not a format bump: a take captured before it, or one whose `START_RECORD` was
+missed, has none and is finished untrimmed as before; older builds still read the file.
+
+**Why not OBS's own frame count.** `GetRecordStatus`'s `outputDuration` looks like a frame-exact
+clock (frames x frame time), but it counts what the muxer has written, and the muxer holds video
+until it has the audio to interleave it with. That hold is OBS's audio buffering, which OBS raises
+when a source lags and never lowers. Measured in one OBS session: the count ran 0.37 s behind the
+file in one batch; then OBS logged "adding 661 milliseconds of audio buffering, total audio
+buffering is now 960 milliseconds", and in the next batch it had not counted a single frame 1.0 s
+into the recording, when the clip started. The time since `OUTPUT_STARTED` does not move with it.
+
+**How it is cut.** Every codec gets `-ss <start - half a frame> -t <length>` as input options on the
+OBS take (FFmpeg's accurate seek; the half frame makes it keep the frame nearest the start). Keep as
+captured (`source_copy`) can't stay a stream copy: OBS's Simple output puts a keyframe every 250
+frames (4.2 s at 60 fps), obs-websocket can't change that in Simple mode, and a copy only cuts on a
+keyframe, so it would keep the whole head. Splicing a re-encoded first GOP onto copied packets was
+ruled out: the two encoders' parameter sets differ, and an MP4 holds one. So Keep as captured with
+a trim re-encodes at OBS's own quality: `h264_nvenc` CQP 16 (what Studio's profile records at),
+or `libx264` CRF 14 when FFmpeg can't open NVENC (probed once per FFmpeg path). On a 1440p clip the
+NVENC cut measured PSNR 43 dB against the original; a whole 3-clip batch (64 s of footage) finished
+in 24 s with the three jobs running at once. Audio is re-encoded to AAC at 320 kb/s.
+
+**Measured accuracy** (POST, 60 fps, OBS 33.0.0, each finished clip against the HLAE take of the
+same clip at 300 fps, by matching pictures): see the table below.
+
+TRIM_TABLE
 
 ---
 
