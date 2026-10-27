@@ -32,9 +32,10 @@ use crate::patch::CaptureStreak;
 use super::client::ObsClient;
 
 /// A frame whose mean luma difference from the one before it (YDIF, on a
-/// [`YDIF_WIDTH`]-wide copy) is under this is a repeat. The #645 measurements
-/// used the same cut: a game frame with anything moving on screen measured
-/// well above it, and a repeat decodes to 0-0.05 after H.264 at CQP 12-20.
+/// [`YDIF_WIDTH`]-wide copy) is under this is the same picture: a repeat
+/// decodes to 0-0.05 after H.264 at CQP 12-20. The #645 measurements used
+/// the same cut. Whether it is a repeat or a still picture is
+/// `count_repeats`' call.
 pub const REPEAT_YDIF: f64 = 0.15;
 
 /// The width the frames are scaled to before YDIF: enough to see movement,
@@ -247,11 +248,14 @@ pub struct FileReport {
     pub nominal_fps: String,
     /// Frames decoded.
     pub frames: u64,
-    /// Frames the repeat count looked at (all but the first [`SETTLE_SECS`]).
+    /// Frames the repeat count looked at: the moving ones after the first
+    /// [`SETTLE_SECS`] (`count_repeats`).
     pub counted: u64,
     pub repeated: u64,
     /// The longest run of repeats in a row, in frames.
     pub longest_repeat: u32,
+    /// Frames of a still picture, not counted.
+    pub still: u64,
     pub has_audio: bool,
     pub audio_peak_db: Option<f64>,
     pub audio_mean_db: Option<f64>,
@@ -271,25 +275,64 @@ pub fn parse_ydif_line(line: &str) -> Option<f64> {
         .ok()
 }
 
-/// `(counted, repeated, longest run)` over `ydif` after its first `skip`
-/// frames. A frame's YDIF compares it with the one before, so the very first
-/// frame (always 0) is never counted.
-pub fn count_repeats(ydif: &[f64], skip: usize) -> (u64, u64, u32) {
-    let mut counted = 0u64;
-    let mut repeated = 0u64;
-    let mut run = 0u32;
-    let mut longest = 0u32;
-    for &d in ydif.iter().skip(skip.max(1)) {
-        counted += 1;
-        if d < REPEAT_YDIF {
-            repeated += 1;
-            run += 1;
-            longest = longest.max(run);
-        } else {
-            run = 0;
+/// What [`count_repeats`] found.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RepeatCount {
+    /// Frames that moved, plus the repeats among them.
+    pub counted: u64,
+    pub repeated: u64,
+    pub longest: u32,
+    /// Frames of a still picture, left out.
+    pub still: u64,
+}
+
+/// Counts the frames the game repeated: a run of at most `max_run` frames
+/// under [`REPEAT_YDIF`] with a moving frame (at least [`MOVING_YDIF`]) on
+/// each side. A longer run, or one beside a frame that barely moved, is the
+/// picture standing still (the player not moving or turning), not a repeat:
+/// measured on the bundled demo at 120 fps with the game at 240 fps, 23% of
+/// frames were under the cut, all in nine still stretches of 8-157 frames,
+/// and not one in a short run between moving frames; with `fps_max 120`
+/// the same clip had 34 such single repeats (1.9% of the moving frames, the
+/// 1.5-2.1% #645 measured against HLAE takes). Starts after the first
+/// `skip` frames; the very first frame (YDIF always 0) is never counted.
+pub fn count_repeats(ydif: &[f64], skip: usize, max_run: usize) -> RepeatCount {
+    let mut out = RepeatCount::default();
+    let start = skip.max(1);
+    let mut i = start;
+    while i < ydif.len() {
+        if ydif[i] >= REPEAT_YDIF {
+            out.counted += 1;
+            i += 1;
+            continue;
         }
+        let mut j = i;
+        while j < ydif.len() && ydif[j] < REPEAT_YDIF {
+            j += 1;
+        }
+        let len = j - i;
+        let moving_before = ydif[i - 1] >= MOVING_YDIF;
+        let moving_after = ydif.get(j).is_some_and(|&d| d >= MOVING_YDIF);
+        if len <= max_run && moving_before && moving_after {
+            out.counted += len as u64;
+            out.repeated += len as u64;
+            out.longest = out.longest.max(len as u32);
+        } else {
+            out.still += len as u64;
+        }
+        i = j;
     }
-    (counted, repeated, longest)
+    out
+}
+
+/// A frame at least this different from the one before it is moving.
+pub const MOVING_YDIF: f64 = 0.5;
+
+/// The longest run [`count_repeats`] still calls repeats: 100 ms of frames,
+/// at least 2. The game stalling longer than that shows in its own frame
+/// times (`GameFrames`).
+pub fn max_repeat_run(fps: f64) -> usize {
+    ((fps * 0.1).round() as usize).max(2)
 }
 
 /// `(mean_volume, max_volume)` in dB from FFmpeg's `volumedetect` report.
@@ -419,10 +462,11 @@ pub async fn analyze_file(
     report.frames = ydif.len() as u64;
     progress(report.frames, report.frames.max(1));
     let skip = (SETTLE_SECS * fps.max(1.0)).round() as usize;
-    let (counted, repeated, longest) = count_repeats(&ydif, skip);
-    report.counted = counted;
-    report.repeated = repeated;
-    report.longest_repeat = longest;
+    let count = count_repeats(&ydif, skip, max_repeat_run(fps));
+    report.counted = count.counted;
+    report.repeated = count.repeated;
+    report.longest_repeat = count.longest;
+    report.still = count.still;
 
     if report.has_audio {
         let mut cmd = Command::new(ffmpeg);
@@ -779,11 +823,24 @@ mod tests {
         let text = "frame:0 pts:0 pts_time:0\nlavfi.signalstats.YDIF=0\nframe:1\nlavfi.signalstats.YDIF=2.5\nlavfi.signalstats.YDIF=0.01\nnoise\n";
         let ydif: Vec<f64> = text.lines().filter_map(parse_ydif_line).collect();
         assert_eq!(ydif, vec![0.0, 2.5, 0.01]);
+        // Moving, two repeats, moving, three repeats, moving.
         let ydif = [0.0, 2.5, 0.01, 0.02, 3.0, 0.1, 0.1, 0.1, 4.0];
-        assert_eq!(count_repeats(&ydif, 0), (8, 5, 3));
-        assert_eq!(count_repeats(&ydif, 2), (7, 5, 3));
-        assert_eq!(count_repeats(&ydif, 5), (4, 3, 3));
-        assert_eq!(count_repeats(&[], 0), (0, 0, 0));
+        let rc = |counted, repeated, longest, still| RepeatCount {
+            counted,
+            repeated,
+            longest,
+            still,
+        };
+        assert_eq!(count_repeats(&ydif, 0, 3), rc(8, 5, 3, 0));
+        // Runs longer than the cap are a still picture.
+        assert_eq!(count_repeats(&ydif, 0, 2), rc(5, 2, 2, 3));
+        assert_eq!(count_repeats(&ydif, 5, 3), rc(4, 3, 3, 0));
+        assert_eq!(count_repeats(&[], 0, 3), RepeatCount::default());
+        // Beside a frame that barely moved, or at the clip's end: still.
+        let slow = [0.0, 3.0, 0.2, 0.01, 3.0, 0.01];
+        assert_eq!(count_repeats(&slow, 0, 3), rc(3, 0, 0, 2));
+        assert_eq!(max_repeat_run(120.0), 12);
+        assert_eq!(max_repeat_run(10.0), 2);
     }
 
     #[test]
