@@ -392,17 +392,17 @@ export const STRINGS = {
     obsTestFailed: (err) => `OBS test failed: ${err}`,
     OBS_CAPTURE_FPS_LABEL: 'OBS Capture FPS:',
     OBS_CAPTURE_FPS_TITLE:
-        "OBS's own live recording rate (the game draws at twice it) — separate from Capture FPS above, which is non-real-time for the other two modes. Set above what your machine can sustain and OBS drops frames instead of falling behind, making the clip choppy or unusable. At 2560x1440 on an RTX 3070 Ti, 60 held; 120 is at the encoder's limit (held in one run, dropped 12-95% of frames in others). Test a short capture first and watch for dropped-frame warnings before committing to a value.",
+        "OBS's own live recording rate (the game draws at twice it) — separate from Capture FPS above, which is non-real-time for the other two modes. Set above what your machine can sustain and OBS drops frames instead of falling behind, making the clip choppy or unusable. At 2560x1440 on an RTX 3070 Ti, 120 holds with every OBS Quality choice but \"OBS's own\" (the encoder about two-thirds busy); 240 does not. Test a short capture first and watch for dropped-frame warnings before committing to a value.",
     OBS_CAPTURE_FPS_WARNING:
         'Too high for your machine and OBS drops frames — test a short capture first.',
     OBS_QUALITY_LABEL: 'OBS Quality:',
     OBS_QUALITY_TITLE:
-        "How OBS encodes the clips, on an NVIDIA card (NVENC). Every choice is a fast single-pass setup that keeps up with 120 fps at 2560x1440 on an RTX 3070 Ti; higher choices make bigger files. \"OBS's own\" is OBS's Simple-mode Indistinguishable preset, which can't keep up with 120 fps at 1440p there. On an AMD or Intel card OBS's own settings are used whatever is picked.",
-    OBS_QUALITY_SMALL: 'Small (H.264 QP 20)',
-    OBS_QUALITY_STANDARD: 'Standard (H.264 QP 16)',
-    OBS_QUALITY_HIGH: 'High (H.264 QP 12)',
-    OBS_QUALITY_MAX: 'Max (H.264 4:4:4 QP 12)',
-    OBS_QUALITY_OBS_SIMPLE: "OBS's own (Simple mode, slower)",
+        "How OBS encodes the clips on an NVIDIA card (NVENC). Each choice is a fast single-pass setup that kept up with 120 fps at 2560x1440 on an RTX 3070 Ti; higher choices look closer to HLAE's lossless frames and make bigger files. Sizes at 1440p, 120 fps: Small ~1.7 GB a minute, Standard ~3 GB, High ~4.5 GB, Max ~5.3 GB. Max keeps full colour detail (sharper red and coloured text), but some editors can't open 4:4:4 H.264: use Studio's render step for those clips. \"OBS's own\" is OBS's Simple-mode preset, which used the whole encoder at 120 fps there and dropped frames in some runs. On an AMD or Intel card OBS's own settings are used whatever is picked.",
+    OBS_QUALITY_SMALL: 'Small (~1.7 GB/min)',
+    OBS_QUALITY_STANDARD: 'Standard (~3 GB/min)',
+    OBS_QUALITY_HIGH: 'High (~4.5 GB/min)',
+    OBS_QUALITY_MAX: 'Max, full colour (~5.3 GB/min)',
+    OBS_QUALITY_OBS_SIMPLE: "OBS's own (may drop frames at 120 fps)",
     OBS_ENABLE_HINT:
         'OBS 28+: enable this under Tools → WebSocket Server Settings (the checkbox, not the Connect Info panel).',
     OBS_PROVISION_HINT:
