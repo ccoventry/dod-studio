@@ -3210,12 +3210,12 @@ export const STRINGS = {
   OBS_TEST: {
     TEST_BUTTON: 'Test OBS capture',
     TEST_BUTTON_TITLE:
-        "Records one short clip of a demo that comes with DoD Studio, through a normal batch at your OBS Capture FPS and OBS Quality, then says whether this PC keeps up: frames OBS skipped or missed, frames the game didn't draw in time, and whether the clip has sound. The game opens for about a minute; the clip is deleted afterwards.",
+        "Records about a minute of a demo that comes with DoD Studio, through a normal batch at your OBS Capture FPS and OBS Quality, then says whether this PC keeps up: frames OBS skipped or missed, frames the game didn't draw in time, and whether the clip has sound. The game opens for about a minute and a half; the clip is deleted afterwards.",
     LADDER_BUTTON: 'Find my highest steady FPS',
     LADDER_BUTTON_TITLE:
-        'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. About a minute per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
+        'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. About a minute and a half per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
     LONG_LABEL: '1-minute clips',
-    LONG_TITLE: 'Longer clips catch a PC that slows down as it warms up. Each rate takes about a minute longer.',
+    LONG_TITLE: "Longer clips catch a PC that slows down as it warms up. On one of your own demos each rate takes about 40 s longer; the bundled demo's clip is about a minute already.",
     STOP_BUTTON: 'Stop test',
     DEMO_LABEL: 'Test demo:',
     DEMO_BUNDLED: 'the one that comes with DoD Studio',
@@ -3224,7 +3224,7 @@ export const STRINGS = {
     DEMO_RESET: 'Use the bundled demo',
     DEMO_DIALOG_TITLE: 'Pick a demo for the OBS capture test',
     DEMO_NOTE:
-        "The test plays a stretch of a real 6v6 match on dod_anzio, with grenades and fights, recorded without lag. Your own matches may be busier on other maps: to check, test one of your own demos.",
+        "The test plays a stretch of a real 6v6 match on dod_anzio, with grenades and fights, recorded without lag. A map with more detail on screen gives OBS's encoder more to do: if you play other maps, test one of your own demos too.",
     // Step lines, each shown while that step runs.
     CHECKING_OBS: 'Checking OBS…',
     CHECKING_GAME: 'Checking the game is closed…',
