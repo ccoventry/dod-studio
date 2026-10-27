@@ -35,6 +35,32 @@ own output (`cargo run -p native --bin dod-studio-cli -- analyze
 test-fixtures/ci_fixture.dem`) after checking the numbers against what was
 played.
 
+## `dodstudio_benchmark_anzio.dem`
+
+The demo Studio's OBS capture test plays (#646), bundled with the app under
+`obs-test\` (`tauri.conf.json`'s resources; `BUNDLED_DEMO_FILE` and
+`BUNDLED_WINDOW` in `studio/src-tauri/src/obs_test_manager.rs`).
+
+- **Recorded** by the repo owner, m00cat ("ChillRx (m00cat)"), as a POV demo
+  of a 6v6 KTPS4 vs Thunder match on `dod_anzio` (Axis), with no lost
+  packets. The original is `ktps4-thunder-anzio-axis.dem`, 77.8 MB.
+- **Cut** to its first 100 s of play (the demo player's bar runs 0:58 to
+  2:38; the clock is kept) with
+  `cargo run --release -p analysis --example trim_demo -- ktps4-thunder-anzio-axis.dem 100 dodstudio_benchmark_anzio.dem`,
+  which gives this file byte for byte (SHA-256 `d57e6667...6dea453`). Only
+  the end can be cut: a demo's one full entity snapshot is at its start.
+- **Why this one:** about 10 times the grenades and 3 times the kills of
+  `ci_fixture.dem` (8-12 grenades and 12-16 deaths a minute, like a real
+  match), and 15-21% slower for the game to draw. A bot demo made the test
+  promise one or two rates more than a real match holds.
+- **The test records** 1:32 to 2:30: 1:32-1:52 has 11 grenades and 6 kills,
+  2:10-2:30 has 6 grenades and 6 kills.
+- **Size:** 6.5 MB.
+
+**Tests that use it:** `desktop-studio`'s `obs_test_manager` tests (the file
+is there, and its highlights fill `BUNDLED_WINDOW`), and `hl-demo-auditor`'s
+integrity check.
+
 ## `players_table.txt`
 
 The Players table file Studio writes for the hook DLL (#428: sprays and

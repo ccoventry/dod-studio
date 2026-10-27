@@ -11,7 +11,8 @@
 //!   (1.5-2.1% with `fps_max` at OBS's rate, #645). Counted with FFmpeg's
 //!   `signalstats` YDIF: a repeated frame decodes (near) identical to the one
 //!   before it. Only meaningful on a demo with no lag of its own, which is why
-//!   the test plays the bundled `ci_fixture.dem` (real recordings freeze for
+//!   the test plays the bundled `dodstudio_benchmark_anzio.dem`, a match
+//!   recorded with no lost packets (many real recordings freeze for
 //!   100-380 ms at a time, and those freezes are in HLAE's takes too).
 //! - **Sound**: there is an audio stream and it isn't silence. Every OBS clip
 //!   was silent with the game behind other windows before #1058.

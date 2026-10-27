@@ -59,7 +59,7 @@
       "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md",
       "../../blender/*.py": "blender-scripts/",
       "../../blender/README.md": "blender-scripts/README.md",
-      "../../test-fixtures/ci_fixture.dem": "obs-test/ci_fixture.dem"
+      "../../test-fixtures/dodstudio_benchmark_anzio.dem": "obs-test/dodstudio_benchmark_anzio.dem"
     }
   },
   "plugins": {

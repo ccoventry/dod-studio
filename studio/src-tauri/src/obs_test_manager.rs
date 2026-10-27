@@ -25,13 +25,21 @@ pub const SESSION_PREFIX: &str = "obs_test_";
 /// bundles under `obs-test/`. To test on another demo, put it in
 /// `test-fixtures/`, change this and the resource line, and set
 /// [`BUNDLED_WINDOW`] to its busy stretch.
-const BUNDLED_DEMO_FILE: &str = "ci_fixture.dem";
+/// It is the first 100 s of m00cat's `ktps4-thunder-anzio-axis.dem`, a 6v6
+/// dod_anzio match with no lost packets, cut with
+/// `analysis/examples/trim_demo.rs` (the end only: a demo can't be cut at the
+/// front). It has 8-12 grenades and 12-16 deaths a minute, about what a real
+/// match has.
+const BUNDLED_DEMO_FILE: &str = "dodstudio_benchmark_anzio.dem";
 
 /// The stretch of [`BUNDLED_DEMO_FILE`] the test records, `(start, end)` on
 /// the demo player's clock (`viewdemo` seconds), widened evenly when the
 /// test asks for longer. `None`: the stretch of the test's length with the
 /// most kills, found by `native::obs::bench::pick_clip`.
-const BUNDLED_WINDOW: Option<(f32, f32)> = None;
+///
+/// 1:32 to 2:30 covers the demo's two busy stretches: 1:32-1:52 (11
+/// grenades, 6 kills) and 2:10-2:30 (6 grenades, 6 kills).
+const BUNDLED_WINDOW: Option<(f32, f32)> = Some((92.0, 150.0));
 
 /// Whether a batch's session id is a test's.
 pub fn is_test_session(session_id: &str) -> bool {
@@ -276,9 +284,9 @@ mod tests {
     fn the_verbatim_prefix_goes() {
         assert_eq!(
             without_verbatim_prefix(Path::new(
-                r"\\?\C:\Program Files\DoD Studio\obs-test\ci_fixture.dem"
+                r"\\?\C:\Program Files\DoD Studio\obs-test\dodstudio_benchmark_anzio.dem"
             )),
-            PathBuf::from(r"C:\Program Files\DoD Studio\obs-test\ci_fixture.dem")
+            PathBuf::from(r"C:\Program Files\DoD Studio\obs-test\dodstudio_benchmark_anzio.dem")
         );
         assert_eq!(
             without_verbatim_prefix(Path::new(r"\\?\UNC\server\share\a.dem")),
@@ -296,5 +304,23 @@ mod tests {
             .join("../../test-fixtures")
             .join(BUNDLED_DEMO_FILE);
         assert!(repo.is_file());
+    }
+
+    /// The bundled demo's highlights still give a clip that fills
+    /// [`BUNDLED_WINDOW`], so a different demo or window can't ship a test
+    /// that finds no clip.
+    #[test]
+    fn the_bundled_window_gives_a_clip() {
+        let (start, end) = BUNDLED_WINDOW.expect("the bundled demo has a window");
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test-fixtures")
+            .join(BUNDLED_DEMO_FILE);
+        let (_, streaks, ..) = native::patch::scan_demo_for_highlights(&repo).unwrap();
+        let clip = bench::pick_clip_in(&streaks, start, end, 20.0).expect("a clip in the window");
+        let times = &clip.streak.viewdemo_times;
+        let (t0, t1) = (times[clip.streak.start_index], times[clip.streak.end_index]);
+        assert!((t0 - clip.pre_roll - start).abs() < 0.01);
+        assert!((t1 + clip.post_roll - end).abs() < 0.01);
+        assert!(clip.pre_roll >= 1.0 && clip.post_roll >= 1.0);
     }
 }

@@ -11,10 +11,10 @@ async function gotoHarness(page, { verdicts = {}, gameOpen = false, holdAnalyze 
       obs_test_connection: () => ({ connected: true, obs_version: '33.0.0', websocket_version: '5', current_profile: '[DoD-Studio]', current_scene: '[DoD-Studio]', canvas: '2560x1440', output: '2560x1440', fps: 120, record_directory: 'D:\\captures', missing_requests: [], warnings: [] }),
       check_engine_processes: () => open,
       steam_state: () => 'ready',
-      obs_test_clip: () => ({ demo: 'C:\\Studio\\obs-test\\ci_fixture.dem', streak: { start_index: 1, end_index: 2, kills: [] }, pre_roll: 5.5, post_roll: 5.5 }),
+      obs_test_clip: () => ({ demo: 'C:\\Studio\\obs-test\\dodstudio_benchmark_anzio.dem', streak: { start_index: 1, end_index: 2, kills: [] }, pre_roll: 5.5, post_roll: 5.5 }),
       start_capture_batch: ({ payload }) => {
         window.__lastRate = payload.obs_capture_fps;
-        const take = `D:\\captures\\${payload.session_id}\\ci_fixture_b0`;
+        const take = `D:\\captures\\${payload.session_id}\\dodstudio_benchmark_anzio_b0`;
         setTimeout(() => window.__mockEmit('capture_status', { running: true, stage: 'starting', status: 'Starting the game…' }), 10);
         setTimeout(() => window.__mockEmit('capture_status', { running: false, status: 'Batch complete' }), 30);
         setTimeout(() => window.__mockEmit('obs_test_takes_verified', { session_id: payload.session_id, blocks: [{ take_folder: take, captured: true }] }), 40);
@@ -80,7 +80,7 @@ test('one test clip runs as an OBS batch at the current settings, shows its step
   expect(await invocations(page, 'obs_test_clip')).toEqual([{ seconds: 20, demo: null }]);
   expect(await invocations(page, 'obs_test_watch_start')).toEqual([{ host: '127.0.0.1', port: 4455, password: 'pw' }]);
   const [deleted] = await invocations(page, 'obs_test_delete_take');
-  expect(deleted.takeFolder).toBe(`D:\\captures\\${batch.payload.session_id}\\ci_fixture_b0`);
+  expect(deleted.takeFolder).toBe(`D:\\captures\\${batch.payload.session_id}\\dodstudio_benchmark_anzio_b0`);
 });
 
 test('the ladder climbs until a rate clearly fails, reports the highest steady one and can apply it', async ({ page }) => {

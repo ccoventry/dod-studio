@@ -3224,7 +3224,7 @@ export const STRINGS = {
     DEMO_RESET: 'Use the bundled demo',
     DEMO_DIALOG_TITLE: 'Pick a demo for the OBS capture test',
     DEMO_NOTE:
-        "The test plays a demo recorded on a local server with bots, which never lags. A full match with more players and smoke on screen gives OBS's encoder more to do: pick a rate a step below the result, or test one of your own demos.",
+        "The test plays a stretch of a real 6v6 match on dod_anzio, with grenades and fights, recorded without lag. Your own matches may be busier on other maps: to check, test one of your own demos.",
     // Step lines, each shown while that step runs.
     CHECKING_OBS: 'Checking OBS…',
     CHECKING_GAME: 'Checking the game is closed…',
