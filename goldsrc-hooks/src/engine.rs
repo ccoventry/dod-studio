@@ -42,11 +42,12 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps five of its 43 slots for our
+//!   `cldll_func_t` table, then swaps nine of its 43 slots for our
 //!   trampolines before handing it back to the engine.
-//! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` /
-//!   `"HUD_DirectorMessage"` / `"HUD_GetStudioModelInterface"` (classic
-//!   non-secured builds) -- we return the trampoline directly.
+//! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` / `"HUD_Redraw"` /
+//!   `"HUD_Key_Event"` / `"HUD_DirectorMessage"` /
+//!   `"HUD_GetStudioModelInterface"` (classic non-secured builds) -- we
+//!   return the trampoline directly.
 //!
 //! Either way the trampolines receive what we need as ordinary arguments:
 //! `Initialize` hands us `pEnginefuncs`, `HUD_GetStudioModelInterface` hands
@@ -55,7 +56,9 @@
 //! list -- the first of two that aren't a one-time capture, since it runs the
 //! suppress/forward decision itself, once per entity. `HUD_DirectorMessage`
 //! is the second: it hands us every HLTV director message, so
-//! `hltv_messages.rs` can drop the proxy's on-screen text.
+//! `hltv_messages.rs` can drop the proxy's on-screen text. `HUD_Redraw` and
+//! `HUD_Key_Event` carry the review's on-screen panel and answer keys
+//! (`review_keys.rs`, #660).
 
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -999,6 +1002,12 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 /// Slot indices within that table -- verified by resolving every address DoD's
 /// `F` writes back to its own export name.
 const SLOT_INITIALIZE: usize = 0;
+/// Checked against both installs' `client.dll` (#660): `F` writes
+/// `HUD_Redraw` here and `HUD_Key_Event` at slot 34. `hw.dll` calls the first
+/// as `(float time, int intermission)` (pre-Anniversary `+0xbec9`, 25th
+/// Anniversary `+0x196f5a`) and the second as `(down, key, binding)` from
+/// `ClientDLL_Key_Event` (`+0xb98f`, `+0x1971d4`).
+const SLOT_HUD_REDRAW: usize = 3;
 /// `V_CalcRefdef`, the slot before `HUD_AddEntity` in `cldll_func_t`
 /// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
 const SLOT_CALC_REFDEF: usize = 19;
@@ -1007,6 +1016,7 @@ const SLOT_HUD_ADD_ENTITY: usize = 20;
 /// (`+0x4c830`) at its table's slot 23.
 const SLOT_DRAW_TRANSPARENT_TRIANGLES: usize = 23;
 const SLOT_HUD_FRAME: usize = 33;
+const SLOT_HUD_KEY_EVENT: usize = 34;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
 /// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
 const SLOT_HUD_DIRECTOR_MESSAGE: usize = 38;
@@ -1018,6 +1028,8 @@ const _: () = assert!(
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_REDRAW < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_KEY_EVENT < CLDLL_FUNC_SLOTS
         && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
     "a cldll_func_t slot index is outside the table F actually writes"
@@ -1025,6 +1037,11 @@ const _: () = assert!(
 
 type InitializeFn = unsafe extern "C" fn(*mut ClEngineFuncsPartial, i32) -> i32;
 type HudFrameFn = unsafe extern "C" fn(f64);
+/// `int HUD_Redraw(float time, int intermission)`.
+type HudRedrawFn = unsafe extern "C" fn(f32, i32) -> i32;
+/// `int HUD_Key_Event(int down, int keynum, const char *binding)`: 0
+/// swallows the key, so the engine runs no bind for it.
+type HudKeyEventFn = unsafe extern "C" fn(i32, i32, *const c_char) -> i32;
 /// `void V_CalcRefdef(struct ref_params_s *pparams)`.
 type CalcRefdefFn = unsafe extern "C" fn(*mut RefParamsPartial);
 type GetStudioModelInterfaceFn =
@@ -1049,6 +1066,8 @@ static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mu
 static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_REDRAW: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_KEY_EVENT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -1459,6 +1478,38 @@ unsafe extern "C" fn tramp_draw_transparent_triangles() {
     crate::demo_scope::with_black_fill(|| unsafe { real() });
 }
 
+/// Runs `client.dll`'s own `HUD_Redraw`, then draws the review's panel
+/// over the HUD (#660).
+unsafe extern "C" fn tramp_hud_redraw(time: f32, intermission: i32) -> i32 {
+    let real = REAL_HUD_REDRAW.load(Ordering::Acquire);
+    let result = if real.is_null() {
+        1
+    } else {
+        let real: HudRedrawFn = unsafe { std::mem::transmute(real) };
+        // Safety: the client's own export, called on the engine's thread.
+        unsafe { real(time, intermission) }
+    };
+    // Safety: on the engine's thread, inside HUD_Redraw.
+    unsafe { crate::review_keys::draw() };
+    result
+}
+
+/// A key the engine is about to run the bind of, only while keys go to the
+/// game (never the console, chat or a window's box). The review's answer
+/// keys take theirs here (#660); everything else goes to the client as is.
+unsafe extern "C" fn tramp_hud_key_event(down: i32, key: i32, binding: *const c_char) -> i32 {
+    if crate::review_keys::key_event(down, key) {
+        return 0;
+    }
+    let real = REAL_HUD_KEY_EVENT.load(Ordering::Acquire);
+    if real.is_null() {
+        return 1;
+    }
+    let real: HudKeyEventFn = unsafe { std::mem::transmute(real) };
+    // Safety: the client's own export, with the engine's own arguments.
+    unsafe { real(down, key, binding) }
+}
+
 /// Called once per entity the engine is about to add to the render list.
 /// Returning 0 suppresses that one entity; see `hide_asset.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
@@ -1577,6 +1628,20 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_HUD_FRAME,
             tramp_hud_frame as *mut c_void,
             "HUD_Frame",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_REDRAW,
+            &REAL_HUD_REDRAW,
+            tramp_hud_redraw as *mut c_void,
+            "HUD_Redraw",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_KEY_EVENT,
+            &REAL_HUD_KEY_EVENT,
+            tramp_hud_key_event as *mut c_void,
+            "HUD_Key_Event",
         );
         swap_slot(
             table,
@@ -1713,6 +1778,14 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_Frame" => {
             REAL_HUD_FRAME.store(result, Ordering::Release);
             tramp_hud_frame as *mut c_void
+        }
+        "HUD_Redraw" => {
+            REAL_HUD_REDRAW.store(result, Ordering::Release);
+            tramp_hud_redraw as *mut c_void
+        }
+        "HUD_Key_Event" => {
+            REAL_HUD_KEY_EVENT.store(result, Ordering::Release);
+            tramp_hud_key_event as *mut c_void
         }
         "V_CalcRefdef" => {
             REAL_CALC_REFDEF.store(result, Ordering::Release);

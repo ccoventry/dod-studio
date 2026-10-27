@@ -90,6 +90,8 @@ the death cam).
 | `ds_ui_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `ds_ui_resizable_windows` | `1` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `ds_ui_remember_layout` | `1` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
+| `ds_ui_review_keys` | `1` | Review highlights answers on the game screen: at each highlight's end the review pauses with a box listing Y Yes, M Maybe, N No, R Replay, B Back, and ESC opens the DoD Studio window's Review tab for the kill range and note. The keys work only while the review waits for an answer and keys go to the game: never while typing in the console, chat or a window's box, and at any other time each key does what it always does. They take no bind, so `config.cfg` is untouched. `0` opens the Review tab at each highlight's end instead (#660) | `goldsrc-hooks/src/review_keys.rs` |
+| `ds_ui_review_info` | `1` | Review highlights: while a highlight loads and plays, a box on the game screen says which it is, whose and how many kills. The answer keys' box shows at a highlight's end either way (#660) | `goldsrc-hooks/src/review_keys.rs` |
 
 The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 `hw.dll` (#370).
@@ -327,8 +329,10 @@ Game Behind Your Windows is off (then it sends `ds_capture_stay_behind 0`). Sour
 ### `ds_demo_review`
 
 DoD Studio's **Review highlights** (#623): plays each queued highlight at
-normal speed, from 4 s before its first kill to 2 s after its last, pauses,
-and opens the window's Review tab. When the queue's header asks for it
+normal speed, from 4 s before its first kill to 2 s after its last, and
+pauses for an answer: from the answer keys on the game screen
+(`ds_ui_review_keys`, #660), or, with those off, on the window's Review tab,
+which it opens. When the queue's header asks for it
 (`gap=` and `speed=`, #665), a stretch between two kills further apart than
 `gap` seconds plays at `speed`. `start "<queue file>"` begins (Studio
 sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and

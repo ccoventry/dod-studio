@@ -1433,6 +1433,24 @@ unsafe extern "C" fn cmd_show_load_progress() {
     );
 }
 
+/// Only registered when `ds_ui_review_keys` could not be a cvar.
+unsafe extern "C" fn cmd_review_keys() {
+    handle_toggle(
+        crate::review_keys::KEYS.name,
+        &crate::review_keys::KEYS.fallback,
+        crate::review_keys::keys_status,
+    );
+}
+
+/// Only registered when `ds_ui_review_info` could not be a cvar.
+unsafe extern "C" fn cmd_review_info() {
+    handle_toggle(
+        crate::review_keys::INFO.name,
+        &crate::review_keys::INFO.fallback,
+        crate::review_keys::info_status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1745,6 +1763,16 @@ pub fn install() {
     match register(crate::demo_bar_progress::NAME, "1") {
         Some(cvar) => crate::demo_bar_progress::SETTING.set_cvar(cvar),
         None => add_command(crate::demo_bar_progress::NAME, cmd_show_load_progress),
+    }
+    // The review's on-screen panel and answer keys (#660), both on: they
+    // only show or take a key while a review runs.
+    match register(crate::review_keys::KEYS.name, "1") {
+        Some(cvar) => crate::review_keys::KEYS.set_cvar(cvar),
+        None => add_command(crate::review_keys::KEYS.name, cmd_review_keys),
+    }
+    match register(crate::review_keys::INFO.name, "1") {
+        Some(cvar) => crate::review_keys::INFO.set_cvar(cvar),
+        None => add_command(crate::review_keys::INFO.name, cmd_review_info),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };

@@ -282,11 +282,15 @@ is the complete list):
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
 - **Review highlights** (`ds_demo_review`, #623): plays each highlight
-  DoD Studio queued at normal speed, pauses at its end on the window's Review
-  tab, and sends each Yes/No, kill range and note back to Studio on the
+  DoD Studio queued at normal speed, pauses at its end for an answer, and
+  sends each Yes/Maybe/No, kill range and note back to Studio on the
   events pipe. Pause and speed go through `DemoPlayer.dll`'s `SetPaused` and
   `SetTimeScale`, checked by `tools/verify_demo_seek_offsets.py`. See
-  `src/review.rs`.
+  `src/review.rs`. The answer comes from keys on the game screen (Y M N R B,
+  ESC for the Review tab), through `client.dll`'s `HUD_Key_Event`, with a box
+  drawn from `HUD_Redraw` saying which highlight plays (#660,
+  `src/review_keys.rs`); `ds_ui_review_keys 0` pauses on the Review tab
+  instead.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that
