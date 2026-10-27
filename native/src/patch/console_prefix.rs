@@ -104,6 +104,7 @@ mod tests {
         "debug_log_view_bob",
         "demo_show_load_progress",
         "hud_hide_center_text",
+        "hud_hide_hints",
         "hud_hide_server_text",
         "hud_overview_hide_speaker",
         "player_change_name",
