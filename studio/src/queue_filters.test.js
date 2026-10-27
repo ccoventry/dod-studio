@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listedStreaks, dropOtherPlayersSavedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { listedStreaks, dropOtherPlayersSavedStreaks, matchesQuickFilters, hasTickedHighlight, KILLS_FILTER } from './queue_filters.js';
 
 const streak = (player_index, kill_count) => ({ player_index, kill_count });
 
@@ -60,5 +60,33 @@ describe('matchesQuickFilters', () => {
   it('recorder-only hides demos with no resolvable recording player', () => {
     expect(matchesQuickFilters(ownerless, { ownerOnly: true })).toBe(false);
     expect(matchesQuickFilters(multi, { ownerOnly: true })).toBe(true);
+  });
+
+  it('ticked only hides demos with no highlight ticked for capture', () => {
+    const ticked = { path: 'a.dem', streaks: [streak(2, 1), { ...streak(2, 2), selected: true }] };
+    const unticked = { path: 'b.dem', streaks: [{ ...streak(2, 3), selected: false }, streak(2, 1)] };
+    const f = { tickedOnly: true };
+    expect(matchesQuickFilters(ticked, f)).toBe(true);
+    expect(matchesQuickFilters(unticked, f)).toBe(false);
+    expect(matchesQuickFilters(noKills, f)).toBe(false);
+    expect(matchesQuickFilters(unticked)).toBe(true);
+  });
+
+  it('ticked only keeps the demo open in Highlight Details listed', () => {
+    const open = { path: 'open.dem', streaks: [streak(2, 1)] };
+    expect(matchesQuickFilters(open, { tickedOnly: true, keepPath: 'open.dem' })).toBe(true);
+    expect(matchesQuickFilters(open, { tickedOnly: true, keepPath: 'other.dem' })).toBe(false);
+    // The other filters still apply to it.
+    const ownerless = { path: 'open.dem', local_player_index: null, streaks: [] };
+    expect(matchesQuickFilters(ownerless, { tickedOnly: true, ownerOnly: true, keepPath: 'open.dem' })).toBe(false);
+  });
+});
+
+describe('hasTickedHighlight', () => {
+  it('counts only a highlight ticked with true', () => {
+    expect(hasTickedHighlight({ streaks: [{ selected: true }] })).toBe(true);
+    expect(hasTickedHighlight({ streaks: [{ selected: false }, {}] })).toBe(false);
+    expect(hasTickedHighlight({})).toBe(false);
+    expect(hasTickedHighlight(null)).toBe(false);
   });
 });

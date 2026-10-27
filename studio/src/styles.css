@@ -629,10 +629,16 @@ html.picking-path * {
   margin-right: 2px;
 }
 
-.queue-filter-min-kills {
+.queue-filter-min-kills,
+.queue-filter-ticked-only {
   display: flex;
   gap: 3px;
   align-items: center;
+}
+
+/* Dimmed while no highlight is ticked anywhere (#127). */
+.queue-filter-ticked-only.is-disabled {
+  opacity: 0.45;
 }
 
 .panel-header h2, .panel-header h3 {

@@ -41,12 +41,24 @@ export const KILLS_FILTER = {
 };
 
 /**
- * Whether `demo` passes the quick filters: `kills` (a KILLS_FILTER value)
- * and `ownerOnly` (hide demos with no resolvable recording player).
+ * Whether any of `demo`'s highlights is ticked for capture. Every ticked one
+ * counts, even one Min Kills hides, since the capture batch takes it too.
  */
-export function matchesQuickFilters(demo, { kills = KILLS_FILTER.ALL, ownerOnly = false } = {}) {
+export function hasTickedHighlight(demo) {
+  return (demo?.streaks || []).some((s) => s.selected === true);
+}
+
+/**
+ * Whether `demo` passes the quick filters: `kills` (a KILLS_FILTER value),
+ * `ownerOnly` (hide demos with no resolvable recording player) and
+ * `tickedOnly` (hide demos with no highlight ticked, #127). `keepPath` is the
+ * demo open in Highlight Details: Ticked only keeps it listed, so unticking
+ * its last highlight doesn't pull the row out from under the user.
+ */
+export function matchesQuickFilters(demo, { kills = KILLS_FILTER.ALL, ownerOnly = false, tickedOnly = false, keepPath = null } = {}) {
   const hasOwner = demo.local_player_index !== null && demo.local_player_index !== undefined;
   if (ownerOnly && !hasOwner) return false;
+  if (tickedOnly && !hasTickedHighlight(demo) && !(keepPath && demo.path === keepPath)) return false;
   if (kills === KILLS_FILTER.ALL) return true;
   const own = listedStreaks(demo);
   if (kills === KILLS_FILTER.WITH_KILLS) return own.some((s) => (s.kill_count || 0) > 0);

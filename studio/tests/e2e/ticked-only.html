@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<!--
+  Harness for the Master Queue's Ticked only filter (#127): the queue table
+  and the checkbox master_pane.js queries. ticked.dem has a highlight ticked,
+  plain.dem and other.dem have none. window.__tick(name, on) ticks or unticks
+  a demo's first highlight and re-renders, as Highlight Details does.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ticked only test harness</title>
+</head>
+<body>
+  <label class="queue-filter-ticked-only" title="">
+    <input type="checkbox" id="master-ticked-only-cb" />
+    <span>Ticked only</span>
+  </label>
+  <table>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+
+    const demos = [
+      { name: 'ticked.dem', path: 'C:\\demos\\ticked.dem', streaks: [{ kill_count: 2, selected: true }, { kill_count: 1 }] },
+      { name: 'plain.dem', path: 'C:\\demos\\plain.dem', streaks: [{ kill_count: 3, selected: false }] },
+      { name: 'other.dem', path: 'C:\\demos\\other.dem', streaks: [{ kill_count: 1 }] },
+    ];
+    let open = null;
+    const onSelect = (_demo, idx) => { open = idx; };
+    initMasterPane(null, null, null, null, null);
+    renderMasterList(demos, open, onSelect);
+    window.__tick = (name, on) => {
+      demos.find((d) => d.name === name).streaks[0].selected = on;
+      renderMasterList(demos, open, onSelect);
+    };
+    window.__untickAll = () => {
+      demos.forEach((d) => d.streaks.forEach((s) => { s.selected = false; }));
+      renderMasterList(demos, open, onSelect);
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

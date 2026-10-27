@@ -107,6 +107,10 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    // #127: a demo with no highlight ticked for capture.
+    TICKED_ONLY_LABEL: 'Ticked only',
+    TICKED_ONLY_TITLE: 'Hide demos with no highlight ticked, so the list shows what the next capture takes. The demo open in Highlight Details stays listed until you open another.',
+    TICKED_ONLY_NONE_TITLE: 'No highlight is ticked yet. Tick one in Highlight Details to use this.',
     // #685, #823: the queue grouped by match, player, map, ..., with a header line per group.
     GROUP_BY_LABEL: 'Group by:',
     GROUP_BY_TITLE: 'Show the queue in groups, each under a line with its counts. Only the order changes: '
