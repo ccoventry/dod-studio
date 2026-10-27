@@ -122,7 +122,7 @@ impl SnapshotMotion {
             _ => 0,
         };
         match (self.airborne_since, self.climb) {
-            (None, Some(climb)) => {
+            (None, Some(_)) => {
                 let off_a_ladder = self.ladder_at.is_some_and(|at| time - at < LADDER_SECONDS);
                 if body.starts_with("crouch_") && !off_a_ladder && self.rising_run == 2 {
                     self.airborne_since = Some(time);
