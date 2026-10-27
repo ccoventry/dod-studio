@@ -3217,8 +3217,14 @@ export const STRINGS = {
     LONG_LABEL: '1-minute clips',
     LONG_TITLE: 'Longer clips catch a PC that slows down as it warms up. Each rate takes about a minute longer.',
     STOP_BUTTON: 'Stop test',
+    DEMO_LABEL: 'Test demo:',
+    DEMO_BUNDLED: 'the one that comes with DoD Studio',
+    DEMO_PICK: 'Use another demo…',
+    DEMO_PICK_TITLE: "Test on one of your own demos instead: the test records the stretch of it with the most kills. A real match's own lag shows up as repeated frames, so the bundled demo's result is the fairer one.",
+    DEMO_RESET: 'Use the bundled demo',
+    DEMO_DIALOG_TITLE: 'Pick a demo for the OBS capture test',
     DEMO_NOTE:
-        'The test plays a demo recorded on a local server with bots, which never lags. A full match with more players on screen can ask more of the PC.',
+        "The test plays a demo recorded on a local server with bots, which never lags. A full match with more players and smoke on screen gives OBS's encoder more to do: pick a rate a step below the result, or test one of your own demos.",
     // Step lines, each shown while that step runs.
     CHECKING_OBS: 'Checking OBS…',
     CHECKING_GAME: 'Checking the game is closed…',
@@ -3238,7 +3244,7 @@ export const STRINGS = {
     verdictLine: (rate, level, quality) => `${rate} fps at OBS Quality ${quality}: ${level}.`,
     causeLine: (cause) => `What lost frames: ${cause}.`,
     numbersLine: (skipped, missed, repeated) =>
-        `${skipped} skipped by OBS's encoder, ${missed} missed by OBS's rendering, ${repeated} repeated because the game was late.`,
+        `${skipped} skipped by OBS's encoder, ${missed} missed by OBS's rendering, ${repeated} of the moving frames repeated in the file (the game late, or OBS filling in a skipped frame).`,
     adviceFps: (rate) => `Change one setting: lower OBS Capture FPS to ${rate}.`,
     adviceQuality: (quality) => `Change one setting: lower OBS Quality to ${quality}, or lower OBS Capture FPS.`,
     ADVICE_NONE: 'Nothing to change: OBS kept every frame.',
@@ -3260,7 +3266,7 @@ export const STRINGS = {
     COL_RESULT: 'Result',
     COL_SKIPPED: 'Skipped (encoder)',
     COL_MISSED: 'Missed (rendering)',
-    COL_REPEATED: 'Repeated (game)',
+    COL_REPEATED: 'Repeated',
     COL_GAME: 'Game fps (1% low)',
     COL_SOUND: 'Sound',
     SOUND_CELL_OK: 'yes',

@@ -17,6 +17,7 @@ import { isObsConnected } from './obs_status.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { setObsTestBatch } from './obs_test_flag.js';
 import { numberField } from './number_field.js';
+import { pickPath } from './pick_path.js';
 import { STRINGS } from './strings.js';
 import {
   FPS_LADDER, CLIP_SECONDS, pct, levelName, ladderStops, highestSteady, ladderSummary, stepLines, testSessionId,
@@ -166,8 +167,7 @@ export function createObsCaptureTest({ getState, persist }) {
     const seconds = longBox?.checked ? CLIP_SECONDS.long : CLIP_SECONDS.short;
     let takeFolder = null;
     try {
-      // `data-demo` on the panel swaps in another demo: not in the UI, it is
-      // how a run is compared against a real match's demo.
+      // `data-demo`: the demo "Use another demo…" picked, else the bundled one.
       const clip = await obsTestClip(seconds, panel.dataset.demo || null);
       const payload = {
         ...settings,
@@ -288,6 +288,33 @@ export function createObsCaptureTest({ getState, persist }) {
       await runObsConnectionTest({ auto: true }).catch(() => {});
       setRunning(false);
     }
+  });
+
+  // "Use another demo…": the test then records the busiest stretch of it.
+  const demoName = el('obs-test-demo-name');
+  const demoPickBtn = el('obs-test-demo-pick-btn');
+  const demoResetBtn = el('obs-test-demo-reset-btn');
+  const showDemo = () => {
+    const demo = panel.dataset.demo;
+    if (demoName) demoName.textContent = demo ? demo.split(/[\\/]/).pop() : STRINGS.OBS_TEST.DEMO_BUNDLED;
+    if (demoName) demoName.title = demo || '';
+    if (demoResetBtn) demoResetBtn.hidden = !demo;
+  };
+  demoPickBtn?.addEventListener('click', async () => {
+    const picked = await pickPath({
+      field: 'obs_test.demo',
+      multiple: false,
+      filters: [{ name: STRINGS.MAIN.DEMO_FILES_FILTER_NAME, extensions: ['dem'] }],
+      title: STRINGS.OBS_TEST.DEMO_DIALOG_TITLE,
+    }).catch(() => null);
+    if (typeof picked === 'string' && picked) {
+      panel.dataset.demo = picked;
+      showDemo();
+    }
+  });
+  demoResetBtn?.addEventListener('click', () => {
+    delete panel.dataset.demo;
+    showDemo();
   });
 
   stopBtn.addEventListener('click', () => {

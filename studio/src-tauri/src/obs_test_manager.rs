@@ -21,8 +21,17 @@ use crate::capture_manager::SerializedStreak;
 /// Every test batch's session id starts with this.
 pub const SESSION_PREFIX: &str = "obs_test_";
 
-/// The test demo inside Studio's resources (`tauri.conf.json`).
-const BUNDLED_DEMO: &str = "obs-test/ci_fixture.dem";
+/// The test's demo: its file name in `test-fixtures/`, which `tauri.conf.json`
+/// bundles under `obs-test/`. To test on another demo, put it in
+/// `test-fixtures/`, change this and the resource line, and set
+/// [`BUNDLED_WINDOW`] to its busy stretch.
+const BUNDLED_DEMO_FILE: &str = "ci_fixture.dem";
+
+/// The stretch of [`BUNDLED_DEMO_FILE`] the test records, `(start, end)` on
+/// the demo player's clock (`viewdemo` seconds), widened evenly when the
+/// test asks for longer. `None`: the stretch of the test's length with the
+/// most kills, found by `native::obs::bench::pick_clip`.
+const BUNDLED_WINDOW: Option<(f32, f32)> = None;
 
 /// Whether a batch's session id is a test's.
 pub fn is_test_session(session_id: &str) -> bool {
@@ -47,8 +56,14 @@ pub struct ObsTestClip {
 /// The bundled demo: from the installed resources, or the repository's
 /// `test-fixtures` in a build that runs from it.
 fn bundled_demo(app: &tauri::AppHandle) -> Option<PathBuf> {
-    let installed = app.path().resource_dir().ok().map(|d| d.join(BUNDLED_DEMO));
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-fixtures/ci_fixture.dem");
+    let installed = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("obs-test").join(BUNDLED_DEMO_FILE));
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test-fixtures")
+        .join(BUNDLED_DEMO_FILE);
     installed
         .into_iter()
         .chain(std::iter::once(repo))
@@ -78,9 +93,12 @@ pub async fn obs_test_clip(
     seconds: f32,
     demo: Option<String>,
 ) -> Result<ObsTestClip, String> {
-    let path = match demo.filter(|d| !d.trim().is_empty()) {
-        Some(d) => PathBuf::from(d),
-        None => bundled_demo(&app).ok_or_else(|| crate::messages::OBS_TEST_NO_DEMO.to_string())?,
+    let (path, window) = match demo.filter(|d| !d.trim().is_empty()) {
+        Some(d) => (PathBuf::from(d), None),
+        None => (
+            bundled_demo(&app).ok_or_else(|| crate::messages::OBS_TEST_NO_DEMO.to_string())?,
+            BUNDLED_WINDOW,
+        ),
     };
     tokio::task::spawn_blocking(move || {
         let (_, streaks, _, _, _, match_start_tick, frame_times) =
@@ -91,8 +109,11 @@ pub async fn obs_test_clip(
             .filter(|s| s.demo_fps > 0.0)
             .map(|s| s.total_demo_frames as f32 / s.demo_fps)
             .unwrap_or(0.0);
-        let clip = bench::pick_clip(&streaks, seconds, demo_secs)
-            .ok_or_else(|| crate::messages::obs_test_no_clip(&path, seconds))?;
+        let clip = match window {
+            Some((start, end)) => bench::pick_clip_in(&streaks, start, end, seconds),
+            None => bench::pick_clip(&streaks, seconds, demo_secs),
+        }
+        .ok_or_else(|| crate::messages::obs_test_no_clip(&path, seconds))?;
         let mut streak = clip.streak;
         streak.match_start_tick = match_start_tick;
         streak.frame_times = frame_times;
@@ -271,7 +292,9 @@ mod tests {
 
     #[test]
     fn the_test_demo_is_found_from_the_repository() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-fixtures/ci_fixture.dem");
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test-fixtures")
+            .join(BUNDLED_DEMO_FILE);
         assert!(repo.is_file());
     }
 }

@@ -118,3 +118,16 @@ test('an open game stops the test before any batch', async ({ page }) => {
   expect(await invocations(page, 'start_capture_batch')).toEqual([]);
   await expect(page.locator('#obs-capture-test-btn')).toBeEnabled();
 });
+
+test('"Use another demo…" tests on the picked demo until the bundled one is put back', async ({ page }) => {
+  await gotoHarness(page);
+  await page.evaluate(() => { window.__mockInvokeHandlers['plugin:dialog|open'] = () => 'D:/demos/match.dem'; });
+  await page.click('#obs-test-demo-pick-btn');
+  await expect(page.locator('#obs-test-demo-name')).toHaveText('match.dem');
+  await page.click('#obs-capture-test-btn');
+  await expect(page.locator('#obs-test-result')).toContainText('Sustainable');
+  expect((await invocations(page, 'obs_test_clip'))[0]).toEqual({ seconds: 20, demo: 'D:/demos/match.dem' });
+  await page.click('#obs-test-demo-reset-btn');
+  await expect(page.locator('#obs-test-demo-name')).toHaveText('the one that comes with DoD Studio');
+  await expect(page.locator('#obs-test-demo-reset-btn')).toHaveJSProperty('hidden', true);
+});

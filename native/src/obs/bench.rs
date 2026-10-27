@@ -723,6 +723,51 @@ pub fn pick_clip(streaks: &[CaptureStreak], seconds: f32, demo_secs: f32) -> Opt
     })
 }
 
+/// A fixed stretch of a demo, `start..end` on the demo player's clock
+/// (`viewdemo` seconds, the clock `CaptureStreak::viewdemo_times` uses), at
+/// least `seconds` long: widened evenly around its middle when shorter. The
+/// clip is built on the kills inside it (the most kills of one highlight,
+/// the earliest on a tie), with the roll reaching out to the stretch's ends.
+/// `None` when no kill sits at least a second inside it.
+pub fn pick_clip_in(
+    streaks: &[CaptureStreak],
+    start: f32,
+    end: f32,
+    seconds: f32,
+) -> Option<TestClip> {
+    let widen = (seconds - (end - start)).max(0.0) / 2.0;
+    let (start, end) = (start - widen, end + widen);
+    // (kills, start time, streak, i, j)
+    let mut best: Option<(usize, f32, usize, usize, usize)> = None;
+    for (si, s) in streaks.iter().enumerate() {
+        let times = &s.viewdemo_times;
+        if times.len() != s.kills.len() {
+            continue;
+        }
+        let inside: Vec<usize> = (0..times.len())
+            .filter(|&k| times[k] - start >= MIN_ROLL_SECS && end - times[k] >= MIN_ROLL_SECS)
+            .collect();
+        let (Some(&i), Some(&j)) = (inside.first(), inside.last()) else {
+            continue;
+        };
+        let kills = j - i + 1;
+        if best.is_none_or(|(bk, bt0, ..)| kills > bk || (kills == bk && times[i] < bt0)) {
+            best = Some((kills, times[i], si, i, j));
+        }
+    }
+    let (_, _, si, i, j) = best?;
+    let mut streak = streaks[si].clone();
+    let (t0, t1) = (streak.viewdemo_times[i], streak.viewdemo_times[j]);
+    streak.start_index = i;
+    streak.end_index = j;
+    streak.update_visuals();
+    Some(TestClip {
+        streak,
+        pre_roll: t0 - start,
+        post_roll: end - t1,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1009,6 +1054,24 @@ mod tests {
         // A minute takes three of the first four.
         let c = pick_clip(&streaks, 60.0, 308.0).unwrap();
         assert_eq!((c.streak.start_index, c.streak.end_index), (1, 3));
+    }
+
+    #[test]
+    fn a_fixed_stretch_is_recorded_as_given() {
+        let mut s = streak(&[58.68, 67.57, 97.92]);
+        s.viewdemo_times = vec![362.19, 371.09, 401.44];
+        let streaks = [s];
+        // 355..375 on the demo player's clock holds the first two kills.
+        let c = pick_clip_in(&streaks, 355.0, 375.0, 20.0).unwrap();
+        assert_eq!((c.streak.start_index, c.streak.end_index), (0, 1));
+        assert!((c.pre_roll - 7.19).abs() < 1e-3);
+        assert!((c.post_roll - 3.91).abs() < 1e-3);
+        // A minute widens it evenly to 335..395.
+        let c = pick_clip_in(&streaks, 355.0, 375.0, 60.0).unwrap();
+        assert!((c.pre_roll - 27.19).abs() < 1e-3);
+        assert!((c.post_roll - 23.91).abs() < 1e-3);
+        // No kill inside: nothing to build the clip on.
+        assert!(pick_clip_in(&streaks, 380.0, 395.0, 15.0).is_none());
     }
 
     #[test]

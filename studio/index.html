@@ -488,6 +488,12 @@
                   <label data-str-title="OBS_TEST.LONG_TITLE"><input type="checkbox" id="obs-test-long" /> <span data-str="OBS_TEST.LONG_LABEL">1-minute clips</span></label>
                   <button id="obs-test-stop-btn" hidden data-str="OBS_TEST.STOP_BUTTON">Stop test</button>
                 </div>
+                <div class="control-group obs-test-demo-row">
+                  <span data-str="OBS_TEST.DEMO_LABEL">Test demo:</span>
+                  <span id="obs-test-demo-name" class="obs-test-demo-name" data-str="OBS_TEST.DEMO_BUNDLED">the one that comes with DoD Studio</span>
+                  <button id="obs-test-demo-pick-btn" data-str="OBS_TEST.DEMO_PICK" data-str-title="OBS_TEST.DEMO_PICK_TITLE">Use another demo…</button>
+                  <button id="obs-test-demo-reset-btn" hidden data-str="OBS_TEST.DEMO_RESET">Use the bundled demo</button>
+                </div>
                 <div id="obs-test-panel" class="obs-test-panel" hidden>
                   <p class="setting-hint" data-str="OBS_TEST.DEMO_NOTE"></p>
                   <div id="obs-test-step" class="obs-test-step"></div>
@@ -500,7 +506,7 @@
                         <th data-str="OBS_TEST.COL_RESULT">Result</th>
                         <th data-str="OBS_TEST.COL_SKIPPED">Skipped (encoder)</th>
                         <th data-str="OBS_TEST.COL_MISSED">Missed (rendering)</th>
-                        <th data-str="OBS_TEST.COL_REPEATED">Repeated (game)</th>
+                        <th data-str="OBS_TEST.COL_REPEATED">Repeated</th>
                         <th data-str="OBS_TEST.COL_GAME">Game fps (1% low)</th>
                         <th data-str="OBS_TEST.COL_SOUND">Sound</th>
                       </tr>
