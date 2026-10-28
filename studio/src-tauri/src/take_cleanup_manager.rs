@@ -429,6 +429,9 @@ pub(crate) fn make_room(
         let outcome = delete_take_permanently(&plan.take_folder, &dirs);
         done.record(why, AfterFinish::Delete, &plan.take_folder, outcome);
     }
+    // The job's own space check runs next, within the free-space cache's 2 s,
+    // and would still see the deleted takes' bytes as taken.
+    native::sys::disk::forget_free_space();
     if progress.report("deleting", total, total) {
         on_step(
             &crate::messages::making_room_deleting(total, total),
