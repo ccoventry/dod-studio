@@ -47,6 +47,16 @@ test('boots and wires settings into the folder pools', async ({ page }) => {
   expect(errors.filter((m) => /before initialization|is not defined|is not a function/.test(m))).toEqual([]);
 });
 
+test('"Capture Output Free" reads the drives again after finished takes are deleted (#644)', async ({ page }) => {
+  await page.goto('/index.html');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
+  await page.evaluate((gib) => {
+    window.__mockInvokeHandlers.calculate_export_pool_space = () => 25 * gib;
+    window.__mockEmit('take_cleanup_done', { reason: 'capture', method: 'delete', deleted: [], failed: [], short: null });
+  }, GIB);
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('25.0');
+});
+
 test("+ Add Folder's folder shows in the Explorer's Recent list straight away", async ({ page }) => {
   await page.addInitScript(() => {
     Object.assign(window.__mockInvokeHandlers, {

@@ -67,6 +67,23 @@ pub fn group_by_volume(
 // issuing blocking kernel disk-enumeration syscalls on every frame.
 const TTL_MS: u128 = 2_000;
 
+/// Bumped by [`forget_free_space`]; a cached answer or disk list from an
+/// older epoch is re-read.
+#[cfg(not(target_arch = "wasm32"))]
+static FREE_SPACE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Drops every cached free-space answer, so the next [`get_available_bytes`]
+/// asks the OS again. Call it after deleting files on purpose to make room:
+/// the take cleanup (#644) deletes a take and `build_batch_queue` reads the
+/// drive within the 2 s cache, which then still reported the space as taken.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn forget_free_space() {
+    FREE_SPACE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn forget_free_space() {}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     use std::collections::HashMap;
@@ -76,10 +93,12 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
     // Shared sysinfo disk list and when it was last re-listed — only
     // refreshed when older than TTL_MS.
-    static DISKS: OnceLock<Mutex<(Disks, Instant)>> = OnceLock::new();
+    static DISKS: OnceLock<Mutex<(Disks, Instant, u64)>> = OnceLock::new();
 
-    // Per-path TTL cache: path_key → (last_refresh, available_bytes)
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64)>>> = OnceLock::new();
+    // Per-path TTL cache: path_key → (last_refresh, available_bytes, epoch)
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64, u64)>>> = OnceLock::new();
+
+    let epoch = FREE_SPACE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
 
     // Normalise path to a lowercase forward-slash key in a single pass.
     let path_key: String = path
@@ -98,7 +117,8 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
     // Fast path: return cached value if within TTL.
     if let Ok(guard) = cache.lock()
-        && let Some(&(last, bytes)) = guard.get(&path_key)
+        && let Some(&(last, bytes, cached_epoch)) = guard.get(&path_key)
+        && cached_epoch == epoch
         && last.elapsed().as_millis() < TTL_MS
     {
         return bytes;
@@ -116,17 +136,19 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     let result = match diagnose_path(path) {
         PathStatus::Malformed | PathStatus::NotAbsolute | PathStatus::NotADirectory => u64::MAX,
         PathStatus::Ok | PathStatus::NotFound => {
-            let disks_mutex = DISKS
-                .get_or_init(|| Mutex::new((Disks::new_with_refreshed_list(), Instant::now())));
+            let disks_mutex = DISKS.get_or_init(|| {
+                Mutex::new((Disks::new_with_refreshed_list(), Instant::now(), epoch))
+            });
 
             if let Ok(mut guard) = disks_mutex.lock() {
-                let (disks, refreshed_at) = &mut *guard;
+                let (disks, refreshed_at, listed_epoch) = &mut *guard;
                 // Callers that queued on the lock behind a refresh use its list
                 // instead of each re-listing every volume again (#853).
-                if !list_is_fresh(*refreshed_at, Instant::now()) {
+                if !list_is_fresh(*refreshed_at, Instant::now()) || *listed_epoch != epoch {
                     // Re-lists too, so a drive plugged in since the last call counts.
                     disks.refresh(true);
                     *refreshed_at = Instant::now();
+                    *listed_epoch = epoch;
                 }
 
                 let mut best_bytes = u64::MAX;
@@ -160,7 +182,7 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
     // Store result in cache.
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(path_key, (Instant::now(), result));
+        guard.insert(path_key, (Instant::now(), result, epoch));
     }
 
     result

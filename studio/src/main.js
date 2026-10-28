@@ -9,6 +9,7 @@ import { renderDetailView, initDetailPane } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
+import { initTakeCleanup } from './take_cleanup.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
@@ -411,6 +412,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     ),
     onSettingsChange: persistAppSettings,
   });
+  // "After a clip is finished" (#644): the setting, and the backend's reports.
+  initTakeCleanup({ onSettingsChange: persistAppSettings });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
   // pattern as dev's StartupState::PendingRenderRecovery. Render is now a
