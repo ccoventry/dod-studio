@@ -41,6 +41,11 @@ pub enum EngineEvent {
     /// clip_count), all 1-based. Same console-log source as DemoLoading.
     /// See issue #98.
     FastForwardToClip(u32, u32, u32, u32),
+    /// A clip's recording started (`START_RECORD`) or stopped
+    /// (`STOP_RECORD`). Counting both tells a Cancel that cut a clip short
+    /// from one between clips (#1081).
+    RecordStarted,
+    RecordStopped,
 }
 
 /// Longest a batch may go without a console marker before OBS mode calls it
@@ -841,6 +846,15 @@ pub fn spawn_capture_engine(
                         && let Some((job_idx, total, clip_idx, clip_count)) = marker.next_clip_progress {
                             let _ = tx.send(EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count));
                         }
+                    match marker.kind {
+                        crate::obs::MarkerKind::StartRecord => {
+                            let _ = tx.send(EngineEvent::RecordStarted);
+                        }
+                        crate::obs::MarkerKind::StopRecord => {
+                            let _ = tx.send(EngineEvent::RecordStopped);
+                        }
+                        _ => {}
+                    }
                 }
 
                 if !launcher_exit_logged {

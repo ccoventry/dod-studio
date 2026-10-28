@@ -2247,7 +2247,12 @@ export const STRINGS = {
     CHECKING: 'Checking the takes on disk…',
     kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
     merged: (n) => `(+${n} more, recorded as one take)`,
-    STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
+    STATUS: {
+      ok: 'Captured',
+      unrenderable: "Captured, can't render yet",
+      missing: 'Missing',
+      cut_short: 'Cut short by Cancel (partial take, not captured)',
+    },
     OPEN_FOLDER: 'Open folder',
   },
 

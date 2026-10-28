@@ -779,6 +779,51 @@ pub struct VerifiedBlock {
     pub renderable: bool,
     /// What the take folder holds on disk, for the batch results panel (#172).
     pub bytes: u64,
+    /// Cancel stopped the batch while this clip recorded (#1081): what's on
+    /// disk is a partial take, so it counts as neither captured nor
+    /// renderable, and is left for the user to delete.
+    pub cut_short: bool,
+}
+
+/// Each manifest block's position in recording order: demos play in the
+/// manifest's order, and a demo's clips by `block_index`, while its blocks
+/// sit in the order they were placed on drives (largest first).
+fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    // A demo's blocks are contiguous; its first block's position keys the demo.
+    let mut demo_start = vec![0usize; blocks.len()];
+    for i in 1..blocks.len() {
+        demo_start[i] = if blocks[i].demo_name == blocks[i - 1].demo_name {
+            demo_start[i - 1]
+        } else {
+            i
+        };
+    }
+    order.sort_by_key(|&i| (demo_start[i], blocks[i].block_index));
+    order
+}
+
+/// Marks the clip a Cancel cut short (#1081): `recording` is how many clips
+/// had started recording and `stopped` how many had stopped, from the
+/// batch's `START_RECORD`/`STOP_RECORD` markers. With one still recording,
+/// the clip at position `stopped` in recording order is partial. Without
+/// markers both are 0 and nothing changes.
+fn mark_cut_short(
+    manifest: &CaptureManifest,
+    verified: &mut [VerifiedBlock],
+    recording: usize,
+    stopped: usize,
+) {
+    if recording <= stopped {
+        return;
+    }
+    let Some(&i) = recording_order(&manifest.blocks).get(stopped) else {
+        return;
+    };
+    let block = &mut verified[i];
+    block.cut_short = block.captured;
+    block.captured = false;
+    block.renderable = false;
 }
 
 /// Everything under `path`, in bytes. 0 for a folder that isn't there.
@@ -829,6 +874,7 @@ fn verify_capture_takes(
             captured: take_folder_has_content(&block.take_folder),
             renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
             bytes: 0,
+            cut_short: false,
         })
         .collect();
 
@@ -906,11 +952,13 @@ struct TakeReport {
 /// Runs verification for the batch that just ended, with "Checking the
 /// takes: N of M" on the status line while it runs (#952, throttled to
 /// ~33 ms like the patch line). `outcome` ("complete" / "cancelled") goes
-/// into the manifest file (#19). `None` when the batch planned no takes.
+/// into the manifest file (#19). `records` is (started, stopped) clip
+/// recordings, for [`mark_cut_short`]. `None` when the batch planned no takes.
 fn check_takes(
     app: &tauri::AppHandle,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
     outcome: &str,
+    records: (usize, usize),
 ) -> Option<TakeReport> {
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
@@ -935,12 +983,19 @@ fn check_takes(
     };
     emit_checking(0);
     let mut last_emit = std::time::Instant::now();
-    let blocks = verify_capture_takes(&manifest, &mut |done| {
+    let mut blocks = verify_capture_takes(&manifest, &mut |done| {
         if done == total || last_emit.elapsed() >= std::time::Duration::from_millis(33) {
             last_emit = std::time::Instant::now();
             emit_checking(done);
         }
     });
+    mark_cut_short(&manifest, &mut blocks, records.0, records.1);
+    for block in blocks.iter().filter(|b| b.cut_short) {
+        log_markdown(&format!(
+            "[take-verify] {} was cut short by Cancel: not counted as captured. Its partial take is left at {}.",
+            block.take_key, block.take_folder
+        ));
+    }
     let captured_count = blocks.iter().filter(|b| b.captured).count();
     let renderable_count = blocks.iter().filter(|b| b.renderable).count();
 
@@ -989,8 +1044,9 @@ fn finish_batch(
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
     status: &str,
     outcome: &str,
+    records: (usize, usize),
 ) {
-    let report = check_takes(app, manifest_slot, outcome);
+    let report = check_takes(app, manifest_slot, outcome, records);
     *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
     let _ = app.emit(
         "capture_status",
@@ -1538,6 +1594,8 @@ pub async fn start_capture_batch_impl(
                 // within a demo reports the same "X of Y clips total" the
                 // demo-loading toast itself would have shown. See issue #98.
                 let mut clips = ClipTally::default();
+                // Clip recordings (started, stopped), for a Cancel (#1081).
+                let mut records = (0usize, 0usize);
                 // A demo by DEMO_START's 1-based index, for the line (#952).
                 let demo_name = |job_idx: u32| {
                     (job_idx as usize)
@@ -1672,18 +1730,23 @@ pub async fn start_capture_batch_impl(
                                 &manifest_for_listener,
                                 "Complete",
                                 "complete",
+                                (0, 0),
                             );
                             break;
                         }
+                        EngineEvent::RecordStarted => records.0 += 1,
+                        EngineEvent::RecordStopped => records.1 += 1,
                         EngineEvent::Cancelled => {
                             // A cancelled batch still leaves real finished takes on
                             // disk — verify anyway rather than discarding them.
+                            // The clip it cut short, if any, isn't one (#1081).
                             finish_batch(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
                                 "Cancelled",
                                 "cancelled",
+                                records,
                             );
                             break;
                         }
@@ -4792,5 +4855,88 @@ mod tests {
             js.contains(&line),
             "studio/src/scan_version.js must say `{line}`"
         );
+    }
+
+    fn cut_short_manifest(order: &[(&str, usize)]) -> CaptureManifest {
+        CaptureManifest {
+            session_id: "s".into(),
+            blocks: order
+                .iter()
+                .map(|&(demo, block_index)| native::patch::types::CaptureBlock {
+                    demo_name: demo.into(),
+                    block_index,
+                    drive_index: 0,
+                    take_folder: std::path::PathBuf::from(format!("{demo}_b{block_index}")),
+                    take_key: format!("s/{demo}_b{block_index}"),
+                    source_streak_indices: vec![],
+                    start_tick: 0,
+                    end_tick: 0,
+                    record_start_tick: 0,
+                    record_stop_tick: 0,
+                })
+                .collect(),
+            capture_fps: 300,
+            capture_mode: "frames".into(),
+            agr_fps: 0,
+        }
+    }
+
+    fn on_disk(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
+        manifest
+            .blocks
+            .iter()
+            .map(|b| VerifiedBlock {
+                take_key: b.take_key.clone(),
+                take_folder: b.take_folder.to_string_lossy().into_owned(),
+                demo_name: b.demo_name.clone(),
+                block_index: b.block_index,
+                source_streak_indices: vec![],
+                captured: true,
+                renderable: true,
+                bytes: 1,
+                cut_short: false,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn blocks_are_put_in_recording_order_demo_by_demo() {
+        // Each demo's blocks sit largest first, as they were placed on drives.
+        let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
+        assert_eq!(recording_order(&manifest.blocks), vec![1, 2, 0, 4, 3]);
+    }
+
+    /// #1081: Cancel while the third clip recorded leaves a partial take,
+    /// which is not a captured clip.
+    #[test]
+    fn the_clip_a_cancel_cut_short_is_not_captured() {
+        let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, 3, 2);
+        let cut: Vec<_> = blocks.iter().map(|b| (b.captured, b.cut_short)).collect();
+        // Recording order a0, a1, a2: a2 (manifest position 0) was recording.
+        assert_eq!(
+            cut,
+            vec![
+                (false, true),
+                (true, false),
+                (true, false),
+                (true, false),
+                (true, false)
+            ]
+        );
+        assert!(!blocks[0].renderable);
+
+        // Cancelled between clips, or with no markers read: nothing changes.
+        for (started, stopped) in [(2, 2), (0, 0)] {
+            let mut blocks = on_disk(&manifest);
+            mark_cut_short(&manifest, &mut blocks, started, stopped);
+            assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
+        }
+        // A clip cut short before it wrote anything is just missing.
+        let mut blocks = on_disk(&manifest);
+        blocks[3].captured = false;
+        mark_cut_short(&manifest, &mut blocks, 5, 4);
+        assert!(!blocks[3].captured && !blocks[3].cut_short);
     }
 }

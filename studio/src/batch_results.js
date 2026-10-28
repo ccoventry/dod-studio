@@ -45,7 +45,8 @@ export function resultsOf(payload, dispatch) {
   const blocks = payload?.blocks || [];
   const rows = blocks.map((b) => ({
     label: takeLabel(b, dispatch),
-    status: !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    // cut_short: a partial take Cancel left on disk (#1081), not a clip.
+    status: b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
     bytes: b.bytes || 0,
     folder: b.take_folder,
   }));

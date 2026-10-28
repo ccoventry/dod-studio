@@ -1870,7 +1870,8 @@ button.danger-btn {
   color: #ef5350;
 }
 
-.batch-results-row-unrenderable td:first-child {
+.batch-results-row-unrenderable td:first-child,
+.batch-results-row-cut_short td:first-child {
   color: #ffb74d;
 }
 
