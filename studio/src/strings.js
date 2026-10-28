@@ -669,7 +669,6 @@ export const STRINGS = {
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
-    BATCH_QUEUED_TOAST: 'Batch capture queued successfully!',
     startBatchError: (err) => `Error starting batch: ${err}`,
     CANCELLING_BATCH_TOAST: 'Cancelling batch...',
     EMPTY_DASH: '—',

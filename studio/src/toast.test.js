@@ -50,4 +50,19 @@ describe('toast logging (#873)', () => {
     vi.runAllTimers();
     expect(logFrontendEvent).toHaveBeenCalledTimes(2);
   });
+
+  it('shows the same text and kind once while it is on screen (#1097)', () => {
+    const shown = () => document.querySelector().children.map((t) => `${t.className}: ${t.textContent}`);
+    showToast('No takes were deleted.', 'warning');
+    showToast('No takes were deleted.', 'warning');
+    showToast('No takes were deleted.', 'error');
+    expect(shown()).toEqual([
+      'toast toast-warning: No takes were deleted.',
+      'toast toast-error: No takes were deleted.',
+    ]);
+    expect(logFrontendEvent).toHaveBeenCalledTimes(2);
+    vi.runAllTimers();
+    showToast('No takes were deleted.', 'warning');
+    expect(shown()).toEqual(['toast toast-warning: No takes were deleted.']);
+  });
 });
