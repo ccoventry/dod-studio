@@ -25,7 +25,7 @@ import { requestFinishClips, finishSummary } from './finish_clips.js';
 import { syncCommandProfileRow, getAllCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
-import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
+import { computeRequiredCaptureBytes, bytesPerFrameFor } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
@@ -409,9 +409,11 @@ export async function refreshLaunchGuard(state) {
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
   const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
   const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
-  // AGR mode writes a few KB a frame, at its own rate — sizing it like a
-  // frame sequence would block batches that fit with room to spare.
-  const agrMode = document.querySelector('#config-capture-mode')?.value === 'agr';
+  // AGR mode writes a few KB a frame, at its own rate, and a video take is
+  // compressed (#1096) — sizing either like a frame sequence would block
+  // batches that fit with room to spare.
+  const captureMode = document.querySelector('#config-capture-mode')?.value;
+  const agrMode = captureMode === 'agr';
   const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
@@ -421,7 +423,12 @@ export async function refreshLaunchGuard(state) {
     captureFps: agrMode ? agrFpsVal : captureFpsVal,
     resWidth: resWidthVal,
     resHeight: resHeightVal,
-    bytesPerFrame: agrMode ? AGR_BYTES_PER_FRAME : undefined,
+    bytesPerFrame: bytesPerFrameFor(
+      captureMode,
+      document.querySelector('#config-capture-codec')?.value,
+      resWidthVal,
+      resHeightVal,
+    ),
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -995,6 +1002,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // AGR mode sizes a batch in KB rather than GB, so switching mode moves the
   // disk estimate too.
   document.querySelector('#config-capture-mode')?.addEventListener('change', () => refreshLaunchGuard());
+  // The codec changes what a video take is billed at (#1096).
+  document.querySelector('#config-capture-codec')?.addEventListener('change', () => refreshLaunchGuard());
   // Same missing-wiring bug as the rest of this function, just on the OBS
   // connection fields and the capture-mode selector — all three read at
   // capture/save time but never saved on their own change, so edits looked
@@ -1543,8 +1552,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // and run it later unchanged.
   function startBatchWithPayload(activePayload, state) {
     return startCaptureBatch(activePayload)
+        // No "queued" toast: this resolves before the backend has built the
+        // queue, which can still refuse the batch a moment later (#1097). The
+        // footer shows the batch from its first capture_status.
         .then(() => {
-          showToast(STRINGS.CAPTURE.BATCH_QUEUED_TOAST, "success");
           setBatchRunning(true);
         })
         .catch((err) => {
