@@ -57,6 +57,14 @@ test('"Capture Output Free" reads the drives again after finished takes are dele
   await expect(page.locator('#export-pool-free-indicator')).toContainText('25.0');
 });
 
+test('"After a clip is finished" sits in the Destinations tab, since it acts before captures too (#1094)', async ({ page }) => {
+  await page.goto('/index.html');
+  for (const id of ['#config-take-after-finish', '#config-take-delete-when-needed', '#config-take-after-finish-hint']) {
+    await expect(page.locator(`#tab-drive-overrides ${id}`)).toHaveCount(1);
+    await expect(page.locator(`#tab-render-output ${id}`)).toHaveCount(0);
+  }
+});
+
 test("+ Add Folder's folder shows in the Explorer's Recent list straight away", async ({ page }) => {
   await page.addInitScript(() => {
     Object.assign(window.__mockInvokeHandlers, {
