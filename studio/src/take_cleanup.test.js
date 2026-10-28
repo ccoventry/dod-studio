@@ -5,7 +5,7 @@ vi.mock('./themed_confirm.js', () => ({ themedConfirm: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {
-  AFTER_FINISH, normalizeChoice, whenNeededAvailable, settingHint, needsConfirm,
+  AFTER_FINISH, normalizeChoice, whenNeededAvailable, makesRoomBeforeCapture, settingHint, needsConfirm,
   progressText, doneToast, createTakeCleanupSetting, createTakeCleanupReports,
 } = await import('./take_cleanup.js');
 const { STRINGS } = await import('./strings.js');
@@ -24,6 +24,13 @@ describe('the setting (#644)', () => {
     expect(whenNeededAvailable(AFTER_FINISH.DELETE)).toBe(true);
     expect(whenNeededAvailable(AFTER_FINISH.RECYCLE)).toBe(false);
     expect(whenNeededAvailable(AFTER_FINISH.KEEP)).toBe(false);
+  });
+
+  it('lets a capture short of room start only when finished takes may be deleted to make room', () => {
+    expect(makesRoomBeforeCapture(AFTER_FINISH.DELETE, true)).toBe(true);
+    expect(makesRoomBeforeCapture(AFTER_FINISH.DELETE, false)).toBe(false);
+    expect(makesRoomBeforeCapture(AFTER_FINISH.RECYCLE, true)).toBe(false);
+    expect(makesRoomBeforeCapture(AFTER_FINISH.KEEP, true)).toBe(false);
   });
 
   it('says what each choice does, and that the Recycle Bin frees no space until emptied', () => {

@@ -31,6 +31,13 @@ export function whenNeededAvailable(choice) {
   return choice === AFTER_FINISH.DELETE;
 }
 
+/** With "Only when space is needed" on, finished takes may cover a capture's
+ *  shortfall, so the capture tab doesn't stop the batch up front: the backend
+ *  makes room first and stops the batch itself when that can't help. */
+export function makesRoomBeforeCapture(choice, whenNeeded) {
+  return choice === AFTER_FINISH.DELETE && !!whenNeeded;
+}
+
 /** The line under the setting, saying what the current choice does. */
 export function settingHint(choice, whenNeeded) {
   if (choice === AFTER_FINISH.RECYCLE) return STRINGS.TAKE_CLEANUP.HINT_RECYCLE;
@@ -192,6 +199,12 @@ function showProgress(progress) {
 export function getTakeCleanupSetting() {
   const { choice, whenNeeded } = setting ? setting.get() : loaded;
   return { take_after_finish: choice, take_delete_only_when_space_needed: whenNeeded };
+}
+
+/** Whether the current setting makes room before a capture (capture_pane.js's launch guard). */
+export function takeCleanupMakesRoom() {
+  const { choice, whenNeeded } = setting ? setting.get() : loaded;
+  return makesRoomBeforeCapture(choice, whenNeeded);
 }
 
 /** What settings_sync.js loads. */
