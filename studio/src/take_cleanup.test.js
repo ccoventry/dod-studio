@@ -5,7 +5,7 @@ vi.mock('./themed_confirm.js', () => ({ themedConfirm: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {
-  AFTER_FINISH, normalizeChoice, whenNeededAvailable, settingHint, needsConfirm,
+  AFTER_FINISH, normalizeChoice, whenNeededAvailable, makesRoomBeforeCapture, settingHint, needsConfirm,
   progressText, doneToast, createTakeCleanupSetting, createTakeCleanupReports,
 } = await import('./take_cleanup.js');
 const { STRINGS } = await import('./strings.js');
@@ -24,6 +24,13 @@ describe('the setting (#644)', () => {
     expect(whenNeededAvailable(AFTER_FINISH.DELETE)).toBe(true);
     expect(whenNeededAvailable(AFTER_FINISH.RECYCLE)).toBe(false);
     expect(whenNeededAvailable(AFTER_FINISH.KEEP)).toBe(false);
+  });
+
+  it('lets a capture short of room start only when finished takes may be deleted to make room', () => {
+    expect(makesRoomBeforeCapture(AFTER_FINISH.DELETE, true)).toBe(true);
+    expect(makesRoomBeforeCapture(AFTER_FINISH.DELETE, false)).toBe(false);
+    expect(makesRoomBeforeCapture(AFTER_FINISH.RECYCLE, true)).toBe(false);
+    expect(makesRoomBeforeCapture(AFTER_FINISH.KEEP, true)).toBe(false);
   });
 
   it('says what each choice does, and that the Recycle Bin frees no space until emptied', () => {
@@ -120,6 +127,13 @@ describe('the reports', () => {
     expect(short.message).toContain('The capture needs 40.0 GB free on one drive');
     expect(short.message).toContain('at most 1.0 GB on any one drive');
     expect(short.message).toContain('No takes were deleted');
+    expect(short.message).not.toContain('stay');
+    const moved = (n) => doneToast({
+      reason: 'capture', method: 'delete', deleted: [], failed: [],
+      short: { needed_bytes: 40 * 1073741824, available_bytes: 1073741824, moved_takes: n },
+    }, gb).message;
+    expect(moved(1)).toContain('1 finished take stays because its clip isn\'t where it was rendered');
+    expect(moved(2)).toContain('2 finished takes stay because their clips aren\'t where they were rendered');
     const failed = doneToast({ reason: 'finished', method: 'delete', deleted: [], failed: [{ take_folder: 'x', error: 'in use' }] }, gb);
     expect(failed.level).toBe('error');
     expect(failed.message).toContain('in use');

@@ -630,6 +630,7 @@ export const STRINGS = {
     noUsableSpaceProblem: (desc) => `Capture Output problem:\n${desc}`,
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
+    insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
     partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
@@ -956,8 +957,12 @@ export const STRINGS = {
     },
     failedToast: (n, error) =>
       `Couldn't delete ${n === 1 ? 'a finished take' : `${n} finished takes`}: ${error}. Scan for Takes to list it again.`,
-    shortToast: (reason, needed, available) =>
-      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} free on one drive, and deleting every finished take would leave at most ${available} on any one drive. No takes were deleted.`,
+    shortToast: (reason, needed, available, movedTakes = 0) =>
+      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} free on one drive, and deleting every finished take would leave at most ${available} on any one drive.${
+        movedTakes === 1 ? ' 1 finished take stays because its clip isn\'t where it was rendered (moved or renamed).'
+          : movedTakes > 1 ? ` ${movedTakes} finished takes stay because their clips aren't where they were rendered (moved or renamed).`
+            : ''
+      } No takes were deleted.`,
   },
 
   // ── Render while capturing (#861) ────────────────────────────────────────

@@ -109,6 +109,16 @@ fn removed_line(take_folder: &Path, size_bytes: u64, method: AfterFinish, why: W
     }
 }
 
+/// The "Making room" warning's note on finished takes kept because their clip
+/// isn't where it was rendered, or nothing when there are none.
+fn moved_takes_note(moved_takes: usize) -> String {
+    match moved_takes {
+        0 => String::new(),
+        1 => " 1 finished take stays because its clip isn't where it was rendered (moved or renamed).".to_string(),
+        n => format!(" {n} finished takes stay because their clips aren't where they were rendered (moved or renamed)."),
+    }
+}
+
 /// Whether a take's jobs say its clip is done: listed, and every job (two for
 /// a HUD pair) Finished. A failed, cancelled, queued or rendering half keeps
 /// the take.
@@ -133,6 +143,7 @@ struct Failure {
 struct Short {
     needed_bytes: u64,
     available_bytes: u64,
+    moved_takes: usize,
 }
 
 /// `take_cleanup_done`: what went, what couldn't, or why nothing did.
@@ -409,16 +420,19 @@ pub(crate) fn make_room(
         RoomPlan::Short {
             needed_bytes,
             available_bytes,
+            moved_takes,
         } => {
             log_markdown(&format!(
-                "[take-cleanup] Making room for {}: it needs {} free on one drive, and deleting every finished take on its drives would leave at most {} on any one. No takes were deleted.",
+                "[take-cleanup] Making room for {}: it needs {} free on one drive, and deleting every finished take on its drives would leave at most {} on any one.{} No takes were deleted.",
                 why.job(),
                 format_gb(needed_bytes),
-                format_gb(available_bytes)
+                format_gb(available_bytes),
+                moved_takes_note(moved_takes)
             ));
             done.short = Some(Short {
                 needed_bytes,
                 available_bytes,
+                moved_takes,
             });
             done.emit(app);
             return;
@@ -448,6 +462,9 @@ pub(crate) fn make_room(
         let outcome = delete_take_permanently(&plan.take_folder, &dirs);
         done.record(why, AfterFinish::Delete, &plan.take_folder, outcome);
     }
+    // The job's own space check runs next, within the free-space cache's 2 s,
+    // and would still see the deleted takes' bytes as taken.
+    native::sys::disk::forget_free_space();
     if progress.report("deleting", total, total) {
         on_step(
             &crate::messages::making_room_deleting(total, total),
@@ -512,5 +529,12 @@ mod tests {
         assert_eq!((done.reason, done.method), ("capture", "delete"));
         let done = Done::new(Why::Finished, AfterFinish::Recycle);
         assert_eq!((done.reason, done.method), ("finished", "recycle"));
+    }
+
+    #[test]
+    fn the_short_warning_says_how_many_takes_stay_because_their_clip_moved() {
+        assert_eq!(moved_takes_note(0), "");
+        assert!(moved_takes_note(1).contains("1 finished take stays because its clip"));
+        assert!(moved_takes_note(3).contains("3 finished takes stay because their clips"));
     }
 }

@@ -111,6 +111,32 @@ pub fn finished_at(
     Some(latest)
 }
 
+/// Whether a take's clip was finished but isn't where it was rendered any
+/// more (moved, renamed or deleted by the user): every one of `streams` has
+/// a last attempt that finished, and one of their files is gone. Such a take
+/// stays, and the "Making room" warning says why.
+pub fn clip_moved(
+    history: &[RenderAttempt],
+    streams: &[String],
+    output_exists: impl Fn(&str) -> bool,
+) -> bool {
+    let mut missing = false;
+    for stream in streams {
+        let Some(last) = history
+            .iter()
+            .filter(|a| &a.stream == stream)
+            .max_by_key(|a| a.started_unix_ms)
+        else {
+            return false;
+        };
+        if last.outcome != RenderOutcome::Finished || last.output_path.is_empty() {
+            return false;
+        }
+        missing |= !output_exists(&last.output_path);
+    }
+    missing
+}
+
 /// The streams a take folder holds, as its render history records them: what
 /// `finished_at` must find finished before the take may go. Read from the
 /// disk, not from the Render tab's rows, since a row the user removed leaves
@@ -353,6 +379,15 @@ pub struct FinishedTake {
 /// or rendering may have an older finished render in its history, and is
 /// still never eligible.
 pub fn finished_takes(capture_dirs: &[PathBuf], busy: &HashSet<String>) -> Vec<FinishedTake> {
+    scan_takes(capture_dirs, busy).0
+}
+
+/// `finished_takes`, plus the idle takes kept because their clip moved
+/// (`clip_moved`).
+fn scan_takes(
+    capture_dirs: &[PathBuf],
+    busy: &HashSet<String>,
+) -> (Vec<FinishedTake>, Vec<PathBuf>) {
     let (clip_tx, clip_rx) = std::sync::mpsc::channel();
     // The scan's per-take status lines aren't shown here; dropping the
     // receiver makes each send a no-op.
@@ -367,24 +402,29 @@ pub fn finished_takes(capture_dirs: &[PathBuf], busy: &HashSet<String>) -> Vec<F
             .push(attempt_stream(&clip));
     }
 
-    let mut takes: Vec<FinishedTake> = streams_by_take
-        .into_iter()
-        .filter(|(folder, _)| !busy.contains(&folder_key(folder)))
-        .filter_map(|(folder, streams)| {
-            let history = take_meta::read_history(Path::new(&folder));
-            let at = finished_at(&history, &streams, |p| Path::new(p).is_file())?;
-            Some(FinishedTake {
+    let mut takes: Vec<FinishedTake> = Vec::new();
+    let mut moved: Vec<PathBuf> = Vec::new();
+    let is_file = |p: &str| Path::new(p).is_file();
+    for (folder, streams) in streams_by_take {
+        if busy.contains(&folder_key(&folder)) {
+            continue;
+        }
+        let history = take_meta::read_history(Path::new(&folder));
+        if let Some(at) = finished_at(&history, &streams, is_file) {
+            takes.push(FinishedTake {
                 take_folder: PathBuf::from(folder),
                 finished_unix_ms: at,
-            })
-        })
-        .collect();
+            });
+        } else if clip_moved(&history, &streams, is_file) {
+            moved.push(PathBuf::from(folder));
+        }
+    }
     takes.sort_by(|a, b| {
         a.finished_unix_ms
             .cmp(&b.finished_unix_ms)
             .then_with(|| a.take_folder.cmp(&b.take_folder))
     });
-    takes
+    (takes, moved)
 }
 
 /// What a job about to start needs: the drives it writes to, the pieces it
@@ -419,10 +459,12 @@ pub enum RoomPlan {
     /// Even with every finished take on the job's drives deleted, a piece
     /// has no drive with room for it, so none is deleted for a job that won't
     /// fit anyway. `needed_bytes` is that piece; `available_bytes` is the most
-    /// room one drive would have.
+    /// room one drive would have; `moved_takes` counts the takes on those
+    /// drives kept because their clip isn't where it was rendered.
     Short {
         needed_bytes: u64,
         available_bytes: u64,
+        moved_takes: usize,
     },
 }
 
@@ -457,10 +499,15 @@ pub fn plan_room(
     }
 
     progress(RoomStep::Looking);
-    let candidates: Vec<FinishedTake> = finished_takes(capture_dirs, busy)
+    let (finished, moved) = scan_takes(capture_dirs, busy);
+    let candidates: Vec<FinishedTake> = finished
         .into_iter()
         .filter(|t| ledger.counts(&volume_of(&t.take_folder)))
         .collect();
+    let moved_takes = moved
+        .iter()
+        .filter(|t| ledger.counts(&volume_of(t)))
+        .count();
     let volumes: Vec<String> = candidates
         .iter()
         .map(|t| volume_of(&t.take_folder))
@@ -496,6 +543,7 @@ pub fn plan_room(
         Err(short) => RoomPlan::Short {
             needed_bytes: short.piece_bytes,
             available_bytes: short.best_drive_bytes,
+            moved_takes,
         },
     }
 }
@@ -977,12 +1025,57 @@ mod tests {
         let RoomPlan::Short {
             needed_bytes,
             available_bytes,
+            moved_takes,
         } = plan
         else {
             panic!("expected short, got {plan:?}");
         };
         assert_eq!((needed_bytes, available_bytes), (10_000, TAKE_BYTES));
+        assert_eq!(moved_takes, 0);
         assert!(take.join("sound.wav").is_file(), "planning deletes nothing");
+    }
+
+    #[test]
+    fn a_finished_take_whose_clip_moved_is_kept_and_counted() {
+        let s = streams(&["all"]);
+        let finished = vec![attempt("all", 10, RenderOutcome::Finished, "E:/out/a.mov")];
+        assert!(clip_moved(&finished, &s, |_| false));
+        assert!(!clip_moved(&finished, &s, EVERY_FILE_EXISTS));
+        let failed = vec![attempt("all", 10, RenderOutcome::Failed, "E:/out/a.mov")];
+        assert!(!clip_moved(&failed, &s, |_| false));
+        assert!(!clip_moved(&[], &s, |_| false));
+        let no_path = vec![attempt("all", 10, RenderOutcome::Finished, "")];
+        assert!(!clip_moved(&no_path, &s, |_| false));
+
+        let capture = Scratch::new("take_cleanup_plan_moved");
+        let gone = capture.join("exports").join("moved.mov");
+        let take = take_with_history(
+            &capture,
+            "chain_01_b0",
+            vec![attempt(
+                "all",
+                100,
+                RenderOutcome::Finished,
+                &gone.to_string_lossy(),
+            )],
+        );
+        take_with_history(
+            &capture,
+            "chain_01_b1",
+            vec![attempt("all", 50, RenderOutcome::Failed, "")],
+        );
+        let dirs = vec![capture.path().to_path_buf()];
+        let plan = plan_room(&need(&capture, 500), &dirs, &HashSet::new(), |_| 0, |_| {});
+        let RoomPlan::Short {
+            available_bytes,
+            moved_takes,
+            ..
+        } = plan
+        else {
+            panic!("expected short, got {plan:?}");
+        };
+        assert_eq!((available_bytes, moved_takes), (0, 1));
+        assert!(take.join("sound.wav").is_file());
     }
 
     #[test]
