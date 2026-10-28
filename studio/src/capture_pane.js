@@ -30,6 +30,7 @@ import { setStatusLine, uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { refreshAfterTyping } from './input_refresh.js';
+import { takeCleanupMakesRoom } from './take_cleanup.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -480,6 +481,11 @@ export async function refreshLaunchGuard(state) {
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
   const insufficientSpace = !noDrivesConfigured && !noUsableSpace && requiredBytes > availableBytes;
+  // "Only when space is needed" (#644): finished takes on the capture drives
+  // may cover the shortfall, and only the backend can tell (make_room runs
+  // before the capture and stops the batch when it can't), so short of room
+  // is a heads-up here, not a block.
+  const makesRoom = insufficientSpace && takeCleanupMakesRoom();
   // Pool is usable overall (at least one real drive with room) but not every
   // configured entry is — worth a heads-up, not worth blocking the batch.
   const hasPartialProblems = !noDrivesConfigured && !noUsableSpace && !insufficientSpace && problemPaths.length > 0;
@@ -501,7 +507,7 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
     startBtn.disabled = blocked;
@@ -538,6 +544,10 @@ export async function refreshLaunchGuard(state) {
       warningEl.textContent = problemPaths.length > 0
         ? STRINGS.CAPTURE.noUsableSpaceProblem(describeProblemPaths(problemPaths))
         : STRINGS.CAPTURE.NO_USABLE_SPACE_WARNING;
+      warningEl.style.display = 'block';
+    } else if (makesRoom) {
+      warningEl.style.color = '#ffa726';
+      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceMakesRoom((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = '#f44336';
@@ -1031,6 +1041,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listeningForExternalErrors = true;
     listen('external_error', (event) => {
       showToast(String(event.payload || ''), 'error', 15000);
+    });
+    // Deleted takes free space on the Destinations drives: "Capture Output
+    // Free" reads it again (the backend's free-space cache is already dropped).
+    // currentOnBatchFinished is that figure's refresh (see its declaration).
+    listen('take_cleanup_done', () => {
+      refreshLaunchGuard();
+      if (currentOnBatchFinished) currentOnBatchFinished();
     });
   }
 
@@ -1526,8 +1543,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // and run it later unchanged.
   function startBatchWithPayload(activePayload, state) {
     return startCaptureBatch(activePayload)
+        // No "queued" toast: this resolves before the backend has built the
+        // queue, which can still refuse the batch a moment later (#1097). The
+        // footer shows the batch from its first capture_status.
         .then(() => {
-          showToast(STRINGS.CAPTURE.BATCH_QUEUED_TOAST, "success");
           setBatchRunning(true);
         })
         .catch((err) => {

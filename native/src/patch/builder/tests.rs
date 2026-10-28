@@ -1885,3 +1885,71 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
     );
     assert!(!job.init_commands.iter().any(|c| c.starts_with("ds_spec")));
 }
+
+#[test]
+fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
+    let mut config = PatcherConfig::default();
+    config.resolution_width = 100;
+    config.resolution_height = 100;
+    config.capture_fps = 10;
+    let streak = |start, end| CaptureStreak {
+        start_tick: start,
+        end_tick: end,
+        source_demo: "demo1.dem".to_string(),
+        target_player: None,
+        kill_count: 3,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 0,
+        kills: Vec::new(),
+        start_index: 0,
+        end_index: 2,
+        total_demo_frames: 3000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
+        status: Default::default(),
+    };
+    // Two seconds each at 100 ticks a second.
+    let streaks = vec![streak(1000, 1200), streak(1100, 1300)];
+    let one = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 2.0);
+    assert_eq!(estimate_batch_capture_bytes(&streaks, &config), 2 * one);
+    // The two overlap and merge into one three-second block, which needs less.
+    let merged = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 3.0);
+    assert!(merged <= estimate_batch_capture_bytes(&streaks, &config));
+    assert_eq!(estimate_batch_capture_bytes(&[], &config), 0);
+
+    // Per drive (#716): the two that merge are one block, billed at both
+    // estimates; one far later, and another player's, are blocks of their own.
+    assert_eq!(
+        estimate_batch_capture_blocks(&streaks, &config),
+        vec![2 * one]
+    );
+    let mut other_player = streak(1000, 1200);
+    other_player.player_index = 1;
+    let spread = vec![
+        streak(2500, 2700),
+        streak(1000, 1200),
+        other_player,
+        streak(1100, 1300),
+    ];
+    let mut blocks = estimate_batch_capture_blocks(&spread, &config);
+    blocks.sort_unstable();
+    assert_eq!(blocks, vec![one, one, 2 * one]);
+    assert!(estimate_batch_capture_blocks(&[], &config).is_empty());
+}
+
+#[test]
+fn a_batch_with_no_room_is_refused_in_plain_words() {
+    let gib = 1_073_741_824;
+    let message = no_room_message(31 * gib, 22 * gib);
+    assert_eq!(
+        message,
+        "Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB."
+    );
+}

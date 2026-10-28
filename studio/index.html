@@ -663,6 +663,26 @@
               </div>
               <div id="target-drive-list" class="list-editor-list"></div>
               <div id="target-drive-same-warning" class="path-warning" style="display: none;"></div>
+              <!-- "After a clip is finished" (#644) — take_cleanup.js. Here, not
+                   under Render Output: "Only when space is needed" acts before
+                   captures too (#1094). Keep by default; the permanent choice
+                   asks once when turned on, and "Only when space is needed"
+                   needs it, since the Recycle Bin frees nothing until emptied. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-take-after-finish" data-str="TAKE_CLEANUP.AFTER_LABEL" data-str-title="TAKE_CLEANUP.AFTER_TITLE">After a clip is finished:</label>
+                  <select id="config-take-after-finish" data-str-title="TAKE_CLEANUP.AFTER_TITLE">
+                    <option value="keep" data-str="TAKE_CLEANUP.AFTER_KEEP">Keep the take</option>
+                    <option value="recycle" data-str="TAKE_CLEANUP.AFTER_RECYCLE">Move the take to the Recycle Bin</option>
+                    <option value="delete" data-str="TAKE_CLEANUP.AFTER_DELETE">Delete the take permanently</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <input type="checkbox" id="config-take-delete-when-needed" disabled />
+                  <label for="config-take-delete-when-needed" data-str="TAKE_CLEANUP.WHEN_NEEDED_LABEL">Only when space is needed</label>
+                </div>
+              </div>
+              <p id="config-take-after-finish-hint" class="setting-hint">Takes stay on disk. Delete them from the Render tab when you are done.</p>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency

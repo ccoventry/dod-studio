@@ -630,6 +630,7 @@ export const STRINGS = {
     noUsableSpaceProblem: (desc) => `Capture Output problem:\n${desc}`,
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
+    insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
     partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
@@ -668,7 +669,6 @@ export const STRINGS = {
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
-    BATCH_QUEUED_TOAST: 'Batch capture queued successfully!',
     startBatchError: (err) => `Error starting batch: ${err}`,
     CANCELLING_BATCH_TOAST: 'Cancelling batch...',
     EMPTY_DASH: '—',
@@ -915,6 +915,53 @@ export const STRINGS = {
     SKIPPED_CANCELLED: 'The batch was cancelled, so its clips were not finished. Render the takes from the Render tab if you want them.',
     SKIPPED_NO_EXPORT_DIR: 'Clips were not finished: add an export folder in Configuration → Render Settings first. The takes are still there for the Render tab.',
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
+  },
+
+  // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
+  TAKE_CLEANUP: {
+    AFTER_LABEL: 'After a clip is finished:',
+    AFTER_TITLE:
+        'What happens to a take once its clip has rendered successfully. Only a take whose every render finished, with the clip file still there, is ever deleted. A failed, cancelled or unrendered take always stays. The render history stays either way.',
+    AFTER_KEEP: 'Keep the take',
+    AFTER_RECYCLE: 'Move the take to the Recycle Bin',
+    AFTER_DELETE: 'Delete the take permanently',
+    WHEN_NEEDED_LABEL: 'Only when space is needed',
+    WHEN_NEEDED_TITLE:
+        'Takes stay until a capture or a render batch needs room on its drive. Then the oldest finished takes there are deleted until it fits.',
+    WHEN_NEEDED_OFF_TITLE:
+        'Needs "Delete the take permanently": the Recycle Bin frees no space until you empty it.',
+    HINT_KEEP: 'Takes stay on disk. Delete them from the Render tab when you are done.',
+    HINT_RECYCLE:
+        'Each take goes to the Recycle Bin once its clip renders. The Recycle Bin frees no space until you empty it.',
+    HINT_DELETE: 'Each take is deleted for good once its clip renders. It cannot be restored.',
+    HINT_DELETE_WHEN_NEEDED:
+        'Takes stay until a capture or render batch is short of room. Then the oldest finished takes on that drive are deleted for good until it fits.',
+    CONFIRM_TITLE: 'Delete takes permanently?',
+    CONFIRM_MESSAGE:
+        'Takes deleted this way skip the Recycle Bin and cannot be restored. Only takes whose clip rendered successfully are deleted, and the render history stays.',
+    CONFIRM_BUTTON: 'Delete permanently',
+    progressLine: (step, done, total) => {
+      if (step === 'looking') return 'Making room: looking for finished takes';
+      if (step === 'measuring') return `Making room: measuring finished takes (${done} of ${total})`;
+      if (step === 'recycling') return `Moving finished takes to the Recycle Bin (${done} of ${total})`;
+      return `Deleting finished takes (${done} of ${total})`;
+    },
+    /** `reason`: `finished`, `capture` or `finish`; `method`: `recycle` or `delete`. */
+    doneToast: (n, size, reason, method) => {
+      const takes = n === 1 ? 'a finished take' : `${n} finished takes`;
+      if (method === 'recycle') return `Moved ${takes} to the Recycle Bin (${size}).`;
+      if (reason === 'capture') return `Deleted ${takes} (${size}) to make room for the capture.`;
+      if (reason === 'finish') return `Deleted ${takes} (${size}) to make room for the renders.`;
+      return `Deleted ${takes} for good (${size}).`;
+    },
+    failedToast: (n, error) =>
+      `Couldn't delete ${n === 1 ? 'a finished take' : `${n} finished takes`}: ${error}. Scan for Takes to list it again.`,
+    shortToast: (reason, needed, available, movedTakes = 0) =>
+      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} free on one drive, and deleting every finished take would leave at most ${available} on any one drive.${
+        movedTakes === 1 ? ' 1 finished take stays because its clip isn\'t where it was rendered (moved or renamed).'
+          : movedTakes > 1 ? ` ${movedTakes} finished takes stay because their clips aren't where they were rendered (moved or renamed).`
+            : ''
+      } No takes were deleted.`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
