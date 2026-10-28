@@ -252,6 +252,16 @@ fn block_byte_estimate(config: &PatcherConfig, streak: &CaptureStreak, demo_fps:
     let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         crate::sys::disk::calculate_agr_bytes(config.effective_agr_fps(), clip_duration_secs)
+    } else if config.capture_mode == crate::patch::CaptureMode::DirectToVideo
+        && config.ffmpeg_capture_codec != crate::patch::types::CaptureCodec::RawVideo
+    {
+        // A compressed take, not raw frames (#1096).
+        crate::sys::disk::calculate_lossless_video_bytes(
+            config.resolution_width,
+            config.resolution_height,
+            config.capture_fps,
+            clip_duration_secs,
+        )
     } else {
         crate::sys::disk::calculate_raw_sequence_bytes(
             config.resolution_width,
@@ -349,6 +359,18 @@ pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
 /// two, so the primer stays.
 pub fn plays_primer(hook_dll: bool) -> bool {
     !hook_dll
+}
+
+/// The refusal when a capture block fits on no drive, in the player's words:
+/// shown as the batch's error toast (#1097). `needed` includes the headroom
+/// each drive keeps; `best` is the most free on any one drive.
+fn no_room_message(needed: u64, best: u64) -> String {
+    use crate::hlcr::take_cleanup::format_gb;
+    format!(
+        "Not enough free space on any capture drive for this batch: a clip needs {} free on one drive, and the most any one has is {}.",
+        format_gb(needed),
+        format_gb(best)
+    )
 }
 
 pub fn build_batch_queue(
@@ -783,14 +805,16 @@ pub fn build_batch_queue(
             Err(_) if config.render_while_capturing => {
                 let (pairs, left) = allocate_blocks_one_at_a_time(
                     &block_estimates,
+                    &volume_of_drive,
                     &drive_capacity,
                     &mut active_drive_idx,
                     FAILOVER_THRESHOLD,
                 )
-                .map_err(|_| {
-                    std::io::Error::other(
-                        "A clip needs more space than any capture drive has free, even with every earlier take rendered and deleted",
-                    )
+                .map_err(|block_index| {
+                    std::io::Error::other(no_room_message(
+                        block_estimates[block_index] + FAILOVER_THRESHOLD,
+                        drive_capacity.iter().copied().max().unwrap_or(0),
+                    ))
                 })?;
                 for (free, left) in drive_free.iter_mut().zip(left) {
                     if let Some(left) = left {
@@ -799,10 +823,11 @@ pub fn build_batch_queue(
                 }
                 pairs
             }
-            Err(_) => {
-                return Err(std::io::Error::other(
-                    "Insufficient space across all mapped drives to allocate a block",
-                ));
+            Err(block_index) => {
+                return Err(std::io::Error::other(no_room_message(
+                    block_estimates[block_index] + FAILOVER_THRESHOLD,
+                    drive_free.iter().copied().max().unwrap_or(0),
+                )));
             }
         };
 

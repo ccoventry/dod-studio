@@ -1274,7 +1274,8 @@ pub async fn start_capture_batch_impl(
                     serde_json::json!({
                         "running": false,
                         "error": true,
-                        "status": format!("build_batch_queue failed: {}", e)
+                        // The error toast's text; the log line above names the step.
+                        "status": e.to_string()
                     }),
                 );
                 return;
