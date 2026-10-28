@@ -127,6 +127,13 @@ describe('the reports', () => {
     expect(short.message).toContain('The capture needs 40.0 GB free on one drive');
     expect(short.message).toContain('at most 1.0 GB on any one drive');
     expect(short.message).toContain('No takes were deleted');
+    expect(short.message).not.toContain('stay');
+    const moved = (n) => doneToast({
+      reason: 'capture', method: 'delete', deleted: [], failed: [],
+      short: { needed_bytes: 40 * 1073741824, available_bytes: 1073741824, moved_takes: n },
+    }, gb).message;
+    expect(moved(1)).toContain('1 finished take stays because its clip isn\'t where it was rendered');
+    expect(moved(2)).toContain('2 finished takes stay because their clips aren\'t where they were rendered');
     const failed = doneToast({ reason: 'finished', method: 'delete', deleted: [], failed: [{ take_folder: 'x', error: 'in use' }] }, gb);
     expect(failed.level).toBe('error');
     expect(failed.message).toContain('in use');

@@ -73,6 +73,7 @@ export function doneToast(payload, formatSize) {
         payload.reason,
         formatSize(payload.short.needed_bytes),
         formatSize(payload.short.available_bytes),
+        Number(payload.short.moved_takes) || 0,
       ),
       level: 'warning',
     };

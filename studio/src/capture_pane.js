@@ -1042,6 +1042,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listen('external_error', (event) => {
       showToast(String(event.payload || ''), 'error', 15000);
     });
+    // Deleted takes free space on the Destinations drives: "Capture Output
+    // Free" reads it again (the backend's free-space cache is already dropped).
+    // currentOnBatchFinished is that figure's refresh (see its declaration).
+    listen('take_cleanup_done', () => {
+      refreshLaunchGuard();
+      if (currentOnBatchFinished) currentOnBatchFinished();
+    });
   }
 
   if (!unlistenCaptureStatus) {
