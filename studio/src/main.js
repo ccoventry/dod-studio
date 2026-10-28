@@ -10,6 +10,7 @@ import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsSta
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
 import { initTakeCleanup } from './take_cleanup.js';
+import { initRenderWhileCapturing } from './render_while_capturing.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
@@ -414,6 +415,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   // "After a clip is finished" (#644): the setting, and the backend's reports.
   initTakeCleanup({ onSettingsChange: persistAppSettings });
+  // "Render while capturing" (#861): queues each take as the batch records it.
+  initRenderWhileCapturing({ onSettingsChange: persistAppSettings });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
   // pattern as dev's StartupState::PendingRenderRecovery. Render is now a

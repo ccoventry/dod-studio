@@ -631,6 +631,7 @@ export const STRINGS = {
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
     insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
+    insufficientSpaceRendersMakeRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: the batch will wait between clips for renders to free room ("Render while capturing").`,
     partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
@@ -962,6 +963,25 @@ export const STRINGS = {
           : movedTakes > 1 ? ` ${movedTakes} finished takes stay because their clips aren't where they were rendered (moved or renamed).`
             : ''
       } No takes were deleted.`,
+  },
+
+  // ── Render while capturing (#861) ────────────────────────────────────────
+  RENDER_WHILE_CAPTURING: {
+    LABEL: 'Render while capturing',
+    TITLE:
+        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    HINT_OFF: 'Clips render after the batch.',
+    HINT_ON_KEEP:
+        'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
+    HINT_ON_DELETE:
+        'Each clip renders while the batch goes on, and its take is deleted once the clip is done. When the drive runs short, the batch waits between clips for the renders to free room.',
+    holdingLine: (short) =>
+      `Will wait after this clip for renders to free ${short || 'room'} for the next one`,
+    heldLine: (short, minutes) =>
+      `Waiting for renders to free ${short || 'room'} for the next clip${minutes ? ` (about ${minutes} min)` : ''}`,
+    stoppedToast: (clip, reason) =>
+      `The batch stopped before clip ${clip}: ${reason}. The clips recorded so far are kept.`,
+    queueFailed: (err) => `Couldn't queue a recorded clip for rendering: ${err}`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────

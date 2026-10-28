@@ -116,6 +116,50 @@ export function recordTake(takeIndex, takeKey, uids) {
 }
 
 /**
+ * Marks the highlights a captured block covers Captured and records its take
+ * in the take index, so a render of it resolves back to them. Shared by the
+ * post-batch verification and Render While Capturing (#861), which renders
+ * (and may delete) a take before the batch ends. `{ advanced, markCleared }`.
+ */
+export function markBlockCaptured(block, dispatch, takeIndex) {
+  let advanced = 0;
+  let markCleared = false;
+  // A block can cover several highlights — overlapping ones are recorded
+  // as one continuous take — so every highlight it covers advances.
+  const uids = [];
+  const sourceIndices = block.source_streak_indices || [];
+  sourceIndices.forEach(i => {
+    const streak = dispatch?.streaks?.[i];
+    if (!streak) return;
+    const demoPath = dispatch?.demoPaths?.[i];
+    uids.push(streakUid(demoPath, streak));
+    // Merged blocks (2+ source highlights recorded into one take) get a
+    // visible affordance in Highlight Details (detail_pane.js) so it's
+    // obvious why the rows flipped together. Non-enumerable, same as
+    // `.uid`, so it never leaks into a future capture payload sent
+    // over IPC (buildCapturePayload pushes the live streak object).
+    if (sourceIndices.length > 1 && block.take_key) {
+      Object.defineProperty(streak, 'mergedTakeKey', { value: block.take_key, enumerable: false, configurable: true });
+      Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
+    }
+    // Status only ever moves forward. Re-capturing something already
+    // rendered must not knock it back down to Captured -- unless that
+    // Rendered was set by hand: a verified capture beats an unverified
+    // claim (#105).
+    if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
+    if (streak.statusByHand) markCleared = true;
+    if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
+  });
+  // Recorded even when the take isn't renderable yet — a future render
+  // still needs to resolve this take_key back to these highlights once
+  // it succeeds, and the index outlives this dispatch's in-memory state.
+  if (takeIndex && block.take_key) {
+    recordTake(takeIndex, block.take_key, uids);
+  }
+  return { advanced, markCleared };
+}
+
+/**
  * Points every uid of a relocated demo at its new path (#21). A uid starts
  * with the demo's path, so without this a moved demo's captured takes would
  * no longer resolve to its highlights.

@@ -17,7 +17,7 @@ import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus, isSkipped, markBlockCaptured } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -31,6 +31,7 @@ import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
+import { rendersMakeRoom } from './render_while_capturing.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -492,7 +493,10 @@ export async function refreshLaunchGuard(state) {
   // may cover the shortfall, and only the backend can tell (make_room runs
   // before the capture and stops the batch when it can't), so short of room
   // is a heads-up here, not a block.
-  const makesRoom = insufficientSpace && takeCleanupMakesRoom();
+  // Render While Capturing (#861) holds between clips for renders to free
+  // room, and the backend refuses only a clip no drive could ever hold.
+  const rendersRoom = insufficientSpace && rendersMakeRoom();
+  const makesRoom = insufficientSpace && (rendersRoom || takeCleanupMakesRoom());
   // Pool is usable overall (at least one real drive with room) but not every
   // configured entry is — worth a heads-up, not worth blocking the batch.
   const hasPartialProblems = !noDrivesConfigured && !noUsableSpace && !insufficientSpace && problemPaths.length > 0;
@@ -554,7 +558,7 @@ export async function refreshLaunchGuard(state) {
       warningEl.style.display = 'block';
     } else if (makesRoom) {
       warningEl.style.color = '#ffa726';
-      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceMakesRoom((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
+      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = '#f44336';
@@ -896,6 +900,26 @@ function initClearPreviewsModal() {
   }
 }
 
+/** Render While Capturing's hold line on the footer (`captureProgress.setRoom`). */
+export function showCaptureRoomLine(room) {
+  captureProgress?.setRoom(room);
+}
+
+/**
+ * Render While Capturing (#861): a take of the running batch has settled and
+ * is about to be queued for rendering. Its highlights go Captured and the
+ * take index learns it now, before the render: the render's clip name and
+ * its Rendered mark both resolve through the index, and the take may be
+ * deleted before the batch's own verification looks. `clip` is a
+ * `capture_clip_ready` payload; one from another batch is ignored.
+ */
+export function markClipCaptured(clip) {
+  if (!clip || !lastDispatch || clip.session_id !== lastDispatch.sessionId) return;
+  const takeIndex = currentGetTakeIndex ? currentGetTakeIndex() : null;
+  const { advanced, markCleared } = markBlockCaptured(clip, lastDispatch, takeIndex);
+  if ((advanced > 0 || markCleared) && currentOnStatusChange) currentOnStatusChange();
+}
+
 export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
@@ -1186,38 +1210,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        // A block can cover several highlights — overlapping ones are recorded
-        // as one continuous take — so every highlight it covers advances.
-        const uids = [];
-        const sourceIndices = block.source_streak_indices || [];
-        sourceIndices.forEach(i => {
-          const streak = lastDispatch?.streaks?.[i];
-          if (!streak) return;
-          const demoPath = lastDispatch?.demoPaths?.[i];
-          uids.push(streakUid(demoPath, streak));
-          // Merged blocks (2+ source highlights recorded into one take) get a
-          // visible affordance in Highlight Details (detail_pane.js) so it's
-          // obvious why the rows flipped together. Non-enumerable, same as
-          // `.uid`, so it never leaks into a future capture payload sent
-          // over IPC (buildCapturePayload pushes the live streak object).
-          if (sourceIndices.length > 1 && block.take_key) {
-            Object.defineProperty(streak, 'mergedTakeKey', { value: block.take_key, enumerable: false, configurable: true });
-            Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
-          }
-          // Status only ever moves forward. Re-capturing something already
-          // rendered must not knock it back down to Captured -- unless that
-          // Rendered was set by hand: a verified capture beats an unverified
-          // claim (#105).
-          if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
-          if (streak.statusByHand) markCleared = true;
-          if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
-        });
-        // Recorded even when the take isn't renderable yet — a future render
-        // still needs to resolve this take_key back to these highlights once
-        // it succeeds, and the index outlives this dispatch's in-memory state.
-        if (takeIndex && block.take_key) {
-          recordTake(takeIndex, block.take_key, uids);
-        }
+        const marked = markBlockCaptured(block, lastDispatch, takeIndex);
+        advanced += marked.advanced;
+        markCleared ||= marked.markCleared;
       });
 
       if (total === 0) return;
