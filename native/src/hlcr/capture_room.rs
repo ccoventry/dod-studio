@@ -154,11 +154,15 @@ pub fn hold_seconds(short_bytes: u64, freed_bytes_per_sec: Option<f64>) -> Optio
 /// What a clip is expected to need, learned from the takes this batch has
 /// already recorded.
 ///
-/// The planner's figure (`estimate_batch_capture_bytes`) is the uncompressed
-/// size, an upper bound that is far above what a direct-to-video take
-/// actually writes. Once a take has landed, its bytes per recorded frame give
-/// a much closer figure; the largest seen, plus a margin, since footage
-/// varies (smoke and fast motion compress worse). Never above the planner's.
+/// The planner's figure (`estimate_batch_capture_bytes`) is a fixed rate per
+/// pixel: the uncompressed size for frame sequences, a lossless-video guess for
+/// Video mode (#1103). Once a take has landed, its bytes per recorded frame
+/// give a closer figure; the largest seen, plus a margin, since footage
+/// varies (smoke and fast motion compress worse). Never above the planner's:
+/// the planner placed each block against its own figure, so a larger one
+/// could hold for room the drive never had. In Video mode that cap can trim
+/// the margin (1.66 B/px seen x 1.5 is above #1103's 2 B/px);
+/// `MIN_DRIVE_HEADROOM_BYTES` covers the difference.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClipSizeModel {
     bytes_per_frame: Option<f64>,
