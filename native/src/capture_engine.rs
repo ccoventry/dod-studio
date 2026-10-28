@@ -131,10 +131,14 @@ fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
 
 /// Ends every `hl.exe` and waits for it to go, as [`wait_for_hl_exe_to_exit`]
 /// describes. Every way out of a batch's loop that leaves the game running
-/// goes through here.
+/// goes through here. A killed game can't release the mouse it confined, so
+/// once it's gone Studio does (#1095).
 fn kill_hl_exe_and_wait(sys: &mut sysinfo::System) {
     crate::sys::process::kill_game();
     wait_for_hl_exe_to_exit(sys);
+    if !crate::sys::process::is_game_in(sys) && crate::sys::cursor_clip::release() {
+        log_markdown("[capture] Released the mouse the closed game had confined to its window.");
+    }
 }
 
 struct CaptureCleanupGuard {
