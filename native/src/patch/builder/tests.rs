@@ -1953,3 +1953,55 @@ fn a_batch_with_no_room_is_refused_in_plain_words() {
         "Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB."
     );
 }
+
+#[test]
+fn a_direct_to_video_take_is_billed_as_compressed_video_not_raw_frames() {
+    use crate::patch::types::{CaptureCodec, CaptureMode};
+    // #1096: a real 2560x1440 Ut Video take was 12.1 GB where raw frames
+    // billed 30.9 GB.
+    let raw = crate::sys::disk::calculate_raw_sequence_bytes(2560, 1440, 300, 10.0);
+    let video = crate::sys::disk::calculate_lossless_video_bytes(2560, 1440, 300, 10.0);
+    assert_eq!(video * 3, raw * 2);
+    assert!(video > 13_005_270_518, "above the measured take");
+
+    let mut config = PatcherConfig::default();
+    config.resolution_width = 100;
+    config.resolution_height = 100;
+    config.capture_fps = 10;
+    let streak = CaptureStreak {
+        start_tick: 1000,
+        end_tick: 1200,
+        source_demo: "demo1.dem".to_string(),
+        target_player: None,
+        kill_count: 1,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 0,
+        kills: Vec::new(),
+        start_index: 0,
+        end_index: 0,
+        total_demo_frames: 3000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
+        status: Default::default(),
+    };
+    let bill = |config: &PatcherConfig| block_byte_estimate(config, &streak, 100.0);
+    let frames = bill(&config);
+    config.capture_mode = CaptureMode::DirectToVideo;
+    for codec in [
+        CaptureCodec::UtVideo,
+        CaptureCodec::Ffv1,
+        CaptureCodec::X264Lossless,
+    ] {
+        config.ffmpeg_capture_codec = codec;
+        assert_eq!(bill(&config) * 3, frames * 2, "{codec:?}");
+    }
+    config.ffmpeg_capture_codec = CaptureCodec::RawVideo;
+    assert_eq!(bill(&config), frames);
+}

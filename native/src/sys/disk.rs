@@ -2,6 +2,22 @@ pub fn calculate_raw_sequence_bytes(w: i32, h: i32, fps: i32, duration_secs: f32
     (w * h * 3) as u64 * (fps as u64) * (duration_secs as f64).ceil() as u64
 }
 
+/// Bytes per pixel a lossless direct-to-video take (Ut Video, FFV1, x264
+/// lossless) is billed at: two thirds of the raw frame's 3 (#1096). Measured
+/// 2026-10-28 on three real Ut Video captures (two clips, 2560x1440 at
+/// 300 fps): 1.18 and 1.66 bytes a pixel, so this is ~20% over the larger.
+/// FFV1 and x264 lossless are smaller than Ut Video on the same frames
+/// (`CaptureCodec`'s transcode figures), so the same bound covers them.
+pub const LOSSLESS_VIDEO_BYTES_PER_PIXEL: u64 = 2;
+
+/// What a lossless direct-to-video take of `duration_secs` is expected to
+/// need on disk: an upper bound, see [`LOSSLESS_VIDEO_BYTES_PER_PIXEL`].
+pub fn calculate_lossless_video_bytes(w: i32, h: i32, fps: i32, duration_secs: f32) -> u64 {
+    (w.max(0) as u64 * h.max(0) as u64 * LOSSLESS_VIDEO_BYTES_PER_PIXEL)
+        * (fps.max(0) as u64)
+        * (duration_secs as f64).ceil() as u64
+}
+
 /// Bytes one recorded `mirv_agr` frame costs, rounded up. Measured on #403's
 /// test take: 7.3 MB for 32.6 s at 30 fps is ~7.5 KB a frame. It grows with
 /// how many models are on screen, so this is a planning figure, not a bound.
