@@ -18,7 +18,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { queueRenderBatch, startQueuedRender } from './ipc_bridge.js';
 import { renderPayloadFor } from './finish_clips.js';
-import { markClipCaptured } from './capture_pane.js';
+import { markClipCaptured, showCaptureRoomLine } from './capture_pane.js';
 import { STRINGS } from './strings.js';
 import { showToast } from './toast.js';
 
@@ -28,6 +28,15 @@ export function settingHint(enabled, takeChoice) {
   return takeChoice === 'delete'
     ? STRINGS.RENDER_WHILE_CAPTURING.HINT_ON_DELETE
     : STRINGS.RENDER_WHILE_CAPTURING.HINT_ON_KEEP;
+}
+
+/**
+ * Whether a batch short of room may still start because it will hold between
+ * clips for renders to free it: the same test `capture_manager.rs` makes
+ * before letting the planner route more than the drives hold now.
+ */
+export function holdsForRoom({ enabled, captureMode, hookRunsBatch, takeChoice }) {
+  return !!enabled && captureMode !== 'agr' && !!hookRunsBatch && takeChoice === 'delete';
 }
 
 /** Whether an error from `start_queued_render` only means it already runs. */
@@ -121,6 +130,16 @@ function paint() {
   if (hint) hint.textContent = settingHint(enabled, choice);
 }
 
+/** `holdsForRoom` for the settings on the page. */
+export function rendersMakeRoom() {
+  return holdsForRoom({
+    enabled,
+    captureMode: document.querySelector('#config-capture-mode')?.value,
+    hookRunsBatch: document.querySelector('#config-hook-runs-batch')?.checked ?? true,
+    takeChoice: document.querySelector('#config-take-after-finish')?.value,
+  });
+}
+
 /** What settings_sync.js saves. */
 export function getRenderWhileCapturing() {
   return { render_while_capturing: enabled };
@@ -165,10 +184,10 @@ export function initRenderWhileCapturing({ onSettingsChange } = {}) {
   }).catch((err) => console.error('Failed to register capture_clip_ready listener:', err));
 
   listen('capture_room_status', (event) => {
+    // Through the footer's own line, which redraws every second: written
+    // straight to it, the next redraw put "Capturing clip N" back.
     const line = roomStatusLine(event.payload, sizeText);
-    if (!line) return;
-    const statusEl = document.querySelector('#batch-status');
-    if (statusEl) statusEl.textContent = line;
+    showCaptureRoomLine(line ? { text: line, replaces: event.payload?.state === 'held' } : null);
   }).catch((err) => console.error('Failed to register capture_room_status listener:', err));
 
   listen('capture_room_stopped', (event) => {

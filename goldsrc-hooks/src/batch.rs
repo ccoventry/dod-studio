@@ -298,14 +298,22 @@ pub(crate) fn studio_gone(pipe_in_use: bool, gone_for: Option<Duration>) -> bool
 }
 
 /// Studio asked the batch to stop at the next clip boundary (#861): a seek to
-/// the next clip, or the move to the next demo. Both come after the clip's
-/// recording has stopped, so nothing records while held. Studio sends `hold`
-/// when a render has to free space for the next clip, and `go` once it has.
+/// the next clip, the move to the next demo, or the start of a gap too short
+/// to seek over (`sys_fast_forward` with no seek after it). All come after
+/// the clip's recording has stopped, so nothing records while held. Studio
+/// sends `hold` when a render has to free space for the next clip, and `go`
+/// once it has.
 static HOLD: AtomicBool = AtomicBool::new(false);
 
-/// Whether the batch stops before doing `then`: only at a clip boundary.
-pub(crate) fn holds_at(then: &Then, hold: bool) -> bool {
-    hold && matches!(then, Then::Seek(_) | Then::Next)
+/// The line that starts the run-up to the next clip (`runtime_batch`).
+const FAST_FORWARD_LINE: &str = "sys_fast_forward";
+
+/// Whether the batch stops before doing `then`, after running `lines`: only
+/// at a clip boundary. Two clips close together have no seek between them,
+/// only the fast-forward through the gap, which is a boundary as well.
+pub(crate) fn holds_at(then: &Then, lines: &[String], hold: bool) -> bool {
+    hold && (matches!(then, Then::Seek(_) | Then::Next)
+        || lines.iter().any(|l| l == FAST_FORWARD_LINE))
 }
 
 struct Batch {
@@ -494,7 +502,7 @@ pub fn poll() {
             } else {
                 then
             };
-            if holds_at(&then, HOLD.load(Ordering::Relaxed)) {
+            if holds_at(&then, &lines, HOLD.load(Ordering::Relaxed)) {
                 let _ = crate::demo_seek::set_paused(true);
                 say(&format!(
                     "held before {} (demo {}, clock {:.1})",
@@ -840,11 +848,26 @@ mod tests {
 
     #[test]
     fn a_hold_stops_only_at_a_clip_boundary() {
-        assert!(holds_at(&Then::Seek(20.0), true));
-        assert!(holds_at(&Then::Next, true));
-        assert!(!holds_at(&Then::Play, true), "mid-clip: plays on");
-        assert!(!holds_at(&Then::Seek(20.0), false));
-        assert!(!holds_at(&Then::Next, false));
+        let none: Vec<String> = vec![];
+        let ff = vec!["sys_fast_forward".to_string()];
+        assert!(holds_at(&Then::Seek(20.0), &none, true));
+        assert!(holds_at(&Then::Next, &none, true));
+        assert!(!holds_at(&Then::Play, &none, true), "mid-clip: plays on");
+        assert!(
+            !holds_at(&Then::Play, &["startmovie x".to_string()], true),
+            "a clip's own lines: plays on"
+        );
+        assert!(!holds_at(&Then::Seek(20.0), &none, false));
+        assert!(!holds_at(&Then::Next, &none, false));
+        assert!(!holds_at(&Then::Play, &ff, false));
+    }
+
+    #[test]
+    fn a_gap_too_short_to_seek_over_is_a_boundary_too() {
+        // Two clips close together: no seek, only the fast-forward between
+        // them, after the first one's recording stopped.
+        let ff = vec!["sys_fast_forward".to_string()];
+        assert!(holds_at(&Then::Play, &ff, true));
     }
 
     #[test]

@@ -3,11 +3,11 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve()) }));
 vi.mock('./ipc_bridge.js', () => ({ queueRenderBatch: vi.fn(), startQueuedRender: vi.fn() }));
 vi.mock('./finish_clips.js', () => ({ renderPayloadFor: vi.fn() }));
-vi.mock('./capture_pane.js', () => ({ markClipCaptured: vi.fn() }));
+vi.mock('./capture_pane.js', () => ({ markClipCaptured: vi.fn(), showCaptureRoomLine: vi.fn() }));
 vi.mock('./toast.js', () => ({ showToast: vi.fn() }));
 
 const {
-  settingHint, alreadyRendering, scanBusy, createClipRenderQueue, roomStatusLine,
+  settingHint, alreadyRendering, scanBusy, createClipRenderQueue, roomStatusLine, holdsForRoom,
 } = await import('./render_while_capturing.js');
 const { STRINGS } = await import('./strings.js');
 
@@ -105,5 +105,22 @@ describe('roomStatusLine', () => {
       .toBe(STRINGS.RENDER_WHILE_CAPTURING.heldLine('4 GB', 3));
     expect(roomStatusLine({ state: 'held', short_bytes: 4e9, eta_seconds: null }, size))
       .toBe(STRINGS.RENDER_WHILE_CAPTURING.heldLine('4 GB', null));
+  });
+});
+
+describe('holdsForRoom', () => {
+  const on = { enabled: true, captureMode: 'direct_to_video', hookRunsBatch: true, takeChoice: 'delete' };
+
+  it('lets a batch short of room start when it can hold for deleted takes', () => {
+    expect(holdsForRoom(on)).toBe(true);
+    expect(holdsForRoom({ ...on, captureMode: 'frames' })).toBe(true);
+  });
+
+  it('needs the setting, the hook running the batch and permanent deletion, and not AGR', () => {
+    expect(holdsForRoom({ ...on, enabled: false })).toBe(false);
+    expect(holdsForRoom({ ...on, hookRunsBatch: false })).toBe(false);
+    expect(holdsForRoom({ ...on, takeChoice: 'recycle' })).toBe(false);
+    expect(holdsForRoom({ ...on, takeChoice: 'keep' })).toBe(false);
+    expect(holdsForRoom({ ...on, captureMode: 'agr' })).toBe(false);
   });
 });

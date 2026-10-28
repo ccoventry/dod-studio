@@ -103,12 +103,16 @@ export function renderQueueBusy(jobs) {
 
 /**
  * Why a verified batch will not be finished automatically — `null` when it
- * will. `off` and `nothing` are silent (the setting is off, or no take is
- * renderable, which the verification toast already reported); `cancelled`
- * and `no_export_dir` are worth telling the user about.
+ * will. `off`, `rendered_while_capturing` and `nothing` are silent (the
+ * setting is off, Render While Capturing (#861) queued every take already, or
+ * no take is renderable, which the verification toast already reported);
+ * `cancelled` and `no_export_dir` are worth telling the user about.
  */
-export function finishSkipReason({ enabled, outcome, folders, exportDirs }) {
+export function finishSkipReason({ enabled, outcome, folders, exportDirs, renderedWhileCapturing }) {
   if (!enabled) return 'off';
+  // Its renders are in the Render tab already, the last ones queued after
+  // this check; starting them again finds nothing left to render.
+  if (renderedWhileCapturing) return 'rendered_while_capturing';
   // A cancelled batch is one the user stopped; starting minutes of encoding
   // behind it is not what stopping asked for. Its takes stay for the Render tab.
   if (outcome === 'cancelled') return 'cancelled';
@@ -312,7 +316,13 @@ export function requestFinishClips(verified, captureMode) {
   const settings = readSettings();
   const folders = finishFolders(verified?.blocks);
   const exportDirs = (getExportDirsFn ? getExportDirsFn() : []).filter(Boolean);
-  const reason = finishSkipReason({ enabled: settings.enabled, outcome: verified?.outcome, folders, exportDirs });
+  const reason = finishSkipReason({
+    enabled: settings.enabled,
+    outcome: verified?.outcome,
+    folders,
+    exportDirs,
+    renderedWhileCapturing: !!verified?.rendered_while_capturing,
+  });
   if (reason === 'cancelled') {
     showToast(STRINGS.FINISH.SKIPPED_CANCELLED, 'info', 6000);
     return;

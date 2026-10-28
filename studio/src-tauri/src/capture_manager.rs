@@ -934,6 +934,7 @@ fn check_takes(
     app: &tauri::AppHandle,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
     outcome: &str,
+    rendered_while_capturing: bool,
 ) -> Option<TakeReport> {
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
@@ -998,6 +999,9 @@ fn check_takes(
             // sequence has to be encoded at the rate it was captured at.
             "outcome": outcome,
             "capture_fps": manifest.capture_fps,
+            // Render While Capturing (#861) queues every take itself, the
+            // last ones after this goes out, so the finish step stays out.
+            "rendered_while_capturing": rendered_while_capturing,
         }),
         captured: captured_count,
         total,
@@ -1014,8 +1018,9 @@ fn finish_batch(
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
     status: &str,
     outcome: &str,
+    rendered_while_capturing: bool,
 ) {
-    let report = check_takes(app, manifest_slot, outcome);
+    let report = check_takes(app, manifest_slot, outcome, rendered_while_capturing);
     *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
     let _ = app.emit(
         "capture_status",
@@ -1593,6 +1598,7 @@ pub async fn start_capture_batch_impl(
         let is_running_for_panic = Arc::clone(&is_running_arc);
         let app_emitter_for_panic = app_handle_clone.clone();
         let room = capture_room;
+        let rendered_while_capturing = room.is_some();
         // The listener ends the room from here on.
         room_guard.0 = None;
         std::thread::spawn(move || {
@@ -1759,6 +1765,7 @@ pub async fn start_capture_batch_impl(
                                 &manifest_for_listener,
                                 "Complete",
                                 "complete",
+                                rendered_while_capturing,
                             );
                             break;
                         }
@@ -1771,6 +1778,7 @@ pub async fn start_capture_batch_impl(
                                 &manifest_for_listener,
                                 "Cancelled",
                                 "cancelled",
+                                rendered_while_capturing,
                             );
                             break;
                         }

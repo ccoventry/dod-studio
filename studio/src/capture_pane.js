@@ -31,6 +31,7 @@ import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
+import { rendersMakeRoom } from './render_while_capturing.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -492,7 +493,10 @@ export async function refreshLaunchGuard(state) {
   // may cover the shortfall, and only the backend can tell (make_room runs
   // before the capture and stops the batch when it can't), so short of room
   // is a heads-up here, not a block.
-  const makesRoom = insufficientSpace && takeCleanupMakesRoom();
+  // Render While Capturing (#861) holds between clips for renders to free
+  // room, and the backend refuses only a clip no drive could ever hold.
+  const rendersRoom = insufficientSpace && rendersMakeRoom();
+  const makesRoom = insufficientSpace && (rendersRoom || takeCleanupMakesRoom());
   // Pool is usable overall (at least one real drive with room) but not every
   // configured entry is — worth a heads-up, not worth blocking the batch.
   const hasPartialProblems = !noDrivesConfigured && !noUsableSpace && !insufficientSpace && problemPaths.length > 0;
@@ -554,7 +558,7 @@ export async function refreshLaunchGuard(state) {
       warningEl.style.display = 'block';
     } else if (makesRoom) {
       warningEl.style.color = '#ffa726';
-      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceMakesRoom((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
+      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = '#f44336';
@@ -894,6 +898,11 @@ function initClearPreviewsModal() {
       }
     });
   }
+}
+
+/** Render While Capturing's hold line on the footer (`captureProgress.setRoom`). */
+export function showCaptureRoomLine(room) {
+  captureProgress?.setRoom(room);
 }
 
 /**
