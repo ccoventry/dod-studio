@@ -59,6 +59,11 @@ pub const MIGRATIONS: &[Migration] = &[
         to: 12,
         upgrade: v11_to_v12,
     },
+    Migration {
+        from: 12,
+        to: 13,
+        upgrade: v12_to_v13,
+    },
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
@@ -245,6 +250,38 @@ fn v11_to_v12(analysis: &mut Value) -> Upgrade {
         return Upgrade::NeedsReparse(STALLED_CLOCK);
     }
     info.insert("no_camera_data".into(), false.into());
+    Upgrade::Done
+}
+
+const ROCKET_OPENS_STREAK: &str = "a kill streak starts with a rocket kill";
+
+/// #1091: a rocket kill after its shooter's death joins the life it was
+/// fired in. v12 put it first in the next life's streak, so only an entry
+/// with a streak that starts with a rocket kill can differ; every other entry
+/// is what v13 writes.
+fn v12_to_v13(analysis: &mut Value) -> Upgrade {
+    let Some(players) = analysis.pointer("/state/players").and_then(Value::as_array) else {
+        return Upgrade::NeedsReparse(MALFORMED);
+    };
+    for player in players {
+        let Some(streaks) = player.get("kill_streaks").and_then(Value::as_array) else {
+            return Upgrade::NeedsReparse(MALFORMED);
+        };
+        for streak in streaks {
+            let Some(kills) = streak.get("kills").and_then(Value::as_array) else {
+                return Upgrade::NeedsReparse(MALFORMED);
+            };
+            let Some(first) = kills.first() else {
+                continue;
+            };
+            let Some(Ok(weapon)) = first.get(1).map(dod::Weapon::deserialize) else {
+                return Upgrade::NeedsReparse(MALFORMED);
+            };
+            if weapon.is_rocket() {
+                return Upgrade::NeedsReparse(ROCKET_OPENS_STREAK);
+            }
+        }
+    }
     Upgrade::Done
 }
 
@@ -558,6 +595,49 @@ mod tests {
             json!({"demo_info": {"playback_time": "x", "playback_frames": 10}}),
         ] {
             assert_eq!(v11_to_v12(&mut value), Upgrade::NeedsReparse(MALFORMED));
+        }
+    }
+
+    #[test]
+    fn a_v12_entry_needs_the_demo_only_when_a_streak_starts_with_a_rocket() {
+        use crate::kill::KillStreak;
+        let streak = |weapons: &[dod::Weapon]| {
+            let mut s = KillStreak::default();
+            for w in weapons {
+                let victim = serde_json::from_value(json!("STEAM_0:0:1")).unwrap();
+                s.kills.push((Default::default(), w.clone(), victim));
+            }
+            serde_json::to_value(&s).unwrap()
+        };
+        let entry =
+            |streaks: Vec<Value>| json!({"state": {"players": [{"kill_streaks": streaks}]}});
+
+        let mut value = entry(vec![
+            streak(&[]),
+            streak(&[dod::Weapon::K98, dod::Weapon::Bazooka]),
+            streak(&[dod::Weapon::StickGrenade]),
+        ]);
+        assert_eq!(v12_to_v13(&mut value), Upgrade::Done);
+        for rocket in [
+            dod::Weapon::Bazooka,
+            dod::Weapon::Panzerschreck,
+            dod::Weapon::Piat,
+        ] {
+            let mut value = entry(vec![
+                streak(&[dod::Weapon::K98]),
+                streak(&[rocket, dod::Weapon::K98]),
+            ]);
+            assert_eq!(
+                v12_to_v13(&mut value),
+                Upgrade::NeedsReparse(ROCKET_OPENS_STREAK)
+            );
+        }
+        for mut value in [
+            json!({}),
+            json!({"state": {"players": [{}]}}),
+            json!({"state": {"players": [{"kill_streaks": [{"kills": [[0, "Laser", 1]]}]}]}}),
+        ] {
+            assert_eq!(v12_to_v13(&mut value), Upgrade::NeedsReparse(MALFORMED));
         }
     }
 
