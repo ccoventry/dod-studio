@@ -1543,8 +1543,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // and run it later unchanged.
   function startBatchWithPayload(activePayload, state) {
     return startCaptureBatch(activePayload)
+        // No "queued" toast: this resolves before the backend has built the
+        // queue, which can still refuse the batch a moment later (#1097). The
+        // footer shows the batch from its first capture_status.
         .then(() => {
-          showToast(STRINGS.CAPTURE.BATCH_QUEUED_TOAST, "success");
           setBatchRunning(true);
         })
         .catch((err) => {

@@ -351,6 +351,18 @@ pub fn plays_primer(hook_dll: bool) -> bool {
     !hook_dll
 }
 
+/// The refusal when a capture block fits on no drive, in the player's words:
+/// shown as the batch's error toast (#1097). `needed` includes the headroom
+/// each drive keeps; `best` is the most free on any one drive.
+fn no_room_message(needed: u64, best: u64) -> String {
+    use crate::hlcr::take_cleanup::format_gb;
+    format!(
+        "Not enough free space on any capture drive for this batch: a clip needs {} free on one drive, and the most any one has is {}.",
+        format_gb(needed),
+        format_gb(best)
+    )
+}
+
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,
@@ -769,8 +781,11 @@ pub fn build_batch_queue(
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
         )
-        .map_err(|_| {
-            std::io::Error::other("Insufficient space across all mapped drives to allocate a block")
+        .map_err(|block_index| {
+            std::io::Error::other(no_room_message(
+                block_estimates[block_index] + FAILOVER_THRESHOLD,
+                drive_free.iter().copied().max().unwrap_or(0),
+            ))
         })?;
 
         // Route aliases key off each block's original index in merged_streaks,
