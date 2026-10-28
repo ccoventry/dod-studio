@@ -252,6 +252,16 @@ fn block_byte_estimate(config: &PatcherConfig, streak: &CaptureStreak, demo_fps:
     let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         crate::sys::disk::calculate_agr_bytes(config.effective_agr_fps(), clip_duration_secs)
+    } else if config.capture_mode == crate::patch::CaptureMode::DirectToVideo
+        && config.ffmpeg_capture_codec != crate::patch::types::CaptureCodec::RawVideo
+    {
+        // A compressed take, not raw frames (#1096).
+        crate::sys::disk::calculate_lossless_video_bytes(
+            config.resolution_width,
+            config.resolution_height,
+            config.capture_fps,
+            clip_duration_secs,
+        )
     } else {
         crate::sys::disk::calculate_raw_sequence_bytes(
             config.resolution_width,
