@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { streakSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
+import { streakSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME, bytesPerFrameFor } from './capture_estimate.js';
 
 const opts = {
   preRollSeconds: 2, postRollSeconds: 0.6,
@@ -48,5 +48,17 @@ describe('computeRequiredCaptureBytes', () => {
     const demos = [{ streaks: [streak(10, 14)] }];
     const agr = { ...opts, bytesPerFrame: AGR_BYTES_PER_FRAME };
     expect(computeRequiredCaptureBytes(demos, agr)).toBe(4 * AGR_BYTES_PER_FRAME);
+  });
+});
+
+describe('bytesPerFrameFor (#1096)', () => {
+  it('bills a compressed video take at two thirds of raw, and raw frames as raw', () => {
+    expect(bytesPerFrameFor('direct_to_video', 'utvideo', 2560, 1440)).toBe(2560 * 1440 * 2);
+    expect(bytesPerFrameFor('direct_to_video', 'ffv1', 10, 10)).toBe(200);
+    expect(bytesPerFrameFor('direct_to_video', 'x264_lossless', 10, 10)).toBe(200);
+    expect(bytesPerFrameFor('direct_to_video', 'rawvideo', 10, 10)).toBeUndefined();
+    expect(bytesPerFrameFor('frame_sequence', 'utvideo', 10, 10)).toBeUndefined();
+    expect(bytesPerFrameFor('obs', 'utvideo', 10, 10)).toBeUndefined();
+    expect(bytesPerFrameFor('agr', 'utvideo', 10, 10)).toBe(AGR_BYTES_PER_FRAME);
   });
 });

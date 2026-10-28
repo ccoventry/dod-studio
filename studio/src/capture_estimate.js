@@ -91,3 +91,18 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
 
 /** What one recorded AGR frame costs on disk — see `sys::disk::AGR_BYTES_PER_FRAME`. */
 export const AGR_BYTES_PER_FRAME = 8 * 1024;
+
+/** Bytes a pixel of a lossless video take — see `sys::disk::LOSSLESS_VIDEO_BYTES_PER_PIXEL` (#1096). */
+export const LOSSLESS_VIDEO_BYTES_PER_PIXEL = 2;
+
+/**
+ * What one frame is billed at for a capture mode and codec, or `undefined`
+ * for raw frames (3 bytes a pixel): AGR's own figure, and a compressed
+ * direct-to-video take at two thirds of raw. Mirrors the backend's
+ * `block_byte_estimate`.
+ */
+export function bytesPerFrameFor(mode, codec, width, height) {
+  if (mode === 'agr') return AGR_BYTES_PER_FRAME;
+  if (mode === 'direct_to_video' && codec !== 'rawvideo') return width * height * LOSSLESS_VIDEO_BYTES_PER_PIXEL;
+  return undefined;
+}
