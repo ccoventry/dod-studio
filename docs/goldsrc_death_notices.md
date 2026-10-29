@@ -730,11 +730,11 @@ of the feed steps differently, and the guns' barrels sit at different heights.
 `layout even` gives every icon a box 26 stock rows tall, every long gun's
 barrel top on row 8, nothing cut: a long gun is as wide as Valve's drawing,
 and shrinks with its barrel kept on the line when its magazine or bipod
-would hang below the box (the MP40 and MP44 to 71%); pistols and launchers
+would hang below the box (the MP40 and MP44 to 71%); pistols and launchers (the mortars too, #1088)
 keep their size, moved onto the line (the launchers and the Bren move up or
 down as little as fits); knives, the spade and grenades keep their size,
 centred; the icons with no weapon model to render whole (`d_skull`, the
-bayonet close-ups, the butt stroke, the mortars) are composed from model
+bayonet close-ups, the butt stroke) are composed from model
 renders in the same look (`killfeed_composites.py`, #1088), centred, shrunk
 only when taller than 26 rows.
 

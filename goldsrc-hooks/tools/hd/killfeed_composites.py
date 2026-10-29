@@ -1,5 +1,5 @@
 """Kill-feed icons with no weapon model to render whole (#1088): the
-suicide skull, the two bayonet close-ups, the butt stroke and the mortars,
+suicide skull, the two bayonet close-ups and the butt stroke,
 composed from model renders in killfeed_icons.py's look (the HD skin,
 the same light, light inner edge and dark outline), so they sit beside the
 rendered weapon icons instead of the #733 upscale of Valve's drawing.
@@ -23,10 +23,9 @@ weapon, and goes where render_icon's would: painted into the HD sheet
                      the victim's team (deathmsg/butt.rs); the HD sheet's
                      one rect holds the commonest, a Garand on an Axis head.
                      British heads are #1089.
-  d_mortar           the mortar's world model (hk_mortar.mdl) side-on, as
-  d_germortar        Valve's composite lays it out (baseplate left, tube,
-                     bipod), without the separate shell; both teams' icons
-                     are one drawing in Valve's sheets too.
+
+The mortars have a weapon model of their own (p_mortar.mdl, the carried
+mortar) and are in killfeed_icons.ICONS.
 """
 import os, re
 from dataclasses import dataclass
@@ -88,10 +87,7 @@ SKULL_BOX = (0.24, 0.02, 0.76, 0.86)
 BONE_ANGLE = 32.0  # degrees each bone is turned from level
 SKULL_TURN = -80.0  # degrees about its up axis: the face to the viewer, a touch to one side
 
-MORTARS = ("d_mortar", "d_germortar")
-MORTAR_MODEL = "hk_mortar.mdl"
-
-NAMES = frozenset(SKULLS) | frozenset(BAYONETS) | frozenset(BUTT_VARIANTS) | frozenset(MORTARS)
+NAMES = frozenset(SKULLS) | frozenset(BAYONETS) | frozenset(BUTT_VARIANTS)
 
 
 @dataclass
@@ -309,19 +305,6 @@ def skull(dod, name, canvas, style, models_dir, log):
     return img, {"model": f"{SKULL_MODEL} skull and crossbones"}
 
 
-def mortar(dod, name, canvas, style, models_dir, log):
-    path = os.path.join(dod, "models", MORTAR_MODEL)
-    try:
-        tris = StudioModel(path).triangles()
-    except (OSError, MdlError) as e:
-        return None, f"no {MORTAR_MODEL} in this install ({e})"
-    X, Y, Z = np.eye(3)
-    side = np.array([Z, X, np.cross(Z, X)])  # baseplate left, tube to the right
-    skins = K.hd_skins(textures_of(tris), style, models_dir)
-    img = layer(tris, side, fit_part(project(tris, side), canvas.box((0.0, 0.0, 1.0, 1.0))), canvas, skins, gun=True)
-    return img, {"model": MORTAR_MODEL}
-
-
 def compose(dod, name, style, models_dir, scale=4, log=print):
     """(rgba at `scale`x the icon's hud.txt rect, info) for one of NAMES
     (a butt variant in d_garandbutt's rect), or (None, why not). Rows the
@@ -336,8 +319,6 @@ def compose(dod, name, style, models_dir, scale=4, log=print):
         img, info = bayonet(dod, name, canvas, style, models_dir, log)
     elif name in BUTT_VARIANTS:
         img, info = butt(dod, name, canvas, style, models_dir, log)
-    elif name in MORTARS:
-        img, info = mortar(dod, name, canvas, style, models_dir, log)
     else:
         raise KeyError(name)
     if img is None:

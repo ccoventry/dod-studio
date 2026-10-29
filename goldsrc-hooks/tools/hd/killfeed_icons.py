@@ -64,7 +64,7 @@ Per icon (ICONS):
      render painted over; other pixels stay as sprites_hd.py made them.
 
 Icons with no weapon model to render whole (the skull, the bayonet
-close-ups, the butt stroke, the mortars) are composed from model renders in
+close-ups, the butt stroke) are composed from model renders in
 the same look by killfeed_composites.py (#1088).
 
 Resumable and safe to run again: before the first change to a sheet file,
@@ -112,7 +112,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 14  # 14: the skull, bayonets, butt stroke and mortars composed (#1088); 13: guards from the v_ models (v_part); 12: the MP40 skin's guard; 11: wires as 1 px lines
+VERSION = 14  # 14: the skull, bayonets and butt stroke composed, the mortars rendered (#1088); 13: guards from the v_ models (v_part); 12: the MP40 skin's guard; 11: wires as 1 px lines
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -278,6 +278,10 @@ ICONS = {
     "d_stick": Icon(("p_stick.mdl",), ("w_stick.mdl",)),
     "d_spade": Icon(("p_spade.mdl",), ("w_spade.mdl",)),
     "d_gerknife": Icon(("p_youthk.mdl",), (), note="the Hitler Youth knife"),
+    "d_mortar": Icon(("p_mortar.mdl",), ("w_mortar.mdl",),
+                     note="the carried mortar (baseplate, tube, folded bipod); no shell beside it (#1088)"),
+    "d_germortar": Icon(("p_mortar.mdl",), ("w_mortar.mdl",),
+                        note="both teams carry one mortar model; Valve's two icons are one drawing too"),
     "d_paraknife": Icon(("p_paraknife.mdl",), ("w_paraknife.mdl",), muzzle=(1.0, 0.0, 0.0),
                         turn=4.5, note="lies along X; blade kept on the right; turned: both ends level"),
     # British
@@ -1912,7 +1916,7 @@ LONG_GUNS = frozenset({
     "d_bar", "d_30cal", "d_mg42", "d_mg34", "d_fg42", "d_scopedfg42", "d_bren"})
 # Today's size, only moved onto the barrel row.
 PISTOLS = frozenset({"d_colt", "d_luger", "d_webley"})
-LAUNCHERS = frozenset({"d_bazooka", "d_pschreck", "d_piat"})
+LAUNCHERS = frozenset({"d_bazooka", "d_pschreck", "d_piat", "d_mortar", "d_germortar"})
 # These stand far above or below the barrel line (the Bren's magazine on top,
 # the launchers' shields and frames): they keep their size and move up or
 # down as little as fits, rather than shrink to half.

@@ -750,7 +750,7 @@ class EvenLayoutTest(unittest.TestCase):
                 self.assertTrue(K.NOT_LEVELLED.search(name), name)
                 self.assertEqual((lay.barrel_row, lay.size), (None, "natural"), name)
             self.assertEqual(lay.below, "move" if name in K.MOVE_TO_FIT else "shrink", name)
-        self.assertEqual(K.MOVE_TO_FIT, {"d_bren", "d_bazooka", "d_pschreck", "d_piat"})
+        self.assertEqual(K.MOVE_TO_FIT, {"d_bren", "d_bazooka", "d_pschreck", "d_piat", "d_mortar", "d_germortar"})
 
     def test_pack_keeps_boxes_apart_and_inside_their_frame(self):
         sizes = {f"d_{i}": (30 + (i * 37) % 60, 26) for i in range(40)}
