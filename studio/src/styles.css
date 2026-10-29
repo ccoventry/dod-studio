@@ -614,6 +614,32 @@ html.picking-path * {
   padding-bottom: 6px;
 }
 
+/* The Master Demo Queue's filters, a row of their own under its toolbar (#127). */
+.queue-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.queue-filter-row-label {
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.queue-filter-tracked-only {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+/* Dimmed while no highlight is ticked anywhere (#127). */
+.queue-filter-tracked-only.is-disabled {
+  opacity: 0.45;
+}
+
 .panel-header h2, .panel-header h3 {
   font-size: 14px;
   font-weight: 600;
@@ -3678,7 +3704,7 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 12px;
 }
 
-/* The Capture page's card. */
+/* The Highlights tab's card. */
 .setup-card {
   margin: 8px;
   padding: 10px 12px;

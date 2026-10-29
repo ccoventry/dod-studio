@@ -474,8 +474,8 @@ export const obsTestCancel = () => obsTestCall('obs_test_cancel', {});
 export const obsTestDeleteTake = (takeFolder) => obsTestCall('obs_test_delete_take', { takeFolder });
 
 /** Patches the given demo's highlights into a single `<stem>_preview.dem`
- *  (BOOKMARK/director events at each highlight, regardless of selection or
- *  Min Kills — reuses an existing preview instead of regenerating one) and
+ *  (BOOKMARK/director events at each highlight, regardless of selection —
+ *  reuses an existing preview instead of regenerating one) and
  *  immediately launches it in HLAE via `+viewdemo`. */
 export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
   return invoke("launch_demo_preview", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
