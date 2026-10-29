@@ -71,15 +71,63 @@ pub fn calculate_agr_bytes(fps: i32, duration_secs: f32) -> u64 {
 /// literals that could silently drift apart.
 pub const MIN_DRIVE_HEADROOM_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 
-/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
-/// `None` for a path with no prefix. Folders with the same key share one
-/// drive's free space, so planners budget per key, not per folder (#774).
+/// The volume a path is on, lowercased: its `\\?\volume{guid}\` name when
+/// Windows can tell, so a disk mounted as a folder inside another drive
+/// (`D:\Captures`) keys apart from `D:` itself (#1041); else the drive
+/// (`c:`) or share (`\\server\share`). `None` for a path with no prefix.
+/// Folders with the same key share one drive's free space, so planners budget
+/// per key, not per folder (#774).
 pub fn volume_key(path: &std::path::Path) -> Option<String> {
-    match path.components().next()? {
-        std::path::Component::Prefix(prefix) => {
-            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+    let std::path::Component::Prefix(prefix) = path.components().next()? else {
+        return None;
+    };
+    // Only a drive letter is asked about: asking about a share that's offline
+    // waits on the network.
+    #[cfg(windows)]
+    if matches!(
+        prefix.kind(),
+        std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)
+    ) && let Some(name) = win_volume::volume_name(path)
+    {
+        return Some(name.to_lowercase());
+    }
+    Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+}
+
+/// `GetVolumePathNameW` (the mount point a path is under, its nearest
+/// existing folder deciding) then `GetVolumeNameForVolumeMountPointW`.
+/// `None` for a `subst` drive or a drive that isn't there.
+#[cfg(windows)]
+mod win_volume {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetVolumePathNameW(file_name: *const u16, volume_path: *mut u16, len: u32) -> i32;
+        fn GetVolumeNameForVolumeMountPointW(
+            mount_point: *const u16,
+            volume_name: *mut u16,
+            len: u32,
+        ) -> i32;
+    }
+
+    pub fn volume_name(path: &std::path::Path) -> Option<String> {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut mount = vec![0u16; wide.len().max(4) + 1];
+        if unsafe { GetVolumePathNameW(wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) } == 0
+        {
+            return None;
         }
-        _ => None,
+        // A volume name is `\\?\Volume{GUID}\`: 49 characters and the nul.
+        let mut name = [0u16; 64];
+        if unsafe {
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), name.len() as u32)
+        } == 0
+        {
+            return None;
+        }
+        let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+        Some(String::from_utf16_lossy(&name[..len]))
     }
 }
 
@@ -335,6 +383,29 @@ mod tests {
             volume_key(Path::new(r"\\NAS\Movies\b"))
         );
         assert_eq!(volume_key(Path::new("relative")), None);
+    }
+
+    /// #1041: a real drive keys by its volume name, which a disk mounted as a
+    /// folder has of its own; a folder that isn't there yet keys by the
+    /// volume it will be on.
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_keys_by_its_volume_name() {
+        use std::path::Path;
+        let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let key = volume_key(&Path::new(&system).join("Windows")).unwrap();
+        assert!(key.starts_with(r"\\?\volume{"), "{key}");
+        assert_eq!(
+            volume_key(&Path::new(&system).join("no-such-folder-1041").join("x")),
+            Some(key)
+        );
+        // No such drive: the letter, as before.
+        let missing = (b'A'..=b'Z')
+            .map(|c| format!("{}:", c as char))
+            .find(|d| !Path::new(&format!("{d}\\")).exists());
+        if let Some(d) = missing {
+            assert_eq!(volume_key(&Path::new(&d).join("x")), Some(d.to_lowercase()));
+        }
     }
 
     /// #774: two folders on C: get one budget, D: its own, and folders with
