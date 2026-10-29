@@ -184,6 +184,9 @@ pub struct RenderJobView {
     pub id: String,
     pub name: String,
     pub stream: String,
+    /// The stream folder inside `take_folder` this job renders from (`all`,
+    /// or `hudColor` for a HUD pair): what the take preview (#1069) shows.
+    pub stream_folder: String,
     pub frames: usize,
     pub date: String,
     pub status: String,
@@ -250,6 +253,7 @@ impl RenderJobRuntime {
             } else {
                 self.clip.img_folder.clone()
             },
+            stream_folder: self.clip.img_folder.clone(),
             frames: self.clip.frame_count,
             date: self.clip.date.clone(),
             status: self.status.clone(),
@@ -1792,14 +1796,8 @@ pub async fn get_export_pool_free_gb(directories: Vec<String>) -> Result<f64, St
 }
 
 fn export_pool_free_gb(directories: &[String]) -> f64 {
-    let mut total: u64 = 0;
-    for dir in directories {
-        let free = native::sys::disk::get_available_bytes(&PathBuf::from(dir));
-        if free != u64::MAX {
-            total += free;
-        }
-    }
-    total as f64 / 1_073_741_824.0
+    let paths: Vec<PathBuf> = directories.iter().map(PathBuf::from).collect();
+    native::sys::disk::pool_free_bytes(&paths) as f64 / 1_073_741_824.0
 }
 
 #[derive(Serialize)]
