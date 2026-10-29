@@ -824,21 +824,30 @@ pub struct VerifiedBlock {
     pub cut_short: bool,
 }
 
+/// Each manifest block's demo, as the 1-based index `DEMO_START` names: a
+/// demo's blocks are contiguous and demos play in the manifest's order.
+fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
+    let mut ordinal = 0u32;
+    blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            if i == 0 || b.demo_name != blocks[i - 1].demo_name {
+                ordinal += 1;
+            }
+            ordinal
+        })
+        .collect()
+}
+
 /// Each manifest block's position in recording order: demos play in the
-/// manifest's order, and a demo's clips by `block_index`, while its blocks
-/// sit in the order they were placed on drives (largest first).
+/// manifest's order, and a demo's clips by `block_index`. The builder already
+/// sorts a demo's blocks that way; sorting here keeps the order from
+/// depending on it.
 fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..blocks.len()).collect();
-    // A demo's blocks are contiguous; its first block's position keys the demo.
-    let mut demo_start = vec![0usize; blocks.len()];
-    for i in 1..blocks.len() {
-        demo_start[i] = if blocks[i].demo_name == blocks[i - 1].demo_name {
-            demo_start[i - 1]
-        } else {
-            i
-        };
-    }
-    order.sort_by_key(|&i| (demo_start[i], blocks[i].block_index));
+    let demo = demo_ordinals(blocks);
+    order.sort_by_key(|&i| (demo[i], blocks[i].block_index));
     order
 }
 
@@ -851,12 +860,25 @@ struct Records {
     /// The demo tick the last `START_RECORD` named: its block's
     /// `record_start_tick` (#861).
     last_start_tick: Option<i64>,
+    /// The demo playing, by `DEMO_START`'s 1-based index.
+    demo: Option<u32>,
+    /// The demo the last `START_RECORD` came from.
+    last_start_demo: Option<u32>,
 }
 
 impl Records {
+    /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
+    /// playing mid-clip, and the hook's batch skipped on) is over, so a
+    /// Cancel later in the batch can't count it as still recording.
+    fn demo_started(&mut self, job_idx: u32) {
+        self.stopped = self.stopped.max(self.started);
+        self.demo = Some(job_idx);
+    }
+
     fn clip_started(&mut self, tick: Option<i64>) {
         self.started += 1;
         self.last_start_tick = tick;
+        self.last_start_demo = self.demo;
     }
 
     fn clip_stopped(&mut self) {
@@ -865,22 +887,25 @@ impl Records {
 }
 
 /// Marks the clip a Cancel cut short (#1081). With a clip still recording
-/// (more starts than stops), it is the first block from position `stopped`
-/// in recording order whose `record_start_tick` is the tick the last
-/// `START_RECORD` named: a demo the hook's batch skipped sends no markers, so
-/// the recording clip can sit further on than the count says (#861's
-/// `resolve_block` does the same). With no tick, or none matching, the block
-/// at `stopped`. Without markers both counts are 0 and nothing changes.
+/// (more starts than stops), it is the block of the demo playing whose
+/// `record_start_tick` is the tick the last `START_RECORD` named. Without a
+/// demo, the first block from position `stopped` in recording order with that
+/// tick: a demo the hook's batch skipped sends no markers, so the recording
+/// clip can sit further on than the count says (#861's `resolve_block` does
+/// the same). With no tick, or none matching, the block at `stopped`.
+/// Without markers both counts are 0 and nothing changes.
 fn mark_cut_short(manifest: &CaptureManifest, verified: &mut [VerifiedBlock], records: Records) {
     if records.started <= records.stopped {
         return;
     }
     let order = recording_order(&manifest.blocks);
+    let demo = demo_ordinals(&manifest.blocks);
     let by_tick = records.last_start_tick.and_then(|tick| {
-        order
-            .iter()
-            .skip(records.stopped)
-            .find(|&&i| i64::from(manifest.blocks[i].record_start_tick) == tick)
+        let starts_at = |i: usize| i64::from(manifest.blocks[i].record_start_tick) == tick;
+        match records.last_start_demo {
+            Some(d) => order.iter().find(|&&i| demo[i] == d && starts_at(i)),
+            None => order.iter().skip(records.stopped).find(|&&i| starts_at(i)),
+        }
     });
     let Some(&i) = by_tick.or_else(|| order.get(records.stopped)) else {
         return;
@@ -1865,6 +1890,7 @@ pub async fn start_capture_batch_impl(
                         }
                         EngineEvent::DemoLoading(job_idx, total, clip_count) => {
                             clips.demo_loading(clip_count);
+                            records.demo_started(job_idx);
                             let current_demo = demo_name(job_idx);
                             emit_step(
                                 "loading",
@@ -5258,13 +5284,13 @@ mod tests {
         Records {
             started,
             stopped,
-            last_start_tick: None,
+            ..Records::default()
         }
     }
 
     #[test]
     fn blocks_are_put_in_recording_order_demo_by_demo() {
-        // Each demo's blocks sit largest first, as they were placed on drives.
+        // Blocks out of `block_index` order still come out in it.
         let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
         assert_eq!(recording_order(&manifest.blocks), vec![1, 2, 0, 4, 3]);
     }
@@ -5315,6 +5341,7 @@ mod tests {
             started: 2,
             stopped: 1,
             last_start_tick: Some(1200),
+            ..Records::default()
         };
         let mut blocks = on_disk(&manifest);
         mark_cut_short(&manifest, &mut blocks, records);
@@ -5332,10 +5359,54 @@ mod tests {
             started: 3,
             stopped: 2,
             last_start_tick: Some(100),
+            ..Records::default()
         };
         let mut blocks = on_disk(&manifest);
         mark_cut_short(&manifest, &mut blocks, records);
         let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
         assert_eq!(cut, vec![false, false, false, true]);
+    }
+
+    /// A demo that ended or stopped playing mid-clip leaves a `START_RECORD`
+    /// with no `STOP_RECORD`, and the hook's batch goes on to the next demo:
+    /// a Cancel there between clips must not mark a whole clip cut short.
+    #[test]
+    fn a_clip_an_earlier_demo_left_recording_is_not_cut_short_by_a_later_cancel() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0), ("b", 1)]);
+        let mut records = Records::default();
+        records.demo_started(1);
+        records.clip_started(Some(100));
+        records.clip_stopped();
+        // a1 starts, then demo a stops playing.
+        records.clip_started(Some(200));
+        records.demo_started(2);
+        records.clip_started(Some(100));
+        records.clip_stopped();
+        // Cancelled between b0 and b1.
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
+
+        // Cancelled while b1 recorded: b1, not anything in demo a.
+        records.clip_started(Some(200));
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, false, true]);
+    }
+
+    /// A skipped demo sends no markers, and its clip may start at the tick
+    /// the recording one does: the demo `DEMO_START` named decides.
+    #[test]
+    fn a_skipped_demo_sharing_the_tick_does_not_take_the_cut() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0), ("b", 1)]);
+        let mut records = Records::default();
+        // Demo a skipped before it played: b0 recording when cancelled.
+        records.demo_started(2);
+        records.clip_started(Some(100));
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, true, false]);
     }
 }
