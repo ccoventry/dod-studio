@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<!--
+  Harness for review_library.js (#848): the themed confirm modal from
+  index.html and a queue the test fills, with Tauri's IPC mocked
+  (vite.config.e2e.js). `window.__library` is the library the mocked
+  review_library_get / review_library_update read and write;
+  `window.__addDemo(demo)` is a scan adding a demo, `window.__project` says
+  whether a project file is open, and `window.__brought` lists the
+  highlights onBroughtIn got.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>review_library.js test harness</title>
+</head>
+<body>
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 420px; padding: 20px;">
+      <h2 id="themed-confirm-title">Confirm</h2>
+      <p id="themed-confirm-message"></p>
+      <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <button id="themed-confirm-ok-btn">Confirm</button>
+        <button id="themed-confirm-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { createReviewLibrary } from '/src/review_library.js';
+
+    initThemedConfirm();
+    window.__library = {};
+    window.__mockInvokeHandlers.review_library_get = ({ keys }) =>
+      Object.fromEntries(keys.filter((k) => window.__library[k]).map((k) => [k, window.__library[k]]));
+    window.__mockInvokeHandlers.review_library_update = ({ key, name, changes }) => {
+      const d = window.__library[key] || (window.__library[key] = { name, highlights: {} });
+      Object.entries(changes).forEach(([id, e]) => { if (e) d.highlights[id] = e; else delete d.highlights[id]; });
+    };
+
+    const demos = [];
+    window.__demos = demos;
+    window.__project = false;
+    window.__brought = [];
+    const library = createReviewLibrary({
+      getDemos: () => demos,
+      hasProjectFile: () => window.__project,
+      onBroughtIn: (streaks) => window.__brought.push(...streaks),
+      saveDelayMs: 0,
+    });
+    window.__addDemo = (demo) => { demos.push(demo); return library.sync(); };
+    window.__sync = () => library.sync();
+    window.__flush = () => library.flush();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

@@ -1,8 +1,11 @@
 mod audit_manager;
+mod batch_catch_up;
+mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
 mod capture_manager;
+mod capture_room_manager;
 mod combine_manager;
 mod crash_maps_manager;
 mod dem_open_with;
@@ -23,6 +26,7 @@ mod match_group_cmd;
 mod menu_scale_manager;
 mod messages;
 mod movie_copy_manager;
+mod obs_test_manager;
 mod open_files;
 mod overview_manager;
 mod packet_limit_manager;
@@ -31,8 +35,10 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod render_manager;
+mod review_library;
 mod review_manager;
 mod settings_manager;
+mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
 mod updater_manager;
@@ -941,6 +947,7 @@ pub fn run() {
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
+        .manage(obs_test_manager::ObsTestManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
         .manage(hd_manager::HdManager::default())
@@ -1007,10 +1014,17 @@ pub fn run() {
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,
+            obs_test_manager::obs_test_clip,
+            obs_test_manager::obs_test_watch_start,
+            obs_test_manager::obs_test_analyze,
+            obs_test_manager::obs_test_cancel,
+            obs_test_manager::obs_test_delete_take,
             launch_obs,
             launch_standalone_game,
             read_cfg_commands,
             check_engine_processes,
+            batch_catch_up::catch_up_unwatched_batches,
+            batch_close::wait_for_batch_start,
             kill_engine_processes,
             capture_manager::check_running_game,
             capture_manager::close_running_game,
@@ -1019,6 +1033,8 @@ pub fn run() {
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_library::review_library_get,
+            review_library::review_library_update,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,

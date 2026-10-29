@@ -1,5 +1,5 @@
 //! What a highlight is, once, for everything that lists them (#573): the
-//! Capture page's Highlights table (through `native::patch::scanner`) and the
+//! Highlights page's Highlight Details table (through `native::patch::scanner`) and the
 //! in-game DoD Studio window's Highlights tab.
 //!
 //! A highlight is one life's kills by one player: `Player::kill_streaks`, which
@@ -24,7 +24,7 @@ use crate::{Analysis, Connection, Weapon};
 /// A change to what `kill.rs` caches needs both bumps, or the rescan reads
 /// the old highlights back out of the analyzer cache. Mirrored in
 /// `studio/src/scan_version.js`; a test checks the two agree.
-pub const HIGHLIGHTS_VERSION: u32 = 1;
+pub const HIGHLIGHTS_VERSION: u32 = 2;
 
 /// One kill in a highlight.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,7 +95,7 @@ pub enum Rule {
 pub struct Highlights {
     /// Every player's: players in the analysis' order, each one's highlights
     /// in the order they happened. [`Highlights::shown`] keeps this order:
-    /// the Capture page's row order, which saved projects index into.
+    /// the Highlights page's row order, which saved projects index into.
     pub all: Vec<Highlight>,
     pub hltv: bool,
     /// A POV demo's recording player.

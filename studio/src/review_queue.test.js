@@ -30,7 +30,7 @@ describe('HLTV demos in a review (#822)', () => {
     { id: '76561197960265729', names: ['stealth'], label: 'stealth' },
     { id: '76561197960265730', names: ['m00cat'], label: 'm00cat' },
   ];
-  const queue = (players) => buildReviewQueue([hltv, pov], ['h.dem', 'p.dem'], 1, REVIEW_COVERS.ALL, players).highlights;
+  const queue = (players) => buildReviewQueue([hltv, pov], ['h.dem', 'p.dem'], REVIEW_COVERS.ALL, players).highlights;
 
   it('plays only the chosen players, matched by SteamID or else by name, and every POV highlight', () => {
     const rows = queue(hltvPlayersFor(HLTV_PLAYERS.RECORDERS, recorders));
@@ -45,7 +45,7 @@ describe('HLTV demos in a review (#822)', () => {
         life('m00cat', 1, 135), life('gorilla', 2, 130), life('gorilla', 2, 180), life('Alpha', 3, 130),
       ],
     };
-    const played = (order) => buildReviewQueue([mixed], ['o.dem'], 1, REVIEW_COVERS.ALL, null, order)
+    const played = (order) => buildReviewQueue([mixed], ['o.dem'], REVIEW_COVERS.ALL, null, order)
       .highlights.map((h) => `${h.player}@${h.kill_times[0]}`);
 
     it('chronological by default: a later clip starting earlier than one ends still goes by its start, ties A to Z', () => {
@@ -79,7 +79,7 @@ describe('HLTV demos in a review (#822)', () => {
     const demos = [here, stealthHere, m00catElsewhere];
     const recorderOf = (d) => ({ 's1.dem': { id: '76561197960265729' }, 'm2.dem': { id: '76561197960265730' } })[d.path] || null;
     const players = (choice) =>
-      buildReviewQueue(demos, ['h.dem'], 1, REVIEW_COVERS.ALL, hltvPlayersFor(choice, recorders, { demos, recorderOf }))
+      buildReviewQueue(demos, ['h.dem'], REVIEW_COVERS.ALL, hltvPlayersFor(choice, recorders, { demos, recorderOf }))
         .highlights.map((h) => h.player);
 
     it('is what an empty box means, and leaves out whoever recorded this half', () => {
@@ -89,14 +89,14 @@ describe('HLTV demos in a review (#822)', () => {
     });
 
     it('counts what the box left out, so an empty review can say why', () => {
-      const result = buildReviewQueue(demos, ['h.dem'], 1, REVIEW_COVERS.ALL,
+      const result = buildReviewQueue(demos, ['h.dem'], REVIEW_COVERS.ALL,
         hltvPlayersFor(HLTV_PLAYERS.MISSING, recorders, { demos, recorderOf }));
       expect(result.notChosen).toBe(2);
     });
 
     it('an HLTV demo whose half is not known reviews every recorder', () => {
       const unplaced = [withInfo(hltv, null), stealthHere, m00catElsewhere];
-      const rows = buildReviewQueue(unplaced, ['h.dem'], 1, REVIEW_COVERS.ALL,
+      const rows = buildReviewQueue(unplaced, ['h.dem'], REVIEW_COVERS.ALL,
         hltvPlayersFor(HLTV_PLAYERS.MISSING, recorders, { demos: unplaced, recorderOf })).highlights;
       expect(rows.map((h) => h.player)).toEqual(['m00cat', 'DICE | stealth']);
     });
@@ -122,13 +122,13 @@ describe('Review highlights queue (#623)', () => {
     expect(h.key).toBe(streakUid('a.dem', s));
   });
 
-  it('leaves out short lives and highlights with no demo-player times', () => {
+  it('leaves out highlights with no demo-player times', () => {
     const demos = [demo('a.dem', [
       streak({ kill_count: 1, kills: [[1, 1, 'K98']], viewdemo_times: [1] }),
       streak({ viewdemo_times: undefined }),
     ])];
-    const { highlights, skipped } = buildReviewQueue(demos, ['a.dem'], 2);
-    expect(highlights).toEqual([]);
+    const { highlights, skipped } = buildReviewQueue(demos, ['a.dem']);
+    expect(highlights.map((h) => h.kill_times)).toEqual([[1]]);
     expect(skipped).toBe(1);
   });
 });
@@ -199,7 +199,7 @@ describe('Review highlights answers (#623)', () => {
 describe('What a review covers (#661)', () => {
   const marked = (curation, at) => streak({ kills: [[at, 1, 'K98']], viewdemo_times: [at], kill_count: 1, curation });
   const d = demo('a.dem', [marked('Keep', 10), marked(undefined, 20), marked('Maybe', 30), marked('Skip', 40)]);
-  const times = (covers) => buildReviewQueue([d], ['a.dem'], 1, covers).highlights.map((h) => h.kill_times[0]);
+  const times = (covers) => buildReviewQueue([d], ['a.dem'], covers).highlights.map((h) => h.kill_times[0]);
 
   it('All plays every highlight, whatever its mark', () => {
     expect(times(REVIEW_COVERS.ALL)).toEqual([10, 20, 30, 40]);
