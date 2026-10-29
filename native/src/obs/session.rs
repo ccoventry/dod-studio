@@ -137,6 +137,7 @@ impl ObsSession {
             game_height,
             capture_fps,
             1,
+            cfg.recording_quality,
         )?;
 
         let preflight = client.preflight(game_width, game_height)?;

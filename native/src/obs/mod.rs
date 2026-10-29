@@ -31,6 +31,7 @@
 
 pub mod client;
 pub mod drop_rate;
+pub mod encoder;
 #[cfg(test)]
 mod fake_obs;
 pub mod log_tail;

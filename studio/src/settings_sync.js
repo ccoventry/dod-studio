@@ -120,6 +120,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      obs_recording_quality: document.querySelector('#config-obs-recording-quality')?.value || '',
       agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
@@ -261,6 +262,10 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (settings.obs_capture_fps) {
     const inputEl = document.querySelector('#config-obs-capture-fps');
     if (inputEl) inputEl.value = settings.obs_capture_fps;
+  }
+  if (settings.obs_recording_quality) {
+    const selectEl = document.querySelector('#config-obs-recording-quality');
+    if (selectEl) selectEl.value = settings.obs_recording_quality;
   }
   // 0 is "the same as Capture FPS" and stays an empty box.
   if (settings.agr_fps > 0) {

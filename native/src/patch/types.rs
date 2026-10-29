@@ -365,6 +365,9 @@ pub struct ObsConfig {
     pub port: u16,
     /// Empty when OBS has authentication switched off.
     pub password: String,
+    /// How DoD Studio's OBS profile encodes (`obs::encoder`).
+    #[serde(default)]
+    pub recording_quality: ObsRecordingQuality,
 }
 
 impl Default for ObsConfig {
@@ -373,6 +376,44 @@ impl Default for ObsConfig {
             host: "127.0.0.1".to_string(),
             port: 4455,
             password: String::new(),
+            recording_quality: ObsRecordingQuality::default(),
+        }
+    }
+}
+
+/// The recording quality a user picks for OBS mode (#1060). Every NVENC
+/// choice is single-pass with no lookahead and no B-frames, which is what
+/// holds 120 fps at 1440p on an RTX 3070 Ti; they differ in codec and
+/// quantiser. Any other encoder records with OBS's own Simple-mode
+/// settings whatever is picked here (see `obs::encoder`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObsRecordingQuality {
+    /// H.264 at QP 16: what Simple mode's "Indistinguishable" asks for, at a
+    /// speed that holds 120 fps.
+    /// H.264 at QP 20: about half Standard's size.
+    Small,
+    #[default]
+    Standard,
+    /// H.264 at QP 12: about 1.7x Standard's size.
+    High,
+    /// H.264 4:4:4 at QP 12: full colour resolution.
+    Max,
+    /// OBS's own Simple-mode "Indistinguishable" setup, as before #1060:
+    /// smaller files, but at 1440p it can't keep up with 120 fps on an RTX
+    /// 3070 Ti.
+    ObsSimple,
+}
+
+impl ObsRecordingQuality {
+    /// From the settings file's id; anything unknown is the default.
+    pub fn from_str_id(id: &str) -> Self {
+        match id {
+            "small" => Self::Small,
+            "high" => Self::High,
+            "max" => Self::Max,
+            "obs_simple" => Self::ObsSimple,
+            _ => Self::Standard,
         }
     }
 }
