@@ -163,6 +163,12 @@ fn is_voice_menu(payload: &[u8]) -> bool {
         .is_some_and(|text| VOICE_KEYS.iter().any(|key| text.starts_with(key)))
 }
 
+/// Whether a `ShowMenu` payload carries any text. DoD's server sends an empty
+/// one (no slots, no text) to close a menu; that is not a plugin menu to count.
+fn has_text(payload: &[u8]) -> bool {
+    payload.get(HEADER).is_some_and(|&b| b != 0)
+}
+
 /// Whether a `ShowMenu` payload says another chunk of the same menu follows.
 fn needs_more(payload: &[u8]) -> bool {
     payload.get(NEED_MORE_AT).is_some_and(|&b| b != 0)
@@ -342,7 +348,7 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
         HID_CURRENT.store(false, Ordering::Relaxed);
         if voice && WANTED.load(Ordering::Relaxed) {
             HIDDEN.fetch_add(1, Ordering::Relaxed);
-        } else if !voice && crate::plugin_text::wanted() {
+        } else if !voice && has_text(payload) && crate::plugin_text::wanted() {
             PLUGIN_HIDDEN.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -490,6 +496,15 @@ mod tests {
     fn the_header_is_not_part_of_the_text() {
         assert!(!is_voice_menu(b"#Menu_GerVoice2\0"));
         assert!(is_voice_menu(b"\x00\x00\x00\x00#Menu_GerVoice2\0"));
+    }
+
+    /// The server's empty `ShowMenu` closes a menu; it is not a plugin menu.
+    #[test]
+    fn an_empty_menu_has_no_text() {
+        assert!(!has_text(&[0, 0, 0, 0]));
+        assert!(!has_text(&[0, 0, 0, 0, 0]));
+        assert!(!has_text(&[]));
+        assert!(has_text(&show_menu(0, "Choose a map:")));
     }
 
     #[test]
