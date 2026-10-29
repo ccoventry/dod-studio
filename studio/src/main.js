@@ -32,6 +32,7 @@ import { applyStaticStrings } from './apply_strings.js';
 import { initInfoTooltips } from './info_tooltip.js';
 import { initOsNotifications, updateNotificationSettings } from './os_notifications.js';
 import { initUpdater } from './updater_pane.js';
+import { startWhatsNew } from './whats_new.js';
 import { initAppMenu } from './app_menu.js';
 import { initClipNameSettings, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
@@ -231,6 +232,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // only the startup auto-check itself is conditional on settings being
   // present. Not awaited: a background check shouldn't block startup.
   initUpdater(settings, persistAppSettings);
+  startWhatsNew();
   initAppMenu();
   if (pinnedListCleaned) persistAppSettings();
 
