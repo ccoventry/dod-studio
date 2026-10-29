@@ -92,7 +92,6 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
   }).catch((err) => console.error('[review] could not listen for answers:', err));
 
   btn.addEventListener('click', async () => {
-    const minKills = parseInt(document.querySelector('#input-min-kills')?.value || '1', 10) || 1;
     const covers = document.querySelector('#review-covers-select')?.value;
     const ticked = getCheckedPaths();
     const paths = reviewDemoPaths(ticked, getShownPaths());
@@ -100,7 +99,7 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     const picked = hltvPick?.players() || [];
     const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf, picked });
     const order = document.querySelector('#review-order-select')?.value;
-    const { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, minKills, covers, hltvPlayers, order);
+    const { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, covers, hltvPlayers, order);
     if (highlights.length === 0) {
       let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;
       if (skipped > 0) why = STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS;

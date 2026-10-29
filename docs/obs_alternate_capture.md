@@ -63,20 +63,32 @@ utvideo, 300 fps.
 
 | Setting | Value | Why |
 |---|---|---|
-| Output mode | Simple | obs-websocket can write Simple mode's settings; Advanced mode keeps its encoder settings in `recordEncoder.json`, out of reach |
-| Recording quality | Indistinguishable (`HQ`) | constant QP: 16 on NVENC at 2560x1440, ~390 Mbps at 120 fps. A new profile records "Same as stream", **6 Mbps CBR** |
-| Encoder | the one OBS picked for this PC (the profile's default) | NVENC here; undoes a switch to x264 |
+| Output mode | **Advanced** with NVENC (OBS 31+), Simple otherwise | Simple mode's NVENC setup can't keep up with 120 fps at 1440p (#1060, below). Studio writes Advanced mode's encoder file itself |
+| Recording encoder (NVENC) | H.264, preset P4, single pass, no lookahead, no B-frames, constant QP from **OBS Quality** (Standard: 16) | holds 120 fps at 1440p; see "Encoder and quality" below |
+| Recording quality (Simple mode) | Indistinguishable (`HQ`) | constant QP: 16 on NVENC at 2560x1440. A new profile records "Same as stream", **6 Mbps CBR** |
+| Encoder | the one OBS picked for this PC (the profile's default) | NVENC here; undoes a switch to x264. On AMD, Intel or x264 Studio keeps Simple mode: their fast settings are unmeasured |
+| Colour | NV12 (I444 for Max), Rec. 709, limited range | OBS's defaults, and what the render step and editors read an H.264 file as |
 | Container | Hybrid MP4 (OBS 30.2+) | a killed OBS leaves a playable file; the finished file is a plain MP4 (VEGAS opens it) |
 | Replay buffer | off | |
 | Canvas and output | the game's resolution | as before |
-| FPS | Configuration's OBS Capture FPS, **120** by default | 120 is at NVENC's limit at 1440p, 60 holds (below) |
+| FPS | Configuration's OBS Capture FPS, **120** by default | 120 holds at 1440p with the Advanced-mode encoder (#1060, below) |
 | `[DoD-Studio] Game Audio` sync offset | **-270 ms** | waveOut's latency, see the sound paragraph below |
 
 Settings written over obs-websocket only take effect when OBS rebuilds its outputs: changing the
 quality preset without that made the next `StartRecord` fail, with OBS's "Failed to start recording"
 box in front of the user's windows. So after a change Studio switches to another profile and back.
-Only Studio's own `[DoD-Studio]` profile is written. The keyframe interval can't be set in Simple
-mode (NVENC uses 250 frames, ~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway.
+Only Studio's own `[DoD-Studio]` profile is written. NVENC's keyframe interval stays at 250 frames
+(~2 s at 120 fps); the head and tail trim (#84) re-encodes anyway.
+
+**How Studio writes Advanced mode's encoder settings.** obs-websocket can write a profile's
+`basic.ini` but not its `recordEncoder.json`, so Studio writes that file itself. It finds the
+profile's folder by writing a fresh marker (`[DoDStudio] ProvisionMarker`) through obs-websocket,
+which saves `basic.ini` at once, then looking for it under `%APPDATA%\obs-studio\basic\profiles\`
+and a portable OBS's `config\obs-studio\` beside each running `obs64.exe`. The profile round trip
+below then makes OBS read the file. If the folder isn't found, or OBS is older than 31 (its NVENC
+encoder named these settings differently), the profile stays in Simple mode, never Advanced mode on
+OBS's NVENC defaults (10 Mbps CBR). Picking "OBS's own" under OBS Quality switches it back to
+Simple mode too.
 
 The game side, OBS mode only: `fps_override 1; fps_max <2 x OBS FPS>; gl_vsync 0` in the helper cfg,
 and `-wavonly` on the launch line.
@@ -115,7 +127,8 @@ fast-forward's sound just before OBS starts, stays.
 frames it drew and reported 95-98% skipped "due to encoding lag". HLAE's 300 fps and its
 blend-to-motion-blur use stay HLAE-only.
 
-**120 fps is at the encoder's limit, not safely inside it.** It held in one POST run (above) and
+**120 fps was at Simple mode's encoder limit, not safely inside it** (fixed by #1060, next
+section). It held in one POST run (above) and
 dropped 12% in the next; on 2026-10-26 evening it dropped 32-95% per clip in five more runs, on
 PRE and POST alike, with `fps_max` at 120 or 240 (so not the game's rate). NVENC sat at 99% the
 whole time. Simple mode's recording encoder is fixed at p5, `hq` tuning, quarter-resolution
@@ -123,6 +136,96 @@ two-pass, 8-frame lookahead and 2 B-frames; ffmpeg with those settings on PRE fo
 136 fps on its own, so a game and OBS's own GPU work beside it leave nothing spare. The QP doesn't
 help (153-163 fps at QP 16-23, same preset). **60 fps held on PRE**: no skipped frames, 0-0.4% of
 frames repeated with the game moving.
+
+### Encoder and quality (2026-10-27, #1060)
+
+Same PC, OBS **33.0.0** (the runs above were 32.2.2), POST, the same three clips, game behind other
+windows, OBS Capture FPS 120, `fps_max` 240.
+
+**What was slow.** Simple mode sets only the rate control, profile and QP; everything else is
+`obs-nvenc`'s default: preset P5, quarter-resolution two-pass, 8 frames of lookahead, 2 B-frames.
+Encoding 720 frames of 1440p from memory with ffmpeg on the same NVENC, nothing else running, that
+setup managed **119 fps**; the same QP with preset P4, single pass, no lookahead and no B-frames
+**244 fps**, at the same quality. Presets P1-P3 were faster still (291-335 fps) for no change in
+quality at this QP, P4 leaves the most quality per bit of the fast ones.
+
+**Live, OBS's own log and nvidia-smi** (NVENC busy % while recording, average/peak):
+
+| OBS Quality | Frames skipped (encoding lag) | Frames missed (rendering lag) | NVENC | GPU 3D | Size, MB per minute |
+|---|---|---|---|---|---|
+| OBS's own (Simple, before) | 0 this time; 32-95% per clip in five runs on 32.2.2 | 0 | **96% / 100%** | 39% | 2,880-3,340 |
+| Small (QP 20) | 0 | 0 | 56% / 72% | 40% | 1,590-1,900 |
+| Standard (QP 16), two runs | 0 | 0 | 57% / 75% | 40% | 2,770-3,170 |
+| High (QP 12) | 0 | 0 | 64% / 94% | 39% | 4,170-4,740 |
+| Max (4:4:4, QP 12) | 2-5 per clip, all before the first written frame (no gaps in the file) | 0 | 55% / 79% | 48% | 5,030-5,720 |
+| Standard, `fps_max` 120 | 0 | 0 | 67% / 83% | 29% | as Standard |
+| Max, `fps_max` 120 | 0-5 per clip, as above | 0 | 61% / 77% | 36% | as Max |
+| Standard, game **in front** | 0 | 0 | 57% / 69% | 41% | as Standard |
+
+Every take ran at 119.9-120.0 fps from first frame to last. The sizes are bigger than ffmpeg's on
+the HLAE reference clip (1.2 GB a minute at QP 16) because these clips are BAR fire fights.
+
+**Quality**, offline against HLAE's lossless frames of the same 6 s (an HLAE utvideo take at
+2560x1440 resampled to 120 fps, converted the way OBS converts: NV12, Rec. 709, limited range):
+
+| Setup | Encoder fps (ffmpeg) | VMAF | VMAF, worst 1% of frames | PSNR in RGB |
+|---|---|---|---|---|
+| OBS's own Simple HQ | 119 | 99.67 | 96.31 | 37.59 |
+| Small: H.264 QP 20 | 247 | 99.42 | 95.47 | 37.06 |
+| Standard: H.264 QP 16 | 244 | 99.79 | 96.76 | 37.66 |
+| High: H.264 QP 12 | 236 | 99.89 | 97.46 | 38.08 |
+| H.264 QP 8 | 224 | 99.90 | 97.46 | 38.30 |
+| Max: H.264 4:4:4 QP 12 | 172 | 99.86 | 97.19 | **41.98** |
+| H.264 lossless (4:2:0) | 309 | 99.96 | 98.32 | 38.53 |
+| HEVC QP 16 / 12 | 229 / 226 | 99.74 / 99.87 | 96.43 / 97.19 | 37.63 / 37.96 |
+| HEVC 4:4:4 QP 12 | 164 | 99.83 | 96.93 | 42.47 |
+
+- **4:2:0 is the ceiling, not the QP.** Even lossless 4:2:0 stops at 38.5 dB in RGB, because
+  colour is stored at half resolution: red kill-feed names lose saturation and their edges in every
+  4:2:0 choice, and only 4:4:4 matches HLAE's (stills in `local\review-images\obs-encoder\`,
+  not in the repo). Below QP 12 a 4:2:0 file only grows.
+- **HEVC buys nothing here.** At these quantisers NVENC's HEVC made the same size file at the same
+  quality as H.264, slightly slower, so every choice is H.264. The RTX 3070 Ti has no AV1 encoder
+  (OBS's log: "AV1 supported: false").
+- **Max goes through OBS's slower path.** `obs-nvenc` encodes I444 from system memory, not from a
+  GPU texture, so OBS converts and copies each frame (GPU 3D up about 8 points). It held 120 fps;
+  its few skipped frames fall before recording starts. Some editors can't open 4:4:4 H.264; Studio's
+  render step (FFmpeg to ProRes) can.
+- **Colour range.** OBS's defaults (Rec. 709, limited range) are what an editor assumes of an H.264
+  file; full range in a file read as limited crushes the blacks GoldSrc's dark maps live in, and the
+  other way round washes them out. Studio sets them on every connect.
+
+**Other things tried** for the frame drops, one at a time:
+
+- **Game Capture's capture method.** OBS's log shows `gl shared texture capture successful` for
+  hl.exe, with and without HLAE: the fast GPU-to-GPU path, not the slow CPU copy (`shmem`).
+- **`fps_max` 120 instead of 240** lowered GPU 3D load by about 10 points and made no difference to
+  OBS (0 skipped either way). Kept at twice OBS's rate for the frame pacing measured in #645.
+- **Game in front vs behind** (`ds_capture_stay_behind`): no difference (table above).
+- **Not changed**, for want of an effect to fix once the encoder was: running OBS as administrator
+  (it raises OBS's GPU priority, the usual fix for *rendering* lag, of which there was none), OBS's
+  process priority, Game Capture's frame-rate limit. Windows Game Mode is off on this PC;
+  hardware-accelerated GPU scheduling is at the driver's default (no `HwSchMode` value).
+
+**Does the hook DLL cost OBS anything?** POST, game in front, OBS Standard, the first 60 s of
+`ktps8w8-stealth_ih_saints_h1_p3` (a POV demo; 466 s, 42,399 frames), launched three ways:
+(a) HLAE + the hook DLL, as Studio does; (b) HLAE alone; (c) plain hl.exe.
+
+| | (a) HLAE + hook | (b) HLAE only | (c) plain hl.exe |
+|---|---|---|---|
+| `timedemo`, uncapped (whole demo, average fps) | 231.3, 232.4, 233.1 | 237.8 | 238.2, 238.1, 238.2 |
+| (a) with `ds_hd_enabled 0` | 237.9 | | |
+| (a) with `ds_sound_restore_gunshots 0` / `ds_hud_show_scope 0` | 233.1 / 232.9 (no change) | | |
+| OBS recording, `fps_max` 240: skipped / missed frames | 0 / 0 | 0 / 0 | 0 / 0 |
+| same: NVENC, GPU 3D | 66%, 33% | 66%, 33% | 67%, 33% |
+| OBS recording, `fps_max` 1000: skipped / missed | 0 / 0 | 1 / 1 of 7,356 | 0 / 0 |
+
+The game is CPU-bound near 238 fps at 1440p on this PC (one core busy, the GPU about a third). The
+hook costs about 2.5% of uncapped frame rate (0.1 ms a frame), and all of it is HD textures: with
+`ds_hd_enabled 0` the hook's run matches plain hl.exe. None of it reaches OBS: the encoder and the
+GPU are equally busy in all three, and none dropped frames. A frame-time 1% low wasn't measured:
+PresentMon needs administrator rights (ETW), and only `timedemo`'s average is available without the
+hook.
 
 **OBS Game Capture records the game behind other windows**: its frames match HLAE's of the same
 moment. A minimised game is parked off-screen by `ds_capture_stay_behind`; not measured with OBS.

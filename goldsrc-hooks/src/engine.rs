@@ -1022,6 +1022,8 @@ const SLOT_HUD_ADD_ENTITY: usize = 20;
 /// Checked 2026-10-11: `F` stores `HUD_DrawTransparentTriangles`
 /// (`+0x4c830`) at its table's slot 23.
 const SLOT_DRAW_TRANSPARENT_TRIANGLES: usize = 23;
+/// `F` stores `HUD_Shutdown` (`+0x2a570`) at slot 26.
+const SLOT_HUD_SHUTDOWN: usize = 26;
 const SLOT_HUD_FRAME: usize = 33;
 const SLOT_HUD_KEY_EVENT: usize = 34;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
@@ -1034,6 +1036,7 @@ const _: () = assert!(
         && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_SHUTDOWN < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
         && SLOT_HUD_REDRAW < CLDLL_FUNC_SLOTS
         && SLOT_HUD_KEY_EVENT < CLDLL_FUNC_SLOTS
@@ -1059,6 +1062,8 @@ type GetStudioModelInterfaceFn =
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
 /// `void HUD_DrawTransparentTriangles(void)`.
 type DrawTransparentTrianglesFn = unsafe extern "C" fn();
+/// `void HUD_Shutdown(void)`.
+type HudShutdownFn = unsafe extern "C" fn();
 /// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
 /// message, with the opcode and length byte already stripped.
 type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
@@ -1071,6 +1076,7 @@ static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_SHUTDOWN: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_REDRAW: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -1549,6 +1555,33 @@ unsafe extern "C" fn tramp_hud_add_entity(
     unsafe { real(entity_type, ent, modelname) }
 }
 
+/// Set once `client.dll`'s `HUD_Shutdown` has run: the game is quitting.
+static CLIENT_SHUT_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Whether the client has shut down. Once it has, the engine frees every
+/// cvar the client side registered, ours included, before SDL takes the
+/// window down, so a cvar pointer must not be read any more: `ShowWindow`
+/// reaching `behind_imports` read a freed `ds_capture_stay_behind` and
+/// crashed the game as it quit (#1080).
+pub fn client_shut_down() -> bool {
+    CLIENT_SHUT_DOWN.load(Ordering::Acquire)
+}
+
+/// Marks the client shut down before `client.dll`'s own `HUD_Shutdown` runs,
+/// so nothing reads our cvars past this point.
+unsafe extern "C" fn tramp_hud_shutdown() {
+    if !CLIENT_SHUT_DOWN.swap(true, Ordering::AcqRel) {
+        unsafe {
+            crate::debug::report("HUD_Shutdown: the game is quitting; our cvars are no longer read")
+        };
+    }
+    let real = REAL_HUD_SHUTDOWN.load(Ordering::Acquire);
+    if !real.is_null() {
+        let real: HudShutdownFn = unsafe { std::mem::transmute(real) };
+        unsafe { real() };
+    }
+}
+
 /// Called once per `svc_director` message. Drops the ones
 /// `hltv_messages::should_drop` asks for and forwards the rest unchanged.
 unsafe extern "C" fn tramp_hud_director_message(size: i32, buf: *mut c_void) {
@@ -1670,6 +1703,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_DRAW_TRANSPARENT_TRIANGLES,
             tramp_draw_transparent_triangles as *mut c_void,
             "HUD_DrawTransparentTriangles",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_SHUTDOWN,
+            &REAL_HUD_SHUTDOWN,
+            tramp_hud_shutdown as *mut c_void,
+            "HUD_Shutdown",
         );
         swap_slot(
             table,
@@ -1805,6 +1845,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_DrawTransparentTriangles" => {
             REAL_DRAW_TRANSPARENT_TRIANGLES.store(result, Ordering::Release);
             tramp_draw_transparent_triangles as *mut c_void
+        }
+        "HUD_Shutdown" => {
+            REAL_HUD_SHUTDOWN.store(result, Ordering::Release);
+            tramp_hud_shutdown as *mut c_void
         }
         "HUD_DirectorMessage" => {
             REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);

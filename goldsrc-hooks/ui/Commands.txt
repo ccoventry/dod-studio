@@ -112,7 +112,7 @@ DEMO PLAYBACK
       Raise the engine's 100 ms ceiling on ex_interp.
 
 CAPTURE
-  ds_capture_batch start "<file>"|away|stop
+  ds_capture_batch start "<file>"|away|hold|go|stop
       Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
   ds_capture_schedule load "<file>"|clear
       Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
@@ -176,3 +176,5 @@ DEBUG
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
   ds_debug_cloak_instead 0/1
       While staying behind, a minimised game is cloaked in place instead of moved off-screen, to compare.
+  ds_debug_record_frame_times 0/1
+      Time every frame while 1; at 0, print the average fps, 1% and 0.1% lows and the longest frame, and save the times to %APPDATA%\dod-studio\frame_times.txt (the OBS capture test reads it).

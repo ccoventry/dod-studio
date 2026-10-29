@@ -1,8 +1,11 @@
 mod audit_manager;
+mod batch_catch_up;
+mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
 mod capture_manager;
+mod capture_room_manager;
 mod combine_manager;
 mod crash_maps_manager;
 mod dem_open_with;
@@ -23,6 +26,7 @@ mod match_group_cmd;
 mod menu_scale_manager;
 mod messages;
 mod movie_copy_manager;
+mod obs_test_manager;
 mod open_files;
 mod overview_manager;
 mod packet_limit_manager;
@@ -31,9 +35,12 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod render_manager;
+mod review_library;
 mod review_manager;
 mod settings_manager;
+mod take_cleanup_manager;
 mod take_delete_manager;
+mod take_preview_manager;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -431,21 +438,8 @@ async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> 
 }
 
 fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
-    let mut total: u64 = 0;
-    let mut seen = std::collections::HashSet::new();
-    for path_str in paths {
-        let p = std::path::PathBuf::from(path_str);
-        if let Some(key) = native::sys::disk::volume_key(&p)
-            && !seen.insert(key)
-        {
-            continue;
-        }
-        let space = native::sys::disk::get_available_bytes(&p);
-        if space != u64::MAX {
-            total += space;
-        }
-    }
-    Ok(total)
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+    Ok(native::sys::disk::pool_free_bytes(&paths))
 }
 
 #[derive(serde::Serialize)]
@@ -933,12 +927,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
         .manage(RenderManager::new())
+        .manage(take_preview_manager::TakePreviewManager::default())
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(movie_copy_manager::MovieCopyManager::default())
         .manage(combine_manager::CombineManager::default())
+        .manage(obs_test_manager::ObsTestManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(match_group_cmd::MatchGroupManager::default())
         .manage(hd_manager::HdManager::default())
@@ -1005,18 +1001,28 @@ pub fn run() {
             capture_manager::obs_test_connection,
             capture_manager::obs_check_orphan,
             capture_manager::obs_recover_orphan,
+            obs_test_manager::obs_test_clip,
+            obs_test_manager::obs_test_watch_start,
+            obs_test_manager::obs_test_analyze,
+            obs_test_manager::obs_test_cancel,
+            obs_test_manager::obs_test_delete_take,
             launch_obs,
             launch_standalone_game,
             read_cfg_commands,
             check_engine_processes,
+            batch_catch_up::catch_up_unwatched_batches,
+            batch_close::wait_for_batch_start,
             kill_engine_processes,
             capture_manager::check_running_game,
+            capture_manager::running_game_for_batch,
             capture_manager::close_running_game,
             steam_state,
             start_steam,
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_library::review_library_get,
+            review_library::review_library_update,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,
@@ -1039,6 +1045,9 @@ pub fn run() {
             clear_render_queue,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
+            take_preview_manager::take_preview_thumb,
+            take_preview_manager::take_preview_sheet,
+            take_preview_manager::cancel_take_previews,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,
@@ -1130,6 +1139,7 @@ pub fn run() {
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
+            updater_manager::release_history,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,

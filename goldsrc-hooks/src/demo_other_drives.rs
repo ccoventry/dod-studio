@@ -52,6 +52,31 @@ pub static ENABLED: AtomicBool = AtomicBool::new(true);
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 /// Bit `letter - b'A'` is set once that drive's root is a search path.
 static DRIVES: AtomicU32 = AtomicU32::new(0);
+/// Set once the `Open` slot is ours.
+static INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// Studio looks for these bytes in the DLL file
+/// (`native::preview_in_place::HOOK_FULL_PATH_MARKER`, #779): a DLL that has
+/// them sends a batch's, a review's and Go's demo on another drive to
+/// `viewdemo` by its full path ([`ready`], `review::viewdemo_line`), so Studio
+/// plays such a demo in place. For an older DLL it copies the demo into
+/// `dod\` for the batch. The install line prints it, which keeps it in the
+/// binary.
+pub const FULL_PATH_MARKER: &str = "ds-viewdemo-full-path-779";
+
+/// Whether `viewdemo "D:/..."` opens a demo now: the hook is installed and
+/// the setting is on. `Err` says why not.
+pub(crate) fn ready() -> Result<(), String> {
+    if !INSTALLED.load(Ordering::Acquire) {
+        return Err(
+            "the hook that opens demos on other drives is not installed in this game".into(),
+        );
+    }
+    if !enabled() {
+        return Err(format!("{NAME} is 0 (set it to 1 to play it in place)"));
+    }
+    Ok(())
+}
 
 /// `IFileSystem` (`VFileSystem009`) slots.
 const FS_SLOT_ADD_SEARCH_PATH: usize = 4;
@@ -235,9 +260,12 @@ mod hook {
         }
         DONE.store(true, Ordering::Relaxed);
         let message = match install(handle as usize) {
-            Ok(build) => format!(
-                "demo_other_drives: installed ({build} file system); {NAME} 1 opens a demo on another drive by its full path (#776)"
-            ),
+            Ok(build) => {
+                INSTALLED.store(true, Ordering::Release);
+                format!(
+                    "demo_other_drives: installed ({build} file system); {NAME} 1 opens a demo on another drive by its full path (#776; {FULL_PATH_MARKER})"
+                )
+            }
             Err(why) => format!("demo_other_drives: not installed -- {why}"),
         };
         unsafe { crate::debug::report(&message) };

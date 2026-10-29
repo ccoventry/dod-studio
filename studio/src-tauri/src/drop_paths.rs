@@ -1,4 +1,4 @@
-//! Files and folders dropped on the Capture page from Windows (#530): which
+//! Files and folders dropped on the Highlights page from Windows (#530): which
 //! are demos, which are folders to scan, and which are neither.
 
 use serde::Serialize;

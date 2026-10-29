@@ -122,6 +122,9 @@ pub const BREADCRUMB_INTERVAL_TICKS: i32 = 5000;
 
 pub mod types;
 
+/// A Seek Between Clips batch in the game that is already open (#725).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod batch_reuse;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
 #[cfg(not(target_arch = "wasm32"))]
@@ -167,8 +170,8 @@ pub mod viewdemo_refresh;
 
 pub use types::{
     CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
-    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig, PatchJob,
-    PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
+    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig,
+    ObsRecordingQuality, PatchJob, PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -215,7 +218,8 @@ pub use engine::{PatchStage, StreamPatcher};
 #[cfg(not(target_arch = "wasm32"))]
 pub use builder::{
     WorkspaceGuard, build_batch_queue, build_director_message, build_director_stufftext,
-    build_preview_patch_jobs, final_init_commands, playdemo_safe_stem, spawn_patch_batch,
+    build_preview_patch_jobs, estimate_batch_capture_blocks, estimate_batch_capture_bytes,
+    final_init_commands, playdemo_safe_stem, spawn_patch_batch,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

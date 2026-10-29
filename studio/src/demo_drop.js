@@ -1,5 +1,5 @@
 // demo_drop.js
-// Dragging demos and folders from Windows onto the Capture page (#530).
+// Dragging demos and folders from Windows onto the Highlights page (#530).
 // Tauri delivers a native drop as a webview event with full paths and the
 // pointer position (the browser's own HTML5 drop has no real paths), so this
 // works out which of the two drop zones, Directory Scan & Management or the

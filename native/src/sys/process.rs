@@ -161,6 +161,10 @@ pub fn close_game(pid: u32, timeout: Duration) -> bool {
     loop {
         refresh(&mut sys);
         if !is_game(&sys) {
+            // The mouse it confined stays confined otherwise (#1095).
+            if !is_game_in(&sys) {
+                crate::sys::cursor_clip::release();
+            }
             return true;
         }
         if since.elapsed() >= timeout {
