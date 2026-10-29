@@ -2742,6 +2742,14 @@ export const STRINGS = {
     NOTHING_TO_REVIEW: 'The Master Demo Queue shows no demos to review: add some, or clear its search and filters.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
+    NOT_STARTED: 'The review was not started.',
+    // #1142: the in-game Review tab asked for a review of the demo it has loaded.
+    FROM_GAME_SCANNING: 'Scanning the demo in DoD Studio...',
+    FROM_GAME_STARTING: 'Starting the review...',
+    FROM_GAME_BUSY: 'DoD Studio is scanning other demos: try again when that scan is done.',
+    fromGameAddingToast: (name) => `The game asked to review ${name}: adding it to the Master Demo Queue and scanning it.`,
+    fromGameNotAdded: (name) => `DoD Studio scanned ${name} but it isn't in the Master Demo Queue (an identical copy of a demo already there, or unreadable), so there is nothing to review.`,
+    fromGameNoHighlights: (name) => `${name} has no highlights to review.`,
     startedToast: (count, launched, skipped) =>
       `Reviewing ${count} highlight${count === 1 ? '' : 's'} in Day of Defeat${launched ? ' (starting the game)' : ''}.`
       + (skipped > 0 ? ` ${skipped} older highlight${skipped === 1 ? ' needs' : 's need'} a rescan first.` : ''),

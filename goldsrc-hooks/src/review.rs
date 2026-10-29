@@ -31,7 +31,16 @@
 //! weapon ([`KILL_SEP`] between kills, [`PART_SEP`] between a kill's two;
 //! #1140; missing from an older Studio). The review starts at the
 //! first highlight: Studio's Review box decides what the queue holds, so
-//! picking up where a review left off is its Unmarked choice.
+//! picking up where a review left off is its Unmarked choice. A header's
+//! `from=<seconds>` starts it at the first highlight whose first kill is at
+//! or after that time instead (#1142's From here); Back still reaches the
+//! ones before.
+//!
+//! ## Starting one from the game
+//!
+//! With no review running, the Review tab's From the start and From here
+//! (`ask start`, `ask here`) ask DoD Studio to review the demo playing
+//! (`review_ask`, #1142); Studio sends the queue back as above.
 //!
 //! ## HLTV demos
 //!
@@ -191,6 +200,8 @@ pub(crate) struct Options {
     pub gap: f64,
     /// The speed a gap plays at.
     pub speed: f32,
+    /// Start at the first highlight at or after this demo time (#1142).
+    pub from: Option<f64>,
 }
 
 impl Default for Options {
@@ -198,6 +209,7 @@ impl Default for Options {
         Options {
             gap: 0.0,
             speed: FAST_SPEED,
+            from: None,
         }
     }
 }
@@ -221,6 +233,13 @@ fn parse_options<'a>(fields: impl Iterator<Item = &'a str>) -> Options {
                 {
                     options.speed = speed.clamp(1.0, 16.0);
                 }
+            }
+            Some(("from", v)) => {
+                options.from = v
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|from| from.is_finite() && *from >= 0.0);
             }
             _ => {}
         }
@@ -518,8 +537,107 @@ pub(crate) struct TabView {
 
 /// The Review tab's text with no review running.
 pub(crate) const IDLE_HEADING: &str = "No review running.";
-pub(crate) const IDLE_DETAIL: &str =
-    "In DoD Studio, tick demos in the Master Demo Queue and press Review highlights.";
+/// How a review starts from DoD Studio itself, the tab's last word when one
+/// can't start from here.
+const FROM_STUDIO: &str =
+    "Or, in DoD Studio, tick demos in the Master Demo Queue and press Review highlights.";
+
+/// The Review tab's two buttons that start a review of the demo playing
+/// (#1142), in `ui/Review.res`.
+pub(crate) const START_BUTTONS: [&str; 2] = ["FromStartButton", "FromHereButton"];
+
+/// What decides whether a review can start from the game, and what the idle
+/// tab says.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct IdleFacts {
+    /// DoD Studio serves its game pipe.
+    pub studio: bool,
+    /// A demo is loaded and readable.
+    pub demo: bool,
+    pub ask: crate::review_ask::Status,
+}
+
+impl IdleFacts {
+    /// As they stand now. Only for the tab: it looks up the pipe at most once
+    /// a second.
+    pub(crate) fn now() -> IdleFacts {
+        IdleFacts {
+            studio: crate::review_ask::studio_running(),
+            demo: loaded_demo().is_some(),
+            ask: crate::review_ask::status(),
+        }
+    }
+
+    /// Whether From the start and From here may be pressed.
+    pub(crate) fn can_ask(&self) -> bool {
+        use crate::review_ask::Status;
+        self.studio && self.demo && matches!(self.ask, Status::Idle | Status::Failed(_))
+    }
+
+    /// The tab's second line with no review running.
+    pub(crate) fn detail(&self) -> String {
+        use crate::review_ask::Status;
+        match &self.ask {
+            Status::Asking(text) => return text.clone(),
+            Status::Sent => return "DoD Studio sent the review: it starts in a moment.".into(),
+            Status::Failed(why) if self.studio => {
+                return format!("DoD Studio couldn't start it: {why}");
+            }
+            Status::Failed(_) | Status::Idle => {}
+        }
+        if !self.studio {
+            format!("Start DoD Studio to review the demo playing from here. {FROM_STUDIO}")
+        } else if !self.demo {
+            format!("Play a demo to review it from here. {FROM_STUDIO}")
+        } else {
+            "Review the demo playing: From the start, or From here (the next highlight from now on)."
+                .to_string()
+        }
+    }
+}
+
+/// The loaded demo's name and the demo player's clock now, while a demo is
+/// in the player and read.
+fn loaded_demo() -> Option<(String, f64)> {
+    let clock = crate::demo_seek::clock().filter(|c| c.active && !c.loading)?;
+    crate::demo_reload::current_demo().map(|name| (name, clock.now))
+}
+
+/// `ask start` / `ask here`: asks DoD Studio to review the demo playing.
+fn ask(what: &str) {
+    if lock().is_some() {
+        say("a review is running already");
+        return;
+    }
+    let Some((name, now)) = loaded_demo() else {
+        say("no demo is playing: play one with viewdemo first");
+        return;
+    };
+    let start = match what {
+        "start" => crate::review_ask::Start::First,
+        "here" => crate::review_ask::Start::At(now),
+        _ => {
+            say(&format!("usage: {NAME} ask start | ask here"));
+            return;
+        }
+    };
+    let demo = crate::review_ask::demo_path(&crate::texture_hires::game_dir(), &name);
+    match crate::review_ask::send(demo.clone(), start) {
+        Ok(()) => say(&format!("asked DoD Studio to review {}", demo.display())),
+        Err(why) => say(&why),
+    }
+}
+
+/// Where a review starts: the first highlight whose first kill is at or
+/// after `from`, or the first when `from` is none. `Err` with the first when
+/// every highlight is before it.
+fn start_index(queue: &[Highlight], from: Option<f64>) -> Result<usize, usize> {
+    let Some(from) = from else { return Ok(0) };
+    queue
+        .iter()
+        .position(|h| h.kills.first().is_some_and(|&t| t >= from))
+        .ok_or(0)
+}
 
 /// What the Review tab shows now, or `None` with no review running.
 pub(crate) fn tab_view() -> Option<TabView> {
@@ -1116,7 +1234,7 @@ fn stop() {
     }
 }
 
-const USAGE: &str = "start \"<queue file>\" | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
+const USAGE: &str = "start \"<queue file>\" | ask start | ask here | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
 
 /// `ds_demo_review <what>`.
 pub unsafe extern "C" fn command() {
@@ -1132,6 +1250,7 @@ pub unsafe extern "C" fn command() {
             say(&line);
         }
         "start" => start(rest_of_line(2).trim().trim_matches('"')),
+        "ask" => ask(&words.next().unwrap_or("").to_ascii_lowercase()),
         "yes" => answer(Verdict::Yes),
         "maybe" => answer(Verdict::Maybe),
         "no" => answer(Verdict::No),
@@ -1192,7 +1311,14 @@ fn start(path: &str) {
         }
     };
     let (queue, options) = queue;
-    let at = 0;
+    crate::review_ask::review_started();
+    let at = match start_index(&queue, options.from) {
+        Ok(at) => at,
+        Err(first) => {
+            say("no highlight after where the demo was: starting from the first");
+            first
+        }
+    };
     say(&format!("{} highlight(s)", queue.len()));
     crate::events::send(&format!("REVIEW_START\t{}", queue.len()));
     // Held for the whole review: it only matters on an HLTV highlight, and
@@ -1386,9 +1512,95 @@ mod tests {
             options,
             Options {
                 gap: 8.0,
-                speed: 6.0
+                speed: 6.0,
+                from: None,
             }
         );
+    }
+
+    #[test]
+    fn from_here_on_the_header_starts_at_the_first_highlight_after_it() {
+        let text = format!("{QUEUE_HEADER}\tfrom=400.5\nd.dem\t1\tp\t5\t1\t1\t-\t");
+        let (_, options) = parse_queue(&text).unwrap();
+        assert_eq!(options.from, Some(400.5));
+        assert_eq!(parse_options("from=-1\tfrom=x".split('\t')).from, None);
+        let mut queue = vec![
+            highlight("a", None),
+            highlight("a", None),
+            highlight("a", None),
+        ];
+        queue[0].kills = vec![356.0, 363.0];
+        queue[1].kills = vec![402.9];
+        queue[2].kills = vec![428.0];
+        assert_eq!(start_index(&queue, None), Ok(0));
+        // In the middle of the first highlight: the next one.
+        assert_eq!(start_index(&queue, Some(360.0)), Ok(1));
+        // At a first kill exactly: that one.
+        assert_eq!(start_index(&queue, Some(428.0)), Ok(2));
+        // Past every highlight: the first, said so.
+        assert_eq!(start_index(&queue, Some(500.0)), Err(0));
+    }
+
+    #[test]
+    fn the_start_buttons_need_studio_a_demo_and_no_request_on_its_way() {
+        use crate::review_ask::Status;
+        let facts = |studio, demo, ask| IdleFacts { studio, demo, ask };
+        assert!(facts(true, true, Status::Idle).can_ask());
+        assert!(facts(true, true, Status::Failed("x".into())).can_ask());
+        assert!(!facts(false, true, Status::Idle).can_ask());
+        assert!(!facts(true, false, Status::Idle).can_ask());
+        assert!(!facts(true, true, Status::Asking("Scanning".into())).can_ask());
+        assert!(!facts(true, true, Status::Sent).can_ask());
+    }
+
+    #[test]
+    fn the_idle_tab_says_why_it_cant_start_or_how_the_request_goes() {
+        use crate::review_ask::Status;
+        let facts = |studio, demo, ask| IdleFacts { studio, demo, ask };
+        assert!(
+            facts(false, true, Status::Idle)
+                .detail()
+                .starts_with("Start DoD Studio")
+        );
+        assert!(
+            facts(true, false, Status::Idle)
+                .detail()
+                .starts_with("Play a demo")
+        );
+        assert!(
+            facts(true, true, Status::Idle)
+                .detail()
+                .contains("From here")
+        );
+        assert_eq!(
+            facts(true, true, Status::Asking("Scanning the demo...".into())).detail(),
+            "Scanning the demo..."
+        );
+        assert_eq!(
+            facts(true, true, Status::Failed("no highlights".into())).detail(),
+            "DoD Studio couldn't start it: no highlights"
+        );
+        // A failure from before Studio closed gives way to why nothing works.
+        assert!(
+            facts(false, true, Status::Failed("x".into()))
+                .detail()
+                .starts_with("Start DoD Studio")
+        );
+    }
+
+    #[test]
+    fn the_start_buttons_are_in_the_review_tab_and_ask_studio() {
+        let res = include_str!("../ui/Review.res");
+        for (name, what) in START_BUTTONS.iter().zip(["start", "here"]) {
+            let at = res
+                .find(&format!("\"fieldName\"\t\t\"{name}\""))
+                .expect(name);
+            let block = &res[at..at + res[at..].find('}').unwrap()];
+            assert!(
+                block.contains(&format!("\"engine {NAME} ask {what}\"")),
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -1399,7 +1611,8 @@ mod tests {
             parse("gap=-3\tspeed=99"),
             Options {
                 gap: 0.0,
-                speed: 16.0
+                speed: 16.0,
+                from: None,
             }
         );
         assert_eq!(parse("gap=inf"), Options::default());

@@ -612,7 +612,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {} button after the previous key's", k.word));
             at += found + label.len();
         }
-        // And no button is left without a key.
-        assert_eq!(res.matches("\"Button\"").count(), KEYS_LIST.len());
+        // And no button is left without a key, but the two that start a
+        // review from the game (#1142), which have none.
+        assert_eq!(
+            res.matches("\"Button\"").count(),
+            KEYS_LIST.len() + crate::review::START_BUTTONS.len()
+        );
     }
 }

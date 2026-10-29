@@ -958,6 +958,8 @@ pub fn run() {
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
+            // ...and its Review tab to review the demo it has loaded (#1142).
+            review_manager::serve_game_requests(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then
             // the page is told and the window comes to the front.
             #[cfg(windows)]
@@ -1023,6 +1025,8 @@ pub fn run() {
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_manager::game_review_progress,
+            review_manager::game_review_finished,
             review_library::review_library_get,
             review_library::review_library_update,
             scan_orphaned_previews,

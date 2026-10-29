@@ -349,6 +349,13 @@ sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 `no` answer with the Review tab's kill range and note and move on; `replay`, `next` (skip without answering),
 `back` and `stop` move around. `range <from> <to>` and `note <text>` set the
 answer from the console, for key binds. Bare prints where the review is.
+With no review running, `ask start` and `ask here` (the Review tab's **From
+the start** and **From here**, #1142) ask DoD Studio, over its game pipe, to
+review the demo playing: every highlight, from the first or from the first
+at or after the demo's clock now (`from=` on the queue's header; Back still
+reaches the ones before). Studio scans the demo first when it isn't in the
+Master Demo Queue, and the tab shows what it is doing. The buttons are
+greyed while DoD Studio isn't running or no demo plays.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
 move the camera off the highlight's player (#826), and the console refuses
