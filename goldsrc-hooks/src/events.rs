@@ -22,6 +22,9 @@
 //! the queue to it one line at a time. Lines queued before Studio connects
 //! are kept and sent on connect, and a line that fails to write is sent again
 //! after the next connect, so a slow or reconnecting Studio misses nothing.
+//! While nothing is being written the thread checks every half second whether
+//! the reader has gone, and lets it go, so the next reader (the next batch's,
+//! in a game left open, #725) connects at once.
 //! The queue is capped ([`MAX_PENDING`]); past that, new lines are dropped
 //! rather than growing without bound in a game nobody is listening to.
 //!
@@ -177,7 +180,8 @@ fn try_wrap() -> bool {
 }
 
 /// Whether Studio is reading the events pipe, as far as the pipe knows: a
-/// reader that has gone is noticed at the next failed write.
+/// reader that has gone is noticed at the next failed write, or within half a
+/// second while nothing is being written.
 pub fn studio_connected() -> bool {
     server::CONNECTED.load(Ordering::Relaxed)
 }
@@ -220,7 +224,8 @@ mod server {
         use std::time::Duration;
 
         use windows_sys::Win32::Foundation::{
-            CloseHandle, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+            CloseHandle, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, GetLastError, HANDLE,
+            INVALID_HANDLE_VALUE,
         };
         use windows_sys::Win32::Storage::FileSystem::{PIPE_ACCESS_OUTBOUND, WriteFile};
         use windows_sys::Win32::System::Pipes::{
@@ -248,8 +253,22 @@ mod server {
             ok != 0 && written as usize == bytes.len()
         }
 
+        /// Whether the connected reader has closed its end. A connect on a
+        /// connected instance returns at once: `ERROR_PIPE_CONNECTED` while
+        /// the reader is there, `ERROR_NO_DATA` once it has gone (measured;
+        /// `PeekNamedPipe` is refused on this outbound end). A batch's reader
+        /// stops when its batch ends, and in a game left open for the next
+        /// batch (#725) nothing may be written for minutes: without this, the
+        /// next batch's reader waited for the pipe until its first marker.
+        fn reader_gone(pipe: HANDLE) -> bool {
+            // Safety: our own handle, connected, so this never blocks.
+            unsafe {
+                ConnectNamedPipe(pipe, std::ptr::null_mut()) == 0 && GetLastError() == ERROR_NO_DATA
+            }
+        }
+
         /// One reader at a time: accept, write the backlog and then every
-        /// new line until a write fails, repeat.
+        /// new line until a write fails or the reader is seen gone, repeat.
         pub fn serve(receiver: Receiver<String>) {
             let name = events_pipe_name(unsafe { GetCurrentProcessId() });
             let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
@@ -296,6 +315,10 @@ mod server {
                             Some(line) => line,
                             None => match receiver.recv_timeout(Duration::from_millis(500)) {
                                 Ok(line) => line,
+                                // Nothing to send, so nothing held back: a
+                                // gone reader is let go and the pipe listens
+                                // again for the next one.
+                                Err(RecvTimeoutError::Timeout) if reader_gone(pipe) => break,
                                 Err(RecvTimeoutError::Timeout) => continue,
                                 Err(RecvTimeoutError::Disconnected) => break,
                             },
@@ -305,6 +328,9 @@ mod server {
                             break;
                         }
                         PENDING.fetch_sub(1, Ordering::AcqRel);
+                        if crate::batch_end::is_batch_complete(&line) {
+                            crate::batch_end::studio_saw_end();
+                        }
                     }
                     CONNECTED.store(false, Ordering::Relaxed);
                     unsafe { crate::debug::report("events: Studio disconnected") };
@@ -348,50 +374,73 @@ mod tests {
     }
 
     /// The real pipe, end to end: lines queued before a reader connects are
-    /// kept, and arrive after the hello, in order. 32-bit only, like the server.
+    /// kept, and arrive after the hello, in order; and once that reader has
+    /// gone, the next one gets in at once though nothing was written, then
+    /// gets each new line once. One test, as the pipe is named after the
+    /// process. 32-bit only, like the server.
     #[cfg(target_arch = "x86")]
     #[test]
-    fn a_reader_gets_the_hello_then_everything_queued_before_it() {
+    fn readers_get_everything_once_and_the_next_one_gets_in_at_once() {
         use std::io::BufRead;
+        use std::time::{Duration, Instant};
         let (sender, receiver) = channel::<String>();
-        for line in [
-            "[dod-studio] DEMO_START 1 1 2",
-            "[dod-studio] NEXT_CLIP 1 1 1 2",
-        ] {
+        let send = |line: &str| {
             PENDING.fetch_add(1, Ordering::AcqRel);
             sender.send(line.to_string()).unwrap();
-        }
+        };
+        send("[dod-studio] DEMO_START 1 1 2");
+        send("[dod-studio] NEXT_CLIP 1 1 1 2");
         std::thread::spawn(move || server::serve(receiver));
 
         let name = events_pipe_name(std::process::id());
-        let started = std::time::Instant::now();
-        let pipe = loop {
-            match std::fs::OpenOptions::new().read(true).open(&name) {
-                Ok(pipe) => break pipe,
-                Err(_) if started.elapsed().as_secs() < 5 => {
-                    std::thread::sleep(std::time::Duration::from_millis(20))
+        let open = |within: Duration| {
+            let started = Instant::now();
+            loop {
+                match std::fs::OpenOptions::new().read(true).open(&name) {
+                    Ok(pipe) => break (pipe, started.elapsed()),
+                    Err(_) if started.elapsed() < within => {
+                        std::thread::sleep(Duration::from_millis(20))
+                    }
+                    Err(e) => panic!("could not open {name} within {within:?}: {e}"),
                 }
-                Err(e) => panic!("could not open {name}: {e}"),
             }
         };
+        let (pipe, _) = open(Duration::from_secs(5));
         let mut lines = std::io::BufReader::new(pipe).lines();
         assert_eq!(lines.next().unwrap().unwrap(), HELLO);
         assert_eq!(
             lines.next().unwrap().unwrap(),
             "[dod-studio] DEMO_START 1 1 2"
         );
-        sender
-            .send("[dod-studio] BATCH_COMPLETE".to_string())
-            .unwrap();
-        PENDING.fetch_add(1, Ordering::AcqRel);
+        send("[dod-studio] STOP_RECORD - Tick 900");
         assert_eq!(
             lines.next().unwrap().unwrap(),
             "[dod-studio] NEXT_CLIP 1 1 1 2"
         );
         assert_eq!(
             lines.next().unwrap().unwrap(),
-            "[dod-studio] BATCH_COMPLETE"
+            "[dod-studio] STOP_RECORD - Tick 900"
         );
+
+        // The first batch's reader stops; the game writes nothing.
+        drop(lines);
+        let (pipe, waited) = open(Duration::from_secs(2));
+        assert!(waited < Duration::from_millis(1500), "{waited:?}");
+        let mut lines = std::io::BufReader::new(pipe).lines();
+        assert_eq!(lines.next().unwrap().unwrap(), HELLO);
+        assert!(studio_connected());
+        send("[dod-studio] DEMO_START 1 1 1");
+        assert_eq!(
+            lines.next().unwrap().unwrap(),
+            "[dod-studio] DEMO_START 1 1 1"
+        );
+        drop(lines);
+        let started = Instant::now();
+        while studio_connected() {
+            assert!(started.elapsed() < Duration::from_secs(2), "never let go");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(PENDING.load(Ordering::Acquire), 0, "nothing left over");
     }
 
     #[test]

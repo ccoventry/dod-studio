@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { previewKey, frameLabel, passProgress, createTakePreview, PREVIEW_STATE } from './take_preview.js';
+import { previewKey, frameLabel, passProgress, createTakePreview, PREVIEW_STATE, RECHECK_MS, RETRY_MS } from './take_preview.js';
 
 const job = (over = {}) => ({ id: '0', take_folder: 'D:/caps/s/chain_01_b0/take0000', stream_folder: 'all', ...over });
 
@@ -84,5 +84,70 @@ describe('take pictures (#1069)', () => {
       error: 'FFmpeg made no picture',
     });
     expect(preview.thumbFor(previewKey(job({ take_folder: 'good' })))).toBe('data:ok');
+  });
+
+  it('a take re-captured into the same row gets its new picture, the old one staying up meanwhile', async () => {
+    let clock = 1000;
+    let uri = 'data:old';
+    const thumb = vi.fn(async () => ({ uri }));
+    const cells = [];
+    const preview = createTakePreview({
+      thumb, sheet: vi.fn(), cancel: vi.fn(async () => {}), getFps: () => null, now: () => clock,
+      onChange: () => cells.push(preview.stateFor(previewKey(job()))?.status),
+    });
+    preview.sync([job()]);
+    await settle();
+    expect(preview.thumbFor(previewKey(job()))).toBe('data:old');
+    // Soon after: still trusted, nothing is asked again.
+    clock += RECHECK_MS - 1;
+    preview.sync([job()]);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(1);
+    // The take is re-captured; the next refresh after the wait asks again.
+    uri = 'data:new';
+    clock += 1;
+    cells.length = 0;
+    preview.sync([job()]);
+    expect(preview.stateFor(previewKey(job())).status).toBe(PREVIEW_STATE.DONE);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(2);
+    expect(preview.thumbFor(previewKey(job()))).toBe('data:new');
+    expect(cells.every((s) => s === PREVIEW_STATE.DONE)).toBe(true);
+    // A take being rendered is left alone.
+    clock += RECHECK_MS;
+    preview.sync([job({ status: 'Rendering' })]);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed picture is tried again after a wait that grows, never in a storm', async () => {
+    let clock = 0;
+    let works = false;
+    const thumb = vi.fn(async () => {
+      if (!works) throw 'FFmpeg made no picture';
+      return { uri: 'data:ok' };
+    });
+    const preview = createTakePreview({ thumb, sheet: vi.fn(), cancel: vi.fn(async () => {}), getFps: () => null, now: () => clock, onChange: () => {} });
+    const key = previewKey(job());
+    preview.sync([job()]);
+    await settle();
+    for (let i = 0; i < 20; i++) preview.sync([job()]);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(1);
+    clock += RETRY_MS;
+    preview.sync([job()]);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(2);
+    // The second failure waits twice as long.
+    clock += RETRY_MS;
+    preview.sync([job()]);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(2);
+    works = true;
+    clock += RETRY_MS;
+    preview.sync([job()]);
+    await settle();
+    expect(thumb).toHaveBeenCalledTimes(3);
+    expect(preview.stateFor(key)).toMatchObject({ status: PREVIEW_STATE.DONE, uri: 'data:ok', failures: 0 });
   });
 });

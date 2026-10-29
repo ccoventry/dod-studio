@@ -39,6 +39,7 @@ mod render_manager;
 mod review_library;
 mod review_manager;
 mod settings_manager;
+mod take_checks_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
@@ -305,7 +306,7 @@ fn cancel_audit(state: tauri::State<'_, AuditManager>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     audit_manager::reveal_in_explorer_impl(path)
 }
@@ -929,6 +930,7 @@ pub fn run() {
         .manage(CaptureManager::new())
         .manage(RenderManager::new())
         .manage(take_preview_manager::TakePreviewManager::default())
+        .manage(take_checks_manager::TakeChecksManager::default())
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
@@ -1050,6 +1052,8 @@ pub fn run() {
             take_preview_manager::take_preview_thumb,
             take_preview_manager::take_preview_sheet,
             take_preview_manager::cancel_take_previews,
+            take_checks_manager::take_checks,
+            take_checks_manager::cancel_take_checks,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,
