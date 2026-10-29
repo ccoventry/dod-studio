@@ -245,6 +245,11 @@ pub struct CaptureBlock {
     /// any end-of-demo clamp.
     #[serde(default)]
     pub record_stop_tick: i32,
+    /// What this recording is planned to hold, in seconds on the `viewdemo` clock (#1084):
+    /// written beside the take so its length and kills can be checked.
+    /// `None` when the highlight's kills have no `viewdemo` times to plan from.
+    #[serde(default)]
+    pub plan: Option<crate::hlcr::take_plan::TakePlan>,
 }
 
 #[derive(Debug, Clone)]
