@@ -1,5 +1,5 @@
 // review_settings.js
-// The Capture page's Review controls (Covers, Order, Tick Yes for capture,
+// The Highlights page's Review controls (Covers, Order, Tick Yes for capture,
 // Fast-forward gaps over N s) kept in the settings file, so a choice survives
 // a restart. Defaults match settings_manager.rs: All, Chronological, Tick Yes
 // on, fast-forward on over 8 s.

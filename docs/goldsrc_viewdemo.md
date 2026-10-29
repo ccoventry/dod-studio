@@ -251,7 +251,13 @@ named (`AddSearchPath` takes a path with a drive letter as it is and
 appends it last; its own path ID keeps the engine's `GAME` lookups out of
 it) and opens `folder/demo.dem` under it, before the original `Open` and
 its assert. `tools/verify_demo_other_drives.py` checks the slots and the
-assert on both installs.
+assert on both installs. Studio uses it (#779): a Seek Between Clips
+batch, Review highlights and Launch Preview play a demo on another drive
+by its full path (the hook's `review::viewdemo_line`, Studio's
+`native::preview_in_place`), with `ds_demo_other_drives 1` sent first.
+Studio knows a DLL can by the marker `demo_other_drives::FULL_PATH_MARKER`
+in the DLL file; for an older DLL a batch copies such a demo into `dod\`
+(`native::patch::source_copies`) and a preview is patched.
 
 **Without it**, a demo on `D:\` needs a path under `dod\`. A directory
 junction gives it one with no copy and no engine change: Studio's + Link

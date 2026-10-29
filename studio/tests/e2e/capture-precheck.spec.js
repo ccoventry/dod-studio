@@ -65,3 +65,32 @@ test('a question answered no says it was not started', async ({ page }) => {
   await expect(page.locator('#batch-status')).toHaveText('Not started.');
   await expect(page.locator('#start-capture-btn')).toBeEnabled();
 });
+
+// #1097: a batch the backend refuses once it plans the queue shows one plain
+// error toast, with no "queued" toast before it.
+const emit = (page, payload) => page.evaluate((p) => window.__mockEmit('capture_status', p), payload);
+
+test('a refused batch shows only its error, in plain words, once', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => { window.__mockInvokeHandlers.steam_state = () => 'ready'; });
+  await page.click('#start-capture-btn');
+  await page.waitForFunction(() => window.__demosCalls === 1);
+  await page.evaluate(() => window.__demosDone(true));
+  await page.waitForFunction(() => window.__mockInvocations.some((c) => c.cmd === 'start_capture_batch'));
+  const refusal = {
+    running: false,
+    error: true,
+    status: 'Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB.',
+  };
+  await emit(page, { running: true, stage: 'preparing', index: 0, total: 0, status: 'Making room…' });
+  await emit(page, refusal);
+  await expect(page.locator('.toast-error')).toHaveCount(1);
+  await expect(page.locator('.toast-error')).toHaveText(`Capture error: ${refusal.status}`);
+  // Every toast is logged as it shows (#873), so one that came and went counts too.
+  const toasts = await page.evaluate(() => window.__mockInvocations
+    .filter((c) => c.cmd === 'log_frontend_event')
+    .map((c) => JSON.stringify(c.args))
+    .filter((a) => a.includes('[toast ')));
+  expect(toasts.filter((a) => a.includes('[toast success]'))).toEqual([]);
+  expect(toasts.filter((a) => a.includes('[toast error]'))).toHaveLength(1);
+});

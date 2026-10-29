@@ -83,7 +83,7 @@ export async function convertProjectFile(path) {
 }
 
 /** A project file's text, for Rescan Recent Sessions' count and backup
- *  (#938). Rejects with the backend's message, which names the file. */
+ *  (#938) and a batch catch-up's change to a closed project (#545). Rejects with the backend's message, which names the file. */
 export async function readProjectFile(path) {
   return invoke("load_project_session", { path })
     .catch((err) => {
@@ -456,9 +456,26 @@ export async function startCaptureBatch(payload) {
     });
 }
 
+// ── OBS capture test (#646) ─────────────────────────────────────────────────
+// Each rethrows: obs_capture_test.js shows the reason on its own panel.
+function obsTestCall(command, args) {
+  return invoke(command, args).catch((err) => {
+    console.error(`IPC Execution Error (${command}):`, err);
+    throw err;
+  });
+}
+
+/** The test clip: `seconds` of the bundled demo (or of `demo`). */
+export const obsTestClip = (seconds, demo) => obsTestCall('obs_test_clip', { seconds, demo: demo || null });
+export const obsTestWatchStart = (host, port, password) => obsTestCall('obs_test_watch_start', { host, port, password });
+/** Stops the watch, reads the take's video, returns `{ recording, file, verdict, game }`. */
+export const obsTestAnalyze = (takeFolder, ffmpegPath, obsFps) => obsTestCall('obs_test_analyze', { takeFolder, ffmpegPath: ffmpegPath || null, obsFps });
+export const obsTestCancel = () => obsTestCall('obs_test_cancel', {});
+export const obsTestDeleteTake = (takeFolder) => obsTestCall('obs_test_delete_take', { takeFolder });
+
 /** Patches the given demo's highlights into a single `<stem>_preview.dem`
- *  (BOOKMARK/director events at each highlight, regardless of selection or
- *  Min Kills — reuses an existing preview instead of regenerating one) and
+ *  (BOOKMARK/director events at each highlight, regardless of selection —
+ *  reuses an existing preview instead of regenerating one) and
  *  immediately launches it in HLAE via `+viewdemo`. */
 export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
   return invoke("launch_demo_preview", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
@@ -501,6 +518,28 @@ export async function stopHighlightReview() {
   return invoke("stop_highlight_review")
     .catch((err) => {
       console.error("IPC Execution Error (stop_highlight_review):", err);
+      throw err;
+    });
+}
+
+/** The review library's saved marks (#848) for the demos with these
+ *  `source_key`s: `{ [key]: { name, highlights: { [id]: entry } } }`. */
+export async function reviewLibraryGet(keys) {
+  return invoke("review_library_get", { keys })
+    .catch((err) => {
+      console.error("IPC Execution Error (review_library_get):", err);
+      showToast(STRINGS.IPC.reviewLibraryFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
+/** Saves one demo's changed highlights to the review library (#848):
+ *  `changes` maps a highlight id to its entry, or null to remove it. */
+export async function reviewLibraryUpdate(key, name, changes) {
+  return invoke("review_library_update", { key, name, changes })
+    .catch((err) => {
+      console.error("IPC Execution Error (review_library_update):", err);
+      showToast(STRINGS.IPC.reviewLibraryFailed(err), 'error', 8000);
       throw err;
     });
 }
@@ -1233,6 +1272,27 @@ export async function writeTextFile(path, contents) {
   return invoke("save_project_session", { path, contents })
     .catch((err) => {
       console.error("IPC Execution Error (save_project_session, text export):", err);
+      throw err;
+    });
+}
+
+/** Checks the takes of capture batches that ran while Studio was closed
+ *  (#545). Resolves to `{ batches, waiting_for_game }`. */
+export async function catchUpUnwatchedBatches() {
+  return invoke("catch_up_unwatched_batches")
+    .catch((err) => {
+      console.error("IPC Execution Error (catch_up_unwatched_batches):", err);
+      throw err;
+    });
+}
+
+/** Where the running batch's start stands once it is no longer on its way
+ *  to the game, or `timeoutMs` has passed (#545): 'preparing', 'pending',
+ *  'sent', 'not_needed', 'failed' or 'not_running'. */
+export async function waitForBatchStart(timeoutMs) {
+  return invoke("wait_for_batch_start", { timeoutMs })
+    .catch((err) => {
+      console.error("IPC Execution Error (wait_for_batch_start):", err);
       throw err;
     });
 }

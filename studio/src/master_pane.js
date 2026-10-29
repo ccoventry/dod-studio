@@ -74,8 +74,9 @@ const lookedUpRecorders = new Map();
 let recorderLookupRequest = 0;
 let recorderLookupKey = '';
 let playerOptionsKey = '';
-// #54: the header's quick filters.
-const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false };
+// #54: the header's quick filters; #127 adds Tracked only. `keepPath` is the
+// demo last opened in Highlight Details, which Tracked only keeps listed.
+const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false, trackedOnly: false, keepPath: null };
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
@@ -222,6 +223,10 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
     quickFilters.ownerOnly = e.target.checked;
     renderMasterList(currentDemos, null, currentOnSelectDemo);
   });
+  document.querySelector('#master-tracked-only-cb')?.addEventListener('change', (e) => {
+    quickFilters.trackedOnly = e.target.checked;
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
 
   const selectAllCb = document.querySelector('#master-select-all-cb');
   if (selectAllCb) {
@@ -303,6 +308,18 @@ function syncClearSelectedButtonState() {
   if (btn) btn.disabled = checkedPaths.size === 0;
 }
 
+/** Tracked only is dimmed while no demo is tracked, since it would hide every
+ *  demo; once on, it stays clickable so it can be turned off. */
+function syncTrackedOnlyControl() {
+  const cb = document.querySelector('#master-tracked-only-cb');
+  if (!cb) return;
+  const label = cb.closest('label');
+  const off = !cb.checked && !currentDemos.some(isDemoTracked);
+  cb.disabled = off;
+  label?.classList.toggle('is-disabled', off);
+  if (label) label.title = off ? STRINGS.WORKSPACE.TRACKED_ONLY_NONE_TITLE : STRINGS.WORKSPACE.TRACKED_ONLY_TITLE;
+}
+
 function syncSelectAllCheckboxState(visibleDemos) {
   const selectAllCb = document.querySelector('#master-select-all-cb');
   if (!selectAllCb) return;
@@ -321,6 +338,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   if (onSelectDemo) {
     currentOnSelectDemo = onSelectDemo;
   }
+  if (Number.isInteger(selectedDemoIdx) && currentDemos[selectedDemoIdx]) {
+    quickFilters.keepPath = currentDemos[selectedDemoIdx].path;
+  }
+  syncTrackedOnlyControl();
 
   const tableBody = document.querySelector('#master-demo-table-body');
   if (!tableBody) return;
@@ -588,6 +609,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       const allRows = tableBody.querySelectorAll('tr');
       allRows.forEach((r) => r.classList.remove('table-row-selected'));
       tr.classList.add('table-row-selected');
+      quickFilters.keepPath = demo.path;
       if (currentOnSelectDemo) currentOnSelectDemo(demo, originalIdx);
     });
 
