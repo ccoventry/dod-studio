@@ -1815,6 +1815,8 @@
                lands in one place, with the whole row's width, and the space
                readouts above stay centred like the Render footer's. -->
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
+          <!-- OBS mode only, while a batch runs: frames OBS drops (#172). -->
+          <p id="obs-drop-rate" class="status-text" hidden></p>
           <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>

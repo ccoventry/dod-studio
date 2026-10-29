@@ -807,6 +807,28 @@ pub struct VerifiedBlock {
     pub bytes: u64,
 }
 
+/// One OBS drop-rate report as the `capture_obs_drop_rate` event (#172):
+/// shares as percentages, the clip's take folder spelled as the manifest
+/// spells it, so the Last Batch panel can put it on its row.
+fn obs_drop_rate_payload(report: &native::obs::ObsDropReport) -> serde_json::Value {
+    let pct = |share: f64| (share * 1000.0).round() / 10.0;
+    serde_json::json!({
+        "clip": report.clip,
+        "take_folder": report.take_folder.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        "recording": report.recording,
+        "skipped_pct": pct(report.clip_counts.skipped_share()),
+        "missed_pct": pct(report.clip_counts.missed_share()),
+        "skipped": report.clip_counts.output_skipped,
+        "frames": report.clip_counts.output_total,
+        "missed": report.clip_counts.render_skipped,
+        "rendered": report.clip_counts.render_total,
+        "recent_skipped_pct": pct(report.recent.skipped_share()),
+        "recent_missed_pct": pct(report.recent.missed_share()),
+        "lagging": report.lagging,
+        "capture_fps": report.capture_fps,
+    })
+}
+
 /// Everything under `path`, in bytes. 0 for a folder that isn't there.
 fn folder_bytes(path: &Path) -> u64 {
     native::sys::folder_walk::Walker::new()
@@ -1778,6 +1800,11 @@ pub async fn start_capture_batch_impl(
                                     "total_batch_clips": total_batch_clips,
                                 }),
                             );
+                        }
+                        EngineEvent::ObsDropRate(report) => {
+                            // About once a second: no throttle needed.
+                            let _ = app_emitter
+                                .emit("capture_obs_drop_rate", obs_drop_rate_payload(&report));
                         }
                         EngineEvent::ClipStarted(tick) => {
                             if let Some(room) = &room {
@@ -3867,6 +3894,32 @@ mod tests {
     use crate::test_support::Scratch;
     use native::patch::PatchStage;
 
+    /// The drop-rate event carries percentages to one decimal and the take
+    /// folder as the batch planned it (#172).
+    #[test]
+    fn obs_drop_rate_payload_rounds_and_names_the_take() {
+        let report = native::obs::ObsDropReport {
+            clip: 2,
+            take_folder: Some(std::path::PathBuf::from(r"D:\raw\b1")),
+            recording: false,
+            clip_counts: native::obs::FrameCounters {
+                output_total: 1200,
+                output_skipped: 407,
+                render_total: 1200,
+                render_skipped: 3,
+            },
+            recent: native::obs::FrameCounters::default(),
+            lagging: true,
+            capture_fps: 120,
+        };
+        let p = obs_drop_rate_payload(&report);
+        assert_eq!(p["skipped_pct"], 33.9);
+        assert_eq!(p["missed_pct"], 0.3);
+        assert_eq!(p["take_folder"], r"D:\raw\b1");
+        assert_eq!(p["recording"], false);
+        assert_eq!(p["lagging"], true);
+        assert_eq!(p["recent_skipped_pct"], 0.0);
+    }
     /// Render While Capturing (#861) deletes a take once its clip renders,
     /// before the batch ends: the block still counts as captured, isn't one
     /// Render Studio missed, and writing the capture settings keeps its
