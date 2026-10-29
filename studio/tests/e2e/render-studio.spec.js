@@ -1054,6 +1054,32 @@ test.describe('take checks (#1084)', () => {
     await expect(list.locator('li').first()).toContainText('Black picture for 3.5 s from 2.0 s.');
   });
 
+  test('a take off its planned length or missing a kill warns, and one with no plan says it is unknown', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: true });
+      window.__mockInvokeHandlers['take_checks'] = ({ stream }) => ({
+        findings: stream === 'all'
+          ? [
+              { check: 'length', cause: 'capture', warn: true, frames: 1500, planned_frames: 5700, secs: 5 },
+              { check: 'kill_outside', cause: 'capture', warn: true, count: 1, at_secs: 12, secs: 5 },
+            ]
+          : [{ check: 'no_plan', cause: 'unknown', warn: false }],
+      });
+    }, PIXEL);
+    await emitSnapshot(page, [
+      job({ id: '0', stream_folder: 'all' }),
+      job({ id: '1', name: 'old', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream_folder: 'hudColor' }),
+    ]);
+    const bad = page.locator('tr[data-job-id="0"] .rj-check');
+    const unplanned = page.locator('tr[data-job-id="1"] .rj-check');
+    await expect(bad).toHaveText('⚠ 2');
+    await expect(bad).toHaveAttribute('title', /1500 frames \(5\.0 s\) but 5700 were planned/);
+    await expect(bad).toHaveAttribute('title', /A kill is not in the clip/);
+    await expect(unplanned).toHaveText('OK');
+    await expect(unplanned).toHaveAttribute('title', /has no plan recorded/);
+  });
+
   test('a take that can\'t be checked shows a question mark that says why', async ({ page }) => {
     await gotoHarness(page);
     await page.evaluate((uri) => {

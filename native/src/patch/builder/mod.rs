@@ -903,6 +903,7 @@ pub fn build_batch_queue(
                 record_start_tick: 0,
                 record_stop_tick: 0,
                 ramped_gaps: 0,
+                plan: None,
             });
         }
         blocks.sort_by_key(|b| b.block_index);
@@ -1063,6 +1064,21 @@ pub fn build_batch_queue(
             if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
                 block.record_start_tick = record_start_tick;
                 block.record_stop_tick = r_stop;
+                // On the clock the hook records on (`viewdemo_clock`), from
+                // the same highlights `runtime_batch` builds it from:
+                // `frame_times_ref` stops at the demo's loading segment and
+                // never reaches a clip's frames.
+                block.plan =
+                    crate::patch::viewdemo_clock::clock_for(&streak.source_demo, &raw_streaks)
+                        .ok()
+                        .and_then(|clock| {
+                            crate::hlcr::take_plan::plan_for_block(
+                                |tick| clock.seconds(tick),
+                                record_start_tick,
+                                r_stop,
+                                &block_kill_frames(streak),
+                            )
+                        });
             }
 
             // Custom command overrides
