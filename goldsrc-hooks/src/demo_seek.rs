@@ -206,6 +206,20 @@ fn sent(last_frame_time: f64, last_set: f64) -> bool {
 
 static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
 
+/// Drops a seek still on its way, returning its target. A newly loaded demo
+/// must not inherit the last one's steps: they would move the clock of a demo
+/// still loading, where a seek is refused, and run the old seek's follow-up
+/// in it. An HLTV backward seek steps for a second or two (#830), so a review
+/// moving on to another demo can land inside one. `try_lock`: only `poll` and
+/// a seek starting hold it, both on this thread and never across this call.
+fn cancel_pending() -> Option<f64> {
+    PENDING
+        .try_lock()
+        .ok()
+        .and_then(|mut p| p.take())
+        .map(|p| p.target)
+}
+
 /// One frame of a stepped seek: move the clock to `To`, or set it to the
 /// target and land.
 #[derive(Debug, PartialEq)]
@@ -545,6 +559,12 @@ pub enum DemoCommand {
 /// a seek later on this line waits for this one.
 pub fn demo_started(command: DemoCommand) {
     cancel_queued("you loaded another demo");
+    if let Some(target) = cancel_pending() {
+        say(&format!(
+            "{SEEK_TO_NAME}: stopped the seek to {} (you loaded another demo)",
+            clock_text(target)
+        ));
+    }
     // The client keeps the last demo's zooms otherwise (#830); none of this
     // demo's messages have arrived yet.
     crate::hltv_fov::clear_logged("a demo was loaded");
@@ -1514,8 +1534,6 @@ mod tests {
         );
     }
 
-    /// The float of #893 on `ktps8w1-m00cat_soul_lenn_h2` (Anniversary): the
-    /// clock at 8.52 s, the first playback frame (71.388 s) already sent.
     /// #830: stealth scoped at 940 s of `wsod25_grp2_h1_hltv`, seeked back to
     /// from 1000 s.
     #[test]
@@ -1551,6 +1569,28 @@ mod tests {
         );
     }
 
+    /// A review moving on to another demo mid-rewind: the new demo gets none
+    /// of the old seek's steps or follow-up.
+    #[test]
+    fn loading_another_demo_drops_a_seek_still_on_its_way() {
+        *PENDING.lock().unwrap() = Some(Pending {
+            target: 939.0,
+            then: Some("spec_mode 4".into()),
+            landed: false,
+            last_set: 300.0,
+            rewind_from: None,
+            waited: 0,
+            steps: 60,
+            dropped: 0,
+            started: std::time::Instant::now(),
+        });
+        assert_eq!(cancel_pending(), Some(939.0));
+        assert!(!seeking());
+        assert_eq!(cancel_pending(), None);
+    }
+
+    /// The float of #893 on `ktps8w1-m00cat_soul_lenn_h2` (Anniversary): the
+    /// clock at 8.52 s, the first playback frame (71.388 s) already sent.
     #[test]
     fn a_clock_stuck_behind_a_sent_frame_jumps_to_just_before_it() {
         let to = gap_landing(8.522, 71.388, 3, 3).expect("a gap");
