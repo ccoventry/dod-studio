@@ -127,6 +127,14 @@ TOOLS = [
         ["effect_index"],
     ),
     tool(
+        "blend_by_speed",
+        "Frame Blend (#1051) that follows each event's speed: gives every video event on the track (or just `event`) its own "
+        "subclip with Frame Blend as Media FX, frames = capture_fps / project fps x speed (5 at normal speed on 60 fps, 2 at "
+        "2.5x slow, none at 5x slow). Adds a take; the old take stays.",
+        {"track": TRACK, "event": EVENT, "capture_fps": {"type": "number"}, "effect": {"type": "string"}},
+        ["track"],
+    ),
+    tool(
         "list_render_templates",
         "Render templates, filtered by renderer (file type) and template name parts, fps, width, height.",
         {

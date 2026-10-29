@@ -44,6 +44,7 @@ public class Commands {
                 case "create_subclip": return CreateSubclip(a);
                 case "add_effect": return AddEffect(a);
                 case "set_effect_params": return SetEffectParams(a);
+                case "blend_by_speed": return BlendBySpeed(a);
                 default: throw new BridgeError("unknown command \"" + cmd + "\"");
             }
         }
@@ -267,6 +268,68 @@ public class Commands {
         return r;
     }
 
+    // ---- Frame Blend by event speed (#1051) ----
+
+    // VEGAS never tells an OFX effect an event's speed, and only a Media FX
+    // sees the 300 fps frames, so the blend cannot follow a ctrl-drag by
+    // itself. This does it at edit time instead: each event gets its own
+    // subclip of exactly the media it plays (a subclip has its own Media FX
+    // chain), with Frame Blend set to the captured frames one output frame
+    // spans at the event's speed: 5 at normal speed, 2 at 2.5x slow, none at
+    // 5x slow. The event's old take stays, so switching takes undoes it.
+    object BlendBySpeed(Args a) {
+        Track track = TrackAt(a.Int("track"));
+        string effectId = a.Str("effect", "{Svfx:com.dodstudio.FrameBlend}");
+        PlugInNode fx = FindPlugIn(vegas.VideoFX, effectId);
+        if (fx == null) throw new BridgeError("Frame Blend (" + effectId + ") is not installed in this VEGAS (OFX_PLUGIN_PATH)");
+        double captureFps = a.Num("capture_fps", 300.0);
+        double projectFps = P.Video.FrameRate;
+        int only = a.Int("event", -1);
+        List<object> done = new List<object>();
+        List<TrackEvent> events = new List<TrackEvent>();
+        foreach (TrackEvent ev in track.Events) if (only < 0 || ev.Index == only) events.Add(ev);
+        foreach (TrackEvent ev in events) {
+            VideoEvent ve = ev as VideoEvent;
+            if (ve == null || ve.ActiveTake == null || ve.ActiveTake.Media == null) continue;
+            Media m = ve.ActiveTake.Media;
+            string parentPath = m.FilePath;
+            double baseStart = 0;
+            if (m.IsSubclip()) {
+                Subclip sc = (Subclip)m;
+                parentPath = sc.ParentMedia.FilePath;
+                baseStart = Sec(sc.Start);
+            }
+            double rate = ve.PlaybackRate;
+            int frames = (int)Math.Round(captureFps / projectFps * rate);
+            frames = Math.Max(1, Math.Min(16, frames));
+            double mediaStart = baseStart + Sec(ve.ActiveTake.Offset);
+            // The blend at the event's last frame reads `frames` captured
+            // frames on from it, so the subclip runs that much longer.
+            double mediaLength = Sec(ve.Length) * rate + frames / captureFps;
+            string name = (ve.Name != null && ve.Name.Length > 0 ? ve.Name : Path.GetFileNameWithoutExtension(parentPath)) +
+                          " blend " + frames + " @" + mediaStart.ToString("0.000") + "s";
+            Subclip sub = new Subclip(P, parentPath, Tc(mediaStart), Tc(mediaLength), false, name);
+            if (frames > 1) {
+                Effect e = sub.Effects.AddEffect(fx);
+                Dictionary<string, object> ps = new Dictionary<string, object>();
+                ps["frames"] = frames;
+                ps["captureFps"] = captureFps;
+                SetParams(e, ps);
+            }
+            Take t = ve.AddTake(sub.GetVideoStreamByIndex(0), true, name);
+            t.Offset = Tc(0);
+            Dictionary<string, object> r = new Dictionary<string, object>();
+            r["event"] = ve.Index;
+            r["playback_rate"] = rate;
+            r["frames"] = frames;
+            r["subclip"] = sub.KeyString;
+            r["media_start"] = mediaStart;
+            r["media_length"] = mediaLength;
+            done.Add(r);
+        }
+        return done;
+    }
+
     // ---- effects ----
 
     static PlugInNode FindPlugIn(PlugInNode node, string want) {
@@ -402,9 +465,11 @@ public class Commands {
             foreach (RenderTemplate t in r.Templates) {
                 if (!t.IsValid()) continue;
                 if (filter.Length > 0 && t.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (a.Has("fps") && Math.Abs(t.VideoFrameRate - a.Num("fps")) > 0.001) continue;
-                if (a.Has("width") && t.VideoWidth != a.Int("width")) continue;
-                if (a.Has("height") && t.VideoHeight != a.Int("height")) continue;
+                // A size or rate of 0 means the template follows the project
+                // (VEGAS fills it in only at some moments), so it matches.
+                if (a.Has("fps") && t.VideoFrameRate > 0 && Math.Abs(t.VideoFrameRate - a.Num("fps")) > 0.001) continue;
+                if (a.Has("width") && t.VideoWidth > 0 && t.VideoWidth != a.Int("width")) continue;
+                if (a.Has("height") && t.VideoHeight > 0 && t.VideoHeight != a.Int("height")) continue;
                 yield return new KeyValuePair<Renderer, RenderTemplate>(r, t);
             }
         }
@@ -444,6 +509,13 @@ public class Commands {
             if (exact) break;
         }
         if (!found) throw new BridgeError("no render template matches (see list_render_templates)");
+        // VEGAS builds its "match the project" templates when the renderers
+        // are first listed in a session; listed before the timeline had video,
+        // they stay audio-only until VEGAS restarts.
+        if (pick.Value.VideoStreamCount < 1 && !a.Bool("audio_only", false))
+            throw new BridgeError("template \"" + pick.Value.Name + "\" (" + pick.Key.FileTypeName + ") has no video stream. " +
+                                  "VEGAS fixes its project-matching templates the first time templates are listed in a session: " +
+                                  "list or render only after video is on the timeline, or restart VEGAS. Pass audio_only=true to render it anyway.");
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         RenderArgs args = new RenderArgs(P);
         args.OutputFile = path;
