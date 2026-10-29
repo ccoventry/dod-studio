@@ -347,4 +347,16 @@ pub(super) fn last_kill_frame(streak: &CaptureStreak) -> i32 {
         .unwrap_or(streak.end_tick)
 }
 
+/// Frame indices of the kills a block records: its Kill Range, from the first
+/// recorded kill to the last (a merged block's absorbed highlights add their
+/// last kills, see the merge in `build_batch_queue`).
+pub(super) fn block_kill_frames(streak: &CaptureStreak) -> Vec<i32> {
+    let last = streak.end_index.min(streak.kills.len().saturating_sub(1));
+    streak
+        .kills
+        .get(streak.start_index..=last)
+        .map(|kills| kills.iter().map(|k| k.0).collect())
+        .unwrap_or_default()
+}
+
 // ── Drive allocation ──────────────────────────────────────────────────────────
