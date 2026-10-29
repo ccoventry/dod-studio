@@ -649,7 +649,11 @@ fn workspace_guard_drop_actually_removes_chain_demos_when_auto_clear_is_on() {
     let _ = std::fs::remove_dir_all(&dod_dir);
 }
 
-fn streak_with_kills(start_tick: i32, end_tick: i32, kill_frames: &[i32]) -> CaptureStreak {
+pub(super) fn streak_with_kills(
+    start_tick: i32,
+    end_tick: i32,
+    kill_frames: &[i32],
+) -> CaptureStreak {
     CaptureStreak {
         start_tick,
         end_tick,
@@ -2147,4 +2151,77 @@ fn an_obs_take_is_billed_by_its_quality_setting_not_as_raw_frames() {
     );
     config.obs.recording_quality = Q::Max;
     assert!(block_byte_estimate(&config, &streak, 100.0) > billed);
+}
+
+// ── Fast-forwarded gaps between kills (#831) ─────────────────────────────
+
+fn fast_forward_gaps(config: &mut PatcherConfig) {
+    config.kill_gaps.mode = crate::patch::types::KillGapMode::FastForward;
+    config.kill_gaps.over_seconds = 8.0;
+    config.kill_gaps.speed = 4.0;
+}
+
+fn ramp_commands(job: &PatchJob) -> Vec<(i32, &str)> {
+    job.scheduled_commands
+        .iter()
+        .filter(|(_, c)| c == kill_gaps::RAMP_ON || c == kill_gaps::RAMP_OFF)
+        .map(|(t, c)| (*t, c.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_long_gap_inside_a_clip_is_scheduled_as_a_ramp_when_gaps_fast_forward() {
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    // Kills at 10 s and 30 s (100 fps, no frame times).
+    let streaks = vec![streak_with_kills(1000, 3000, &[1000, 3000])];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert_eq!(
+        ramp_commands(job),
+        vec![(1200, "sys_ramp_on"), (2600, "sys_ramp_off")]
+    );
+    assert_eq!(job.blocks[0].ramped_gaps, 1);
+    let helper = std::fs::read_to_string(
+        std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod")
+            .join("dodstudio_helper.cfg"),
+    )
+    .unwrap();
+    assert!(
+        helper.contains("alias sys_ramp_on \"dem_speed 4\""),
+        "{helper}"
+    );
+}
+
+#[test]
+fn gaps_are_kept_by_default() {
+    let config = mock_config();
+    let streaks = vec![streak_with_kills(1000, 3000, &[1000, 3000])];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert!(ramp_commands(job).is_empty());
+    assert_eq!(job.blocks[0].ramped_gaps, 0);
+}
+
+#[test]
+fn the_gap_between_two_highlights_merged_into_one_take_ramps_too() {
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    // 10 s apart: the two takes' 5 s lead and trail overlap, so one take.
+    let streaks = vec![
+        streak_with_kills(1000, 1000, &[1000]),
+        streak_with_kills(2000, 2000, &[2000]),
+    ];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert_eq!(job.blocks.len(), 1);
+    assert_eq!(
+        ramp_commands(job),
+        vec![(1200, "sys_ramp_on"), (1600, "sys_ramp_off")]
+    );
 }

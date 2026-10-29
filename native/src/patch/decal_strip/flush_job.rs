@@ -767,6 +767,7 @@ mod tests {
             end_tick: record_stop_tick,
             record_start_tick,
             record_stop_tick,
+            ramped_gaps: 0,
         }
     }
 

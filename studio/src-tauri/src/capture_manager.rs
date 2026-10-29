@@ -273,6 +273,10 @@ pub struct CapturePayload {
     /// Decal ring size the flush pins `r_decals` to. Absent means the default.
     #[serde(default)]
     pub decal_ring_limit: Option<u32>,
+    /// Gaps between kills inside a clip: kept, or recorded sped up (#831).
+    /// Absent means kept.
+    #[serde(default)]
+    pub kill_gaps: native::patch::types::KillGaps,
 }
 
 fn default_initial_delay() -> f32 {
@@ -478,6 +482,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.record_stop_trail = payload.record_stop_trail;
     cfg.initial_delay = payload.initial_delay;
     cfg.fast_forward_speed = payload.fast_forward_speed;
+    cfg.kill_gaps = payload.kill_gaps;
     cfg.ffmpeg_override_path = payload.ffmpeg_override_path.clone();
     cfg.goldsrc_hooks_dll_path =
         crate::updater_manager::allowed_hook_dll(payload.goldsrc_hooks_dll_path.clone());
@@ -833,6 +838,9 @@ pub struct VerifiedBlock {
     /// stopped writing mid-clip. A partial take like a Cancel's, with both
     /// lengths.
     pub short_take: Option<native::hlcr::take_length::ShortTake>,
+    /// How many gaps between kills the take recorded sped up (#831), for its
+    /// label in the batch results panel.
+    pub ramped_gaps: usize,
 }
 
 /// What ended a batch while a clip was recording: the Last Batch panel and
@@ -1161,6 +1169,7 @@ pub(crate) fn verify_capture_takes_settling(
                 cut_short: false,
                 cut_by: None,
                 short_take: None,
+                ramped_gaps: block.ramped_gaps,
             }
         })
         .collect();
@@ -1624,7 +1633,7 @@ pub async fn start_capture_batch_impl(
         } else {
             0
         };
-        let (patch_jobs, drive_headroom) = match build_batch_queue(
+        let (mut patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
             &std::collections::HashMap::new(),
@@ -1740,6 +1749,22 @@ pub async fn start_capture_batch_impl(
         } else {
             None
         };
+
+        // Fast-forwarded gaps need the hook's demo player (#831): a patched
+        // batch records them at real time, and its takes' labels say so.
+        if runtime_batch.is_none() {
+            let kept = native::patch::builder::kill_gaps::keep_gaps(&mut patch_jobs);
+            if kept > 0 {
+                log_markdown(&native::patch::builder::kill_gaps::kept_gaps_message(kept));
+                // The manifest was written before the route was known.
+                let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(manifest) = slot.as_mut() {
+                    for block in &mut manifest.blocks {
+                        block.ramped_gaps = 0;
+                    }
+                }
+            }
+        }
 
         // ── Write each job's patched demo before the capture engine copies it ───
         // build_batch_queue only plans where each patched demo should land
@@ -4348,6 +4373,7 @@ mod tests {
                     end_tick: 1,
                     record_start_tick: 0,
                     record_stop_tick: 1,
+                    ramped_gaps: 0,
                 })
                 .collect(),
             capture_fps: 120,
@@ -5483,6 +5509,7 @@ mod tests {
                     // alone can't tell two demos' blocks apart.
                     record_start_tick: 100 * (block_index as i32 + 1),
                     record_stop_tick: 0,
+                    ramped_gaps: 0,
                 })
                 .collect(),
             capture_fps: 300,
@@ -5511,6 +5538,7 @@ mod tests {
                 cut_short: false,
                 cut_by: None,
                 short_take: None,
+                ramped_gaps: 0,
             })
             .collect()
     }

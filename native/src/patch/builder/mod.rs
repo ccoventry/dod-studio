@@ -2,6 +2,7 @@
 // Batch job construction: `build_batch_queue` and the init commands it adds.
 // The helpers it uses live beside it — `timing` (tick walks, roll floors,
 // block merging), `speed` (the fast-forward and normal-speed aliases),
+// `kill_gaps` (long gaps between kills recorded sped up, #831),
 // `alloc` (drive allocation), `workspace` (junctions and the legacy
 // channel-based worker spawner), `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
@@ -14,6 +15,7 @@ use crate::shared::paths::{CHAIN_DEMO_PREFIX, PRIMER_DEMO_STEM};
 use std::sync::{Arc, atomic::AtomicBool};
 
 mod alloc;
+pub mod kill_gaps;
 mod preview;
 mod speed;
 mod timing;
@@ -523,6 +525,7 @@ pub fn build_batch_queue(
         &final_init_commands(config),
         Some(&crate::patch::cfg_scan::scan_cached(&dod_dir)),
     ));
+    helper_cfg_content.push_str(&ramp_alias_lines(config));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
     // driven off the console-log markers these same stages already echo, so the
@@ -737,12 +740,18 @@ pub fn build_batch_queue(
         let mut merged_streaks: Vec<CaptureStreak> = Vec::new();
         let mut merged_sources: Vec<Vec<usize>> = Vec::new();
         let mut chained_to_previous: Vec<bool> = Vec::new();
+        // Every kill each block records, for the gaps between them (#831).
+        // The merge below keeps only an absorbed highlight's last kill in the
+        // block's own list, which would hide the gaps inside it.
+        let mut merged_kill_frames: Vec<Vec<i32>> = Vec::new();
 
         for (current, payload_idx) in streaks.into_iter().zip(streak_payload_indices) {
+            let current_kills = kill_gaps::kill_frames(&current);
             if merged_streaks.is_empty() {
                 merged_streaks.push(current);
                 merged_sources.push(vec![payload_idx]);
                 chained_to_previous.push(false);
+                merged_kill_frames.push(current_kills);
                 continue;
             }
 
@@ -775,6 +784,10 @@ pub fn build_batch_queue(
                     last.end_index = last.kills.len() - 1;
                 }
                 merged_sources.last_mut().unwrap().push(payload_idx);
+                let kills = merged_kill_frames.last_mut().unwrap();
+                kills.extend(current_kills);
+                kills.sort_unstable();
+                kills.dedup();
             } else {
                 let rolls_collide = blocks_merge(
                     prev_stop,
@@ -785,6 +798,7 @@ pub fn build_batch_queue(
                 merged_streaks.push(current);
                 merged_sources.push(vec![payload_idx]);
                 chained_to_previous.push(rolls_collide);
+                merged_kill_frames.push(current_kills);
             }
         }
 
@@ -888,6 +902,7 @@ pub fn build_batch_queue(
                 // than duplicating that arithmetic.
                 record_start_tick: 0,
                 record_stop_tick: 0,
+                ramped_gaps: 0,
             });
         }
         blocks.sort_by_key(|b| b.block_index);
@@ -1187,6 +1202,27 @@ pub fn build_batch_queue(
                 &format!("START_RECORD - Tick {}", record_start_tick),
             ) {
                 scheduled_commands.push((t, echo_cmd));
+            }
+
+            // Long gaps between kills, recorded sped up (#831). Inside the
+            // record window by construction: between two of its kills.
+            if config.kill_gaps.ramp_speed().is_some() {
+                let ramps = kill_gaps::ramps(
+                    &merged_kill_frames[i],
+                    config.kill_gaps.over_seconds,
+                    &kill_gaps::Timeline {
+                        frame_times: frame_times_ref,
+                        fps: demo_fps,
+                    },
+                    (record_start_tick, r_stop),
+                );
+                for ramp in &ramps {
+                    scheduled_commands.push((ramp.on_tick, kill_gaps::RAMP_ON.to_string()));
+                    scheduled_commands.push((ramp.off_tick, kill_gaps::RAMP_OFF.to_string()));
+                }
+                if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
+                    block.ramped_gaps = ramps.len();
+                }
             }
 
             // At End Frame (Stage 3)

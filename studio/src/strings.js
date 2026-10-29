@@ -511,6 +511,14 @@ export const STRINGS = {
     START_LEAD_HINT: 'Time between capture starting and the first kill.',
     STOP_TRAIL_LABEL: 'Stop Trail (s):',
     STOP_TRAIL_HINT: 'Time between the last kill and capture stopping.',
+    // Gaps between kills inside a clip (#831): kill_gaps_setting.js.
+    KILL_GAPS_LABEL: 'Gaps between kills over',
+    KILL_GAPS_UNIT: 's:',
+    KILL_GAPS_KEEP: 'Keep',
+    KILL_GAPS_FAST_FORWARD: 'Fast-forward',
+    KILL_GAPS_SPEED_UNIT: 'x',
+    KILL_GAPS_HINT:
+      'Fast-forward plays a long wait between two kills sped up inside the clip, from 2 s after one kill to 4 s before the next. The clip comes out shorter and the speed-up is part of it: it can't be undone in the edit. Sound in the sped-up stretch is choppy. Needs Seek Between Clips (Pipeline tab); a batch that is patched keeps its gaps.',
     INITIAL_DELAY_LABEL: 'Initial Delay (s):',
     INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
@@ -1658,6 +1666,8 @@ export const STRINGS = {
       // Only ever reported for Scheduled Commands (it is fine in Initial
       // Commands), like the three below.
       mirv_agr: 'set Capture Mode to AGR in the Output Format tab instead -- it saves one file per clip',
+      // Scheduled only, like mirv_agr (#831).
+      dem_speed: "the app sets the demo's speed itself for Fast-forward gaps between kills -- set that in the Timing tab instead",
       r_drawentities:
         "the engine resets this to 1 by itself, so it does nothing -- and if cheats are on instead, DoD's client closes the game",
       cl_lw: "DoD's client quits the game outright if this is not 1 -- there is no other value",
@@ -2340,6 +2350,8 @@ export const STRINGS = {
     CHECKING: 'Checking the takes on disk…',
     kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
     merged: (n) => `(+${n} more, recorded as one take)`,
+    // A take that recorded its long gaps between kills sped up (#831).
+    rampedGaps: (n, speed) => `(${n === 1 ? 'gap' : `${n} gaps`} at ${speed}x)`,
     STATUS: {
       ok: 'Captured',
       unrenderable: "Captured, can't render yet",

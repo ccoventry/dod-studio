@@ -23,6 +23,41 @@ export function streakSeconds(streak) {
   return [kills[start][1], kills[end][1]];
 }
 
+/** A highlight's selected kills' times, in seconds into the demo. */
+export function streakKillSeconds(streak) {
+  const kills = streak.kills || [];
+  if (kills.length === 0) return [];
+  const last = kills.length - 1;
+  const end = Math.min(streak.end_index ?? last, last);
+  const start = Math.min(streak.start_index ?? 0, end);
+  return kills.slice(start, end + 1).map((k) => k[1]);
+}
+
+/** Where a fast-forwarded gap starts after its first kill and ends before
+ *  the next, in seconds: `builder::kill_gaps`' AFTER_KILL_SECONDS and
+ *  BEFORE_KILL_SECONDS (Review's own margins, #665). */
+export const RAMP_AFTER_KILL_SECONDS = 2;
+export const RAMP_BEFORE_KILL_SECONDS = 4;
+
+/**
+ * Seconds of take a clip saves by playing its long gaps between kills sped
+ * up (#831): for each gap over `overSeconds`, the stretch between the two
+ * margins records at `1 / speed` of its length. `killGaps` null (gaps kept)
+ * saves nothing.
+ */
+export function rampSavedSeconds(killSeconds, killGaps) {
+  if (!killGaps || !(killGaps.speed > 1) || !(killGaps.overSeconds > 0)) return 0;
+  const sorted = [...killSeconds].sort((a, b) => a - b);
+  let saved = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1];
+    if (gap <= killGaps.overSeconds) continue;
+    const ramp = gap - RAMP_AFTER_KILL_SECONDS - RAMP_BEFORE_KILL_SECONDS;
+    if (ramp > 0) saved += ramp * (1 - 1 / killGaps.speed);
+  }
+  return saved;
+}
+
 /**
  * Sums required capture bytes across every selected streak, merging
  * overlapping (or touching) pre/post-roll windows *within each source demo*
@@ -33,6 +68,10 @@ export function streakSeconds(streak) {
  * (`AGR_BYTES_PER_FRAME`, mirroring `sys::disk::AGR_BYTES_PER_FRAME`). With
  * `bytesPerSecond` the take is billed by its length instead (OBS, #1096).
  *
+ * With `killGaps` (`{ overSeconds, speed }`, Fast-forward gaps between kills
+ * on a Seek Between Clips batch, #831), each take is billed less the
+ * stretches its long gaps record sped up ([`rampSavedSeconds`]).
+ *
  * Does not account for `mirv_movie_separate_hud 1` typed into Initial
  * Commands — that triples the real cost (HUD pass recorded as its own
  * stream), but there is no longer a dedicated setting to read it from, and
@@ -42,7 +81,7 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
   const {
     preRollSeconds, postRollSeconds,
     recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight, bytesPerFrame, bytesPerSecond,
+    captureFps, resWidth, resHeight, bytesPerFrame, bytesPerSecond, killGaps,
   } = opts;
   let totalSeconds = 0;
 
@@ -54,7 +93,7 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
       // never renders as a checkable row at all) — neither should ever be
       // billed for capture space.
       .filter(streak => streak.selected === true)
-      .map(streakSeconds)
+      .map((streak) => [...streakSeconds(streak), streakKillSeconds(streak)])
       .sort((a, b) => a[0] - b[0]);
 
     // Two different windows are at play, and mixing them up is what this used
@@ -66,19 +105,24 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
     // So merge on the roll window, then bill the lead/trail window.
     let mergedStart = null;
     let mergedEnd = null;
+    let mergedKills = [];
     const bill = () => {
-      totalSeconds += recordStartLead + (mergedEnd - mergedStart) + recordStopTrail;
+      totalSeconds += recordStartLead + (mergedEnd - mergedStart) + recordStopTrail
+        - rampSavedSeconds(mergedKills, killGaps);
     };
-    intervals.forEach(([start, end]) => {
+    intervals.forEach(([start, end, kills]) => {
       if (mergedStart === null) {
         mergedStart = start;
         mergedEnd = end;
+        mergedKills = [...kills];
       } else if (start - preRollSeconds <= mergedEnd + postRollSeconds) {
         mergedEnd = Math.max(mergedEnd, end);
+        mergedKills.push(...kills);
       } else {
         bill();
         mergedStart = start;
         mergedEnd = end;
+        mergedKills = [...kills];
       }
     });
     if (mergedStart !== null) {
