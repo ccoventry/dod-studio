@@ -679,6 +679,7 @@ fn panel_view(review: &Review) -> (Option<crate::review_keys::Panel>, bool) {
         title: title.clone(),
         status: status.to_string(),
         keys,
+        can_go_back: review.at > 0,
     };
     match review.phase {
         Phase::Waiting if keys => (Some(panel("", true)), true),
@@ -1366,6 +1367,24 @@ mod tests {
         // A failed highlight has the Review tab open instead.
         review.phase = Phase::Failed("gone".into());
         assert_eq!(panel_view(&review), (None, false));
+    }
+
+    #[test]
+    fn back_is_greyed_on_the_first_highlight_only() {
+        use crate::review_keys::Action;
+        let mut review = Review {
+            queue: vec![highlight("a", None), highlight("a", None)],
+            options: Options::default(),
+            at: 0,
+            phase: Phase::Waiting,
+            loaded: Some("a".to_string()),
+        };
+        let first = panel_view(&review).0.expect("a panel");
+        assert!(!first.key_live(Action::Back));
+        assert!(first.key_live(Action::Next));
+        review.at = 1;
+        let second = panel_view(&review).0.expect("a panel");
+        assert!(second.key_live(Action::Back));
     }
 
     #[test]

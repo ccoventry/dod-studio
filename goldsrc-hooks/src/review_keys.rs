@@ -197,6 +197,16 @@ pub(crate) struct Panel {
     pub status: String,
     /// The answer keys' lines.
     pub keys: bool,
+    /// Whether there is a highlight before this one; B Back is greyed when
+    /// not, since it does nothing on the first.
+    pub can_go_back: bool,
+}
+
+impl Panel {
+    /// Whether a key does something now, so the box draws it in full colour.
+    pub(crate) fn key_live(&self, action: Action) -> bool {
+        action != Action::Back || self.can_go_back
+    }
 }
 
 static PANEL: RwLock<Option<Panel>> = RwLock::new(None);
@@ -243,6 +253,9 @@ mod draw {
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
     /// The keys, in DoD's HUD amber.
     const KEY: (f32, f32, f32) = (1.0, 0.75, 0.25);
+    /// A key that does nothing now, and its word (B Back on the first
+    /// highlight): greyed rather than hidden, so the keys keep their places.
+    const DIM: (f32, f32, f32) = (0.4, 0.4, 0.4);
     const PADDING: i32 = 8;
     const GAP: i32 = 4;
 
@@ -267,8 +280,13 @@ mod draw {
             // Each key in the key colour, then its button's word.
             for (i, k) in KEYS_LIST.iter().enumerate() {
                 let gap = if i == 0 { "" } else { "    " };
-                keys.extend(run(&format!("{gap}{}", k.label), KEY));
-                keys.extend(run(&format!(" {}", k.word), WHITE));
+                let (key, word) = if panel.key_live(k.action) {
+                    (KEY, WHITE)
+                } else {
+                    (DIM, DIM)
+                };
+                keys.extend(run(&format!("{gap}{}", k.label), key));
+                keys.extend(run(&format!(" {}", k.word), word));
             }
             lines.push(keys);
             let mut esc = Vec::new();
