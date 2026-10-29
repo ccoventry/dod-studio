@@ -24,6 +24,8 @@ import {
   takePreviewThumb,
   takePreviewSheet,
   cancelTakePreviews,
+  takeChecks as takeChecksIpc,
+  cancelTakeChecks,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
@@ -50,6 +52,7 @@ import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
 import { startTakePreview } from './take_preview.js';
+import { startTakeChecks } from './take_checks.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -71,6 +74,7 @@ const renderBatch = createRenderBatch({ redraw: () => redrawBatchLine(), log: lo
 let takeDelete = null;
 // Each take's picture (#1069), set up by initRenderUI.
 let takePreview = null;
+let takeChecks = null;
 // initRenderUI's getExportDirs, for the Start button's check.
 let exportDirsSource = null;
 
@@ -306,7 +310,7 @@ function createJobRow(j, rowState) {
   row.dataset.jobId = j.id;
   row.innerHTML = `
     <td class="rj-select col-center"><input type="checkbox" class="render-job-select-cb" title="${STRINGS.RENDER.SELECT_ROW_TITLE}" /></td>
-    <td class="rj-thumb-cell col-center"></td>
+    <td class="rj-thumb-cell col-center"><div class="rj-thumb-pic"></div><div class="rj-check"></div></td>
     <td class="rj-name"></td>
     <td class="rj-stream"></td>
     <td class="rj-frames"></td>
@@ -348,7 +352,8 @@ function updateJobRow(row, j, rowState = {}) {
   // Take (#644) without this row changing.
   // The picture changes without the job changing; it skips itself when
   // nothing did.
-  takePreview?.fillCell(row.querySelector('.rj-thumb-cell'), j);
+  takePreview?.fillCell(row.querySelector('.rj-thumb-pic'), j);
+  takeChecks?.fillChip(row.querySelector('.rj-check'), j);
   const signature = JSON.stringify([j, rowState]);
   if (row.dataset.signature === signature) return;
   row.dataset.signature = signature;
@@ -446,6 +451,7 @@ function renderJobsTable() {
   if (jobs.length === 0) {
     tbody.innerHTML = `<tr><td colspan="13" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
     takePreview?.sync(jobs);
+    takeChecks?.sync(jobs);
     syncSelectionControls();
     return;
   }
@@ -484,6 +490,7 @@ function renderJobsTable() {
   existingRows.forEach((row) => row.remove());
   syncSelectionControls();
   takePreview?.sync(jobs);
+  takeChecks?.sync(jobs);
 }
 
 /**
@@ -715,7 +722,13 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     showProgress: showTakeDeleteProgress,
     // FFmpeg reading a take's frames would keep it from moving.
     onBusyChange: (busy) => {
-      if (busy) takePreview?.pause(); else takePreview?.resume();
+      if (busy) {
+        takePreview?.pause();
+        takeChecks?.pause();
+      } else {
+        takePreview?.resume();
+        takeChecks?.resume();
+      }
       renderJobsTable();
     },
     listen,
@@ -730,6 +743,17 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     // A frame sequence's rate, for the sheet's times: the Source FPS the
     // take renders at.
     getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
+    afterChange: () => takeChecks?.run(),
+  });
+  // Take checks (#1084) read every frame of a take, so they wait for the
+  // pictures and for any render, which reads the same disks.
+  takeChecks = startTakeChecks({
+    check: takeChecksIpc,
+    cancel: cancelTakeChecks,
+    listen,
+    getJobs: () => jobs,
+    getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
+    isBlocked: () => !!takePreview?.isRunning() || jobs.some((j) => j.status === JOB_STATUS.RENDERING),
   });
 
   // A take finishing renders — advances every highlight the take index says

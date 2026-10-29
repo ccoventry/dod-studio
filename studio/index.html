@@ -1067,6 +1067,11 @@
               <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
               <span id="render-take-preview-progress-label"></span>
             </div>
+            <!-- #1084: the background pass that checks each take's picture and sound. -->
+            <div id="render-take-checks-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
+              <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <span id="render-take-checks-progress-label"></span>
+            </div>
             <!-- #1069: a take's picture, bigger, while the mouse is on its thumbnail. -->
             <div id="take-preview-hover" class="take-preview-hover" hidden><img alt="" /></div>
             <!-- #644: Delete Take's steps, measuring then moving to the Recycle Bin. -->
@@ -2042,6 +2047,7 @@
         <h2 class="take-sheet-title"></h2>
         <p class="take-sheet-status status-text"></p>
         <div class="take-sheet-grid"></div>
+        <div class="take-sheet-checks" hidden></div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button class="take-sheet-close" data-str="RENDER.TAKE_SHEET_CLOSE">Close</button>
         </div>

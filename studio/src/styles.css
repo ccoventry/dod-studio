@@ -4236,6 +4236,56 @@ button.setup-skip:hover:not(:disabled) {
   margin-top: 2px;
 }
 
+/* Take checks (#1084): the chip under a take's picture and the list on
+   its contact sheet. */
+.rj-check {
+  font-size: 0.8em;
+  line-height: 1.2;
+  margin-top: 2px;
+  cursor: help;
+}
+
+.rj-check:empty {
+  display: none;
+}
+
+.rj-check-ok {
+  color: #4caf50;
+}
+
+.rj-check-warn {
+  color: #d9a441;
+  font-weight: 600;
+}
+
+.rj-check-busy,
+.rj-check-failed {
+  opacity: 0.6;
+}
+
+.take-sheet-checks h3 {
+  margin: 12px 0 4px;
+  font-size: 1em;
+}
+
+.take-sheet-checks ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.take-check-warn {
+  color: #d9a441;
+}
+
+.take-check-note {
+  opacity: 0.8;
+}
+
+.take-check-cause {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
 /* What's new (#1013): release notes drawn by whats_new.js. */
 .whats-new-content {
   max-width: 720px;

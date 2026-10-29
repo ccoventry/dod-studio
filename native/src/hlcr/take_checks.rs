@@ -228,13 +228,13 @@ pub fn parse_report(stderr: &str, clip_secs: Option<f64>) -> Report {
             }
         }
     }
-    if let (Some(start), Some(end)) = (open_freeze, clip_secs) {
-        if end > start {
-            report.frozen.push(Run {
-                start,
-                secs: end - start,
-            });
-        }
+    if let (Some(start), Some(end)) = (open_freeze, clip_secs)
+        && end > start
+    {
+        report.frozen.push(Run {
+            start,
+            secs: end - start,
+        });
     }
     if saw_sound {
         report.sound = Some(sound);
@@ -398,7 +398,11 @@ pub fn pass_args(picture: &PictureInput, sound: Option<&Path>) -> Vec<String> {
 
 /// Seconds decoded so far, from a `-progress` line (`out_time_us=1500000`).
 pub fn progress_secs(line: &str) -> Option<f64> {
-    let us = line.strip_prefix("out_time_us=")?.trim().parse::<i64>().ok()?;
+    let us = line
+        .strip_prefix("out_time_us=")?
+        .trim()
+        .parse::<i64>()
+        .ok()?;
     (us >= 0).then(|| us as f64 / 1_000_000.0)
 }
 
@@ -498,8 +502,14 @@ pub async fn check_take(
         source: take_frames::source_stamp(&media),
         sound: wav.as_deref().map(sound_stamp),
         duration_secs: total,
-        peak_db: report.sound.and_then(|s| s.peak_db).filter(|v| v.is_finite()),
-        rms_db: report.sound.and_then(|s| s.rms_db).filter(|v| v.is_finite()),
+        peak_db: report
+            .sound
+            .and_then(|s| s.peak_db)
+            .filter(|v| v.is_finite()),
+        rms_db: report
+            .sound
+            .and_then(|s| s.rms_db)
+            .filter(|v| v.is_finite()),
         findings: findings(&report),
     };
 
@@ -567,7 +577,11 @@ mod tests {
         );
         assert_eq!(report.black.len(), 2);
         let found = findings(&report);
-        assert_eq!(found.len(), 1, "a 0.2 s flash isn't a black take: {found:?}");
+        assert_eq!(
+            found.len(),
+            1,
+            "a 0.2 s flash isn't a black take: {found:?}"
+        );
         assert_eq!(found[0].check, Check::Black);
         assert_eq!(found[0].cause, Cause::Capture);
         assert_eq!((found[0].at_secs, found[0].secs), (Some(2.0), Some(3.5)));
@@ -751,10 +765,18 @@ mod tests {
         assert!(kinds.contains(&Check::Black), "{checks:?}");
         assert!(kinds.contains(&Check::Frozen), "{checks:?}");
         assert!(kinds.contains(&Check::Silent), "{checks:?}");
-        let black = checks.findings.iter().find(|f| f.check == Check::Black).unwrap();
+        let black = checks
+            .findings
+            .iter()
+            .find(|f| f.check == Check::Black)
+            .unwrap();
         assert!((black.at_secs.unwrap() - 1.0).abs() < 0.1, "{black:?}");
         // The black stretch doesn't move either; it is reported once, as black.
-        let frozen: Vec<_> = checks.findings.iter().filter(|f| f.check == Check::Frozen).collect();
+        let frozen: Vec<_> = checks
+            .findings
+            .iter()
+            .filter(|f| f.check == Check::Frozen)
+            .collect();
         assert_eq!(frozen.len(), 1, "{checks:?}");
         assert!((frozen[0].at_secs.unwrap() - 3.5).abs() < 0.2, "{frozen:?}");
 

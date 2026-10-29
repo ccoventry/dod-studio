@@ -57,14 +57,14 @@ pub struct TakeSheetView {
     pub frames: Vec<SheetFrameView>,
 }
 
-fn check_listed(render: &RenderManager, take_folder: &str) -> Result<(), String> {
+pub(crate) fn check_listed(render: &RenderManager, take_folder: &str) -> Result<(), String> {
     if render.take_statuses(take_folder).is_empty() {
         return Err(crate::messages::take_not_listed_for_preview(take_folder));
     }
     Ok(())
 }
 
-fn ffmpeg_path(settings: &SettingsManager) -> PathBuf {
+pub(crate) fn ffmpeg_path(settings: &SettingsManager) -> PathBuf {
     resolve_ffmpeg(settings.inner.lock().unwrap().ffmpeg_path.as_ref())
 }
 

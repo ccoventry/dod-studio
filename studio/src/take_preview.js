@@ -254,11 +254,12 @@ export function wireTakePreviewViews({ table, preview, getJob, hover, modal }) {
 
 /**
  * The Render tab's take pictures, wired to its table: each row's picture
- * cell (`.rj-thumb-cell`), the progress line, the hover and the contact
- * sheet. `render_pane.js` hands it the rows (`sync`) and pauses it around a
- * Delete Take.
+ * (`.rj-thumb-pic`, above the take checks' chip), the progress line, the
+ * hover and the contact sheet. `render_pane.js` hands it the rows (`sync`)
+ * and pauses it around a Delete Take; `afterChange` runs after each change,
+ * so the take checks (#1084) can start once the last picture is made.
  */
-export function startTakePreview({ thumb, sheet, cancel, listen, getJobs, getFps }) {
+export function startTakePreview({ thumb, sheet, cancel, listen, getJobs, getFps, afterChange }) {
   const tbody = document.querySelector('#render-jobs-tbody');
   const progressWrap = document.querySelector('#render-take-preview-progress');
   const jobFor = (key) => (getJobs() || []).find((j) => previewKey(j) === key);
@@ -272,8 +273,9 @@ export function startTakePreview({ thumb, sheet, cancel, listen, getJobs, getFps
     onChange: () => {
       tbody?.querySelectorAll('tr[data-job-id]').forEach((row) => {
         const job = (getJobs() || []).find((j) => j.id === row.dataset.jobId);
-        if (job) preview.fillCell(row.querySelector('.rj-thumb-cell'), job);
+        if (job) preview.fillCell(row.querySelector('.rj-thumb-pic'), job);
       });
+      afterChange?.();
       const p = preview.progress();
       if (!progressWrap) return;
       progressWrap.style.display = p ? 'flex' : 'none';
