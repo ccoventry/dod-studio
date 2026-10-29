@@ -985,4 +985,34 @@ test.describe('take pictures (#1069)', () => {
     await expect(cell).toHaveText('—');
     await expect(cell).toHaveAttribute('title', 'No picture: FFmpeg made no picture');
   });
+
+  test('a failed picture is made on a later refresh, and a re-captured take gets its new one', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => { throw 'FFmpeg made no picture'; };
+      window.__fakeNowOffset = 0;
+      const real = Date.now.bind(Date);
+      Date.now = () => real() + window.__fakeNowOffset;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-cell');
+    await expect(cell).toHaveText('—');
+    // A refresh right away asks nothing more.
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    expect(await invocationsFor(page, 'take_preview_thumb')).toHaveLength(1);
+    // After the wait the next refresh tries again, and the picture appears.
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: false });
+      window.__fakeNowOffset += 31_000;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    await expect(cell.locator('img.rj-thumb')).toHaveAttribute('src', PIXEL);
+    // The take is captured again: the next refresh after the minute swaps it.
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri: uri + '#new', cached: false });
+      window.__fakeNowOffset += 61_000;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    await expect(cell.locator('img.rj-thumb')).toHaveAttribute('src', PIXEL + '#new');
+  });
 });
