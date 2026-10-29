@@ -1351,7 +1351,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       const marked = advanced > 0 ? STRINGS.CAPTURE.highlightsMarkedCaptured(advanced) : '';
       if (captured < total) {
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total)}${marked}`, 'error');
+        const cutShort = blocks.filter((b) => b.cut_short).length;
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cutShort)}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else {
