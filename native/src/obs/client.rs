@@ -613,6 +613,17 @@ impl ObsClient {
             .to_string())
     }
 
+    /// `GetStats`'s whole answer, for the capture test (#646). `None` on any
+    /// failure: like `output_frame_stats`, it only produces advice.
+    pub fn stats(&mut self) -> Option<Value> {
+        self.request("GetStats", json!({})).ok()
+    }
+
+    /// `GetRecordStatus`'s `outputActive`, `None` on any failure.
+    pub fn record_active(&mut self) -> Option<bool> {
+        self.request("GetRecordStatus", json!({})).ok()?["outputActive"].as_bool()
+    }
+
     /// A setting of the current profile: `(value, OBS's default for it)`.
     /// Either is empty when unset. The default is worth having: for the
     /// encoder it is the one OBS itself picked for this PC's hardware.

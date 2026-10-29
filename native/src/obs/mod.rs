@@ -29,6 +29,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod bench;
 pub mod client;
 pub mod drop_rate;
 pub mod encoder;

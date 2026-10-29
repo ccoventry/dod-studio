@@ -481,6 +481,40 @@
                   </select>
                 </div>
                 <div id="obs-status" class="path-warning" style="display: none;"></div>
+                <!-- OBS capture test (#646): obs_capture_test.js. -->
+                <div class="control-group obs-test-controls">
+                  <button id="obs-capture-test-btn" data-str="OBS_TEST.TEST_BUTTON" data-str-title="OBS_TEST.TEST_BUTTON_TITLE">Test OBS capture</button>
+                  <button id="obs-fps-ladder-btn" data-str="OBS_TEST.LADDER_BUTTON" data-str-title="OBS_TEST.LADDER_BUTTON_TITLE">Find my highest steady FPS</button>
+                  <button id="obs-test-stop-btn" hidden data-str="OBS_TEST.STOP_BUTTON">Stop test</button>
+                </div>
+                <div class="control-group obs-test-demo-row">
+                  <span data-str="OBS_TEST.DEMO_LABEL">Test demo:</span>
+                  <span id="obs-test-demo-name" class="obs-test-demo-name" data-str="OBS_TEST.DEMO_BUNDLED">the one that comes with DoD Studio</span>
+                  <button id="obs-test-demo-pick-btn" data-str="OBS_TEST.DEMO_PICK" data-str-title="OBS_TEST.DEMO_PICK_TITLE">Use another demo…</button>
+                  <button id="obs-test-demo-reset-btn" hidden data-str="OBS_TEST.DEMO_RESET">Use the bundled demo</button>
+                  <label id="obs-test-long-label" hidden data-str-title="OBS_TEST.LONG_TITLE"><input type="checkbox" id="obs-test-long" /> <span data-str="OBS_TEST.LONG_LABEL">1-minute clips</span></label>
+                </div>
+                <div id="obs-test-panel" class="obs-test-panel" hidden>
+                  <p class="setting-hint" data-str="OBS_TEST.DEMO_NOTE"></p>
+                  <div id="obs-test-step" class="obs-test-step"></div>
+                  <div id="obs-test-bar" class="progress-bar-container" hidden><div id="obs-test-bar-fill" class="progress-bar-fill"></div></div>
+                  <div id="obs-test-result" class="obs-test-result"></div>
+                  <table id="obs-test-table" class="obs-test-table" hidden>
+                    <thead>
+                      <tr>
+                        <th data-str="OBS_TEST.COL_FPS">OBS FPS</th>
+                        <th data-str="OBS_TEST.COL_RESULT">Result</th>
+                        <th data-str="OBS_TEST.COL_SKIPPED">Skipped (encoder)</th>
+                        <th data-str="OBS_TEST.COL_MISSED">Missed (rendering)</th>
+                        <th data-str="OBS_TEST.COL_REPEATED">Repeated</th>
+                        <th data-str="OBS_TEST.COL_GAME">Game fps (1% low)</th>
+                        <th data-str="OBS_TEST.COL_SOUND">Sound</th>
+                      </tr>
+                    </thead>
+                    <tbody id="obs-test-rows"></tbody>
+                  </table>
+                  <button id="obs-test-apply-btn" hidden data-str-title="OBS_TEST.APPLY_TITLE"></button>
+                </div>
               </div>
             </div>
 

@@ -31,6 +31,7 @@ import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { startObsDropRate } from './obs_drop_rate.js';
 import { refreshAfterTyping } from './input_refresh.js';
+import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 
@@ -362,7 +363,7 @@ const OBS_LAUNCH_RETRY_DELAY_MS = 2000;
  * to launch, and the caller's existing "not connected" error already covers
  * that case correctly.
  */
-async function launchObsAndRetry() {
+export async function launchObsAndRetry() {
   const obsExePath = document.querySelector('#config-obs-exe-path')?.value?.trim();
   if (!obsExePath) return false;
 
@@ -902,6 +903,122 @@ function initClearPreviewsModal() {
   }
 }
 
+/**
+ * Every batch setting of the `start_capture_batch` payload, from the DOM and
+ * `state.targetDrives`: all but `streaks` and `session_id`. Returns `null`
+ * (after toasting the reason) when a required field is missing. Shared by
+ * Start Capture Batch and the OBS capture test (#646), so a test clip runs
+ * with exactly the settings a real batch would.
+ */
+export function batchSettingsPayload(state) {
+  const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
+  const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+  // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+  const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
+  const preRollVal = numberField('#config-pre-roll', 5.0);
+  const postRollVal = numberField('#config-post-roll', 1.0);
+  const recordStartLeadVal = numberField('#config-record-start-lead', 5.0);
+  const recordStopTrailVal = numberField('#config-record-stop-trail', 5.0);
+  const initialDelayVal = numberField('#config-initial-delay', 3.0);
+  // The fast-forward step (`host_framerate`), not a setting: batches skip to
+  // each clip, and fast-forward is only the fallback.
+  const fastForwardSpeedVal = getFastForwardStep();
+
+  const hlaePathVal = document.querySelector("#hlae-path-input")?.value?.trim() || "";
+  const hlPathVal = document.querySelector("#hl-path-input")?.value?.trim() || "";
+  const ffmpegOverridePathVal = document.querySelector("#ffmpeg-override-path-input")?.value?.trim() || null;
+  const goldsrcHooksDllPathVal = document.querySelector("#goldsrc-hooks-dll-path-input")?.value?.trim() || null;
+
+  const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
+  const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
+  // `?? true` not `|| false`: a missing element must not silently disable
+  // the flush, since nothing in the captured video would show that it had.
+  const decalFlushVal = document.querySelector("#config-decal-flush")?.checked ?? true;
+  // The mode select is the authority; `ffmpeg_capture` is derived from it so
+  // the payload cannot describe two modes at once. The backend reconciles
+  // both fields again in `normalise_capture_mode`, which is what keeps an
+  // older frontend working against this build.
+  const captureModeVal = document.querySelector("#config-capture-mode")?.value || "frame_sequence";
+  const ffmpegCaptureVal = captureModeVal === "direct_to_video";
+  const ffmpegCaptureCodecVal = document.querySelector("#config-capture-codec")?.value || "utvideo";
+  const obsHostVal = document.querySelector("#config-obs-host")?.value?.trim() || "127.0.0.1";
+  const obsPortVal = parseInt(document.querySelector("#config-obs-port")?.value, 10) || 4455;
+  const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
+  const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
+  const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked ?? true;
+  const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
+
+  const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;
+  const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
+  const autoClearTempDemosVal = document.querySelector("#config-auto-clear-temp-demos")?.checked || false;
+
+  if (!hlaePathVal || !hlPathVal) {
+    showToast(STRINGS.CAPTURE.BOTH_PATHS_REQUIRED, 'error');
+    return null;
+  }
+
+  // capture_directories is the physical BMP/patched-demo output pool —
+  // native/src/patch/builder.rs routes capture output there and
+  // capture_engine.rs mklinks a junction per entry. It must be actual
+  // output directories, NEVER state.scanPaths (the demo *source* files
+  // the user added for scanning); mklinking a junction against a .dem
+  // file aborts the batch. Sourced from Capture Output — required, no
+  // fallback.
+  const outputDrivePool = (state.targetDrives || []).filter(Boolean);
+
+  if (outputDrivePool.length === 0) {
+    showToast(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR, 'error');
+    return null;
+  }
+
+  // Blank rows (added via "+ Add" but never filled in) are dropped rather
+  // than sent as no-op console commands.
+  const initCommandsPayload = initCommands.map(c => c.trim()).filter(c => c.length > 0);
+  const customCommandsPayload = customCommands
+    .filter(c => c.command && c.command.trim().length > 0)
+    .map(c => ({
+      command: c.command.trim(),
+      relation: c.relation === 'After' ? 'After' : 'Before',
+      offset_seconds: c.offsetSeconds,
+    }));
+
+  return {
+    hlae_path: hlaePathVal,
+    game_path: hlPathVal,
+    ffmpeg_override_path: ffmpegOverridePathVal,
+    goldsrc_hooks_dll_path: goldsrcHooksDllPathVal,
+    resolution_width: resWidthVal,
+    resolution_height: resHeightVal,
+    decal_flush: decalFlushVal,
+    ffmpeg_capture: ffmpegCaptureVal,
+    ffmpeg_capture_codec: ffmpegCaptureCodecVal,
+    capture_mode: captureModeVal,
+    obs_host: obsHostVal,
+    obs_port: obsPortVal,
+    obs_password: obsPasswordVal,
+    obs_recording_quality: document.querySelector('#config-obs-recording-quality')?.value || '',
+    save_local_patched_copy: saveLocalPatchedCopyVal,
+    hook_runs_batch: hookRunsBatchVal,
+    keep_game_behind: keepGameBehindVal,
+    pre_roll_seconds: preRollVal,
+    post_roll_seconds: postRollVal,
+    capture_directories: outputDrivePool,
+    capture_fps: captureFpsVal,
+    obs_capture_fps: obsCaptureFpsVal,
+    agr_fps: agrFpsVal,
+    drives: state.targetDrives || [],
+    record_start_lead: recordStartLeadVal,
+    record_stop_trail: recordStopTrailVal,
+    initial_delay: initialDelayVal,
+    fast_forward_speed: fastForwardSpeedVal,
+    auto_clear_logs: autoClearLogsVal,
+    auto_clear_previews: autoClearPreviewsVal,
+    auto_clear_temp_demos: autoClearTempDemosVal,
+    init_commands: initCommandsPayload,
+    custom_commands: customCommandsPayload,
+  };
+}
+
 /** Render While Capturing's hold line on the footer (`captureProgress.setRoom`). */
 export function showCaptureRoomLine(room) {
   captureProgress?.setRoom(room);
@@ -1092,11 +1209,14 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   if (!unlistenCaptureStatus) {
     listen('capture_status', (event) => {
       const payload = event.payload || {};
+      // An OBS capture test's clip (#646): progress only. The test's own
+      // panel says how it ended, and Last Batch keeps the user's last batch.
+      const testBatch = isObsTestBatch();
       if (payload.running) {
         // The first running report of a batch: the last one's results go.
         // A Cancel clears capturingInFlight before the takes are checked,
         // and that check still reports as running: it is the same batch.
-        if (!capturingInFlight && !captureProgress.isRunning()) batchStarted();
+        if (!testBatch && !capturingInFlight && !captureProgress.isRunning()) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
         captureProgress.update(payload);
@@ -1110,6 +1230,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         setBatchRunning(false);
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
+        if (testBatch) return;
         if (currentOnBatchFinished) currentOnBatchFinished();
         const kind = endKind(payload);
         batchEnded(kind, uiStatusText(payload.status));
@@ -1143,7 +1264,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // The upcoming "fast-forwarding to clip 1" toast carries the same
       // title plus more detail — skip this one so they don't double up,
       // when that notification is actually on to cover it.
-      if (isNotificationEnabled('between_clips')) return;
+      if (isNotificationEnabled('between_clips') || isObsTestBatch()) return;
       notify(
         'demo_loading',
         STRINGS.NOTIFICATIONS.demoLoadingTitle(payload.index, payload.total),
@@ -1161,6 +1282,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // clip 1 too (see the demo-loading listener's own suppression above).
   if (!unlistenFastForwardToClip) {
     listen('capture_fast_forward_to_clip', (event) => {
+      if (isObsTestBatch()) return;
       const payload = event.payload || {};
       notify(
         'between_clips',
@@ -1279,121 +1401,19 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     // source_streak_indices back to these exact live streak objects — the
     // backend preserves this array's order, so index N here is index N there.
     const sessionId = generateSessionId();
+    const settings = batchSettingsPayload(state);
+    if (!settings) return null;
     lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths };
-
-    const captureFpsVal = numberField('#config-capture-fps', 120, { integer: true, positive: true });
-    const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
-    // Empty is 0, "the same as Capture FPS" — resolved by the backend.
-    const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
-    const preRollVal = numberField('#config-pre-roll', 5.0);
-    const postRollVal = numberField('#config-post-roll', 1.0);
-    const recordStartLeadVal = numberField('#config-record-start-lead', 5.0);
-    const recordStopTrailVal = numberField('#config-record-stop-trail', 5.0);
-    const initialDelayVal = numberField('#config-initial-delay', 3.0);
-    // The fast-forward step (`host_framerate`), not a setting: batches skip to
-    // each clip, and fast-forward is only the fallback.
-    const fastForwardSpeedVal = getFastForwardStep();
-
-    const hlaePathVal = document.querySelector("#hlae-path-input")?.value?.trim() || "";
-    const hlPathVal = document.querySelector("#hl-path-input")?.value?.trim() || "";
-    const ffmpegOverridePathVal = document.querySelector("#ffmpeg-override-path-input")?.value?.trim() || null;
-    const goldsrcHooksDllPathVal = document.querySelector("#goldsrc-hooks-dll-path-input")?.value?.trim() || null;
-
-    const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
-    const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
-    // `?? true` not `|| false`: a missing element must not silently disable
-    // the flush, since nothing in the captured video would show that it had.
-    const decalFlushVal = document.querySelector("#config-decal-flush")?.checked ?? true;
-    // The mode select is the authority; `ffmpeg_capture` is derived from it so
-    // the payload cannot describe two modes at once. The backend reconciles
-    // both fields again in `normalise_capture_mode`, which is what keeps an
-    // older frontend working against this build.
-    const captureModeVal = document.querySelector("#config-capture-mode")?.value || "frame_sequence";
     // The finish step (#440) picks its codec by the mode this batch used.
-    lastDispatch.captureMode = captureModeVal;
-    const ffmpegCaptureVal = captureModeVal === "direct_to_video";
-    const ffmpegCaptureCodecVal = document.querySelector("#config-capture-codec")?.value || "utvideo";
-    const obsHostVal = document.querySelector("#config-obs-host")?.value?.trim() || "127.0.0.1";
-    const obsPortVal = parseInt(document.querySelector("#config-obs-port")?.value, 10) || 4455;
-    const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
-    const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
-    const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked ?? true;
-    const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
-
-    const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;
-    const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
-    const autoClearTempDemosVal = document.querySelector("#config-auto-clear-temp-demos")?.checked || false;
-
-    if (!hlaePathVal || !hlPathVal) {
-      showToast(STRINGS.CAPTURE.BOTH_PATHS_REQUIRED, 'error');
-      return null;
-    }
-
-    // capture_directories is the physical BMP/patched-demo output pool —
-    // native/src/patch/builder.rs routes capture output there and
-    // capture_engine.rs mklinks a junction per entry. It must be actual
-    // output directories, NEVER state.scanPaths (the demo *source* files
-    // the user added for scanning); mklinking a junction against a .dem
-    // file aborts the batch. Sourced from Capture Output — required, no
-    // fallback.
-    const outputDrivePool = (state.targetDrives || []).filter(Boolean);
-
-    if (outputDrivePool.length === 0) {
-      showToast(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR, 'error');
-      return null;
-    }
-
-    // Blank rows (added via "+ Add" but never filled in) are dropped rather
-    // than sent as no-op console commands.
-    const initCommandsPayload = initCommands.map(c => c.trim()).filter(c => c.length > 0);
-    const customCommandsPayload = customCommands
-      .filter(c => c.command && c.command.trim().length > 0)
-      .map(c => ({
-        command: c.command.trim(),
-        relation: c.relation === 'After' ? 'After' : 'Before',
-        offset_seconds: c.offsetSeconds,
-      }));
-
+    lastDispatch.captureMode = settings.capture_mode;
     return {
-      hlae_path: hlaePathVal,
-      game_path: hlPathVal,
-      ffmpeg_override_path: ffmpegOverridePathVal,
-      goldsrc_hooks_dll_path: goldsrcHooksDllPathVal,
-      resolution_width: resWidthVal,
-      resolution_height: resHeightVal,
-      decal_flush: decalFlushVal,
-      ffmpeg_capture: ffmpegCaptureVal,
-      ffmpeg_capture_codec: ffmpegCaptureCodecVal,
-      capture_mode: captureModeVal,
-      obs_host: obsHostVal,
-      obs_port: obsPortVal,
-      obs_password: obsPasswordVal,
-      obs_recording_quality: document.querySelector('#config-obs-recording-quality')?.value || '',
-      save_local_patched_copy: saveLocalPatchedCopyVal,
-      hook_runs_batch: hookRunsBatchVal,
-      keep_game_behind: keepGameBehindVal,
+      ...settings,
       streaks: selectedStreaks,
       // Recorded in the batch's manifest, so a batch that outlives Studio can
       // still be mapped back to these highlights when it reopens (#545).
       streak_uids: selectedStreaks.map((streak, i) => streakUid(selectedDemoPaths[i], streak)),
       project_path: state.projectPath || null,
-      pre_roll_seconds: preRollVal,
-      post_roll_seconds: postRollVal,
-      capture_directories: outputDrivePool,
-      capture_fps: captureFpsVal,
-      obs_capture_fps: obsCaptureFpsVal,
-      agr_fps: agrFpsVal,
-      drives: state.targetDrives || [],
-      record_start_lead: recordStartLeadVal,
-      record_stop_trail: recordStopTrailVal,
-      initial_delay: initialDelayVal,
-      fast_forward_speed: fastForwardSpeedVal,
-      auto_clear_logs: autoClearLogsVal,
-      auto_clear_previews: autoClearPreviewsVal,
-      auto_clear_temp_demos: autoClearTempDemosVal,
       session_id: sessionId,
-      init_commands: initCommandsPayload,
-      custom_commands: customCommandsPayload,
     };
   }
 

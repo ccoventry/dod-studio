@@ -3315,4 +3315,89 @@ export const STRINGS = {
     PATH_IS_A_FOLDER: 'That is a folder, not the program itself.',
     wrongExe: (found, expected) => `That is ${found}, not ${expected}. Pick ${expected}.`,
   },
+  // ── OBS capture test (#646, obs_capture_test.js) ──────────────────────────
+  OBS_TEST: {
+    TEST_BUTTON: 'Test OBS capture',
+    TEST_BUTTON_TITLE:
+        "Records about a minute of a demo that comes with DoD Studio, through a normal batch at your OBS Capture FPS and OBS Quality, then says whether this PC keeps up: frames OBS skipped or missed, frames the game didn't draw in time, and whether the clip has sound. The game opens for about a minute and a half; the clip is deleted afterwards.",
+    LADDER_BUTTON: 'Find my highest steady FPS',
+    LADDER_BUTTON_TITLE:
+        'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. On the bundled demo it recommends one step below that, for maps that are busier to encode. About a minute and a half per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
+    LONG_LABEL: '1-minute clips',
+    LONG_TITLE: 'Longer clips catch a PC that slows down as it warms up. Each rate takes about 40 s longer.',
+    STOP_BUTTON: 'Stop test',
+    DEMO_LABEL: 'Test demo:',
+    DEMO_BUNDLED: 'the one that comes with DoD Studio',
+    DEMO_PICK: 'Use another demo…',
+    DEMO_PICK_TITLE: "Test on one of your own demos instead: the test records the stretch of it with the most kills. A real match's own lag shows up as repeated frames, so the bundled demo's result is the fairer one.",
+    DEMO_RESET: 'Use the bundled demo',
+    DEMO_DIALOG_TITLE: 'Pick a demo for the OBS capture test',
+    DEMO_NOTE:
+        "The test plays a stretch of a real 6v6 match on dod_anzio, with grenades and fights, recorded without lag. A map with more detail on screen gives OBS's encoder more to do: if you play other maps, test one of your own demos too.",
+    // Step lines, each shown while that step runs.
+    CHECKING_OBS: 'Checking OBS…',
+    CHECKING_GAME: 'Checking the game is closed…',
+    PREPARING_CLIP: 'Getting the test clip ready…',
+    ladderStep: (n, total, rate) => `Rate ${n} of up to ${total}, ${rate} fps. `,
+    recording: (rate, status) => `Capturing at ${rate} fps: ${status || 'starting…'}`,
+    // No count until the clip's frame total is known, rather than "frame 0 of 0".
+    readingClip: (done, total) => (total > 0
+      ? `Reading the clip: frame ${done.toLocaleString()} of ${total.toLocaleString()}`
+      : 'Reading the clip…'),
+    DELETING: 'Deleting the test clip…',
+    RESTORING: 'Putting OBS back to your OBS Capture FPS…',
+    // Results.
+    LEVEL_STEADY: 'Sustainable',
+    LEVEL_BORDERLINE: 'Borderline',
+    LEVEL_NOT_STEADY: 'Not sustainable',
+    CAUSE_ENCODER: "OBS's encoder couldn't keep up",
+    CAUSE_RENDERING: "OBS's rendering couldn't keep up",
+    CAUSE_GAME: "the game didn't draw new frames fast enough",
+    verdictLine: (rate, level, quality) => `${rate} fps at OBS Quality ${quality}: ${level}.`,
+    causeLine: (cause) => `What lost frames: ${cause}.`,
+    numbersLine: (skipped, missed, repeated) =>
+        `${skipped} skipped by OBS's encoder, ${missed} missed by OBS's rendering, ${repeated} of the moving frames repeated in the file (the game late, or OBS filling in a skipped frame).`,
+    adviceFps: (rate) => `Change one setting: lower OBS Capture FPS to ${rate}.`,
+    adviceQuality: (quality) => `Change one setting: lower OBS Quality to ${quality}, or lower OBS Capture FPS.`,
+    ADVICE_NONE: 'Nothing to change: OBS kept every frame.',
+    gameLine: (avg, low1, low01, slower, rate) =>
+        `The game itself: ${avg} fps average, 1% low ${low1} fps, 0.1% low ${low01} fps; ${slower} of its frames took longer than one ${rate} fps frame.`,
+    GAME_UNMEASURED: "The game's own frame rate wasn't measured: the hook DLL in use is older than this test.",
+    soundOk: (peak) => `Sound: present, loudest moment ${peak} dB.`,
+    SOUND_MISSING: "Sound: the clip has no sound track. Check OBS's [DoD-Studio] Game Audio source.",
+    SOUND_SILENT: "Sound: the clip is silent. Check that OBS's [DoD-Studio] Game Audio source isn't muted.",
+    COUNTERS_UNREAD: "OBS's own frame counters couldn't be read, so only the clip itself was checked.",
+    ladderBest: (best, recommended, quality) =>
+        `Steady up to ${best} fps at OBS Quality ${quality} on this demo. Recommended: ${recommended} fps (one step lower, for busier maps).`,
+    ladderBestEdge: (rate, quality) =>
+        `Steady only at ${rate} fps at OBS Quality ${quality} on this demo. Recommended: ${rate} fps, but it's at the edge: busier maps may not hold it.`,
+    ladderBestOwn: (rate, quality) =>
+        `Steady up to ${rate} fps at OBS Quality ${quality} on your demo (its busiest stretch). Recommended: ${rate} fps.`,
+    LADDER_MARGIN_WHY:
+        "Why lower: the bundled demo is lighter to encode than maps with more detail (on an RTX 3070 Ti it held 200 fps at High, where a dod_harrington match failed at 165). Test one of your own demos for a tighter number.",
+    LADDER_NONE: 'No rate held steady, not even 60 fps.',
+    ladderFirstFail: (rate, level, cause) => `${rate} fps: ${level}, ${cause}.`,
+    ladderAllPassed: (rate) => `Every rate up to ${rate} fps held.`,
+    applyButton: (rate) => `Use ${rate} fps`,
+    APPLY_TITLE: 'Sets OBS Capture FPS to this rate.',
+    applied: (rate) => `OBS Capture FPS is now ${rate}.`,
+    COL_FPS: 'OBS FPS',
+    COL_RESULT: 'Result',
+    COL_SKIPPED: 'Skipped (encoder)',
+    COL_MISSED: 'Missed (rendering)',
+    COL_REPEATED: 'Repeated',
+    COL_GAME: 'Game fps (1% low)',
+    COL_SOUND: 'Sound',
+    SOUND_CELL_OK: 'yes',
+    SOUND_CELL_MISSING: 'none',
+    SOUND_CELL_SILENT: 'silent',
+    // Refusals and endings.
+    BATCH_RUNNING: 'A capture batch is running. Test OBS once it has finished.',
+    GAME_OPEN: 'Close the game first: the test starts its own.',
+    OBS_NOT_CONNECTED: "OBS isn't reachable. Check the OBS Connection settings above, then test again.",
+    NO_TAKE: "OBS recorded nothing for the test clip. Check OBS's own window for why.",
+    batchEnded: (status) => `The test clip's batch ended without a clip: ${status}`,
+    failed: (err) => `The test stopped: ${err}`,
+    STOPPED: 'Test stopped.',
+  },
 };

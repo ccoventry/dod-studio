@@ -10,6 +10,7 @@ import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsSta
 import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
+import { createObsCaptureTest } from './obs_capture_test.js';
 import { initTakeCleanup } from './take_cleanup.js';
 import { initRenderWhileCapturing } from './render_while_capturing.js';
 import { initAuditorPane } from './auditor_pane.js';
@@ -66,9 +67,8 @@ import { createDemoDrop } from './demo_drop.js';
 import { createPlayersUi } from './players_ui.js';
 import { getGameFolder } from './game_folder_ui.js';
 
-// Registered at module load, before DOMContentLoaded — so it's catching
-// from the earliest possible moment, not just once the app's own init
-// logic gets around to it.
+// Registered at module load, before DOMContentLoaded, so it catches errors
+// from the earliest moment, not only once the app's own init gets to it.
 initErrorReporter();
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -180,8 +180,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
 
-  // Capture Locations (doubles as Render Studio's scan input) and Render
-  // Studio's Export Drives: folder_pools.js.
+  // Capture Locations (also Render Studio's scan input) and Export Drives: folder_pools.js.
   const folderPools = createFolderPools({
     getDemos: () => currentScannedDemos,
     persist: () => persistAppSettings(),
@@ -391,6 +390,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     currentScannedDemos,
     projectPath: projectSession.currentPath(),
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, folderPools.updateExportPoolIndicator, captureDemosReady);
+  createObsCaptureTest({ getState: () => ({ targetDrives: folderPools.targetDrives() }), persist: () => persistAppSettings() });
   // Saving, renaming or deleting a profile changes its name in the capture
   // summary strip without touching a field the strip listens to.
   initCommandProfiles({

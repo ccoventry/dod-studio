@@ -1106,7 +1106,17 @@ fn finish_batch(
         }),
     );
     if let Some(report) = report {
-        let _ = app.emit("capture_takes_verified", report.payload);
+        // An OBS capture test's clip (#646) is the test's alone: it must not
+        // mark highlights captured, fill Last Batch or start Finish clips.
+        let test = report.payload["session_id"]
+            .as_str()
+            .is_some_and(crate::obs_test_manager::is_test_session);
+        let event = if test {
+            "obs_test_takes_verified"
+        } else {
+            "capture_takes_verified"
+        };
+        let _ = app.emit(event, report.payload);
     }
 }
 
