@@ -10,6 +10,10 @@
 //! the install, and `-game`/`-w`/`-h` are on its command line because HLAE
 //! starts `hl.exe` with the `-cmdLine` text. That works for a game started in an
 //! earlier Studio session too, with nothing to record.
+//!
+//! The hook DLL is the exception: HLAE passes it on its own command line and
+//! exits, so the game's module list says which file it was and the id baked
+//! into the DLL says which build (`sys::hook_build`, #1143).
 
 use serde::Serialize;
 use std::path::PathBuf;
@@ -32,6 +36,26 @@ pub struct LaunchSettings {
     pub goldsrc_hooks_dll: Option<PathBuf>,
 }
 
+/// A DoD Studio hook DLL: its path and the build id baked into it
+/// (`sys::hook_build`), `None` for a build from before ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookDll {
+    pub path: PathBuf,
+    pub build: Option<String>,
+}
+
+/// The hook DLL a running game has loaded.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum LoadedHook {
+    /// Its modules or the DLL's image could not be read. The default, so a
+    /// game nobody looked at is never taken to have the right DLL.
+    #[default]
+    Unreadable,
+    /// It has none: started by something other than DoD Studio.
+    Absent,
+    Loaded(HookDll),
+}
+
 /// A launch setting the running game differs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +66,13 @@ pub enum LaunchDifference {
     Resolution,
     /// It runs another game folder (`-game`, #402).
     GameFolder,
+    /// It has the hook DLL from another path (#1143).
+    HookDll,
+    /// It has another build of the hook DLL at the same path: the file was
+    /// replaced while the game ran (#1143).
+    HookBuild,
+    /// Which hook DLL it has could not be read (#1143).
+    HookUnreadable,
 }
 
 /// One side of a mismatch, as the frontend words it.
@@ -56,6 +87,13 @@ pub struct GameLaunch {
     pub height: Option<i32>,
     /// `-game`'s folder, when it can be read.
     pub game_folder: Option<String>,
+    /// The hook DLL's path, when it is known and Studio launches with one.
+    pub hook_dll: Option<String>,
+    /// The hook DLL's folder name, or its whole folder when both sides'
+    /// folder names are the same, as `install` is worded.
+    pub hook_label: Option<String>,
+    /// The hook DLL's build id, `None` for a build from before ids.
+    pub hook_build: Option<String>,
 }
 
 /// Whether a game is running, and whether it was started with the launch
@@ -86,6 +124,8 @@ pub struct RunningGame {
     pub exe: Option<String>,
     /// Its command line, one argument per entry.
     pub cmd: Vec<String>,
+    /// The hook DLL it has loaded; read only when Studio launches with one.
+    pub hook: LoadedHook,
 }
 
 /// Whether a game is running now, and whether it was started with `want`.
@@ -98,26 +138,57 @@ pub fn check_running_game(want: &LaunchSettings) -> RunningGameCheck {
             .map(|c| c.to_string_lossy().into_owned())
             .unwrap_or_else(|_| p.to_string())
     };
+    let canonical_hook = |dll: HookDll| HookDll {
+        path: PathBuf::from(canonical(&dll.path.to_string_lossy())),
+        ..dll
+    };
     let want = LaunchSettings {
         game_path: canonical(&want.game_path),
         ..want.clone()
     };
-    let games: Vec<RunningGame> = crate::sys::process::running_games()
+    let games = crate::sys::process::running_games();
+    if games.is_empty() {
+        return RunningGameCheck::None;
+    }
+    // Read once, and only with a game to compare it against.
+    let want_hook = want
+        .goldsrc_hooks_dll
+        .as_deref()
+        .map(|path| canonical_hook(crate::sys::hook_build::hook_on_disk(path)));
+    let games: Vec<RunningGame> = games
         .into_iter()
-        .map(|g| RunningGame {
-            exe: g.exe.as_deref().map(canonical),
-            ..g
+        .map(|g| {
+            let hook = match &want_hook {
+                Some(_) => match crate::sys::hook_build::loaded_hook(
+                    g.pid,
+                    crate::patch::batch_reuse::HOOK_DLL_NAME,
+                ) {
+                    LoadedHook::Loaded(dll) => LoadedHook::Loaded(canonical_hook(dll)),
+                    other => other,
+                },
+                None => LoadedHook::default(),
+            };
+            RunningGame {
+                exe: g.exe.as_deref().map(canonical),
+                hook,
+                ..g
+            }
         })
         .collect();
-    check(&want, &games)
+    check(&want, want_hook.as_ref(), &games)
 }
 
 /// The answer for `games`: the first one started with `want` is reused, and
-/// only when none was does the first one count as a mismatch.
-pub fn check(want: &LaunchSettings, games: &[RunningGame]) -> RunningGameCheck {
+/// only when none was does the first one count as a mismatch. `want_hook`:
+/// the hook DLL Studio launches with and its build, read off disk.
+pub fn check(
+    want: &LaunchSettings,
+    want_hook: Option<&HookDll>,
+    games: &[RunningGame],
+) -> RunningGameCheck {
     let mut first_mismatch = None;
     for game in games {
-        match compare(want, game) {
+        match compare(want, want_hook, game) {
             RunningGameCheck::Match { pid } => return RunningGameCheck::Match { pid },
             mismatch if first_mismatch.is_none() => first_mismatch = Some(mismatch),
             _ => {}
@@ -129,19 +200,23 @@ pub fn check(want: &LaunchSettings, games: &[RunningGame]) -> RunningGameCheck {
 /// Compares one running game against `want`. A setting that can't be read off
 /// the game (no image path, no `-w`/`-h` because something other than Studio
 /// started it) is not counted as different: those games reach the reuse
-/// paths' existing "not started by DoD Studio" handling instead.
-pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
+/// paths' existing "not started by DoD Studio" handling instead; so is a
+/// game with no hook DLL. The hook DLL is compared only when Studio launches
+/// with one (`want_hook`: the file `goldsrc_hooks_dll` names, read off disk).
+pub fn compare(
+    want: &LaunchSettings,
+    want_hook: Option<&HookDll>,
+    game: &RunningGame,
+) -> RunningGameCheck {
     let LaunchSettings {
         game_path,
         game_folder,
         width,
         height,
-        // Not compared: HLAE passes the hook DLLs as `-hookDllPath` on its own
-        // command line and exits seconds after injecting them
-        // (docs/hlae_protocols.md), so by now only `hl.exe`'s loaded-module
-        // list holds them, which needs Windows API calls `native` does not
-        // make. A changed hook DLL is not detected.
+        // Not compared: a game without HLAE is left to the reuse paths
+        // (`batch_reuse`), and which HLAE build injected it can't be told.
         afx_hook_dll: _,
+        // Compared through `want_hook`, which carries its build as well.
         goldsrc_hooks_dll: _,
     } = want;
 
@@ -166,12 +241,31 @@ pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
     {
         differs.push(LaunchDifference::GameFolder);
     }
+    if let Some(difference) = hook_difference(want_hook, &game.hook) {
+        differs.push(difference);
+    }
 
     if differs.is_empty() {
         return RunningGameCheck::Match { pid: game.pid };
     }
     let running_exe = running_exe.unwrap_or_default();
     let (running_install, wanted_install) = install_labels(&running_exe, game_path);
+    let running_hook = match (want_hook, &game.hook) {
+        (Some(_), LoadedHook::Loaded(dll)) => Some(dll),
+        _ => None,
+    };
+    let path_text = |dll: &HookDll| clean_path(&dll.path.to_string_lossy());
+    let (running_hook_label, wanted_hook_label) = match (running_hook, want_hook) {
+        (Some(running), Some(wanted)) => {
+            let (r, w) = install_labels(&path_text(running), &path_text(wanted));
+            (Some(r), Some(w))
+        }
+        (None, Some(wanted)) => {
+            let (w, _) = install_labels(&path_text(wanted), "");
+            (None, Some(w))
+        }
+        _ => (None, None),
+    };
     RunningGameCheck::Mismatch {
         pid: game.pid,
         running: GameLaunch {
@@ -180,6 +274,9 @@ pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
             width: running_size.map(|s| s.0),
             height: running_size.map(|s| s.1),
             game_folder: running_folder,
+            hook_dll: running_hook.map(path_text),
+            hook_label: running_hook_label,
+            hook_build: running_hook.and_then(|d| d.build.clone()),
         },
         wanted: GameLaunch {
             install: wanted_install,
@@ -187,8 +284,33 @@ pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
             width: Some(*width),
             height: Some(*height),
             game_folder: Some(game_folder.clone()),
+            hook_dll: want_hook.map(path_text),
+            hook_label: wanted_hook_label,
+            hook_build: want_hook.and_then(|d| d.build.clone()),
         },
         differs,
+    }
+}
+
+/// How the game's hook DLL differs from the one Studio launches with, if it
+/// does. Two builds from before ids (both `None`) count as the same: nothing
+/// but the path tells them apart.
+fn hook_difference(want: Option<&HookDll>, loaded: &LoadedHook) -> Option<LaunchDifference> {
+    let want = want?;
+    match loaded {
+        LoadedHook::Absent => None,
+        LoadedHook::Unreadable => Some(LaunchDifference::HookUnreadable),
+        LoadedHook::Loaded(dll) => {
+            let same_path = normalise_path(&dll.path.to_string_lossy())
+                == normalise_path(&want.path.to_string_lossy());
+            if !same_path {
+                Some(LaunchDifference::HookDll)
+            } else if dll.build != want.build {
+                Some(LaunchDifference::HookBuild)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -325,13 +447,14 @@ mod tests {
             pid,
             exe: Some(exe.to_string()),
             cmd,
+            hook: LoadedHook::Absent,
         }
     }
 
     #[test]
     fn the_same_install_and_resolution_is_reused() {
         assert_eq!(
-            compare(&want(PRE, 1920, 1080), &game(7, PRE, 1920, 1080)),
+            compare(&want(PRE, 1920, 1080), None, &game(7, PRE, 1920, 1080)),
             RunningGameCheck::Match { pid: 7 }
         );
     }
@@ -341,13 +464,13 @@ mod tests {
         let typed = "c:/games/half-life - pre-anniversary for movies/HL.EXE";
         let mut running = game(7, &format!(r"\\?\{PRE}"), 1920, 1080);
         assert_eq!(
-            compare(&want(typed, 1920, 1080), &running),
+            compare(&want(typed, 1920, 1080), None, &running),
             RunningGameCheck::Match { pid: 7 }
         );
         running.exe = Some(format!("\"{PRE}\""));
         let doubled = PRE.replace('\\', r"\\");
         assert_eq!(
-            compare(&want(&doubled, 1920, 1080), &running),
+            compare(&want(&doubled, 1920, 1080), None, &running),
             RunningGameCheck::Match { pid: 7 }
         );
     }
@@ -359,7 +482,7 @@ mod tests {
             running,
             wanted,
             differs,
-        } = compare(&want(POST, 3440, 1440), &game(7, PRE, 1920, 1080))
+        } = compare(&want(POST, 3440, 1440), None, &game(7, PRE, 1920, 1080))
         else {
             panic!("expected a mismatch");
         };
@@ -390,7 +513,7 @@ mod tests {
             wanted,
             differs,
             ..
-        } = compare(&want(PRE, 1920, 1080), &running)
+        } = compare(&want(PRE, 1920, 1080), None, &running)
         else {
             panic!("expected a mismatch");
         };
@@ -406,7 +529,7 @@ mod tests {
             }
         }
         assert_eq!(
-            compare(&want(PRE, 1920, 1080), &upper),
+            compare(&want(PRE, 1920, 1080), None, &upper),
             RunningGameCheck::Match { pid: 8 }
         );
     }
@@ -427,7 +550,7 @@ mod tests {
 
     #[test]
     fn a_resolution_change_alone_is_a_mismatch() {
-        let check = compare(&want(PRE, 2560, 1440), &game(7, PRE, 1920, 1080));
+        let check = compare(&want(PRE, 2560, 1440), None, &game(7, PRE, 1920, 1080));
         assert!(matches!(
             check,
             RunningGameCheck::Mismatch { ref differs, .. } if differs == &[LaunchDifference::Resolution]
@@ -492,9 +615,10 @@ mod tests {
             pid: 3,
             exe: Some(PRE.to_string()),
             cmd: vec![PRE.to_string(), "-game".into(), "dod".into()],
+            hook: LoadedHook::Absent,
         };
         assert_eq!(
-            compare(&want(PRE, 1920, 1080), &steam_started),
+            compare(&want(PRE, 1920, 1080), None, &steam_started),
             RunningGameCheck::Match { pid: 3 }
         );
         let unreadable = RunningGame {
@@ -502,7 +626,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            compare(&want(PRE, 1920, 1080), &unreadable),
+            compare(&want(PRE, 1920, 1080), None, &unreadable),
             RunningGameCheck::Match { pid: 4 }
         );
     }
@@ -512,11 +636,11 @@ mod tests {
         let mut running = game(5, PRE, 1920, 1080);
         running.exe = None;
         assert!(matches!(
-            compare(&want(POST, 1920, 1080), &running),
+            compare(&want(POST, 1920, 1080), None, &running),
             RunningGameCheck::Mismatch { ref differs, .. } if differs == &[LaunchDifference::Install]
         ));
         assert_eq!(
-            compare(&want(PRE, 1920, 1080), &running),
+            compare(&want(PRE, 1920, 1080), None, &running),
             RunningGameCheck::Match { pid: 5 }
         );
     }
@@ -524,12 +648,12 @@ mod tests {
     #[test]
     fn a_matching_game_wins_over_a_mismatched_one() {
         let w = want(PRE, 1920, 1080);
-        assert_eq!(check(&w, &[]), RunningGameCheck::None);
+        assert_eq!(check(&w, None, &[]), RunningGameCheck::None);
         let games = [game(1, POST, 1920, 1080), game(2, PRE, 1920, 1080)];
-        assert_eq!(check(&w, &games), RunningGameCheck::Match { pid: 2 });
+        assert_eq!(check(&w, None, &games), RunningGameCheck::Match { pid: 2 });
         let games = [game(1, POST, 1920, 1080), game(2, POST, 800, 600)];
         assert!(matches!(
-            check(&w, &games),
+            check(&w, None, &games),
             RunningGameCheck::Mismatch { pid: 1, .. }
         ));
     }
@@ -554,16 +678,152 @@ mod tests {
             pid: 9,
             exe: Some(PRE.to_string()),
             cmd: vec![PRE.to_string(), args[at + 1].clone()],
+            hook: LoadedHook::Absent,
         };
         assert_eq!(
-            compare(&cfg.launch_settings(), &running),
+            compare(&cfg.launch_settings(), None, &running),
             RunningGameCheck::Match { pid: 9 }
         );
         let mut other = cfg.clone();
         other.resolution_width = 1920;
         assert!(matches!(
-            compare(&other.launch_settings(), &running),
+            compare(&other.launch_settings(), None, &running),
             RunningGameCheck::Mismatch { .. }
         ));
+    }
+
+    const HOOK_A: &str = r"C:\Repos\dod-studio\local\test-660\dodstudio_goldsrc_hooks.dll";
+    const HOOK_B: &str = r"C:\Repos\dod-studio\local\test-660b\dodstudio_goldsrc_hooks.dll";
+
+    fn hook(path: &str, build: Option<&str>) -> HookDll {
+        HookDll {
+            path: PathBuf::from(path),
+            build: build.map(String::from),
+        }
+    }
+
+    fn game_with_hook(loaded: LoadedHook) -> RunningGame {
+        RunningGame {
+            hook: loaded,
+            ..game(7, PRE, 1920, 1080)
+        }
+    }
+
+    fn differs_with_hook(want_hook: &HookDll, loaded: LoadedHook) -> Vec<LaunchDifference> {
+        match compare(
+            &want(PRE, 1920, 1080),
+            Some(want_hook),
+            &game_with_hook(loaded),
+        ) {
+            RunningGameCheck::Mismatch { differs, .. } => differs,
+            other => panic!("expected a mismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_same_hook_dll_and_build_is_reused_whatever_the_path_spelling() {
+        let typed = HOOK_A.to_lowercase().replace('\\', "/");
+        let loaded = LoadedHook::Loaded(hook(&format!(r"\\?\{HOOK_A}"), Some("0.10.0+abc")));
+        assert_eq!(
+            compare(
+                &want(PRE, 1920, 1080),
+                Some(&hook(&typed, Some("0.10.0+abc"))),
+                &game_with_hook(loaded)
+            ),
+            RunningGameCheck::Match { pid: 7 }
+        );
+    }
+
+    #[test]
+    fn a_hook_dll_from_another_path_is_named_with_both_paths_and_folders() {
+        let loaded = LoadedHook::Loaded(hook(HOOK_A, Some("0.10.0+aaa")));
+        let RunningGameCheck::Mismatch {
+            running,
+            wanted,
+            differs,
+            ..
+        } = compare(
+            &want(PRE, 1920, 1080),
+            Some(&hook(HOOK_B, Some("0.10.0+bbb"))),
+            &game_with_hook(loaded),
+        )
+        else {
+            panic!("expected a mismatch");
+        };
+        assert_eq!(differs, vec![LaunchDifference::HookDll]);
+        assert_eq!(running.hook_dll.as_deref(), Some(HOOK_A));
+        assert_eq!(wanted.hook_dll.as_deref(), Some(HOOK_B));
+        assert_eq!(running.hook_label.as_deref(), Some("test-660"));
+        assert_eq!(wanted.hook_label.as_deref(), Some("test-660b"));
+        assert_eq!(running.hook_build.as_deref(), Some("0.10.0+aaa"));
+        assert_eq!(wanted.hook_build.as_deref(), Some("0.10.0+bbb"));
+    }
+
+    /// The file was renamed away and a new build put at its path while the
+    /// game ran (Windows allows that for a loaded DLL, not an overwrite).
+    #[test]
+    fn another_build_at_the_same_path_is_a_mismatch() {
+        let loaded = LoadedHook::Loaded(hook(HOOK_A, Some("0.10.0+aaa")));
+        assert_eq!(
+            differs_with_hook(&hook(HOOK_A, Some("0.10.0+bbb")), loaded),
+            vec![LaunchDifference::HookBuild]
+        );
+    }
+
+    #[test]
+    fn a_build_without_an_id_differs_from_one_with_an_id() {
+        let old = LoadedHook::Loaded(hook(HOOK_A, None));
+        assert_eq!(
+            differs_with_hook(&hook(HOOK_A, Some("0.10.0+bbb")), old),
+            vec![LaunchDifference::HookBuild]
+        );
+    }
+
+    #[test]
+    fn two_builds_without_ids_at_the_same_path_are_reused() {
+        let old = LoadedHook::Loaded(hook(HOOK_A, None));
+        assert_eq!(
+            compare(
+                &want(PRE, 1920, 1080),
+                Some(&hook(HOOK_A, None)),
+                &game_with_hook(old)
+            ),
+            RunningGameCheck::Match { pid: 7 }
+        );
+    }
+
+    #[test]
+    fn a_game_whose_hook_dll_cannot_be_read_is_not_reused() {
+        assert_eq!(
+            differs_with_hook(&hook(HOOK_A, Some("x")), LoadedHook::Unreadable),
+            vec![LaunchDifference::HookUnreadable]
+        );
+    }
+
+    /// A game Steam started has no hook DLL: left to the reuse paths' "not
+    /// started by DoD Studio" handling, as before #1143.
+    #[test]
+    fn a_game_without_a_hook_dll_is_not_a_hook_difference() {
+        assert_eq!(
+            compare(
+                &want(PRE, 1920, 1080),
+                Some(&hook(HOOK_A, Some("x"))),
+                &game_with_hook(LoadedHook::Absent)
+            ),
+            RunningGameCheck::Match { pid: 7 }
+        );
+    }
+
+    #[test]
+    fn without_a_hook_dll_set_the_game_s_is_not_compared() {
+        for loaded in [
+            LoadedHook::Unreadable,
+            LoadedHook::Loaded(hook(HOOK_A, Some("x"))),
+        ] {
+            assert_eq!(
+                compare(&want(PRE, 1920, 1080), None, &game_with_hook(loaded)),
+                RunningGameCheck::Match { pid: 7 }
+            );
+        }
     }
 }
