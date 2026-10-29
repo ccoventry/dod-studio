@@ -1426,7 +1426,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const sessionId = generateSessionId();
     const settings = batchSettingsPayload(state);
     if (!settings) return null;
-    lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths };
+    // kill_gaps: the take labels name the speed sped-up gaps played at (#831).
+    lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths, kill_gaps: settings.kill_gaps };
     // The finish step (#440) picks its codec by the mode this batch used.
     lastDispatch.captureMode = settings.capture_mode;
     return {
