@@ -673,11 +673,13 @@ export const STRINGS = {
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
     // A clip Cancel cut short (#1081) left a partial take: it isn't missing.
-    takesFoundMissing: (captured, total, cutShort = 0) => {
-      const missing = total - captured - cutShort;
+    // A take whose video stopped early (#1105) is partial too: not missing either.
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly;
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short by Cancel (partial take, not captured)`);
+      if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -2320,7 +2322,10 @@ export const STRINGS = {
       unrenderable: "Captured, can't render yet",
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
+      short: 'Video stops early (partial take, not captured)',
     },
+    // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
+    shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,

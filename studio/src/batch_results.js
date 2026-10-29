@@ -63,8 +63,10 @@ export function resultsOf(payload, dispatch) {
   const blocks = payload?.blocks || [];
   const rows = blocks.map((b) => ({
     label: takeLabel(b, dispatch),
-    // cut_short: a partial take Cancel left on disk (#1081), not a clip.
-    status: b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    // cut_short: a partial take Cancel left on disk (#1081), not a clip;
+    // short: one FFmpeg stopped writing mid-clip (#1105).
+    status: b.short_take ? 'short' : b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    short: b.short_take || null,
     bytes: b.bytes || 0,
     folder: b.take_folder,
   }));
@@ -127,7 +129,9 @@ function render() {
       const tr = document.createElement('tr');
       tr.className = `batch-results-row-${row.status}`;
       const status = document.createElement('td');
-      status.textContent = S.STATUS[row.status];
+      status.textContent = row.short
+        ? S.shortTake(row.short.video_secs, row.short.audio_secs)
+        : S.STATUS[row.status];
       const label = document.createElement('td');
       label.textContent = row.label;
       const size = document.createElement('td');
