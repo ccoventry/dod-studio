@@ -364,6 +364,53 @@ globals: once as a `pfnRegisterVariable` result and once as a
 `pfnGetCvarPointer` lookup. That is not a transcription slip — the client both
 registers them and looks them up again for the enforcement path.
 
+### Fog and atmosphere cvars (#1131)
+
+DoD's own "look" cvars, checked in demo playback on both movie installs
+(POV demos on dod_anzio, Brain account, grabs in `local\review-images\1129\`).
+Defaults and the archive flag come from each `pfnRegisterVariable` call; the
+effect comes from the client code that reads it.
+
+**Fog** is `RenderDoDFog` (`+0x2d410`), run each frame. `cl_fog` picks the mode:
+
+- `0`: no fog. Both movie installs' `config.cfg` set this.
+- `1` (the default): OpenGL linear fog, `glFogi(GL_FOG_MODE, GL_LINEAR)`,
+  from `cl_fog_start` to `cl_fog_end`. Its colour is a **fixed mid grey**
+  (`0.5, 0.5, 0.5`), so `cl_fog_red/green/blue` do nothing here, and
+  `cl_fog_density` does nothing either, since linear fog ignores it. Seen on
+  both builds: `cl_fog 1; cl_fog_start 50; cl_fog_end 900` greys out the far
+  end of a street and the sky. The 25th Anniversary renderer draws it too.
+- `2`: the engine's own fog through `pTriAPI->Fog(colour, start, end, 1)`,
+  the only mode that uses the colour cvars. Nothing showed on the
+  pre-Anniversary build with `cl_fog_end 900` and red colour, or after adding
+  `cl_fog_density`. So the colour cvars are not offered.
+
+The fog stands down when `cl_fog_start` or `cl_fog_end` is below 0, and in some spectator states (`gHUD+0x6e264` >= 3). It is
+also cut while zoomed, through a second cvar lookup at `gHUD+0x6e280`. All
+seven are archived (`config.cfg`). Defaults: `cl_fog 1`, start `10.0`, end
+`3500.0`, density `0.0`, colour `192 192 192`.
+
+**The others**, all accepted in playback with no clamp (the console reads back
+the set value). Their effect is from the code that reads each one; it was not
+checked by eye:
+
+- `cl_weatherdis` (archived, default `1700`): `CDoDParticle::Create`
+  (`+0x4c9b0`) makes no particle farther than this from the player, for the
+  effects created with its distance check. Values under 100 are raised to 100.
+  The variable is next to the weather globals (`g_iWeatherType`, #1129).
+- `cl_bulletejects` (archived, default `1`): the shell-casing ejects in the
+  weapon fire events (`+0x314a2`, `+0x315a2`); 0 skips them.
+- `cl_dynamiclights` (archived, default `1`): checked before each dynamic
+  light the client makes; 0 skips them.
+- `cl_corpsestay` (archived, default `10`): how long a dead body (the
+  `ClCorpse` temp entity, callbacks at `+0x4a30`) lies before it sinks into
+  the ground, in seconds. It is read when the body is made and again each
+  frame.
+- `cl_particlefx` (archived): 0 turns particle effects off; DoD's rain and snow only run at 2 (the weather updater skips below 2, `client+0x4c942`, found in #1129). Both movie installs' `config.cfg` set 1.
+- `room_off` (engine, `hw.dll`): 1 turns off the room reverb (DSP).
+- `max_rubble` (not archived, default `240`): its reader was not traced, so
+  it is not offered.
+
 ---
 
 ## 8. `CHud::Redraw`, in full
