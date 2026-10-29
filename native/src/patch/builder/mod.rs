@@ -746,7 +746,7 @@ pub fn build_batch_queue(
         let mut merged_kill_frames: Vec<Vec<i32>> = Vec::new();
 
         for (current, payload_idx) in streaks.into_iter().zip(streak_payload_indices) {
-            let current_kills = kill_gaps::kill_frames(&current);
+            let current_kills = block_kill_frames(&current);
             if merged_streaks.is_empty() {
                 merged_streaks.push(current);
                 merged_sources.push(vec![payload_idx]);
@@ -1061,24 +1061,48 @@ pub fn build_batch_queue(
             // than indexed with, since allocation may reorder `blocks`.
             // The decal flush is the consumer: it needs the frames that end up
             // in the take, which `start_tick`/`end_tick` are not.
+            // On the clock the hook records on (`viewdemo_clock`), from the
+            // same highlights `runtime_batch` builds it from:
+            // `frame_times_ref` stops at the demo's loading segment and never
+            // reaches a clip's frames.
+            let clock =
+                crate::patch::viewdemo_clock::clock_for(&streak.source_demo, &raw_streaks).ok();
+            // Long gaps between kills, recorded sped up (#831). Inside the
+            // record window by construction: between two of its kills.
+            let ramp_speed = config.kill_gaps.ramp_speed();
+            let ramps = match ramp_speed {
+                Some(_) => kill_gaps::ramps(
+                    &merged_kill_frames[i],
+                    config.kill_gaps.over_seconds,
+                    &kill_gaps::Timeline {
+                        frame_times: frame_times_ref,
+                        fps: demo_fps,
+                        clock: clock.as_ref(),
+                    },
+                    (record_start_tick, r_stop),
+                ),
+                None => Vec::new(),
+            };
             if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
                 block.record_start_tick = record_start_tick;
                 block.record_stop_tick = r_stop;
-                // On the clock the hook records on (`viewdemo_clock`), from
-                // the same highlights `runtime_batch` builds it from:
-                // `frame_times_ref` stops at the demo's loading segment and
-                // never reaches a clip's frames.
-                block.plan =
-                    crate::patch::viewdemo_clock::clock_for(&streak.source_demo, &raw_streaks)
-                        .ok()
-                        .and_then(|clock| {
-                            crate::hlcr::take_plan::plan_for_block(
-                                |tick| clock.seconds(tick),
-                                record_start_tick,
-                                r_stop,
-                                &block_kill_frames(streak),
-                            )
-                        });
+                block.ramped_gaps = ramps.len();
+                // Every kill the block records, the merged highlights' too, so
+                // the check finds any of them outside the video. A ramp makes
+                // the video shorter than the window, which the plan carries.
+                block.plan = clock.as_ref().and_then(|clock| {
+                    let mut plan = crate::hlcr::take_plan::plan_for_block(
+                        |tick| clock.seconds(tick),
+                        record_start_tick,
+                        r_stop,
+                        &merged_kill_frames[i],
+                    )?;
+                    let start = clock.seconds(record_start_tick);
+                    plan.sped_up = kill_gaps::sped_up(&ramps, ramp_speed.unwrap_or(1.0), |tick| {
+                        clock.seconds(tick) - start
+                    });
+                    Some(plan)
+                });
             }
 
             // Custom command overrides
@@ -1220,25 +1244,9 @@ pub fn build_batch_queue(
                 scheduled_commands.push((t, echo_cmd));
             }
 
-            // Long gaps between kills, recorded sped up (#831). Inside the
-            // record window by construction: between two of its kills.
-            if config.kill_gaps.ramp_speed().is_some() {
-                let ramps = kill_gaps::ramps(
-                    &merged_kill_frames[i],
-                    config.kill_gaps.over_seconds,
-                    &kill_gaps::Timeline {
-                        frame_times: frame_times_ref,
-                        fps: demo_fps,
-                    },
-                    (record_start_tick, r_stop),
-                );
-                for ramp in &ramps {
-                    scheduled_commands.push((ramp.on_tick, kill_gaps::RAMP_ON.to_string()));
-                    scheduled_commands.push((ramp.off_tick, kill_gaps::RAMP_OFF.to_string()));
-                }
-                if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
-                    block.ramped_gaps = ramps.len();
-                }
+            for ramp in &ramps {
+                scheduled_commands.push((ramp.on_tick, kill_gaps::RAMP_ON.to_string()));
+                scheduled_commands.push((ramp.off_tick, kill_gaps::RAMP_OFF.to_string()));
             }
 
             // At End Frame (Stage 3)

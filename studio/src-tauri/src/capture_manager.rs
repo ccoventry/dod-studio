@@ -1763,12 +1763,14 @@ pub async fn start_capture_batch_impl(
             let kept = native::patch::builder::kill_gaps::keep_gaps(&mut patch_jobs);
             if kept > 0 {
                 log_markdown(&native::patch::builder::kill_gaps::kept_gaps_message(kept));
-                // The manifest was written before the route was known.
+                // The manifest was written before the route was known, and
+                // its blocks carry the plans the takes are checked against.
                 let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(manifest) = slot.as_mut() {
-                    for block in &mut manifest.blocks {
-                        block.ramped_gaps = 0;
-                    }
+                    manifest
+                        .blocks
+                        .iter_mut()
+                        .for_each(native::patch::builder::kill_gaps::keep_block_gaps);
                 }
             }
         }
@@ -4427,6 +4429,7 @@ mod tests {
         let plan = TakePlan {
             length_secs: 12.5,
             kill_offsets_secs: vec![4.0, 9.0],
+            sped_up: Vec::new(),
         };
         let manifest = CaptureManifest {
             session_id: "session_1".into(),
@@ -4445,6 +4448,7 @@ mod tests {
                         end_tick: 1,
                         record_start_tick: 0,
                         record_stop_tick: 1,
+                        ramped_gaps: 0,
                         plan,
                     },
                 )

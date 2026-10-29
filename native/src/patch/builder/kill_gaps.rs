@@ -14,7 +14,9 @@
 //! the demo player's clock, and a patched demo played with `playdemo` has
 //! none. A batch that ends up patched keeps its gaps ([`keep_gaps`]).
 
-use crate::patch::types::{CaptureStreak, PatchJob};
+use crate::hlcr::take_plan::SpedUp;
+use crate::patch::types::{CaptureBlock, PatchJob};
+use crate::patch::viewdemo_clock::Clock;
 
 use super::timing::{find_tick_backwards, find_tick_forwards};
 
@@ -40,12 +42,22 @@ pub struct Ramp {
 pub(super) struct Timeline<'a> {
     pub frame_times: &'a [f32],
     pub fps: f32,
+    /// The `viewdemo` clock the hook's batch runs on, when the demo's kills
+    /// have its times: it measures a gap between two kills exactly (each
+    /// kill is one of its anchors), where the demo's average frame rate is
+    /// off by the recorder's frame-rate swings.
+    pub clock: Option<&'a Clock<'a>>,
 }
 
 impl Timeline<'_> {
-    /// Seconds of playback between frames `from` and `to`: from the frame
-    /// times when both are in them, else by the demo's fps.
+    /// Seconds between frames `from` and `to`: on the `viewdemo` clock when
+    /// there is one, else from the frame times when both are in them, else
+    /// by the demo's fps.
     fn seconds_between(&self, from: usize, to: usize) -> f32 {
+        if let Some(clock) = self.clock {
+            let tick = |frame: usize| i32::try_from(frame).unwrap_or(i32::MAX);
+            return (clock.seconds(tick(to)) - clock.seconds(tick(from))) as f32;
+        }
         match (self.frame_times.get(from), self.frame_times.get(to)) {
             (Some(a), Some(b)) => b - a,
             _ => {
@@ -54,16 +66,6 @@ impl Timeline<'_> {
             }
         }
     }
-}
-
-/// The frames of the kills `streak` covers (`kills[start_index..=end_index]`).
-pub(super) fn kill_frames(streak: &CaptureStreak) -> Vec<i32> {
-    if streak.kills.is_empty() {
-        return Vec::new();
-    }
-    let end = streak.end_index.min(streak.kills.len() - 1);
-    let start = streak.start_index.min(end);
-    streak.kills[start..=end].iter().map(|k| k.0).collect()
 }
 
 /// The ramps for one take: one per gap longer than `over_seconds` between
@@ -103,6 +105,20 @@ pub(super) fn ramps(
         .collect()
 }
 
+/// `ramps` as the take plan's sped-up stretches (#1084's checks), at
+/// `speed`, where `offset` places a tick in seconds from the recording's
+/// first frame on the clock the batch runs on.
+pub(super) fn sped_up(ramps: &[Ramp], speed: f32, offset: impl Fn(i32) -> f64) -> Vec<SpedUp> {
+    ramps
+        .iter()
+        .map(|ramp| SpedUp {
+            from_secs: offset(ramp.on_tick),
+            to_secs: offset(ramp.off_tick),
+            speed: f64::from(speed),
+        })
+        .collect()
+}
+
 /// Takes every ramp out of `jobs`, for a batch that is patched rather than
 /// run by the hook: there `dem_speed` does nothing, so its gaps are kept.
 /// Returns how many ramps came out; the caller says so in the activity log
@@ -114,11 +130,20 @@ pub fn keep_gaps(jobs: &mut [PatchJob]) -> usize {
         job.scheduled_commands
             .retain(|(_, command)| command != RAMP_ON && command != RAMP_OFF);
         removed += (before - job.scheduled_commands.len()) / 2;
-        for block in &mut job.blocks {
-            block.ramped_gaps = 0;
-        }
+        job.blocks.iter_mut().for_each(keep_block_gaps);
     }
     removed
+}
+
+/// Marks `block` as recorded at real time throughout: no ramped gaps, and a
+/// plan without sped-up stretches, so its take is checked against the full
+/// record window. For a copy of a block made before [`keep_gaps`] ran (the
+/// batch manifest).
+pub fn keep_block_gaps(block: &mut CaptureBlock) {
+    block.ramped_gaps = 0;
+    if let Some(plan) = &mut block.plan {
+        plan.sped_up.clear();
+    }
 }
 
 /// The activity log's line for a patched batch that kept `ramps` gaps it
@@ -141,6 +166,7 @@ mod tests {
         Timeline {
             frame_times: &[],
             fps: 100.0,
+            clock: None,
         }
     }
 
@@ -195,6 +221,7 @@ mod tests {
         let timeline = Timeline {
             frame_times: &times,
             fps: 100.0,
+            clock: None,
         };
         // Kills at 10 s and 30 s.
         let ramps = ramps(&[500, 1500], 8.0, &timeline, (0, 2000));
@@ -214,13 +241,21 @@ mod tests {
     }
 
     #[test]
-    fn kill_frames_are_the_highlights_own_kills() {
-        let mut streak = super::super::tests::streak_with_kills(0, 0, &[10, 20, 30, 40]);
-        streak.start_index = 1;
-        streak.end_index = 2;
-        assert_eq!(kill_frames(&streak), vec![20, 30]);
-        streak.kills.clear();
-        assert!(kill_frames(&streak).is_empty());
+    fn ramps_become_the_plans_sped_up_stretches_from_the_record_start() {
+        let ramps = [Ramp {
+            on_tick: 1200,
+            off_tick: 2600,
+        }];
+        // Recording starts at tick 500, 100 ticks a second.
+        let stretches = sped_up(&ramps, 4.0, |tick| f64::from(tick - 500) / 100.0);
+        assert_eq!(
+            stretches,
+            vec![SpedUp {
+                from_secs: 7.0,
+                to_secs: 21.0,
+                speed: 4.0
+            }]
+        );
     }
 
     #[test]
