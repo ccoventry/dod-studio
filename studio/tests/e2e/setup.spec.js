@@ -1,4 +1,4 @@
-// setup_card.js and setup_window.js — the Capture page's setup checklist and
+// setup_card.js and setup_window.js — the Highlights page's setup checklist and
 // the Setup window (#599).
 //
 // Pins what a new user sees: the card's count and one fix button per row, the

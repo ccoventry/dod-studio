@@ -4,12 +4,11 @@
 // to scroll through. The filter keeps one player's. Pure, so it can be tested
 // on its own.
 
-/** Every player with a highlight of at least `minKills` kills in `demo`:
- *  `[{ name, count }]`, most highlights first, then by name. */
-export function playersOf(demo, minKills = 1) {
+/** Every player with a highlight in `demo`: `[{ name, count }]`, most
+ *  highlights first, then by name. */
+export function playersOf(demo) {
   const counts = new Map();
   for (const s of demo?.streaks || []) {
-    if ((s.kill_count || 0) < minKills) continue;
     const name = s.target_player || '';
     counts.set(name, (counts.get(name) || 0) + 1);
   }

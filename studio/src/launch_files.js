@@ -18,7 +18,7 @@ import { STRINGS } from './strings.js';
 
 export const DEM_TARGETS = ['analyzer', 'queue'];
 
-/** Studio's Capture sub-tab, where the Master Demo Queue is: Studio
+/** Studio's Highlights sub-tab, where the Master Demo Queue is: Studio
  *  otherwise reopens on whichever sub-tab was last shown. */
 export function showCaptureQueue() {
   switchNavTab('workspace');

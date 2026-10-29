@@ -319,6 +319,30 @@ pub fn combine_failed(log: &str) -> String {
     }
 }
 
+// ── hlcr/take_frames.rs (#1069) ───────────────────────────────────────────
+
+pub const TAKE_FRAMES_CANCELLED: &str = "cancelled";
+
+pub fn take_frames_no_stream(stream: &str, take: impl Display) -> String {
+    format!("{take} has no stream folder `{stream}` with frames or a video in it")
+}
+
+pub fn take_frames_no_length(video: impl Display) -> String {
+    format!("FFmpeg can't tell how long {video} is, so no frames were picked")
+}
+
+pub fn take_frames_no_frame(at: &str, source: impl Display) -> String {
+    format!("FFmpeg made no picture at {at} in {source}")
+}
+
+pub fn take_frames_timed_out(secs: u64) -> String {
+    format!("FFmpeg took over {secs} s for one picture and was stopped")
+}
+
+pub fn take_frames_bad_stream_name(stream: &str) -> String {
+    format!("`{stream}` isn't a stream folder name")
+}
+
 // ── demo_rename.rs (#469) ─────────────────────────────────────────────────
 
 pub const RENAME_NOT_IN_PLACE: &str =

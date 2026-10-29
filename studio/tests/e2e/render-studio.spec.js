@@ -936,3 +936,53 @@ test.describe('start-up recovery dialog', () => {
     expect(await invocationsFor(page, 'recover_render_batch')).toEqual([]);
   });
 });
+
+test.describe('take pictures (#1069)', () => {
+  // A 1x1 JPEG is enough for an <img>; the content is never looked at.
+  const PIXEL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+
+  test('each take gets its picture once, and a click shows nine frames across it', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: false });
+      window.__mockInvokeHandlers['take_preview_sheet'] = () => ({
+        kind: 'video',
+        duration_secs: 18,
+        fps: 300,
+        frames: Array.from({ length: 9 }, (_, i) => ({ uri, frame: (2 * i + 1) * 300, secs: 2 * i + 1 })),
+      });
+    }, PIXEL);
+    // A HUD pair: two rows of one take, one picture per stream.
+    await emitSnapshot(page, [
+      job({ id: '0', stream_folder: 'hudColor' }),
+      job({ id: '1', stream: 'hudAlpha', stream_folder: 'hudColor' }),
+      job({ id: '2', name: 'other', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream_folder: 'all' }),
+    ]);
+    await expect(page.locator('tr[data-job-id="2"] img.rj-thumb')).toHaveAttribute('src', PIXEL);
+    await expect(page.locator('tr[data-job-id="0"] img.rj-thumb')).toBeVisible();
+    await expect(page.locator('#render-take-preview-progress')).toBeHidden();
+    expect(await invocationsFor(page, 'take_preview_thumb')).toEqual([
+      { takeFolder: 'C:\\captures\\demo1\\chain_01_b0\\take0000', stream: 'hudColor', fps: 300 },
+      { takeFolder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream: 'all', fps: 300 },
+    ]);
+
+    await page.locator('tr[data-job-id="2"] img.rj-thumb').click();
+    await expect(page.locator('#take-sheet-modal')).toBeVisible();
+    await expect(page.locator('#take-sheet-modal .take-sheet-title')).toHaveText('Take pictures: other');
+    await expect(page.locator('#take-sheet-modal figure')).toHaveCount(9);
+    await expect(page.locator('#take-sheet-modal figcaption').nth(4)).toHaveText('9.0 s · frame 2700');
+    await page.locator('#take-sheet-modal .take-sheet-close').click();
+    await expect(page.locator('#take-sheet-modal')).toBeHidden();
+  });
+
+  test('a take FFmpeg can\'t read shows a dash that says why', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => { throw 'FFmpeg made no picture'; };
+    });
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-cell');
+    await expect(cell).toHaveText('—');
+    await expect(cell).toHaveAttribute('title', 'No picture: FFmpeg made no picture');
+  });
+});

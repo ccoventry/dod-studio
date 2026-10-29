@@ -121,6 +121,30 @@ describe('createCaptureProgress', () => {
     expect(log).toHaveBeenLastCalledWith('[capture] completed after 6 min 12 s: 2 of 2 clip(s) captured');
   });
 
+  it('keeps the hold line on through the clock and later reports', () => {
+    vi.useFakeTimers();
+    let t = 1_000;
+    const statusEl = { textContent: '', title: '' };
+    const progress = createCaptureProgress({ statusEl, container: null, now: () => t });
+
+    progress.update({ running: true, stage: 'capturing', index: 1, total: 4, status: 'Capturing clip 2 of 4 (anzio.dem)' });
+    progress.setRoom({ text: 'Will wait after this clip', replaces: false });
+    expect(statusEl.textContent).toBe('Capturing clip 2 of 4 (anzio.dem) · Will wait after this clip · 0:00');
+
+    // Held: nothing records, so the hold's line is the whole line, through
+    // the clock's redraw and the next clip report alike.
+    progress.setRoom({ text: 'Waiting for renders to free 6 GB for the next clip', replaces: true });
+    t = 11_000;
+    vi.advanceTimersByTime(1000);
+    expect(statusEl.textContent).toBe('Waiting for renders to free 6 GB for the next clip · 0:10');
+    progress.update({ running: true, stage: 'capturing', index: 2, total: 4, status: 'Capturing clip 3 of 4 (anzio.dem)' });
+    expect(statusEl.textContent).toBe('Waiting for renders to free 6 GB for the next clip · 0:10');
+
+    progress.setRoom(null);
+    expect(statusEl.textContent).toBe('Capturing clip 3 of 4 (anzio.dem) · 0:10');
+    progress.end({ running: false, status: 'Complete', clips_captured: 4, clips_total: 4 });
+  });
+
   it('logs nothing for a batch refused before it ran', () => {
     const statusEl = { textContent: '', title: '' };
     const log = vi.fn();

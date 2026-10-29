@@ -105,9 +105,17 @@ export function createCaptureProgress({ statusEl, container, now = () => Date.no
   let shown = 0;
   let line = '';
   let timeLeft = null;
+  // Render While Capturing's hold (#861): `{ text, replaces }`. A batch held
+  // between clips records nothing, so its line replaces the capture's; one
+  // that will hold after this clip adds to it.
+  let room = null;
 
   const draw = () => {
-    if (running) setStatusLine(statusEl, line + timeLeftSuffix(timeLeft, now()) + clock.suffix());
+    if (!running) return;
+    const text = room?.replaces
+      ? room.text
+      : line + timeLeftSuffix(timeLeft, now()) + (room ? ` · ${room.text}` : '');
+    setStatusLine(statusEl, text + clock.suffix());
   };
   const clock = createClock({ redraw: draw, now });
 
@@ -119,6 +127,7 @@ export function createCaptureProgress({ statusEl, container, now = () => Date.no
         running = true;
         shown = 0;
         timeLeft = null;
+        room = null;
         clock.start();
         log(STRINGS.CAPTURE_PROGRESS.startLog());
       }
@@ -135,12 +144,19 @@ export function createCaptureProgress({ statusEl, container, now = () => Date.no
       draw();
     },
 
+    /// Render While Capturing's hold line, or `null` once it's over.
+    setRoom(r) {
+      room = r || null;
+      draw();
+    },
+
     /// The batch ended. Returns how long it ran, in milliseconds.
     end(p) {
       const ms = running ? clock.stop() : 0;
       const wasRunning = running;
       running = false;
       timeLeft = null;
+      room = null;
       clearStepBar(container);
       const fill = container?.querySelector('.progress-bar-fill');
       const kind = endKind(p);
