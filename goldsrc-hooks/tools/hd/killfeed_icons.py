@@ -63,8 +63,9 @@ Per icon (ICONS):
      (the Kar's loose bayonet, a rocket beside a launcher) cleared, the
      render painted over; other pixels stay as sprites_hd.py made them.
 
-Icons with no weapon model of their own (KEEP_UPSCALE: the skull, close-ups
-and composites) keep the #733 upscale.
+Icons with no weapon model to render whole (the skull, the bayonet
+close-ups, the butt stroke, the mortars) are composed from model renders in
+the same look by killfeed_composites.py (#1088).
 
 Resumable and safe to run again: before the first change to a sheet file,
 the upscaled one is kept beside it as `<file>.bak`, and every run paints
@@ -89,9 +90,8 @@ usage: python killfeed_icons.py <sprites out_dir> [--only d_kar,d_mp40]
   --force   repaint even if the record says the sheet is current
   --even    build the even layout's atlas: its HD frames into out_dir, its
             sprite and rect table into --sprite-dir
-  --sheets  with --even: read the HD sheets (for the icons with no model)
-            and the HD model skins next to them from this
-            dodstudio_hd/sprites/<style> instead of out_dir
+  --sheets  with --even: read the HD model skins next to this
+            dodstudio_hd/sprites/<style> instead of out_dir's
   --sprite-dir  with --even: where sprites/dodstudio_killfeed.spr and .txt
             go (default <game>_addon/sprites)
 env: HD_STYLE (default ultrasharp), HD_GAME, HD_GAME_FOLDER, REALESRGAN
@@ -112,7 +112,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
-VERSION = 13  # 13: guards from the v_ models (v_part); 12: the MP40 skin's guard; 11: wires as 1 px lines
+VERSION = 14  # 14: the skull, bayonets, butt stroke and mortars composed (#1088); 13: guards from the v_ models (v_part); 12: the MP40 skin's guard; 11: wires as 1 px lines
 RECORD = "killfeed_icons.json"
 
 # The look the user picked on #850 (d_kar_recommended).
@@ -295,16 +295,13 @@ ICONS = {
     "d_britknife": Icon(("p_fairbairn.mdl",), (), turn=2.5, note="the Fairbairn-Sykes knife; turned: both ends level"),
 }
 
-# Kill-feed icons that keep the #733 upscale, and why.
-KEEP_UPSCALE = {
-    "d_skull": "no weapon (suicide, fall)",
-    "d_world": "no weapon (the world)",
-    "d_bayonet": "a close-up of the Kar's muzzle and bayonet, not a whole weapon",
-    "d_enfbayonet": "a close-up of the Enfield's front with its bayonet",
-    "d_garandbutt": "a cartoon (rifle butt and a face)",
-    "d_mortar": "a composite (mortar, shell and bipod)",
-    "d_germortar": "a composite (mortar, shell and bipod)",
-}
+
+def composites():
+    """killfeed_composites (the kill-feed icons with no weapon model to
+    render whole, #1088), imported on first use: it imports this module."""
+    import killfeed_composites
+    return killfeed_composites
+
 
 # â”€â”€ hud.txt and the stock icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1510,8 +1507,8 @@ def shared_area(entries, name):
     mask = np.zeros((h, w), bool)
     top, bottom = 0, h
     for other, (s2, x2, y2, w2, h2) in entries.items():
-        if other == name or s2 != sheet:
-            continue
+        if other == name or s2 != sheet or (x2, y2, w2, h2) == (x, y, w, h):
+            continue  # an identical rect is the same drawing (d_skull and d_world)
         if name.startswith("d_") and other.startswith("d_") and y2 < y:
             continue  # a kill-feed icon above: the shared rows are this one's
 
@@ -1528,6 +1525,39 @@ def shared_area(entries, name):
     if top >= bottom:
         top, bottom = 0, h
     return mask, top, bottom
+
+
+def best_view(dod, name, icon, target, box, log=print):
+    """The model and side view icon `name` is drawn with: of `icon`'s
+    candidates, the one whose silhouette best overlaps `target` (Valve's
+    icon, stock px) fitted in `box` (stock px), then levelled (guns) and
+    turned as the table says. (tris, IoU, pick, basis, path, clipped
+    triangles), or None when no model reads."""
+    best = None
+    for path in candidates(dod, icon):
+        try:
+            tris = model_triangles(path)
+            tris = [t for t in tris if not any(re.search(r, t[3].name, re.I) for r in icon.skip_tex)]
+        except (OSError, MdlError) as e:
+            log(f"  {name}: {os.path.basename(path)} unreadable ({e}), skipped")
+            continue
+        if not tris:
+            continue
+        cut = None
+        if icon.clip_tip:
+            tris, _, dropped = clip_tip(tris, principal_axes(tris)[0])
+            cut = dropped
+        basis, score, pick = choose_view(tris, target, box, icon.rolls, icon.muzzle)
+        if best is None or score > best[1]:
+            best = (tris, score, pick, basis, path, cut)
+    if best is None:
+        return None
+    tris, score, pick, basis, path, cut = best
+    if not NOT_LEVELLED.search(name):
+        basis, pick = level_view(tris, pick)
+    if icon.turn:
+        basis = turned(basis, icon.turn)
+    return tris, score, pick, basis, path, cut
 
 
 def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_rows=False, layout=None):
@@ -1549,30 +1579,10 @@ def render_icon(dod, name, icon, style, models_dir, scale=4, log=print, _free_ro
     box1 = (xs.min(), top, xs.max() + 1, bottom) if _free_rows else (xs.min(), 0, xs.max() + 1, h)
     m = OUTLINE
     box = (box1[0] * scale + m, box1[1] * scale + m, box1[2] * scale - m, box1[3] * scale - m)
-    best = None
-    for path in candidates(dod, icon):
-        try:
-            tris = model_triangles(path)
-            tris = [t for t in tris if not any(re.search(r, t[3].name, re.I) for r in icon.skip_tex)]
-        except (OSError, MdlError) as e:
-            log(f"  {name}: {os.path.basename(path)} unreadable ({e}), skipped")
-            continue
-        if not tris:
-            continue
-        cut = None
-        if icon.clip_tip:
-            tris, _, dropped = clip_tip(tris, principal_axes(tris)[0])
-            cut = dropped
-        basis, score, pick = choose_view(tris, target, tuple(v / scale for v in box), icon.rolls, icon.muzzle)
-        if best is None or score > best[1]:
-            best = (tris, score, pick, basis, path, cut)
+    best = best_view(dod, name, icon, target, tuple(v / scale for v in box), log)
     if best is None:
         return None, "no model in this install"
     tris, score, pick, basis, path, cut = best
-    if not NOT_LEVELLED.search(name):
-        basis, pick = level_view(tris, pick)
-    if icon.turn:
-        basis = turned(basis, icon.turn)
     textures = sorted({id(t[3]): t[3] for t in tris}.values(), key=lambda t: t.name)
     skins = hd_skins(textures, style, models_dir)
     n_hd = len(skins)
@@ -1770,8 +1780,15 @@ def build(out_dir, only=None, review=None, force=False, log=print):
     hd = os.path.dirname(os.path.dirname(os.path.abspath(out_dir)))
     models_dir = os.path.join(hd, "models", style)
     entries = hud_entries(dod)
-    names = [n for n in killfeed_names(entries) if n in ICONS and (not only or n in only)]
-    unknown = [n for n in killfeed_names(entries) if n not in ICONS and n not in KEEP_UPSCALE]
+    KC = composites()
+    # A rect two names share (d_skull and d_world) is painted once.
+    drawn_rects = set()
+    names = []
+    for n in killfeed_names(entries):
+        if (n in ICONS or n in KC.NAMES) and (not only or n in only) and entries[n] not in drawn_rects:
+            names.append(n)
+            drawn_rects.add(entries[n])
+    unknown = [n for n in killfeed_names(entries) if n not in ICONS and n not in KC.NAMES]
     if unknown:
         log(f"kill-feed icons with no model in the table, left as upscaled: {', '.join(unknown)}")
     by_sheet = {}
@@ -1823,7 +1840,10 @@ def build(out_dir, only=None, review=None, force=False, log=print):
         for n in icons:
             step += 1
             _, x, y, w, h = entries[n]
-            img, info = render_icon(dod, n, ICONS[n], style, models_dir, scale=f, log=log)
+            if n in ICONS:
+                img, info = render_icon(dod, n, ICONS[n], style, models_dir, scale=f, log=log)
+            else:
+                img, info = KC.compose(dod, n, style, models_dir, scale=f, log=log)
             if img is None:
                 log(f"  {n}: {info}, left as upscaled")
             else:
@@ -1831,7 +1851,10 @@ def build(out_dir, only=None, review=None, force=False, log=print):
                 paint(sheet4, (x, y, w, h), stock_alpha, img)
                 painted.append(n)
                 report.append((n, sheet, info))
-                log(f"  {n}: {info['model']}, IoU {info['iou']}, roll {info['roll']}, skin {info['skin']}")
+                if n in ICONS:
+                    log(f"  {n}: {info['model']}, IoU {info['iou']}, roll {info['roll']}, skin {info['skin']}")
+                else:
+                    log(f"  {n}: {info['model']}")
                 if review:
                     os.makedirs(review, exist_ok=True)
                     to_image(img).save(os.path.join(review, f"{n}_new_{f}x.png"))
@@ -1873,7 +1896,7 @@ EVEN_HEIGHT = 26
 EVEN_BARREL_ROW = 8
 # Bump when the even atlas's look or rule changes: a style's atlas built by
 # an older one is built again.
-EVEN_VERSION = 2  # 2: each box trimmed to its icon's visible columns (trim_box)
+EVEN_VERSION = 3  # 3: composed icons and the butt-stroke variants (#1088); 2: each box trimmed to its icon's visible columns (trim_box)
 ATLAS_NAME = "dodstudio_killfeed"
 ATLAS_TABLE_VERSION = 1
 ATLAS_SIZE = 256  # stock px per frame side, as Valve's sheets: 1024 at 4x, gl_max_size 1024 as theirs
@@ -1937,7 +1960,7 @@ def fit_box(img, w, h, height, scale):
 VISIBLE_ALPHA = 4 / 255  # a column with no texel at least this opaque is empty
 
 
-def trim_box(img, size, scale, visible=VISIBLE_ALPHA):
+def trim_box(img, size, scale, visible=VISIBLE_ALPHA, ink=None):
     """A box narrowed to the icon's visible columns, so the kill feed's names
     sit the same distance from every icon's art: `img` (RGBA float at
     `scale`x) of `size` (box w, box h) stock px. The engine draws a box from
@@ -1946,9 +1969,10 @@ def trim_box(img, size, scale, visible=VISIBLE_ALPHA):
     px wider than they are, centred to the HD pixel: at most 3/8 of a stock
     px of slack is left on each side. Rows are untouched (barrel row,
     centring). A box whose art already fills it keeps its size; nothing
-    visible is cut. (rgba, (box w, box h))."""
+    visible is cut. `ink`: the coverage the columns are found in, when not
+    `img`'s own (trim_group). (rgba, (box w, box h))."""
     w, h = size
-    cols = np.nonzero((img[..., 3] >= visible).any(0))[0]
+    cols = np.nonzero(((img[..., 3] if ink is None else ink) >= visible).any(0))[0]
     if not len(cols):
         return img, size
     c0, c1 = int(cols.min()), int(cols.max()) + 1
@@ -1962,17 +1986,14 @@ def trim_box(img, size, scale, visible=VISIBLE_ALPHA):
     return out, (new_w, h)
 
 
-def kept_icon(dod, name, sheet4, scale, height=EVEN_HEIGHT):
-    """A KEEP_UPSCALE icon for the atlas: its own pixels in the HD sheet
-    `sheet4` (RGBA float, `scale`x the stock sheet), a neighbouring icon's
-    bits inside the rect left out as paint() does, in a box `height` rows
-    tall (fit_box)."""
-    sheet, x, y, w, h = hud_rect(dod, name)
-    stock, _, _ = stock_icon(dod, sheet, x, y, w, h)
-    own = ndimage.binary_dilation(own_mask(stock[..., 3]), iterations=1)
-    region = sheet4[y * scale:(y + h) * scale, x * scale:(x + w) * scale].copy()
-    region[..., 3] *= np.kron(own, np.ones((scale, scale)))
-    return fit_box(region, w, h, height, scale)
+def trim_group(imgs, size, scale):
+    """trim_box for icons that must share one box (the butt-stroke variants,
+    which the hook draws on the line laid out for d_garandbutt): every one
+    of `imgs` (same shape, `size`) cut to the columns any of them uses.
+    ([rgba], (box w, box h))."""
+    ink = np.max([im[..., 3] for im in imgs], axis=0)
+    out = [trim_box(im, size, scale, ink=ink) for im in imgs]
+    return [o[0] for o in out], out[0][1]
 
 
 def pack(sizes, frame=ATLAS_SIZE, gap=ATLAS_GAP):
@@ -2059,8 +2080,9 @@ def write_whole(path, data):
 
 def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print):
     """The even layout's atlas for the style in force: every kill-feed icon of
-    the game in its box (even_layout; KEEP_UPSCALE icons from the HD sheets,
-    kept_icon), packed into ATLAS_SIZE frames. Writes the HD frames
+    the game in its box (even_layout; the composed ones, killfeed_composites,
+    in their hud.txt rect fitted to the height, plus the butt stroke's extra
+    variants in one shared box), packed into ATLAS_SIZE frames. Writes the HD frames
     (`<ATLAS_NAME>_<n>_<hash>.tga`) into `out_dir` (dodstudio_hd/sprites/
     <style>), and the sprite and rect table into `sprite_dir` (default
     <game>_addon/sprites). Returns how many icons the atlas holds."""
@@ -2085,23 +2107,14 @@ def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print
         return len(entry.get("icons", []))
 
     entries = hud_entries(dod)
+    KC = composites()
     names = killfeed_names(entries)
-    unknown = [n for n in names if n not in ICONS and n not in KEEP_UPSCALE]
+    unknown = [n for n in names if n not in ICONS and n not in KC.NAMES]
     if unknown:
         log(f"kill-feed icons with no model in the table, left out of the atlas: {', '.join(unknown)}")
     names = [n for n in names if n not in unknown]
-    sheets = {}
-
-    def hd_sheet(sheet):
-        if sheet not in sheets:
-            fw, fh, idx, pal, _ = sheet_frame(dod, sheet)
-            tga = os.path.join(sheets_dir, f"{C.file_stem_name(sheet)}_0_{C.fnv1a32(idx, pal):08x}.tga")
-            src = tga + ".bak" if os.path.exists(tga + ".bak") else tga  # the upscale under the painted icons
-            img = load_rgba(src) if os.path.exists(src) else None
-            if img is not None and (img.shape[1] % fw or img.shape[1] // fw != img.shape[0] // fh):
-                img = None
-            sheets[sheet] = (img, img.shape[1] // fw if img is not None else 0)
-        return sheets[sheet]
+    if KC.BUTT_RECT in names:  # the butt stroke's other variants, beside hud.txt's own (#1088)
+        names += [n for n in KC.BUTT_VARIANTS if n not in names]
 
     imgs, sizes, keys = {}, {}, {}
     for step, n in enumerate(names, 1):
@@ -2115,21 +2128,31 @@ def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print
                 keys[n] = key
                 log(f"  {n}: {info['rect'][0]}x{info['rect'][1]}, {info['k']} px per unit (Valve's {info['k_valve']})")
         else:
-            sheet4, f = hd_sheet(entries[n][0])
-            if sheet4 is None or f != 4:
-                log(f"  {n}: no 4x HD sheet for {entries[n][0]} in {sheets_dir}, left out of the atlas")
-            else:
-                key = "kept " + " ".join(map(str, entries[n]))  # d_skull and d_world are one drawing
-                if key not in imgs:
-                    imgs[key], sizes[key] = kept_icon(dod, n, sheet4, f)
-                keys[n] = key
-                log(f"  {n}: {sizes[key][0]}x{sizes[key][1]}, the #733 upscale ({KEEP_UPSCALE[n]})")
+            rect_name = KC.BUTT_RECT if n in KC.BUTT_VARIANTS else n
+            key = "composed " + " ".join(map(str, hud_rect(dod, rect_name)))  # d_skull and d_world are one drawing
+            if n in KC.BUTT_VARIANTS:
+                key = n
+            if key not in imgs:
+                img, info = KC.compose(dod, n, style, models_dir, scale=4, log=log)
+                if img is None:
+                    log(f"  {n}: {info}, left out of the atlas (the even layout draws Valve's)")
+                    continue
+                _, _, _, w, h = hud_rect(dod, rect_name)
+                imgs[key], sizes[key] = fit_box(img, w, h, EVEN_HEIGHT, 4)
+                log(f"  {n}: {sizes[key][0]}x{sizes[key][1]}, {info['model']}")
+            keys[n] = key
         print(f"@@progress {step} of {len(names)} kill-feed icons", flush=True)
     if not keys:
         log("no kill-feed icon could go into the atlas; nothing written")
         return 0
+    group = [k for k in KC.BUTT_VARIANTS if k in imgs]
+    if len(group) > 1:
+        trimmed, size = trim_group([imgs[k] for k in group], sizes[group[0]], 4)
+        for k, im in zip(group, trimmed):
+            imgs[k], sizes[k] = im, size
     for k in imgs:
-        imgs[k], sizes[k] = trim_box(imgs[k], sizes[k], 4)
+        if k not in group:
+            imgs[k], sizes[k] = trim_box(imgs[k], sizes[k], 4)
 
     spots, count = pack(sizes)
     if count > ATLAS_MAX_FRAMES:

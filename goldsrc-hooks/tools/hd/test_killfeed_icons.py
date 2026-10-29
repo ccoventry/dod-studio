@@ -33,7 +33,7 @@ class TableTest(unittest.TestCase):
             for m in icon.fallback:
                 self.assertTrue(m.startswith("w_") and m.endswith(".mdl"), f"{name}: {m}")
             self.assertTrue(icon.rolls, name)
-        self.assertFalse(set(K.ICONS) & set(K.KEEP_UPSCALE))
+        self.assertFalse(set(K.ICONS) & set(K.composites().NAMES))
 
     def test_covers_every_stock_kill_feed_icon(self):
         # The d_ entries of DoD 1.3's hud.txt, both engine builds.
@@ -43,7 +43,7 @@ class TableTest(unittest.TestCase):
                  "d_mg34", "d_k43", "d_stick", "d_paraknife", "d_gerknife", "d_luger", "d_sten", "d_enfield",
                  "d_scopedenfield", "d_bren", "d_britgrenade", "d_britknife", "d_webley", "d_piat",
                  "d_pschreck", "d_bazooka", "d_garandbutt", "d_enfbayonet", "d_mortar", "d_germortar"}
-        self.assertEqual(stock - set(K.ICONS) - set(K.KEEP_UPSCALE), set())
+        self.assertEqual(stock - set(K.ICONS) - set(K.composites().NAMES), set())
 
     def test_bipod_and_scoped_variants(self):
         self.assertEqual(set(K.ICONS["d_mg42"].models), {"p_mg42bu.mdl", "p_mg42bd.mdl"})
@@ -400,6 +400,13 @@ class PassesTest(unittest.TestCase):
         mask, top, bottom = K.shared_area(entries, "d_k43")
         self.assertEqual((top, bottom), (0, 14))
         self.assertFalse(mask.any())
+
+    def test_an_identical_rect_is_the_same_drawing_not_a_neighbour(self):
+        # d_skull and d_world are one rect in weapons2.
+        entries = {"d_skull": ("weapons2", 164, 163, 37, 26), "d_world": ("weapons2", 164, 163, 37, 26)}
+        mask, top, bottom = K.shared_area(entries, "d_skull")
+        self.assertFalse(mask.any())
+        self.assertEqual((top, bottom), (0, 26))
 
     def test_shared_rows_belong_to_the_lower_kill_feed_icon_only(self):
         # weapons1: the weapon menu's weapon_luger over the scoped FG42; a
@@ -820,6 +827,21 @@ class EvenLayoutTest(unittest.TestCase):
         self.assertLessEqual(abs(cols.min() - (34 * 4 - cols.max() - 1)), 1, "centred")
         rows = np.nonzero(out[..., 3].any(1))[0]
         self.assertEqual((rows.min(), rows.max() + 1), (40, 60), "rows untouched")
+
+    def test_trim_group_gives_every_variant_one_box_holding_all_their_art(self):
+        # Two butt-stroke variants whose art spans different columns: the
+        # shared box holds both, so either fits the line laid out for one.
+        a = np.zeros((26 * 4, 53 * 4, 4))
+        b = np.zeros_like(a)
+        a[40:60, 20:150, 3] = 1.0
+        b[40:60, 40:180, 3] = 1.0
+        (ta, tb), size = K.trim_group([a, b], (53, 26), 4)
+        self.assertEqual(size, (41, 26), "160 px at 4x is 40 stock px, +1 for the half texels")
+        self.assertEqual(ta.shape, tb.shape)
+        self.assertAlmostEqual(ta[..., 3].sum(), a[..., 3].sum(), msg="nothing of either cut")
+        self.assertAlmostEqual(tb[..., 3].sum(), b[..., 3].sum())
+        # The same columns cut from both: a's art keeps its place left of b's.
+        self.assertLess(np.nonzero(ta[..., 3].any(0))[0].min(), np.nonzero(tb[..., 3].any(0))[0].min())
 
     def test_trim_box_leaves_a_box_its_art_fills(self):
         # A long gun's art reaches to half a texel of each edge already.
