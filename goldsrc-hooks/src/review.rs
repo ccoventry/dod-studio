@@ -8,7 +8,9 @@
 //! its demo with `viewdemo` (unless it is the one already in the player),
 //! waits for the whole file to be read, seeks to [`LEAD`] seconds before the
 //! first kill, and plays at normal speed until [`TAIL`] seconds after the
-//! last. There it pauses and opens the DoD Studio window on its Review tab.
+//! last. There it pauses and waits for an answer: on the game screen, from
+//! the answer keys (`review_keys`, #660), or with `ds_ui_review_keys 0` on
+//! the DoD Studio window's Review tab, which it opens.
 //!
 //! `yes`, `maybe` (#661) or `no` sends the answer -- with the kill range and note from the
 //! Review tab's boxes -- to Studio as a `[dod-studio] REVIEW` line on the
@@ -51,7 +53,7 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
@@ -630,9 +632,110 @@ fn advance(guard: &mut Option<Review>) {
     }
 }
 
-/// Runs every frame.
+/// Runs every frame: an answer key pressed since the last frame, the
+/// review's own step, then what the on-screen panel shows (#660).
 pub fn poll() {
+    if let Some(action) = crate::review_keys::take_pending() {
+        key_action(action);
+    }
     let mut guard = lock();
+    step(&mut guard);
+    let (panel, awaiting) = match guard.as_ref() {
+        Some(review) => panel_view(review),
+        None => (None, false),
+    };
+    drop(guard);
+    crate::review_keys::publish(panel, awaiting);
+    watch_menu(awaiting);
+}
+
+/// "Highlight 3 of 12 | m00cat | 4 kills".
+fn panel_title(queue: &[Highlight], at: usize) -> String {
+    let h = &queue[at];
+    let mut parts = vec![format!("Highlight {} of {}", at + 1, queue.len())];
+    if !h.player.is_empty() {
+        parts.push(h.player.clone());
+    }
+    parts.push(match h.kills.len() {
+        1 => "1 kill".to_string(),
+        n => format!("{n} kills"),
+    });
+    if let Some(v) = h.verdict {
+        parts.push(format!("answered {}", v.word()));
+    }
+    parts.join(" | ")
+}
+
+/// What the on-screen panel shows for the review as it stands, and whether
+/// the answer keys are live.
+fn panel_view(review: &Review) -> (Option<crate::review_keys::Panel>, bool) {
+    let keys = crate::review_keys::KEYS.on();
+    let info = crate::review_keys::INFO.on();
+    let Some(_) = review.queue.get(review.at) else {
+        return (None, false);
+    };
+    let title = panel_title(&review.queue, review.at);
+    let panel = |status: &str, keys: bool| crate::review_keys::Panel {
+        title: title.clone(),
+        status: status.to_string(),
+        keys,
+        can_go_back: review.at > 0,
+    };
+    match review.phase {
+        Phase::Waiting if keys => (Some(panel("", true)), true),
+        // The Review tab is open for the answer, or for why this one failed.
+        Phase::Waiting | Phase::Failed(_) => (None, false),
+        Phase::Loading { .. } if info => (Some(panel("Loading the demo...", false)), false),
+        Phase::Playing { .. } if info => (Some(panel("", false)), false),
+        Phase::Loading { .. } | Phase::Playing { .. } => (None, false),
+    }
+}
+
+/// What an answer key asks for, if the review is still waiting for an
+/// answer: the key may have come in after the Review tab's buttons moved it
+/// on.
+fn key_action(action: crate::review_keys::Action) {
+    use crate::review_keys::Action;
+    let waiting = lock().as_ref().is_some_and(|r| r.phase == Phase::Waiting);
+    if !waiting {
+        return;
+    }
+    trace(&format!("key: {action:?}"));
+    match action {
+        Action::Yes => answer(Verdict::Yes),
+        Action::Maybe => answer(Verdict::Maybe),
+        Action::No => answer(Verdict::No),
+        Action::Replay => replay(),
+        Action::Back => back(),
+        Action::Next => next(),
+        Action::Stop => stop(),
+    }
+}
+
+/// Whether the menu was up last frame, for [`menu_opens_tab`].
+static MENU_WAS_UP: AtomicBool = AtomicBool::new(false);
+
+/// Whether the menu just came up by itself, ESC's doing: up now and not a
+/// frame ago, with neither our window nor the console window in it.
+fn menu_opens_tab(was_up: bool, (menu, window, console): (bool, bool, bool)) -> bool {
+    menu && !was_up && !window && !console
+}
+
+/// While the review waits on screen for an answer, ESC's menu comes up with
+/// the Review tab in it, for the kill range and the note (#660).
+fn watch_menu(waiting_on_keys: bool) {
+    let Some(state) = crate::studio_panel::menu_state() else {
+        return;
+    };
+    let was_up = MENU_WAS_UP.swap(state.0, Ordering::Relaxed);
+    if waiting_on_keys && menu_opens_tab(was_up, state) {
+        trace("the menu came up while waiting for an answer: opening the Review tab");
+        open_tab();
+    }
+}
+
+/// The review's step for this frame.
+fn step(guard: &mut Option<Review>) {
     let Some(review) = guard.as_mut() else { return };
     match review.phase.clone() {
         Phase::Loading {
@@ -740,7 +843,11 @@ pub fn poll() {
                 }
                 let _ = crate::demo_seek::set_paused(true);
                 review.phase = Phase::Waiting;
-                open_tab();
+                // With the answer keys on, the panel on screen asks instead
+                // (#660); ESC still opens the tab.
+                if !crate::review_keys::KEYS.on() {
+                    open_tab();
+                }
             }
             _ => fail(review, "the demo stopped".into()),
         },
@@ -805,6 +912,59 @@ fn rest_of_line(from: i32) -> String {
     words.join(" ")
 }
 
+fn replay() {
+    let mut guard = lock();
+    match guard.as_mut() {
+        Some(review) if review.loaded.is_some() => {
+            let at = review.at;
+            if matches!(review.phase, Phase::Loading { .. }) {
+                say("still loading the demo");
+            } else {
+                go_to(review, at);
+            }
+        }
+        Some(_) => say("nothing to replay yet"),
+        None => say("no review running"),
+    }
+}
+
+fn back() {
+    let mut guard = lock();
+    match guard.as_mut() {
+        Some(review) if review.at > 0 => {
+            let at = review.at - 1;
+            go_to(review, at);
+        }
+        Some(_) => say("this is the first highlight"),
+        None => say("no review running"),
+    }
+}
+
+/// The next highlight without answering this one.
+fn next() {
+    let mut guard = lock();
+    if guard.is_none() {
+        say("no review running");
+    }
+    advance(&mut guard);
+}
+
+/// Ends the review; every answer so far is already in Studio.
+fn stop() {
+    if let Some(review) = lock().take() {
+        // Stopped inside a gap: the demo plays on at normal speed.
+        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+            let _ = crate::demo_seek::set_time_scale(1.0);
+        }
+        crate::events::send("REVIEW_END\tstopped");
+        crate::spectator_follow::hold_for_review(false);
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        say("stopped");
+    } else {
+        say("no review running");
+    }
+}
+
 const USAGE: &str = "start \"<queue file>\" | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
 
 /// `ds_demo_review <what>`.
@@ -824,39 +984,9 @@ pub unsafe extern "C" fn command() {
         "yes" => answer(Verdict::Yes),
         "maybe" => answer(Verdict::Maybe),
         "no" => answer(Verdict::No),
-        "replay" => {
-            let mut guard = lock();
-            match guard.as_mut() {
-                Some(review) if review.loaded.is_some() => {
-                    let at = review.at;
-                    if matches!(review.phase, Phase::Loading { .. }) {
-                        say("still loading the demo");
-                    } else {
-                        go_to(review, at);
-                    }
-                }
-                Some(_) => say("nothing to replay yet"),
-                None => say("no review running"),
-            }
-        }
-        "next" => {
-            let mut guard = lock();
-            if guard.is_none() {
-                say("no review running");
-            }
-            advance(&mut guard);
-        }
-        "back" => {
-            let mut guard = lock();
-            match guard.as_mut() {
-                Some(review) if review.at > 0 => {
-                    let at = review.at - 1;
-                    go_to(review, at);
-                }
-                Some(_) => say("this is the first highlight"),
-                None => say("no review running"),
-            }
-        }
+        "replay" => replay(),
+        "next" => next(),
+        "back" => back(),
         "range" => {
             let mut guard = lock();
             let Some(review) = guard.as_mut() else {
@@ -889,20 +1019,7 @@ pub unsafe extern "C" fn command() {
             review.queue[at].note = clean_note(&rest_of_line(2));
             GENERATION.fetch_add(1, Ordering::Relaxed);
         }
-        "stop" => {
-            if let Some(review) = lock().take() {
-                // Stopped inside a gap: the demo plays on at normal speed.
-                if matches!(review.phase, Phase::Playing { fast: true, .. }) {
-                    let _ = crate::demo_seek::set_time_scale(1.0);
-                }
-                crate::events::send("REVIEW_END\tstopped");
-                crate::spectator_follow::hold_for_review(false);
-                GENERATION.fetch_add(1, Ordering::Relaxed);
-                say("stopped");
-            } else {
-                say("no review running");
-            }
-        }
+        "stop" => stop(),
         other => say(&format!("unknown \"{other}\" -- {NAME} {USAGE}")),
     }
 }
@@ -1207,6 +1324,79 @@ mod tests {
             heading(&queue, 0),
             "Demo 1 of 2 | highlight 1 of 3 | 2 left to answer"
         );
+    }
+
+    #[test]
+    fn the_panel_title_names_the_highlight_the_player_and_the_kills() {
+        let mut queue = vec![highlight("a", None), highlight("a", None)];
+        queue[1].player = "gorilla".to_string();
+        queue[1].kills = vec![1.0, 2.0, 3.0, 4.0];
+        assert_eq!(panel_title(&queue, 0), "Highlight 1 of 2 | 1 kill");
+        assert_eq!(
+            panel_title(&queue, 1),
+            "Highlight 2 of 2 | gorilla | 4 kills"
+        );
+        queue[1].verdict = Some(Verdict::Maybe);
+        assert_eq!(
+            panel_title(&queue, 1),
+            "Highlight 2 of 2 | gorilla | 4 kills | answered maybe"
+        );
+    }
+
+    #[test]
+    fn the_keys_are_live_only_while_the_review_waits_for_an_answer() {
+        // The settings' defaults (both on): no cvar in a host build.
+        let mut review = Review {
+            queue: vec![highlight("a", None)],
+            options: Options::default(),
+            at: 0,
+            phase: Phase::Waiting,
+            loaded: Some("a".to_string()),
+        };
+        let (panel, awaiting) = panel_view(&review);
+        assert!(awaiting);
+        assert!(panel.is_some_and(|p| p.keys));
+        review.phase = Phase::Loading {
+            since: Instant::now(),
+            frames: 0,
+            seen_loading: false,
+        };
+        let (panel, awaiting) = panel_view(&review);
+        assert!(!awaiting);
+        assert_eq!(panel.map(|p| p.status), Some("Loading the demo...".into()));
+        // A failed highlight has the Review tab open instead.
+        review.phase = Phase::Failed("gone".into());
+        assert_eq!(panel_view(&review), (None, false));
+    }
+
+    #[test]
+    fn back_is_greyed_on_the_first_highlight_only() {
+        use crate::review_keys::Action;
+        let mut review = Review {
+            queue: vec![highlight("a", None), highlight("a", None)],
+            options: Options::default(),
+            at: 0,
+            phase: Phase::Waiting,
+            loaded: Some("a".to_string()),
+        };
+        let first = panel_view(&review).0.expect("a panel");
+        assert!(!first.key_live(Action::Back));
+        assert!(first.key_live(Action::Next));
+        review.at = 1;
+        let second = panel_view(&review).0.expect("a panel");
+        assert!(second.key_live(Action::Back));
+    }
+
+    #[test]
+    fn only_a_menu_that_just_came_up_on_its_own_opens_the_review_tab() {
+        // ESC: the menu up, nothing in it.
+        assert!(menu_opens_tab(false, (true, false, false)));
+        // Already up last frame, or brought up around our window or the
+        // console window (the console key), or not up at all: left alone.
+        assert!(!menu_opens_tab(true, (true, false, false)));
+        assert!(!menu_opens_tab(false, (true, true, false)));
+        assert!(!menu_opens_tab(false, (true, false, true)));
+        assert!(!menu_opens_tab(false, (false, false, false)));
     }
 
     #[test]
