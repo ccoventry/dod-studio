@@ -1361,6 +1361,19 @@ export async function downloadAndInstallUpdate() {
     });
 }
 
+/** Earlier versions' release notes for the What's new window (#1013):
+ *  `{ releases, from_cache, error }`. `offline` reads only the copy saved in
+ *  the app's data folder. A failed GitHub read still resolves, with the saved
+ *  copy and the reason; this resolves to null only if the backend fails. */
+export async function releaseHistory(offline) {
+  return invoke("release_history", { offline: Boolean(offline) })
+    .catch((err) => {
+      console.error("IPC Execution Error (release_history):", err);
+      logFrontendEvent(`What's new: the release list could not be read: ${err}`);
+      return null;
+    });
+}
+
 /** Reads the actual compiled-in app version (Cargo.toml's `version`, stamped
  *  by the release workflows) — never hardcoded, so it always matches what
  *  was really built, whether that's a stable release, an experimental build,
