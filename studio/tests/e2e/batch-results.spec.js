@@ -101,6 +101,23 @@ test('a clip Cancel cut short shows as a partial take, not a captured one (#1081
   await expect(row.getByRole('button', { name: 'Open folder' })).toHaveCount(1);
 });
 
+test('a clip the game closing cut short says the game closed, not Cancel', async ({ page }) => {
+  await loadHarness(page);
+  const payload = {
+    total_count: 2, captured_count: 1, renderable_count: 1,
+    blocks: [
+      { ...PAYLOAD.blocks[0] },
+      { take_key: 'b', demo_name: 'flash.dem', source_streak_indices: [2], captured: false, renderable: false, cut_short: true, cut_by: 'game_closed', bytes: 200 * 1024 ** 2, take_folder: 'C:/caps/b' },
+    ],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('error', 'the game closed'); window.__verified(p, d); }, [payload, DISPATCH]);
+  await expect(page.locator('.batch-results-summary')).toHaveText(/^Stopped: the game closed\. 1 of 2 takes on disk/);
+  const row = page.locator('#batch-results tbody tr').nth(1);
+  await expect(row).toContainText('Cut short: the game closed (partial take, not captured)');
+  await expect(row).toHaveClass(/batch-results-row-cut_short/);
+  await expect(row.getByRole('button', { name: 'Open folder' })).toHaveCount(1);
+});
+
 test('a take that stopped writing early shows as a partial take with its length (#1105)', async ({ page }) => {
   await loadHarness(page);
   const payload = {

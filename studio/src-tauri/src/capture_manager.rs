@@ -822,15 +822,41 @@ pub struct VerifiedBlock {
     pub rendered: bool,
     /// What the take folder holds on disk, for the batch results panel (#172).
     pub bytes: u64,
-    /// Cancel stopped the batch while this clip recorded (#1081): what's on
-    /// disk is a partial take, so it counts as neither captured nor
-    /// renderable, and is left for the user to delete. Also set for a take
-    /// that stopped writing early (`short_take`).
+    /// The batch ended while this clip recorded (#1081): what's on disk is a
+    /// partial take, so it counts as neither captured nor renderable, and is
+    /// left for the user to delete. `cut_by` says what ended it. Also set for
+    /// a take that stopped writing early (`short_take`).
     pub cut_short: bool,
+    /// What cut the clip short, when the batch's end did.
+    pub cut_by: Option<CutBy>,
     /// The take's video stops well before its audio (#1105): FFmpeg
     /// stopped writing mid-clip. A partial take like a Cancel's, with both
     /// lengths.
     pub short_take: Option<native::hlcr::take_length::ShortTake>,
+}
+
+/// What ended a batch while a clip was recording: the Last Batch panel and
+/// the activity log name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutBy {
+    /// The user pressed Cancel (#1081).
+    Cancel,
+    /// The game closed or crashed mid-clip.
+    GameClosed,
+    /// The batch stopped on an error with the game still up (a stall, OBS
+    /// lost, an error box): the engine ended the game.
+    Stopped,
+}
+
+impl CutBy {
+    fn log_text(self) -> &'static str {
+        match self {
+            CutBy::Cancel => "was cut short by Cancel",
+            CutBy::GameClosed => "was cut short when the game closed",
+            CutBy::Stopped => "was cut short when the batch stopped",
+        }
+    }
 }
 
 /// Marks every take whose video stops well before its audio as partial
@@ -934,9 +960,68 @@ impl Records {
     fn clip_stopped(&mut self) {
         self.stopped += 1;
     }
+
+    /// A demo started playing, so the batch may have left takes on disk.
+    fn reached_game(&self) -> bool {
+        self.demo.is_some() || self.started > 0
+    }
 }
 
-/// Marks the clip a Cancel cut short (#1081). With a clip still recording
+/// How a batch that reached the game ended, for [`finish_batch`].
+struct BatchEnd<'a> {
+    /// The footer's last line.
+    status: &'a str,
+    /// The manifest file's outcome (#19): "complete", "cancelled" or
+    /// "error". Anything but "planned" keeps the next start's catch-up
+    /// (#545) from checking the batch again.
+    outcome: &'a str,
+    /// The batch failed: the line and toasts say so.
+    error: bool,
+    /// The clip recordings the markers reported, for [`mark_cut_short`].
+    records: Records,
+    cut_by: CutBy,
+}
+
+impl BatchEnd<'_> {
+    fn complete() -> Self {
+        BatchEnd {
+            status: "Complete",
+            outcome: "complete",
+            error: false,
+            records: Records::default(),
+            cut_by: CutBy::Cancel,
+        }
+    }
+
+    fn cancelled(records: Records) -> Self {
+        BatchEnd {
+            status: "Cancelled",
+            outcome: "cancelled",
+            error: false,
+            records,
+            cut_by: CutBy::Cancel,
+        }
+    }
+
+    /// The engine stopped the batch with `message`. `game_closed`: the game
+    /// went away by itself rather than being ended by the engine.
+    fn failed(message: &str, records: Records, game_closed: bool) -> BatchEnd<'_> {
+        BatchEnd {
+            status: message,
+            outcome: "error",
+            error: true,
+            records,
+            cut_by: if game_closed {
+                CutBy::GameClosed
+            } else {
+                CutBy::Stopped
+            },
+        }
+    }
+}
+
+/// Marks the clip the batch's end cut short (#1081), with what ended it.
+/// With a clip still recording
 /// (more starts than stops), it is the block of the demo playing whose
 /// `record_start_tick` is the tick the last `START_RECORD` named. Without a
 /// demo, the first block from position `stopped` in recording order with that
@@ -944,7 +1029,12 @@ impl Records {
 /// clip can sit further on than the count says (#861's `resolve_block` does
 /// the same). With no tick, or none matching, the block at `stopped`.
 /// Without markers both counts are 0 and nothing changes.
-fn mark_cut_short(manifest: &CaptureManifest, verified: &mut [VerifiedBlock], records: Records) {
+fn mark_cut_short(
+    manifest: &CaptureManifest,
+    verified: &mut [VerifiedBlock],
+    records: Records,
+    cut_by: CutBy,
+) {
     if records.started <= records.stopped {
         return;
     }
@@ -961,8 +1051,11 @@ fn mark_cut_short(manifest: &CaptureManifest, verified: &mut [VerifiedBlock], re
         return;
     };
     let block = &mut verified[i];
-    // A cut clip's take is short too: Cancel is the reason it gives.
+    // A cut clip's take is short too: the batch's end is the reason it gives.
     block.cut_short = block.captured || block.cut_short;
+    if block.cut_short {
+        block.cut_by = Some(cut_by);
+    }
     block.short_take = None;
     block.captured = false;
     block.renderable = false;
@@ -1066,6 +1159,7 @@ pub(crate) fn verify_capture_takes_settling(
                 rendered,
                 bytes: 0,
                 cut_short: false,
+                cut_by: None,
                 short_take: None,
             }
         })
@@ -1153,17 +1247,16 @@ struct TakeReport {
 
 /// Runs verification for the batch that just ended, with "Checking the
 /// takes: N of M" on the status line while it runs (#952, throttled to
-/// ~33 ms like the patch line). `outcome` ("complete" / "cancelled") goes
-/// into the manifest file (#19). `records` is the clip recordings the
-/// markers reported, for [`mark_cut_short`]. `None` when the batch planned
-/// no takes.
+/// ~33 ms like the patch line). `end.outcome` goes into the manifest file
+/// (#19); `end.records` and `end.cut_by` find the clip the end cut short
+/// ([`mark_cut_short`]). `None` when the batch planned no takes.
 fn check_takes(
     app: &tauri::AppHandle,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
-    outcome: &str,
+    end: &BatchEnd,
     rendered_while_capturing: bool,
-    records: Records,
 ) -> Option<TakeReport> {
+    let outcome = end.outcome;
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
         match guard.as_ref() {
@@ -1193,14 +1286,14 @@ fn check_takes(
             emit_checking(done);
         }
     });
-    mark_cut_short(&manifest, &mut blocks, records);
+    mark_cut_short(&manifest, &mut blocks, end.records, end.cut_by);
     for block in blocks.iter().filter(|b| b.cut_short) {
         let why = match block.short_take {
             Some(s) => format!(
                 "stopped writing video early ({:.2} s of video, {:.2} s of audio)",
                 s.video_secs, s.audio_secs
             ),
-            None => "was cut short by Cancel".to_string(),
+            None => block.cut_by.unwrap_or(end.cut_by).log_text().to_string(),
         };
         log_markdown(&format!(
             "[take-verify] {} {why}: not counted as captured. Its partial take is left at {}.",
@@ -1250,36 +1343,30 @@ fn check_takes(
     })
 }
 
-/// A batch that ran (to its end, or until cancelled) finishes: its takes are
-/// checked, then the running flag drops and the last status line goes out
-/// with how many clips landed, then the check's result. In that order: the
-/// footer's last line comes before what Finish clips (#440) puts on it.
+/// A batch that ran (to its end, until cancelled, or until it failed in the
+/// game) finishes: its takes are checked, then the running flag drops and
+/// the last status line goes out with how many clips landed, then the
+/// check's result. In that order: the footer's last line comes before what
+/// Finish clips (#440) puts on it.
 fn finish_batch(
     app: &tauri::AppHandle,
     is_running: &Arc<Mutex<bool>>,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
-    status: &str,
-    outcome: &str,
+    end: BatchEnd,
     rendered_while_capturing: bool,
-    records: Records,
 ) {
-    let report = check_takes(
-        app,
-        manifest_slot,
-        outcome,
-        rendered_while_capturing,
-        records,
-    );
+    let report = check_takes(app, manifest_slot, &end, rendered_while_capturing);
     *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
-    let _ = app.emit(
-        "capture_status",
-        serde_json::json!({
-            "running": false,
-            "status": status,
-            "clips_captured": report.as_ref().map(|r| r.captured),
-            "clips_total": report.as_ref().map(|r| r.total),
-        }),
-    );
+    let mut status = serde_json::json!({
+        "running": false,
+        "status": end.status,
+        "clips_captured": report.as_ref().map(|r| r.captured),
+        "clips_total": report.as_ref().map(|r| r.total),
+    });
+    if end.error {
+        status["error"] = serde_json::Value::Bool(true);
+    }
+    let _ = app.emit("capture_status", status);
     if let Some(report) = report {
         // An OBS capture test's clip (#646) is the test's alone: it must not
         // mark highlights captured, fill Last Batch or start Finish clips.
@@ -1909,6 +1996,8 @@ pub async fn start_capture_batch_impl(
                 let mut clips = ClipTally::default();
                 // Clip recordings, for a Cancel (#1081).
                 let mut records = Records::default();
+                // The game went away by itself before the batch's end.
+                let mut game_closed = false;
                 // A demo by DEMO_START's 1-based index, for the line (#952).
                 let demo_name = |job_idx: u32| {
                     (job_idx as usize)
@@ -2050,6 +2139,25 @@ pub async fn start_capture_batch_impl(
                                 room.game_held(false);
                             }
                         }
+                        EngineEvent::GameClosed => {
+                            game_closed = true;
+                        }
+                        // A batch that played a demo before it failed has
+                        // takes to check, like a cancelled one: the finished
+                        // ones are real, and the clip recording when it
+                        // stopped is a partial take. Left unchecked, its
+                        // manifest stays "planned" and the next start's
+                        // catch-up (#545) counts that partial take captured.
+                        EngineEvent::Error(msg) if records.reached_game() => {
+                            finish_batch(
+                                &app_emitter,
+                                &is_running_clone,
+                                &manifest_for_listener,
+                                BatchEnd::failed(&msg, records, game_closed),
+                                rendered_while_capturing,
+                            );
+                            break;
+                        }
                         EngineEvent::Error(msg) => {
                             let mut running =
                                 is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
@@ -2069,10 +2177,8 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                "Complete",
-                                "complete",
+                                BatchEnd::complete(),
                                 rendered_while_capturing,
-                                Records::default(),
                             );
                             break;
                         }
@@ -2084,10 +2190,8 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                "Cancelled",
-                                "cancelled",
+                                BatchEnd::cancelled(records),
                                 rendered_while_capturing,
-                                records,
                             );
                             break;
                         }
@@ -5405,6 +5509,7 @@ mod tests {
                 rendered: false,
                 bytes: 1,
                 cut_short: false,
+                cut_by: None,
                 short_take: None,
             })
             .collect()
@@ -5432,7 +5537,7 @@ mod tests {
     fn the_clip_a_cancel_cut_short_is_not_captured() {
         let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
         let mut blocks = on_disk(&manifest);
-        mark_cut_short(&manifest, &mut blocks, counts(3, 2));
+        mark_cut_short(&manifest, &mut blocks, counts(3, 2), CutBy::Cancel);
         let cut: Vec<_> = blocks.iter().map(|b| (b.captured, b.cut_short)).collect();
         // Recording order a0, a1, a2: a2 (manifest position 0) was recording.
         assert_eq!(
@@ -5450,14 +5555,61 @@ mod tests {
         // Cancelled between clips, or with no markers read: nothing changes.
         for (started, stopped) in [(2, 2), (0, 0)] {
             let mut blocks = on_disk(&manifest);
-            mark_cut_short(&manifest, &mut blocks, counts(started, stopped));
+            mark_cut_short(
+                &manifest,
+                &mut blocks,
+                counts(started, stopped),
+                CutBy::Cancel,
+            );
             assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
         }
         // A clip cut short before it wrote anything is just missing.
         let mut blocks = on_disk(&manifest);
         blocks[3].captured = false;
-        mark_cut_short(&manifest, &mut blocks, counts(5, 4));
+        mark_cut_short(&manifest, &mut blocks, counts(5, 4), CutBy::Cancel);
         assert!(!blocks[3].captured && !blocks[3].cut_short);
+        assert_eq!(blocks[3].cut_by, None);
+    }
+
+    /// The game closing mid-clip cuts it short like a Cancel, and the row
+    /// says the game closed: the same clip, a different reason.
+    #[test]
+    fn a_clip_the_game_closing_cut_short_is_not_captured_and_says_why() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0)]);
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, counts(2, 1), CutBy::GameClosed);
+        assert!(!blocks[1].captured && !blocks[1].renderable && blocks[1].cut_short);
+        assert_eq!(blocks[1].cut_by, Some(CutBy::GameClosed));
+        assert!(
+            blocks
+                .iter()
+                .enumerate()
+                .all(|(i, b)| i == 1 || (b.captured && b.cut_by.is_none()))
+        );
+        let row = serde_json::to_value(&blocks[1]).unwrap();
+        assert_eq!(row["cut_by"], "game_closed");
+    }
+
+    /// A batch that failed in the game checks its takes, under an outcome
+    /// the next start's catch-up (#545) leaves alone; one that failed before
+    /// a demo played has nothing to check.
+    #[test]
+    fn a_batch_that_failed_in_the_game_is_ended_like_a_cancel() {
+        let mut records = Records::default();
+        assert!(!records.reached_game(), "nothing played yet");
+        records.demo_started(1);
+        assert!(records.reached_game());
+
+        let closed = BatchEnd::failed("hl.exe ended", records, true);
+        assert_eq!(
+            (closed.outcome, closed.error, closed.cut_by),
+            ("error", true, CutBy::GameClosed)
+        );
+        assert_ne!(closed.outcome, "planned");
+        let stalled = BatchEnd::failed("stalled", records, false);
+        assert_eq!(stalled.cut_by, CutBy::Stopped);
+        let cancelled = BatchEnd::cancelled(records);
+        assert_eq!((cancelled.error, cancelled.cut_by), (false, CutBy::Cancel));
     }
 
     /// A demo the hook's batch skipped sends no markers (#861), so the count
@@ -5475,7 +5627,7 @@ mod tests {
             ..Records::default()
         };
         let mut blocks = on_disk(&manifest);
-        mark_cut_short(&manifest, &mut blocks, records);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
         let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
         assert_eq!(cut, vec![false, false, true, false]);
     }
@@ -5493,7 +5645,7 @@ mod tests {
             ..Records::default()
         };
         let mut blocks = on_disk(&manifest);
-        mark_cut_short(&manifest, &mut blocks, records);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
         let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
         assert_eq!(cut, vec![false, false, false, true]);
     }
@@ -5567,7 +5719,7 @@ mod tests {
             video_secs: 1.0,
             audio_secs: 9.0,
         });
-        mark_cut_short(&manifest, &mut blocks, counts(2, 1));
+        mark_cut_short(&manifest, &mut blocks, counts(2, 1), CutBy::Cancel);
         assert!(blocks[1].cut_short && !blocks[1].captured);
         assert_eq!(blocks[1].short_take, None);
         // A short take Cancel didn't touch keeps its own reason.
@@ -5578,7 +5730,7 @@ mod tests {
             video_secs: 1.0,
             audio_secs: 9.0,
         });
-        mark_cut_short(&manifest, &mut blocks, counts(2, 1));
+        mark_cut_short(&manifest, &mut blocks, counts(2, 1), CutBy::Cancel);
         assert!(blocks[0].cut_short && blocks[0].short_take.is_some());
         assert!(blocks[1].cut_short && blocks[1].short_take.is_none());
     }
@@ -5626,13 +5778,13 @@ mod tests {
         records.clip_stopped();
         // Cancelled between b0 and b1.
         let mut blocks = on_disk(&manifest);
-        mark_cut_short(&manifest, &mut blocks, records);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
         assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
 
         // Cancelled while b1 recorded: b1, not anything in demo a.
         records.clip_started(Some(200));
         let mut blocks = on_disk(&manifest);
-        mark_cut_short(&manifest, &mut blocks, records);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
         let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
         assert_eq!(cut, vec![false, false, false, true]);
     }
@@ -5647,7 +5799,7 @@ mod tests {
         records.demo_started(2);
         records.clip_started(Some(100));
         let mut blocks = on_disk(&manifest);
-        mark_cut_short(&manifest, &mut blocks, records);
+        mark_cut_short(&manifest, &mut blocks, records, CutBy::Cancel);
         let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
         assert_eq!(cut, vec![false, false, true, false]);
     }

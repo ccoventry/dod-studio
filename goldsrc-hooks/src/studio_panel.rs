@@ -588,9 +588,10 @@ const LIST_SLOT_FIRST_ITEM: usize = 167;
 const LIST_SLOT_NEXT_ITEM: usize = 168;
 const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
 /// `AddColumnHeader(int index, const char *name, const char *text, int width,
-/// int flags)` and `SetColumnSortable(int, bool)`: what the Demos tab's Map
-/// and Date columns are built with.
-const LIST_SLOT_ADD_COLUMN_HEADER: usize = 134;
+/// int minWidth, int maxWidth, int flags)`: what our columns are built with
+/// ([`column_width_range`]), and what the 5-argument form in the slot before
+/// it forwards to on both builds. `SetColumnSortable(int, bool)` follows.
+const LIST_SLOT_ADD_COLUMN_HEADER_RANGE: usize = 135;
 const LIST_SLOT_SET_COLUMN_SORTABLE: usize = 148;
 /// `SetColumnVisible(int, bool)`: the Highlights tab hides its Player
 /// column for a POV demo (one player).
@@ -632,6 +633,31 @@ const COLUMN_DRAGGER: usize = 0x14;
 /// and `AddColumnHeader` never renumbers them, so a column inserted before
 /// others (the Demos tab's icons, #779) left Demo File's handle naming
 /// position 0, the fixed icon column, and dragging it did nothing (#801).
+/// The narrowest a resizable column may be dragged, in the pixels our widths
+/// are given in: the minimum the 5-argument `AddColumnHeader` gives on the
+/// pre-Anniversary build. And the widest any column may be.
+const COLUMN_MIN_WIDE: i32 = 20;
+const COLUMN_MAX_WIDE: i32 = 10_000;
+/// `ListPanel::AddColumnHeader` flags: fixed width is `COLUMN_FIXEDSIZE`
+/// without `COLUMN_RESIZEWITHWINDOW` (2).
+const COLUMN_FIXED_MASK: i32 = 3;
+const COLUMN_FIXED: i32 = 1;
+
+/// The minimum and maximum width a column of `width` and `flags` is added
+/// with: what the 5-argument `AddColumnHeader` gives, except that the
+/// minimum is never above the width. The 25th Anniversary's 5-argument form
+/// scales its minimum of 20 to the screen but leaves the width as given, so
+/// on a screen 2160 lines tall its minimum passed our narrowest columns (40)
+/// and `ListPanel.cpp`'s `minWidth <= width` assert stopped the game the
+/// moment our window was built (#1092).
+fn column_width_range(width: i32, flags: i32) -> (i32, i32) {
+    if flags & COLUMN_FIXED_MASK == COLUMN_FIXED {
+        (width, width)
+    } else {
+        (COLUMN_MIN_WIDE.min(width), COLUMN_MAX_WIDE.max(width))
+    }
+}
+
 fn dragger_positions(order: &[u8], allocated: usize) -> impl Iterator<Item = (usize, i32)> + '_ {
     order
         .iter()
@@ -1906,8 +1932,42 @@ mod hook {
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_void) -> i32;
     type ListItemIdFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> i32;
     type ListSetVisibleFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
-    type AddColumnFn =
-        unsafe extern "thiscall" fn(*mut c_void, i32, *const c_char, *const c_char, i32, i32);
+    type AddColumnRangeFn = unsafe extern "thiscall" fn(
+        *mut c_void,
+        i32,
+        *const c_char,
+        *const c_char,
+        i32,
+        i32,
+        i32,
+        i32,
+    );
+
+    /// Adds a column to `list` at `index`, with the width range
+    /// [`column_width_range`] gives it (#1092).
+    unsafe fn add_column(
+        list: *mut c_void,
+        index: i32,
+        key: &CStr,
+        heading: &CStr,
+        width: i32,
+        flags: i32,
+    ) {
+        let (min, max) = column_width_range(width, flags);
+        unsafe {
+            let add: AddColumnRangeFn = slot(list, LIST_SLOT_ADD_COLUMN_HEADER_RANGE);
+            add(
+                list,
+                index,
+                key.as_ptr(),
+                heading.as_ptr(),
+                width,
+                min,
+                max,
+                flags,
+            );
+        }
+    }
     type ListIntVoidFn = unsafe extern "thiscall" fn(*mut c_void, i32);
     type ListIntBoolFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
@@ -2393,7 +2453,6 @@ mod hook {
             if list.is_null() {
                 return;
             }
-            let add: AddColumnFn = slot(list, LIST_SLOT_ADD_COLUMN_HEADER);
             let sortable: ListIntBoolFn = slot(list, LIST_SLOT_SET_COLUMN_SORTABLE);
             let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
             // A row remembers its place in each column's sort order by column
@@ -2403,24 +2462,17 @@ mod hook {
             // The icon column first (#779): an image column, fixed width,
             // drawn from our own image list; a row picks its icon with the
             // `int` under the column's key.
-            add(
+            add_column(
                 list,
                 0,
-                list_icons::ICON_KEY.as_ptr(),
-                c"".as_ptr(),
+                list_icons::ICON_KEY,
+                c"",
                 list_icons::ICON_COLUMN_WIDE,
                 list_icons::COLUMN_FIXEDSIZE | list_icons::COLUMN_IMAGE,
             );
             list_icons::install(vgui.surface, list);
             for (index, (key, heading, width)) in DEMO_COLUMNS.iter().enumerate() {
-                add(
-                    list,
-                    index as i32 + 2,
-                    key.as_ptr(),
-                    heading.as_ptr(),
-                    *width,
-                    0,
-                );
+                add_column(list, index as i32 + 2, key, heading, *width, 0);
             }
             if let Some(heading) = vgui.child_named(vpanel_of(list), "demoname") {
                 let (x, y, _, tall) = vgui.rect(heading);
@@ -4965,6 +5017,25 @@ pub unsafe extern "C" fn command() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_column_minimum_is_never_above_its_width() {
+        // Resizable: Valve's 20..10000, the minimum lowered to a narrower width.
+        assert_eq!(column_width_range(100, 0), (20, 10_000));
+        assert_eq!(column_width_range(12, 0), (12, 10_000));
+        // Resizes with the window (2) without the fixed flag: still a range.
+        assert_eq!(column_width_range(40, 2), (20, 10_000));
+        // Fixed size (1, and the icon column's 1 | 4): the width both ways.
+        assert_eq!(column_width_range(22, 1 | 4), (22, 22));
+        // Fixed and resize-with-window together is not fixed, as in GameUI.
+        assert_eq!(column_width_range(22, 3), (20, 10_000));
+        for width in [1, 20, 40, 42, 210, 20_000] {
+            for flags in [0, 1, 2, 3, 4, 5] {
+                let (min, max) = column_width_range(width, flags);
+                assert!(min <= width && width <= max, "{width} {flags}");
+            }
+        }
+    }
 
     #[test]
     fn each_drag_handle_names_its_column_position() {
