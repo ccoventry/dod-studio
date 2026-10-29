@@ -11,9 +11,71 @@
 //! afterwards; only when the map loads matters. Started over the pipe, the
 //! demo loads after the configs have run.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::sys::game_remote::{Sent, send_console_commands};
+
+/// Where a batch's start in the game stands, for Studio's close prompt
+/// (#545): closing Studio before the start is sent leaves the game at its
+/// main menu with no batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartState {
+    /// The game has not been launched yet (the batch is being prepared).
+    Preparing,
+    /// The game is launched and the start waits for its pipe.
+    Pending,
+    /// The start was sent: the batch runs in the game.
+    Sent,
+    /// The batch starts from the launch line, so it runs once launched.
+    NotNeeded,
+    /// The start could not be sent; the batch is ending.
+    Failed,
+}
+
+impl StartState {
+    /// The name the frontend gets.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Preparing => "preparing",
+            Self::Pending => "pending",
+            Self::Sent => "sent",
+            Self::NotNeeded => "not_needed",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// Whether the batch runs in the game without Studio.
+    pub fn runs_without_studio(self) -> bool {
+        matches!(self, Self::Sent | Self::NotNeeded)
+    }
+}
+
+/// A [`StartState`] shared between the capture loop and Studio's commands.
+#[derive(Debug)]
+pub struct BatchStart(AtomicU8);
+
+impl Default for BatchStart {
+    fn default() -> Self {
+        Self(AtomicU8::new(StartState::Preparing as u8))
+    }
+}
+
+impl BatchStart {
+    pub fn set(&self, state: StartState) {
+        self.0.store(state as u8, Ordering::SeqCst);
+    }
+
+    pub fn get(&self) -> StartState {
+        match self.0.load(Ordering::SeqCst) {
+            x if x == StartState::Pending as u8 => StartState::Pending,
+            x if x == StartState::Sent as u8 => StartState::Sent,
+            x if x == StartState::NotNeeded as u8 => StartState::NotNeeded,
+            x if x == StartState::Failed as u8 => StartState::Failed,
+            _ => StartState::Preparing,
+        }
+    }
+}
 
 /// How long a launched game has to open its command pipe.
 const PIPE_WAIT: Duration = Duration::from_secs(120);
@@ -163,6 +225,26 @@ mod tests {
             "+exec dodstudio_helper.cfg +playdemo dodstudio_primer"
         );
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn a_batch_start_reads_back_what_was_set() {
+        let start = BatchStart::default();
+        assert_eq!(start.get(), StartState::Preparing);
+        for state in [
+            StartState::Pending,
+            StartState::Sent,
+            StartState::NotNeeded,
+            StartState::Failed,
+            StartState::Preparing,
+        ] {
+            start.set(state);
+            assert_eq!(start.get(), state);
+        }
+        assert!(StartState::Sent.runs_without_studio());
+        assert!(StartState::NotNeeded.runs_without_studio());
+        assert!(!StartState::Pending.runs_without_studio());
+        assert!(!StartState::Preparing.runs_without_studio());
     }
 
     #[test]
