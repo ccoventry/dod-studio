@@ -250,8 +250,8 @@ mod tests {
         };
         let mismatch = RunningGameCheck::Mismatch {
             pid: 42,
-            running: launch.clone(),
-            wanted: launch,
+            running: Box::new(launch.clone()),
+            wanted: Box::new(launch),
             differs: vec![LaunchDifference::Resolution],
         };
         assert!(

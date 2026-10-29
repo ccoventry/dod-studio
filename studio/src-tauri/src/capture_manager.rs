@@ -3958,7 +3958,10 @@ fn hook_dll_log(
     let side = |launch: &native::patch::launch_settings::GameLaunch| {
         format!(
             "hook build {} ({})",
-            launch.hook_build.as_deref().unwrap_or("from before build ids"),
+            launch
+                .hook_build
+                .as_deref()
+                .unwrap_or("from before build ids"),
             launch.hook_dll.as_deref().unwrap_or("?"),
         )
     };

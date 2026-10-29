@@ -110,8 +110,8 @@ pub enum RunningGameCheck {
     /// when the game starts again.
     Mismatch {
         pid: u32,
-        running: GameLaunch,
-        wanted: GameLaunch,
+        running: Box<GameLaunch>,
+        wanted: Box<GameLaunch>,
         differs: Vec<LaunchDifference>,
     },
 }
@@ -268,7 +268,7 @@ pub fn compare(
     };
     RunningGameCheck::Mismatch {
         pid: game.pid,
-        running: GameLaunch {
+        running: Box::new(GameLaunch {
             install: running_install,
             exe: clean_path(&running_exe),
             width: running_size.map(|s| s.0),
@@ -277,8 +277,8 @@ pub fn compare(
             hook_dll: running_hook.map(path_text),
             hook_label: running_hook_label,
             hook_build: running_hook.and_then(|d| d.build.clone()),
-        },
-        wanted: GameLaunch {
+        }),
+        wanted: Box::new(GameLaunch {
             install: wanted_install,
             exe: clean_path(game_path),
             width: Some(*width),
@@ -287,7 +287,7 @@ pub fn compare(
             hook_dll: want_hook.map(path_text),
             hook_label: wanted_hook_label,
             hook_build: want_hook.and_then(|d| d.build.clone()),
-        },
+        }),
         differs,
     }
 }

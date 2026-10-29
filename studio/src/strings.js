@@ -2524,6 +2524,10 @@ export const STRINGS = {
     CLOSING: 'Closing Day of Defeat…',
     RUNNING_EXE: 'Running now',
     STUDIO_EXE: "DoD Studio's Half-Life Executable",
+    // The hook DLL rows (#1143): path, then its build id when it has one.
+    RUNNING_HOOK: 'Hook DLL in the game',
+    STUDIO_HOOK: 'Hook DLL DoD Studio is set to',
+    hookLine: ({ hook_dll, hook_build }) => `${hook_dll} (${hook_build ? `build ${hook_build}` : 'no build id'})`,
     // Beside Start Capture Batch when the user kept the running game.
     BATCH_NOT_STARTED_STATUS: 'Status: Not started — Day of Defeat is running with other launch settings.',
     /** "DoD is running from X at 1920×1080; DoD Studio is set to Y at
@@ -2534,19 +2538,32 @@ export const STRINGS = {
       // The Game folder setting, `-game` (#402).
       const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
+      // The hook DLL from another path, or another build at its path (#1143).
+      const hookDll = differs.includes('hook_dll');
+      const hookBuild = differs.includes('hook_build');
+      const unreadable = differs.includes('hook_unreadable');
       const size = (s) => `${s.width}×${s.height}`;
       const folderName = (s) => `the "${s.game_folder}" game folder`;
+      const hookFrom = (s) => `the hook DLL from "${s.hook_label}"`;
+      const build = (s) => (s.hook_build ? `hook build ${s.hook_build}` : 'an older hook build with no build id');
       const now = [
         install && `from "${running.install}"`,
         folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
+        hookDll && `with ${hookFrom(running)}`,
+        hookBuild && `with ${build(running)}`,
       ].filter(Boolean).join(' ');
+      const unread = 'DoD Studio could not read which hook DLL the running Day of Defeat has, so it can\'t tell whether it is the one DoD Studio is set to.';
+      if (!now) return `${unread} Close it and start again?`;
       const set = [
         install && `"${wanted.install}"`,
         folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
         resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
+        hookDll && (install || folder || resolution ? `with ${hookFrom(wanted)}` : hookFrom(wanted)),
+        hookBuild && (install || folder || resolution ? `with ${build(wanted)}` : build(wanted)),
       ].filter(Boolean).join(' ');
-      return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
+      const also = unreadable ? ` ${unread}` : '';
+      return `Day of Defeat is running ${now}; DoD Studio is set to ${set}.${also} The game only takes these when it starts. Close it and start again?`;
     },
     // Switching installs in Configuration > Paths while a game runs (#931).
     SWITCH_TITLE: 'Day of Defeat is running',
