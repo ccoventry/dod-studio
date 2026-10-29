@@ -136,7 +136,7 @@ fn collect_image_folders(take_folder: &Path) -> Vec<PathBuf> {
 const VIDEO_EXTENSIONS: &[&str] = &["avi", "mp4", "mkv", "mov"];
 
 /// The video inside a stream folder, whatever container it is in.
-fn stream_video_path(folder: &Path) -> Option<PathBuf> {
+pub(crate) fn stream_video_path(folder: &Path) -> Option<PathBuf> {
     // `video.avi` first so an HLAE take resolves without touching the disk
     // more than once — it is by far the common case.
     let preferred = folder.join(VIDEO_FILE);

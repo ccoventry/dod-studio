@@ -1043,6 +1043,7 @@
                 <thead>
                   <tr>
                     <th class="col-center"><input type="checkbox" id="render-select-all-cb" disabled data-str-title="RENDER.SELECT_ALL_CB_TITLE" title="Tick or untick every row" /></th>
+                    <th class="col-center" data-str="RENDER.TABLE_HEADER_PICTURE" data-str-title="RENDER.TABLE_HEADER_PICTURE_TITLE" title="The middle of each take. Hover for a bigger picture, click for nine frames across the take.">Picture</th>
                     <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
                     <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
                     <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
@@ -1057,10 +1058,17 @@
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="12" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="13" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
             </div>
+            <!-- #1069: the background pass that makes each take's picture. -->
+            <div id="render-take-preview-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
+              <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <span id="render-take-preview-progress-label"></span>
+            </div>
+            <!-- #1069: a take's picture, bigger, while the mouse is on its thumbnail. -->
+            <div id="take-preview-hover" class="take-preview-hover" hidden><img alt="" /></div>
             <!-- #644: Delete Take's steps, measuring then moving to the Recycle Bin. -->
             <div id="render-take-delete-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
               <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
@@ -2024,6 +2032,18 @@
           <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
           <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>
           <button id="combine-close-btn" data-str="COMBINE.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- #1069: nine frames across a take, from a click on its thumbnail. -->
+    <div id="take-sheet-modal" class="modal" style="display: none;">
+      <div class="modal-content take-sheet-content">
+        <h2 class="take-sheet-title"></h2>
+        <p class="take-sheet-status status-text"></p>
+        <div class="take-sheet-grid"></div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button class="take-sheet-close" data-str="RENDER.TAKE_SHEET_CLOSE">Close</button>
         </div>
       </div>
     </div>

@@ -8,6 +8,7 @@ pub mod renderer;
 pub mod scanner;
 pub mod take_cleanup;
 pub mod take_delete;
+pub mod take_frames;
 pub mod take_meta;
 
 pub use autosave::{RenderJob, RenderJobStatus, RenderSessionData};

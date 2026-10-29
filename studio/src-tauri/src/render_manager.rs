@@ -184,6 +184,9 @@ pub struct RenderJobView {
     pub id: String,
     pub name: String,
     pub stream: String,
+    /// The stream folder inside `take_folder` this job renders from (`all`,
+    /// or `hudColor` for a HUD pair): what the take preview (#1069) shows.
+    pub stream_folder: String,
     pub frames: usize,
     pub date: String,
     pub status: String,
@@ -250,6 +253,7 @@ impl RenderJobRuntime {
             } else {
                 self.clip.img_folder.clone()
             },
+            stream_folder: self.clip.img_folder.clone(),
             frames: self.clip.frame_count,
             date: self.clip.date.clone(),
             status: self.status.clone(),
