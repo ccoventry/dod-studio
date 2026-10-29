@@ -1337,6 +1337,54 @@ fn test_blocks_carry_the_record_bounds_the_decal_flush_keys_off() {
 }
 
 #[test]
+fn test_blocks_carry_a_plan_of_the_recording_and_its_kills() {
+    // The take checks (#1084) hold a captured video to this: how long the
+    // recording should be, and where each kill falls in it, in seconds of
+    // demo time from the recording's first frame.
+    let config = mock_config();
+    let mut streak = streak_with_kills(1000, 1200, &[1000, 1200]);
+    streak.frame_times = std::sync::Arc::new((0..30_000).map(|i| i as f32 / 100.0).collect());
+    let mut arrays = std::collections::HashMap::new();
+    arrays.insert(
+        std::path::PathBuf::from("demo1.dem"),
+        streak.frame_times.clone(),
+    );
+
+    let (jobs, _) = build_batch_queue(vec![streak], &config, &arrays).unwrap();
+    let block = &jobs[1].blocks[0];
+    let plan = block
+        .plan
+        .as_ref()
+        .expect("a demo with frame times has a plan");
+
+    let record_secs = f64::from(block.record_stop_tick - block.record_start_tick) / 100.0;
+    assert!((plan.length_secs - record_secs).abs() < 1e-3, "{plan:?}");
+    let first_kill = f64::from(1000 - block.record_start_tick) / 100.0;
+    assert!(
+        (plan.kill_offsets_secs[0] - first_kill).abs() < 1e-3,
+        "{plan:?}"
+    );
+    assert!(
+        (plan.kill_offsets_secs[1] - (first_kill + 2.0)).abs() < 1e-3,
+        "{plan:?}"
+    );
+    assert!(
+        plan.kill_offsets_secs
+            .iter()
+            .all(|&at| at >= 0.0 && at <= plan.length_secs)
+    );
+}
+
+#[test]
+fn test_a_demo_without_frame_times_has_blocks_without_a_plan() {
+    let config = mock_config();
+    let streak = streak_with_kills(1000, 1200, &[1000, 1200]);
+    let (jobs, _) =
+        build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
+    assert!(jobs[1].blocks[0].plan.is_none());
+}
+
+#[test]
 fn test_decal_flush_pins_the_ring_once_at_demo_load_and_never_again() {
     // r_decals bounds how far the rotating decal index may travel before it
     // wraps; it evicts nothing. Setting it a second time, lower, strands
