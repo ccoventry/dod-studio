@@ -41,6 +41,30 @@ pub enum EngineEvent {
     /// clip_count), all 1-based. Same console-log source as DemoLoading.
     /// See issue #98.
     FastForwardToClip(u32, u32, u32, u32),
+    /// OBS mode: the frames OBS is losing, about once a second while a clip
+    /// records and once more with its totals when it ends (#172).
+    ObsDropRate(crate::obs::ObsDropReport),
+    /// A clip's recording started (`START_RECORD`), with the demo tick the
+    /// marker names: its block's `record_start_tick` (#861). The listener
+    /// finds the block by it, since a skipped demo sends no markers for its
+    /// clips and a plain count would fall behind the batch's order.
+    ClipStarted(Option<i64>),
+    /// A clip's recording stopped (`STOP_RECORD`), with its block's
+    /// `record_stop_tick`. The take may still be flushing to disk.
+    ClipRecorded(Option<i64>),
+    /// The hook's batch stopped at a clip boundary after `hold` (#861).
+    Held,
+    /// The hook's batch went on after `go`.
+    Going,
+}
+
+/// The hook batch command that asks for `hold` (true) or `go` (false), #861.
+pub fn hold_command(hold: bool) -> String {
+    format!(
+        "{} {}",
+        crate::patch::runtime_batch::BATCH_COMMAND,
+        if hold { "hold" } else { "go" }
+    )
 }
 
 /// Longest a batch may go without a console marker before OBS mode calls it
@@ -156,7 +180,8 @@ struct CaptureCleanupGuard {
     /// unwinds and no `Drop` runs. That gap, a hard kill and a power cut are
     /// all covered by `obs::recover` on the next start instead.
     obs: Option<std::sync::Arc<std::sync::Mutex<Option<crate::obs::ObsClient>>>>,
-    /// Copies of demos on another drive a hook-run batch plays from
+    /// Copies of demos on another drive a hook-run batch plays from when its
+    /// hook DLL is older than #779
     /// (`patch::source_copies`), removed however the batch ends.
     source_copies: Vec<PathBuf>,
     _wake_lock: Option<keepawake::KeepAwake>,
@@ -175,20 +200,20 @@ impl CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::new] Failed to pre-clean exit_trigger {:?}: {}",
-                exit_trigger,
+            log_markdown(&format!(
+                "[cleanup] Failed to pre-clean exit_trigger {}: {}",
+                exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Err(e) = std::fs::remove_dir(&session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::new] Failed to pre-clean session_junction {:?}: {}",
-                session_junction,
+            log_markdown(&format!(
+                "[cleanup] Failed to pre-clean session_junction {}: {}",
+                session_junction.display(),
                 e
-            );
+            ));
         }
         Self {
             exit_trigger,
@@ -227,20 +252,20 @@ impl Drop for CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::drop] Failed to remove exit_trigger {:?}: {}",
-                self.exit_trigger,
+            log_markdown(&format!(
+                "[cleanup] Failed to remove exit_trigger {}: {}",
+                self.exit_trigger.display(),
                 e
-            );
+            ));
         }
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[GC::drop] Failed to remove session_junction {:?}: {}",
-                self.session_junction,
+            log_markdown(&format!(
+                "[cleanup] Failed to remove session_junction {}: {}",
+                self.session_junction.display(),
                 e
-            );
+            ));
         }
 
         if let Some(game_root) = self.exit_trigger.parent() {
@@ -282,6 +307,13 @@ pub fn spawn_capture_engine(
     // `jobs` is then empty: nothing is patched into `dod/`, the game starts on
     // no demo, and the file is handed to it once it takes commands.
     runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
+    // Where the batch's start in the game stands, read by Studio's close
+    // prompt (#545). Studio sets it to `Preparing` when the batch starts.
+    batch_start: Arc<crate::game_handoff::BatchStart>,
+    // Render While Capturing (#861): true asks the hook's batch to stop at the
+    // next clip boundary, false lets it go on. Sent over the game's pipe when
+    // it changes; a patched batch can't hold, so it is ignored there.
+    hold: Arc<AtomicBool>,
 ) {
     std::thread::Builder::new()
         .name("capture_engine".into())
@@ -289,7 +321,6 @@ pub fn spawn_capture_engine(
             macro_rules! log_crash_abort {
                 ($tx:expr, $msg:expr) => {
                     {
-                        log::error!("{}", $msg);
                         crate::log_markdown(&$msg);
                         let _ = $tx.send(EngineEvent::Error(
                             format!("Capture Engine Aborted — {} (see View Logs for details)", $msg)
@@ -513,7 +544,7 @@ pub fn spawn_capture_engine(
                     let local_dest = demos_dir.join(&demo_filename);
                     match std::fs::copy(&job.patched_demo_path, &local_dest) {
                         Ok(_) => log_markdown(&format!("- [IO] Saved local copy to demos/{}", demo_filename)),
-                        Err(e) => log::warn!("Failed to save local patched copy to {}: {}", local_dest.display(), e),
+                        Err(e) => log_markdown(&format!("- [IO] Failed to save local patched copy to {}: {}", local_dest.display(), e)),
                     }
                 }
 
@@ -579,6 +610,8 @@ pub fn spawn_capture_engine(
             // folder.
             let obs_mode = config.capture_mode == crate::patch::CaptureMode::Obs;
             let mut obs_session: Option<crate::obs::ObsSession> = None;
+            // Stops when dropped, so an early return can't leave it polling.
+            let mut drop_poller: Option<crate::obs::DropPoller> = None;
             let (marker_tx, marker_rx) = std::sync::mpsc::channel::<crate::obs::Marker>();
             let tail_cancel = Arc::new(AtomicBool::new(false));
             // The log feeds the markers until the game's events pipe
@@ -614,6 +647,20 @@ pub fn spawn_capture_engine(
                         // this point on every exit path stops the recorder.
                         _cleanup_guard.obs = Some(session.stop_handle());
                         obs_session = Some(session);
+                        // The live drop rate (#172), on its own connection so
+                        // it never holds up a start or stop. Advice only: a
+                        // poller that can't start just means no figure.
+                        let drop_tx = tx.clone();
+                        drop_poller = crate::obs::DropPoller::spawn(
+                            config.obs.clone(),
+                            obs_take_folders.clone(),
+                            config.obs_capture_fps,
+                            Arc::clone(&cancel_token),
+                            move |report| {
+                                let _ = drop_tx.send(EngineEvent::ObsDropRate(report));
+                            },
+                        )
+                        .ok();
                     }
                     Err(e) => {
                         log_crash_abort!(tx, format!("OBS capture could not start — {}", e));
@@ -713,7 +760,7 @@ pub fn spawn_capture_engine(
                 Some(batch) => (
                     with_start("+exec dodstudio_helper.cfg"),
                     crate::patch::runtime_batch::early_lines(config.keep_game_behind),
-                    crate::patch::runtime_batch::start_lines(&batch.file),
+                    crate::patch::runtime_batch::start_lines(batch),
                 ),
                 None => {
                     let (args, lines) = crate::game_handoff::first_demo_start(
@@ -767,6 +814,11 @@ pub fn spawn_capture_engine(
                 }
             };
             log_markdown(&format!("[HLAE] Spawned (PID {})", child.id()));
+            batch_start.set(if handoff.is_some() {
+                crate::game_handoff::StartState::Pending
+            } else {
+                crate::game_handoff::StartState::NotNeeded
+            });
 
             // The HLAE launcher process (`_child` above) injects into `hl.exe` and then
             // exits on its own under `-noGui -autoStart` — that is expected handoff
@@ -812,6 +864,9 @@ pub fn spawn_capture_engine(
             let mut last_process_check: Option<std::time::Instant> = None;
             let mut last_dialog_check: Option<std::time::Instant> = None;
             let mut hl_alive_cached = false;
+            // What the game was last told (#861), and when a send last failed.
+            let mut hold_sent = false;
+            let mut hold_retry_at: Option<std::time::Instant> = None;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -821,7 +876,11 @@ pub fn spawn_capture_engine(
                 // for OBS mode at the end of this loop.
                 for marker in marker_rx.try_iter() {
                     let now = std::time::Instant::now();
-                    if let Some(previous) = last_marker_at {
+                    // A gap that spans a hold (#861) is waiting, not the pace
+                    // of the batch, so it doesn't widen the stall deadline.
+                    if let Some(previous) = last_marker_at
+                        && !hold_sent
+                    {
                         longest_marker_gap = longest_marker_gap.max(now - previous);
                     }
                     last_marker_at = Some(now);
@@ -842,6 +901,54 @@ pub fn spawn_capture_engine(
                         && let Some((job_idx, total, clip_idx, clip_count)) = marker.next_clip_progress {
                             let _ = tx.send(EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count));
                         }
+                    match marker.kind {
+                        crate::obs::MarkerKind::StartRecord => {
+                            let _ = tx.send(EngineEvent::ClipStarted(marker.tick));
+                        }
+                        crate::obs::MarkerKind::StopRecord => {
+                            let _ = tx.send(EngineEvent::ClipRecorded(marker.tick));
+                        }
+                        crate::obs::MarkerKind::Other if marker.label == "BATCH_HELD" => {
+                            let _ = tx.send(EngineEvent::Held);
+                        }
+                        crate::obs::MarkerKind::Other if marker.label == "BATCH_GOING" => {
+                            let _ = tx.send(EngineEvent::Going);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Render While Capturing (#861): tell the hook's batch when the
+                // hold changes. A failed send tries again a second later.
+                let want_hold = hold.load(Ordering::Relaxed);
+                if runtime_batch.is_some()
+                    && want_hold != hold_sent
+                    && hold_retry_at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1))
+                {
+                    let sent = crate::sys::process::game_pids_in(&sys)
+                        .into_iter()
+                        .next()
+                        .map(|pid| crate::sys::game_remote::send_console_commands(pid, &[hold_command(want_hold)]));
+                    match sent {
+                        Some(Ok(crate::sys::game_remote::Sent::Delivered)) => {
+                            // A hold sends no markers for as long as it lasts:
+                            // the stall check counts from the `go`, not from
+                            // the last marker before the hold.
+                            if hold_sent && !want_hold {
+                                last_marker_at = Some(std::time::Instant::now());
+                            }
+                            hold_sent = want_hold;
+                            hold_retry_at = None;
+                            log_markdown(&format!("[HLAE] Sent `{}`", hold_command(want_hold)));
+                        }
+                        other => {
+                            hold_retry_at = Some(std::time::Instant::now());
+                            log_markdown(&format!(
+                                "[HLAE] Could not send `{}` yet ({other:?}); trying again",
+                                hold_command(want_hold)
+                            ));
+                        }
+                    }
                 }
 
                 if !launcher_exit_logged {
@@ -890,12 +997,14 @@ pub fn spawn_capture_engine(
                         Handoff::Waiting | Handoff::Sent => {}
                         Handoff::JustSent(pid) => {
                             foreground_lock.release();
+                            batch_start.set(crate::game_handoff::StartState::Sent);
                             log_markdown(&format!(
                                 "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
                                 handoff.lines.join("; ")
                             ))
                         }
                         Handoff::Failed(why) => {
+                            batch_start.set(crate::game_handoff::StartState::Failed);
                             log_markdown(&format!("[HLAE] {why}"));
                             failure_reason = Some(why);
                             kill_hl_exe_and_wait(&mut sys);
@@ -1006,7 +1115,9 @@ pub fn spawn_capture_engine(
                 // never started playing, which produces no markers to count
                 // from at all. Both mean the same thing: the game is alive and
                 // the batch is not advancing.
+                // A batch held for renders (#861) sends no markers on purpose.
                 if obs_mode
+                    && !hold_sent
                     && let Some(since) = last_marker_at.or(hl_first_seen)
                         && hl_alive && since.elapsed() > marker_stall_deadline(longest_marker_gap) {
                             let never_started = last_marker_at.is_none();
@@ -1145,6 +1256,11 @@ pub fn spawn_capture_engine(
                     session.on_marker(&marker);
                 }
                 session.finish();
+                // Before the batch reports it ended, so the last clip's
+                // totals reach the Last Batch panel.
+                if let Some(poller) = drop_poller.take() {
+                    poller.stop_and_wait();
+                }
                 log_markdown(&format!(
                     "🎥 **OBS capture** — {} block(s) recorded, {} skipped.",
                     session.recorded.len(),
@@ -1211,14 +1327,12 @@ pub fn spawn_capture_engine(
             let _ = tx.send(EngineEvent::Finished("Batch Queue".into()));
 
             let autosave_path = crate::shared::paths::get_appdata_dir().join(".autosave.json");
-            if let Err(e) = std::fs::remove_file(&autosave_path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
-                }
-            } else {
-                // Nothing writes `.autosave.json` yet (#20), so a file found
-                // here is a stray, not recovery state: removed quietly (#352).
-                log::debug!("[autosave] removed a stray .autosave.json");
+            // Nothing writes `.autosave.json` yet (#20), so a file found here
+            // is a stray, not recovery state: removed quietly (#352).
+            if let Err(e) = std::fs::remove_file(&autosave_path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                log_markdown(&format!("[autosave] Failed to remove .autosave.json: {}", e));
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);
@@ -1247,7 +1361,13 @@ fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool
 
 #[cfg(test)]
 mod tests {
-    use super::completion_source;
+    use super::{completion_source, hold_command};
+
+    #[test]
+    fn hold_and_go_use_the_hooks_batch_command() {
+        assert_eq!(hold_command(true), "ds_capture_batch hold");
+        assert_eq!(hold_command(false), "ds_capture_batch go");
+    }
 
     #[test]
     fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {

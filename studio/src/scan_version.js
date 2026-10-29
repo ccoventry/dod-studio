@@ -9,7 +9,7 @@
 
 import { demoHasTeams } from './project_teams.js';
 
-export const HIGHLIGHTS_VERSION = 1;
+export const HIGHLIGHTS_VERSION = 2;
 
 /**
  * True when `demo` was scanned by this version of highlight detection and

@@ -5,7 +5,7 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log::error!/eprintln!
+// as a toast/dialog string. Developer-only log_markdown/eprintln!
 // diagnostics stay inline at their call site, same as strings.js leaves
 // console.log/console.error alone. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
@@ -176,6 +176,35 @@ pub fn obs_orphan_recovery_failed(err: impl Display) -> String {
     format!("OBS orphan recovery failed to run: {}", err)
 }
 
+// ── OBS capture test (#646) ──
+pub const OBS_TEST_NO_DEMO: &str = "The OBS capture test's demo isn't in DoD Studio's install folder. Reinstall DoD Studio to get it back.";
+
+pub fn obs_test_unreadable_demo(path: &Path, err: impl Display) -> String {
+    format!("Could not read the test demo {}: {err}", path.display())
+}
+
+pub fn obs_test_no_clip(path: &Path, seconds: f32) -> String {
+    format!(
+        "{} has no kill with {seconds:.0} s of demo around it to record.",
+        path.display()
+    )
+}
+
+pub fn obs_test_no_video(folder: &Path) -> String {
+    format!(
+        "OBS recorded no video into {}. Check OBS's own window for why.",
+        folder.display()
+    )
+}
+
+pub fn obs_test_not_a_test_folder(folder: &str) -> String {
+    format!("{folder} isn't an OBS capture test's folder, so it was not deleted.")
+}
+
+pub fn obs_test_delete_failed(folder: &Path, err: impl Display) -> String {
+    format!("Could not delete the test clip {}: {err}", folder.display())
+}
+
 pub fn failed_to_create_dod_directory(err: impl Display) -> String {
     format!(
         "Failed to create the game folder `{}` beside hl.exe: {}",
@@ -292,6 +321,16 @@ pub const REVIEW_GAME_NOT_FROM_STUDIO: &str = "Day of Defeat is open, but DoD St
 pub const REVIEW_GAME_LAUNCH_SETTINGS_DIFFER: &str = "Day of Defeat is open with other launch settings than DoD Studio's (another install or resolution). Close the game and press Review highlights again.";
 pub const GAME_DID_NOT_CLOSE: &str = "Day of Defeat didn't close within 10 seconds, so nothing was started. Close it yourself, then try again.";
 pub const REVIEW_GAME_DID_NOT_START: &str = "Day of Defeat didn't open within two minutes. Start it with Launch Game, then press Review highlights again.";
+// ── review_library.rs (#848) ────────────────────────────────────────────────
+pub fn review_library_unreadable(path: &std::path::Path, e: impl Display) -> String {
+    format!(
+        "Could not read your saved Review marks ({}): {e}",
+        path.display()
+    )
+}
+pub fn review_library_unwritable(path: &std::path::Path, e: impl Display) -> String {
+    format!("Could not save your Review marks ({}): {e}", path.display())
+}
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 
@@ -381,6 +420,26 @@ pub fn take_is_rendering(take_folder: &str) -> String {
 }
 
 pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
+
+// ── take_cleanup_manager.rs (#644, the automatic half) ──────────────────
+
+/// The Capture footer's line while finished takes make room for a capture.
+pub const MAKING_ROOM_LOOKING: &str = "Making room: looking for finished takes";
+
+pub fn making_room_measuring(done: usize, total: usize) -> String {
+    format!("Making room: measuring finished takes ({done} of {total})")
+}
+
+pub fn making_room_deleting(done: usize, total: usize) -> String {
+    format!("Making room: deleting finished takes ({done} of {total})")
+}
+
+pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
+    format!("{take_folder} is queued or rendering, so it was not deleted")
+}
+
+pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
+    "Capture cancelled while making room. Nothing was captured.";
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 

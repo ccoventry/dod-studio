@@ -150,9 +150,10 @@ export function localDate(unixSecs) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** The highlight's row number, 1-based, stable whatever Min Kills is set to:
- *  its place in the demo's highlights, the rows Highlight Details numbers
- *  with Min Kills at 1 (whose they are is the scan's decision, #573). */
+/** The highlight's row number, 1-based, stable whatever the Player filter
+ *  shows: its place in the demo's highlights, the rows Highlight Details
+ *  numbers with every player shown (whose they are is the scan's decision,
+ *  #573). */
 export function highlightRow(demo, streak) {
   const index = (demo?.streaks || []).indexOf(streak);
   return index === -1 ? 1 : index + 1;

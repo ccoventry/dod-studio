@@ -365,6 +365,9 @@ pub struct ObsConfig {
     pub port: u16,
     /// Empty when OBS has authentication switched off.
     pub password: String,
+    /// How DoD Studio's OBS profile encodes (`obs::encoder`).
+    #[serde(default)]
+    pub recording_quality: ObsRecordingQuality,
 }
 
 impl Default for ObsConfig {
@@ -373,6 +376,44 @@ impl Default for ObsConfig {
             host: "127.0.0.1".to_string(),
             port: 4455,
             password: String::new(),
+            recording_quality: ObsRecordingQuality::default(),
+        }
+    }
+}
+
+/// The recording quality a user picks for OBS mode (#1060). Every NVENC
+/// choice is single-pass with no lookahead and no B-frames, which is what
+/// holds 120 fps at 1440p on an RTX 3070 Ti; they differ in codec and
+/// quantiser. Any other encoder records with OBS's own Simple-mode
+/// settings whatever is picked here (see `obs::encoder`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObsRecordingQuality {
+    /// H.264 at QP 16: what Simple mode's "Indistinguishable" asks for, at a
+    /// speed that holds 120 fps.
+    /// H.264 at QP 20: about half Standard's size.
+    Small,
+    #[default]
+    Standard,
+    /// H.264 at QP 12: about 1.7x Standard's size.
+    High,
+    /// H.264 4:4:4 at QP 12: full colour resolution.
+    Max,
+    /// OBS's own Simple-mode "Indistinguishable" setup, as before #1060:
+    /// smaller files, but at 1440p it can't keep up with 120 fps on an RTX
+    /// 3070 Ti.
+    ObsSimple,
+}
+
+impl ObsRecordingQuality {
+    /// From the settings file's id; anything unknown is the default.
+    pub fn from_str_id(id: &str) -> Self {
+        match id {
+            "small" => Self::Small,
+            "high" => Self::High,
+            "max" => Self::Max,
+            "obs_simple" => Self::ObsSimple,
+            _ => Self::Standard,
         }
     }
 }
@@ -471,6 +512,12 @@ pub struct PatcherConfig {
     /// (`ds_capture_run_in_background`).
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
+    /// Render While Capturing (#861): takes render and go while the batch
+    /// runs, and the batch holds between clips until they have freed the
+    /// room. So the planner may route more blocks to a drive than it holds
+    /// now, rather than refusing the batch.
+    #[serde(default)]
+    pub render_while_capturing: bool,
     /// Configuration > Players' "Use in the game" box (#428), sent to the
     /// game as `ds_player_overrides` when its pipe first answers.
     /// `None` sends nothing: a config not built from the saved settings.
@@ -774,18 +821,27 @@ impl PatcherConfig {
         // path that was tried.
         match &goldsrc_hooks_dll_str {
             Some(extra_dll) => {
-                log::info!("goldsrc-hooks: injecting {extra_dll}");
+                crate::log_markdown(&format!("goldsrc-hooks: injecting {extra_dll}"));
                 cmd.args(["-hookDllPath", extra_dll]);
             }
-            None => log::warn!(
-                "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                 ds_* console commands will be absent this session. Tried: override={:?}, \
-                 bundled default={:?}, legacy spot beside hlae.exe={:?}. In a dev build only the \
-                 override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
-                self.goldsrc_hooks_dll_path,
-                default_goldsrc_hooks_dll_path(),
-                hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll")),
-            ),
+            None => {
+                let shown = |p: Option<std::path::PathBuf>| {
+                    p.map_or_else(|| "none".to_string(), |p| p.display().to_string())
+                };
+                crate::log_markdown(&format!(
+                    "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
+                     ds_* console commands will be absent this session. Tried: override={}, \
+                     bundled default={}, legacy spot beside hlae.exe={}. In a dev build only the \
+                     override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
+                    shown(
+                        self.goldsrc_hooks_dll_path
+                            .as_ref()
+                            .map(std::path::PathBuf::from)
+                    ),
+                    shown(default_goldsrc_hooks_dll_path()),
+                    shown(hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))),
+                ));
+            }
         }
         cmd.args(["-programPath", &program_path_str, "-cmdLine", &cmd_line_str]);
         cmd.env("SteamAppId", "30");
@@ -832,6 +888,7 @@ impl Default for PatcherConfig {
             save_local_patched_copy: false,
             hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
+            render_while_capturing: false,
             player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),
