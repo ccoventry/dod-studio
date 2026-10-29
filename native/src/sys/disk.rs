@@ -127,6 +127,32 @@ pub fn group_by_volume(
     (budget_of_dir, budgets)
 }
 
+/// Free bytes across `paths`, counting each volume once and skipping paths
+/// whose free space is unknown (`u64::MAX`).
+pub fn pool_free_bytes(paths: &[std::path::PathBuf]) -> u64 {
+    pool_free_bytes_with(paths, get_available_bytes)
+}
+
+fn pool_free_bytes_with(
+    paths: &[std::path::PathBuf],
+    mut free_of: impl FnMut(&std::path::Path) -> u64,
+) -> u64 {
+    let mut seen = std::collections::HashSet::new();
+    let mut total: u64 = 0;
+    for p in paths {
+        if let Some(key) = volume_key(p)
+            && !seen.insert(key)
+        {
+            continue;
+        }
+        let free = free_of(p);
+        if free != u64::MAX {
+            total += free;
+        }
+    }
+    total
+}
+
 // Disk query results are cached for TTL_MS milliseconds to avoid
 // issuing blocking kernel disk-enumeration syscalls on every frame.
 const TTL_MS: u128 = 2_000;
@@ -328,6 +354,25 @@ mod tests {
             get_available_bytes(std::path::Path::new("relative/folder")),
             u64::MAX
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pool_counts_each_drive_once_and_skips_unknown() {
+        use std::path::PathBuf;
+        let free = |p: &std::path::Path| match p.to_string_lossy().to_lowercase().chars().next() {
+            Some('c') => 100,
+            Some('d') => 40,
+            _ => u64::MAX,
+        };
+        let paths: Vec<PathBuf> = [r"C:\a", r"c:\b", r"D:\x", r"Z:\gone"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(pool_free_bytes_with(&paths, free), 140);
+        let reversed: Vec<PathBuf> = paths.iter().rev().cloned().collect();
+        assert_eq!(pool_free_bytes_with(&reversed, free), 140);
+        assert_eq!(pool_free_bytes_with(&[], free), 0);
     }
 
     #[cfg(windows)]
