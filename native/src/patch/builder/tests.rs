@@ -1336,6 +1336,84 @@ fn test_blocks_carry_the_record_bounds_the_decal_flush_keys_off() {
     }
 }
 
+/// A highlight as a real scan hands it over: `frame_times` stop at the end of
+/// the demo's loading segment (31 frames here), the kills sit ~100k frames
+/// in at ~468 frames a second, and each kill has its `viewdemo` time.
+/// Numbers from `wsod25_grp5_h1_m00cat.dem`'s 3k on dod_harrington.
+fn scanned_streak() -> CaptureStreak {
+    let mut streak = streak_with_kills(104_320, 108_292, &[104_320, 108_292]);
+    streak.total_demo_frames = 586_462;
+    streak.demo_fps = 468.2;
+    streak.viewdemo_times = vec![760.0, 769.33];
+    streak.frame_times = std::sync::Arc::new((0..31).map(|i| 38.0 + i as f32 / 15.0).collect());
+    streak
+}
+
+#[test]
+fn test_blocks_carry_a_plan_of_the_recording_and_its_kills() {
+    // The take checks (#1084) hold a captured video to this: how long the
+    // recording should be, and where each kill falls in it, in seconds on
+    // the clock the hook records on. A take of this block measured 19.33 s
+    // (5799 frames at 300 fps): 5 s lead + 9.33 s of kills + 5 s trail.
+    let mut config = mock_config();
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let streak = scanned_streak();
+    let mut arrays = std::collections::HashMap::new();
+    arrays.insert(
+        std::path::PathBuf::from("demo1.dem"),
+        streak.frame_times.clone(),
+    );
+
+    let (jobs, _) = build_batch_queue(vec![streak], &config, &arrays).unwrap();
+    let block = &jobs[1].blocks[0];
+    let plan = block
+        .plan
+        .as_ref()
+        .expect("a highlight with viewdemo times has a plan");
+
+    assert!((plan.length_secs - 19.33).abs() < 0.01, "{plan:?}");
+    assert_eq!(plan.kill_offsets_secs.len(), 2, "{plan:?}");
+    assert!((plan.kill_offsets_secs[0] - 5.0).abs() < 0.01, "{plan:?}");
+    assert!((plan.kill_offsets_secs[1] - 14.33).abs() < 0.01, "{plan:?}");
+}
+
+#[test]
+fn test_a_plan_is_the_window_the_hook_batch_records() {
+    // The plan and the hook's batch file read one clock, so the plan's
+    // length is the time between the batch's own record start and stop.
+    let mut config = mock_config();
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let streak = scanned_streak();
+    let streaks = vec![streak.clone()];
+    let (jobs, _) =
+        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new()).unwrap();
+    let plan = jobs[1].blocks[0].plan.clone().expect("a plan");
+    let text = crate::patch::runtime_batch::batch_file(&jobs, &streaks, false).unwrap();
+    let at = |command: &str| -> f64 {
+        text.lines()
+            .find(|l| l.ends_with(command))
+            .and_then(|l| l.split('\t').nth(1))
+            .and_then(|t| t.parse().ok())
+            .unwrap_or_else(|| panic!("no {command} in {text}"))
+    };
+    let scheduled = at("sys_record_stop") - at("sys_record_start");
+    assert!(
+        (plan.length_secs - scheduled).abs() < 0.002,
+        "plan {plan:?}, batch {scheduled}"
+    );
+}
+
+#[test]
+fn test_a_highlight_without_viewdemo_times_has_blocks_without_a_plan() {
+    let config = mock_config();
+    let streak = streak_with_kills(1000, 1200, &[1000, 1200]);
+    let (jobs, _) =
+        build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
+    assert!(jobs[1].blocks[0].plan.is_none());
+}
+
 #[test]
 fn test_decal_flush_pins_the_ring_once_at_demo_load_and_never_again() {
     // r_decals bounds how far the rotating decal index may travel before it

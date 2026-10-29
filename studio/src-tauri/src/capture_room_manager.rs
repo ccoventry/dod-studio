@@ -694,6 +694,7 @@ mod tests {
             end_tick: stop,
             record_start_tick: start,
             record_stop_tick: stop,
+            plan: None,
         }
     }
 

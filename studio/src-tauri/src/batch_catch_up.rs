@@ -161,6 +161,7 @@ mod tests {
             end_tick: 100,
             record_start_tick: 0,
             record_stop_tick: 100,
+            plan: None,
         }
     }
 

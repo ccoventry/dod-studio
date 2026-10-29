@@ -8,7 +8,8 @@
 //! - **Ticks become demo-player seconds.** The hook runs commands on the
 //!   `viewdemo` clock, the server time each kill's `viewdemo_times` entry is in.
 //!   A tick is placed by the nearest kill of the same demo: that kill's
-//!   `viewdemo` time, plus the playback time between the two frames.
+//!   `viewdemo` time, plus the playback time between the two frames
+//!   (`viewdemo_clock.rs`, which the take plan reads its seconds from too).
 //! - **Most of each fast-forward becomes a seek.** Each `sys_fast_forward`
 //!   jumps to [`SETTLE_SECONDS`] before the next `sys_normal_speed` (the next
 //!   clip's pre-roll) and fast-forwards the rest, as the patched demo does. The
@@ -30,9 +31,10 @@
 //!   only the markers Studio reads go in.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::patch::types::{CaptureStreak, PatchJob};
+use crate::patch::viewdemo_clock::clock_for;
 
 /// A batch the hook runs: its file, the copies of demos on another drive it
 /// plays from (`patch::source_copies`, for a hook DLL older than #779),
@@ -61,111 +63,6 @@ pub const SETTLE_SECONDS: f64 = 30.0;
 
 /// The hook DLL's batch command.
 pub const BATCH_COMMAND: &str = "ds_capture_batch";
-
-/// One kill whose frame and `viewdemo` time are both known.
-#[derive(Debug, Clone, Copy)]
-struct Anchor {
-    tick: i32,
-    viewdemo: f64,
-}
-
-/// How many of the nearest kills place a tick (see `Clock::seconds`).
-const NEAREST_ANCHORS: usize = 7;
-/// How far, in playback seconds, a kill may be from the tick to count.
-const NEAR_SECONDS: f64 = 30.0;
-
-/// Places ticks of one demo on the `viewdemo` clock.
-struct Clock<'a> {
-    anchors: Vec<Anchor>,
-    frame_times: &'a [f32],
-    fps: f64,
-}
-
-impl Clock<'_> {
-    fn playback(&self, tick: i32) -> Option<f64> {
-        usize::try_from(tick)
-            .ok()
-            .and_then(|t| self.frame_times.get(t))
-            .map(|&t| f64::from(t))
-    }
-
-    fn seconds(&self, tick: i32) -> f64 {
-        // With frame times, the demo clock is playback time plus an offset,
-        // and each kill gives one reading of it. One kill's reading is off by
-        // up to a network frame (the kill's server time is its packet's), so
-        // the median of the nearest few is used.
-        if let Some(at) = self.playback(tick) {
-            let mut near: Vec<(i64, f64)> = self
-                .anchors
-                .iter()
-                .filter_map(|a| {
-                    let played = self.playback(a.tick)?;
-                    // Only kills close by: the offset can step at a pause.
-                    ((played - at).abs() <= NEAR_SECONDS).then(|| {
-                        let distance = (i64::from(a.tick) - i64::from(tick)).abs();
-                        (distance, a.viewdemo - played)
-                    })
-                })
-                .collect();
-            if !near.is_empty() {
-                near.sort_by_key(|&(distance, _)| distance);
-                near.truncate(NEAREST_ANCHORS);
-                let mut offsets: Vec<f64> = near.iter().map(|&(_, o)| o).collect();
-                offsets.sort_by(f64::total_cmp);
-                return (at + offsets[offsets.len() / 2]).max(0.0);
-            }
-        }
-        let anchor = self
-            .anchors
-            .iter()
-            .min_by_key(|a| (i64::from(a.tick) - i64::from(tick)).abs())
-            .copied()
-            .expect("a clock has anchors");
-        let between = match (self.playback(tick), self.playback(anchor.tick)) {
-            (Some(t), Some(a)) => t - a,
-            _ => f64::from(tick - anchor.tick) / self.fps,
-        };
-        (anchor.viewdemo + between).max(0.0)
-    }
-}
-
-fn clock_for<'a>(demo: &str, streaks: &'a [CaptureStreak]) -> Result<Clock<'a>, String> {
-    let mine: Vec<&CaptureStreak> = streaks.iter().filter(|s| s.source_demo == demo).collect();
-    let anchors: Vec<Anchor> = mine
-        .iter()
-        .flat_map(|s| {
-            s.kills
-                .iter()
-                .zip(&s.viewdemo_times)
-                .filter(|(_, vd)| vd.is_finite() && **vd > 0.0)
-                .map(|(kill, vd)| Anchor {
-                    tick: kill.0,
-                    viewdemo: f64::from(*vd),
-                })
-        })
-        .collect();
-    if anchors.is_empty() {
-        return Err(format!(
-            "{} has no demo-player times for its kills (scan it again)",
-            Path::new(demo).display()
-        ));
-    }
-    let frame_times = mine
-        .iter()
-        .map(|s| s.frame_times.as_slice())
-        .max_by_key(|f| f.len())
-        .unwrap_or(&[]);
-    let fps = mine
-        .iter()
-        .map(|s| s.demo_fps)
-        .find(|&f| f > 0.0)
-        .unwrap_or(30.0);
-    Ok(Clock {
-        anchors,
-        frame_times,
-        fps: f64::from(fps),
-    })
-}
 
 fn clean(line: &str) -> String {
     line.replace(['\r', '\n', '\t'], " ")
@@ -371,6 +268,7 @@ mod tests {
                 end_tick: 0,
                 record_start_tick: 0,
                 record_stop_tick: 0,
+                plan: None,
             }],
         }
     }
