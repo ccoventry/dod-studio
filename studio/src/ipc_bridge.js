@@ -83,7 +83,7 @@ export async function convertProjectFile(path) {
 }
 
 /** A project file's text, for Rescan Recent Sessions' count and backup
- *  (#938). Rejects with the backend's message, which names the file. */
+ *  (#938) and a batch catch-up's change to a closed project (#545). Rejects with the backend's message, which names the file. */
 export async function readProjectFile(path) {
   return invoke("load_project_session", { path })
     .catch((err) => {
@@ -1255,6 +1255,27 @@ export async function writeTextFile(path, contents) {
   return invoke("save_project_session", { path, contents })
     .catch((err) => {
       console.error("IPC Execution Error (save_project_session, text export):", err);
+      throw err;
+    });
+}
+
+/** Checks the takes of capture batches that ran while Studio was closed
+ *  (#545). Resolves to `{ batches, waiting_for_game }`. */
+export async function catchUpUnwatchedBatches() {
+  return invoke("catch_up_unwatched_batches")
+    .catch((err) => {
+      console.error("IPC Execution Error (catch_up_unwatched_batches):", err);
+      throw err;
+    });
+}
+
+/** Where the running batch's start stands once it is no longer on its way
+ *  to the game, or `timeoutMs` has passed (#545): 'preparing', 'pending',
+ *  'sent', 'not_needed', 'failed' or 'not_running'. */
+export async function waitForBatchStart(timeoutMs) {
+  return invoke("wait_for_batch_start", { timeoutMs })
+    .catch((err) => {
+      console.error("IPC Execution Error (wait_for_batch_start):", err);
       throw err;
     });
 }

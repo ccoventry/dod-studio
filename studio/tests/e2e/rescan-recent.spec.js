@@ -3,6 +3,8 @@ import { test, expect } from '@playwright/test';
 
 const old = (path) => ({ path, name: path.split('/').pop(), file_key: '1-abc', streaks: [] });
 const project = (...demos) => JSON.stringify({ version: '0.12.0', demos });
+// The current highlight detection version, as the page has it.
+const currentVersion = (page) => page.evaluate(() => import('/src/scan_version.js').then((m) => m.HIGHLIGHTS_VERSION));
 
 async function gotoHarness(page, { files, recent, toParse = 1 }) {
   await page.goto('/tests/e2e/rescan-recent.html');
@@ -76,7 +78,8 @@ test('Rescan all backs up, rescans and saves each session, with one bar and a li
   const backups = Object.keys(after).filter((p) => p.includes('.before-rescan-'));
   expect(backups).toHaveLength(2);
   const saved = JSON.parse(after['D:/p/wsod25.json']);
-  expect(saved.demos.map((d) => d.highlights_version)).toEqual([1, 1]);
+  const v = await currentVersion(page);
+  expect(saved.demos.map((d) => d.highlights_version)).toEqual([v, v]);
   expect(JSON.parse(after['D:/p/monday.json']).demos[0].no_camera_data).toBe(false);
 
   const logs = await page.evaluate(() => window.__mockInvocations
@@ -99,7 +102,7 @@ test('the session that was open is reopened when it finishes, without its own re
   await page.locator('#rescan-recent-start-btn').click();
   await expect(page.locator('#rescan-recent-modal')).toBeHidden();
   await expect(page.locator('#session-file-indicator')).toHaveText('monday.json');
-  expect(await page.evaluate(() => window.__getDemos().map((d) => d.highlights_version))).toEqual([1]);
+  expect(await page.evaluate(() => window.__getDemos().map((d) => d.highlights_version))).toEqual([await currentVersion(page)]);
   expect(await page.evaluate(() => window.__rescanOffers)).toBe(1);
 });
 
@@ -129,7 +132,7 @@ test('Cancel stops between sessions: the one under way is saved, the rest are le
   await expect(page.locator('#rescan-recent-modal')).toBeHidden();
   expect(await page.evaluate(() => window.__scans)).toHaveLength(1);
   const after = await files(page);
-  expect(JSON.parse(after['D:/p/wsod25.json']).demos[0].highlights_version).toBe(1);
+  expect(JSON.parse(after['D:/p/wsod25.json']).demos[0].highlights_version).toBe(await currentVersion(page));
   expect(after['D:/p/monday.json']).toBe(TWO.files['D:/p/monday.json']);
   await expect(page.locator('#toast-container')).toContainText('Rescanned 1 of 2 sessions.');
 });

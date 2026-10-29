@@ -392,6 +392,26 @@ pub fn take_is_rendering(take_folder: &str) -> String {
 
 pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
 
+// ── take_cleanup_manager.rs (#644, the automatic half) ──────────────────
+
+/// The Capture footer's line while finished takes make room for a capture.
+pub const MAKING_ROOM_LOOKING: &str = "Making room: looking for finished takes";
+
+pub fn making_room_measuring(done: usize, total: usize) -> String {
+    format!("Making room: measuring finished takes ({done} of {total})")
+}
+
+pub fn making_room_deleting(done: usize, total: usize) -> String {
+    format!("Making room: deleting finished takes ({done} of {total})")
+}
+
+pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
+    format!("{take_folder} is queued or rendering, so it was not deleted")
+}
+
+pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
+    "Capture cancelled while making room. Nothing was captured.";
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
 /// A path as Explorer shows it: the audit's canonical paths carry a `\\?\`

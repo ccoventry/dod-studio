@@ -17,7 +17,7 @@ import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus, isSkipped, markBlockCaptured } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -25,11 +25,13 @@ import { requestFinishClips, finishSummary } from './finish_clips.js';
 import { syncCommandProfileRow, getAllCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
-import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
+import { computeRequiredCaptureBytes, bytesPerFrameFor } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { refreshAfterTyping } from './input_refresh.js';
+import { takeCleanupMakesRoom } from './take_cleanup.js';
+import { rendersMakeRoom } from './render_while_capturing.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -408,9 +410,11 @@ export async function refreshLaunchGuard(state) {
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
   const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
   const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
-  // AGR mode writes a few KB a frame, at its own rate — sizing it like a
-  // frame sequence would block batches that fit with room to spare.
-  const agrMode = document.querySelector('#config-capture-mode')?.value === 'agr';
+  // AGR mode writes a few KB a frame, at its own rate, and a video take is
+  // compressed (#1096) — sizing either like a frame sequence would block
+  // batches that fit with room to spare.
+  const captureMode = document.querySelector('#config-capture-mode')?.value;
+  const agrMode = captureMode === 'agr';
   const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
@@ -420,7 +424,12 @@ export async function refreshLaunchGuard(state) {
     captureFps: agrMode ? agrFpsVal : captureFpsVal,
     resWidth: resWidthVal,
     resHeight: resHeightVal,
-    bytesPerFrame: agrMode ? AGR_BYTES_PER_FRAME : undefined,
+    bytesPerFrame: bytesPerFrameFor(
+      captureMode,
+      document.querySelector('#config-capture-codec')?.value,
+      resWidthVal,
+      resHeightVal,
+    ),
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -480,6 +489,14 @@ export async function refreshLaunchGuard(state) {
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
   const insufficientSpace = !noDrivesConfigured && !noUsableSpace && requiredBytes > availableBytes;
+  // "Only when space is needed" (#644): finished takes on the capture drives
+  // may cover the shortfall, and only the backend can tell (make_room runs
+  // before the capture and stops the batch when it can't), so short of room
+  // is a heads-up here, not a block.
+  // Render While Capturing (#861) holds between clips for renders to free
+  // room, and the backend refuses only a clip no drive could ever hold.
+  const rendersRoom = insufficientSpace && rendersMakeRoom();
+  const makesRoom = insufficientSpace && (rendersRoom || takeCleanupMakesRoom());
   // Pool is usable overall (at least one real drive with room) but not every
   // configured entry is — worth a heads-up, not worth blocking the batch.
   const hasPartialProblems = !noDrivesConfigured && !noUsableSpace && !insufficientSpace && problemPaths.length > 0;
@@ -501,7 +518,7 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
     startBtn.disabled = blocked;
@@ -538,6 +555,10 @@ export async function refreshLaunchGuard(state) {
       warningEl.textContent = problemPaths.length > 0
         ? STRINGS.CAPTURE.noUsableSpaceProblem(describeProblemPaths(problemPaths))
         : STRINGS.CAPTURE.NO_USABLE_SPACE_WARNING;
+      warningEl.style.display = 'block';
+    } else if (makesRoom) {
+      warningEl.style.color = '#ffa726';
+      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = '#f44336';
@@ -879,6 +900,26 @@ function initClearPreviewsModal() {
   }
 }
 
+/** Render While Capturing's hold line on the footer (`captureProgress.setRoom`). */
+export function showCaptureRoomLine(room) {
+  captureProgress?.setRoom(room);
+}
+
+/**
+ * Render While Capturing (#861): a take of the running batch has settled and
+ * is about to be queued for rendering. Its highlights go Captured and the
+ * take index learns it now, before the render: the render's clip name and
+ * its Rendered mark both resolve through the index, and the take may be
+ * deleted before the batch's own verification looks. `clip` is a
+ * `capture_clip_ready` payload; one from another batch is ignored.
+ */
+export function markClipCaptured(clip) {
+  if (!clip || !lastDispatch || clip.session_id !== lastDispatch.sessionId) return;
+  const takeIndex = currentGetTakeIndex ? currentGetTakeIndex() : null;
+  const { advanced, markCleared } = markBlockCaptured(clip, lastDispatch, takeIndex);
+  if ((advanced > 0 || markCleared) && currentOnStatusChange) currentOnStatusChange();
+}
+
 export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
@@ -985,6 +1026,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // AGR mode sizes a batch in KB rather than GB, so switching mode moves the
   // disk estimate too.
   document.querySelector('#config-capture-mode')?.addEventListener('change', () => refreshLaunchGuard());
+  // The codec changes what a video take is billed at (#1096).
+  document.querySelector('#config-capture-codec')?.addEventListener('change', () => refreshLaunchGuard());
   // Same missing-wiring bug as the rest of this function, just on the OBS
   // connection fields and the capture-mode selector — all three read at
   // capture/save time but never saved on their own change, so edits looked
@@ -1031,6 +1074,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listeningForExternalErrors = true;
     listen('external_error', (event) => {
       showToast(String(event.payload || ''), 'error', 15000);
+    });
+    // Deleted takes free space on the Destinations drives: "Capture Output
+    // Free" reads it again (the backend's free-space cache is already dropped).
+    // currentOnBatchFinished is that figure's refresh (see its declaration).
+    listen('take_cleanup_done', () => {
+      refreshLaunchGuard();
+      if (currentOnBatchFinished) currentOnBatchFinished();
     });
   }
 
@@ -1160,38 +1210,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        // A block can cover several highlights — overlapping ones are recorded
-        // as one continuous take — so every highlight it covers advances.
-        const uids = [];
-        const sourceIndices = block.source_streak_indices || [];
-        sourceIndices.forEach(i => {
-          const streak = lastDispatch?.streaks?.[i];
-          if (!streak) return;
-          const demoPath = lastDispatch?.demoPaths?.[i];
-          uids.push(streakUid(demoPath, streak));
-          // Merged blocks (2+ source highlights recorded into one take) get a
-          // visible affordance in Highlight Details (detail_pane.js) so it's
-          // obvious why the rows flipped together. Non-enumerable, same as
-          // `.uid`, so it never leaks into a future capture payload sent
-          // over IPC (buildCapturePayload pushes the live streak object).
-          if (sourceIndices.length > 1 && block.take_key) {
-            Object.defineProperty(streak, 'mergedTakeKey', { value: block.take_key, enumerable: false, configurable: true });
-            Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
-          }
-          // Status only ever moves forward. Re-capturing something already
-          // rendered must not knock it back down to Captured -- unless that
-          // Rendered was set by hand: a verified capture beats an unverified
-          // claim (#105).
-          if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
-          if (streak.statusByHand) markCleared = true;
-          if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
-        });
-        // Recorded even when the take isn't renderable yet — a future render
-        // still needs to resolve this take_key back to these highlights once
-        // it succeeds, and the index outlives this dispatch's in-memory state.
-        if (takeIndex && block.take_key) {
-          recordTake(takeIndex, block.take_key, uids);
-        }
+        const marked = markBlockCaptured(block, lastDispatch, takeIndex);
+        advanced += marked.advanced;
+        markCleared ||= marked.markCleared;
       });
 
       if (total === 0) return;
@@ -1346,6 +1367,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       hook_runs_batch: hookRunsBatchVal,
       keep_game_behind: keepGameBehindVal,
       streaks: selectedStreaks,
+      // Recorded in the batch's manifest, so a batch that outlives Studio can
+      // still be mapped back to these highlights when it reopens (#545).
+      streak_uids: selectedStreaks.map((streak, i) => streakUid(selectedDemoPaths[i], streak)),
+      project_path: state.projectPath || null,
       pre_roll_seconds: preRollVal,
       post_roll_seconds: postRollVal,
       capture_directories: outputDrivePool,
@@ -1526,8 +1551,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // and run it later unchanged.
   function startBatchWithPayload(activePayload, state) {
     return startCaptureBatch(activePayload)
+        // No "queued" toast: this resolves before the backend has built the
+        // queue, which can still refuse the batch a moment later (#1097). The
+        // footer shows the batch from its first capture_status.
         .then(() => {
-          showToast(STRINGS.CAPTURE.BATCH_QUEUED_TOAST, "success");
           setBatchRunning(true);
         })
         .catch((err) => {
