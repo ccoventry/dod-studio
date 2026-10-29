@@ -43,6 +43,9 @@ pub struct RuntimeBatch {
     pub file: PathBuf,
     pub source_copies: Vec<PathBuf>,
     pub other_drives_in_place: bool,
+    /// The open game the batch runs in instead of launching one
+    /// (`patch::batch_reuse`, #725), by PID.
+    pub reuse_game: Option<u32>,
 }
 
 /// The hook's batch file header (goldsrc-hooks `batch::HEADER`).

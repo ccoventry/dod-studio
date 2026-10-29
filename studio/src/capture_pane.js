@@ -1,5 +1,5 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, launchObs, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
@@ -1571,6 +1571,19 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       };
 
       if (engineAlreadyRunning) {
+        // A Seek Between Clips batch runs in an open game Studio started with
+        // the same hook DLL, instead of asking to relaunch it (#725).
+        const reusePid = await runningGameForBatch(
+          launchRequest,
+          activePayload.capture_mode,
+          activePayload.hook_runs_batch,
+        );
+        if (reusePid) {
+          showToast(STRINGS.CAPTURE.BATCH_IN_OPEN_GAME_TOAST, "info");
+          activePayload.reuse_game_pid = reusePid;
+          runBatch();
+          return;
+        }
         // Its window asks what to do and starts the batch itself; Start comes
         // back behind it in case the answer is no.
         precheck.stop(STRINGS.CAPTURE_PRECHECK.GAME_OPEN);

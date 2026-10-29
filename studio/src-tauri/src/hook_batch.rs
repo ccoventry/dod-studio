@@ -145,5 +145,7 @@ pub fn prepare(
         file: path,
         source_copies: copies.into_iter().map(|c| c.copy).collect(),
         other_drives_in_place: !in_place.is_empty(),
+        // Set by the caller for a batch in the open game (#725).
+        reuse_game: None,
     })
 }

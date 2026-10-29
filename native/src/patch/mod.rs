@@ -122,6 +122,9 @@ pub const BREADCRUMB_INTERVAL_TICKS: i32 = 5000;
 
 pub mod types;
 
+/// A Seek Between Clips batch in the game that is already open (#725).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod batch_reuse;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
 #[cfg(not(target_arch = "wasm32"))]

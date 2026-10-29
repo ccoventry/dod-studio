@@ -590,6 +590,18 @@ export async function checkRunningGame(request = null) {
     });
 }
 
+/** The open game a capture batch can run in instead of Force Relaunch
+ *  (#725): its pid, or null when the batch needs a fresh game (the activity
+ *  log says why). `request` as for checkRunningGame. Resolves null when the
+ *  check itself fails, which leaves the usual Force Relaunch question. */
+export async function runningGameForBatch(request, captureMode, hookRunsBatch) {
+  return invoke("running_game_for_batch", { request, captureMode, hookRunsBatch })
+    .catch((err) => {
+      console.error("IPC Execution Error (running_game_for_batch):", err);
+      return null;
+    });
+}
+
 /** Closes game `pid` and resolves once it has gone (#666). */
 export async function closeRunningGame(pid) {
   return invoke("close_running_game", { pid })
