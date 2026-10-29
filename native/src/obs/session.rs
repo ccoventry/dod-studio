@@ -382,7 +382,7 @@ impl ObsSession {
         log_markdown(&format!(
             "⚠️ **OBS** — this block dropped {skipped_delta}/{total_delta} frames \
              ({:.1}%) due to encoding lag: {effect}. The encoder can't keep up with \
-             OBS Capture FPS on this PC; lower it (Configuration, OBS Connection), \
+             OBS Capture FPS on this PC; lower it (Configuration → Output Format), \
              or the resolution.",
             rate * 100.0
         ));
