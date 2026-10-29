@@ -203,7 +203,7 @@ pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: 
 /// engine makes up itself go that way -- the `HudText` that `TE_TEXTMESSAGE`
 /// turns into (`CL_HudMessage`) is the one that matters -- so a hook cannot
 /// drop those: `client.dll`'s own record runs after it anyway (#677,
-/// `server_hud_text.rs`).
+/// `plugin_text.rs`).
 /// `gEngfuncs.GetLocalPlayer` (slot 51). Returns the local player's
 /// `cl_entity_t`. Confirmed by the call site at `client.dll+0x20520`, a
 /// three-instruction thunk that calls this slot and immediately

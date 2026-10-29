@@ -82,7 +82,7 @@ is the complete list):
   qualifies: several DoD draws itself as an ordinary 2D HUD element (the
   crosshair, the capture-area icon) rather than a world-placed entity, and
   those never reach this command regardless of spelling --
-  `ds_hud_hide_crosshair`/`ds_hud_hide_element` reach those instead.
+  `ds_hud_hide_crosshair` and the HUD's own sprite names (below) reach those instead.
   Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't previously
   use. See the module doc in `src/hide_asset.rs`.
 - **Scoreboard** (`ds_hud_hide_scoreboard 1`): stops a POV demo's recorded TAB
@@ -296,19 +296,15 @@ is the complete list):
   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off, for testing on your own
   server. Wraps the engine commands the same way as the demo reload. See
   `src/connect_guard.rs` and `docs/vac_safety.md`.
-- **Any HUD element** (`ds_hud_hide_element <name> 1`): hides one of the
-  nine elements DoD draws that the stock `cl_hud_*` cvars don't already
-  reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
-  icons, the objective icons and the rest. (The ammo counter/weapon-select
-  menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,
-  no hook needed. The overview map, the mortar HUD, the spectator overlay, and
-  the sniper scope overlay are also left out -- their `Draw` functions turned
-  out not to draw anything at all in this build, hook or no hook; the scope
-  is drawn by `CHudScope::DrawTriApiScope` instead, which
-  `ds_hud_show_scope` reaches.) Run it with no
-  arguments to list them. `ds_hud_hide_element all 0` puts everything
-  back. Writes `CHudBase::Draw` into the element's vftable slot 3 -- one
-  dword, no code patch -- see `docs/goldsrc_hud_elements.md`.
+- **Teammate name and health** (`ds_hud_hide_teammate_info 1`): hides the
+  line under a POV demo's crosshair naming the teammate the player aims at.
+  Writes `CHudBase::Draw` into the status bar element's vftable slot 3 -- one
+  dword, no code patch. It replaced `ds_hud_hide_element <name>` (#342),
+  whose other names went to the game's own cvars (`hud_saytext_internal 0`
+  for chat, `cl_hud_objectives 0`, `cl_hud_objtimer 0`,
+  `cl_hud_reinforcements 0`, `hud_deathnotice_time 0` for the kill feed) or
+  to settings named after what they hide; see
+  `docs/goldsrc_hud_elements.md`.
 - **Objective icons** (`ds_hud_objectives`): places the territory-flag icon
   row in the top-left corner, and the objective timer beside it. The game draws
   both ~117 pixels lower at 1080p while spectating than it does in a POV demo,
