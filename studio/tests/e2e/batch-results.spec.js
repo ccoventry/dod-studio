@@ -83,3 +83,20 @@ test('the panel can be hidden until the next batch', async ({ page }) => {
   await page.click('.batch-results-close');
   await expect(page.locator('#batch-results')).toBeHidden();
 });
+
+test('a clip Cancel cut short shows as a partial take, not a captured one (#1081)', async ({ page }) => {
+  await loadHarness(page);
+  const payload = {
+    total_count: 2, captured_count: 1, renderable_count: 1,
+    blocks: [
+      { ...PAYLOAD.blocks[0] },
+      { take_key: 'b', demo_name: 'flash.dem', source_streak_indices: [2], captured: false, renderable: false, cut_short: true, bytes: 200 * 1024 ** 2, take_folder: 'C:/caps/b' },
+    ],
+  };
+  await page.evaluate(([p, d]) => { window.__ended('cancelled', ''); window.__verified(p, d); }, [payload, DISPATCH]);
+  await expect(page.locator('.batch-results-summary')).toHaveText(/^Cancelled\. 1 of 2 takes on disk/);
+  const row = page.locator('#batch-results tbody tr').nth(1);
+  await expect(row).toContainText('Cut short by Cancel (partial take, not captured)');
+  await expect(row).toContainText('200.0 MB');
+  await expect(row.getByRole('button', { name: 'Open folder' })).toHaveCount(1);
+});

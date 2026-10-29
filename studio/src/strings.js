@@ -672,7 +672,14 @@ export const STRINGS = {
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
-    takesFoundMissing: (captured, total) => `${captured}/${total} takes found on disk — ${total - captured} missing.`,
+    // A clip Cancel cut short (#1081) left a partial take: it isn't missing.
+    takesFoundMissing: (captured, total, cutShort = 0) => {
+      const missing = total - captured - cutShort;
+      const parts = [];
+      if (missing > 0) parts.push(`${missing} missing`);
+      if (cutShort > 0) parts.push(`${cutShort} cut short by Cancel (partial take, not captured)`);
+      return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
+    },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
     allTakesVerified: (total) => `All ${total} takes verified on disk.`,
     highlightsMarkedCaptured: (n) => ` ${n} highlight(s) marked Captured.`,
@@ -2308,7 +2315,12 @@ export const STRINGS = {
     CHECKING: 'Checking the takes on disk…',
     kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
     merged: (n) => `(+${n} more, recorded as one take)`,
-    STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
+    STATUS: {
+      ok: 'Captured',
+      unrenderable: "Captured, can't render yet",
+      missing: 'Missing',
+      cut_short: 'Cut short by Cancel (partial take, not captured)',
+    },
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,

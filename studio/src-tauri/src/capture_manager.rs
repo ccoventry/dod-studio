@@ -818,6 +818,102 @@ pub struct VerifiedBlock {
     pub rendered: bool,
     /// What the take folder holds on disk, for the batch results panel (#172).
     pub bytes: u64,
+    /// Cancel stopped the batch while this clip recorded (#1081): what's on
+    /// disk is a partial take, so it counts as neither captured nor
+    /// renderable, and is left for the user to delete.
+    pub cut_short: bool,
+}
+
+/// Each manifest block's demo, as the 1-based index `DEMO_START` names: a
+/// demo's blocks are contiguous and demos play in the manifest's order.
+fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
+    let mut ordinal = 0u32;
+    blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            if i == 0 || b.demo_name != blocks[i - 1].demo_name {
+                ordinal += 1;
+            }
+            ordinal
+        })
+        .collect()
+}
+
+/// Each manifest block's position in recording order: demos play in the
+/// manifest's order, and a demo's clips by `block_index`. The builder already
+/// sorts a demo's blocks that way; sorting here keeps the order from
+/// depending on it.
+fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    let demo = demo_ordinals(blocks);
+    order.sort_by_key(|&i| (demo[i], blocks[i].block_index));
+    order
+}
+
+/// The clip recordings a batch's `START_RECORD` / `STOP_RECORD` markers
+/// reported, for a Cancel (#1081).
+#[derive(Debug, Default, Clone, Copy)]
+struct Records {
+    started: usize,
+    stopped: usize,
+    /// The demo tick the last `START_RECORD` named: its block's
+    /// `record_start_tick` (#861).
+    last_start_tick: Option<i64>,
+    /// The demo playing, by `DEMO_START`'s 1-based index.
+    demo: Option<u32>,
+    /// The demo the last `START_RECORD` came from.
+    last_start_demo: Option<u32>,
+}
+
+impl Records {
+    /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
+    /// playing mid-clip, and the hook's batch skipped on) is over, so a
+    /// Cancel later in the batch can't count it as still recording.
+    fn demo_started(&mut self, job_idx: u32) {
+        self.stopped = self.stopped.max(self.started);
+        self.demo = Some(job_idx);
+    }
+
+    fn clip_started(&mut self, tick: Option<i64>) {
+        self.started += 1;
+        self.last_start_tick = tick;
+        self.last_start_demo = self.demo;
+    }
+
+    fn clip_stopped(&mut self) {
+        self.stopped += 1;
+    }
+}
+
+/// Marks the clip a Cancel cut short (#1081). With a clip still recording
+/// (more starts than stops), it is the block of the demo playing whose
+/// `record_start_tick` is the tick the last `START_RECORD` named. Without a
+/// demo, the first block from position `stopped` in recording order with that
+/// tick: a demo the hook's batch skipped sends no markers, so the recording
+/// clip can sit further on than the count says (#861's `resolve_block` does
+/// the same). With no tick, or none matching, the block at `stopped`.
+/// Without markers both counts are 0 and nothing changes.
+fn mark_cut_short(manifest: &CaptureManifest, verified: &mut [VerifiedBlock], records: Records) {
+    if records.started <= records.stopped {
+        return;
+    }
+    let order = recording_order(&manifest.blocks);
+    let demo = demo_ordinals(&manifest.blocks);
+    let by_tick = records.last_start_tick.and_then(|tick| {
+        let starts_at = |i: usize| i64::from(manifest.blocks[i].record_start_tick) == tick;
+        match records.last_start_demo {
+            Some(d) => order.iter().find(|&&i| demo[i] == d && starts_at(i)),
+            None => order.iter().skip(records.stopped).find(|&&i| starts_at(i)),
+        }
+    });
+    let Some(&i) = by_tick.or_else(|| order.get(records.stopped)) else {
+        return;
+    };
+    let block = &mut verified[i];
+    block.cut_short = block.captured;
+    block.captured = false;
+    block.renderable = false;
 }
 
 /// One OBS drop-rate report as the `capture_obs_drop_rate` event (#172):
@@ -917,6 +1013,7 @@ pub(crate) fn verify_capture_takes_settling(
                 renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
                 rendered,
                 bytes: 0,
+                cut_short: false,
             }
         })
         .collect();
@@ -1003,12 +1100,15 @@ struct TakeReport {
 /// Runs verification for the batch that just ended, with "Checking the
 /// takes: N of M" on the status line while it runs (#952, throttled to
 /// ~33 ms like the patch line). `outcome` ("complete" / "cancelled") goes
-/// into the manifest file (#19). `None` when the batch planned no takes.
+/// into the manifest file (#19). `records` is the clip recordings the
+/// markers reported, for [`mark_cut_short`]. `None` when the batch planned
+/// no takes.
 fn check_takes(
     app: &tauri::AppHandle,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
     outcome: &str,
     rendered_while_capturing: bool,
+    records: Records,
 ) -> Option<TakeReport> {
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
@@ -1033,12 +1133,19 @@ fn check_takes(
     };
     emit_checking(0);
     let mut last_emit = std::time::Instant::now();
-    let blocks = verify_capture_takes(&manifest, &mut |done| {
+    let mut blocks = verify_capture_takes(&manifest, &mut |done| {
         if done == total || last_emit.elapsed() >= std::time::Duration::from_millis(33) {
             last_emit = std::time::Instant::now();
             emit_checking(done);
         }
     });
+    mark_cut_short(&manifest, &mut blocks, records);
+    for block in blocks.iter().filter(|b| b.cut_short) {
+        log_markdown(&format!(
+            "[take-verify] {} was cut short by Cancel: not counted as captured. Its partial take is left at {}.",
+            block.take_key, block.take_folder
+        ));
+    }
     let captured_count = blocks.iter().filter(|b| b.captured).count();
     // A take already rendered and deleted (#861) isn't one Render Studio
     // missed.
@@ -1093,8 +1200,15 @@ fn finish_batch(
     status: &str,
     outcome: &str,
     rendered_while_capturing: bool,
+    records: Records,
 ) {
-    let report = check_takes(app, manifest_slot, outcome, rendered_while_capturing);
+    let report = check_takes(
+        app,
+        manifest_slot,
+        outcome,
+        rendered_while_capturing,
+        records,
+    );
     *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
     let _ = app.emit(
         "capture_status",
@@ -1711,6 +1825,8 @@ pub async fn start_capture_batch_impl(
                 // within a demo reports the same "X of Y clips total" the
                 // demo-loading toast itself would have shown. See issue #98.
                 let mut clips = ClipTally::default();
+                // Clip recordings, for a Cancel (#1081).
+                let mut records = Records::default();
                 // A demo by DEMO_START's 1-based index, for the line (#952).
                 let demo_name = |job_idx: u32| {
                     (job_idx as usize)
@@ -1774,6 +1890,7 @@ pub async fn start_capture_batch_impl(
                         }
                         EngineEvent::DemoLoading(job_idx, total, clip_count) => {
                             clips.demo_loading(clip_count);
+                            records.demo_started(job_idx);
                             let current_demo = demo_name(job_idx);
                             emit_step(
                                 "loading",
@@ -1830,11 +1947,13 @@ pub async fn start_capture_batch_impl(
                                 .emit("capture_obs_drop_rate", obs_drop_rate_payload(&report));
                         }
                         EngineEvent::ClipStarted(tick) => {
+                            records.clip_started(tick);
                             if let Some(room) = &room {
                                 room.clip_started(tick);
                             }
                         }
                         EngineEvent::ClipRecorded(tick) => {
+                            records.clip_stopped();
                             if let Some(room) = &room {
                                 room.clip_recorded(tick);
                             }
@@ -1871,12 +1990,14 @@ pub async fn start_capture_batch_impl(
                                 "Complete",
                                 "complete",
                                 rendered_while_capturing,
+                                Records::default(),
                             );
                             break;
                         }
                         EngineEvent::Cancelled => {
                             // A cancelled batch still leaves real finished takes on
                             // disk — verify anyway rather than discarding them.
+                            // The clip it cut short, if any, isn't one (#1081).
                             finish_batch(
                                 &app_emitter,
                                 &is_running_clone,
@@ -1884,6 +2005,7 @@ pub async fn start_capture_batch_impl(
                                 "Cancelled",
                                 "cancelled",
                                 rendered_while_capturing,
+                                records,
                             );
                             break;
                         }
@@ -5107,5 +5229,184 @@ mod tests {
             js.contains(&line),
             "studio/src/scan_version.js must say `{line}`"
         );
+    }
+
+    fn cut_short_manifest(order: &[(&str, usize)]) -> CaptureManifest {
+        CaptureManifest {
+            session_id: "s".into(),
+            blocks: order
+                .iter()
+                .map(|&(demo, block_index)| native::patch::types::CaptureBlock {
+                    demo_name: demo.into(),
+                    block_index,
+                    drive_index: 0,
+                    take_folder: std::path::PathBuf::from(format!("{demo}_b{block_index}")),
+                    take_key: format!("s/{demo}_b{block_index}"),
+                    source_streak_indices: vec![],
+                    start_tick: 0,
+                    end_tick: 0,
+                    // Every demo's clips start at the same ticks, so a tick
+                    // alone can't tell two demos' blocks apart.
+                    record_start_tick: 100 * (block_index as i32 + 1),
+                    record_stop_tick: 0,
+                })
+                .collect(),
+            capture_fps: 300,
+            capture_mode: "frames".into(),
+            agr_fps: 0,
+            streak_uids: vec![],
+            streak_sources: vec![],
+            project_path: None,
+        }
+    }
+
+    fn on_disk(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
+        manifest
+            .blocks
+            .iter()
+            .map(|b| VerifiedBlock {
+                take_key: b.take_key.clone(),
+                take_folder: b.take_folder.to_string_lossy().into_owned(),
+                demo_name: b.demo_name.clone(),
+                block_index: b.block_index,
+                source_streak_indices: vec![],
+                captured: true,
+                renderable: true,
+                rendered: false,
+                bytes: 1,
+                cut_short: false,
+            })
+            .collect()
+    }
+
+    /// Marker counts with no ticks (a marker that names none).
+    fn counts(started: usize, stopped: usize) -> Records {
+        Records {
+            started,
+            stopped,
+            ..Records::default()
+        }
+    }
+
+    #[test]
+    fn blocks_are_put_in_recording_order_demo_by_demo() {
+        // Blocks out of `block_index` order still come out in it.
+        let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
+        assert_eq!(recording_order(&manifest.blocks), vec![1, 2, 0, 4, 3]);
+    }
+
+    /// #1081: Cancel while the third clip recorded leaves a partial take,
+    /// which is not a captured clip.
+    #[test]
+    fn the_clip_a_cancel_cut_short_is_not_captured() {
+        let manifest = cut_short_manifest(&[("a", 2), ("a", 0), ("a", 1), ("b", 1), ("b", 0)]);
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, counts(3, 2));
+        let cut: Vec<_> = blocks.iter().map(|b| (b.captured, b.cut_short)).collect();
+        // Recording order a0, a1, a2: a2 (manifest position 0) was recording.
+        assert_eq!(
+            cut,
+            vec![
+                (false, true),
+                (true, false),
+                (true, false),
+                (true, false),
+                (true, false)
+            ]
+        );
+        assert!(!blocks[0].renderable);
+
+        // Cancelled between clips, or with no markers read: nothing changes.
+        for (started, stopped) in [(2, 2), (0, 0)] {
+            let mut blocks = on_disk(&manifest);
+            mark_cut_short(&manifest, &mut blocks, counts(started, stopped));
+            assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
+        }
+        // A clip cut short before it wrote anything is just missing.
+        let mut blocks = on_disk(&manifest);
+        blocks[3].captured = false;
+        mark_cut_short(&manifest, &mut blocks, counts(5, 4));
+        assert!(!blocks[3].captured && !blocks[3].cut_short);
+    }
+
+    /// A demo the hook's batch skipped sends no markers (#861), so the count
+    /// falls behind: the tick the last `START_RECORD` named finds the clip.
+    #[test]
+    fn the_cut_short_clip_is_found_by_its_tick_after_a_skipped_demo() {
+        let mut manifest = cut_short_manifest(&[("a", 1), ("a", 0), ("b", 1), ("b", 0)]);
+        manifest.blocks[2].record_start_tick = 1200;
+        manifest.blocks[3].record_start_tick = 1100;
+        // Demo a skipped: b0 recorded whole, b1 (tick 1200) was recording.
+        let records = Records {
+            started: 2,
+            stopped: 1,
+            last_start_tick: Some(1200),
+            ..Records::default()
+        };
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, true, false]);
+    }
+
+    /// Two demos' clips can start at the same tick: the search starts at the
+    /// count, never before it.
+    #[test]
+    fn a_tick_an_earlier_demo_shares_does_not_pick_its_clip() {
+        let manifest = cut_short_manifest(&[("a", 1), ("a", 0), ("b", 1), ("b", 0)]);
+        // a0 and a1 recorded whole; b0 (tick 100, like a0) was recording.
+        let records = Records {
+            started: 3,
+            stopped: 2,
+            last_start_tick: Some(100),
+            ..Records::default()
+        };
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, false, true]);
+    }
+
+    /// A demo that ended or stopped playing mid-clip leaves a `START_RECORD`
+    /// with no `STOP_RECORD`, and the hook's batch goes on to the next demo:
+    /// a Cancel there between clips must not mark a whole clip cut short.
+    #[test]
+    fn a_clip_an_earlier_demo_left_recording_is_not_cut_short_by_a_later_cancel() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0), ("b", 1)]);
+        let mut records = Records::default();
+        records.demo_started(1);
+        records.clip_started(Some(100));
+        records.clip_stopped();
+        // a1 starts, then demo a stops playing.
+        records.clip_started(Some(200));
+        records.demo_started(2);
+        records.clip_started(Some(100));
+        records.clip_stopped();
+        // Cancelled between b0 and b1.
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        assert!(blocks.iter().all(|b| b.captured && !b.cut_short));
+
+        // Cancelled while b1 recorded: b1, not anything in demo a.
+        records.clip_started(Some(200));
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, false, true]);
+    }
+
+    /// A skipped demo sends no markers, and its clip may start at the tick
+    /// the recording one does: the demo `DEMO_START` named decides.
+    #[test]
+    fn a_skipped_demo_sharing_the_tick_does_not_take_the_cut() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0), ("b", 1)]);
+        let mut records = Records::default();
+        // Demo a skipped before it played: b0 recording when cancelled.
+        records.demo_started(2);
+        records.clip_started(Some(100));
+        let mut blocks = on_disk(&manifest);
+        mark_cut_short(&manifest, &mut blocks, records);
+        let cut: Vec<_> = blocks.iter().map(|b| b.cut_short).collect();
+        assert_eq!(cut, vec![false, false, true, false]);
     }
 }
