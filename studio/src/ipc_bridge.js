@@ -854,6 +854,28 @@ export async function cancelTakePreviews() {
     });
 }
 
+/** Take checks (#1084): checks a take stream's picture and sound, or reads
+ *  back the results already made, and resolves to `{ findings: [{ check,
+ *  cause, warn, at_secs, secs, count, share }], duration_secs, peak_db,
+ *  rms_db, ... }`. Rejects with "cancelled" when `cancelTakeChecks` stopped
+ *  it. */
+export async function takeChecks(takeFolder, stream, fps) {
+  return invoke("take_checks", { takeFolder, stream, fps })
+    .catch((err) => {
+      if (err !== 'cancelled') console.error("IPC Execution Error (take_checks):", err);
+      throw err;
+    });
+}
+
+/** Stops the take check running now, if any. */
+export async function cancelTakeChecks() {
+  return invoke("cancel_take_checks")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_take_checks):", err);
+      throw err;
+    });
+}
+
 export async function setRenderJobCodec(jobId, codec, customCodecArgs) {
   return invoke("set_render_job_codec", { jobId, codec, customCodecArgs: customCodecArgs ?? null })
     .catch((err) => {

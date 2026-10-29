@@ -56,6 +56,55 @@ pub enum EngineEvent {
     Held,
     /// The hook's batch went on after `go`.
     Going,
+    /// hl.exe went away by itself mid-batch: closed (quit, ALT+F4, End
+    /// Process) or crashed. Sent just before the `Error` that ends the batch,
+    /// so the clip it cut short says the game closed.
+    GameClosed,
+}
+
+/// The listener's event for one console marker, if it has one: progress,
+/// clip recordings, holds.
+fn marker_event(marker: &crate::obs::Marker) -> Option<EngineEvent> {
+    use crate::obs::MarkerKind;
+    match marker.kind {
+        MarkerKind::DemoStart => marker
+            .demo_progress
+            .map(|(job_idx, total, clips)| EngineEvent::DemoLoading(job_idx, total, clips)),
+        MarkerKind::NextClip => {
+            marker
+                .next_clip_progress
+                .map(|(job_idx, total, clip_idx, clip_count)| {
+                    EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count)
+                })
+        }
+        MarkerKind::StartRecord => Some(EngineEvent::ClipStarted(marker.tick)),
+        MarkerKind::StopRecord => Some(EngineEvent::ClipRecorded(marker.tick)),
+        MarkerKind::Other if marker.label == "BATCH_HELD" => Some(EngineEvent::Held),
+        MarkerKind::Other if marker.label == "BATCH_GOING" => Some(EngineEvent::Going),
+        _ => None,
+    }
+}
+
+/// How long the capture loop's end waits for markers still on their way:
+/// the log delivers them 21-40 ms after the game runs them, the pipe within
+/// its 5 ms poll.
+const LATE_MARKERS: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Every marker that arrives within `wait`. The readers keep reading until
+/// the teardown stops them, so what the game ran just before the batch ended
+/// lands here rather than being dropped with the channel.
+fn late_markers(
+    rx: &std::sync::mpsc::Receiver<crate::obs::Marker>,
+    wait: std::time::Duration,
+) -> Vec<crate::obs::Marker> {
+    let deadline = std::time::Instant::now() + wait;
+    let mut late = Vec::new();
+    while let Ok(marker) =
+        rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+    {
+        late.push(marker);
+    }
+    late
 }
 
 /// The hook batch command that asks for `hold` (true) or `go` (false), #861.
@@ -915,6 +964,8 @@ pub fn spawn_capture_engine(
             // What the game was last told (#861), and when a send last failed.
             let mut hold_sent = false;
             let mut hold_retry_at: Option<std::time::Instant> = None;
+            // hl.exe went away by itself mid-batch (closed or crashed).
+            let mut game_closed = false;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -941,28 +992,8 @@ pub fn spawn_capture_engine(
                     if marker.via_pipe && marker.kind == crate::obs::MarkerKind::BatchComplete {
                         pipe_batch_complete_seen = true;
                     }
-                    if marker.kind == crate::obs::MarkerKind::DemoStart
-                        && let Some((job_idx, total, clips)) = marker.demo_progress {
-                            let _ = tx.send(EngineEvent::DemoLoading(job_idx, total, clips));
-                        }
-                    if marker.kind == crate::obs::MarkerKind::NextClip
-                        && let Some((job_idx, total, clip_idx, clip_count)) = marker.next_clip_progress {
-                            let _ = tx.send(EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count));
-                        }
-                    match marker.kind {
-                        crate::obs::MarkerKind::StartRecord => {
-                            let _ = tx.send(EngineEvent::ClipStarted(marker.tick));
-                        }
-                        crate::obs::MarkerKind::StopRecord => {
-                            let _ = tx.send(EngineEvent::ClipRecorded(marker.tick));
-                        }
-                        crate::obs::MarkerKind::Other if marker.label == "BATCH_HELD" => {
-                            let _ = tx.send(EngineEvent::Held);
-                        }
-                        crate::obs::MarkerKind::Other if marker.label == "BATCH_GOING" => {
-                            let _ = tx.send(EngineEvent::Going);
-                        }
-                        _ => {}
+                    if let Some(event) = marker_event(&marker) {
+                        let _ = tx.send(event);
                     }
                 }
 
@@ -1296,6 +1327,7 @@ pub fn spawn_capture_engine(
                         }
                         None => "hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)".into(),
                     });
+                    game_closed = true;
                     break;
                 }
                 // 500 ms is fine for watching a process; it is far too coarse
@@ -1308,12 +1340,25 @@ pub fn spawn_capture_engine(
                 std::thread::sleep(std::time::Duration::from_millis(poll));
             }
 
+            // Markers the game ran before it closed or was ended, still on
+            // their way when the loop stopped reading: a `STOP_RECORD` among
+            // them means the clip finished, and must reach the listener before
+            // the Cancel or the failure does (#1081).
+            let late = late_markers(&marker_rx, LATE_MARKERS);
+            for event in late.iter().filter_map(marker_event) {
+                let _ = tx.send(event);
+            }
+            if game_closed {
+                let _ = tx.send(EngineEvent::GameClosed);
+            }
+
             // Stop anything still recording and put the scene back before the
             // teardown below starts removing junctions.
             if let Some(mut session) = obs_session.take() {
                 tail_cancel.store(true, Ordering::Relaxed);
-                for marker in marker_rx.try_iter() {
-                    session.on_marker(&marker);
+                let rest: Vec<_> = marker_rx.try_iter().collect();
+                for marker in late.iter().chain(&rest) {
+                    session.on_marker(marker);
                 }
                 session.finish();
                 // Before the batch reports it ended, so the last clip's
@@ -1421,7 +1466,56 @@ fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{completion_source, hold_command};
+    use super::{EngineEvent, completion_source, hold_command, late_markers, marker_event};
+    use crate::obs::log_tail::parse_marker;
+
+    fn event(line: &str) -> Option<EngineEvent> {
+        marker_event(&parse_marker(line).expect("a marker"))
+    }
+
+    #[test]
+    fn each_marker_becomes_the_listeners_event() {
+        assert!(matches!(
+            event("[dod-studio] DEMO_START 2 3 4"),
+            Some(EngineEvent::DemoLoading(2, 3, 4))
+        ));
+        assert!(matches!(
+            event("[dod-studio] STOP_RECORD - Tick 93481"),
+            Some(EngineEvent::ClipRecorded(Some(93481)))
+        ));
+        assert!(matches!(
+            event("[dod-studio] START_RECORD - Tick 900"),
+            Some(EngineEvent::ClipStarted(Some(900)))
+        ));
+        assert!(event("[dod-studio] AUDIO_SYNC - Tick 900").is_none());
+    }
+
+    /// #1081: a `STOP_RECORD` the game ran just before Cancel reaches the
+    /// reader a few tens of ms later. The loop's end still collects it, so
+    /// the finished clip isn't called cut short.
+    #[test]
+    fn a_marker_still_on_its_way_when_the_loop_ends_is_kept() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(parse_marker("[dod-studio] START_RECORD - Tick 1").unwrap())
+            .unwrap();
+        let late_tx = tx.clone();
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            late_tx
+                .send(parse_marker("[dod-studio] STOP_RECORD - Tick 2").unwrap())
+                .unwrap();
+        });
+        let late = late_markers(&rx, std::time::Duration::from_millis(400));
+        sender.join().unwrap();
+        let events: Vec<_> = late.iter().filter_map(marker_event).collect();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                EngineEvent::ClipStarted(Some(1)),
+                EngineEvent::ClipRecorded(Some(2))
+            ]
+        ));
+    }
 
     #[test]
     fn hold_and_go_use_the_hooks_batch_command() {
