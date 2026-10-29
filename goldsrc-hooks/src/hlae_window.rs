@@ -76,10 +76,12 @@ pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
 
-/// Whether the setting is on now.
+/// Whether the setting is on now. Off once the client has shut down: the
+/// engine has freed the cvar by the time SDL's window teardown calls
+/// `behind_imports`' detours with it (#1080).
 pub fn wanted() -> bool {
     let cvar = CVAR.load(Ordering::Acquire);
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    !cvar.is_null() && !crate::engine::client_shut_down() && unsafe { (*cvar).value } != 0.0
 }
 
 /// The start of HLAE's "make the window a popup" function. The exit function
