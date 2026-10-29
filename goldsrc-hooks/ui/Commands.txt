@@ -140,6 +140,10 @@ DOD STUDIO WINDOW
       A folder's demo count includes its subfolders.
   ds_ui_demo_list_show_counts 0/1
       Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
+  ds_ui_review_keys 0/1
+      Review highlights: at each highlight's end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; ESC opens the Review tab. 0: the Review tab opens.
+  ds_ui_review_info 0/1
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills.
 
 HD TEXTURES
   ds_hd_enabled 0/1
