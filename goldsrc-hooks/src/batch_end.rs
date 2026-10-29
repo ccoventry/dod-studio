@@ -91,7 +91,8 @@ fn next(seen_at_ms: u64, now_ms: u64, studio_connected: bool) -> Next {
 
 /// Studio has read the batch's `BATCH_COMPLETE` (the events pipe wrote it to
 /// a reader), so ending the game or leaving it open is Studio's call. Called
-/// from the pipe's own thread.
+/// from the pipe's own thread, which is 32-bit only.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 pub fn studio_saw_end() {
     reset();
 }
