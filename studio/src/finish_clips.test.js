@@ -123,6 +123,11 @@ describe('finishSkipReason', () => {
     expect(finishSkipReason({ ...ok, folders: [] })).toBe('nothing');
     expect(finishSkipReason({ ...ok, exportDirs: [] })).toBe('no_export_dir');
   });
+
+  it('stays out of a batch that rendered while capturing, cancelled or not', () => {
+    expect(finishSkipReason({ ...ok, renderedWhileCapturing: true })).toBe('rendered_while_capturing');
+    expect(finishSkipReason({ ...ok, outcome: 'cancelled', renderedWhileCapturing: true })).toBe('rendered_while_capturing');
+  });
 });
 
 // ── The controller ───────────────────────────────────────────────────────────

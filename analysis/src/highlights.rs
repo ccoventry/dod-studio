@@ -1,5 +1,5 @@
 //! What a highlight is, once, for everything that lists them (#573): the
-//! Capture page's Highlights table (through `native::patch::scanner`) and the
+//! Highlights page's Highlight Details table (through `native::patch::scanner`) and the
 //! in-game DoD Studio window's Highlights tab.
 //!
 //! A highlight is one life's kills by one player: `Player::kill_streaks`, which
@@ -95,7 +95,7 @@ pub enum Rule {
 pub struct Highlights {
     /// Every player's: players in the analysis' order, each one's highlights
     /// in the order they happened. [`Highlights::shown`] keeps this order:
-    /// the Capture page's row order, which saved projects index into.
+    /// the Highlights page's row order, which saved projects index into.
     pub all: Vec<Highlight>,
     pub hltv: bool,
     /// A POV demo's recording player.

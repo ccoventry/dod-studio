@@ -137,6 +137,7 @@ impl ObsSession {
             game_height,
             capture_fps,
             1,
+            cfg.recording_quality,
         )?;
 
         let preflight = client.preflight(game_width, game_height)?;
@@ -370,12 +371,20 @@ impl ObsSession {
         if rate < Self::FRAME_DROP_WARNING_THRESHOLD {
             return;
         }
+        // Scaled to the rate (#172): 10% is a visible stutter, not a clip
+        // "missing most of its motion".
+        let effect = if rate >= 0.5 {
+            "the recorded clip is missing most of its motion"
+        } else if rate >= 0.2 {
+            "the recorded clip is visibly choppy"
+        } else {
+            "the recorded clip stutters"
+        };
         log_markdown(&format!(
             "⚠️ **OBS** — this block dropped {skipped_delta}/{total_delta} frames \
-             ({:.1}%) due to encoding lag — the recorded clip is missing most of its \
-             motion, not just slightly rougher. OBS's canvas/output is set past what this \
-             machine's encoder can sustain in real time; lower Capture FPS (and/or \
-             resolution) for OBS mode.",
+             ({:.1}%) due to encoding lag: {effect}. The encoder can't keep up with \
+             OBS Capture FPS on this PC; lower it (Configuration → Output Format), \
+             or the resolution.",
             rate * 100.0
         ));
     }

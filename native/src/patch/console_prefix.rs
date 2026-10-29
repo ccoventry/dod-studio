@@ -102,6 +102,7 @@ mod tests {
         "debug_log_gun_lowered",
         "debug_log_server_sounds",
         "debug_log_view_bob",
+        "debug_record_frame_times",
         "demo_show_load_progress",
         "hud_hide_center_text",
         "hud_hide_hints",

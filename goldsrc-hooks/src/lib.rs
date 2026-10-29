@@ -258,6 +258,7 @@ mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod frame_times;
 mod game_dir_check;
 mod game_folder;
 mod gl_zoom;
