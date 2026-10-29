@@ -9,7 +9,8 @@
 // list is checked in turn, one at a time, after the picture pass has made
 // every picture (the pictures are quick, the checks read the whole take);
 // the line under the table says how far it is. Delete Take pauses it, as it
-// does the pictures.
+// does the pictures; a render or a capture batch stops it until it ends,
+// since the pass reads a whole take and decodes it on several cores.
 import { STRINGS } from './strings.js';
 import { previewKey } from './take_preview.js';
 
@@ -82,20 +83,46 @@ export function checksProgress(states, current = null) {
  * @param {() => Promise<void>} deps.cancel  stops the backend check running now
  * @param {(event: string, cb: Function) => void} [deps.listen]
  * @param {() => number|null} deps.getFps  a frame sequence's rate, when the take doesn't record one
- * @param {() => boolean} [deps.isBlocked]  true while the picture pass runs
+ * @param {() => boolean} [deps.isBlocked]  true while the picture pass or a render runs: no check starts
+ * @param {() => boolean} [deps.mustStop]  true while a render runs: the check running now stops too
  * @param {() => void} deps.onChange  a result or the progress changed
  */
-export function createTakeChecks({ check, cancel, listen, getFps, isBlocked = () => false, onChange }) {
+export function createTakeChecks({ check, cancel, listen, getFps, isBlocked = () => false, mustStop = () => false, onChange }) {
   const states = new Map();
   let running = false;
   let paused = false;
+  // A capture batch is running (`capture_status`): the pass reads a whole
+  // take at full speed and decodes it on several cores, which would take disk
+  // and CPU from the game writing its takes, or from OBS (dropped frames).
+  let capturing = false;
   let current = null;
+
+  const held = () => paused || capturing || mustStop();
+  /** Stops the check running now when it must give way. Called again on
+   *  every progress event, so a cancel that reached the backend just before
+   *  the check claimed its flag still stops it. */
+  function yieldIfHeld() {
+    if (running && current && held()) cancel().catch(() => {});
+  }
 
   listen?.('take_checks_progress', (event) => {
     const { take_folder: take, done, total } = event?.payload || {};
     if (!running || !current || take !== current.take) return;
     current = { ...current, done, total };
+    yieldIfHeld();
     onChange();
+  });
+
+  listen?.('capture_status', (event) => {
+    const now = !!event?.payload?.running;
+    if (now === capturing) return;
+    capturing = now;
+    if (capturing) {
+      yieldIfHeld();
+      onChange();
+    } else {
+      run();
+    }
   });
 
   /** Lists every row's take stream, drops the ones no longer listed, and
@@ -110,15 +137,18 @@ export function createTakeChecks({ check, cancel, listen, getFps, isBlocked = ()
     for (const [key, j] of keys) {
       if (!states.has(key)) states.set(key, { status: CHECK_STATE.WAITING, take: j.take_folder, stream: j.stream_folder });
     }
+    // A take no longer listed (another project, removed) isn't read on.
+    if (running && current && !states.has(current.key)) cancel().catch(() => {});
+    yieldIfHeld();
     run();
   }
 
   async function run() {
-    if (running || paused || isBlocked()) return;
+    if (running || held() || isBlocked()) return;
     running = true;
     try {
       for (;;) {
-        if (paused || isBlocked()) break;
+        if (held() || isBlocked()) break;
         const entry = [...states.entries()].find(([, s]) => s.status === CHECK_STATE.WAITING);
         if (!entry) break;
         const [key, state] = entry;
@@ -131,8 +161,10 @@ export function createTakeChecks({ check, cancel, listen, getFps, isBlocked = ()
           state.error = '';
         } catch (err) {
           if (String(err) === CANCELLED) {
+            // Checked again later: the loop's top stops while held, and goes
+            // on to the next take when this one was dropped from the list.
             state.status = CHECK_STATE.WAITING;
-            break;
+            continue;
           }
           state.status = CHECK_STATE.FAILED;
           state.error = String(err);
@@ -178,6 +210,8 @@ export function createTakeChecks({ check, cancel, listen, getFps, isBlocked = ()
     stateFor: (key) => states.get(key) || null,
     progress: () => checksProgress(states, current),
     isRunning: () => running,
+    /** Waiting for a capture, a render or a Delete Take to end. */
+    isHeld: held,
   };
 }
 
@@ -226,7 +260,7 @@ export function wireSheetChecks({ table, checks, modal }) {
  * `render_pane.js` hands it the rows (`sync`), pauses it around a Delete
  * Take, and calls `run` when the picture pass finishes.
  */
-export function startTakeChecks({ check, cancel, listen, getJobs, getFps, isBlocked }) {
+export function startTakeChecks({ check, cancel, listen, getJobs, getFps, isBlocked, mustStop }) {
   const tbody = document.querySelector('#render-jobs-tbody');
   const progressWrap = document.querySelector('#render-take-checks-progress');
   const checks = createTakeChecks({
@@ -235,13 +269,14 @@ export function startTakeChecks({ check, cancel, listen, getJobs, getFps, isBloc
     listen,
     getFps,
     isBlocked,
+    mustStop,
     onChange: () => {
       tbody?.querySelectorAll('tr[data-job-id]').forEach((row) => {
         const job = (getJobs() || []).find((j) => j.id === row.dataset.jobId);
         if (job) checks.fillChip(row.querySelector('.rj-check'), job);
       });
-      // Waiting behind the pictures is not checking yet.
-      const p = isBlocked?.() ? null : checks.progress();
+      // Waiting behind the pictures, a render or a capture is not checking yet.
+      const p = isBlocked?.() || checks.isHeld() ? null : checks.progress();
       if (!progressWrap) return;
       progressWrap.style.display = p ? 'flex' : 'none';
       if (!p) return;

@@ -746,14 +746,17 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     afterChange: () => takeChecks?.run(),
   });
   // Take checks (#1084) read every frame of a take, so they wait for the
-  // pictures and for any render, which reads the same disks.
+  // pictures, and stop for any render, which reads the same disks, and for
+  // any capture batch (they watch `capture_status` themselves).
+  const rendering = () => jobs.some((j) => j.status === JOB_STATUS.RENDERING);
   takeChecks = startTakeChecks({
     check: takeChecksIpc,
     cancel: cancelTakeChecks,
     listen,
     getJobs: () => jobs,
     getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
-    isBlocked: () => !!takePreview?.isRunning() || jobs.some((j) => j.status === JOB_STATUS.RENDERING),
+    isBlocked: () => !!takePreview?.isRunning() || rendering(),
+    mustStop: rendering,
   });
 
   // A take finishing renders — advances every highlight the take index says

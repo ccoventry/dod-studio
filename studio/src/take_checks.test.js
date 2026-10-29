@@ -108,4 +108,65 @@ describe('take checks (#1084)', () => {
     expect(failed.error).toBe('FFmpeg failed');
     expect(checks.stateFor('D:/caps/s/chain_02_b0/take0000|all').status).toBe(CHECK_STATE.DONE);
   });
+  it('a capture batch stops the running check, and the pass goes on when it ends', async () => {
+    const handlers = {};
+    const listen = (name, cb) => { handlers[name] = cb; };
+    let release;
+    const check = vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { release = () => reject('cancelled'); }))
+      .mockImplementation(async () => ({ findings: [] }));
+    const cancel = vi.fn(async () => { release?.(); });
+    const checks = createTakeChecks({ check, cancel, listen, getFps: () => null, onChange: () => {} });
+    checks.sync([job()]);
+    await settle();
+    handlers.capture_status({ payload: { running: true } });
+    await settle();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(checks.isHeld()).toBe(true);
+    // Progress reports during the batch don't start anything.
+    handlers.capture_status({ payload: { running: true } });
+    checks.sync([job()]);
+    checks.run();
+    await settle();
+    expect(check).toHaveBeenCalledTimes(1);
+    handlers.capture_status({ payload: { running: false } });
+    await settle();
+    await settle();
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(checks.stateFor('D:/caps/s/chain_01_b0/take0000|all').status).toBe(CHECK_STATE.DONE);
+  });
+
+  it('a render starting stops the running check', async () => {
+    let rendering = false;
+    let release;
+    const check = vi.fn(() => new Promise((_, reject) => { release = () => reject('cancelled'); }));
+    const cancel = vi.fn(async () => { release?.(); });
+    const checks = createTakeChecks({ check, cancel, getFps: () => null, isBlocked: () => rendering, mustStop: () => rendering, onChange: () => {} });
+    checks.sync([job()]);
+    await settle();
+    rendering = true;
+    checks.sync([job()]);
+    await settle();
+    expect(cancel).toHaveBeenCalled();
+    expect(checks.isRunning()).toBe(false);
+    expect(checks.stateFor('D:/caps/s/chain_01_b0/take0000|all').status).toBe(CHECK_STATE.WAITING);
+  });
+
+  it('a take dropped from the list stops being read and the next one is checked', async () => {
+    let release;
+    const check = vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { release = () => reject('cancelled'); }))
+      .mockImplementation(async () => ({ findings: [] }));
+    const cancel = vi.fn(async () => { release?.(); });
+    const other = job({ id: '1', take_folder: 'D:/caps/s/chain_02_b0/take0000' });
+    const checks = createTakeChecks({ check, cancel, getFps: () => null, onChange: () => {} });
+    checks.sync([job(), other]);
+    await settle();
+    checks.sync([other]);
+    await settle();
+    await settle();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(checks.stateFor('D:/caps/s/chain_02_b0/take0000|all').status).toBe(CHECK_STATE.DONE);
+  });
 });
