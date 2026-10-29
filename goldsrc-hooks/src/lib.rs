@@ -227,6 +227,7 @@ mod anim_fix;
 mod batch;
 mod batch_end;
 mod behind_imports;
+mod build_id;
 mod center_text;
 mod clan_text;
 mod cmd_list;
@@ -456,6 +457,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
+    unsafe { debug::report(&format!("goldsrc-hooks build {}", build_id::ID)) };
 
     // Matching POV defaults to OFF, so a session where the hooks all install
     // correctly but nothing visibly changes is the expected outcome of simply

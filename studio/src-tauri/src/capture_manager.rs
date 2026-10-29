@@ -3932,18 +3932,55 @@ pub async fn check_running_game(
         } = &check
         {
             log_markdown(&format!(
-                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}",
+                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}{}",
                 running.exe,
                 running.width,
                 running.height,
                 wanted.exe,
                 launch.resolution_width,
                 launch.resolution_height,
+                hook_dll_log(running, wanted, differs),
             ));
         }
         Ok(check)
     }))
     .await
+}
+
+/// The hook DLL part of the activity log's mismatch line (#1143), empty when
+/// the hook DLL is not what differs.
+fn hook_dll_log(
+    running: &native::patch::launch_settings::GameLaunch,
+    wanted: &native::patch::launch_settings::GameLaunch,
+    differs: &[native::patch::launch_settings::LaunchDifference],
+) -> String {
+    use native::patch::launch_settings::LaunchDifference;
+    let side = |launch: &native::patch::launch_settings::GameLaunch| {
+        format!(
+            "hook build {} ({})",
+            launch
+                .hook_build
+                .as_deref()
+                .unwrap_or("from before build ids"),
+            launch.hook_dll.as_deref().unwrap_or("?"),
+        )
+    };
+    if differs.contains(&LaunchDifference::HookUnreadable) {
+        format!(
+            "; which hook DLL the game has could not be read, Studio would launch {}",
+            side(wanted)
+        )
+    } else if differs.contains(&LaunchDifference::HookDll)
+        || differs.contains(&LaunchDifference::HookBuild)
+    {
+        format!(
+            "; the game runs {}, Studio would launch {}",
+            side(running),
+            side(wanted)
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// The open game a capture batch can run in instead of Force Relaunch
