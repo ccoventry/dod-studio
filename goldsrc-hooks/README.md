@@ -287,7 +287,8 @@ is the complete list):
   events pipe. Pause and speed go through `DemoPlayer.dll`'s `SetPaused` and
   `SetTimeScale`, checked by `tools/verify_demo_seek_offsets.py`. See
   `src/review.rs`. The answer comes from keys on the game screen (Y M N R B Space S,
-  ESC for the Review tab), through `client.dll`'s `HUD_Key_Event`, with a box
+  ESC for the Review tab), while a highlight plays (#1141) or at its end,
+  through `client.dll`'s `HUD_Key_Event`, with a box
   drawn from `HUD_Redraw` saying which highlight plays (#660,
   `src/review_keys.rs`); `ds_ui_review_keys 0` pauses on the Review tab
   instead.
