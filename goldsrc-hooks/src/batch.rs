@@ -653,6 +653,9 @@ fn start(path: &str) {
         "{} demo(s), {timed} timed line(s), from {path}",
         plan.demos.len()
     ));
+    // An earlier batch in this game (#725) ended long ago: its end is not
+    // this one's.
+    crate::batch_end::reset();
     // Running in the background: out of the user's way from the start.
     if crate::hlae_window::wanted() {
         crate::hlae_window::step_aside();

@@ -374,13 +374,19 @@ impl CaptureRoom {
         let room = Arc::clone(self);
         std::thread::spawn(move || {
             let settled = settle(&block.folder, &room.cancel);
+            // A take that stopped writing early (#1105) is partial: never
+            // rendered (and so never deleted) from here, nor learned from.
+            // Take verification after the batch calls it out.
+            let short = settled.and_then(|_| {
+                native::hlcr::take_length::short_take(&block.folder, room.capture_fps)
+            });
             {
                 let mut state = room.lock();
                 state.settling = state.settling.saturating_sub(1);
                 if state.recording == Some(index) {
                     state.recording = None;
                 }
-                if let Some(bytes) = settled {
+                if let Some(bytes) = settled.filter(|_| short.is_none()) {
                     state.sizes.learn(bytes, block.ticks);
                     state.recorded.push((index, bytes));
                 }
@@ -397,6 +403,16 @@ impl CaptureRoom {
                 ));
                 return;
             };
+            if let Some(short) = short {
+                log_markdown(&format!(
+                    "[render-while-capturing] Clip {} at {} stopped writing video early ({:.2} s of video, {:.2} s of audio); not rendering a partial take",
+                    index + 1,
+                    block.folder.display(),
+                    short.video_secs,
+                    short.audio_secs
+                ));
+                return;
+            }
             log_markdown(&format!(
                 "[render-while-capturing] Clip {} recorded ({}); queueing its render",
                 index + 1,

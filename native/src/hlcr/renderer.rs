@@ -1223,8 +1223,8 @@ mod tests {
         let second = try_reserve(&mut ledger, &with_d, 10, 0, free);
         assert_eq!(second.map(|r| r.0), Some(PathBuf::from(r"D:\x")));
         assert_eq!(try_reserve(&mut ledger, &with_d, 10, 0, free), None);
-        assert_eq!(ledger.get(Path::new("c:")), Some(&10));
-        assert_eq!(ledger.get(Path::new("d:")), Some(&10));
+        assert_eq!(ledger.get(&ledger_key(Path::new(r"C:\a"))), Some(&10));
+        assert_eq!(ledger.get(&ledger_key(Path::new(r"D:\x"))), Some(&10));
     }
 
     /// #120: the first clip of a kind reserves the raw estimate; once one

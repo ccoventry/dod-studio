@@ -267,7 +267,7 @@ export const STRINGS = {
     // outright, but not until every demo in the queue has been patched, so the
     // work is already done by the time the error box appears.
     TITLE_BATCH: 'Day of Defeat Is Already Running',
-    BODY_BATCH: 'The Half-Life engine is already running (hl.exe / hlae.exe). Day of Defeat allows only one instance, so the batch would patch every demo and then fail to launch. Close the running game first, or force a relaunch to close it now.',
+    BODY_BATCH: 'The Half-Life engine is already running (hl.exe / hlae.exe), and this batch can\'t run in it (the activity log says why). Day of Defeat allows only one instance. Close the running game first, or force a relaunch to close it now.',
     FORCE_RELAUNCH_BUTTON: 'Force Relaunch',
     COPY_VIEW_COMMAND_BUTTON: 'Copy View Command',
     CANCEL_BUTTON: 'Cancel',
@@ -672,7 +672,16 @@ export const STRINGS = {
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
-    takesFoundMissing: (captured, total) => `${captured}/${total} takes found on disk — ${total - captured} missing.`,
+    // A clip Cancel cut short (#1081) left a partial take: it isn't missing.
+    // A take whose video stopped early (#1105) is partial too: not missing either.
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly;
+      const parts = [];
+      if (missing > 0) parts.push(`${missing} missing`);
+      if (cutShort > 0) parts.push(`${cutShort} cut short by Cancel (partial take, not captured)`);
+      if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
+      return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
+    },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
     allTakesVerified: (total) => `All ${total} takes verified on disk.`,
     highlightsMarkedCaptured: (n) => ` ${n} highlight(s) marked Captured.`,
@@ -681,6 +690,7 @@ export const STRINGS = {
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
+    BATCH_IN_OPEN_GAME_TOAST: 'Running the batch in the game that is already open. It stays open afterwards.',
     startBatchError: (err) => `Error starting batch: ${err}`,
     CANCELLING_BATCH_TOAST: 'Cancelling batch...',
     EMPTY_DASH: '—',
@@ -832,6 +842,20 @@ export const STRINGS = {
     takesDeleteFailed: (deleted, failed, firstError) =>
       `${failed} take${failed === 1 ? '' : 's'} not deleted${deleted > 0 ? ` (${deleted} moved to the Recycle Bin)` : ''}: ${firstError}. Scan for Takes to list ${failed === 1 ? 'it' : 'them'} again.`,
     deleteTakeRefused: (err) => `Couldn't delete the take: ${err}`,
+    // #1069: a picture of each take, and its contact sheet.
+    TABLE_HEADER_PICTURE: 'Picture',
+    TABLE_HEADER_PICTURE_TITLE: 'The middle of each take. Hover for a bigger picture, click for nine frames across the take.',
+    TAKE_THUMB_TITLE: 'Click for nine frames across the take.',
+    TAKE_THUMB_WAITING: 'Waiting for its picture.',
+    TAKE_THUMB_MAKING: 'Making its picture.',
+    takeThumbFailed: (err) => `No picture: ${err}`,
+    takePicturesProgress: (done, total) => `Making take pictures: ${done} of ${total}`,
+    takeSheetTitle: (name) => `Take pictures: ${name}`,
+    TAKE_SHEET_LOADING: 'Loading the pictures…',
+    takeSheetFailed: (err) => `Couldn't show the pictures: ${err}`,
+    takeSheetSeconds: (secs) => `${secs} s`,
+    takeSheetFrame: (frame) => `frame ${frame}`,
+    TAKE_SHEET_CLOSE: 'Close',
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -910,6 +934,7 @@ export const STRINGS = {
     progressStatus: (finished, total, rendering) =>
       `Finishing clips: ${finished} of ${total}${rendering > 0 ? `, ${rendering} in progress` : ''}`,
     WAITING_STATUS: 'Finishing clips: waiting for the Render tab to finish what it is already doing',
+    SCANNING_STATUS: 'Finishing clips: looking for the new takes',
     startedToast: (n) => `Finishing ${n} clip${n === 1 ? '' : 's'}.`,
     VIEW_IN_RENDER_TAB: 'View in Render tab',
     NOTIFY_TITLE: 'Clips ready',
@@ -2293,7 +2318,15 @@ export const STRINGS = {
     CHECKING: 'Checking the takes on disk…',
     kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
     merged: (n) => `(+${n} more, recorded as one take)`,
-    STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
+    STATUS: {
+      ok: 'Captured',
+      unrenderable: "Captured, can't render yet",
+      missing: 'Missing',
+      cut_short: 'Cut short by Cancel (partial take, not captured)',
+      short: 'Video stops early (partial take, not captured)',
+    },
+    // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
+    shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,
@@ -2766,6 +2799,34 @@ export const STRINGS = {
     BLURB: 'A capture, patching, and analytics pipeline for Day of Defeat 1.3 demos — batch-records highlight clips through HLAE and parses matches for scoreboards, kills, chat, and rounds.',
     CREDIT: 'Built by ccoventry',
     GITHUB_LINK: 'github.com/ccoventry/dod-studio',
+  },
+
+  // ── What's new window (#1013), whats_new.js ─────────────────────────────
+  WHATS_NEW: {
+    MENU_ITEM: "What's New",
+    MENU_ITEM_TITLE: "What changed in this version and the ones before it",
+    ABOUT_BUTTON: "What's new in this version",
+    TITLE: "What's New",
+    thisVersion: (v) => `This version: v${v}`,
+    THIS_VERSION_UNKNOWN: 'This version',
+    OTHER_VERSIONS: 'Other versions',
+    versionLabel: (v, experimental) => `v${v}${experimental ? ' (experimental)' : ''}`,
+    // The release body's <details> list of every pull request, folded.
+    everythingElse: (summary) => `Everything else: ${summary}`,
+    NO_NOTES: 'No notes were written for this version.',
+    NO_BUNDLED_NOTES: "This build doesn't carry its own notes (a build made on this PC has none). They show here once GitHub's release list is read.",
+    NO_NOTES_FOR_THIS_BUILD: "No notes for this build: it isn't a published version (a build made on this PC, or an experimental build GitHub has since replaced).",
+    FETCH_BUTTON: "Read GitHub's list",
+    FETCH_TITLE: "Reads the release notes of every version from GitHub. Update checks are off, so DoD Studio doesn't do it by itself.",
+    STATUS_READING: "Reading the release list from GitHub…",
+    STATUS_FAILED: "Couldn't read GitHub's release list, and none is saved from before. The reason is in the activity log.",
+    STATUS_SAVED_COPY: "Couldn't read GitHub's release list, so this is the copy saved last time. The reason is in the activity log.",
+    STATUS_OFFLINE_SAVED: 'Update checks are off, so this is the release list saved last time.',
+    STATUS_OFFLINE_NONE: "Update checks are off, so only this version's notes show.",
+    updatedTo: (v) => `DoD Studio updated to v${v}.`,
+    TOAST_ACTION: "See what's new",
+    // The update window: the pending update's notes, before installing it.
+    PENDING_TITLE: "What's in it",
   },
 
   // ── Update check/install modal (issue #133) ──────────────────────────────

@@ -102,9 +102,11 @@ fn ensure_listener(app: AppHandle, pid: u32) {
     });
 }
 
-/// Reads `pid`'s events pipe until the game is gone, emitting each review
-/// line. The pipe keeps lines written while nobody read it, so an answer
-/// given during a reconnect still arrives.
+/// Reads `pid`'s events pipe until the review ends or the game is gone,
+/// emitting each review line. The pipe keeps lines written while nobody read
+/// it, so an answer given during a reconnect still arrives. It takes one
+/// reader at a time, so the listener lets go once the review has ended: a
+/// capture batch run in the same game (#725) reads its markers from it next.
 fn listen(app: &AppHandle, pid: u32) {
     let name = game_remote::events_pipe_name(pid);
     // The pipe reopens after every reader disconnect: one line says the
@@ -134,7 +136,11 @@ fn listen(app: &AppHandle, pid: u32) {
             let line = String::from_utf8_lossy(&bytes);
             if let Some(event) = parse_event(&line) {
                 native::log_markdown(&format!("[review] {}", line.trim()));
+                let ended = matches!(event, native::review_queue::ReviewEvent::Ended { .. });
                 let _ = app.emit(EVENT, event);
+                if ended {
+                    return;
+                }
             }
         }
     }

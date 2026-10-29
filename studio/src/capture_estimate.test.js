@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { streakSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME, bytesPerFrameFor } from './capture_estimate.js';
+import { streakSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
 
 const opts = {
   preRollSeconds: 2, postRollSeconds: 0.6,
@@ -60,5 +60,33 @@ describe('bytesPerFrameFor (#1096)', () => {
     expect(bytesPerFrameFor('frame_sequence', 'utvideo', 10, 10)).toBeUndefined();
     expect(bytesPerFrameFor('obs', 'utvideo', 10, 10)).toBeUndefined();
     expect(bytesPerFrameFor('agr', 'utvideo', 10, 10)).toBe(AGR_BYTES_PER_FRAME);
+  });
+});
+
+describe('an OBS take is billed by quality and length (#1096)', () => {
+  // One highlight billed for exactly 10 s: lead 0, 10 s of kills, trail 0.
+  const demos = [{ streaks: [{ selected: true, kills: [[0, 100], [0, 110]], start_index: 0, end_index: 1 }] }];
+  const base = { preRollSeconds: 0, postRollSeconds: 0, recordStartLead: 0, recordStopTrail: 0, captureFps: 120, resWidth: 2560, resHeight: 1440 };
+  const bill = (quality, w, h, fps) => computeRequiredCaptureBytes(demos, {
+    ...base, resWidth: w, resHeight: h, captureFps: fps, bytesPerSecond: obsBytesPerSecond(quality, w, h, fps),
+  });
+
+  it('agrees with the backend, figure for figure (builder/tests.rs pins the same numbers)', () => {
+    expect(bill('standard', 2560, 1440, 120)).toBe(633_333_334);
+    expect(bill('standard', 3840, 2160, 240)).toBe(2_850_000_000);
+    expect(bill('standard', 1280, 720, 60)).toBe(633_333_334);
+  });
+
+  it('is above the largest take measured per quality, within 25%', () => {
+    const measured = { small: 1900, standard: 3170, high: 4740, max: 5720, obs_simple: 3340 };
+    for (const [quality, mb] of Object.entries(measured)) {
+      const minute = obsBytesPerSecond(quality, 2560, 1440, 120) * 60;
+      expect(minute).toBeGreaterThan(mb * 1e6);
+      expect(minute).toBeLessThan(mb * 1e6 * 1.25);
+    }
+  });
+
+  it('bills an unknown quality as Standard', () => {
+    expect(obsBytesPerSecond('', 2560, 1440, 120)).toBe(obsBytesPerSecond('standard', 2560, 1440, 120));
   });
 });

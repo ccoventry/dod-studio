@@ -40,6 +40,7 @@ mod review_manager;
 mod settings_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
+mod take_preview_manager;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -437,21 +438,8 @@ async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> 
 }
 
 fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
-    let mut total: u64 = 0;
-    let mut seen = std::collections::HashSet::new();
-    for path_str in paths {
-        let p = std::path::PathBuf::from(path_str);
-        if let Some(key) = native::sys::disk::volume_key(&p)
-            && !seen.insert(key)
-        {
-            continue;
-        }
-        let space = native::sys::disk::get_available_bytes(&p);
-        if space != u64::MAX {
-            total += space;
-        }
-    }
-    Ok(total)
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+    Ok(native::sys::disk::pool_free_bytes(&paths))
 }
 
 #[derive(serde::Serialize)]
@@ -939,6 +927,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
         .manage(RenderManager::new())
+        .manage(take_preview_manager::TakePreviewManager::default())
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
@@ -1025,6 +1014,7 @@ pub fn run() {
             batch_close::wait_for_batch_start,
             kill_engine_processes,
             capture_manager::check_running_game,
+            capture_manager::running_game_for_batch,
             capture_manager::close_running_game,
             steam_state,
             start_steam,
@@ -1055,6 +1045,9 @@ pub fn run() {
             clear_render_queue,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
+            take_preview_manager::take_preview_thumb,
+            take_preview_manager::take_preview_sheet,
+            take_preview_manager::cancel_take_previews,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,
@@ -1146,6 +1139,7 @@ pub fn run() {
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
+            updater_manager::release_history,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,

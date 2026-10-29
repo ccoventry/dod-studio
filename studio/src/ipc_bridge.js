@@ -590,6 +590,18 @@ export async function checkRunningGame(request = null) {
     });
 }
 
+/** The open game a capture batch can run in instead of Force Relaunch
+ *  (#725): its pid, or null when the batch needs a fresh game (the activity
+ *  log says why). `request` as for checkRunningGame. Resolves null when the
+ *  check itself fails, which leaves the usual Force Relaunch question. */
+export async function runningGameForBatch(request, captureMode, hookRunsBatch) {
+  return invoke("running_game_for_batch", { request, captureMode, hookRunsBatch })
+    .catch((err) => {
+      console.error("IPC Execution Error (running_game_for_batch):", err);
+      return null;
+    });
+}
+
 /** Closes game `pid` and resolves once it has gone (#666). */
 export async function closeRunningGame(pid) {
   return invoke("close_running_game", { pid })
@@ -808,6 +820,36 @@ export async function deleteTakeFolders(takeFolders) {
   return invoke("delete_take_folders", { takeFolders })
     .catch((err) => {
       console.error("IPC Execution Error (delete_take_folders):", err);
+      throw err;
+    });
+}
+
+/** Take pictures (#1069): makes a take stream's frames when they aren't
+ *  cached yet and resolves to `{ uri, cached }`, the middle frame as a data
+ *  URI. Rejects with "cancelled" when `cancelTakePreviews` stopped it. */
+export async function takePreviewThumb(takeFolder, stream, fps) {
+  return invoke("take_preview_thumb", { takeFolder, stream, fps })
+    .catch((err) => {
+      if (err !== 'cancelled') console.error("IPC Execution Error (take_preview_thumb):", err);
+      throw err;
+    });
+}
+
+/** Every frame of a take stream's contact sheet: `{ kind, duration_secs,
+ *  fps, frames: [{ uri, frame, secs }] }`. */
+export async function takePreviewSheet(takeFolder, stream, fps) {
+  return invoke("take_preview_sheet", { takeFolder, stream, fps })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_preview_sheet):", err);
+      throw err;
+    });
+}
+
+/** Stops the take-picture pass running now, if any. */
+export async function cancelTakePreviews() {
+  return invoke("cancel_take_previews")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_take_previews):", err);
       throw err;
     });
 }
@@ -1328,6 +1370,19 @@ export async function downloadAndInstallUpdate() {
       console.error("IPC Execution Error (download_and_install_update):", err);
       showToast(STRINGS.IPC.updateInstallFailed(err), 'error');
       throw err;
+    });
+}
+
+/** Earlier versions' release notes for the What's new window (#1013):
+ *  `{ releases, from_cache, error }`. `offline` reads only the copy saved in
+ *  the app's data folder. A failed GitHub read still resolves, with the saved
+ *  copy and the reason; this resolves to null only if the backend fails. */
+export async function releaseHistory(offline) {
+  return invoke("release_history", { offline: Boolean(offline) })
+    .catch((err) => {
+      console.error("IPC Execution Error (release_history):", err);
+      logFrontendEvent(`What's new: the release list could not be read: ${err}`);
+      return null;
     });
 }
 
