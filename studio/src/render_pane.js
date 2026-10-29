@@ -21,6 +21,9 @@ import {
   measureTakeFolders,
   deleteTakeFolders,
   logFrontendEvent,
+  takePreviewThumb,
+  takePreviewSheet,
+  cancelTakePreviews,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
@@ -46,6 +49,7 @@ import { themedConfirm } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
+import { startTakePreview } from './take_preview.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -65,6 +69,8 @@ let redrawBatchLine = () => {};
 const renderBatch = createRenderBatch({ redraw: () => redrawBatchLine(), log: logFrontendEvent });
 // Delete Take (#644), set up by initRenderUI.
 let takeDelete = null;
+// Each take's picture (#1069), set up by initRenderUI.
+let takePreview = null;
 // initRenderUI's getExportDirs, for the Start button's check.
 let exportDirsSource = null;
 
@@ -300,6 +306,7 @@ function createJobRow(j, rowState) {
   row.dataset.jobId = j.id;
   row.innerHTML = `
     <td class="rj-select col-center"><input type="checkbox" class="render-job-select-cb" title="${STRINGS.RENDER.SELECT_ROW_TITLE}" /></td>
+    <td class="rj-thumb-cell col-center"></td>
     <td class="rj-name"></td>
     <td class="rj-stream"></td>
     <td class="rj-frames"></td>
@@ -339,6 +346,9 @@ function updateJobRow(row, j, rowState = {}) {
   // rows (queued, finished) haven't changed; skip those outright. The row
   // state rides along: a HUD pair's other half can change this row's Delete
   // Take (#644) without this row changing.
+  // The picture changes without the job changing; it skips itself when
+  // nothing did.
+  takePreview?.fillCell(row.querySelector('.rj-thumb-cell'), j);
   const signature = JSON.stringify([j, rowState]);
   if (row.dataset.signature === signature) return;
   row.dataset.signature = signature;
@@ -434,7 +444,8 @@ function renderJobsTable() {
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    takePreview?.sync(jobs);
     syncSelectionControls();
     return;
   }
@@ -472,6 +483,7 @@ function renderJobsTable() {
   // stale row would be worse than the cost of checking.
   existingRows.forEach((row) => row.remove());
   syncSelectionControls();
+  takePreview?.sync(jobs);
 }
 
 /**
@@ -701,9 +713,23 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     showToast,
     formatSize: formatFileSize,
     showProgress: showTakeDeleteProgress,
-    onBusyChange: () => renderJobsTable(),
+    // FFmpeg reading a take's frames would keep it from moving.
+    onBusyChange: (busy) => {
+      if (busy) takePreview?.pause(); else takePreview?.resume();
+      renderJobsTable();
+    },
     listen,
     getJobs: () => jobs,
+  });
+  takePreview = startTakePreview({
+    thumb: takePreviewThumb,
+    sheet: takePreviewSheet,
+    cancel: cancelTakePreviews,
+    listen,
+    getJobs: () => jobs,
+    // A frame sequence's rate, for the sheet's times: the Source FPS the
+    // take renders at.
+    getFps: () => Number(document.querySelector('#render-fps-input')?.value) || null,
   });
 
   // A take finishing renders — advances every highlight the take index says

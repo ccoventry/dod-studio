@@ -132,6 +132,31 @@ pub async fn download_and_install_update(
     Ok(())
 }
 
+/// Earlier versions' release notes for the What's new window (#1013):
+/// GitHub's release list, saved in the app's data folder, or that saved copy
+/// when GitHub can't be read. `offline` reads only the saved copy, for a
+/// Studio whose update checks are off. Off the async runtime: it waits on the
+/// network.
+#[tauri::command]
+pub async fn release_history(
+    offline: bool,
+) -> Result<native::shared::release_history::History, String> {
+    use native::shared::release_history as history;
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        let dir = native::shared::paths::get_appdata_dir();
+        if offline {
+            history::History {
+                releases: history::read_cache(&dir),
+                from_cache: true,
+                error: None,
+            }
+        } else {
+            history::fetch_or_cached(history::RELEASES_URL, &dir)
+        }
+    }))
+    .await
+}
+
 /// `cfg!(debug_assertions)` is compile-time info baked into the binary — the
 /// frontend has no other way to tell a `tauri build --debug` bundle (still a
 /// real installed build, unlike `npm run tauri dev`) apart from a genuine

@@ -80,6 +80,8 @@ Matched like the `Release note:` line (case-insensitive, `notes` too, bold or li
 
 **A hand-written summary per version.** When `.github/release_notes/<version>.md` exists, its content is printed first under "What's new". The version is the experimental workflow's input without the `-<run number>` (an experimental `0.2.0-57` build reads `0.2.0.md`) or the stable workflow's computed version, so one file serves both the experimental builds heading to a version and its stable release. Write it for a release worth a summary (0.2.0 has one); routine patches need none.
 
+**In the app.** The same step copies the body to `studio/public/release_notes.md` (gitignored), which Vite puts beside `index.html`, so the build's What's New window (`whats_new.js`, #1013) shows its own notes offline. The window reads them with `release_notes_view.js`: it leaves out what comes before the first heading (the workflow's first line) and the "Full diff" link, and folds the `<details>` list of PR titles. Other versions come from `GET /repos/ccoventry/dod-studio/releases` (`native::shared::release_history`), so a change to the body's layout shows in the app too.
+
 **Locally** (needs `gh` logged in; prints to stdout without `--output`):
 
     python .github/scripts/release_notes.py --target origin/dev --version 0.2.0

@@ -25,7 +25,7 @@ import { requestFinishClips, finishSummary } from './finish_clips.js';
 import { syncCommandProfileRow, getAllCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
-import { computeRequiredCaptureBytes, bytesPerFrameFor } from './capture_estimate.js';
+import { computeRequiredCaptureBytes, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
@@ -433,6 +433,15 @@ export async function refreshLaunchGuard(state) {
       resWidthVal,
       resHeightVal,
     ),
+    // An OBS take is billed by its length at its quality's rate (#1096).
+    bytesPerSecond: captureMode === 'obs'
+      ? obsBytesPerSecond(
+        document.querySelector('#config-obs-recording-quality')?.value,
+        resWidthVal,
+        resHeightVal,
+        numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+      )
+      : undefined,
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -1148,6 +1157,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   document.querySelector('#config-capture-mode')?.addEventListener('change', () => refreshLaunchGuard());
   // The codec changes what a video take is billed at (#1096).
   document.querySelector('#config-capture-codec')?.addEventListener('change', () => refreshLaunchGuard());
+  // OBS takes are billed by quality and OBS fps (#1096).
+  document.querySelector('#config-obs-recording-quality')?.addEventListener('change', () => refreshLaunchGuard());
+  document.querySelector('#config-obs-capture-fps')?.addEventListener('change', () => refreshLaunchGuard());
   // Same missing-wiring bug as the rest of this function, just on the OBS
   // connection fields and the capture-mode selector — all three read at
   // capture/save time but never saved on their own change, so edits looked
@@ -1351,7 +1363,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       const marked = advanced > 0 ? STRINGS.CAPTURE.highlightsMarkedCaptured(advanced) : '';
       if (captured < total) {
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total)}${marked}`, 'error');
+        // A take whose video stopped early (#1105) is cut_short too, but Cancel isn't why.
+        const stoppedEarly = blocks.filter((b) => b.short_take).length;
+        const cutShort = blocks.filter((b) => b.cut_short && !b.short_take).length;
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cutShort, stoppedEarly)}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else {

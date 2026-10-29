@@ -18,6 +18,42 @@ pub fn calculate_lossless_video_bytes(w: i32, h: i32, fps: i32, duration_secs: f
         * (duration_secs as f64).ceil() as u64
 }
 
+/// What an OBS take is billed at, in MB (10^6 bytes) per minute, for each
+/// OBS Quality setting (#1096): the largest take measured in #1060 at
+/// 2560x1440 and 120 fps (`docs/obs_alternate_capture.md`, "Encoder and
+/// quality") plus ~20% margin, so it stays an upper bound. The measured
+/// ranges were Small 1,590-1,900, Standard 2,770-3,170, High 4,170-4,740,
+/// Max 5,030-5,720 and OBS's own 2,880-3,340. Mirrored in
+/// `capture_estimate.js`'s `OBS_MB_PER_MINUTE`.
+pub fn obs_mb_per_minute(quality: crate::patch::ObsRecordingQuality) -> u64 {
+    use crate::patch::ObsRecordingQuality as Q;
+    match quality {
+        Q::Small => 2_300,
+        Q::Standard => 3_800,
+        Q::High => 5_700,
+        Q::Max => 6_900,
+        Q::ObsSimple => 4_000,
+    }
+}
+
+/// What an OBS take of `duration_secs` is expected to need on disk: an
+/// upper bound. The rates above were measured at 2560x1440 and 120 fps; a
+/// bigger picture or a faster capture scales them up, a smaller or slower
+/// one does not scale them down (file size falls slower than the pixel or
+/// frame count, so shrinking it would risk an under-count).
+pub fn calculate_obs_bytes(
+    quality: crate::patch::ObsRecordingQuality,
+    w: i32,
+    h: i32,
+    obs_fps: i32,
+    duration_secs: f32,
+) -> u64 {
+    let pixels = w.max(0) as f64 * h.max(0) as f64 / (2560.0 * 1440.0);
+    let rate = obs_fps.max(0) as f64 / 120.0;
+    let per_second = obs_mb_per_minute(quality) as f64 * 1_000_000.0 / 60.0;
+    (per_second * pixels.max(1.0) * rate.max(1.0) * (duration_secs as f64).ceil()).ceil() as u64
+}
+
 /// Bytes one recorded `mirv_agr` frame costs, rounded up. Measured on #403's
 /// test take: 7.3 MB for 32.6 s at 30 fps is ~7.5 KB a frame. It grows with
 /// how many models are on screen, so this is a planning figure, not a bound.
@@ -125,6 +161,32 @@ pub fn group_by_volume(
         }
     }
     (budget_of_dir, budgets)
+}
+
+/// Free bytes across `paths`, counting each volume once and skipping paths
+/// whose free space is unknown (`u64::MAX`).
+pub fn pool_free_bytes(paths: &[std::path::PathBuf]) -> u64 {
+    pool_free_bytes_with(paths, get_available_bytes)
+}
+
+fn pool_free_bytes_with(
+    paths: &[std::path::PathBuf],
+    mut free_of: impl FnMut(&std::path::Path) -> u64,
+) -> u64 {
+    let mut seen = std::collections::HashSet::new();
+    let mut total: u64 = 0;
+    for p in paths {
+        if let Some(key) = volume_key(p)
+            && !seen.insert(key)
+        {
+            continue;
+        }
+        let free = free_of(p);
+        if free != u64::MAX {
+            total += free;
+        }
+    }
+    total
 }
 
 // Disk query results are cached for TTL_MS milliseconds to avoid
@@ -328,6 +390,25 @@ mod tests {
             get_available_bytes(std::path::Path::new("relative/folder")),
             u64::MAX
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pool_counts_each_drive_once_and_skips_unknown() {
+        use std::path::PathBuf;
+        let free = |p: &std::path::Path| match p.to_string_lossy().to_lowercase().chars().next() {
+            Some('c') => 100,
+            Some('d') => 40,
+            _ => u64::MAX,
+        };
+        let paths: Vec<PathBuf> = [r"C:\a", r"c:\b", r"D:\x", r"Z:\gone"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(pool_free_bytes_with(&paths, free), 140);
+        let reversed: Vec<PathBuf> = paths.iter().rev().cloned().collect();
+        assert_eq!(pool_free_bytes_with(&reversed, free), 140);
+        assert_eq!(pool_free_bytes_with(&[], free), 0);
     }
 
     #[cfg(windows)]
