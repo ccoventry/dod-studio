@@ -36,6 +36,14 @@
 //! from 812 s on PRE, `SetWorldTime(4.00)` from 739 s on POST), and the
 //! player's gap skip then carried it to the first playback frame.
 //!
+//! It also runs while the demo is still being read. Playback starts long
+//! before the read ends (13-18 s for a 21-minute demo), and an ESC in that
+//! time found the slider as the previous demo left it: playback jumped to
+//! 8:11, then 8:15 on a second try, three seconds into a demo loaded from the
+//! Demos tab right after another (POST, both ESCs at 20-30% read). The
+//! player's start and end are the span read so far while it reads, the
+//! range the think sets too.
+//!
 //! The dialog's fields are per GameUI build ([`BUILDS`]); before writing, the
 //! dialog's player pointer must be the demo player's own interface, and the
 //! slider pointer must be the bar's `TimeSlider` (or the one lent to the
@@ -114,7 +122,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
     let Some(clock) = crate::demo_seek::clock() else {
         return;
     };
-    if !clock.active || clock.loading {
+    if !clock.active {
         return;
     }
     let Some(build) = build() else {
