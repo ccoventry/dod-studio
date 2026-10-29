@@ -242,6 +242,11 @@ pub struct FfmpegRun {
     pub stderr: String,
 }
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(target_os = "windows")]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+
 /// Runs FFmpeg with `args` and returns its output. Polled, never awaited
 /// blind: `cancel` (checked every cycle) and the timeout both kill it, and
 /// `kill_on_drop` makes sure it can't outlive Studio.
@@ -251,9 +256,25 @@ pub async fn run_ffmpeg(
     cancel: &AtomicBool,
     timeout: Duration,
 ) -> Result<FfmpegRun, String> {
+    run_ffmpeg_watched(ffmpeg, args, cancel, timeout, |_| {}).await
+}
+
+/// [`run_ffmpeg`], handing each line FFmpeg writes to stdout to `on_line`
+/// as it arrives (with `-progress pipe:1`, its progress report), from the
+/// polling loop, so a long pass can show how far it is.
+pub async fn run_ffmpeg_watched(
+    ffmpeg: &Path,
+    args: &[String],
+    cancel: &AtomicBool,
+    timeout: Duration,
+    mut on_line: impl FnMut(&str),
+) -> Result<FfmpegRun, String> {
     let mut cmd = Command::new(ffmpeg);
+    // No window, and below-normal priority: these passes run in the
+    // background, and must never take CPU from the game capturing, OBS or
+    // a render (#1084).
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
+    cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     cmd.kill_on_drop(true)
         .args(args)
         .stdin(Stdio::null())
@@ -264,10 +285,20 @@ pub async fn run_ffmpeg(
         .map_err(|e| crate::messages::labeled("FFmpeg", e))?;
     // Both pipes drain while FFmpeg runs, so a long report (signalstats
     // prints a line per frame) can't fill a pipe and stall it.
-    let stdout = tokio::spawn(read_all(child.stdout.take()));
+    let (line_tx, mut line_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let stdout = tokio::spawn(read_lines(child.stdout.take(), line_tx));
     let stderr = tokio::spawn(read_all(child.stderr.take()));
     let started = Instant::now();
+    let mut out = String::new();
+    let mut take_lines = |out: &mut String| {
+        while let Ok(line) = line_rx.try_recv() {
+            on_line(&line);
+            out.push_str(&line);
+            out.push('\n');
+        }
+    };
     let status = loop {
+        take_lines(&mut out);
         if cancel.load(Ordering::Relaxed) {
             let _ = child.kill().await;
             return Err(cancelled_error());
@@ -283,11 +314,28 @@ pub async fn run_ffmpeg(
         }
         tokio::time::sleep(Duration::from_millis(16)).await;
     };
+    // The pipe closes with the process; what it wrote last is read here.
+    let _ = stdout.await;
+    take_lines(&mut out);
     Ok(FfmpegRun {
         success: status.success(),
-        stdout: stdout.await.unwrap_or_default(),
+        stdout: out,
         stderr: stderr.await.unwrap_or_default(),
     })
+}
+
+async fn read_lines(
+    pipe: Option<impl tokio::io::AsyncRead + Unpin>,
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+) {
+    use tokio::io::AsyncBufReadExt;
+    let Some(pipe) = pipe else { return };
+    let mut lines = tokio::io::BufReader::new(pipe).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if tx.send(line).is_err() {
+            return;
+        }
+    }
 }
 
 async fn read_all(pipe: Option<impl tokio::io::AsyncRead + Unpin>) -> String {

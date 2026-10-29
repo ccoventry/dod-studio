@@ -672,13 +672,15 @@ export const STRINGS = {
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
-    // A clip Cancel cut short (#1081) left a partial take: it isn't missing.
+    // A clip the batch's end cut short (#1081) left a partial take: it isn't
+    // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0) => {
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel') => {
       const missing = total - captured - cutShort - stoppedEarly;
+      const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
-      if (cutShort > 0) parts.push(`${cutShort} cut short by Cancel (partial take, not captured)`);
+      if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
@@ -856,6 +858,26 @@ export const STRINGS = {
     takeSheetSeconds: (secs) => `${secs} s`,
     takeSheetFrame: (frame) => `frame ${frame}`,
     TAKE_SHEET_CLOSE: 'Close',
+    // Take checks (#1084): the chip under each take's picture, its tooltip
+    // and the list on the contact sheet.
+    TAKE_CHECK_OK: 'OK',
+    takeCheckWarnings: (n) => `⚠ ${n}`,
+    TAKE_CHECK_CHECKING: '…',
+    TAKE_CHECK_FAILED: '?',
+    TAKE_CHECK_WAITING_TITLE: 'Waiting to be checked.',
+    TAKE_CHECK_CHECKING_TITLE: 'Checking the picture and sound.',
+    TAKE_CHECK_ALL_GOOD: 'Picture and sound look good.',
+    takeCheckFailed: (err) => `Couldn't check this take: ${err}`,
+    takeChecksProgress: (done, total) => `Checking takes: ${done} of ${total}`,
+    TAKE_CHECK_CAUSE_CAPTURE: 'Capturing again helps',
+    TAKE_CHECK_CAUSE_DEMO: 'The demo itself, capturing again won\'t help',
+    takeCheckBlack: (secs, at) => `Black picture for ${secs} s from ${at} s.`,
+    takeCheckFrozen: (secs, at) => `The picture doesn't move for ${secs} s from ${at} s: the demo may have no camera data there.`,
+    takeCheckHolds: (count, secs, at) => `The picture holds still briefly ${count} ${count === 1 ? 'time' : 'times'} (longest ${secs} s at ${at} s): the demo itself lags there, or nothing moved.`,
+    TAKE_CHECK_NO_SOUND: 'No sound was recorded.',
+    TAKE_CHECK_SILENT: 'The sound is silent all the way through.',
+    takeCheckClipping: (pct) => `The sound clips: ${pct}% of it is at full volume. Lower the capture's sound volume.`,
+    TAKE_SHEET_CHECKS_TITLE: 'Checks',
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -2343,6 +2365,11 @@ export const STRINGS = {
       cut_short: 'Cut short by Cancel (partial take, not captured)',
       short: 'Video stops early (partial take, not captured)',
     },
+    // A clip the batch's end cut short, by what ended it (#1081).
+    cutShortBy: (cutBy) => ({
+      game_closed: 'Cut short: the game closed (partial take, not captured)',
+      stopped: 'Cut short: the batch stopped (partial take, not captured)',
+    })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     OPEN_FOLDER: 'Open folder',
