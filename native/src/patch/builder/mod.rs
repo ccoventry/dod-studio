@@ -19,7 +19,7 @@ mod speed;
 mod timing;
 mod workspace;
 
-use alloc::allocate_blocks_first_fit_decreasing;
+use alloc::{allocate_blocks_first_fit_decreasing, allocate_blocks_one_at_a_time};
 pub use preview::*;
 pub use speed::*;
 pub use timing::*;
@@ -245,6 +245,105 @@ pub const IN_EYE: &str = "spec_mode 4";
 /// `run_in_background.rs`), which every batch turns on.
 pub const RUN_IN_BACKGROUND: &str = "ds_capture_run_in_background";
 
+/// Bytes one recording block is expected to need on its capture drive: the
+/// figure `build_batch_queue` routes blocks to drives by.
+fn block_byte_estimate(config: &PatcherConfig, streak: &CaptureStreak, demo_fps: f32) -> u64 {
+    let anchor_duration = ((streak.end_tick - streak.start_tick) as f32) / demo_fps.max(1.0);
+    let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
+    if config.capture_mode == crate::patch::CaptureMode::Agr {
+        crate::sys::disk::calculate_agr_bytes(config.effective_agr_fps(), clip_duration_secs)
+    } else if config.capture_mode == crate::patch::CaptureMode::Obs {
+        // OBS's encoder takes, by its quality setting (#1096).
+        crate::sys::disk::calculate_obs_bytes(
+            config.obs.recording_quality,
+            config.resolution_width,
+            config.resolution_height,
+            config.obs_capture_fps,
+            clip_duration_secs,
+        )
+    } else if config.capture_mode == crate::patch::CaptureMode::DirectToVideo
+        && config.ffmpeg_capture_codec != crate::patch::types::CaptureCodec::RawVideo
+    {
+        // A compressed take, not raw frames (#1096).
+        crate::sys::disk::calculate_lossless_video_bytes(
+            config.resolution_width,
+            config.resolution_height,
+            config.capture_fps,
+            clip_duration_secs,
+        )
+    } else {
+        crate::sys::disk::calculate_raw_sequence_bytes(
+            config.resolution_width,
+            config.resolution_height,
+            config.capture_fps,
+            clip_duration_secs,
+        )
+    }
+}
+
+/// What a whole batch is expected to need on its capture drives, before
+/// `build_batch_queue` runs: the automatic take cleanup (#644) makes room for
+/// this much. Each highlight is billed as its own block, so two highlights
+/// that `build_batch_queue` later merges into one recording count their
+/// shared footage twice: an upper bound, never an under-count.
+pub fn estimate_batch_capture_bytes(streaks: &[CaptureStreak], config: &PatcherConfig) -> u64 {
+    estimate_batch_capture_blocks(streaks, config)
+        .into_iter()
+        .fold(0u64, u64::saturating_add)
+}
+
+/// What each recording block of a batch is expected to need on the one
+/// capture drive it is written to, before `build_batch_queue` runs: the
+/// pieces the automatic take cleanup (#644) makes room for, drive by drive.
+/// Highlights of one demo and player whose recordings would merge
+/// (`blocks_merge`, as `build_batch_queue` decides it) count as one block,
+/// billed at the sum of their own estimates, so a block is never
+/// under-counted.
+pub fn estimate_batch_capture_blocks(
+    streaks: &[CaptureStreak],
+    config: &PatcherConfig,
+) -> Vec<u64> {
+    let fps_of = |streak: &CaptureStreak| {
+        Some(streak.demo_fps)
+            .filter(|&fps| fps > 0.0)
+            .unwrap_or(30.0)
+    };
+    let mut order: Vec<&CaptureStreak> = streaks.iter().collect();
+    order.sort_by(|a, b| {
+        (&a.source_demo, a.player_index, first_kill_frame(a)).cmp(&(
+            &b.source_demo,
+            b.player_index,
+            first_kill_frame(b),
+        ))
+    });
+    let mut blocks: Vec<u64> = Vec::new();
+    let mut prev: Option<(&str, usize, i32)> = None;
+    for streak in order {
+        let demo_fps = fps_of(streak);
+        let bytes = block_byte_estimate(config, streak, demo_fps);
+        let lead = (config.record_start_lead * demo_fps) as i32;
+        let trail =
+            ((config.record_stop_trail + take_separation_seconds(config)) * demo_fps) as i32;
+        let merges = prev.is_some_and(|(demo, player, prev_end)| {
+            demo == streak.source_demo
+                && player == streak.player_index
+                && blocks_merge(prev_end, first_kill_frame(streak), lead, trail)
+        });
+        let end = last_kill_frame(streak);
+        match (merges, blocks.last_mut(), prev.as_mut()) {
+            (true, Some(last), Some(p)) => {
+                *last = last.saturating_add(bytes);
+                p.2 = p.2.max(end);
+            }
+            _ => {
+                blocks.push(bytes);
+                prev = Some((&streak.source_demo, streak.player_index, end));
+            }
+        }
+    }
+    blocks
+}
+
 /// The hook DLL's `ds_capture_stay_behind` (goldsrc-hooks `hlae_window.rs`),
 /// which every batch sets from `PatcherConfig::keep_game_behind`.
 pub const STAY_BEHIND: &str = "ds_capture_stay_behind";
@@ -269,6 +368,18 @@ pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
 /// two, so the primer stays.
 pub fn plays_primer(hook_dll: bool) -> bool {
     !hook_dll
+}
+
+/// The refusal when a capture block fits on no drive, in the player's words:
+/// shown as the batch's error toast (#1097). `needed` includes the headroom
+/// each drive keeps; `best` is the most free on any one drive.
+fn no_room_message(needed: u64, best: u64) -> String {
+    use crate::hlcr::take_cleanup::format_gb;
+    format!(
+        "Not enough free space on any capture drive for this batch: a clip needs {} free on one drive, and the most any one has is {}.",
+        format_gb(needed),
+        format_gb(best)
+    )
 }
 
 pub fn build_batch_queue(
@@ -367,6 +478,9 @@ pub fn build_batch_queue(
         volume_of_drive.push(0);
         drive_free.push(u64::MAX);
     }
+    // What each drive had when the batch was planned: the most Render While
+    // Capturing (#861) can ever free there for one block.
+    let drive_capacity = drive_free.clone();
 
     let active_export_dir = match config.primary_media_dir.clone() {
         Some(dir) => dir,
@@ -679,36 +793,52 @@ pub fn build_batch_queue(
         // Byte estimate per block, index-aligned with merged_streaks.
         let block_estimates: Vec<u64> = merged_streaks
             .iter()
-            .map(|streak| {
-                let anchor_duration =
-                    ((streak.end_tick - streak.start_tick) as f32) / demo_fps.max(1.0);
-                let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
-                if config.capture_mode == crate::patch::CaptureMode::Agr {
-                    crate::sys::disk::calculate_agr_bytes(
-                        config.effective_agr_fps(),
-                        clip_duration_secs,
-                    )
-                } else {
-                    crate::sys::disk::calculate_raw_sequence_bytes(
-                        config.resolution_width,
-                        config.resolution_height,
-                        config.capture_fps,
-                        clip_duration_secs,
-                    )
-                }
-            })
+            .map(|streak| block_byte_estimate(config, streak, demo_fps))
             .collect();
 
-        let assignments = allocate_blocks_first_fit_decreasing(
+        let assignments = match allocate_blocks_first_fit_decreasing(
             &block_estimates,
             &volume_of_drive,
             &mut drive_free,
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
-        )
-        .map_err(|_| {
-            std::io::Error::other("Insufficient space across all mapped drives to allocate a block")
-        })?;
+        ) {
+            Ok(assignments) => assignments,
+            // Render While Capturing (#861) frees space as the batch runs and
+            // holds it between clips until there is room, so the blocks that
+            // don't fit now still get a drive, as long as each fits one on
+            // its own: counted as if the earlier blocks will have been freed
+            // by the time it records. A block bigger than any drive could
+            // ever hold is still refused, rather than starting a batch that
+            // can't finish.
+            Err(_) if config.render_while_capturing => {
+                let (pairs, left) = allocate_blocks_one_at_a_time(
+                    &block_estimates,
+                    &volume_of_drive,
+                    &drive_capacity,
+                    &mut active_drive_idx,
+                    FAILOVER_THRESHOLD,
+                )
+                .map_err(|block_index| {
+                    std::io::Error::other(no_room_message(
+                        block_estimates[block_index] + FAILOVER_THRESHOLD,
+                        drive_capacity.iter().copied().max().unwrap_or(0),
+                    ))
+                })?;
+                for (free, left) in drive_free.iter_mut().zip(left) {
+                    if let Some(left) = left {
+                        *free = left;
+                    }
+                }
+                pairs
+            }
+            Err(block_index) => {
+                return Err(std::io::Error::other(no_room_message(
+                    block_estimates[block_index] + FAILOVER_THRESHOLD,
+                    drive_free.iter().copied().max().unwrap_or(0),
+                )));
+            }
+        };
 
         // Route aliases key off each block's original index in merged_streaks,
         // not allocation order, so the scheduled-command lookup below (which

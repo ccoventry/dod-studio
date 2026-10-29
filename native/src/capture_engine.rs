@@ -41,6 +41,30 @@ pub enum EngineEvent {
     /// clip_count), all 1-based. Same console-log source as DemoLoading.
     /// See issue #98.
     FastForwardToClip(u32, u32, u32, u32),
+    /// OBS mode: the frames OBS is losing, about once a second while a clip
+    /// records and once more with its totals when it ends (#172).
+    ObsDropRate(crate::obs::ObsDropReport),
+    /// A clip's recording started (`START_RECORD`), with the demo tick the
+    /// marker names: its block's `record_start_tick` (#861). The listener
+    /// finds the block by it, since a skipped demo sends no markers for its
+    /// clips and a plain count would fall behind the batch's order.
+    ClipStarted(Option<i64>),
+    /// A clip's recording stopped (`STOP_RECORD`), with its block's
+    /// `record_stop_tick`. The take may still be flushing to disk.
+    ClipRecorded(Option<i64>),
+    /// The hook's batch stopped at a clip boundary after `hold` (#861).
+    Held,
+    /// The hook's batch went on after `go`.
+    Going,
+}
+
+/// The hook batch command that asks for `hold` (true) or `go` (false), #861.
+pub fn hold_command(hold: bool) -> String {
+    format!(
+        "{} {}",
+        crate::patch::runtime_batch::BATCH_COMMAND,
+        if hold { "hold" } else { "go" }
+    )
 }
 
 /// Longest a batch may go without a console marker before OBS mode calls it
@@ -131,10 +155,14 @@ fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
 
 /// Ends every `hl.exe` and waits for it to go, as [`wait_for_hl_exe_to_exit`]
 /// describes. Every way out of a batch's loop that leaves the game running
-/// goes through here.
+/// goes through here. A killed game can't release the mouse it confined, so
+/// once it's gone Studio does (#1095).
 fn kill_hl_exe_and_wait(sys: &mut sysinfo::System) {
     crate::sys::process::kill_game();
     wait_for_hl_exe_to_exit(sys);
+    if !crate::sys::process::is_game_in(sys) && crate::sys::cursor_clip::release() {
+        log_markdown("[capture] Released the mouse the closed game had confined to its window.");
+    }
 }
 
 struct CaptureCleanupGuard {
@@ -156,7 +184,8 @@ struct CaptureCleanupGuard {
     /// unwinds and no `Drop` runs. That gap, a hard kill and a power cut are
     /// all covered by `obs::recover` on the next start instead.
     obs: Option<std::sync::Arc<std::sync::Mutex<Option<crate::obs::ObsClient>>>>,
-    /// Copies of demos on another drive a hook-run batch plays from
+    /// Copies of demos on another drive a hook-run batch plays from when its
+    /// hook DLL is older than #779
     /// (`patch::source_copies`), removed however the batch ends.
     source_copies: Vec<PathBuf>,
     _wake_lock: Option<keepawake::KeepAwake>,
@@ -282,6 +311,13 @@ pub fn spawn_capture_engine(
     // `jobs` is then empty: nothing is patched into `dod/`, the game starts on
     // no demo, and the file is handed to it once it takes commands.
     runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
+    // Where the batch's start in the game stands, read by Studio's close
+    // prompt (#545). Studio sets it to `Preparing` when the batch starts.
+    batch_start: Arc<crate::game_handoff::BatchStart>,
+    // Render While Capturing (#861): true asks the hook's batch to stop at the
+    // next clip boundary, false lets it go on. Sent over the game's pipe when
+    // it changes; a patched batch can't hold, so it is ignored there.
+    hold: Arc<AtomicBool>,
 ) {
     std::thread::Builder::new()
         .name("capture_engine".into())
@@ -578,6 +614,8 @@ pub fn spawn_capture_engine(
             // folder.
             let obs_mode = config.capture_mode == crate::patch::CaptureMode::Obs;
             let mut obs_session: Option<crate::obs::ObsSession> = None;
+            // Stops when dropped, so an early return can't leave it polling.
+            let mut drop_poller: Option<crate::obs::DropPoller> = None;
             let (marker_tx, marker_rx) = std::sync::mpsc::channel::<crate::obs::Marker>();
             let tail_cancel = Arc::new(AtomicBool::new(false));
             // The log feeds the markers until the game's events pipe
@@ -613,6 +651,20 @@ pub fn spawn_capture_engine(
                         // this point on every exit path stops the recorder.
                         _cleanup_guard.obs = Some(session.stop_handle());
                         obs_session = Some(session);
+                        // The live drop rate (#172), on its own connection so
+                        // it never holds up a start or stop. Advice only: a
+                        // poller that can't start just means no figure.
+                        let drop_tx = tx.clone();
+                        drop_poller = crate::obs::DropPoller::spawn(
+                            config.obs.clone(),
+                            obs_take_folders.clone(),
+                            config.obs_capture_fps,
+                            Arc::clone(&cancel_token),
+                            move |report| {
+                                let _ = drop_tx.send(EngineEvent::ObsDropRate(report));
+                            },
+                        )
+                        .ok();
                     }
                     Err(e) => {
                         log_crash_abort!(tx, format!("OBS capture could not start — {}", e));
@@ -712,7 +764,7 @@ pub fn spawn_capture_engine(
                 Some(batch) => (
                     with_start("+exec dodstudio_helper.cfg"),
                     crate::patch::runtime_batch::early_lines(config.keep_game_behind),
-                    crate::patch::runtime_batch::start_lines(&batch.file),
+                    crate::patch::runtime_batch::start_lines(batch),
                 ),
                 None => {
                     let (args, lines) = crate::game_handoff::first_demo_start(
@@ -721,6 +773,19 @@ pub fn spawn_capture_engine(
                     );
                     (with_start(&args), Vec::new(), lines)
                 }
+            };
+            // A batch in the game that is already open (#725): it stops what
+            // that game was doing and loads the helper cfg a launch gets from
+            // `+exec`, ahead of the usual early lines.
+            let reuse_game = runtime_batch.as_ref().and_then(|b| b.reuse_game);
+            let early_lines = if reuse_game.is_some() {
+                crate::patch::batch_reuse::REUSE_LINES
+                    .iter()
+                    .map(|l| l.to_string())
+                    .chain(early_lines)
+                    .collect()
+            } else {
+                early_lines
             };
             let early_lines = crate::game_handoff::with_player_overrides(
                 early_lines,
@@ -739,12 +804,15 @@ pub fn spawn_capture_engine(
             let cfg_path = dod_dir.join("dod_quit.cfg");
             std::fs::write(&cfg_path, "quit\n").ok();
 
-            log_markdown(&format!("[HLAE] Spawning: {:?} {:?}", cmd.get_program(), cmd.get_args().collect::<Vec<_>>()));
+            if reuse_game.is_none() {
+                log_markdown(&format!("[HLAE] Spawning: {:?} {:?}", cmd.get_program(), cmd.get_args().collect::<Vec<_>>()));
+            }
 
             // Held until the batch starts in the game (it has stepped aside by
             // then) or FOREGROUND_LOCK_MAX passes; dropped on every way out.
-            // Not taken when the user wants to watch the game.
-            let mut foreground_lock = if config.keep_game_behind {
+            // Not taken when the user wants to watch the game, nor for a game
+            // that is already open: it isn't starting.
+            let mut foreground_lock = if config.keep_game_behind && reuse_game.is_none() {
                 crate::sys::foreground_lock::ForegroundLock::take()
             } else {
                 crate::sys::foreground_lock::ForegroundLock::none()
@@ -754,18 +822,51 @@ pub fn spawn_capture_engine(
                 log_markdown("[HLAE] The game can't take the foreground while it starts");
             }
 
-            let mut child = match cmd.spawn() {
-                Ok(c) => c,
-                Err(e) => {
-                    log_crash_abort!(tx, format!("Failed to launch HLAE ({}): {}", cmd.get_program().to_string_lossy(), e));
-                    for path in &active_dest_paths {
-                        let _ = std::fs::remove_file(path);
+            // No launcher for a batch in the open game.
+            let mut child = match reuse_game {
+                Some(pid) => {
+                    log_markdown(&format!(
+                        "[HLAE] Running the batch in the game that is already open (PID {pid}), not starting one (#725)"
+                    ));
+                    None
+                }
+                None => match cmd.spawn() {
+                    Ok(c) => {
+                        log_markdown(&format!("[HLAE] Spawned (PID {})", c.id()));
+                        Some(c)
                     }
-                    std::fs::remove_file(&cfg_path).ok();
-                    return;
+                    Err(e) => {
+                        log_crash_abort!(tx, format!("Failed to launch HLAE ({}): {}", cmd.get_program().to_string_lossy(), e));
+                        for path in &active_dest_paths {
+                            let _ = std::fs::remove_file(path);
+                        }
+                        std::fs::remove_file(&cfg_path).ok();
+                        return;
+                    }
+                },
+            };
+            // How a reused game is left when the batch ends or is cancelled:
+            // open, at its menu, instead of closed.
+            let leave_game = |pid: u32| {
+                let lines: Vec<String> = crate::patch::batch_reuse::LEAVE_LINES
+                    .iter()
+                    .map(|l| l.to_string())
+                    .collect();
+                match crate::sys::game_remote::send_console_commands(pid, &lines) {
+                    Ok(crate::sys::game_remote::Sent::Delivered) => log_markdown(&format!(
+                        "[HLAE] Left the game open (PID {pid}): `{}`",
+                        lines.join("; ")
+                    )),
+                    other => log_markdown(&format!(
+                        "[HLAE] Could not reach the game (PID {pid}) to stop its recording and demo: {other:?}"
+                    )),
                 }
             };
-            log_markdown(&format!("[HLAE] Spawned (PID {})", child.id()));
+            batch_start.set(if handoff.is_some() {
+                crate::game_handoff::StartState::Pending
+            } else {
+                crate::game_handoff::StartState::NotNeeded
+            });
 
             // The HLAE launcher process (`_child` above) injects into `hl.exe` and then
             // exits on its own under `-noGui -autoStart` — that is expected handoff
@@ -773,7 +874,7 @@ pub fn spawn_capture_engine(
             // `hl.exe` itself is still alive, so liveness is tracked separately via
             // process name rather than via the launcher's own exit status.
             let start_time = std::time::Instant::now();
-            let mut launcher_exit_logged = false;
+            let mut launcher_exit_logged = child.is_none();
             let mut hl_seen_alive = false;
             let mut failure_reason: Option<String> = None;
             // Stall detection state. Both stay untouched outside OBS mode,
@@ -811,6 +912,9 @@ pub fn spawn_capture_engine(
             let mut last_process_check: Option<std::time::Instant> = None;
             let mut last_dialog_check: Option<std::time::Instant> = None;
             let mut hl_alive_cached = false;
+            // What the game was last told (#861), and when a send last failed.
+            let mut hold_sent = false;
+            let mut hold_retry_at: Option<std::time::Instant> = None;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -820,7 +924,11 @@ pub fn spawn_capture_engine(
                 // for OBS mode at the end of this loop.
                 for marker in marker_rx.try_iter() {
                     let now = std::time::Instant::now();
-                    if let Some(previous) = last_marker_at {
+                    // A gap that spans a hold (#861) is waiting, not the pace
+                    // of the batch, so it doesn't widen the stall deadline.
+                    if let Some(previous) = last_marker_at
+                        && !hold_sent
+                    {
                         longest_marker_gap = longest_marker_gap.max(now - previous);
                     }
                     last_marker_at = Some(now);
@@ -841,9 +949,57 @@ pub fn spawn_capture_engine(
                         && let Some((job_idx, total, clip_idx, clip_count)) = marker.next_clip_progress {
                             let _ = tx.send(EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count));
                         }
+                    match marker.kind {
+                        crate::obs::MarkerKind::StartRecord => {
+                            let _ = tx.send(EngineEvent::ClipStarted(marker.tick));
+                        }
+                        crate::obs::MarkerKind::StopRecord => {
+                            let _ = tx.send(EngineEvent::ClipRecorded(marker.tick));
+                        }
+                        crate::obs::MarkerKind::Other if marker.label == "BATCH_HELD" => {
+                            let _ = tx.send(EngineEvent::Held);
+                        }
+                        crate::obs::MarkerKind::Other if marker.label == "BATCH_GOING" => {
+                            let _ = tx.send(EngineEvent::Going);
+                        }
+                        _ => {}
+                    }
                 }
 
-                if !launcher_exit_logged {
+                // Render While Capturing (#861): tell the hook's batch when the
+                // hold changes. A failed send tries again a second later.
+                let want_hold = hold.load(Ordering::Relaxed);
+                if runtime_batch.is_some()
+                    && want_hold != hold_sent
+                    && hold_retry_at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1))
+                {
+                    let sent = crate::sys::process::game_pids_in(&sys)
+                        .into_iter()
+                        .next()
+                        .map(|pid| crate::sys::game_remote::send_console_commands(pid, &[hold_command(want_hold)]));
+                    match sent {
+                        Some(Ok(crate::sys::game_remote::Sent::Delivered)) => {
+                            // A hold sends no markers for as long as it lasts:
+                            // the stall check counts from the `go`, not from
+                            // the last marker before the hold.
+                            if hold_sent && !want_hold {
+                                last_marker_at = Some(std::time::Instant::now());
+                            }
+                            hold_sent = want_hold;
+                            hold_retry_at = None;
+                            log_markdown(&format!("[HLAE] Sent `{}`", hold_command(want_hold)));
+                        }
+                        other => {
+                            hold_retry_at = Some(std::time::Instant::now());
+                            log_markdown(&format!(
+                                "[HLAE] Could not send `{}` yet ({other:?}); trying again",
+                                hold_command(want_hold)
+                            ));
+                        }
+                    }
+                }
+
+                if !launcher_exit_logged && let Some(child) = child.as_mut() {
                     match child.try_wait() {
                         Ok(Some(status)) => {
                             launcher_exit_logged = true;
@@ -889,15 +1045,20 @@ pub fn spawn_capture_engine(
                         Handoff::Waiting | Handoff::Sent => {}
                         Handoff::JustSent(pid) => {
                             foreground_lock.release();
+                            batch_start.set(crate::game_handoff::StartState::Sent);
                             log_markdown(&format!(
                                 "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
                                 handoff.lines.join("; ")
                             ))
                         }
                         Handoff::Failed(why) => {
+                            batch_start.set(crate::game_handoff::StartState::Failed);
                             log_markdown(&format!("[HLAE] {why}"));
                             failure_reason = Some(why);
-                            kill_hl_exe_and_wait(&mut sys);
+                            // An open game the batch never reached stays as it was.
+                            if reuse_game.is_none() {
+                                kill_hl_exe_and_wait(&mut sys);
+                            }
                             break;
                         }
                     }
@@ -944,11 +1105,13 @@ pub fn spawn_capture_engine(
                 // game, the launcher, and the launcher's own injector.
                 if last_dialog_check.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
                     last_dialog_check = Some(std::time::Instant::now());
-                    let launcher_pid = child.id();
+                    let launcher_pid = child.as_ref().map(std::process::Child::id);
                     let game_pids = crate::sys::process::game_pids_in(&sys);
-                    let mut launcher_pids = crate::sys::process::injector_pids_in(&sys, launcher_pid);
-                    if !launcher_exit_logged {
-                        launcher_pids.push(launcher_pid);
+                    let mut launcher_pids = launcher_pid
+                        .map(|pid| crate::sys::process::injector_pids_in(&sys, pid))
+                        .unwrap_or_default();
+                    if let Some(pid) = launcher_pid.filter(|_| !launcher_exit_logged) {
+                        launcher_pids.push(pid);
                     }
                     if let Some(dialog) = crate::sys::dialogs::error_dialogs(&game_pids, &launcher_pids).into_iter().next() {
                         log_markdown(&format!(
@@ -958,10 +1121,10 @@ pub fn spawn_capture_engine(
                             dialog.full_text()
                         ));
                         failure_reason = Some(dialog.summary());
-                        for pid in launcher_pids.iter().filter(|&&pid| pid != launcher_pid) {
+                        for pid in launcher_pids.iter().filter(|&&pid| Some(pid) != launcher_pid) {
                             crate::sys::process::kill_pid(*pid);
                         }
-                        if !launcher_exit_logged {
+                        if !launcher_exit_logged && let Some(child) = child.as_mut() {
                             let _ = child.kill();
                             let _ = child.wait();
                         }
@@ -992,12 +1155,15 @@ pub fn spawn_capture_engine(
                     // still injecting into hl.exe. Killing only hl.exe then
                     // leaves HLAE open on "AfxHook error, Code: 1" (seen
                     // 2026-09-29, a cancel 1.0s in), so the launcher goes first.
-                    if !launcher_exit_logged {
+                    if !launcher_exit_logged && let Some(child) = child.as_mut() {
                         let _ = child.kill();
                         let _ = child.wait();
                         log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
                     }
-                    kill_hl_exe_and_wait(&mut sys);
+                    match reuse_game {
+                        Some(pid) => leave_game(pid),
+                        None => kill_hl_exe_and_wait(&mut sys),
+                    }
                     break;
                 }
                 // Counts from the last marker, or from hl.exe first appearing
@@ -1005,7 +1171,9 @@ pub fn spawn_capture_engine(
                 // never started playing, which produces no markers to count
                 // from at all. Both mean the same thing: the game is alive and
                 // the batch is not advancing.
+                // A batch held for renders (#861) sends no markers on purpose.
                 if obs_mode
+                    && !hold_sent
                     && let Some(since) = last_marker_at.or(hl_first_seen)
                         && hl_alive && since.elapsed() > marker_stall_deadline(longest_marker_gap) {
                             let never_started = last_marker_at.is_none();
@@ -1054,11 +1222,15 @@ pub fn spawn_capture_engine(
                         exit_trigger.exists(),
                     );
                     log_markdown(&format!(
-                        "[HLAE] Batch complete after {} (via {}) — taskkilling hl.exe",
+                        "[HLAE] Batch complete after {} (via {}) — {}",
                         crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
-                        via
+                        via,
+                        if reuse_game.is_some() { "leaving the game open" } else { "taskkilling hl.exe" }
                     ));
-                    kill_hl_exe_and_wait(&mut sys);
+                    match reuse_game {
+                        Some(pid) => leave_game(pid),
+                        None => kill_hl_exe_and_wait(&mut sys),
+                    }
                     break;
                 }
                 // Only treat this as a real failure once the launcher has handed off
@@ -1144,6 +1316,11 @@ pub fn spawn_capture_engine(
                     session.on_marker(&marker);
                 }
                 session.finish();
+                // Before the batch reports it ended, so the last clip's
+                // totals reach the Last Batch panel.
+                if let Some(poller) = drop_poller.take() {
+                    poller.stop_and_wait();
+                }
                 log_markdown(&format!(
                     "🎥 **OBS capture** — {} block(s) recorded, {} skipped.",
                     session.recorded.len(),
@@ -1244,7 +1421,13 @@ fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool
 
 #[cfg(test)]
 mod tests {
-    use super::completion_source;
+    use super::{completion_source, hold_command};
+
+    #[test]
+    fn hold_and_go_use_the_hooks_batch_command() {
+        assert_eq!(hold_command(true), "ds_capture_batch hold");
+        assert_eq!(hold_command(false), "ds_capture_batch go");
+    }
 
     #[test]
     fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {

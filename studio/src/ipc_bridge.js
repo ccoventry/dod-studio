@@ -83,7 +83,7 @@ export async function convertProjectFile(path) {
 }
 
 /** A project file's text, for Rescan Recent Sessions' count and backup
- *  (#938). Rejects with the backend's message, which names the file. */
+ *  (#938) and a batch catch-up's change to a closed project (#545). Rejects with the backend's message, which names the file. */
 export async function readProjectFile(path) {
   return invoke("load_project_session", { path })
     .catch((err) => {
@@ -456,9 +456,26 @@ export async function startCaptureBatch(payload) {
     });
 }
 
+// ── OBS capture test (#646) ─────────────────────────────────────────────────
+// Each rethrows: obs_capture_test.js shows the reason on its own panel.
+function obsTestCall(command, args) {
+  return invoke(command, args).catch((err) => {
+    console.error(`IPC Execution Error (${command}):`, err);
+    throw err;
+  });
+}
+
+/** The test clip: `seconds` of the bundled demo (or of `demo`). */
+export const obsTestClip = (seconds, demo) => obsTestCall('obs_test_clip', { seconds, demo: demo || null });
+export const obsTestWatchStart = (host, port, password) => obsTestCall('obs_test_watch_start', { host, port, password });
+/** Stops the watch, reads the take's video, returns `{ recording, file, verdict, game }`. */
+export const obsTestAnalyze = (takeFolder, ffmpegPath, obsFps) => obsTestCall('obs_test_analyze', { takeFolder, ffmpegPath: ffmpegPath || null, obsFps });
+export const obsTestCancel = () => obsTestCall('obs_test_cancel', {});
+export const obsTestDeleteTake = (takeFolder) => obsTestCall('obs_test_delete_take', { takeFolder });
+
 /** Patches the given demo's highlights into a single `<stem>_preview.dem`
- *  (BOOKMARK/director events at each highlight, regardless of selection or
- *  Min Kills — reuses an existing preview instead of regenerating one) and
+ *  (BOOKMARK/director events at each highlight, regardless of selection —
+ *  reuses an existing preview instead of regenerating one) and
  *  immediately launches it in HLAE via `+viewdemo`. */
 export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
   return invoke("launch_demo_preview", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
@@ -505,6 +522,28 @@ export async function stopHighlightReview() {
     });
 }
 
+/** The review library's saved marks (#848) for the demos with these
+ *  `source_key`s: `{ [key]: { name, highlights: { [id]: entry } } }`. */
+export async function reviewLibraryGet(keys) {
+  return invoke("review_library_get", { keys })
+    .catch((err) => {
+      console.error("IPC Execution Error (review_library_get):", err);
+      showToast(STRINGS.IPC.reviewLibraryFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
+/** Saves one demo's changed highlights to the review library (#848):
+ *  `changes` maps a highlight id to its entry, or null to remove it. */
+export async function reviewLibraryUpdate(key, name, changes) {
+  return invoke("review_library_update", { key, name, changes })
+    .catch((err) => {
+      console.error("IPC Execution Error (review_library_update):", err);
+      showToast(STRINGS.IPC.reviewLibraryFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */
@@ -547,6 +586,18 @@ export async function checkRunningGame(request = null) {
   return invoke("check_running_game", { request })
     .catch((err) => {
       console.error("IPC Execution Error (check_running_game):", err);
+      return null;
+    });
+}
+
+/** The open game a capture batch can run in instead of Force Relaunch
+ *  (#725): its pid, or null when the batch needs a fresh game (the activity
+ *  log says why). `request` as for checkRunningGame. Resolves null when the
+ *  check itself fails, which leaves the usual Force Relaunch question. */
+export async function runningGameForBatch(request, captureMode, hookRunsBatch) {
+  return invoke("running_game_for_batch", { request, captureMode, hookRunsBatch })
+    .catch((err) => {
+      console.error("IPC Execution Error (running_game_for_batch):", err);
       return null;
     });
 }
@@ -769,6 +820,36 @@ export async function deleteTakeFolders(takeFolders) {
   return invoke("delete_take_folders", { takeFolders })
     .catch((err) => {
       console.error("IPC Execution Error (delete_take_folders):", err);
+      throw err;
+    });
+}
+
+/** Take pictures (#1069): makes a take stream's frames when they aren't
+ *  cached yet and resolves to `{ uri, cached }`, the middle frame as a data
+ *  URI. Rejects with "cancelled" when `cancelTakePreviews` stopped it. */
+export async function takePreviewThumb(takeFolder, stream, fps) {
+  return invoke("take_preview_thumb", { takeFolder, stream, fps })
+    .catch((err) => {
+      if (err !== 'cancelled') console.error("IPC Execution Error (take_preview_thumb):", err);
+      throw err;
+    });
+}
+
+/** Every frame of a take stream's contact sheet: `{ kind, duration_secs,
+ *  fps, frames: [{ uri, frame, secs }] }`. */
+export async function takePreviewSheet(takeFolder, stream, fps) {
+  return invoke("take_preview_sheet", { takeFolder, stream, fps })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_preview_sheet):", err);
+      throw err;
+    });
+}
+
+/** Stops the take-picture pass running now, if any. */
+export async function cancelTakePreviews() {
+  return invoke("cancel_take_previews")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_take_previews):", err);
       throw err;
     });
 }
@@ -1237,6 +1318,27 @@ export async function writeTextFile(path, contents) {
     });
 }
 
+/** Checks the takes of capture batches that ran while Studio was closed
+ *  (#545). Resolves to `{ batches, waiting_for_game }`. */
+export async function catchUpUnwatchedBatches() {
+  return invoke("catch_up_unwatched_batches")
+    .catch((err) => {
+      console.error("IPC Execution Error (catch_up_unwatched_batches):", err);
+      throw err;
+    });
+}
+
+/** Where the running batch's start stands once it is no longer on its way
+ *  to the game, or `timeoutMs` has passed (#545): 'preparing', 'pending',
+ *  'sent', 'not_needed', 'failed' or 'not_running'. */
+export async function waitForBatchStart(timeoutMs) {
+  return invoke("wait_for_batch_start", { timeoutMs })
+    .catch((err) => {
+      console.error("IPC Execution Error (wait_for_batch_start):", err);
+      throw err;
+    });
+}
+
 export async function scanDemoFolders(root) {
   return invoke("scan_demo_folders", { root: root ?? null })
     .catch((err) => {
@@ -1268,6 +1370,19 @@ export async function downloadAndInstallUpdate() {
       console.error("IPC Execution Error (download_and_install_update):", err);
       showToast(STRINGS.IPC.updateInstallFailed(err), 'error');
       throw err;
+    });
+}
+
+/** Earlier versions' release notes for the What's new window (#1013):
+ *  `{ releases, from_cache, error }`. `offline` reads only the copy saved in
+ *  the app's data folder. A failed GitHub read still resolves, with the saved
+ *  copy and the reason; this resolves to null only if the backend fails. */
+export async function releaseHistory(offline) {
+  return invoke("release_history", { offline: Boolean(offline) })
+    .catch((err) => {
+      console.error("IPC Execution Error (release_history):", err);
+      logFrontendEvent(`What's new: the release list could not be read: ${err}`);
+      return null;
     });
 }
 

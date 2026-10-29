@@ -136,7 +136,7 @@ fn collect_image_folders(take_folder: &Path) -> Vec<PathBuf> {
 const VIDEO_EXTENSIONS: &[&str] = &["avi", "mp4", "mkv", "mov"];
 
 /// The video inside a stream folder, whatever container it is in.
-fn stream_video_path(folder: &Path) -> Option<PathBuf> {
+pub(crate) fn stream_video_path(folder: &Path) -> Option<PathBuf> {
     // `video.avi` first so an HLAE take resolves without touching the disk
     // more than once — it is by far the common case.
     let preferred = folder.join(VIDEO_FILE);
@@ -230,6 +230,37 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
 /// folder that merely contains a take.
 pub fn is_take_folder(folder: &Path) -> bool {
     take_shape_is_renderable(folder)
+}
+
+/// Frames the longest stream directly inside `folder` holds (one take
+/// folder, not a block folder with HLAE's `take*` inside): an AVI's from its
+/// header, a frame sequence's by its files. `None` when no stream there can
+/// be counted this cheaply (an OBS MP4/MKV, an AGR take, no stream at all),
+/// so an unknown length is never taken for a short one (#1105). An AVI whose
+/// header says 0 frames was never finalised and counts as 0.
+pub fn take_frame_count(folder: &Path) -> Option<usize> {
+    collect_image_folders(folder)
+        .iter()
+        .filter_map(|stream| match stream_video_path(stream) {
+            Some(video)
+                if video
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("avi")) =>
+            {
+                Some(avi_frame_count(&video).unwrap_or(0))
+            }
+            Some(_) => None,
+            None => Some(count_bmps(stream)),
+        })
+        .max()
+}
+
+/// The audio HLAE wrote beside the streams in one take folder (#1105): the
+/// first `.wav` by name, as the render pass picks it.
+pub fn take_wav(folder: &Path) -> Option<PathBuf> {
+    collect_wav_files(folder)
+        .first()
+        .map(|name| folder.join(name))
 }
 
 /// The two admissible shapes, checked against one specific folder.

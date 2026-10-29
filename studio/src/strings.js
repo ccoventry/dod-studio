@@ -96,6 +96,7 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    FILTER_ROW_LABEL: 'Filters',
     // #174: demos you can capture a player from (POV demos they recorded).
     PLAYER_FILTER_ALL: 'All players',
     PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
@@ -106,6 +107,10 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    // #127: the demos with the bookmark badge (isDemoTracked).
+    TRACKED_ONLY_LABEL: 'Tracked only',
+    TRACKED_ONLY_TITLE: 'Show only the demos with the bookmark: a highlight with a status, a review mark, a note, a clip name or a narrowed kill range. The demo open in Highlight Details stays listed until you open another.',
+    TRACKED_ONLY_NONE_TITLE: 'No demo is tracked yet. Give a highlight a status, a review mark, a note, a clip name or a narrowed kill range to use this.',
     // #685, #823: the queue grouped by match, player, map, ..., with a header line per group.
     GROUP_BY_LABEL: 'Group by:',
     GROUP_BY_TITLE: 'Show the queue in groups, each under a line with its counts. Only the order changes: '
@@ -190,9 +195,8 @@ export const STRINGS = {
     // #441: the name the finished file gets.
     COL_CLIP_NAME: 'Clip Name',
     CLIP_NAME_INPUT_TITLE: 'The finished file is named after this. The grey name is the automatic one, from the template in Configuration > Render Output. Type your own to use it instead; clear it to go back.',
-    // Placeholder naming — "Capture"/"Render" is a stand-in until better
-    // names are picked (per #81 discussion), not a final decision.
-    SUBTAB_HIGHLIGHTS: 'Capture',
+    // The Studio sub-tabs (#117): pick the highlights, render the takes, set up.
+    SUBTAB_HIGHLIGHTS: 'Highlights',
     SUBTAB_RENDER: 'Render',
     SUBTAB_CONFIGURATION: 'Configuration',
     DEFAULT_TITLE: 'Highlight Details',
@@ -204,7 +208,6 @@ export const STRINGS = {
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
     LAUNCH_STANDALONE_BUTTON: 'Launch Game',
     LAUNCH_STANDALONE_TITLE: "Starts the game with DoD Studio, no demo loaded. Previews, reviews and capture batches use this game while it's open. Only close it when Studio asks.",
-    MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
     COL_ROW_NUM: 'Row #',
@@ -264,7 +267,7 @@ export const STRINGS = {
     // outright, but not until every demo in the queue has been patched, so the
     // work is already done by the time the error box appears.
     TITLE_BATCH: 'Day of Defeat Is Already Running',
-    BODY_BATCH: 'The Half-Life engine is already running (hl.exe / hlae.exe). Day of Defeat allows only one instance, so the batch would patch every demo and then fail to launch. Close the running game first, or force a relaunch to close it now.',
+    BODY_BATCH: 'The Half-Life engine is already running (hl.exe / hlae.exe), and this batch can\'t run in it (the activity log says why). Day of Defeat allows only one instance. Close the running game first, or force a relaunch to close it now.',
     FORCE_RELAUNCH_BUTTON: 'Force Relaunch',
     COPY_VIEW_COMMAND_BUTTON: 'Copy View Command',
     CANCEL_BUTTON: 'Cancel',
@@ -392,9 +395,17 @@ export const STRINGS = {
     obsTestFailed: (err) => `OBS test failed: ${err}`,
     OBS_CAPTURE_FPS_LABEL: 'OBS Capture FPS:',
     OBS_CAPTURE_FPS_TITLE:
-        "OBS's own live recording rate (the game draws at twice it) — separate from Capture FPS above, which is non-real-time for the other two modes. Set above what your machine can sustain and OBS drops frames instead of falling behind, making the clip choppy or unusable. At 2560x1440 on an RTX 3070 Ti, 60 held; 120 is at the encoder's limit (held in one run, dropped 12-95% of frames in others). Test a short capture first and watch for dropped-frame warnings before committing to a value.",
+        "OBS's own live recording rate (the game draws at twice it) — separate from Capture FPS above, which is non-real-time for the other two modes. Set above what your machine can sustain and OBS drops frames instead of falling behind, making the clip choppy or unusable. At 2560x1440 on an RTX 3070 Ti, 120 holds with every OBS Quality choice but \"OBS's own\" (the encoder about two-thirds busy); 240 does not. Test a short capture first and watch for dropped-frame warnings before committing to a value.",
     OBS_CAPTURE_FPS_WARNING:
         'Too high for your machine and OBS drops frames — test a short capture first.',
+    OBS_QUALITY_LABEL: 'OBS Quality:',
+    OBS_QUALITY_TITLE:
+        "How OBS encodes the clips on an NVIDIA card (NVENC). Each choice is a fast single-pass setup that kept up with 120 fps at 2560x1440 on an RTX 3070 Ti; higher choices look closer to HLAE's lossless frames and make bigger files. Sizes at 1440p, 120 fps: Small ~1.7 GB a minute, Standard ~3 GB, High ~4.5 GB, Max ~5.3 GB. Max keeps full colour detail (sharper red and coloured text), but some editors can't open 4:4:4 H.264: use Studio's render step for those clips. \"OBS's own\" is OBS's Simple-mode preset, which used the whole encoder at 120 fps there and dropped frames in some runs. On an AMD or Intel card OBS's own settings are used whatever is picked.",
+    OBS_QUALITY_SMALL: 'Small (~1.7 GB/min)',
+    OBS_QUALITY_STANDARD: 'Standard (~3 GB/min)',
+    OBS_QUALITY_HIGH: 'High (~4.5 GB/min)',
+    OBS_QUALITY_MAX: 'Max, full colour (~5.3 GB/min)',
+    OBS_QUALITY_OBS_SIMPLE: "OBS's own (may drop frames at 120 fps)",
     OBS_ENABLE_HINT:
         'OBS 28+: enable this under Tools → WebSocket Server Settings (the checkbox, not the Connect Info panel).',
     OBS_PROVISION_HINT:
@@ -488,7 +499,7 @@ export const STRINGS = {
     SAVE_LOCAL_PATCHED_LABEL: 'Save Local Patched Copy',
     HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips',
     HOOK_RUNS_BATCH_TITLE:
-      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. A demo on another drive than the game is copied into the game folder for the batch and removed afterwards. Needs the DoD Studio hook DLL; a batch that cannot run this way is patched as before. Turn off to patch every batch.',
+      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. Demos on other drives play where they are, with nothing copied (an older hook DLL copies them into the game folder for the batch and removes them afterwards). Needs the DoD Studio hook DLL; a batch that cannot run this way is patched as before. Turn off to patch every batch.',
     KEEP_GAME_BEHIND_LABEL: 'Keep the Game Behind Your Windows While Capturing',
     KEEP_GAME_BEHIND_TITLE:
       'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
@@ -619,7 +630,7 @@ export const STRINGS = {
     },
     andNMore: (n) => `...and ${n} more`,
     PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
-    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Capture tab before starting a capture.',
+    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
@@ -630,6 +641,8 @@ export const STRINGS = {
     noUsableSpaceProblem: (desc) => `Capture Output problem:\n${desc}`,
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
+    insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
+    insufficientSpaceRendersMakeRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: the batch will wait between clips for renders to free room ("Render while capturing").`,
     partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
@@ -659,7 +672,16 @@ export const STRINGS = {
     CANCELLED: 'Cancelled',
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
-    takesFoundMissing: (captured, total) => `${captured}/${total} takes found on disk — ${total - captured} missing.`,
+    // A clip Cancel cut short (#1081) left a partial take: it isn't missing.
+    // A take whose video stopped early (#1105) is partial too: not missing either.
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly;
+      const parts = [];
+      if (missing > 0) parts.push(`${missing} missing`);
+      if (cutShort > 0) parts.push(`${cutShort} cut short by Cancel (partial take, not captured)`);
+      if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
+      return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
+    },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
     allTakesVerified: (total) => `All ${total} takes verified on disk.`,
     highlightsMarkedCaptured: (n) => ` ${n} highlight(s) marked Captured.`,
@@ -668,7 +690,7 @@ export const STRINGS = {
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
-    BATCH_QUEUED_TOAST: 'Batch capture queued successfully!',
+    BATCH_IN_OPEN_GAME_TOAST: 'Running the batch in the game that is already open. It stays open afterwards.',
     startBatchError: (err) => `Error starting batch: ${err}`,
     CANCELLING_BATCH_TOAST: 'Cancelling batch...',
     EMPTY_DASH: '—',
@@ -820,6 +842,20 @@ export const STRINGS = {
     takesDeleteFailed: (deleted, failed, firstError) =>
       `${failed} take${failed === 1 ? '' : 's'} not deleted${deleted > 0 ? ` (${deleted} moved to the Recycle Bin)` : ''}: ${firstError}. Scan for Takes to list ${failed === 1 ? 'it' : 'them'} again.`,
     deleteTakeRefused: (err) => `Couldn't delete the take: ${err}`,
+    // #1069: a picture of each take, and its contact sheet.
+    TABLE_HEADER_PICTURE: 'Picture',
+    TABLE_HEADER_PICTURE_TITLE: 'The middle of each take. Hover for a bigger picture, click for nine frames across the take.',
+    TAKE_THUMB_TITLE: 'Click for nine frames across the take.',
+    TAKE_THUMB_WAITING: 'Waiting for its picture.',
+    TAKE_THUMB_MAKING: 'Making its picture.',
+    takeThumbFailed: (err) => `No picture: ${err}`,
+    takePicturesProgress: (done, total) => `Making take pictures: ${done} of ${total}`,
+    takeSheetTitle: (name) => `Take pictures: ${name}`,
+    TAKE_SHEET_LOADING: 'Loading the pictures…',
+    takeSheetFailed: (err) => `Couldn't show the pictures: ${err}`,
+    takeSheetSeconds: (secs) => `${secs} s`,
+    takeSheetFrame: (frame) => `frame ${frame}`,
+    TAKE_SHEET_CLOSE: 'Close',
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -898,6 +934,7 @@ export const STRINGS = {
     progressStatus: (finished, total, rendering) =>
       `Finishing clips: ${finished} of ${total}${rendering > 0 ? `, ${rendering} in progress` : ''}`,
     WAITING_STATUS: 'Finishing clips: waiting for the Render tab to finish what it is already doing',
+    SCANNING_STATUS: 'Finishing clips: looking for the new takes',
     startedToast: (n) => `Finishing ${n} clip${n === 1 ? '' : 's'}.`,
     VIEW_IN_RENDER_TAB: 'View in Render tab',
     NOTIFY_TITLE: 'Clips ready',
@@ -915,6 +952,72 @@ export const STRINGS = {
     SKIPPED_CANCELLED: 'The batch was cancelled, so its clips were not finished. Render the takes from the Render tab if you want them.',
     SKIPPED_NO_EXPORT_DIR: 'Clips were not finished: add an export folder in Configuration → Render Settings first. The takes are still there for the Render tab.',
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
+  },
+
+  // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
+  TAKE_CLEANUP: {
+    AFTER_LABEL: 'After a clip is finished:',
+    AFTER_TITLE:
+        'What happens to a take once its clip has rendered successfully. Only a take whose every render finished, with the clip file still there, is ever deleted. A failed, cancelled or unrendered take always stays. The render history stays either way.',
+    AFTER_KEEP: 'Keep the take',
+    AFTER_RECYCLE: 'Move the take to the Recycle Bin',
+    AFTER_DELETE: 'Delete the take permanently',
+    WHEN_NEEDED_LABEL: 'Only when space is needed',
+    WHEN_NEEDED_TITLE:
+        'Takes stay until a capture or a render batch needs room on its drive. Then the oldest finished takes there are deleted until it fits.',
+    WHEN_NEEDED_OFF_TITLE:
+        'Needs "Delete the take permanently": the Recycle Bin frees no space until you empty it.',
+    HINT_KEEP: 'Takes stay on disk. Delete them from the Render tab when you are done.',
+    HINT_RECYCLE:
+        'Each take goes to the Recycle Bin once its clip renders. The Recycle Bin frees no space until you empty it.',
+    HINT_DELETE: 'Each take is deleted for good once its clip renders. It cannot be restored.',
+    HINT_DELETE_WHEN_NEEDED:
+        'Takes stay until a capture or render batch is short of room. Then the oldest finished takes on that drive are deleted for good until it fits.',
+    CONFIRM_TITLE: 'Delete takes permanently?',
+    CONFIRM_MESSAGE:
+        'Takes deleted this way skip the Recycle Bin and cannot be restored. Only takes whose clip rendered successfully are deleted, and the render history stays.',
+    CONFIRM_BUTTON: 'Delete permanently',
+    progressLine: (step, done, total) => {
+      if (step === 'looking') return 'Making room: looking for finished takes';
+      if (step === 'measuring') return `Making room: measuring finished takes (${done} of ${total})`;
+      if (step === 'recycling') return `Moving finished takes to the Recycle Bin (${done} of ${total})`;
+      return `Deleting finished takes (${done} of ${total})`;
+    },
+    /** `reason`: `finished`, `capture` or `finish`; `method`: `recycle` or `delete`. */
+    doneToast: (n, size, reason, method) => {
+      const takes = n === 1 ? 'a finished take' : `${n} finished takes`;
+      if (method === 'recycle') return `Moved ${takes} to the Recycle Bin (${size}).`;
+      if (reason === 'capture') return `Deleted ${takes} (${size}) to make room for the capture.`;
+      if (reason === 'finish') return `Deleted ${takes} (${size}) to make room for the renders.`;
+      return `Deleted ${takes} for good (${size}).`;
+    },
+    failedToast: (n, error) =>
+      `Couldn't delete ${n === 1 ? 'a finished take' : `${n} finished takes`}: ${error}. Scan for Takes to list it again.`,
+    shortToast: (reason, needed, available, movedTakes = 0) =>
+      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} free on one drive, and deleting every finished take would leave at most ${available} on any one drive.${
+        movedTakes === 1 ? ' 1 finished take stays because its clip isn\'t where it was rendered (moved or renamed).'
+          : movedTakes > 1 ? ` ${movedTakes} finished takes stay because their clips aren't where they were rendered (moved or renamed).`
+            : ''
+      } No takes were deleted.`,
+  },
+
+  // ── Render while capturing (#861) ────────────────────────────────────────
+  RENDER_WHILE_CAPTURING: {
+    LABEL: 'Render while capturing',
+    TITLE:
+        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    HINT_OFF: 'Clips render after the batch.',
+    HINT_ON_KEEP:
+        'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
+    HINT_ON_DELETE:
+        'Each clip renders while the batch goes on, and its take is deleted once the clip is done. When the drive runs short, the batch waits between clips for the renders to free room.',
+    holdingLine: (short) =>
+      `Will wait after this clip for renders to free ${short || 'room'} for the next one`,
+    heldLine: (short, minutes) =>
+      `Waiting for renders to free ${short || 'room'} for the next clip${minutes ? ` (about ${minutes} min)` : ''}`,
+    stoppedToast: (clip, reason) =>
+      `The batch stopped before clip ${clip}: ${reason}. The clips recorded so far are kept.`,
+    queueFailed: (err) => `Couldn't queue a recorded clip for rendering: ${err}`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
@@ -1456,10 +1559,26 @@ export const STRINGS = {
   // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
   BATCH_CLOSE_MODAL: {
     TITLE: 'Capture batch running',
-    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own. Studio checks the takes and marks them Captured the next time it opens. To stop the batch instead, use Cancel Batch first.',
     LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
     CLOSE_BUTTON: 'Close DoD Studio',
     KEEP_OPEN_BUTTON: 'Keep Studio open',
+    // The batch's start has not reached the game yet (#545): Studio waits for
+    // it before asking, so the game does not sit at its main menu.
+    WAIT_TITLE: 'Closing DoD Studio',
+    starting: (secondsLeft) => `The game is still starting. Studio is starting the batch in it first, so it can keep capturing after Studio closes… (up to ${secondsLeft} s)`,
+    NOT_STARTED_TITLE: 'Capture batch not started',
+    NOT_STARTED_MESSAGE: 'The batch has not started in the game yet, so the game cannot capture it on its own. Closing DoD Studio cancels the batch and closes the game.',
+    CANCEL_AND_CLOSE_BUTTON: 'Cancel batch and close',
+    CANCELLING: 'Cancelling the batch and closing the game…',
+  },
+
+  // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
+  BATCH_CATCH_UP: {
+    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    projectUpdated: (name) => `Marked them in the project ${name}.`,
+    projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
+    checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -2217,8 +2336,31 @@ export const STRINGS = {
     CHECKING: 'Checking the takes on disk…',
     kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
     merged: (n) => `(+${n} more, recorded as one take)`,
-    STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
+    STATUS: {
+      ok: 'Captured',
+      unrenderable: "Captured, can't render yet",
+      missing: 'Missing',
+      cut_short: 'Cut short by Cancel (partial take, not captured)',
+      short: 'Video stops early (partial take, not captured)',
+    },
+    // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
+    shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     OPEN_FOLDER: 'Open folder',
+    // OBS mode's per-take frame loss (#172).
+    obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,
+    obsCellTitle: (skipped, frames, missed, rendered) => `OBS left out ${skipped} of ${frames} frames because the encoder couldn't keep up, and ${missed} of ${rendered} because it couldn't draw them in time. A few tenths of a percent is normal; past 5% the take looks choppy.`,
+    obsSummary: (lagging, clips, fix) => `OBS dropped frames in ${lagging} of ${clips} take${clips === 1 ? '' : 's'}. ${fix}`,
+  },
+
+  // ── obs_drop_rate.js: OBS mode's live drop rate (#172) ─────────────────
+  OBS_DROP_RATE: {
+    line: (clip, skippedPct, missedPct, recording) => `OBS, clip ${clip}${recording ? '' : ' done'}: ${skippedPct}% of frames skipped, ${missedPct}% missed`,
+    LINE_TITLE: "Frames OBS left out of this clip so far. Skipped: the encoder couldn't keep up. Missed: OBS couldn't draw them in time. A few tenths of a percent is normal; past 5% the clip looks choppy.",
+    lagging: (pct, encoder, fix) => `OBS is dropping ${pct}% of frames (${encoder ? "the encoder can't keep up" : "OBS can't draw them in time"}): the clip will be choppy. ${fix}`,
+    LAGGING_TITLE: 'Over the last 5 seconds. Each clip\'s total is in Last Batch when the batch ends.',
+    fix: (fps) => (fps > 60
+      ? 'Lower OBS Capture FPS to 60 (Configuration → Output Format) and capture again.'
+      : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────
@@ -2570,6 +2712,16 @@ export const STRINGS = {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
     },
+    // #848: marks saved outside the project, brought onto demos a scan adds.
+    LIBRARY_TITLE: 'Marks you saved before',
+    libraryAskMessage: (demos, highlights) =>
+      `${demos} of these demos ${demos === 1 ? 'has' : 'have'} Review marks you saved before (${highlights} highlight${highlights === 1 ? '' : 's'}). Bring them in?`,
+    LIBRARY_ASK_FOOTER: 'Only highlights with no mark, note or Kill Range in this project get them; the project\'s own stay as they are.',
+    LIBRARY_BRING_IN: 'Bring them in',
+    LIBRARY_NOT_NOW: 'Not now',
+    libraryDemoLine: (highlights) => `${highlights} highlight${highlights === 1 ? '' : 's'}`,
+    libraryBroughtInToast: (demos, highlights) =>
+      `Brought in your saved Review marks: ${highlights} highlight${highlights === 1 ? '' : 's'} in ${demos} demo${demos === 1 ? '' : 's'}.`,
     TICK_YES_LABEL: 'Tick Yes for capture',
     TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
@@ -2615,6 +2767,7 @@ export const STRINGS = {
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
     reviewFailed: (err) => `Could not start the review: ${err}`,
+    reviewLibraryFailed: (err) => `Review marks: ${err}`,
     cfgImportFailed: (err) => `Could not read that config: ${err}`,
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,
@@ -2664,6 +2817,34 @@ export const STRINGS = {
     BLURB: 'A capture, patching, and analytics pipeline for Day of Defeat 1.3 demos — batch-records highlight clips through HLAE and parses matches for scoreboards, kills, chat, and rounds.',
     CREDIT: 'Built by ccoventry',
     GITHUB_LINK: 'github.com/ccoventry/dod-studio',
+  },
+
+  // ── What's new window (#1013), whats_new.js ─────────────────────────────
+  WHATS_NEW: {
+    MENU_ITEM: "What's New",
+    MENU_ITEM_TITLE: "What changed in this version and the ones before it",
+    ABOUT_BUTTON: "What's new in this version",
+    TITLE: "What's New",
+    thisVersion: (v) => `This version: v${v}`,
+    THIS_VERSION_UNKNOWN: 'This version',
+    OTHER_VERSIONS: 'Other versions',
+    versionLabel: (v, experimental) => `v${v}${experimental ? ' (experimental)' : ''}`,
+    // The release body's <details> list of every pull request, folded.
+    everythingElse: (summary) => `Everything else: ${summary}`,
+    NO_NOTES: 'No notes were written for this version.',
+    NO_BUNDLED_NOTES: "This build doesn't carry its own notes (a build made on this PC has none). They show here once GitHub's release list is read.",
+    NO_NOTES_FOR_THIS_BUILD: "No notes for this build: it isn't a published version (a build made on this PC, or an experimental build GitHub has since replaced).",
+    FETCH_BUTTON: "Read GitHub's list",
+    FETCH_TITLE: "Reads the release notes of every version from GitHub. Update checks are off, so DoD Studio doesn't do it by itself.",
+    STATUS_READING: "Reading the release list from GitHub…",
+    STATUS_FAILED: "Couldn't read GitHub's release list, and none is saved from before. The reason is in the activity log.",
+    STATUS_SAVED_COPY: "Couldn't read GitHub's release list, so this is the copy saved last time. The reason is in the activity log.",
+    STATUS_OFFLINE_SAVED: 'Update checks are off, so this is the release list saved last time.',
+    STATUS_OFFLINE_NONE: "Update checks are off, so only this version's notes show.",
+    updatedTo: (v) => `DoD Studio updated to v${v}.`,
+    TOAST_ACTION: "See what's new",
+    // The update window: the pending update's notes, before installing it.
+    PENDING_TITLE: "What's in it",
   },
 
   // ── Update check/install modal (issue #133) ──────────────────────────────
@@ -2950,7 +3131,7 @@ export const STRINGS = {
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
   },
 
-  // ── First-run Setup window and the Capture page's checklist (#599) ──────
+  // ── First-run Setup window and the Highlights page's checklist (#599) ──────
   // Configuration > Players (#428): players_ui.js.
   PLAYERS: {
     USE_IN_GAME_LABEL: 'Use in the game',
@@ -3196,16 +3377,16 @@ export const STRINGS = {
 
     // Step 6: demos.
     DEMOS_TITLE: 'Add your demos',
-    DEMOS_INTRO: "DoD Studio scans a folder of .dem files for highlights. Your movie copy's dod folder is a good start; you can add more folders later from the Capture page.",
+    DEMOS_INTRO: "DoD Studio scans a folder of .dem files for highlights. Your movie copy's dod folder is a good start; you can add more folders later from the Highlights page.",
     DEMOS_FIELD: 'Demo folder',
     DEMOS_NONE: 'No folder picked yet.',
-    DEMOS_FINISH_NOTE: 'Finish scans this folder and opens the Capture page with your demos listed.',
+    DEMOS_FINISH_NOTE: 'Finish scans this folder and opens the Highlights page with your demos listed.',
     DEMOS_SCANNING: 'Scanning…',
     USE_SUGGESTED: 'Use this folder',
 
     // Footer.
     SKIP_SETUP: 'Skip setup for now',
-    SKIP_SETUP_TITLE: 'Close this window. The Capture page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
+    SKIP_SETUP_TITLE: 'Close this window. The Highlights page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
     BACK: 'Back',
     NEXT: 'Next',
     SKIP_STEP: 'Skip this step',
@@ -3215,5 +3396,90 @@ export const STRINGS = {
     PATH_NOT_FOUND: "There's no file at this path.",
     PATH_IS_A_FOLDER: 'That is a folder, not the program itself.',
     wrongExe: (found, expected) => `That is ${found}, not ${expected}. Pick ${expected}.`,
+  },
+  // ── OBS capture test (#646, obs_capture_test.js) ──────────────────────────
+  OBS_TEST: {
+    TEST_BUTTON: 'Test OBS capture',
+    TEST_BUTTON_TITLE:
+        "Records about a minute of a demo that comes with DoD Studio, through a normal batch at your OBS Capture FPS and OBS Quality, then says whether this PC keeps up: frames OBS skipped or missed, frames the game didn't draw in time, and whether the clip has sound. The game opens for about a minute and a half; the clip is deleted afterwards.",
+    LADDER_BUTTON: 'Find my highest steady FPS',
+    LADDER_BUTTON_TITLE:
+        'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. On the bundled demo it recommends one step below that, for maps that are busier to encode. About a minute and a half per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
+    LONG_LABEL: '1-minute clips',
+    LONG_TITLE: 'Longer clips catch a PC that slows down as it warms up. Each rate takes about 40 s longer.',
+    STOP_BUTTON: 'Stop test',
+    DEMO_LABEL: 'Test demo:',
+    DEMO_BUNDLED: 'the one that comes with DoD Studio',
+    DEMO_PICK: 'Use another demo…',
+    DEMO_PICK_TITLE: "Test on one of your own demos instead: the test records the stretch of it with the most kills. A real match's own lag shows up as repeated frames, so the bundled demo's result is the fairer one.",
+    DEMO_RESET: 'Use the bundled demo',
+    DEMO_DIALOG_TITLE: 'Pick a demo for the OBS capture test',
+    DEMO_NOTE:
+        "The test plays a stretch of a real 6v6 match on dod_anzio, with grenades and fights, recorded without lag. A map with more detail on screen gives OBS's encoder more to do: if you play other maps, test one of your own demos too.",
+    // Step lines, each shown while that step runs.
+    CHECKING_OBS: 'Checking OBS…',
+    CHECKING_GAME: 'Checking the game is closed…',
+    PREPARING_CLIP: 'Getting the test clip ready…',
+    ladderStep: (n, total, rate) => `Rate ${n} of up to ${total}, ${rate} fps. `,
+    recording: (rate, status) => `Capturing at ${rate} fps: ${status || 'starting…'}`,
+    // No count until the clip's frame total is known, rather than "frame 0 of 0".
+    readingClip: (done, total) => (total > 0
+      ? `Reading the clip: frame ${done.toLocaleString()} of ${total.toLocaleString()}`
+      : 'Reading the clip…'),
+    DELETING: 'Deleting the test clip…',
+    RESTORING: 'Putting OBS back to your OBS Capture FPS…',
+    // Results.
+    LEVEL_STEADY: 'Sustainable',
+    LEVEL_BORDERLINE: 'Borderline',
+    LEVEL_NOT_STEADY: 'Not sustainable',
+    CAUSE_ENCODER: "OBS's encoder couldn't keep up",
+    CAUSE_RENDERING: "OBS's rendering couldn't keep up",
+    CAUSE_GAME: "the game didn't draw new frames fast enough",
+    verdictLine: (rate, level, quality) => `${rate} fps at OBS Quality ${quality}: ${level}.`,
+    causeLine: (cause) => `What lost frames: ${cause}.`,
+    numbersLine: (skipped, missed, repeated) =>
+        `${skipped} skipped by OBS's encoder, ${missed} missed by OBS's rendering, ${repeated} of the moving frames repeated in the file (the game late, or OBS filling in a skipped frame).`,
+    adviceFps: (rate) => `Change one setting: lower OBS Capture FPS to ${rate}.`,
+    adviceQuality: (quality) => `Change one setting: lower OBS Quality to ${quality}, or lower OBS Capture FPS.`,
+    ADVICE_NONE: 'Nothing to change: OBS kept every frame.',
+    gameLine: (avg, low1, low01, slower, rate) =>
+        `The game itself: ${avg} fps average, 1% low ${low1} fps, 0.1% low ${low01} fps; ${slower} of its frames took longer than one ${rate} fps frame.`,
+    GAME_UNMEASURED: "The game's own frame rate wasn't measured: the hook DLL in use is older than this test.",
+    soundOk: (peak) => `Sound: present, loudest moment ${peak} dB.`,
+    SOUND_MISSING: "Sound: the clip has no sound track. Check OBS's [DoD-Studio] Game Audio source.",
+    SOUND_SILENT: "Sound: the clip is silent. Check that OBS's [DoD-Studio] Game Audio source isn't muted.",
+    COUNTERS_UNREAD: "OBS's own frame counters couldn't be read, so only the clip itself was checked.",
+    ladderBest: (best, recommended, quality) =>
+        `Steady up to ${best} fps at OBS Quality ${quality} on this demo. Recommended: ${recommended} fps (one step lower, for busier maps).`,
+    ladderBestEdge: (rate, quality) =>
+        `Steady only at ${rate} fps at OBS Quality ${quality} on this demo. Recommended: ${rate} fps, but it's at the edge: busier maps may not hold it.`,
+    ladderBestOwn: (rate, quality) =>
+        `Steady up to ${rate} fps at OBS Quality ${quality} on your demo (its busiest stretch). Recommended: ${rate} fps.`,
+    LADDER_MARGIN_WHY:
+        "Why lower: the bundled demo is lighter to encode than maps with more detail (on an RTX 3070 Ti it held 200 fps at High, where a dod_harrington match failed at 165). Test one of your own demos for a tighter number.",
+    LADDER_NONE: 'No rate held steady, not even 60 fps.',
+    ladderFirstFail: (rate, level, cause) => `${rate} fps: ${level}, ${cause}.`,
+    ladderAllPassed: (rate) => `Every rate up to ${rate} fps held.`,
+    applyButton: (rate) => `Use ${rate} fps`,
+    APPLY_TITLE: 'Sets OBS Capture FPS to this rate.',
+    applied: (rate) => `OBS Capture FPS is now ${rate}.`,
+    COL_FPS: 'OBS FPS',
+    COL_RESULT: 'Result',
+    COL_SKIPPED: 'Skipped (encoder)',
+    COL_MISSED: 'Missed (rendering)',
+    COL_REPEATED: 'Repeated',
+    COL_GAME: 'Game fps (1% low)',
+    COL_SOUND: 'Sound',
+    SOUND_CELL_OK: 'yes',
+    SOUND_CELL_MISSING: 'none',
+    SOUND_CELL_SILENT: 'silent',
+    // Refusals and endings.
+    BATCH_RUNNING: 'A capture batch is running. Test OBS once it has finished.',
+    GAME_OPEN: 'Close the game first: the test starts its own.',
+    OBS_NOT_CONNECTED: "OBS isn't reachable. Check the OBS Connection settings above, then test again.",
+    NO_TAKE: "OBS recorded nothing for the test clip. Check OBS's own window for why.",
+    batchEnded: (status) => `The test clip's batch ended without a clip: ${status}`,
+    failed: (err) => `The test stopped: ${err}`,
+    STOPPED: 'Test stopped.',
   },
 };

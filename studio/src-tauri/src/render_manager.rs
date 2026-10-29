@@ -17,6 +17,7 @@ use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
 };
 use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_background};
+use native::hlcr::take_cleanup::attempt_stream;
 use native::hlcr::take_meta::{RenderAttempt, RenderOutcome};
 use native::log_markdown;
 use native::shared::paths::take_key;
@@ -178,20 +179,14 @@ fn first_error_line(log: &str) -> Option<String> {
     Some(line.chars().take(200).collect())
 }
 
-/// The stream an attempt is recorded under: one take can be two jobs.
-fn attempt_stream(clip: &ClipData) -> String {
-    if clip.clip_type == "hud_only" {
-        format!("hud:{}", clip.img_folder)
-    } else {
-        clip.img_folder.clone()
-    }
-}
-
 #[derive(Clone, Serialize)]
 pub struct RenderJobView {
     pub id: String,
     pub name: String,
     pub stream: String,
+    /// The stream folder inside `take_folder` this job renders from (`all`,
+    /// or `hudColor` for a HUD pair): what the take preview (#1069) shows.
+    pub stream_folder: String,
     pub frames: usize,
     pub date: String,
     pub status: String,
@@ -258,6 +253,7 @@ impl RenderJobRuntime {
             } else {
                 self.clip.img_folder.clone()
             },
+            stream_folder: self.clip.img_folder.clone(),
             frames: self.clip.frame_count,
             date: self.clip.date.clone(),
             status: self.status.clone(),
@@ -324,6 +320,36 @@ pub struct RenderManager {
     /// The next unused job id: a scan merges into the list (#772), so new
     /// rows take ids no earlier row had. Read and written under `jobs`.
     next_job_id: AtomicUsize,
+    /// Render While Capturing (#861): set while a capture batch runs with it
+    /// on. Renders then start one at a time, and each take whose clip
+    /// finished goes at once rather than when the render batch ends.
+    while_capturing: Arc<AtomicBool>,
+    /// The capture is held between clips for space (#861): nothing records,
+    /// so renders started now get the machine as they would without a capture.
+    capture_held: Arc<AtomicBool>,
+}
+
+/// How many renders run at once while a capture batch runs (#861): one, so
+/// the game keeps most of the machine.
+pub(crate) const RENDERS_WHILE_CAPTURING: usize = 1;
+
+/// What the scheduler may run at once: the batch's own number, or
+/// [`RENDERS_WHILE_CAPTURING`] while a capture runs.
+fn concurrency_cap(configured: usize, while_capturing: bool) -> usize {
+    let configured = configured.max(1);
+    if while_capturing {
+        configured.min(RENDERS_WHILE_CAPTURING)
+    } else {
+        configured
+    }
+}
+
+/// One render job of a take, for Render While Capturing's space check (#861).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TakeRender {
+    pub status: String,
+    pub output_path: String,
+    pub output_size_bytes: Option<u64>,
 }
 
 struct SchedulerHandles {
@@ -334,6 +360,8 @@ struct SchedulerHandles {
     render_session: Arc<Mutex<Option<RenderSessionData>>>,
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
     clear_on_finish: Arc<AtomicBool>,
+    while_capturing: Arc<AtomicBool>,
+    capture_held: Arc<AtomicBool>,
 }
 
 /// Back to Queued with the run's leftovers cleared, keeping the job's own
@@ -361,7 +389,50 @@ impl RenderManager {
             clear_on_finish: Arc::new(AtomicBool::new(false)),
             scanning: AtomicBool::new(false),
             next_job_id: AtomicUsize::new(0),
+            while_capturing: Arc::new(AtomicBool::new(false)),
+            capture_held: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Render While Capturing (#861): a capture batch with it on started
+    /// (true) or ended (false).
+    pub(crate) fn set_while_capturing(&self, on: bool) {
+        self.while_capturing.store(on, Ordering::SeqCst);
+        self.capture_held.store(false, Ordering::SeqCst);
+    }
+
+    /// The capture holds between clips (true) or records again (false).
+    pub(crate) fn set_capture_held(&self, held: bool) {
+        self.capture_held.store(held, Ordering::SeqCst);
+    }
+
+    /// The render jobs of the take(s) under `folder`, a capture block's
+    /// folder: HLAE writes the take into a `take0000` folder inside it.
+    pub(crate) fn renders_under(&self, folder: &str) -> Vec<TakeRender> {
+        let key = native::hlcr::take_cleanup::folder_key(folder);
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| {
+                let job = native::hlcr::take_cleanup::folder_key(&j.clip.take_folder);
+                job == key || job.starts_with(&format!("{key}\\"))
+            })
+            .map(|j| TakeRender {
+                status: j.status.clone(),
+                output_path: j.output_path.clone(),
+                output_size_bytes: j.output_size_bytes,
+            })
+            .collect()
+    }
+
+    /// Whether any render is queued or running.
+    pub(crate) fn has_pending_renders(&self) -> bool {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|j| j.status == "Queued" || j.status == "Rendering")
     }
 
     /// The statuses of the jobs rendering from `take_folder`: two for a take
@@ -375,6 +446,75 @@ impl RenderManager {
             .filter(|j| j.clip.take_folder == take_folder)
             .map(|j| j.status.clone())
             .collect()
+    }
+
+    /// The automatic take cleanup's (#644) `remove_take_rows`: refuses, under
+    /// the same lock the scheduler starts jobs under, while any row of the
+    /// take is queued or rendering, rather than dropping a queued row.
+    pub(crate) fn remove_idle_take_rows(
+        &self,
+        app: &AppHandle,
+        take_folder: &str,
+    ) -> Result<(), String> {
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            let statuses: Vec<&str> = jobs
+                .iter()
+                .filter(|j| j.clip.take_folder == take_folder)
+                .map(|j| j.status.as_str())
+                .collect();
+            if let Some(refusal) = crate::take_cleanup_manager::busy_refusal(take_folder, &statuses)
+            {
+                return Err(refusal);
+            }
+            jobs.retain(|j| j.clip.take_folder != take_folder);
+        }
+        clear_batch_state_if_empty(self);
+        emit_jobs_snapshot(app, &self.jobs);
+        Ok(())
+    }
+
+    /// Take folders with a job queued or rendering, as `folder_key`s: the
+    /// automatic take cleanup (#644) never touches one.
+    pub(crate) fn busy_take_keys(&self) -> std::collections::HashSet<String> {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| j.status == "Queued" || j.status == "Rendering")
+            .map(|j| native::hlcr::take_cleanup::folder_key(&j.clip.take_folder))
+            .collect()
+    }
+
+    /// The Render tab's own spelling of a take folder, found by `folder_key`:
+    /// the scanner and the list can spell one folder differently, and the
+    /// rows are matched by their exact text.
+    pub(crate) fn listed_take_folder(&self, key: &str) -> Option<String> {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|j| native::hlcr::take_cleanup::folder_key(&j.clip.take_folder) == key)
+            .map(|j| j.clip.take_folder.clone())
+    }
+
+    /// What the first jobs to start need on the export drives, one figure per
+    /// job, since each job writes to one drive: the largest `max_concurrent`
+    /// estimates among the queued jobs, which is what `run_render_job`'s drive
+    /// routing checks as they start together. Later jobs reserve from what
+    /// finished renders actually wrote (#120).
+    pub(crate) fn first_wave_pieces(&self, max_concurrent: usize) -> Vec<u64> {
+        let mut estimates: Vec<u64> = self
+            .jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| j.status == "Queued")
+            .map(|j| job_reservation_estimate(&j.clip, j.codec, &j.custom_codec_args))
+            .collect();
+        estimates.sort_unstable_by(|a, b| b.cmp(a));
+        estimates.truncate(max_concurrent.max(1));
+        estimates
     }
 
     /// Takes these takes' rows out of the list before their folders go to the
@@ -478,6 +618,8 @@ impl RenderManager {
             render_session: self.render_session.clone(),
             export_reservations: self.export_reservations.clone(),
             clear_on_finish: self.clear_on_finish.clone(),
+            while_capturing: self.while_capturing.clone(),
+            capture_held: self.capture_held.clone(),
         }
     }
 }
@@ -553,27 +695,32 @@ fn emit_jobs_snapshot(app: &AppHandle, jobs: &Arc<Mutex<Vec<RenderJobRuntime>>>)
     let _ = app.emit("render_jobs_snapshot", views);
 }
 
+/// Applies one update from a running job. Returns the take folder of a job
+/// that just finished successfully, for the automatic take cleanup (#644).
 fn apply_render_update(
     app: &AppHandle,
     jobs: &Arc<Mutex<Vec<RenderJobRuntime>>>,
     render_session: &Arc<Mutex<Option<RenderSessionData>>>,
     update: RenderUpdate,
-) {
+) -> Option<String> {
     match update {
         RenderUpdate::Progress(id, pct) => {
             if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
                 job.progress = pct;
             }
+            None
         }
         RenderUpdate::Speed(id, speed) => {
             if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
                 job.speed = speed;
             }
+            None
         }
         RenderUpdate::Status(id, status) => {
             if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
                 job.status = status;
             }
+            None
         }
         RenderUpdate::OutputPath(id, path) => {
             if let Some(job) = jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
@@ -585,6 +732,7 @@ fn apply_render_update(
                 job.output_size_bytes = std::fs::metadata(&path).ok().map(|m| m.len());
                 job.output_path = path;
             }
+            None
         }
         RenderUpdate::Finished(id, success, err_log) => {
             // `just_finished` is keyed on `success` alone, deliberately not
@@ -729,6 +877,7 @@ fn apply_render_update(
                     let _ = std::fs::write(autosave_path(), json);
                 }
             }
+            just_finished.map(|(take_folder, _, _, _)| take_folder)
         }
     }
 }
@@ -742,7 +891,9 @@ fn apply_render_update(
 fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConfig) {
     tokio::spawn(async move {
         let (tx, rx) = std::sync::mpsc::channel::<RenderUpdate>();
-        let max_concurrent = config.max_concurrent_renders.max(1);
+        // Takes with a job that finished in this run, for the automatic take
+        // cleanup (#644) once the run ends.
+        let mut finished_takes: Vec<String> = Vec::new();
 
         loop {
             if handles.global_cancel.load(Ordering::SeqCst) {
@@ -757,10 +908,39 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 }
             }
 
+            // Read every pass: a capture starting or ending changes it (#861).
+            let while_capturing = handles.while_capturing.load(Ordering::SeqCst);
+            // Held between clips, nothing records: renders starting now run
+            // as they would with no capture (measured on #861: a lone ProRes
+            // render is 3x faster on every core than on a quarter of them).
+            let game_busy = while_capturing && !handles.capture_held.load(Ordering::SeqCst);
+            let max_concurrent = concurrency_cap(config.max_concurrent_renders, game_busy);
             let mut dirty = false;
+            let mut rendered_now: Vec<String> = Vec::new();
             while let Ok(update) = rx.try_recv() {
-                apply_render_update(&app, &handles.jobs, &handles.render_session, update);
+                if let Some(take_folder) =
+                    apply_render_update(&app, &handles.jobs, &handles.render_session, update)
+                {
+                    // A HUD pair's two jobs can finish in one pass: the take
+                    // is looked at once.
+                    if while_capturing && !rendered_now.contains(&take_folder) {
+                        rendered_now.push(take_folder.clone());
+                    }
+                    if !finished_takes.contains(&take_folder) {
+                        finished_takes.push(take_folder);
+                    }
+                }
                 dirty = true;
+            }
+            // While a capture runs, a take goes as soon as its clip is
+            // finished (#861), so the batch gets the space back; the rest
+            // still wait for the batch's end below.
+            if !rendered_now.is_empty() {
+                if dirty {
+                    emit_jobs_snapshot(&app, &handles.jobs);
+                }
+                finished_takes.retain(|t| !rendered_now.contains(t));
+                crate::take_cleanup_manager::after_takes_rendered(&app, rendered_now);
             }
 
             let mut attempts_started: Vec<(String, RenderAttempt)> = Vec::new();
@@ -776,6 +956,14 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                     // gives a lone job all available threads instead of only 1/max of them.
                     let effective_concurrent =
                         (active_count + jobs_starting).min(max_concurrent).max(1);
+                    // While a capture runs (#861) the one render takes the
+                    // threads one of the batch's usual renders would, not
+                    // every core: the game needs the rest.
+                    let thread_share = if game_busy {
+                        config.max_concurrent_renders.max(1)
+                    } else {
+                        effective_concurrent
+                    };
 
                     for job in guard.iter_mut() {
                         if started >= limit {
@@ -821,7 +1009,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             job_config.target_codec = job.codec;
                             job_config.custom_codec_args = job.custom_codec_args.clone();
                             job_config.fps = job.fps;
-                            job_config.max_concurrent_renders = effective_concurrent;
+                            job_config.max_concurrent_renders = thread_share;
                             let tx2 = tx.clone();
                             let reservations = handles.export_reservations.clone();
                             tokio::spawn(async move {
@@ -893,6 +1081,9 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         log_markdown("[render] scheduler loop exiting: nothing left Rendering or Queued");
         emit_jobs_snapshot(&app, &handles.jobs);
         let _ = app.emit("render_batch_finished", serde_json::json!({}));
+        // After the batch's own end, so its summary and the finish step
+        // (#440) count these rows before they leave the list.
+        crate::take_cleanup_manager::after_render_batch(&app, finished_takes);
     });
 }
 
@@ -1149,6 +1340,27 @@ pub async fn start_queued_render(
             return Err(e);
         }
     };
+
+    // #644: with "Only when space is needed", finished takes make room on the
+    // export drives before the first jobs reserve theirs there.
+    if crate::take_cleanup_manager::makes_room(&app) && !config.export_directories.is_empty() {
+        let need = native::hlcr::take_cleanup::SpaceNeed {
+            targets: config.export_directories.clone(),
+            pieces: state.first_wave_pieces(config.max_concurrent_renders),
+            headroom_bytes: native::hlcr::renderer::EXPORT_SAFETY_MARGIN_BYTES,
+        };
+        let cleanup_app = app.clone();
+        let _ = crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+            crate::take_cleanup_manager::make_room(
+                &cleanup_app,
+                crate::take_cleanup_manager::RoomFor::Finish,
+                need,
+                None,
+                |_, _, _| {},
+            )
+        }))
+        .await;
+    }
 
     log_markdown(&format!(
         "[render] start_queued_render: starting scheduler on {} job(s)",
@@ -1584,14 +1796,8 @@ pub async fn get_export_pool_free_gb(directories: Vec<String>) -> Result<f64, St
 }
 
 fn export_pool_free_gb(directories: &[String]) -> f64 {
-    let mut total: u64 = 0;
-    for dir in directories {
-        let free = native::sys::disk::get_available_bytes(&PathBuf::from(dir));
-        if free != u64::MAX {
-            total += free;
-        }
-    }
-    total as f64 / 1_073_741_824.0
+    let paths: Vec<PathBuf> = directories.iter().map(PathBuf::from).collect();
+    native::sys::disk::pool_free_bytes(&paths) as f64 / 1_073_741_824.0
 }
 
 #[derive(Serialize)]
@@ -1816,6 +2022,14 @@ fn recovered_jobs(session: &RenderSessionData) -> Vec<RenderJobRuntime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renders_run_one_at_a_time_while_a_capture_runs() {
+        assert_eq!(concurrency_cap(4, false), 4);
+        assert_eq!(concurrency_cap(4, true), 1);
+        assert_eq!(concurrency_cap(0, false), 1);
+        assert_eq!(concurrency_cap(0, true), 1);
+    }
 
     #[test]
     fn the_scan_count_is_sent_at_most_every_33_ms_and_once_at_the_end() {

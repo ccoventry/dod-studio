@@ -3,8 +3,10 @@
 //! place of patching each demo. `native::patch::runtime_batch` builds the
 //! file; goldsrc-hooks `batch.rs` runs it. Before the file: highlights with
 //! no demo-player times get them from a fresh read of their demo
-//! (`viewdemo_refresh`), and a demo on another drive than the game is copied
-//! into the game's folder for the batch (`source_copies`).
+//! (`viewdemo_refresh`). A demo on another drive than the game plays where it
+//! is, by its full path, when the hook DLL can open it that way (#779); for
+//! an older DLL it is copied into the game's folder for the batch
+//! (`source_copies`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -69,16 +71,18 @@ pub fn prepare(
     streaks: &[CaptureStreak],
     config: &PatcherConfig,
 ) -> Result<RuntimeBatch, String> {
-    if config.goldsrc_hooks_dll().is_none() {
+    let Some(dll) = config.goldsrc_hooks_dll() else {
         return Err(
             "the DoD Studio hook DLL isn't installed, and only it can run a batch this way".into(),
         );
-    }
+    };
+    let other_drives = native::preview_in_place::hook_plays_other_drives(&dll);
     let dod_dir = dod_dir(config)?;
-    let demos = jobs
+    let demos: Vec<&str> = jobs
         .iter()
         .filter(|j| !j.blocks.is_empty())
-        .map(|j| j.source_demo.as_str());
+        .map(|j| j.source_demo.as_str())
+        .collect();
     let swept = native::patch::source_copies::remove_stale(&dod_dir);
     if swept > 0 {
         native::log_markdown(&format!(
@@ -87,7 +91,20 @@ pub fn prepare(
             dod_dir.display()
         ));
     }
-    let copies = native::patch::source_copies::plan(&dod_dir, demos)?;
+    let copies = native::patch::source_copies::plan(&dod_dir, demos.iter().copied(), other_drives)?;
+    // Demos on another drive the hook opens by their full path.
+    let mut in_place: Vec<&str> = Vec::new();
+    if other_drives {
+        for &demo in &demos {
+            let path = Path::new(demo);
+            if !in_place.contains(&demo)
+                && !copies.iter().any(|c| c.source.as_path() == path)
+                && native::preview_in_place::viewdemo_arg(&dod_dir, path).is_none()
+            {
+                in_place.push(demo);
+            }
+        }
+    }
     let play_as: HashMap<String, PathBuf> = copies
         .iter()
         .map(|c| (c.source.to_string_lossy().into_owned(), c.copy.clone()))
@@ -118,8 +135,17 @@ pub fn prepare(
          nothing is patched. Batch file: `{}`",
         path.display()
     ));
+    for demo in &in_place {
+        native::log_markdown(&format!(
+            "💽 **Played in place** — `{}` is on another drive than the game; the hook DLL opens it by its full path, nothing is copied",
+            Path::new(demo).display()
+        ));
+    }
     Ok(RuntimeBatch {
         file: path,
         source_copies: copies.into_iter().map(|c| c.copy).collect(),
+        other_drives_in_place: !in_place.is_empty(),
+        // Set by the caller for a batch in the open game (#725).
+        reuse_game: None,
     })
 }

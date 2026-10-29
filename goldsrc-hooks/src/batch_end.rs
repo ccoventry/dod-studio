@@ -14,6 +14,12 @@
 //! Studio that is still connected keeps the last word, as before.
 //!
 //! Only on while the events pipe is (`GOLDSRC_HOOKS_EVENTS=0` turns both off).
+//!
+//! A Studio that was there when the batch ended has had its say, and the
+//! marker is forgotten: the game may be one Studio left open for the next
+//! batch (#725), and a reader that goes away later (the batch's pipe reader
+//! stops at the end, which the pipe only notices at its next write) must not
+//! close it then. A new batch forgets an old marker too.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -48,14 +54,41 @@ pub fn is_batch_complete(marker: &str) -> bool {
 /// Called by `events` for every marker line the game echoes.
 pub fn on_marker(marker: &str) {
     if is_batch_complete(marker) {
-        let _ = SEEN_AT_MS.compare_exchange(0, now_ms() + 1, Ordering::AcqRel, Ordering::Relaxed);
+        batch_ended();
     }
 }
 
-/// Whether to quit now: the batch ended at least [`GRACE`] ago and nobody is
-/// reading the events pipe.
-fn should_quit(seen_at_ms: u64, now_ms: u64, studio_connected: bool) -> bool {
-    seen_at_ms != 0 && !studio_connected && now_ms + 1 >= seen_at_ms + GRACE.as_millis() as u64
+/// The batch ended without its `BATCH_COMPLETE` line: a held batch whose
+/// Studio went away (#861). The same quit follows when no Studio is there.
+pub fn batch_ended() {
+    let _ = SEEN_AT_MS.compare_exchange(0, now_ms() + 1, Ordering::AcqRel, Ordering::Relaxed);
+}
+
+/// What to do about a batch's end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Next {
+    /// No batch ended, or the grace period is still running.
+    Wait,
+    /// The grace period is over and nobody reads the events pipe.
+    Quit,
+    /// The grace period is over and Studio is reading: its call, not ours.
+    Forget,
+}
+
+/// What to do now, the batch having ended at `seen_at_ms` (0 = it hasn't).
+fn next(seen_at_ms: u64, now_ms: u64, studio_connected: bool) -> Next {
+    if seen_at_ms == 0 || now_ms + 1 < seen_at_ms + GRACE.as_millis() as u64 {
+        Next::Wait
+    } else if studio_connected {
+        Next::Forget
+    } else {
+        Next::Quit
+    }
+}
+
+/// Forgets an earlier batch's end: `batch.rs` calls it when a batch starts.
+pub fn reset() {
+    SEEN_AT_MS.store(0, Ordering::Release);
 }
 
 /// Runs every frame from `commands::poll`. One atomic load until a batch ends.
@@ -64,8 +97,14 @@ pub fn poll() {
     if seen == 0 || QUIT_SENT.load(Ordering::Relaxed) {
         return;
     }
-    if !should_quit(seen, now_ms(), crate::events::studio_connected()) {
-        return;
+    match next(seen, now_ms(), crate::events::studio_connected()) {
+        Next::Wait => return,
+        Next::Forget => {
+            // Only the marker this look saw: a newer one keeps its own grace.
+            let _ = SEEN_AT_MS.compare_exchange(seen, 0, Ordering::AcqRel, Ordering::Relaxed);
+            return;
+        }
+        Next::Quit => {}
     }
     QUIT_SENT.store(true, Ordering::Relaxed);
     unsafe {
@@ -99,15 +138,37 @@ mod tests {
     fn quits_only_after_the_grace_period_and_without_studio() {
         let seen = 1_001; // seen at 1000 ms
         let grace = GRACE.as_millis() as u64;
-        assert!(!should_quit(0, 60_000, false), "no batch ended");
-        assert!(
-            !should_quit(seen, 1000 + grace - 1, false),
+        assert_eq!(next(0, 60_000, false), Next::Wait, "no batch ended");
+        assert_eq!(
+            next(seen, 1000 + grace - 1, false),
+            Next::Wait,
             "still in the grace period"
         );
-        assert!(should_quit(seen, 1000 + grace, false));
-        assert!(
-            !should_quit(seen, 1000 + grace * 10, true),
+        assert_eq!(next(seen, 1000 + grace, false), Next::Quit);
+        assert_eq!(
+            next(seen, 1000 + grace * 10, true),
+            Next::Forget,
             "Studio is watching: its call"
+        );
+    }
+
+    /// #725: Studio leaves the game open after a batch and its pipe reader
+    /// stops; the game must not quit when the pipe notices that later.
+    #[test]
+    fn a_batch_studio_saw_end_is_forgotten() {
+        SEEN_AT_MS.store(1_001, Ordering::Release);
+        assert_eq!(
+            next(
+                SEEN_AT_MS.load(Ordering::Acquire),
+                1000 + GRACE.as_millis() as u64,
+                true
+            ),
+            Next::Forget
+        );
+        reset();
+        assert_eq!(
+            next(SEEN_AT_MS.load(Ordering::Acquire), u64::MAX / 2, false),
+            Next::Wait
         );
     }
 }
