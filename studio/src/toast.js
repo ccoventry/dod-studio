@@ -10,11 +10,17 @@ export function toastLogLine(message, type = 'info') {
  * `action` ({ label, onClick }) adds a button to the toast, e.g. Undo.
  * Clicking it runs onClick and dismisses the toast at once.
  * Every toast is also written to the activity log (#873).
+ * The same text and kind already on screen isn't shown a second time (#1097).
  */
 export function showToast(message, type = 'info', duration = 3000, { action } = {}) {
+  let container = document.querySelector('#toast-container');
+  const className = `toast toast-${type}`;
+  if (!action && container && [...container.children].some(
+    (t) => t.className === className && t.textContent === String(message),
+  )) return;
+
   logFrontendEvent(toastLogLine(message, type));
 
-  let container = document.querySelector('#toast-container');
   if (!container) {
     container = document.createElement('div');
     container.id = 'toast-container';
@@ -23,7 +29,7 @@ export function showToast(message, type = 'info', duration = 3000, { action } = 
   }
 
   const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
+  toast.className = className;
   toast.textContent = message;
 
   let bg = '#2196f3';

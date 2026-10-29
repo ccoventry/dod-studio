@@ -501,6 +501,69 @@ fn test_drive_headroom_includes_drive_0_when_a_block_actually_lands_there() {
 }
 
 #[test]
+fn clips_that_fit_one_at_a_time_are_planned_when_renders_free_space_while_capturing() {
+    // #861: Render While Capturing holds the batch between clips until
+    // renders have freed the room, so two clips that only fit the drive one
+    // at a time are planned rather than refused.
+    let mut config = mock_config();
+    let temp_drive = std::env::temp_dir().join("dod_test_render_while_capturing_drive");
+    std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
+    config.capture_directories = vec![temp_drive.clone()];
+    let room = crate::sys::disk::get_available_bytes(&temp_drive)
+        .saturating_sub(crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES);
+    assert!(
+        room > 1_000_000_000,
+        "the test drive needs a GB past the headroom"
+    );
+    // Two clips far apart in one demo, each about 60% of the room.
+    let streaks = || {
+        vec![
+            streak_with_kills(1000, 3000, &[1000, 3000]),
+            streak_with_kills(60_000, 62_000, &[60_000, 62_000]),
+        ]
+    };
+    config.capture_fps = 1;
+    let per_fps = estimate_batch_capture_bytes(&streaks()[..1], &config).max(1);
+    config.capture_fps = ((room as f64 * 0.6) / per_fps as f64).ceil() as i32;
+
+    let refused = build_batch_queue(streaks(), &config, &std::collections::HashMap::new());
+    assert!(refused.is_err(), "both clips at once don't fit the drive");
+
+    config.render_while_capturing = true;
+    let (jobs, headroom) =
+        build_batch_queue(streaks(), &config, &std::collections::HashMap::new()).unwrap();
+    let blocks: usize = jobs.iter().map(|j| j.blocks.len()).sum();
+    assert_eq!(blocks, 2);
+    assert_eq!(headroom.len(), 1);
+    assert_eq!(headroom[0].path, temp_drive);
+    assert!(
+        headroom[0].free_bytes >= crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
+        "the room beside one clip passes the pre-launch check"
+    );
+}
+
+#[test]
+fn a_clip_bigger_than_the_drive_is_refused_even_when_renders_free_space_while_capturing() {
+    // #861: deleting takes can't give a drive more room than it had, so a
+    // clip that can't fit on its own would start a batch that can't finish.
+    let mut config = mock_config();
+    let temp_drive = std::env::temp_dir().join("dod_test_render_while_capturing_drive");
+    std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
+    config.capture_directories = vec![temp_drive.clone()];
+    // Petabytes per second of footage: more than any drive has free.
+    config.resolution_width = 20_000;
+    config.resolution_height = 20_000;
+    config.capture_fps = 100_000;
+    config.render_while_capturing = true;
+    let refused = build_batch_queue(
+        vec![streak_with_kills(1000, 3000, &[1000, 3000])],
+        &config,
+        &std::collections::HashMap::new(),
+    );
+    assert!(refused.is_err(), "the clip can't fit the drive on its own");
+}
+
+#[test]
 fn test_patched_demos_land_directly_in_dod_not_on_a_capture_directory() {
     // See issue #8: capture_directories is only about where recorded
     // video blocks land now, never these small demo files -- both the
@@ -1884,4 +1947,124 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
             .any(|(_, c)| c.starts_with("ds_spec") || c.starts_with("spec_mode"))
     );
     assert!(!job.init_commands.iter().any(|c| c.starts_with("ds_spec")));
+}
+
+#[test]
+fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
+    let mut config = PatcherConfig::default();
+    config.resolution_width = 100;
+    config.resolution_height = 100;
+    config.capture_fps = 10;
+    let streak = |start, end| CaptureStreak {
+        start_tick: start,
+        end_tick: end,
+        source_demo: "demo1.dem".to_string(),
+        target_player: None,
+        kill_count: 3,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 0,
+        kills: Vec::new(),
+        start_index: 0,
+        end_index: 2,
+        total_demo_frames: 3000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
+        status: Default::default(),
+    };
+    // Two seconds each at 100 ticks a second.
+    let streaks = vec![streak(1000, 1200), streak(1100, 1300)];
+    let one = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 2.0);
+    assert_eq!(estimate_batch_capture_bytes(&streaks, &config), 2 * one);
+    // The two overlap and merge into one three-second block, which needs less.
+    let merged = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 3.0);
+    assert!(merged <= estimate_batch_capture_bytes(&streaks, &config));
+    assert_eq!(estimate_batch_capture_bytes(&[], &config), 0);
+
+    // Per drive (#716): the two that merge are one block, billed at both
+    // estimates; one far later, and another player's, are blocks of their own.
+    assert_eq!(
+        estimate_batch_capture_blocks(&streaks, &config),
+        vec![2 * one]
+    );
+    let mut other_player = streak(1000, 1200);
+    other_player.player_index = 1;
+    let spread = vec![
+        streak(2500, 2700),
+        streak(1000, 1200),
+        other_player,
+        streak(1100, 1300),
+    ];
+    let mut blocks = estimate_batch_capture_blocks(&spread, &config);
+    blocks.sort_unstable();
+    assert_eq!(blocks, vec![one, one, 2 * one]);
+    assert!(estimate_batch_capture_blocks(&[], &config).is_empty());
+}
+
+#[test]
+fn a_batch_with_no_room_is_refused_in_plain_words() {
+    let gib = 1_073_741_824;
+    let message = no_room_message(31 * gib, 22 * gib);
+    assert_eq!(
+        message,
+        "Not enough free space on any capture drive for this batch: a clip needs 31.0 GB free on one drive, and the most any one has is 22.0 GB."
+    );
+}
+
+#[test]
+fn a_direct_to_video_take_is_billed_as_compressed_video_not_raw_frames() {
+    use crate::patch::types::{CaptureCodec, CaptureMode};
+    // #1096: a real 2560x1440 Ut Video take was 12.1 GB where raw frames
+    // billed 30.9 GB.
+    let raw = crate::sys::disk::calculate_raw_sequence_bytes(2560, 1440, 300, 10.0);
+    let video = crate::sys::disk::calculate_lossless_video_bytes(2560, 1440, 300, 10.0);
+    assert_eq!(video * 3, raw * 2);
+    assert!(video > 13_005_270_518, "above the measured take");
+
+    let mut config = PatcherConfig::default();
+    config.resolution_width = 100;
+    config.resolution_height = 100;
+    config.capture_fps = 10;
+    let streak = CaptureStreak {
+        start_tick: 1000,
+        end_tick: 1200,
+        source_demo: "demo1.dem".to_string(),
+        target_player: None,
+        kill_count: 1,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 0,
+        kills: Vec::new(),
+        start_index: 0,
+        end_index: 0,
+        total_demo_frames: 3000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
+        status: Default::default(),
+    };
+    let bill = |config: &PatcherConfig| block_byte_estimate(config, &streak, 100.0);
+    let frames = bill(&config);
+    config.capture_mode = CaptureMode::DirectToVideo;
+    for codec in [
+        CaptureCodec::UtVideo,
+        CaptureCodec::Ffv1,
+        CaptureCodec::X264Lossless,
+    ] {
+        config.ffmpeg_capture_codec = codec;
+        assert_eq!(bill(&config) * 3, frames * 2, "{codec:?}");
+    }
+    config.ffmpeg_capture_codec = CaptureCodec::RawVideo;
+    assert_eq!(bill(&config), frames);
 }

@@ -292,6 +292,16 @@ pub const REVIEW_GAME_NOT_FROM_STUDIO: &str = "Day of Defeat is open, but DoD St
 pub const REVIEW_GAME_LAUNCH_SETTINGS_DIFFER: &str = "Day of Defeat is open with other launch settings than DoD Studio's (another install or resolution). Close the game and press Review highlights again.";
 pub const GAME_DID_NOT_CLOSE: &str = "Day of Defeat didn't close within 10 seconds, so nothing was started. Close it yourself, then try again.";
 pub const REVIEW_GAME_DID_NOT_START: &str = "Day of Defeat didn't open within two minutes. Start it with Launch Game, then press Review highlights again.";
+// ── review_library.rs (#848) ────────────────────────────────────────────────
+pub fn review_library_unreadable(path: &std::path::Path, e: impl Display) -> String {
+    format!(
+        "Could not read your saved Review marks ({}): {e}",
+        path.display()
+    )
+}
+pub fn review_library_unwritable(path: &std::path::Path, e: impl Display) -> String {
+    format!("Could not save your Review marks ({}): {e}", path.display())
+}
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 
@@ -381,6 +391,26 @@ pub fn take_is_rendering(take_folder: &str) -> String {
 }
 
 pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
+
+// ── take_cleanup_manager.rs (#644, the automatic half) ──────────────────
+
+/// The Capture footer's line while finished takes make room for a capture.
+pub const MAKING_ROOM_LOOKING: &str = "Making room: looking for finished takes";
+
+pub fn making_room_measuring(done: usize, total: usize) -> String {
+    format!("Making room: measuring finished takes ({done} of {total})")
+}
+
+pub fn making_room_deleting(done: usize, total: usize) -> String {
+    format!("Making room: deleting finished takes ({done} of {total})")
+}
+
+pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
+    format!("{take_folder} is queued or rendering, so it was not deleted")
+}
+
+pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
+    "Capture cancelled while making room. Nothing was captured.";
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 

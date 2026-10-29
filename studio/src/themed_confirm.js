@@ -53,7 +53,7 @@ function resolveAndClose(result) {
  * overwrites or throws work away; every other confirm uses the accent colour
  * (#880).
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, focusConfirm = false, destructive = false } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, hideConfirm = false, focusConfirm = false, destructive = false } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
   if (detailsEl) {
@@ -81,6 +81,8 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
   }
   if (okBtn) {
     okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
+    // `hideConfirm`: a wait the code ends (dismissThemedConfirm), not a question.
+    okBtn.style.display = hideConfirm ? 'none' : '';
     okBtn.classList.toggle('danger-btn', !!destructive);
     okBtn.classList.toggle('primary-btn', !destructive);
   }
@@ -95,7 +97,14 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
 }
 
 /** Rewrites the open dialog's message, for a line worked out after it
- *  opened (#937's rescan time). Does nothing once it has closed. */
+ *  opened (#937's rescan time) or a wait that counts down. Does nothing
+ *  once it has closed. */
 export function setThemedConfirmMessage(message) {
   if (pendingResolve && messageEl) messageEl.textContent = message;
+}
+
+/** Closes the open dialog from code, answering it with `result`: for a
+ *  wait that ends on its own. Does nothing when no dialog is open. */
+export function dismissThemedConfirm(result) {
+  if (pendingResolve) resolveAndClose(result);
 }
