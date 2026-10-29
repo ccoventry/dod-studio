@@ -26,6 +26,7 @@ export const STOCK_MOVIE_CVARS = {
   cl_bulletejects: { text: 'Shell casings from fired guns: 0 hides them.', saved: true },
   cl_dynamiclights: { text: 'Dynamic lights (muzzle flashes, explosions): 0 turns them off.', saved: true },
   cl_corpsestay: { text: 'Seconds a dead body lies before it sinks into the ground (default 10).', saved: true },
+  cl_particlefx: { text: 'Particle effects: 0 turns them off. Rain and snow only show at 2.', saved: true },
   room_off: { text: 'Room reverb on sounds: 1 turns it off.' },
 };
 

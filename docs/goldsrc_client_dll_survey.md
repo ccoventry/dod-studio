@@ -406,6 +406,7 @@ checked by eye:
   `ClCorpse` temp entity, callbacks at `+0x4a30`) lies before it sinks into
   the ground, in seconds. It is read when the body is made and again each
   frame.
+- `cl_particlefx` (archived): 0 turns particle effects off; DoD's rain and snow only run at 2 (the weather updater skips below 2, `client+0x4c942`, found in #1129). Both movie installs' `config.cfg` set 1.
 - `room_off` (engine, `hw.dll`): 1 turns off the room reverb (DSP).
 - `max_rubble` (not archived, default `240`): its reader was not traced, so
   it is not offered.
