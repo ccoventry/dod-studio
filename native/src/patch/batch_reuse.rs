@@ -17,6 +17,8 @@
 //!   (`sys::modules`): HLAE passes it on its own command line and exits, so
 //!   nothing else says which file it was. A game started from Steam has none;
 //!   one started with another build of it might not know `ds_capture_batch`.
+//! - **HLAE is in it** (`AfxHookGoldSrc.dll`, read off the same list): every
+//!   capture mode records through HLAE's `mirv_` commands.
 //! - **Its command pipe answers**, so the batch can be handed over.
 //!
 //! What a launch guarantees and a reuse doesn't is listed in
@@ -47,6 +49,19 @@ pub struct ReuseFacts<'a> {
 /// The hook DLL's file name, as the game has it loaded.
 pub const HOOK_DLL_NAME: &str = "dodstudio_goldsrc_hooks.dll";
 
+/// HLAE's DLL in the game, as the game has it loaded.
+pub const HLAE_DLL_NAME: &str = "AfxHookGoldSrc.dll";
+
+fn named<'a>(modules: &'a [PathBuf], name: &str) -> Vec<&'a PathBuf> {
+    modules
+        .iter()
+        .filter(|m| {
+            m.file_name()
+                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name))
+        })
+        .collect()
+}
+
 /// The game to run the batch in, or why a launch is needed (one sentence
 /// for the activity log, starting lower case).
 pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
@@ -75,13 +90,7 @@ pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
     let Some(modules) = facts.modules else {
         return Err(format!("the game's DLLs (PID {pid}) could not be read"));
     };
-    let loaded: Vec<&PathBuf> = modules
-        .iter()
-        .filter(|m| {
-            m.file_name()
-                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(HOOK_DLL_NAME))
-        })
-        .collect();
+    let loaded = named(modules, HOOK_DLL_NAME);
     if loaded.is_empty() {
         return Err("the running game has no DoD Studio hook DLL (not started by Studio)".into());
     }
@@ -91,6 +100,11 @@ pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
             loaded[0].display(),
             wanted.display()
         ));
+    }
+    if named(modules, HLAE_DLL_NAME).is_empty() {
+        return Err(
+            "the running game has no HLAE in it, which every capture records through".into(),
+        );
     }
     if !facts.pipe_answers {
         return Err("the running game does not take commands from Studio".into());
@@ -122,10 +136,16 @@ pub const REUSE_LINES: &[&str] = &[
 
 /// Sent to a reused game when its batch ends or is cancelled: the batch's
 /// recording is stopped and the demo closed, so the game is left at its menu
-/// rather than closed.
+/// rather than closed. A Cancel can land mid-clip or mid-fast-forward, so the
+/// helper cfg's own aliases put back what those set: `sys_record_stop` ends
+/// an AGR recording and its `host_framerate` (`ds_capture_batch stop` only
+/// stops `mirv_recordmovie`), and `sys_normal_speed` undoes
+/// `sys_fast_forward` (`r_norefresh 1`, `host_framerate 0.1`, `fps_max`).
 pub const LEAVE_LINES: &[&str] = &[
     "ds_capture_batch stop",
+    "sys_record_stop",
     "mirv_recordmovie_stop",
+    "sys_normal_speed",
     "disconnect",
 ];
 
@@ -225,6 +245,13 @@ mod tests {
         let e = game_to_reuse(&facts(&running, &other)).unwrap_err();
         assert!(e.contains(r"C:\older\dodstudio_goldsrc_hooks.dll"), "{e}");
         assert!(e.contains("Studio is set to"), "{e}");
+        // Our hook DLL without HLAE: nothing would record.
+        let no_hlae = vec![PathBuf::from(DLL)];
+        assert!(
+            game_to_reuse(&facts(&running, &no_hlae))
+                .unwrap_err()
+                .contains("no HLAE")
+        );
     }
 
     #[test]
