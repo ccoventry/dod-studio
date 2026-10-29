@@ -638,6 +638,8 @@ export const STRINGS = {
     noUsableSpaceProblem: (desc) => `Capture Output problem:\n${desc}`,
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
+    insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
+    insufficientSpaceRendersMakeRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: the batch will wait between clips for renders to free room ("Render while capturing").`,
     partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
@@ -676,7 +678,6 @@ export const STRINGS = {
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
-    BATCH_QUEUED_TOAST: 'Batch capture queued successfully!',
     startBatchError: (err) => `Error starting batch: ${err}`,
     CANCELLING_BATCH_TOAST: 'Cancelling batch...',
     EMPTY_DASH: '—',
@@ -923,6 +924,72 @@ export const STRINGS = {
     SKIPPED_CANCELLED: 'The batch was cancelled, so its clips were not finished. Render the takes from the Render tab if you want them.',
     SKIPPED_NO_EXPORT_DIR: 'Clips were not finished: add an export folder in Configuration → Render Settings first. The takes are still there for the Render tab.',
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
+  },
+
+  // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
+  TAKE_CLEANUP: {
+    AFTER_LABEL: 'After a clip is finished:',
+    AFTER_TITLE:
+        'What happens to a take once its clip has rendered successfully. Only a take whose every render finished, with the clip file still there, is ever deleted. A failed, cancelled or unrendered take always stays. The render history stays either way.',
+    AFTER_KEEP: 'Keep the take',
+    AFTER_RECYCLE: 'Move the take to the Recycle Bin',
+    AFTER_DELETE: 'Delete the take permanently',
+    WHEN_NEEDED_LABEL: 'Only when space is needed',
+    WHEN_NEEDED_TITLE:
+        'Takes stay until a capture or a render batch needs room on its drive. Then the oldest finished takes there are deleted until it fits.',
+    WHEN_NEEDED_OFF_TITLE:
+        'Needs "Delete the take permanently": the Recycle Bin frees no space until you empty it.',
+    HINT_KEEP: 'Takes stay on disk. Delete them from the Render tab when you are done.',
+    HINT_RECYCLE:
+        'Each take goes to the Recycle Bin once its clip renders. The Recycle Bin frees no space until you empty it.',
+    HINT_DELETE: 'Each take is deleted for good once its clip renders. It cannot be restored.',
+    HINT_DELETE_WHEN_NEEDED:
+        'Takes stay until a capture or render batch is short of room. Then the oldest finished takes on that drive are deleted for good until it fits.',
+    CONFIRM_TITLE: 'Delete takes permanently?',
+    CONFIRM_MESSAGE:
+        'Takes deleted this way skip the Recycle Bin and cannot be restored. Only takes whose clip rendered successfully are deleted, and the render history stays.',
+    CONFIRM_BUTTON: 'Delete permanently',
+    progressLine: (step, done, total) => {
+      if (step === 'looking') return 'Making room: looking for finished takes';
+      if (step === 'measuring') return `Making room: measuring finished takes (${done} of ${total})`;
+      if (step === 'recycling') return `Moving finished takes to the Recycle Bin (${done} of ${total})`;
+      return `Deleting finished takes (${done} of ${total})`;
+    },
+    /** `reason`: `finished`, `capture` or `finish`; `method`: `recycle` or `delete`. */
+    doneToast: (n, size, reason, method) => {
+      const takes = n === 1 ? 'a finished take' : `${n} finished takes`;
+      if (method === 'recycle') return `Moved ${takes} to the Recycle Bin (${size}).`;
+      if (reason === 'capture') return `Deleted ${takes} (${size}) to make room for the capture.`;
+      if (reason === 'finish') return `Deleted ${takes} (${size}) to make room for the renders.`;
+      return `Deleted ${takes} for good (${size}).`;
+    },
+    failedToast: (n, error) =>
+      `Couldn't delete ${n === 1 ? 'a finished take' : `${n} finished takes`}: ${error}. Scan for Takes to list it again.`,
+    shortToast: (reason, needed, available, movedTakes = 0) =>
+      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} free on one drive, and deleting every finished take would leave at most ${available} on any one drive.${
+        movedTakes === 1 ? ' 1 finished take stays because its clip isn\'t where it was rendered (moved or renamed).'
+          : movedTakes > 1 ? ` ${movedTakes} finished takes stay because their clips aren't where they were rendered (moved or renamed).`
+            : ''
+      } No takes were deleted.`,
+  },
+
+  // ── Render while capturing (#861) ────────────────────────────────────────
+  RENDER_WHILE_CAPTURING: {
+    LABEL: 'Render while capturing',
+    TITLE:
+        'Each clip renders as soon as the batch has recorded it, one render at a time, instead of after the whole batch. A render slows the capture by however much this PC has to spare, so it is off by default. With "Delete the take permanently", a batch short of room waits between two clips until the renders have freed enough for the next one.',
+    HINT_OFF: 'Clips render after the batch.',
+    HINT_ON_KEEP:
+        'Each clip renders while the batch goes on. The takes stay, so the batch still needs room for all of them.',
+    HINT_ON_DELETE:
+        'Each clip renders while the batch goes on, and its take is deleted once the clip is done. When the drive runs short, the batch waits between clips for the renders to free room.',
+    holdingLine: (short) =>
+      `Will wait after this clip for renders to free ${short || 'room'} for the next one`,
+    heldLine: (short, minutes) =>
+      `Waiting for renders to free ${short || 'room'} for the next clip${minutes ? ` (about ${minutes} min)` : ''}`,
+    stoppedToast: (clip, reason) =>
+      `The batch stopped before clip ${clip}: ${reason}. The clips recorded so far are kept.`,
+    queueFailed: (err) => `Couldn't queue a recorded clip for rendering: ${err}`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
@@ -1446,10 +1513,26 @@ export const STRINGS = {
   // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
   BATCH_CLOSE_MODAL: {
     TITLE: 'Capture batch running',
-    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own. Studio checks the takes and marks them Captured the next time it opens. To stop the batch instead, use Cancel Batch first.',
     LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
     CLOSE_BUTTON: 'Close DoD Studio',
     KEEP_OPEN_BUTTON: 'Keep Studio open',
+    // The batch's start has not reached the game yet (#545): Studio waits for
+    // it before asking, so the game does not sit at its main menu.
+    WAIT_TITLE: 'Closing DoD Studio',
+    starting: (secondsLeft) => `The game is still starting. Studio is starting the batch in it first, so it can keep capturing after Studio closes… (up to ${secondsLeft} s)`,
+    NOT_STARTED_TITLE: 'Capture batch not started',
+    NOT_STARTED_MESSAGE: 'The batch has not started in the game yet, so the game cannot capture it on its own. Closing DoD Studio cancels the batch and closes the game.',
+    CANCEL_AND_CLOSE_BUTTON: 'Cancel batch and close',
+    CANCELLING: 'Cancelling the batch and closing the game…',
+  },
+
+  // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
+  BATCH_CATCH_UP: {
+    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    projectUpdated: (name) => `Marked them in the project ${name}.`,
+    projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
+    checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -2209,6 +2292,21 @@ export const STRINGS = {
     merged: (n) => `(+${n} more, recorded as one take)`,
     STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
     OPEN_FOLDER: 'Open folder',
+    // OBS mode's per-take frame loss (#172).
+    obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,
+    obsCellTitle: (skipped, frames, missed, rendered) => `OBS left out ${skipped} of ${frames} frames because the encoder couldn't keep up, and ${missed} of ${rendered} because it couldn't draw them in time. A few tenths of a percent is normal; past 5% the take looks choppy.`,
+    obsSummary: (lagging, clips, fix) => `OBS dropped frames in ${lagging} of ${clips} take${clips === 1 ? '' : 's'}. ${fix}`,
+  },
+
+  // ── obs_drop_rate.js: OBS mode's live drop rate (#172) ─────────────────
+  OBS_DROP_RATE: {
+    line: (clip, skippedPct, missedPct, recording) => `OBS, clip ${clip}${recording ? '' : ' done'}: ${skippedPct}% of frames skipped, ${missedPct}% missed`,
+    LINE_TITLE: "Frames OBS left out of this clip so far. Skipped: the encoder couldn't keep up. Missed: OBS couldn't draw them in time. A few tenths of a percent is normal; past 5% the clip looks choppy.",
+    lagging: (pct, encoder, fix) => `OBS is dropping ${pct}% of frames (${encoder ? "the encoder can't keep up" : "OBS can't draw them in time"}): the clip will be choppy. ${fix}`,
+    LAGGING_TITLE: 'Over the last 5 seconds. Each clip\'s total is in Last Batch when the batch ends.',
+    fix: (fps) => (fps > 60
+      ? 'Lower OBS Capture FPS to 60 (Configuration → Output Format) and capture again.'
+      : 'Lower OBS Capture FPS or the resolution (Configuration → Output Format) and capture again.'),
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────
@@ -2560,6 +2658,16 @@ export const STRINGS = {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
     },
+    // #848: marks saved outside the project, brought onto demos a scan adds.
+    LIBRARY_TITLE: 'Marks you saved before',
+    libraryAskMessage: (demos, highlights) =>
+      `${demos} of these demos ${demos === 1 ? 'has' : 'have'} Review marks you saved before (${highlights} highlight${highlights === 1 ? '' : 's'}). Bring them in?`,
+    LIBRARY_ASK_FOOTER: 'Only highlights with no mark, note or Kill Range in this project get them; the project\'s own stay as they are.',
+    LIBRARY_BRING_IN: 'Bring them in',
+    LIBRARY_NOT_NOW: 'Not now',
+    libraryDemoLine: (highlights) => `${highlights} highlight${highlights === 1 ? '' : 's'}`,
+    libraryBroughtInToast: (demos, highlights) =>
+      `Brought in your saved Review marks: ${highlights} highlight${highlights === 1 ? '' : 's'} in ${demos} demo${demos === 1 ? '' : 's'}.`,
     TICK_YES_LABEL: 'Tick Yes for capture',
     TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
@@ -2605,6 +2713,7 @@ export const STRINGS = {
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
     reviewFailed: (err) => `Could not start the review: ${err}`,
+    reviewLibraryFailed: (err) => `Review marks: ${err}`,
     cfgImportFailed: (err) => `Could not read that config: ${err}`,
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,

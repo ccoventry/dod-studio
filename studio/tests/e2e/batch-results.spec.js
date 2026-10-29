@@ -50,6 +50,32 @@ test('the takes can arrive before the outcome, an error says why, and the next b
   await expect(page.locator('#batch-results')).toBeHidden();
 });
 
+test('an OBS batch shows what OBS dropped per take and names the fix (#172)', async ({ page }) => {
+  await loadHarness(page);
+  const clip = (n, folder, skipped, lagging) => ({
+    clip: n, take_folder: folder, recording: false, skipped_pct: skipped, missed_pct: 0,
+    skipped: Math.round(skipped * 12), frames: 1200, missed: 0, rendered: 1200, lagging, capture_fps: 120,
+  });
+  const [a, b] = PAYLOAD.blocks;
+  await page.evaluate(([p, d, x, y]) => {
+    window.__obsClip(x);
+    window.__obsClip(y);
+    window.__ended('completed', '');
+    window.__verified(p, d);
+  }, [PAYLOAD, DISPATCH, clip(1, a.take_folder, 34.2, true), clip(2, b.take_folder, 0.3, false)]);
+  const panel = page.locator('#batch-results');
+  await expect(panel.locator('.batch-results-summary')).toContainText(
+    'OBS dropped frames in 1 of 2 takes. Lower OBS Capture FPS to 60');
+  const rows = panel.locator('tbody tr');
+  await expect(rows.nth(0)).toContainText('OBS: 34.2% skipped');
+  await expect(rows.nth(0).locator('.batch-results-obs-lagging')).toHaveCount(1);
+  await expect(rows.nth(1)).toContainText('OBS: 0.3% skipped');
+  await expect(rows.nth(1).locator('.batch-results-obs-lagging')).toHaveCount(0);
+  await page.evaluate(() => window.__started());
+  await page.evaluate(([p, d]) => { window.__ended('completed', ''); window.__verified(p, d); }, [PAYLOAD, DISPATCH]);
+  await expect(panel.locator('.batch-results-summary')).not.toContainText('OBS');
+});
+
 test('the panel can be hidden until the next batch', async ({ page }) => {
   await loadHarness(page);
   await page.evaluate(() => window.__ended('cancelled', ''));

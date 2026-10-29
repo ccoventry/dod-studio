@@ -5,11 +5,14 @@ import { renderMasterList, initMasterPane } from './master_pane.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
-import { renderDetailView, initDetailPane } from './detail_pane.js';
+import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
+import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
 import { createObsCaptureTest } from './obs_capture_test.js';
+import { initTakeCleanup } from './take_cleanup.js';
+import { initRenderWhileCapturing } from './render_while_capturing.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
@@ -56,6 +59,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { createReviewLibrary } from './review_library.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { createSetup } from './setup_wiring.js';
 import { offerPinnedReview } from './pinned_review.js';
@@ -63,9 +67,8 @@ import { createDemoDrop } from './demo_drop.js';
 import { createPlayersUi } from './players_ui.js';
 import { getGameFolder } from './game_folder_ui.js';
 
-// Registered at module load, before DOMContentLoaded — so it's catching
-// from the earliest possible moment, not just once the app's own init
-// logic gets around to it.
+// Registered at module load, before DOMContentLoaded, so it catches errors
+// from the earliest moment, not only once the app's own init gets to it.
 initErrorReporter();
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -107,6 +110,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     getProjectTeams: () => projectTeams,
     onChange: () => markProjectDirty(),
   });
+  // Review marks kept outside the project, for demos a scan adds (#848).
+  const reviewLibrary = createReviewLibrary({
+    getDemos: () => currentScannedDemos, hasProjectFile: () => !!projectSession.currentPath(),
+    onBroughtIn: (streaks) => { streaks.forEach(updateStreakVisuals); refreshAfterRelocation(true); },
+  });
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
@@ -124,6 +132,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Match and half per demo (#685), from the analyzer cache; declared
       // further down (queue_match_groups.js), reached through the closure.
       regroupMatches();
+      reviewLibrary.noteLoaded();
     },
     getTakeIndex: () => takeIndex,
     setTakeIndex: (index) => { takeIndex = index; },
@@ -137,7 +146,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
-  const { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
+  const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
+  const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
@@ -170,8 +180,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
 
-  // Capture Locations (doubles as Render Studio's scan input) and Render
-  // Studio's Export Drives: folder_pools.js.
+  // Capture Locations (also Render Studio's scan input) and Export Drives: folder_pools.js.
   const folderPools = createFolderPools({
     getDemos: () => currentScannedDemos,
     persist: () => persistAppSettings(),
@@ -378,7 +387,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),
     targetDrives: folderPools.targetDrives(),
-    currentScannedDemos
+    currentScannedDemos,
+    projectPath: projectSession.currentPath(),
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, folderPools.updateExportPoolIndicator, captureDemosReady);
   createObsCaptureTest({ getState: () => ({ targetDrives: folderPools.targetDrives() }), persist: () => persistAppSettings() });
   // Saving, renaming or deleting a profile changes its name in the capture
@@ -413,6 +423,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     ),
     onSettingsChange: persistAppSettings,
   });
+  // "After a clip is finished" (#644): the setting, and the backend's reports.
+  initTakeCleanup({ onSettingsChange: persistAppSettings });
+  // "Render while capturing" (#861): queues each take as the batch records it.
+  initRenderWhileCapturing({ onSettingsChange: persistAppSettings });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
   // pattern as dev's StartupState::PendingRenderRecovery. Render is now a
@@ -424,8 +438,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   checkObsOrphanOnStartup();
 
+  // A batch that ran while Studio was closed (#545): mark its finished clips.
+  createBatchCatchUp({ getDemos: () => currentScannedDemos, getTakeIndex: () => takeIndex,
+    getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange }).start();
+
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
-  startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation, persistAppSettings });
+  startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,
+    persistAppSettings: async () => { await reviewLibrary.flush(); await persistAppSettings(); } });
 
   // Delete callback: remove a demo from the active scan list and re-render.
   // Called by master_pane.js when the 🗑 button is clicked on a row. Returns

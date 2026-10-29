@@ -1,8 +1,11 @@
 mod audit_manager;
+mod batch_catch_up;
+mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
 mod capture_manager;
+mod capture_room_manager;
 mod combine_manager;
 mod crash_maps_manager;
 mod dem_open_with;
@@ -32,8 +35,10 @@ mod players_tab;
 mod preview_in_place;
 mod project_convert;
 mod render_manager;
+mod review_library;
 mod review_manager;
 mod settings_manager;
+mod take_cleanup_manager;
 mod take_delete_manager;
 mod updater_manager;
 
@@ -1016,6 +1021,8 @@ pub fn run() {
             launch_standalone_game,
             read_cfg_commands,
             check_engine_processes,
+            batch_catch_up::catch_up_unwatched_batches,
+            batch_close::wait_for_batch_start,
             kill_engine_processes,
             capture_manager::check_running_game,
             capture_manager::close_running_game,
@@ -1024,6 +1031,8 @@ pub fn run() {
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_library::review_library_get,
+            review_library::review_library_update,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,
