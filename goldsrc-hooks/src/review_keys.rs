@@ -1,7 +1,9 @@
 //! The review's on-screen panel and answer keys (#660): while
 //! `ds_demo_review` plays a highlight, a small box on the game screen says
 //! which one it is and lists the keys that answer it, so an answer doesn't
-//! need the ESC menu, nor waiting for the highlight to end (#1141).
+//! need the ESC menu, nor waiting for the highlight to end (#1141). Under
+//! its title the box lists the highlight's kills, time, victim and weapon,
+//! with the next one to come in the key colour behind a `>` (#1140).
 //!
 //! ## The keys
 //!
@@ -242,6 +244,26 @@ pub(crate) struct Panel {
     /// Whether there is a highlight before this one; B Back is greyed when
     /// not, since it does nothing on the first.
     pub can_go_back: bool,
+    /// The highlight's kills, one line each (#1140); empty lists none.
+    pub kills: Vec<KillLine>,
+}
+
+/// Where a kill is against the demo clock, which sets how its line is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KillState {
+    /// Already played: dimmed.
+    Past,
+    /// The next one to come: stood out.
+    Next,
+    /// Still to come after the next one.
+    Later,
+}
+
+/// One kill on the box: `2  5:56  gskiLL  K98`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct KillLine {
+    pub text: String,
+    pub state: KillState,
 }
 
 impl Panel {
@@ -289,7 +311,7 @@ pub unsafe fn draw() {
 mod draw {
     use std::ffi::CString;
 
-    use super::{ESC_LINE, KEYS_LIST, Panel};
+    use super::{ESC_LINE, KEYS_LIST, KillState, Panel};
 
     const WHITE: (f32, f32, f32) = (1.0, 1.0, 1.0);
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
@@ -298,6 +320,12 @@ mod draw {
     /// A key that does nothing now, and its word (B Back on the first
     /// highlight): greyed rather than hidden, so the keys keep their places.
     const DIM: (f32, f32, f32) = (0.4, 0.4, 0.4);
+    /// A kill already played (#1140): readable, but quieter than the rest.
+    const PAST: (f32, f32, f32) = (0.55, 0.55, 0.55);
+    /// The mark in front of the next kill, and the gap that keeps the other
+    /// lines in step with it.
+    const NEXT_MARK: &str = "> ";
+    const NO_MARK: &str = "   ";
     const PADDING: i32 = 8;
     const GAP: i32 = 4;
 
@@ -316,6 +344,20 @@ mod draw {
         lines.push(run(&panel.title, WHITE).into_iter().collect());
         if !panel.status.is_empty() {
             lines.push(run(&panel.status, GREY).into_iter().collect());
+        }
+        // The console font has one size and no bold, so the next kill stands
+        // out by colour and a mark (#1140).
+        for kill in &panel.kills {
+            let (mark, colour) = match kill.state {
+                KillState::Next => (NEXT_MARK, KEY),
+                KillState::Later => (NO_MARK, WHITE),
+                KillState::Past => (NO_MARK, PAST),
+            };
+            lines.push(
+                run(&format!("{mark}{}", kill.text), colour)
+                    .into_iter()
+                    .collect(),
+            );
         }
         if panel.keys {
             let mut keys = Vec::new();

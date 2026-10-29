@@ -27,7 +27,9 @@
 //! each kill's time on the demo player's clock (comma separated), the kill
 //! range's first and last kill (from 1), the answer already given (`yes`,
 //! `maybe`, `no` or `-`), the note, and, for an HLTV demo, the player's
-//! number (#822; `-` or missing for a POV demo). The review starts at the
+//! number (#822; `-` or missing for a POV demo), and each kill's victim and
+//! weapon ([`KILL_SEP`] between kills, [`PART_SEP`] between a kill's two;
+//! #1140; missing from an older Studio). The review starts at the
 //! first highlight: Studio's Review box decides what the queue holds, so
 //! picking up where a review left off is its Unmarked choice.
 //!
@@ -121,6 +123,45 @@ pub(crate) struct Highlight {
     pub note: String,
     /// HLTV: the player the camera goes on, by number (#822).
     pub spectate: Option<i32>,
+    /// Each kill's victim and weapon, one per kill, or none from an older
+    /// Studio (#1140).
+    pub details: Vec<KillDetail>,
+}
+
+/// One kill's victim and weapon, as Studio's Highlight Details lists them.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct KillDetail {
+    pub victim: String,
+    pub weapon: String,
+}
+
+/// Between two kills in the queue's details field, and between a kill's
+/// victim and weapon: control characters, which Studio keeps out of every
+/// name. Must match `native::review_queue::KILL_SEP` and `PART_SEP`.
+pub(crate) const KILL_SEP: char = '\u{1f}';
+pub(crate) const PART_SEP: char = '\u{1e}';
+
+/// The details field, or none when it is missing or doesn't hold one entry
+/// per kill.
+fn parse_details(field: Option<&str>, count: usize) -> Vec<KillDetail> {
+    let Some(field) = field.filter(|f| !f.trim().is_empty()) else {
+        return Vec::new();
+    };
+    let details: Vec<KillDetail> = field
+        .split(KILL_SEP)
+        .map(|kill| {
+            let (victim, weapon) = kill.split_once(PART_SEP).unwrap_or((kill, ""));
+            KillDetail {
+                victim: victim.trim().to_string(),
+                weapon: weapon.trim().to_string(),
+            }
+        })
+        .collect();
+    if details.len() == count {
+        details
+    } else {
+        Vec::new()
+    }
 }
 
 impl Highlight {
@@ -276,6 +317,7 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
                 .get(8)
                 .and_then(|n| n.trim().parse::<i32>().ok())
                 .filter(|n| (1..=32).contains(n)),
+            details: parse_details(fields.get(9).copied(), count),
         });
     }
     if queue.is_empty() {
@@ -656,7 +698,13 @@ pub fn poll() {
     let mut guard = lock();
     step(&mut guard);
     let (panel, mode) = match guard.as_ref() {
-        Some(review) => panel_view(review, Instant::now()),
+        Some(review) => panel_view(
+            review,
+            Instant::now(),
+            crate::demo_seek::clock()
+                .filter(|c| c.active)
+                .map(|c| c.now),
+        ),
         None => (None, KeyMode::Off),
     };
     drop(guard);
@@ -697,9 +745,13 @@ fn key_mode(review: &Review, keys_on: bool, now: Instant) -> KeyMode {
     }
 }
 
-/// What the on-screen panel shows for the review as it stands at `now`, and
-/// what the answer keys do.
-fn panel_view(review: &Review, now: Instant) -> (Option<crate::review_keys::Panel>, KeyMode) {
+/// What the on-screen panel shows for the review as it stands at `now`,
+/// with the demo player's clock at `clock`, and what the answer keys do.
+fn panel_view(
+    review: &Review,
+    now: Instant,
+    clock: Option<f64>,
+) -> (Option<crate::review_keys::Panel>, KeyMode) {
     let keys = crate::review_keys::KEYS.on();
     let info = crate::review_keys::INFO.on();
     let Some(_) = review.queue.get(review.at) else {
@@ -713,16 +765,74 @@ fn panel_view(review: &Review, now: Instant) -> (Option<crate::review_keys::Pane
         keys,
         live: mode == KeyMode::Live,
         can_go_back: review.at > 0,
+        kills: Vec::new(),
     };
+    let h = &review.queue[review.at];
     let shown = match review.phase {
         // With the keys off, the Review tab is open for the answer.
-        Phase::Waiting => keys.then(|| panel("")),
+        Phase::Waiting => keys.then(|| crate::review_keys::Panel {
+            kills: kill_lines(h, KillClock::Ended),
+            ..panel("")
+        }),
         // The Review tab is open for why this one failed.
         Phase::Failed(_) => None,
         Phase::Loading { .. } => info.then(|| panel("Loading the demo...")),
-        Phase::Playing { .. } => info.then(|| panel("")),
+        Phase::Playing { .. } => info.then(|| crate::review_keys::Panel {
+            kills: kill_lines(h, clock.map_or(KillClock::Unknown, KillClock::At)),
+            ..panel("")
+        }),
     };
     (shown, mode)
+}
+
+/// Where the highlight is, for which of its kills is next.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum KillClock {
+    /// The demo player's clock, while the highlight plays.
+    At(f64),
+    /// Played to its end.
+    Ended,
+    /// No clock to read.
+    Unknown,
+}
+
+/// A time on the demo player's clock as its VCR bar shows it: `5:56`.
+fn clock_text(seconds: f64) -> String {
+    let whole = seconds.max(0.0) as u64;
+    format!("{}:{:02}", whole / 60, whole % 60)
+}
+
+/// The box's kill list (#1140): each kill's number, time, victim and weapon,
+/// with the next one still to come stood out. A kill counts as come once
+/// the clock reaches it.
+fn kill_lines(h: &Highlight, clock: KillClock) -> Vec<crate::review_keys::KillLine> {
+    use crate::review_keys::{KillLine, KillState};
+    let next = match clock {
+        KillClock::At(now) => h.kills.iter().position(|&t| t > now),
+        KillClock::Ended | KillClock::Unknown => None,
+    };
+    h.kills
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| {
+            let mut text = format!("{}  {}", i + 1, clock_text(t));
+            if let Some(d) = h.details.get(i) {
+                for part in [&d.victim, &d.weapon] {
+                    if !part.is_empty() {
+                        text.push_str("  ");
+                        text.push_str(part);
+                    }
+                }
+            }
+            let state = match (clock, next) {
+                (KillClock::Unknown, _) => KillState::Later,
+                (_, Some(n)) if i == n => KillState::Next,
+                (_, Some(n)) if i > n => KillState::Later,
+                _ => KillState::Past,
+            };
+            KillLine { text, state }
+        })
+        .collect()
 }
 
 /// What an answer key asks for, if the keys still answer: the key may have
@@ -1122,7 +1232,96 @@ mod tests {
             verdict,
             note: String::new(),
             spectate: None,
+            details: Vec::new(),
         }
+    }
+
+    fn kill_detail(victim: &str, weapon: &str) -> KillDetail {
+        KillDetail {
+            victim: victim.to_string(),
+            weapon: weapon.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_queue_line_carries_each_kills_victim_and_weapon() {
+        let line = format!(
+            "p.dem\t1\t\t5,9\t1\t2\t-\t\t-\tgskiLL{PART_SEP}K98{KILL_SEP}{{$T}} Brain{PART_SEP}Colt"
+        );
+        let (queue, _) = parse_queue(&queue_text(&[&line])).unwrap();
+        assert_eq!(
+            queue[0].details,
+            vec![
+                kill_detail("gskiLL", "K98"),
+                kill_detail("{$T} Brain", "Colt")
+            ]
+        );
+        assert_eq!(queue[0].spectate, None);
+    }
+
+    #[test]
+    fn details_that_are_not_one_per_kill_are_dropped() {
+        assert_eq!(parse_details(Some("a"), 2), vec![]);
+        assert_eq!(parse_details(None, 1), vec![]);
+        assert_eq!(parse_details(Some(" "), 1), vec![]);
+        // A kill with no weapon part keeps its victim.
+        assert_eq!(parse_details(Some("a"), 1), vec![kill_detail("a", "")]);
+    }
+
+    #[test]
+    fn a_kill_time_reads_as_the_vcr_bar_shows_it() {
+        assert_eq!(clock_text(356.7), "5:56");
+        assert_eq!(clock_text(5.0), "0:05");
+        assert_eq!(clock_text(-1.0), "0:00");
+    }
+
+    #[test]
+    fn the_kill_list_stands_out_the_next_kill() {
+        use crate::review_keys::KillState::{Later, Next, Past};
+        let mut h = highlight("a", None);
+        h.kills = vec![356.0, 363.0, 370.0];
+        h.details = vec![
+            kill_detail("gskiLL", "K98"),
+            kill_detail("Brain", ""),
+            kill_detail("", ""),
+        ];
+        let states = |clock| {
+            kill_lines(&h, clock)
+                .into_iter()
+                .map(|l| l.state)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(states(KillClock::At(352.0)), vec![Next, Later, Later]);
+        // A kill counts as come once the clock reaches it.
+        assert_eq!(states(KillClock::At(356.0)), vec![Past, Next, Later]);
+        assert_eq!(states(KillClock::At(371.0)), vec![Past, Past, Past]);
+        assert_eq!(states(KillClock::Ended), vec![Past, Past, Past]);
+        assert_eq!(states(KillClock::Unknown), vec![Later, Later, Later]);
+        let texts: Vec<String> = kill_lines(&h, KillClock::Ended)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["1  5:56  gskiLL  K98", "2  6:03  Brain", "3  6:10"]
+        );
+    }
+
+    #[test]
+    fn the_box_lists_the_kills_while_playing_and_at_the_end() {
+        use crate::review_keys::KillState::{Next, Past};
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        let kills = |r: &Review, clock| panel_view(r, now, clock).0.expect("a panel").kills;
+        assert_eq!(kills(&review, Some(8.0))[0].state, Next);
+        review.phase = Phase::Waiting;
+        assert_eq!(kills(&review, Some(8.0))[0].state, Past);
+        review.phase = Phase::Loading {
+            since: Instant::now(),
+            frames: 0,
+            seen_loading: false,
+        };
+        assert!(kills(&review, None).is_empty());
     }
 
     #[test]
@@ -1411,11 +1610,11 @@ mod tests {
         // The settings' defaults (both on): no cvar in a host build.
         let mut review = review_of(vec![highlight("a", None)], Phase::Waiting);
         let now = review.keys_from;
-        let (panel, mode) = panel_view(&review, now);
+        let (panel, mode) = panel_view(&review, now, None);
         assert_eq!(mode, KeyMode::Live);
         assert!(panel.is_some_and(|p| p.keys && p.live));
         review.phase = playing();
-        let (panel, mode) = panel_view(&review, now);
+        let (panel, mode) = panel_view(&review, now, None);
         assert_eq!(mode, KeyMode::Live);
         assert!(panel.is_some_and(|p| p.keys && p.live && p.status.is_empty()));
     }
@@ -1431,14 +1630,14 @@ mod tests {
             },
         );
         let now = review.keys_from;
-        let (panel, mode) = panel_view(&review, now);
+        let (panel, mode) = panel_view(&review, now, None);
         assert_eq!(mode, KeyMode::Locked);
         let panel = panel.expect("a panel");
         assert_eq!(panel.status, "Loading the demo...");
         assert!(panel.keys && !panel.live);
         // A failed highlight has the Review tab open instead.
         review.phase = Phase::Failed("gone".into());
-        assert_eq!(panel_view(&review, now), (None, KeyMode::Off));
+        assert_eq!(panel_view(&review, now, None), (None, KeyMode::Off));
     }
 
     #[test]
@@ -1446,7 +1645,7 @@ mod tests {
         let mut review = review_of(vec![highlight("a", None)], playing());
         let started = Instant::now();
         review.keys_from = started + LOCKOUT;
-        let (panel, mode) = panel_view(&review, started);
+        let (panel, mode) = panel_view(&review, started, None);
         assert_eq!(mode, KeyMode::Locked);
         assert!(panel.is_some_and(|p| p.keys && !p.live));
         let half = started + LOCKOUT / 2;
@@ -1471,11 +1670,11 @@ mod tests {
             Phase::Waiting,
         );
         let now = review.keys_from;
-        let first = panel_view(&review, now).0.expect("a panel");
+        let first = panel_view(&review, now, None).0.expect("a panel");
         assert!(!first.key_live(Action::Back));
         assert!(first.key_live(Action::Next));
         review.at = 1;
-        let second = panel_view(&review, now).0.expect("a panel");
+        let second = panel_view(&review, now, None).0.expect("a panel");
         assert!(second.key_live(Action::Back));
     }
 
