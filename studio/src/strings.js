@@ -2298,7 +2298,10 @@ export const STRINGS = {
       unrenderable: "Captured, can't render yet",
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
+      short: 'Video stops early (partial take, not captured)',
     },
+    // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
+    shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,

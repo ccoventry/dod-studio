@@ -820,8 +820,33 @@ pub struct VerifiedBlock {
     pub bytes: u64,
     /// Cancel stopped the batch while this clip recorded (#1081): what's on
     /// disk is a partial take, so it counts as neither captured nor
-    /// renderable, and is left for the user to delete.
+    /// renderable, and is left for the user to delete. Also set for a take
+    /// that stopped writing early (`short_take`).
     pub cut_short: bool,
+    /// The take's video stops well before its audio (#1105): FFmpeg
+    /// stopped writing mid-clip. A partial take like a Cancel's, with both
+    /// lengths.
+    pub short_take: Option<native::hlcr::take_length::ShortTake>,
+}
+
+/// Marks every take whose video stops well before its audio as partial
+/// (#1105): not captured, not renderable, so Finish clips and the take
+/// clean-up leave it alone. Takes with nothing on disk, or whose lengths
+/// can't be read cheaply (OBS, AGR), are left as they are.
+fn mark_short_takes(manifest: &CaptureManifest, verified: &mut [VerifiedBlock]) {
+    for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
+        if !v.captured || v.rendered {
+            continue;
+        }
+        if let Some(short) =
+            native::hlcr::take_length::short_take(&block.take_folder, manifest.capture_fps)
+        {
+            v.short_take = Some(short);
+            v.cut_short = true;
+            v.captured = false;
+            v.renderable = false;
+        }
+    }
 }
 
 /// Each manifest block's position in recording order: demos play in the
@@ -860,7 +885,9 @@ fn mark_cut_short(
         return;
     };
     let block = &mut verified[i];
-    block.cut_short = block.captured;
+    // A cut clip's take is short too: Cancel is the reason it gives.
+    block.cut_short = block.captured || block.cut_short;
+    block.short_take = None;
     block.captured = false;
     block.renderable = false;
 }
@@ -963,6 +990,7 @@ pub(crate) fn verify_capture_takes_settling(
                 rendered,
                 bytes: 0,
                 cut_short: false,
+                short_take: None,
             }
         })
         .collect();
@@ -982,6 +1010,7 @@ pub(crate) fn verify_capture_takes_settling(
             }
         }
     }
+    mark_short_takes(manifest, &mut verified);
     for (i, (v, block)) in verified.iter_mut().zip(manifest.blocks.iter()).enumerate() {
         v.bytes = folder_bytes(&block.take_folder);
         on_checked(i + 1);
@@ -1089,8 +1118,15 @@ fn check_takes(
     });
     mark_cut_short(&manifest, &mut blocks, records.0, records.1);
     for block in blocks.iter().filter(|b| b.cut_short) {
+        let why = match block.short_take {
+            Some(s) => format!(
+                "stopped writing video early ({:.2} s of video, {:.2} s of audio)",
+                s.video_secs, s.audio_secs
+            ),
+            None => "was cut short by Cancel".to_string(),
+        };
         log_markdown(&format!(
-            "[take-verify] {} was cut short by Cancel: not counted as captured. Its partial take is left at {}.",
+            "[take-verify] {} {why}: not counted as captured. Its partial take is left at {}.",
             block.take_key, block.take_folder
         ));
     }
@@ -1150,7 +1186,13 @@ fn finish_batch(
     records: (usize, usize),
     rendered_while_capturing: bool,
 ) {
-    let report = check_takes(app, manifest_slot, outcome, records, rendered_while_capturing);
+    let report = check_takes(
+        app,
+        manifest_slot,
+        outcome,
+        records,
+        rendered_while_capturing,
+    );
     *is_running.lock().unwrap_or_else(|p| p.into_inner()) = false;
     let _ = app.emit(
         "capture_status",
@@ -5214,8 +5256,96 @@ mod tests {
                 rendered: false,
                 bytes: 1,
                 cut_short: false,
+                short_take: None,
             })
             .collect()
+    }
+
+    /// A take at `folder` as HLAE writes a frame sequence: `frames` BMPs in
+    /// `take0000/all`, the audio beside them.
+    /// A take at `folder` as HLAE writes a frame sequence: `frames` BMPs in
+    /// `take0000/all`, and `audio_secs` of 8-bit mono 1 kHz audio beside them.
+    fn bmp_take(folder: &Path, frames: usize, audio_secs: u32) {
+        let take = folder.join("take0000");
+        let stream = take.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        for i in 0..frames {
+            std::fs::write(stream.join(format!("{i:05}.bmp")), b"bmp").unwrap();
+        }
+        let data = audio_secs * 1000;
+        let mut wav = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+        for field in [16u32, 1 | (1 << 16), 1000, 1000, 1 | (8 << 16)] {
+            wav.extend_from_slice(&field.to_le_bytes());
+        }
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data.to_le_bytes());
+        wav.resize(wav.len() + data as usize, 0);
+        std::fs::write(take.join("sound.wav"), wav).unwrap();
+    }
+
+    /// #1105: a take whose video FFmpeg stopped writing mid-clip, while the
+    /// game wrote the audio to the end. It is a partial take, like a
+    /// Cancel's: not captured, not renderable, so nothing renders or deletes
+    /// it.
+    #[test]
+    fn a_take_that_stopped_writing_early_is_not_captured() {
+        let scratch = Scratch::new("short_take_1105");
+        let whole = scratch.path().join("chain_01_b0");
+        let short = scratch.path().join("chain_01_b1");
+        let obs = scratch.path().join("chain_01_b2");
+        // 10 fps: the whole take has 3.0 s of video to 3 s of audio, the
+        // short one 0.5 s to 3 s.
+        bmp_take(&whole, 30, 3);
+        bmp_take(&short, 5, 3);
+        let obs_stream = obs.join("take0000").join("all");
+        std::fs::create_dir_all(&obs_stream).unwrap();
+        std::fs::write(obs_stream.join("video.mp4"), b"mp4").unwrap();
+        let mut manifest = cut_short_manifest(&[("chain_01", 0), ("chain_01", 1), ("chain_01", 2)]);
+        manifest.capture_fps = 10;
+        for (block, folder) in manifest.blocks.iter_mut().zip([&whole, &short, &obs]) {
+            block.take_folder = folder.to_path_buf();
+        }
+
+        let verified = verify_capture_takes_settling(&manifest, None, &mut |_| {});
+        assert!(verified[0].captured && verified[0].renderable && !verified[0].cut_short);
+        assert!(!verified[1].captured && !verified[1].renderable && verified[1].cut_short);
+        assert_eq!(
+            verified[1].short_take,
+            Some(native::hlcr::take_length::ShortTake {
+                video_secs: 0.5,
+                audio_secs: 3.0
+            })
+        );
+        // An OBS take's length isn't read: it isn't judged.
+        assert!(verified[2].captured && !verified[2].cut_short);
+    }
+
+    /// A clip Cancel cut short is short too; the reason it gives is Cancel.
+    #[test]
+    fn a_short_take_cancel_cut_gives_cancel_as_the_reason() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1)]);
+        let mut blocks = on_disk(&manifest);
+        blocks[1].captured = false;
+        blocks[1].renderable = false;
+        blocks[1].cut_short = true;
+        blocks[1].short_take = Some(native::hlcr::take_length::ShortTake {
+            video_secs: 1.0,
+            audio_secs: 9.0,
+        });
+        mark_cut_short(&manifest, &mut blocks, 2, 1);
+        assert!(blocks[1].cut_short && !blocks[1].captured);
+        assert_eq!(blocks[1].short_take, None);
+        // A short take Cancel didn't touch keeps its own reason.
+        let mut blocks = on_disk(&manifest);
+        blocks[0].captured = false;
+        blocks[0].cut_short = true;
+        blocks[0].short_take = Some(native::hlcr::take_length::ShortTake {
+            video_secs: 1.0,
+            audio_secs: 9.0,
+        });
+        mark_cut_short(&manifest, &mut blocks, 2, 1);
+        assert!(blocks[0].cut_short && blocks[0].short_take.is_some());
+        assert!(blocks[1].cut_short && blocks[1].short_take.is_none());
     }
 
     #[test]
