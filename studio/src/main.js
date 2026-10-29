@@ -47,6 +47,7 @@ import { readHlPath, startHlPathWatch } from './hl_path_watch.js';
 import { renderQueueFooter } from './queue_footer.js';
 import { startAppShortcuts } from './app_shortcuts.js';
 import { createProjectDemos } from './project_demos.js';
+import { createQueueState } from './queue_state.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
 import { createRescanRecent } from './rescan_recent.js';
@@ -89,12 +90,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Set when the saved pinned list held single demo files (older builds), so
   // the cleaned list is written back once after settings load.
   let pinnedListCleaned = false;
-  let currentScannedDemos = [];
+  // The queue's list and selection, and the rules that change them: queue_state.js.
+  // The pieces it draws with are declared further down this scope, so they are
+  // reached through closures.
+  const queue = createQueueState({
+    renderList: (demos, idx, onSelect) => renderMasterList(demos, idx, onSelect),
+    renderDetail: (demo, idx) => renderDetailView(demo, idx),
+    clearChecked: clearCheckedPaths,
+    resetMapWarnings,
+    updateFooter: (demos) => updateDemoFooter(demos),
+    markDirty: () => markProjectDirty(),
+    // Match and half per demo (#685), from the analyzer cache; declared
+    // further down (queue_match_groups.js), reached through the closure.
+    afterLoad: () => { regroupMatches(); reviewLibrary.noteLoaded(); },
+  });
   // The Setup window and the Highlights page's checklist (#599): setup_wiring.js,
   // created once everything it reads is wired, near the end of startup.
   let setup = null;
   let savedSetupDismissed = false;
-  let selectedDemoIdx = null;
   // take_key -> uid[]. Recorded by capture_pane.js when a batch verifies a
   // block on disk; resolved by render_pane.js when that take finishes
   // rendering, so status can auto-advance even after a restart or re-scan
@@ -106,34 +119,22 @@ window.addEventListener("DOMContentLoaded", async () => {
   let projectTeams = emptyProjectTeams();
   // The Review box's HLTV pick (#828), kept in the project file.
   const hltvPick = createHltvPicker({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     getProjectTeams: () => projectTeams,
     onChange: () => markProjectDirty(),
   });
   // Review marks kept outside the project, for demos a scan adds (#848).
   const reviewLibrary = createReviewLibrary({
-    getDemos: () => currentScannedDemos, hasProjectFile: () => !!projectSession.currentPath(),
-    onBroughtIn: (streaks) => { streaks.forEach(updateStreakVisuals); refreshAfterRelocation(true); },
+    getDemos: queue.getDemos, hasProjectFile: () => !!projectSession.currentPath(),
+    onBroughtIn: (streaks) => { streaks.forEach(updateStreakVisuals); queue.refreshAfterRelocation(true); },
   });
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
   const projectSession = createProjectSession({
-    getDemos: () => currentScannedDemos,
-    replaceDemos: (demos) => replaceScannedDemos(demos),
-    loadDemos: (demos) => {
-      currentScannedDemos = demos;
-      selectedDemoIdx = currentScannedDemos.length > 0 ? 0 : null;
-      renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
-      if (currentScannedDemos.length > 0) {
-        selectDemoAndRenderDetail(currentScannedDemos[0], selectedDemoIdx);
-      }
-      updateDemoFooter(currentScannedDemos);
-      // Match and half per demo (#685), from the analyzer cache; declared
-      // further down (queue_match_groups.js), reached through the closure.
-      regroupMatches();
-      reviewLibrary.noteLoaded();
-    },
+    getDemos: queue.getDemos,
+    replaceDemos: (demos) => queue.replace(demos),
+    loadDemos: (demos) => queue.load(demos),
     getTakeIndex: () => takeIndex,
     setTakeIndex: (index) => { takeIndex = index; },
     getProjectTeams: () => projectTeams,
@@ -153,7 +154,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane({ getDemos: () => currentScannedDemos, onSettingsChange: () => persistAppSettings() });
+  initAuditorPane({ getDemos: queue.getDemos, onSettingsChange: () => persistAppSettings() });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({
@@ -164,16 +165,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   initBlenderPane();
   initOverviewsPane();
   initTeamsPane({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     getProjectTeams: () => projectTeams,
     onChange: () => {
       markProjectDirty();
       // A renamed or merged team changes the clip names shown (#445).
-      // renderDetailView and refreshClipNamePreview are imported above;
-      // selectedDemoIdx is declared further down this scope.
-      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
-        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
-      }
+      queue.redrawSelected();
       refreshClipNamePreview();
     },
     // triggerAutoScan is declared further down (queue_scan.js).
@@ -182,7 +179,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Capture Locations (also Render Studio's scan input) and Export Drives: folder_pools.js.
   const folderPools = createFolderPools({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     persist: () => persistAppSettings(),
     refreshSetup: () => setup?.refresh(),
   });
@@ -242,15 +239,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     viewLogsBtn.addEventListener('click', () => openActivityLog());
   }
 
-  function refreshAfterRelocation(changed) {
-    renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
-    if (!changed) return;
-    if (selectedDemoIdx != null && currentScannedDemos[selectedDemoIdx]) {
-      selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
-    }
-    markProjectDirty();
-  }
-
   // Missing, moved, changed and copied demos (#21): project_demos.js.
   const {
     checkMissingDemos,
@@ -259,21 +247,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerIdenticalCopies,
     locateDemoByHand,
   } = createProjectDemos({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     getTakeIndex: () => takeIndex,
     getScanPaths: demoFolders.all,
-    refreshQueue: refreshAfterRelocation,
+    refreshQueue: queue.refreshAfterRelocation,
     scan: (paths, opts) => triggerAutoScan(paths, opts),
-    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+    removeDemo: (demo) => queue.replace(queue.getDemos().filter((d) => d !== demo)),
   });
 
   // Demos that recorded more than one map (#217): queue_split.js.
   const { splitQueuedDemo, captureDemosReady } = createQueueSplit({
-    getDemos: () => currentScannedDemos,
-    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+    getDemos: queue.getDemos,
+    removeDemo: (demo) => queue.replace(queue.getDemos().filter((d) => d !== demo)),
     scan: (paths, opts) => triggerAutoScan(paths, opts),
     getTakeIndex: () => takeIndex,
-    refreshQueue: () => refreshAfterRelocation(true),
+    refreshQueue: () => queue.refreshAfterRelocation(true),
     pickedDemosPresent,
   });
 
@@ -281,22 +269,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   initConfigWiring({ persistAppSettings });
   // Configuration > Players (#428): players_ui.js.
   createPlayersUi({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     getHlPath: readHlPath,
     getGameFolder,
     persist: () => persistAppSettings(),
   }).refresh();
-
-  // ── Shared "a demo row was selected" handler ────────────────────────────────
-  // Extracted so every renderMasterList call site behaves identically —
-  // renderMasterList persists whichever callback it was last given
-  // (master_pane.js's currentOnSelectDemo) as the fallback for re-renders
-  // that don't pass one, so an inline callback that drifted from this one
-  // would apply inconsistently depending on which code path rendered last.
-  function selectDemoAndRenderDetail(demo, idx) {
-    selectedDemoIdx = idx;
-    renderDetailView(demo, selectedDemoIdx);
-  }
 
   // ── Demo list footer helper ────────────────────────────────────────────────
   function updateDemoFooter(demos) {
@@ -311,13 +288,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Runs after a scan and a project load. The Group by dropdown (#823):
   // queue_group_by.js; grouped by match, a regroup also reads uncached demos.
   const { regroup: regroupMatches } = createQueueMatchGroups({
-    getDemos: () => currentScannedDemos,
-    renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    getDemos: queue.getDemos,
+    renderQueue: () => queue.renderQueue(),
     parseMissingByDefault: isGroupedByMatch,
   });
   createQueueGroupBy({
-    getDemos: () => currentScannedDemos,
-    renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    getDemos: queue.getDemos,
+    renderQueue: () => queue.renderQueue(),
     regroupMatches: (opts) => regroupMatches(opts),
   });
 
@@ -325,9 +302,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   // queue_scan.js. Declared before anything can start a scan; the earlier
   // callers above reach triggerAutoScan through closures.
   const { triggerAutoScan, addDemoFolder, addDroppedPaths, isScanning } = createQueueScan({
-    getDemos: () => currentScannedDemos,
-    setSelectedDemoIdx: (idx) => { selectedDemoIdx = idx; },
-    selectDemoAndRenderDetail: (demo, idx) => selectDemoAndRenderDetail(demo, idx),
+    getDemos: queue.getDemos,
+    setSelectedDemoIdx: queue.setSelectedIdx,
+    selectDemoAndRenderDetail: queue.select,
     updateDemoFooter: (demos) => updateDemoFooter(demos),
     markProjectDirty: () => markProjectDirty(),
     readScanWorkers: () => readScanWorkers(),
@@ -344,14 +321,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Demos an older DoD Studio scanned, offered for a rescan when a project
   // opens: project_rescan.js.
   const { offerRescan } = createProjectRescan({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     scan: (paths) => triggerAutoScan(paths),
   });
   // After an update, every recent session's outdated demos at once (#938).
   const rescanRecent = createRescanRecent({
     getRecent: () => recentProjects.list(),
     session: projectSession,
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     scan: (paths) => triggerAutoScan(paths),
     isScanning: () => isScanning(),
     isSetupOpen: () => !!setup?.isOpen(),
@@ -368,14 +345,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Rendered counts, and the detail view for the per-row status dropdowns.
   const onHighlightStatusChange = () => {
     markProjectDirty();
-    renderMasterList(currentScannedDemos, selectedDemoIdx);
-    if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
-      renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
-    }
+    queue.renderQueue();
+    queue.redrawSelected();
   };
 
   initReviewMode({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     getCheckedPaths: getCheckedDemoPaths,
     getShownPaths: () => getVisibleDemos().map((d) => d.path),
     getRecorders: getQueueRecorders,
@@ -387,7 +362,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),
     targetDrives: folderPools.targetDrives(),
-    currentScannedDemos,
+    currentScannedDemos: queue.getDemos(),
     projectPath: projectSession.currentPath(),
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, folderPools.updateExportPoolIndicator, captureDemosReady);
   createObsCaptureTest({ getState: () => ({ targetDrives: folderPools.targetDrives() }), persist: () => persistAppSettings() });
@@ -408,7 +383,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   initRenderUI(folderPools.targetDrives, folderPools.renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
-    getAllDemos: () => currentScannedDemos,
+    getAllDemos: queue.getDemos,
     getProjectTeams: () => projectTeams,
     onStatusChange: onHighlightStatusChange
   });
@@ -418,7 +393,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFinishClips({
     getExportDirs: folderPools.renderExportDirs,
     getClipNames: (exportDirs) => clipNamesForTakes(
-      takeIndex, currentScannedDemos, getClipNameTemplate(),
+      takeIndex, queue.getDemos(), getClipNameTemplate(),
       { maxLength: maxNameLength(exportDirs), projectTeams },
     ),
     onSettingsChange: persistAppSettings,
@@ -439,84 +414,33 @@ window.addEventListener("DOMContentLoaded", async () => {
   checkObsOrphanOnStartup();
 
   // A batch that ran while Studio was closed (#545): mark its finished clips.
-  createBatchCatchUp({ getDemos: () => currentScannedDemos, getTakeIndex: () => takeIndex,
+  createBatchCatchUp({ getDemos: queue.getDemos, getTakeIndex: () => takeIndex,
     getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
   startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,
     persistAppSettings: async () => { await reviewLibrary.flush(); await persistAppSettings(); } });
 
-  // Delete callback: remove a demo from the active scan list and re-render.
-  // Called by master_pane.js when the 🗑 button is clicked on a row. Returns
-  // the new selectedDemoIdx so the caller's own renderMasterList call can
-  // pass it through for the row-highlight — master_pane.js doesn't otherwise
-  // know this file's selectedDemoIdx, and previously always re-rendered with
-  // no selection at all (visually dropping the highlight) even when the
-  // deleted row wasn't the selected one and the selection should have held.
-  const onDeleteDemo = (deletedOriginalIdx, updatedDemos) => {
-    currentScannedDemos = updatedDemos;
-    markProjectDirty();
-    // If the deleted demo was the selected one, clear the detail view.
-    if (selectedDemoIdx === deletedOriginalIdx) {
-      selectedDemoIdx = currentScannedDemos.length > 0 ? 0 : null;
-      if (selectedDemoIdx !== null) {
-        renderDetailView(currentScannedDemos[0], selectedDemoIdx);
-      } else {
-        renderDetailView(null, null);
-      }
-    } else if (selectedDemoIdx !== null && selectedDemoIdx > deletedOriginalIdx) {
-      // Shift selection index down if a demo above it was removed.
-      selectedDemoIdx -= 1;
-    }
-    updateDemoFooter(currentScannedDemos);
-    return selectedDemoIdx;
-  };
-
-  // Shared by all three Clear actions below: swaps the scanned-demo list,
-  // resets checkboxes, and re-renders both the queue and the detail view.
-  //
-  // Selection is preserved by object identity, not just reset to row 0:
-  // Clear Untracked/Selected/All can all leave the previously-selected demo
-  // still in the queue (it just wasn't the one removed), and jumping the
-  // selection to whatever's now first is jarring — you were looking at one
-  // demo's highlights and suddenly a different one's are shown. Only falls
-  // back to row 0 (or nothing) when the selected demo was actually the one
-  // that got removed.
-  function replaceScannedDemos(newDemos) {
-    const previouslySelectedDemo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
-    currentScannedDemos = newDemos;
-    markProjectDirty();
-    const preservedIdx = previouslySelectedDemo ? currentScannedDemos.indexOf(previouslySelectedDemo) : -1;
-    selectedDemoIdx = preservedIdx !== -1 ? preservedIdx : (currentScannedDemos.length > 0 ? 0 : null);
-    clearCheckedPaths();
-    updateDemoFooter(currentScannedDemos);
-    renderMasterList(currentScannedDemos, selectedDemoIdx);
-    renderDetailView(selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null, selectedDemoIdx);
-    // The banner is about demos in the queue. With the queue empty there is
-    // nothing left for it to be about.
-    if (currentScannedDemos.length === 0) resetMapWarnings();
-  }
-
   // Clear Untracked / Selected / All and the tracked-work modal:
   // queue_actions.js.
   const { requestTrackedDeleteConfirm } = createQueueActions({
-    getDemos: () => currentScannedDemos,
-    replaceDemos: (demos) => replaceScannedDemos(demos),
+    getDemos: queue.getDemos,
+    replaceDemos: (demos) => queue.replace(demos),
     saveProjectSession: () => saveProjectSession(),
   });
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
+  initMasterPane(queue.remove, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
   // capture_pane.js owns the Scheduled Command list, so the floor check reads
   // it from there rather than keeping a second copy.
   initRollFloors(() => getCommandsState().custom_commands);
   // Map warnings, demo links and the checks that follow the hl.exe path: hl_path_watch.js.
-  startHlPathWatch({ renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx) });
+  startHlPathWatch({ renderQueue: () => queue.renderQueue() });
   // #441: the preview uses the selected demo's first checked highlight (its
   // first highlight when none is checked); a settled template change is
   // saved and redraws the automatic names in Highlight Details.
   initClipNameSettings({
     getHighlight: () => {
-      const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
+      const demo = queue.selectedDemo();
       const own = demo ? listedStreaks(demo) : [];
       const streak = own.find((s) => s.selected) || own[0];
       return streak ? { demo, streak } : null;
@@ -525,21 +449,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     getProjectTeams: () => projectTeams,
     onChange: () => {
       persistAppSettings();
-      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
-        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
-      }
+      queue.redrawSelected();
     },
   });
 
-  initDetailPane(() => currentScannedDemos, () => {
+  initDetailPane(queue.getDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
     // switching the selected demo, or after a capture/render completes) —
     // selection moves required capture bytes (refreshLaunchGuard) and status
     // moves the Master Queue's Highlights/Pending/Captured/Rendered columns
     // (renderMasterList), both cheap enough to just always re-derive here.
     // Must NOT mark the project dirty — see onDirty below for that.
-    refreshLaunchGuard({ targetDrives: folderPools.targetDrives(), currentScannedDemos });
-    renderMasterList(currentScannedDemos, selectedDemoIdx);
+    refreshLaunchGuard({ targetDrives: folderPools.targetDrives(), currentScannedDemos: queue.getDemos() });
+    queue.renderQueue();
     refreshClipNamePreview();
   }, () => {
     // Fired only from an actual highlights-table field edit (selection,
@@ -552,7 +474,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   demoFolders.startAnalyzerPane();
 
   setup = createSetup({
-    getDemos: () => currentScannedDemos,
+    getDemos: queue.getDemos,
     getScanPaths: demoFolders.all,
     getTargetDrives: folderPools.targetDrives,
     getRenderExportDirs: folderPools.renderExportDirs,
