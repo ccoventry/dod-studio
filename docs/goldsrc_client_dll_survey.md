@@ -258,7 +258,7 @@ want:
 | `RoundState` / `TimeLeft` / `ClanTimer` | `+0x20c90` / `+0x20cb0` / `+0x2cb50` | round and match clock — a cut point for automated highlight selection |
 | `ScoreInfo` / `ScoreInfoLong` / `TeamScore` | `+0x20e60` / `+0x20e90` / `+0x20ec0` | live scoreboard state, without re-parsing the demo |
 | `StartProg` / `ProgUpdate` / `CancelProg` | `+0x2f680` / `+0x2f6c0` / `+0x2f6e0` | capture progress bars — when a flag cap starts, advances and aborts |
-| `HLTV` | `+0x20c50` | the engine telling the client it is an HLTV stream |
+| `HLTV` | `+0x20c50` | each player's zoom (and, with bit 7 set, health) in an HLTV stream, `[player, value]`; zooms kept in `gHUD+0x70`, `int[64]` (`hltv_fov.rs`, #830) |
 | `CurWeapon` | `+0x27120` | already used by `anim_fix`; listed so nobody hooks it twice |
 
 *Technique:* message hook. *Effort:* low per message. *Risk:* low — nothing is

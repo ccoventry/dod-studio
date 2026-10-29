@@ -82,6 +82,9 @@ mod name_cap;
 mod replace;
 mod scale;
 
+/// A translucent box under a HUD draw; the review's panel (#660) uses it too.
+#[cfg(target_arch = "x86")]
+pub(crate) use backdrop::fill as fill_box;
 pub(crate) use clear::on_round_state;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare

@@ -10,6 +10,32 @@
 !define DODSTUDIO_OLD_PRODUCTNAME "DoD Tools Studio"
 !define DODSTUDIO_OLD_BUNDLEID "com.dodtools.studio"
 
+; A game left open across an update still has the hook DLL loaded from the install folder, and
+; Windows refuses to overwrite or delete a loaded DLL, only to rename it. Tauri's `File` would
+; then stop the update on an Abort/Retry/Ignore box, and Ignore keeps the old DLL until the next
+; release (#1143). So the DLL is moved aside first: the new one installs, the open game runs the
+; old code from the renamed file, and Studio's hook build check asks to restart that game. A
+; `.old` copy no game holds any more is deleted on the next install or the uninstall.
+!macro DODSTUDIO_MOVE_HOOK_DLL_ASIDE DIR
+  Delete "${DIR}\dodstudio_goldsrc_hooks.*.old"
+  ${If} ${FileExists} "${DIR}\dodstudio_goldsrc_hooks.dll"
+    ClearErrors
+    Delete "${DIR}\dodstudio_goldsrc_hooks.dll"
+    ${If} ${Errors}
+      System::Call 'kernel32::GetTickCount()i.R8'
+      Rename "${DIR}\dodstudio_goldsrc_hooks.dll" "${DIR}\dodstudio_goldsrc_hooks.$R8.old"
+      DetailPrint "The hook DLL is in use by an open game: moved aside to dodstudio_goldsrc_hooks.$R8.old"
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  ; Where the resource lands today, and where builds before Tauri's layout change put it.
+  !insertmacro DODSTUDIO_MOVE_HOOK_DLL_ASIDE "$INSTDIR\goldsrc-hooks"
+  !insertmacro DODSTUDIO_MOVE_HOOK_DLL_ASIDE "$INSTDIR\resources\goldsrc-hooks"
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   ; localStorage (Blender, HD and Overviews pane choices) lives in the WebView2 profile, which
   ; follows the identifier. Copy only "Local Storage", and only into a profile that does not
@@ -78,6 +104,9 @@
 ; $UpdateMode check covers one started with /UPDATE), and a dev build's entry opens another exe,
 ; so both keep theirs. .dem's own default handler was never touched: nothing to restore.
 !macro NSIS_HOOK_POSTUNINSTALL
+  ; DLLs a game held during an install (see DODSTUDIO_MOVE_HOOK_DLL_ASIDE); one still held stays.
+  Delete "$INSTDIR\goldsrc-hooks\dodstudio_goldsrc_hooks.*.old"
+  Delete "$INSTDIR\resources\goldsrc-hooks\dodstudio_goldsrc_hooks.*.old"
   ${If} $UpdateMode <> 1
     ReadRegStr $R7 HKCU "Software\Classes\DoDStudio.Demo\shell\open\command" ""
     ${If} $R7 == '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
