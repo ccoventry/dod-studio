@@ -16,6 +16,16 @@ export const PREVIEW_STATE = { WAITING: 'waiting', MAKING: 'making', DONE: 'done
 /** The error a cancelled pass returns (`messages::TAKE_FRAMES_CANCELLED`). */
 const CANCELLED = 'cancelled';
 
+/** How long a made picture is trusted before the backend is asked again: a
+ *  take re-captured into the same row has a new stamp, and the backend's
+ *  cache check (size and time of the stream) then makes the frames anew. An
+ *  unchanged take answers from its cache at once. */
+export const RECHECK_MS = 60_000;
+/** A failed picture is retried after this, doubling per failure up to the
+ *  cap, so a take FFmpeg can't read isn't hammered. */
+export const RETRY_MS = 30_000;
+export const RETRY_MAX_MS = 5 * 60_000;
+
 /** One picture per take stream; '' for a row that has none to show. */
 export function previewKey(job) {
   return job?.take_folder && job?.stream_folder ? `${job.take_folder}|${job.stream_folder}` : '';
@@ -49,8 +59,9 @@ export function passProgress(states, current = null) {
  * @param {(event: string, cb: Function) => void} [deps.listen]
  * @param {() => number|null} deps.getFps  a frame sequence's rate, for its times
  * @param {() => void} deps.onChange  a picture or the progress changed
+ * @param {() => number} [deps.now]  the clock, in ms
  */
-export function createTakePreview({ thumb, sheet, cancel, listen, getFps, onChange }) {
+export function createTakePreview({ thumb, sheet, cancel, listen, getFps, onChange, now = () => Date.now() }) {
   const states = new Map();
   let running = false;
   let paused = false;
@@ -74,9 +85,29 @@ export function createTakePreview({ thumb, sheet, cancel, listen, getFps, onChan
     }
     for (const key of [...states.keys()]) if (!keys.has(key)) states.delete(key);
     for (const [key, j] of keys) {
-      if (!states.has(key)) states.set(key, { status: PREVIEW_STATE.WAITING, take: j.take_folder, stream: j.stream_folder });
+      const state = states.get(key);
+      if (!state) {
+        states.set(key, { status: PREVIEW_STATE.WAITING, take: j.take_folder, stream: j.stream_folder, rev: 0, failures: 0 });
+      } else if (dueForAnother(state, j)) {
+        // The picture stays on show while it is checked again.
+        state.recheck = true;
+      }
     }
     run();
+  }
+
+  /** Whether a made or failed picture is to be asked for again: a re-captured
+   *  take gets its new picture (#1086 follow-up), a failure gets another try,
+   *  each after a wait so a list refreshing every second causes no storm. A
+   *  take being rendered is left alone. */
+  function dueForAnother(state, job) {
+    if (state.recheck || job.status === 'Rendering') return false;
+    const waited = now() - (state.checkedAt ?? 0);
+    if (state.status === PREVIEW_STATE.DONE) return waited >= RECHECK_MS;
+    if (state.status === PREVIEW_STATE.FAILED) {
+      return waited >= Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** Math.max(0, state.failures - 1));
+    }
+    return false;
   }
 
   async function run() {
@@ -85,26 +116,35 @@ export function createTakePreview({ thumb, sheet, cancel, listen, getFps, onChan
     try {
       for (;;) {
         if (paused) break;
-        const entry = [...states.entries()].find(([, s]) => s.status === PREVIEW_STATE.WAITING);
+        const entry = [...states.entries()].find(([, s]) => s.status === PREVIEW_STATE.WAITING || s.recheck);
         if (!entry) break;
         const [key, state] = entry;
-        state.status = PREVIEW_STATE.MAKING;
+        // A picture being checked again keeps showing and isn't counted.
+        const again = state.recheck && state.status !== PREVIEW_STATE.WAITING;
+        if (!again) state.status = PREVIEW_STATE.MAKING;
         current = { key, take: state.take, done: 0, total: 0 };
         onChange();
         try {
           const result = await thumb(state.take, state.stream, getFps());
+          const uri = result?.uri || '';
+          if (uri !== state.uri) state.rev += 1;
           state.status = PREVIEW_STATE.DONE;
-          state.uri = result?.uri || '';
+          state.uri = uri;
           state.error = '';
+          state.failures = 0;
         } catch (err) {
           if (String(err) === CANCELLED) {
             // Paused for a delete: made again on resume, if still listed.
-            state.status = PREVIEW_STATE.WAITING;
+            if (!again) state.status = PREVIEW_STATE.WAITING;
             break;
           }
           state.status = PREVIEW_STATE.FAILED;
           state.error = String(err);
+          state.failures += 1;
+          state.rev += 1;
         }
+        state.recheck = false;
+        state.checkedAt = now();
       }
     } finally {
       running = false;
@@ -131,7 +171,7 @@ export function createTakePreview({ thumb, sheet, cancel, listen, getFps, onChan
     const key = previewKey(job);
     const state = key ? states.get(key) : null;
     const status = state?.status || '';
-    const shown = `${key}|${status}`;
+    const shown = `${key}|${status}|${state?.rev ?? 0}`;
     if (cell.dataset.shown === shown) return;
     cell.dataset.shown = shown;
     cell.replaceChildren();

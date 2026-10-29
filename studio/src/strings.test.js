@@ -91,6 +91,17 @@ describe('takesFoundMissing (#1081)', () => {
       '1/2 takes found on disk — 1 with video that stops early (partial take, not captured).',
     );
   });
+
+  it('names the game closing or the batch stopping instead of Cancel', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 1, 0, 'game_closed')).toBe(
+      '1/2 takes found on disk — 1 cut short when the game closed (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1, 0, 'stopped')).toBe(
+      '0/1 takes found on disk — 1 cut short when the batch stopped (partial take, not captured).',
+    );
+    expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
+    expect(STRINGS.BATCH_RESULTS.cutShortBy(null)).toBe(STRINGS.BATCH_RESULTS.STATUS.cut_short);
+  });
 });
 
 describe('finish step (#440)', () => {
