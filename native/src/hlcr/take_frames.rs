@@ -242,6 +242,11 @@ pub struct FfmpegRun {
     pub stderr: String,
 }
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(target_os = "windows")]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+
 /// Runs FFmpeg with `args` and returns its output. Polled, never awaited
 /// blind: `cancel` (checked every cycle) and the timeout both kill it, and
 /// `kill_on_drop` makes sure it can't outlive Studio.
@@ -265,8 +270,11 @@ pub async fn run_ffmpeg_watched(
     mut on_line: impl FnMut(&str),
 ) -> Result<FfmpegRun, String> {
     let mut cmd = Command::new(ffmpeg);
+    // No window, and below-normal priority: these passes run in the
+    // background, and must never take CPU from the game capturing, OBS or
+    // a render (#1084).
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
+    cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     cmd.kill_on_drop(true)
         .args(args)
         .stdin(Stdio::null())

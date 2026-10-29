@@ -71,6 +71,11 @@ pub const CLIP_SHARE: f64 = 0.001;
 /// 300 fps 1280x1024 HLAE take read cold from disk; this only catches a file
 /// FFmpeg hangs on.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Decoder threads for a video take. Unlimited, a 1440p 300 fps utvideo
+/// take decodes on ~9 cores; with 4 it takes ~5 and the same results, and a
+/// pass reading a take cold from disk is no slower, the disk being the
+/// limit (~24 s for 12.9 GB either way).
+const DECODE_THREADS: u32 = 4;
 
 /// Whether re-capturing helps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,9 +359,12 @@ pub fn pass_args(picture: &PictureInput, sound: Option<&Path>) -> Vec<String> {
     .map(String::from)
     .to_vec();
     match picture {
-        PictureInput::Video(video) => {
-            args.extend(["-i".to_string(), video.to_string_lossy().into_owned()])
-        }
+        PictureInput::Video(video) => args.extend([
+            "-threads".to_string(),
+            DECODE_THREADS.to_string(),
+            "-i".to_string(),
+            video.to_string_lossy().into_owned(),
+        ]),
         PictureInput::Sequence {
             pattern,
             start,
@@ -471,6 +479,10 @@ pub async fn make_checks(
         }
     };
 
+    // Stamped before the pass: a take still being written when it starts
+    // stamps smaller than it ends up, so its results are made again.
+    let source = take_frames::source_stamp(&media);
+    let sound = wav.as_deref().map(sound_stamp);
     let total_secs = total.unwrap_or(0.0);
     let run = take_frames::run_ffmpeg_watched(
         ffmpeg,
@@ -500,8 +512,8 @@ pub async fn make_checks(
     let checks = TakeChecks {
         version: CHECKS_VERSION,
         stream: stream.to_string(),
-        source: take_frames::source_stamp(&media),
-        sound: wav.as_deref().map(sound_stamp),
+        source,
+        sound,
         duration_secs: total,
         peak_db: report
             .sound
@@ -703,6 +715,8 @@ mod tests {
         assert_eq!(obs.iter().filter(|a| *a == "-i").count(), 1);
         assert!(obs.iter().any(|a| a.starts_with("blackdetect=d=0.5")));
         assert_eq!(obs.last().unwrap(), "-");
+        // The video decodes on a few cores, not all of them.
+        assert!(obs.windows(2).any(|w| w == ["-threads", "4"]));
     }
 
     #[test]
