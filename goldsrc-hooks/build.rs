@@ -22,8 +22,12 @@ fn main() {
         }
     }
     emit_rerun(&manifest.join("build.rs"));
-    // Committing or checking out moves HEAD or the branch's ref.
-    for spec in ["HEAD", "index"] {
+    // Committing or checking out moves HEAD or the branch's ref, and every
+    // move appends to HEAD's reflog, which also covers a branch whose ref is
+    // packed (no loose file to watch until the next commit writes one). Not
+    // the index: `git add` of any file, or a `git status` refreshing it,
+    // rewrites it and would rebuild the DLL for nothing.
+    for spec in ["HEAD", "logs/HEAD"] {
         if let Some(path) = git(&manifest, &["rev-parse", "--git-path", spec]) {
             emit_rerun(&manifest.join(path));
         }
@@ -66,7 +70,15 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 
 /// Uncommitted changes to tracked files in the crates the DLL is built from.
 fn is_dirty(manifest: &Path) -> bool {
-    let mut args = vec!["status", "--porcelain", "--untracked-files=no", "--"];
+    // `--no-optional-locks`: a build never writes the index, so it can't
+    // fail a `git commit` running at the same time on its `index.lock`.
+    let mut args = vec![
+        "--no-optional-locks",
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+        "--",
+    ];
     args.extend(SOURCE_DIRS);
     git(manifest, &args).is_some()
 }
