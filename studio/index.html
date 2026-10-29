@@ -187,9 +187,8 @@
               </div>
             </div>
             <!-- #127: every filter on one row of its own, under the toolbar.
-                 Search, player (#486), kills and POV only (#54) narrow the
-                 demos; Min Kills narrows the highlights each demo shows in
-                 Highlight Details and plays in a review. -->
+                 Search, player (#486), kills, POV only (#54) and Ticked
+                 only narrow the demos. -->
             <div id="queue-filter-row" class="queue-filter-row" role="group" data-str-aria-label="WORKSPACE.FILTER_ROW_LABEL" aria-label="Filters">
               <span class="queue-filter-row-label" data-str="WORKSPACE.FILTER_ROW_LABEL">Filters</span>
               <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
@@ -208,10 +207,6 @@
               <label class="queue-filter-ticked-only" data-str-title="WORKSPACE.TICKED_ONLY_TITLE">
                 <input type="checkbox" id="master-ticked-only-cb" />
                 <span data-str="WORKSPACE.TICKED_ONLY_LABEL">Ticked only</span>
-              </label>
-              <label class="queue-filter-min-kills" data-str-title="HIGHLIGHTS.MIN_KILLS_TITLE">
-                <span data-str="HIGHLIGHTS.MIN_KILLS_LABEL">Min Kills:</span>
-                <input type="number" id="input-min-kills" value="1" min="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
               </label>
             </div>
             <!-- Populated by map_warnings.js when a scanned demo needs a map

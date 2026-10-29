@@ -146,8 +146,8 @@ fn leading_frame_times(
 /// shares). Whose rows exist is decided here and nowhere later (#573):
 /// `Highlights::shown`, the same rule the in-game Highlights tab applies
 /// (D18: a POV demo's recorder, an HLTV demo's everyone), so the two list
-/// the same highlights; the frontend only narrows them by Min Kills and its
-/// Player filter. Saved projects index these rows in this order. The slot is
+/// the same highlights; the frontend only narrows them by its Player
+/// filter. Saved projects index these rows in this order. The slot is
 /// the one the kills were scored from, which capture spectates (#706), so a
 /// player who left before the demo ended keeps theirs; only a highlight
 /// whose slot is unknown is skipped, as capture needs one to anchor the

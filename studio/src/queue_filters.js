@@ -6,8 +6,8 @@
  * The demo's highlights. Whose they are is decided once, by the scan
  * (`analysis::highlights`, the in-game Highlights tab's rule too: a POV
  * demo's recorder's, an HLTV demo's everyone's; #247 D18, #573), so the
- * frontend lists `demo.streaks` as it is and only narrows it by Min Kills and
- * the Player filter.
+ * frontend lists `demo.streaks` as it is and only narrows it by the Player
+ * filter.
  */
 export function listedStreaks(demo) {
   return demo.streaks || [];
@@ -42,7 +42,8 @@ export const KILLS_FILTER = {
 
 /**
  * Whether any of `demo`'s highlights is ticked for capture. Every ticked one
- * counts, even one Min Kills hides, since the capture batch takes it too.
+ * counts, even one the Player filter hides, since the capture batch takes it
+ * too.
  */
 export function hasTickedHighlight(demo) {
   return (demo?.streaks || []).some((s) => s.selected === true);

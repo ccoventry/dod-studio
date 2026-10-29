@@ -629,7 +629,6 @@ html.picking-path * {
   margin-right: 2px;
 }
 
-.queue-filter-min-kills,
 .queue-filter-ticked-only {
   display: flex;
   gap: 3px;

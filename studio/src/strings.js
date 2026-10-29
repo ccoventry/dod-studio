@@ -208,9 +208,6 @@ export const STRINGS = {
     SELECT_ALL_CB_TITLE: 'Select/deselect all visible highlights',
     LAUNCH_STANDALONE_BUTTON: 'Launch Game',
     LAUNCH_STANDALONE_TITLE: "Starts the game with DoD Studio, no demo loaded. Previews, reviews and capture batches use this game while it's open. Only close it when Studio asks.",
-    MIN_KILLS_LABEL: 'Min Kills:',
-    // #127: it sits in the queue's filter row but narrows highlights, not demos.
-    MIN_KILLS_TITLE: 'Shows only highlights with at least this many kills, in Highlight Details and in Review highlights. The demo list itself is narrowed by the filters beside it.',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
     COL_ROW_NUM: 'Row #',
