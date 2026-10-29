@@ -110,11 +110,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     getProjectTeams: () => projectTeams,
     onChange: () => markProjectDirty(),
   });
-  // Review marks saved outside the project and brought into demos a scan
-  // adds (#848): review_library.js.
+  // Review marks kept outside the project, for demos a scan adds (#848).
   const reviewLibrary = createReviewLibrary({
-    getDemos: () => currentScannedDemos,
-    hasProjectFile: () => !!projectSession.currentPath(),
+    getDemos: () => currentScannedDemos, hasProjectFile: () => !!projectSession.currentPath(),
     onBroughtIn: (streaks) => { streaks.forEach(updateStreakVisuals); refreshAfterRelocation(true); },
   });
   // Save / Load / New Session, the unsaved-changes prompt and the header's
@@ -149,8 +147,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
   const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
-  // Every change also reaches the review library.
-  const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); };
+  const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
