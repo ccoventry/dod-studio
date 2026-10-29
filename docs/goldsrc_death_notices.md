@@ -789,7 +789,7 @@ laid out for `d_garandbutt`. While `layout even` is asked for, the hook's
 `entity_state_t::weaponmodel` (`p_k43.mdl` or `p_garand.mdl`), else his team
 (Axis: K43); the head from the victim's `g_PlayerExtraInfo` team (British
 victims get the US head until #1089). The note is keyed by the line's
-`flDisplayTime` and victim name, because `Draw` moves lines up the array as
+killer's and victim's names, because `Draw` moves lines up the array as
 older ones expire. The line-start stub (§7) also stores `edi`, `Draw`'s slot
 offset into the array (`slot * 156`, `[edi + &list[0].iSuicide]` at
 `+0x2b037`), so the icon draw reads that line's fields and draws its

@@ -12,9 +12,9 @@
 //! `p_k43.mdl` or `p_garand.mdl`), else from his team (Axis carry the K43),
 //! and the head from the victim's team (`g_PlayerExtraInfo[i].teamnumber`).
 //! British victims get the US head until #1089. It keeps that against the
-//! line it just went into, keyed by the line's own fields (its expiry time
-//! and the victim's name), since `Draw` moves lines up the array as older
-//! ones expire. The icon draw then asks [`line_variant`] for the line it is
+//! line it just went into, keyed by the line's own fields (the killer's and
+//! the victim's names, [`line_key`]), since `Draw` moves lines up the array
+//! as older ones expire. The icon draw then asks [`line_variant`] for the line it is
 //! drawing (the line-start stub stores `Draw`'s slot offset, `edi`).
 //!
 //! The default layout draws from Valve's sheet, whose one rect holds the
@@ -90,25 +90,35 @@ pub(super) fn head_for(victim_team: Option<i32>) -> Head {
     }
 }
 
-/// What identifies a line wherever `Draw` has moved it: its expiry time's
-/// bits and a 16-bit FNV-1a of the victim's name.
-pub(super) fn line_key(display_time_bits: u32, victim: &[u8]) -> u64 {
-    let end = victim.iter().position(|&b| b == 0).unwrap_or(victim.len());
-    let mut h: u32 = 0x811c_9dc5;
-    for &b in &victim[..end] {
-        h ^= u32::from(b);
-        h = h.wrapping_mul(0x0100_0193);
+/// What identifies a line wherever `Draw` has moved it: the killer's and the
+/// victim's names (each up to its NUL), FNV-1a 64 cut to 56 bits. Not its
+/// expiry time: `Draw` rewrites `flDisplayTime` (it clamps it to `m_flTime +
+/// hud_deathnotice_time` every frame, `client+0x2af9e`), which a `fake`'s
+/// restamp from the client clock trips over. Two butt strokes by the same
+/// killer on the same victim within one notice's life share a key; the
+/// newest note wins, and is almost always the same variant.
+pub(super) fn line_key(killer: &[u8], victim: &[u8]) -> u64 {
+    let name = |s: &[u8]| -> usize { s.iter().position(|&b| b == 0).unwrap_or(s.len()) };
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let killer = &killer[..name(killer)];
+    let victim = &victim[..name(victim)];
+    for &b in killer.iter().chain(&[0u8]).chain(victim) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    (u64::from(display_time_bits) << 16) | u64::from((h ^ (h >> 16)) & 0xffff)
+    h & KEY_MASK
 }
+
+/// [`line_key`]'s bits: the low byte of a remembered slot holds the variant.
+const KEY_MASK: u64 = 0x00ff_ffff_ffff_ffff;
 
 /// A remembered line: its key and the variant, never 0.
 fn pack(key: u64, variant: usize) -> u64 {
-    (key << 8) | (variant as u64 & 0x7f) | 0x80
+    ((key & KEY_MASK) << 8) | (variant as u64 & 0x7f) | 0x80
 }
 
 fn unpack(slot: u64, key: u64) -> Option<usize> {
-    (slot != 0 && slot >> 8 == key & 0x00ff_ffff_ffff_ffff).then_some((slot & 0x7f) as usize)
+    (slot != 0 && slot >> 8 == key & KEY_MASK).then_some((slot & 0x7f) as usize)
 }
 
 /// More than the feed's ceiling of 127 lines would need only if every one
@@ -136,11 +146,12 @@ pub(super) fn recall(key: u64) -> Option<usize> {
 
 #[cfg(target_arch = "x86")]
 mod live {
-    use super::super::{FIELD_DISPLAY_TIME, FIELD_ID, ITEM, current_array};
+    use super::super::{FIELD_ID, ITEM, current_array};
     use super::*;
     use crate::engine;
 
-    /// `szVictim` inside a `DeathNoticeItem`.
+    /// `szKiller` and `szVictim` inside a `DeathNoticeItem`.
+    const FIELD_KILLER: usize = 0x00;
     const FIELD_VICTIM: usize = 0x40;
     const NAME_LEN: usize = 64;
 
@@ -189,9 +200,9 @@ mod live {
             if std::ptr::read_unaligned((item + FIELD_ID) as *const i32) == 0 {
                 return None;
             }
-            let time = std::ptr::read_unaligned((item + FIELD_DISPLAY_TIME) as *const u32);
+            let killer = std::slice::from_raw_parts((item + FIELD_KILLER) as *const u8, NAME_LEN);
             let victim = std::slice::from_raw_parts((item + FIELD_VICTIM) as *const u8, NAME_LEN);
-            Some(line_key(time, victim))
+            Some(line_key(killer, victim))
         }
     }
 
@@ -213,9 +224,20 @@ mod live {
         let Some(key) = key_at(base, offset) else {
             return;
         };
-        let rifle = rifle_for(held_model(killer).as_deref(), team_of(base, killer));
-        let head = head_for(team_of(base, victim));
-        remember(key, variant_index(rifle, head));
+        let held = held_model(killer);
+        let (killer_team, victim_team) = (team_of(base, killer), team_of(base, victim));
+        let rifle = rifle_for(held.as_deref(), killer_team);
+        let head = head_for(victim_team);
+        let variant = variant_index(rifle, head);
+        remember(key, variant);
+        // Safety: the DLL's own log; one line per butt stroke.
+        unsafe {
+            crate::debug::report(&format!(
+                "deathmsg butt stroke: {killer} (team {killer_team:?}, holding {}) -> {victim} (team {victim_team:?}): {}",
+                held.as_deref().unwrap_or("nothing known"),
+                VARIANT_NAMES[variant].0
+            ))
+        };
     }
 
     /// The variant of the line `Draw` is drawing, by the slot offset the
@@ -282,34 +304,38 @@ mod tests {
     }
 
     #[test]
-    fn a_line_is_known_by_its_time_and_victim_and_the_oldest_is_forgotten_first() {
+    fn a_line_is_known_by_its_names_and_the_oldest_is_forgotten_first() {
         let mut victim = [0u8; 64];
         victim[..7].copy_from_slice(b"Gorilla");
-        let key = line_key(0x4120_0000, &victim);
+        let key = line_key(b"warchyld\0", &victim);
         assert_eq!(
             key,
-            line_key(0x4120_0000, b"Gorilla\0garbage after the end")
+            line_key(b"warchyld", b"Gorilla\0garbage after the end")
         );
-        assert_ne!(key, line_key(0x4120_0001, &victim), "another time");
-        assert_ne!(key, line_key(0x4120_0000, b"icyHOT"), "another victim");
+        assert_ne!(key, line_key(b"warchyl", &victim), "another killer");
+        assert_ne!(key, line_key(b"warchyld", b"icyHOT"), "another victim");
+        assert_ne!(
+            line_key(b"ab", b"c"),
+            line_key(b"a", b"bc"),
+            "the names are kept apart"
+        );
+        assert_eq!(key & !KEY_MASK, 0);
         remember(key, 3);
-        remember(line_key(1, b"someone"), 1);
+        remember(line_key(b"x", b"someone"), 1);
         assert_eq!(recall(key), Some(3));
-        assert_eq!(recall(line_key(2, b"nobody")), None);
-        // A later notice for the same line wins.
+        assert_eq!(recall(line_key(b"x", b"nobody")), None);
+        // A later notice for the same pair wins.
         remember(key, 2);
         assert_eq!(recall(key), Some(2));
 
         // The oldest line is forgotten first (one test: the ring is shared).
-        let first = line_key(7, b"first");
+        let first = line_key(b"x", b"first");
         remember(first, 1);
-        for i in 0..REMEMBERED as u32 {
-            remember(line_key(100 + i, b"filler"), 0);
+        for i in 0..REMEMBERED {
+            remember(line_key(b"filler", format!("{i}").as_bytes()), 0);
         }
         assert_eq!(recall(first), None);
-        assert_eq!(
-            recall(line_key(100 + REMEMBERED as u32 - 1, b"filler")),
-            Some(0)
-        );
+        let last = format!("{}", REMEMBERED - 1);
+        assert_eq!(recall(line_key(b"filler", last.as_bytes())), Some(0));
     }
 }
