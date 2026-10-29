@@ -4,9 +4,28 @@
 /// GETs `url` and hands back the response once its status is a success. The
 /// error names the URL and either the transport failure or the status.
 pub fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>, String> {
-    let response = ureq::get(url)
-        .call()
-        .map_err(|e| crate::messages::labeled(url, e))?;
+    check(url, ureq::get(url).call())
+}
+
+/// Like [`get`], but gives up after `timeout` in total: ureq has no time limit
+/// of its own, so a stalled connection would otherwise wait forever. For reads
+/// a window waits on (the What's new release list, #1013).
+pub fn get_with_timeout(
+    url: &str,
+    timeout: std::time::Duration,
+) -> Result<ureq::http::Response<ureq::Body>, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .build()
+        .into();
+    check(url, agent.get(url).call())
+}
+
+fn check(
+    url: &str,
+    result: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+) -> Result<ureq::http::Response<ureq::Body>, String> {
+    let response = result.map_err(|e| crate::messages::labeled(url, e))?;
     let status = response.status();
     if !status.is_success() {
         return Err(crate::messages::url_returned_status(url, status));

@@ -11,6 +11,10 @@ use std::path::Path;
 pub const RELEASES_URL: &str =
     "https://api.github.com/repos/ccoventry/dod-studio/releases?per_page=30";
 
+/// How long the release list may take in all before the window falls back to
+/// the saved copy.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// The cache's file name in the app's data folder.
 pub const CACHE_FILE: &str = "release_notes_cache.json";
 
@@ -110,7 +114,7 @@ pub fn fetch_or_cached(url: &str, dir: &Path) -> History {
 }
 
 fn fetch(url: &str) -> Result<Vec<Release>, String> {
-    let mut response = crate::utils::http::get(url)?;
+    let mut response = crate::utils::http::get_with_timeout(url, FETCH_TIMEOUT)?;
     let text = response
         .body_mut()
         .read_to_string()

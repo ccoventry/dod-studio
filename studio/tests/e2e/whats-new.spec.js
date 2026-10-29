@@ -118,6 +118,13 @@ test('a failed GitHub read says so and keeps the saved copy', async ({ page }) =
   await expect(page.locator('#whats-new-status')).toContainText("Couldn't read GitHub's release list, so this is the copy saved last time.");
   await expect(page.locator('#whats-new-others .whats-new-version')).toHaveCount(1);
   await expect(page.locator('#whats-new-fetch-btn')).toBeVisible();
+
+  // Closed and opened again, the retry is still there (it was hidden on a
+  // reopen, so a failed read could not be retried until Studio restarted).
+  await page.locator('#whats-new-close-btn').click();
+  await page.evaluate(() => document.querySelector('#whats-new-menu-btn').click());
+  await expect(page.locator('#whats-new-modal')).toBeVisible();
+  await expect(page.locator('#whats-new-fetch-btn')).toBeVisible();
 });
 
 test("the first start after an update offers What's New in a toast", async ({ page }) => {

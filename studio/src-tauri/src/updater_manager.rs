@@ -132,11 +132,6 @@ pub async fn download_and_install_update(
     Ok(())
 }
 
-/// `cfg!(debug_assertions)` is compile-time info baked into the binary — the
-/// frontend has no other way to tell a `tauri build --debug` bundle (still a
-/// real installed build, unlike `npm run tauri dev`) apart from a genuine
-/// `--release` build, since both go through the same production Vite build
-/// and report `import.meta.env.DEV === false`.
 /// Earlier versions' release notes for the What's new window (#1013):
 /// GitHub's release list, saved in the app's data folder, or that saved copy
 /// when GitHub can't be read. `offline` reads only the saved copy, for a
@@ -162,6 +157,11 @@ pub async fn release_history(
     .await
 }
 
+/// `cfg!(debug_assertions)` is compile-time info baked into the binary — the
+/// frontend has no other way to tell a `tauri build --debug` bundle (still a
+/// real installed build, unlike `npm run tauri dev`) apart from a genuine
+/// `--release` build, since both go through the same production Vite build
+/// and report `import.meta.env.DEV === false`.
 #[tauri::command]
 pub fn is_debug_build() -> bool {
     cfg!(debug_assertions)

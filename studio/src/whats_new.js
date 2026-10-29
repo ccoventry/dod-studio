@@ -115,6 +115,7 @@ export function createWhatsNew(deps) {
   const S = STRINGS.WHATS_NEW;
   let history = null; // { releases, from_cache, error } once read this session
   let historyRead = false; // GitHub itself was asked this session
+  let readFailed = false; // that ask came back with an error or nothing
   let bundled; // undefined until read; null when the build has none
 
   function setStatus(text) {
@@ -167,7 +168,7 @@ export function createWhatsNew(deps) {
     const result = await deps.loadHistory(offline);
     if (fetchBtn) fetchBtn.disabled = false;
     if (result) history = result;
-    if (!offline) historyRead = true;
+    if (!offline) { historyRead = true; readFailed = !result || Boolean(result.error); }
     if (!result) setStatus(S.STATUS_FAILED);
     else if (result.error) {
       logFrontendEvent(`What's new: GitHub's release list could not be read: ${result.error}`);
@@ -175,7 +176,7 @@ export function createWhatsNew(deps) {
     } else if (offline && !historyRead) {
       setStatus(result.releases.length ? S.STATUS_OFFLINE_SAVED : S.STATUS_OFFLINE_NONE);
     } else setStatus('');
-    if (fetchBtn) fetchBtn.hidden = historyRead && !result?.error;
+    if (fetchBtn) fetchBtn.hidden = historyRead && !readFailed;
   }
 
   async function open() {
@@ -184,7 +185,8 @@ export function createWhatsNew(deps) {
     if (bundled === undefined) bundled = await deps.loadBundled();
     const online = deps.canReadGitHub();
     const fetchBtn = document.querySelector('#whats-new-fetch-btn');
-    if (fetchBtn) fetchBtn.hidden = online || historyRead;
+    // After a failed read the button stays, so a reopened window can retry.
+    if (fetchBtn) fetchBtn.hidden = historyRead ? !readFailed : online;
     await draw();
     if (!historyRead) {
       await readHistory(!online);
