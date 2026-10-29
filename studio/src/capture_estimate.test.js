@@ -105,7 +105,7 @@ describe('fast-forwarded gaps between kills (#831)', () => {
     expect(rampSavedSeconds([10, 15], { overSeconds: 3, speed: 4 })).toBe(0);
   });
 
-  it('takes the highlight's selected kills', () => {
+  it("takes the highlight's selected kills", () => {
     const s = { kills: [[1, 10, 'a'], [2, 20, 'b'], [3, 30, 'c']], start_index: 1, end_index: 2 };
     expect(streakKillSeconds(s)).toEqual([20, 30]);
     expect(streakKillSeconds({ kills: [] })).toEqual([]);

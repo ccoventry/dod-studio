@@ -5144,6 +5144,7 @@ mod tests {
             ],
             decal_flush: None,
             decal_ring_limit: None,
+            kill_gaps: Default::default(),
         }
     }
 
