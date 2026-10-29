@@ -267,6 +267,7 @@ mod hand_signals;
 mod hide_asset;
 mod hint_panel;
 mod hlae_window;
+mod hltv_fov;
 mod hltv_messages;
 mod hud_sprite_edges;
 mod hud_sprite_lod;
