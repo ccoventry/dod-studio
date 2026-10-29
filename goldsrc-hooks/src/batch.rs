@@ -278,9 +278,9 @@ enum Phase {
     },
 }
 
-/// How often a held batch repeats `BATCH_HELD`: the events pipe only notices
-/// a reader has gone when a write fails, so a hold that wrote nothing would
-/// never see Studio go.
+/// How often a held batch repeats `BATCH_HELD`, so a Studio that connects
+/// mid-hold hears the batch is held, and a failed write tells the events pipe
+/// at once that its reader has gone.
 const HELD_BEAT: Duration = Duration::from_secs(5);
 
 /// How long Studio may be gone from the events pipe before a held batch
