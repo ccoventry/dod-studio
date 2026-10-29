@@ -673,11 +673,13 @@ export const STRINGS = {
     BATCH_CANCELLED_TOAST: 'Batch capture cancelled.',
     BATCH_COMPLETED_TOAST: 'Batch capture completed successfully!',
     // A clip Cancel cut short (#1081) left a partial take: it isn't missing.
-    takesFoundMissing: (captured, total, cutShort = 0) => {
-      const missing = total - captured - cutShort;
+    // A take whose video stopped early (#1105) is partial too: not missing either.
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly;
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short by Cancel (partial take, not captured)`);
+      if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,

@@ -833,19 +833,40 @@ pub struct VerifiedBlock {
 /// (#1105): not captured, not renderable, so Finish clips and the take
 /// clean-up leave it alone. Takes with nothing on disk, or whose lengths
 /// can't be read cheaply (OBS, AGR), are left as they are.
-fn mark_short_takes(manifest: &CaptureManifest, verified: &mut [VerifiedBlock]) {
-    for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
-        if !v.captured || v.rendered {
-            continue;
-        }
-        if let Some(short) =
-            native::hlcr::take_length::short_take(&block.take_folder, manifest.capture_fps)
-        {
-            v.short_take = Some(short);
-            v.cut_short = true;
-            v.captured = false;
-            v.renderable = false;
-        }
+///
+/// With `settle`, a take that looks short is looked at once more after it:
+/// the game is killed the moment the batch ends, and HLAE's FFmpeg may still
+/// be writing the last take's AVI header, which reads as 0 frames until it
+/// is finalised.
+fn mark_short_takes(
+    manifest: &CaptureManifest,
+    verified: &mut [VerifiedBlock],
+    settle: Option<std::time::Duration>,
+) {
+    let judge = |i: usize| {
+        native::hlcr::take_length::short_take(&manifest.blocks[i].take_folder, manifest.capture_fps)
+    };
+    let mut short: Vec<(usize, native::hlcr::take_length::ShortTake)> = verified
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.captured && !v.rendered)
+        .filter_map(|(i, _)| judge(i).map(|s| (i, s)))
+        .collect();
+    if let Some(settle) = settle
+        && !short.is_empty()
+    {
+        std::thread::sleep(settle);
+        short = short
+            .into_iter()
+            .filter_map(|(i, _)| judge(i).map(|s| (i, s)))
+            .collect();
+    }
+    for (i, s) in short {
+        let v = &mut verified[i];
+        v.short_take = Some(s);
+        v.cut_short = true;
+        v.captured = false;
+        v.renderable = false;
     }
 }
 
@@ -1036,7 +1057,7 @@ pub(crate) fn verify_capture_takes_settling(
             }
         }
     }
-    mark_short_takes(manifest, &mut verified);
+    mark_short_takes(manifest, &mut verified, settle);
     for (i, (v, block)) in verified.iter_mut().zip(manifest.blocks.iter()).enumerate() {
         v.bytes = folder_bytes(&block.take_folder);
         on_checked(i + 1);
@@ -5377,8 +5398,6 @@ mod tests {
     }
 
     /// A take at `folder` as HLAE writes a frame sequence: `frames` BMPs in
-    /// `take0000/all`, the audio beside them.
-    /// A take at `folder` as HLAE writes a frame sequence: `frames` BMPs in
     /// `take0000/all`, and `audio_secs` of 8-bit mono 1 kHz audio beside them.
     fn bmp_take(folder: &Path, frames: usize, audio_secs: u32) {
         let take = folder.join("take0000");
@@ -5461,5 +5480,31 @@ mod tests {
         mark_cut_short(&manifest, &mut blocks, counts(2, 1));
         assert!(blocks[0].cut_short && blocks[0].short_take.is_some());
         assert!(blocks[1].cut_short && blocks[1].short_take.is_none());
+    }
+
+    /// A take still being finished when the batch ends looks short at first:
+    /// with a settle it is looked at again, and a whole one is captured.
+    #[test]
+    fn a_take_finished_during_the_settle_is_not_short() {
+        let scratch = Scratch::new("short_take_settle_1105");
+        let folder = scratch.path().join("chain_01_b0");
+        bmp_take(&folder, 5, 3);
+        let mut manifest = cut_short_manifest(&[("chain_01", 0)]);
+        manifest.capture_fps = 10;
+        manifest.blocks[0].take_folder = folder.clone();
+        let stream = folder.join("take0000").join("all");
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            for i in 5..30 {
+                std::fs::write(stream.join(format!("{i:05}.bmp")), b"bmp").unwrap();
+            }
+        });
+        let verified = verify_capture_takes_settling(
+            &manifest,
+            Some(std::time::Duration::from_millis(500)),
+            &mut |_| {},
+        );
+        writer.join().unwrap();
+        assert!(verified[0].captured && verified[0].short_take.is_none());
     }
 }

@@ -86,6 +86,10 @@ describe('takesFoundMissing (#1081)', () => {
       '1/3 takes found on disk — 1 missing, 1 cut short by Cancel (partial take, not captured).',
     );
     expect(STRINGS.CAPTURE.takesFoundMissing(1, 2)).toBe('1/2 takes found on disk — 1 missing.');
+    // #1105: a take whose video stopped early is not blamed on Cancel.
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2, 0, 1)).toBe(
+      '1/2 takes found on disk — 1 with video that stops early (partial take, not captured).',
+    );
   });
 });
 

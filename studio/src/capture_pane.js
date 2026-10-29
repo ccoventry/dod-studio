@@ -1351,8 +1351,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       const marked = advanced > 0 ? STRINGS.CAPTURE.highlightsMarkedCaptured(advanced) : '';
       if (captured < total) {
-        const cutShort = blocks.filter((b) => b.cut_short).length;
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cutShort)}${marked}`, 'error');
+        // A take whose video stopped early (#1105) is cut_short too, but Cancel isn't why.
+        const stoppedEarly = blocks.filter((b) => b.short_take).length;
+        const cutShort = blocks.filter((b) => b.cut_short && !b.short_take).length;
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cutShort, stoppedEarly)}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else {
