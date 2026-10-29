@@ -77,6 +77,18 @@ describe('bannedCommandsWarning', () => {
   });
 });
 
+describe('takesFoundMissing (#1081)', () => {
+  it('does not call a clip Cancel cut short missing', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(0, 1, 1)).toBe(
+      '0/1 takes found on disk — 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 3, 1)).toBe(
+      '1/3 takes found on disk — 1 missing, 1 cut short by Cancel (partial take, not captured).',
+    );
+    expect(STRINGS.CAPTURE.takesFoundMissing(1, 2)).toBe('1/2 takes found on disk — 1 missing.');
+  });
+});
+
 describe('finish step (#440)', () => {
   it('mentions clips in progress only when there are some', () => {
     expect(STRINGS.FINISH.progressStatus(3, 12, 2)).toBe('Finishing clips: 3 of 12, 2 in progress');
