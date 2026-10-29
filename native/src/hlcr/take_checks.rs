@@ -872,6 +872,7 @@ mod tests {
         TakePlan {
             length_secs,
             kill_offsets_secs: kills.to_vec(),
+            sped_up: Vec::new(),
         }
     }
 
@@ -1084,6 +1085,7 @@ mod tests {
         let plan = TakePlan {
             length_secs: 20.0,
             kill_offsets_secs: vec![2.0, 9.0],
+            sped_up: Vec::new(),
         };
         let meta = take_meta::SessionMeta {
             plan: Some(plan),
