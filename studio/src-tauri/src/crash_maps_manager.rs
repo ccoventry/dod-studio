@@ -55,7 +55,7 @@ pub async fn crash_map_warnings(demo_paths: Vec<String>) -> Result<Vec<CrashMapW
 }
 
 /// Forgets the crashes remembered on `map`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn forget_crash_map(map: String) -> Result<(), String> {
     crash_maps::forget(&native::shared::paths::get_appdata_dir(), &map).map_err(|e| e.to_string())
 }

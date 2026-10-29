@@ -9,17 +9,20 @@
 //! pipe a few seconds later, the game quits itself.
 //!
 //! "Connected" is the events pipe's own view: it notices a reader has gone
-//! when a write fails, and `BATCH_COMPLETE` is itself written to the pipe, so
-//! by the time the grace period ends a vanished Studio has been noticed. A
-//! Studio that is still connected keeps the last word, as before.
+//! when a write fails or, while idle, within half a second, and
+//! `BATCH_COMPLETE` is itself written to the pipe, so by the time the grace
+//! period ends a vanished Studio has been noticed. A Studio that is still
+//! connected keeps the last word, as before.
 //!
 //! Only on while the events pipe is (`GOLDSRC_HOOKS_EVENTS=0` turns both off).
 //!
 //! A Studio that was there when the batch ended has had its say, and the
-//! marker is forgotten: the game may be one Studio left open for the next
-//! batch (#725), and a reader that goes away later (the batch's pipe reader
-//! stops at the end, which the pipe only notices at its next write) must not
-//! close it then. A new batch forgets an old marker too.
+//! marker is forgotten: once the pipe has written `BATCH_COMPLETE` to a
+//! reader ([`studio_saw_end`]), or a reader is connected when the grace
+//! period ends. The game may be one Studio left open for the next batch
+//! (#725), and the batch's pipe reader stops at the end, which the pipe
+//! notices well inside the grace period: that must not close it. A new batch
+//! forgets an old marker too.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -84,6 +87,14 @@ fn next(seen_at_ms: u64, now_ms: u64, studio_connected: bool) -> Next {
     } else {
         Next::Quit
     }
+}
+
+/// Studio has read the batch's `BATCH_COMPLETE` (the events pipe wrote it to
+/// a reader), so ending the game or leaving it open is Studio's call. Called
+/// from the pipe's own thread, which is 32-bit only.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub fn studio_saw_end() {
+    reset();
 }
 
 /// Forgets an earlier batch's end: `batch.rs` calls it when a batch starts.
@@ -166,6 +177,16 @@ mod tests {
             Next::Forget
         );
         reset();
+        assert_eq!(
+            next(SEEN_AT_MS.load(Ordering::Acquire), u64::MAX / 2, false),
+            Next::Wait
+        );
+
+        // The pipe wrote `BATCH_COMPLETE` to Studio, whose reader then
+        // stopped well inside the grace period: no quit.
+        on_marker("[dod-studio] BATCH_COMPLETE");
+        assert_ne!(SEEN_AT_MS.load(Ordering::Acquire), 0);
+        studio_saw_end();
         assert_eq!(
             next(SEEN_AT_MS.load(Ordering::Acquire), u64::MAX / 2, false),
             Next::Wait

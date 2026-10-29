@@ -77,9 +77,9 @@ const POLL: Duration = Duration::from_millis(5);
 /// The events pipe, read so that `cancel` ends the read rather than a line
 /// that may never come. A batch run in a game that stays open (#725) ends
 /// with the game still serving the pipe, which takes one reader at a time
-/// and only notices a reader gone at its next write: a reader left waiting
-/// in a read would hold the pipe until the next batch's first marker, take
-/// that marker and drop it, and keep the next batch's reader out until then.
+/// and lets one go only once its handle is closed: a reader left waiting in
+/// a read would hold the pipe until the next batch's first marker, take that
+/// marker and drop it, and keep the next batch's reader out until then.
 struct UntilCancelled {
     pipe: std::fs::File,
     cancel: Arc<AtomicBool>,
