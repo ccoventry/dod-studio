@@ -12,7 +12,9 @@
 //! - `E time entity origin_z usehull solid gait sequence` -- every player entity (1-32) in
 //!   every snapshot, with fields carried over from the last update;
 //! - `V time view_ofs2` -- `clientdata`'s `view_ofs[2]` when it changes;
-//! - `N entity name` -- a player's name, from userinfo.
+//! - `N entity name` -- a player's name, from userinfo;
+//! - `S time server_time` -- `svc_time`, the clock `viewdemo` and
+//!   `ds_demo_seek_to` go by.
 //!
 //!     cargo run --release -p analysis --example crouch_eye_probe -- <demo> > rows.tsv
 use dem::open_demo_from_bytes;
@@ -101,6 +103,9 @@ fn main() {
                     continue;
                 };
                 match &**em {
+                    EngineMessage::SvcTime(st) => {
+                        println!("S\t{time:.4}\t{:.4}", st.time);
+                    }
                     EngineMessage::SvcUpdateUserInfo(ui) => {
                         let text = String::from_utf8_lossy(ui.user_info.as_slice()).to_string();
                         let parts: Vec<&str> = text
