@@ -245,6 +245,12 @@ pub struct CaptureBlock {
     /// any end-of-demo clamp.
     #[serde(default)]
     pub record_stop_tick: i32,
+    /// How many gaps between kills this take records sped up (#831,
+    /// `builder::kill_gaps`): its frames are fewer than its record window's.
+    /// 0 for a take recorded at real time throughout, which is every take of
+    /// a patched batch.
+    #[serde(default)]
+    pub ramped_gaps: usize,
     /// What this recording is planned to hold, in seconds on the `viewdemo` clock (#1084):
     /// written beside the take so its length and kills can be checked.
     /// `None` when the highlight's kills have no `viewdemo` times to plan from.
@@ -341,6 +347,67 @@ impl CaptureMode {
     /// with `mirv_agr` instead and writes no frames.
     pub fn hlae_records(self) -> bool {
         matches!(self, Self::FrameSequence | Self::DirectToVideo)
+    }
+}
+
+/// What a capture does with a long gap between two kills inside one clip
+/// (#831): Configuration's "Gaps between kills over N s".
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KillGapMode {
+    /// Recorded at real time, like the rest of the clip.
+    #[default]
+    Keep,
+    /// Recorded at `KillGaps::speed` (`dem_speed`), so the clip plays the
+    /// gap sped up. Seek Between Clips only: a patched demo has no demo
+    /// player clock to speed up (`builder::kill_gaps`).
+    FastForward,
+}
+
+/// Configuration's "Gaps between kills over [N] s: Keep / Fast-forward [4]x"
+/// (#831). Off (`Keep`) unless the user picks Fast-forward.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct KillGaps {
+    pub mode: KillGapMode,
+    /// A gap counts when two kills are more than this far apart.
+    pub over_seconds: f32,
+    /// How many times real time a fast-forwarded gap plays at.
+    pub speed: f32,
+}
+
+/// Review's own "Fast-forward gaps over 8 s" default (#665,
+/// `review_settings.js`), so the two settings start from the same idea of a
+/// long gap.
+pub const DEFAULT_KILL_GAP_SECONDS: f32 = 8.0;
+/// Review's default fast-forward speed (`review.rs`), the speed #831's
+/// capture probe measured.
+pub const DEFAULT_KILL_GAP_SPEED: f32 = 4.0;
+/// The fastest a gap may play: Review's own clamp (`review.rs` options).
+pub const MAX_KILL_GAP_SPEED: f32 = 16.0;
+
+impl Default for KillGaps {
+    fn default() -> Self {
+        Self {
+            mode: KillGapMode::Keep,
+            over_seconds: DEFAULT_KILL_GAP_SECONDS,
+            speed: DEFAULT_KILL_GAP_SPEED,
+        }
+    }
+}
+
+impl KillGaps {
+    /// The speed gaps are recorded at, or `None` when gaps are kept: mode
+    /// Keep, or a gap length or speed that can't fast-forward anything
+    /// (not a positive number, or a speed of 1x or less). Clamped to
+    /// [`MAX_KILL_GAP_SPEED`].
+    pub fn ramp_speed(&self) -> Option<f32> {
+        let usable = self.mode == KillGapMode::FastForward
+            && self.over_seconds.is_finite()
+            && self.over_seconds > 0.0
+            && self.speed.is_finite()
+            && self.speed > 1.0;
+        usable.then(|| self.speed.min(MAX_KILL_GAP_SPEED))
     }
 }
 
@@ -523,6 +590,9 @@ pub struct PatcherConfig {
     /// now, rather than refusing the batch.
     #[serde(default)]
     pub render_while_capturing: bool,
+    /// Gaps between kills inside a clip: kept, or recorded sped up (#831).
+    #[serde(default)]
+    pub kill_gaps: KillGaps,
     /// Configuration > Players' "Use in the game" box (#428), sent to the
     /// game as `ds_player_overrides` when its pipe first answers.
     /// `None` sends nothing: a config not built from the saved settings.
@@ -894,6 +964,7 @@ impl Default for PatcherConfig {
             hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
             render_while_capturing: false,
+            kill_gaps: KillGaps::default(),
             player_overrides: None,
             session_id: String::new(),
             hlae_path: String::new(),
