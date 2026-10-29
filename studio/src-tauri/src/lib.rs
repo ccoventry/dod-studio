@@ -437,21 +437,8 @@ async fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> 
 }
 
 fn export_pool_space(paths: Vec<String>) -> Result<u64, String> {
-    let mut total: u64 = 0;
-    let mut seen = std::collections::HashSet::new();
-    for path_str in paths {
-        let p = std::path::PathBuf::from(path_str);
-        if let Some(key) = native::sys::disk::volume_key(&p)
-            && !seen.insert(key)
-        {
-            continue;
-        }
-        let space = native::sys::disk::get_available_bytes(&p);
-        if space != u64::MAX {
-            total += space;
-        }
-    }
-    Ok(total)
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+    Ok(native::sys::disk::pool_free_bytes(&paths))
 }
 
 #[derive(serde::Serialize)]
@@ -1146,6 +1133,7 @@ pub fn run() {
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
+            updater_manager::release_history,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,
