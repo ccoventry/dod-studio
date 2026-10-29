@@ -1796,14 +1796,8 @@ pub async fn get_export_pool_free_gb(directories: Vec<String>) -> Result<f64, St
 }
 
 fn export_pool_free_gb(directories: &[String]) -> f64 {
-    let mut total: u64 = 0;
-    for dir in directories {
-        let free = native::sys::disk::get_available_bytes(&PathBuf::from(dir));
-        if free != u64::MAX {
-            total += free;
-        }
-    }
-    total as f64 / 1_073_741_824.0
+    let paths: Vec<PathBuf> = directories.iter().map(PathBuf::from).collect();
+    native::sys::disk::pool_free_bytes(&paths) as f64 / 1_073_741_824.0
 }
 
 #[derive(Serialize)]
