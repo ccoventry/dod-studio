@@ -222,10 +222,14 @@ pub fn status_line() -> Option<String> {
     let ours = &FORCED as *const AtomicI32 as usize as u32;
     let what = if present == ours {
         format!("forced {}", describe(FORCED.load(Ordering::Relaxed)))
-    } else {
-        // Safety: the game's own variable, inside client.dll's image.
+    } else if present != 0 && present == STOCK_OPERAND.load(Ordering::Acquire) {
+        // Safety: the game's own variable, inside client.dll's image
+        // (`operand_address` checked it).
         let own = unsafe { *(present as usize as *const i32) };
         format!("the map's own ({})", describe(own))
+    } else {
+        // Someone else rewrote the operand after us: don't follow it.
+        format!("the updater reads {present:#x}, not the game's variable or ours")
     };
     let fx = particlefx().map_or_else(|| "?".to_string(), |v| v.to_string());
     Some(format!(
