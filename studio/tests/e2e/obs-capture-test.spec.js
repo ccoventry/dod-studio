@@ -105,13 +105,14 @@ test('the ladder climbs until a rate clearly fails and recommends one step below
 
 test('"Use N fps" sets OBS Capture FPS to the recommended rate', async ({ page }) => {
   await gotoHarness(page, { verdicts: { 200: notSteady } });
-  await page.check('#obs-test-long');
+  // The bundled demo's clip is a minute already: no "1-minute clips" box.
+  await expect(page.locator('#obs-test-long-label')).toBeHidden();
   await page.click('#obs-fps-ladder-btn');
   await expect(page.locator('#obs-test-apply-btn')).toHaveText('Use 165 fps', { timeout: 10000 });
   // The table still shows every rate tried, the highest steady one included.
   await expect(page.locator('#obs-test-rows tr')).toHaveCount(6);
   await expect(page.locator('#obs-test-rows tr').nth(4).locator('td').first()).toHaveText('180');
-  expect((await invocations(page, 'obs_test_clip'))[0]).toEqual({ seconds: 60, demo: null });
+  expect((await invocations(page, 'obs_test_clip'))[0]).toEqual({ seconds: 20, demo: null });
   await page.click('#obs-test-apply-btn');
   await expect(page.locator('#config-obs-capture-fps')).toHaveValue('165');
   await expect(page.locator('#obs-test-result')).toContainText('OBS Capture FPS is now 165.');
@@ -122,6 +123,8 @@ test("on the player's own demo the ladder recommends the highest steady rate its
   await gotoHarness(page, { verdicts: { 180: notSteady } });
   await page.evaluate(() => { window.__mockInvokeHandlers['plugin:dialog|open'] = () => 'D:/demos/match.dem'; });
   await page.click('#obs-test-demo-pick-btn');
+  // A demo of the player's own offers "1-minute clips", and it lengthens the clip.
+  await page.check('#obs-test-long');
   await page.click('#obs-fps-ladder-btn');
   await expect(page.locator('#obs-test-result')).toContainText(
     'Steady up to 165 fps at OBS Quality High on your demo (its busiest stretch). Recommended: 165 fps.',
@@ -129,6 +132,11 @@ test("on the player's own demo the ladder recommends the highest steady rate its
   );
   await expect(page.locator('#obs-test-result')).not.toContainText('Why lower');
   await expect(page.locator('#obs-test-apply-btn')).toHaveText('Use 165 fps');
+  expect((await invocations(page, 'obs_test_clip'))[0]).toEqual({ seconds: 60, demo: 'D:/demos/match.dem' });
+  // Back on the bundled demo the box hides and unticks.
+  await page.click('#obs-test-demo-reset-btn');
+  await expect(page.locator('#obs-test-long-label')).toBeHidden();
+  await expect(page.locator('#obs-test-long')).not.toBeChecked();
 });
 
 test('an open game stops the test before any batch', async ({ page }) => {

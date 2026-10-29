@@ -300,6 +300,11 @@ export function createObsCaptureTest({ getState, persist }) {
     if (demoName) demoName.textContent = demo ? demo.split(/[\\/]/).pop() : STRINGS.OBS_TEST.DEMO_BUNDLED;
     if (demoName) demoName.title = demo || '';
     if (demoResetBtn) demoResetBtn.hidden = !demo;
+    // The bundled demo's clip is about a minute already, so "1-minute clips"
+    // only shows for a demo of the player's own.
+    const longLabel = el('obs-test-long-label');
+    if (longLabel) longLabel.hidden = !demo;
+    if (!demo && longBox) longBox.checked = false;
   };
   demoPickBtn?.addEventListener('click', async () => {
     const picked = await pickPath({

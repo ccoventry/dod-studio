@@ -3324,7 +3324,7 @@ export const STRINGS = {
     LADDER_BUTTON_TITLE:
         'Runs the same test at 60, 120, 144, 165, 180, 200 and 240 fps at your OBS Quality, stopping once a rate clearly fails, and says the highest rate this PC captures with no dropped or repeated frames. On the bundled demo it recommends one step below that, for maps that are busier to encode. About a minute and a half per rate. Your OBS Capture FPS stays as it is unless you choose to use the result.',
     LONG_LABEL: '1-minute clips',
-    LONG_TITLE: "Longer clips catch a PC that slows down as it warms up. On one of your own demos each rate takes about 40 s longer; the bundled demo's clip is about a minute already.",
+    LONG_TITLE: 'Longer clips catch a PC that slows down as it warms up. Each rate takes about 40 s longer.',
     STOP_BUTTON: 'Stop test',
     DEMO_LABEL: 'Test demo:',
     DEMO_BUNDLED: 'the one that comes with DoD Studio',
@@ -3340,7 +3340,10 @@ export const STRINGS = {
     PREPARING_CLIP: 'Getting the test clip ready…',
     ladderStep: (n, total, rate) => `Rate ${n} of up to ${total}, ${rate} fps. `,
     recording: (rate, status) => `Capturing at ${rate} fps: ${status || 'starting…'}`,
-    readingClip: (done, total) => `Reading the clip: frame ${done.toLocaleString()} of ${total.toLocaleString()}`,
+    // No count until the clip's frame total is known, rather than "frame 0 of 0".
+    readingClip: (done, total) => (total > 0
+      ? `Reading the clip: frame ${done.toLocaleString()} of ${total.toLocaleString()}`
+      : 'Reading the clip…'),
     DELETING: 'Deleting the test clip…',
     RESTORING: 'Putting OBS back to your OBS Capture FPS…',
     // Results.
