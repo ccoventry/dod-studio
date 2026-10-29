@@ -1,4 +1,6 @@
 mod audit_manager;
+mod batch_catch_up;
+mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
@@ -1011,6 +1013,8 @@ pub fn run() {
             launch_standalone_game,
             read_cfg_commands,
             check_engine_processes,
+            batch_catch_up::catch_up_unwatched_batches,
+            batch_close::wait_for_batch_start,
             kill_engine_processes,
             capture_manager::check_running_game,
             capture_manager::close_running_game,
