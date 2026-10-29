@@ -1224,6 +1224,13 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
         // writing the settings keeps it.
         let meta = native::hlcr::take_meta::SessionMeta {
             renders: native::hlcr::take_meta::read_history(folder),
+            // What the plan held for this block, so the take's length and
+            // kills can be checked against it (#1084).
+            plan: manifest
+                .blocks
+                .iter()
+                .find(|b| b.take_folder == folder)
+                .and_then(|b| b.plan.clone()),
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
@@ -4348,6 +4355,7 @@ mod tests {
                     end_tick: 1,
                     record_start_tick: 0,
                     record_stop_tick: 1,
+                    plan: None,
                 })
                 .collect(),
             capture_fps: 120,
@@ -5483,6 +5491,7 @@ mod tests {
                     // alone can't tell two demos' blocks apart.
                     record_start_tick: 100 * (block_index as i32 + 1),
                     record_stop_tick: 0,
+                    plan: None,
                 })
                 .collect(),
             capture_fps: 300,

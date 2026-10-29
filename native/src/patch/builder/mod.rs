@@ -888,6 +888,7 @@ pub fn build_batch_queue(
                 // than duplicating that arithmetic.
                 record_start_tick: 0,
                 record_stop_tick: 0,
+                plan: None,
             });
         }
         blocks.sort_by_key(|b| b.block_index);
@@ -1048,6 +1049,12 @@ pub fn build_batch_queue(
             if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
                 block.record_start_tick = record_start_tick;
                 block.record_stop_tick = r_stop;
+                block.plan = crate::hlcr::take_plan::plan_for_block(
+                    frame_times_ref,
+                    record_start_tick,
+                    r_stop,
+                    &block_kill_frames(streak),
+                );
             }
 
             // Custom command overrides

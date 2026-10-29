@@ -20,8 +20,15 @@
 //!   BAR bursts before `mirv_movie_sound_volume 0.25`. FFmpeg's `astats`
 //!   over HLAE's `sound.wav`, or over the video's own audio for an OBS take.
 //!
+//! - **Length and kills** (`take_plan.rs`): the take's frame count against
+//!   the length the batch planned, and each kill's place against the video,
+//!   from the plan recorded beside the take. A take without a plan (captured
+//!   before it was recorded) gets a note saying so, never a warning.
+//!
 //! A video shorter than its sound is #1105's partial take
-//! (`take_length.rs`), shown on the row already, so it isn't repeated here.
+//! (`take_length.rs`), shown on the row already; a video far short of its
+//! plan is reported here too, since that check also catches a take whose
+//! sound is short as well.
 //!
 //! Every finding says whether re-capturing helps ([`Cause::Capture`]) or the
 //! demo itself is the reason ([`Cause::Demo`]), because the fix differs.
@@ -36,12 +43,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::hlcr::take_frames::{self, SourceStamp, StreamMedia};
+use crate::hlcr::take_plan::{self, TakePlan};
 
 /// The checks' results, beside the stream's pictures.
 pub const CHECKS_FILE: &str = "checks.json";
 /// Bumped when what is checked or how changes, so older results are made
 /// again.
-const CHECKS_VERSION: u32 = 1;
+const CHECKS_VERSION: u32 = 2;
 
 /// A black run shorter than this is a cut or a flash, not a black take.
 pub const BLACK_MIN_SECS: f64 = 0.5;
@@ -85,6 +93,8 @@ pub enum Cause {
     Capture,
     /// The demo itself; re-capturing won't change it.
     Demo,
+    /// Nothing to say either way: a check that couldn't be made.
+    Unknown,
 }
 
 /// What a finding is about.
@@ -97,6 +107,12 @@ pub enum Check {
     NoSound,
     Silent,
     Clipping,
+    /// The video's frame count is off the planned length.
+    Length,
+    /// A kill the highlight lists is outside the video.
+    KillOutside,
+    /// The take has no plan to check its length and kills against.
+    NoPlan,
 }
 
 /// One thing the checks found.
@@ -114,6 +130,9 @@ pub struct Finding {
     pub count: Option<u32>,
     /// Share of samples at full scale, for clipping.
     pub share: Option<f64>,
+    /// The video's frame count, and the planned one, for a length finding.
+    pub frames: Option<u64>,
+    pub planned_frames: Option<u64>,
 }
 
 impl Finding {
@@ -126,6 +145,8 @@ impl Finding {
             secs: None,
             count: None,
             share: None,
+            frames: None,
+            planned_frames: None,
         }
     }
 }
@@ -141,6 +162,11 @@ pub struct TakeChecks {
     pub sound: Option<SourceStamp>,
     /// The clip's length in seconds, as FFmpeg decoded it.
     pub duration_secs: Option<f64>,
+    /// The video's frames, as decoded (a sequence's files).
+    pub frames: Option<u64>,
+    /// The plan the length and kill findings were made against, so a take
+    /// that gets one (or a different one) is checked again.
+    pub plan: Option<TakePlan>,
     /// The sound's loudest moment and its average, in dBFS, when it has
     /// sound.
     pub peak_db: Option<f64>,
@@ -414,6 +440,64 @@ pub fn progress_secs(line: &str) -> Option<f64> {
     (us >= 0).then(|| us as f64 / 1_000_000.0)
 }
 
+/// Frames decoded so far, from a `-progress` line (`frame=1500`).
+pub fn progress_frames(line: &str) -> Option<u64> {
+    line.strip_prefix("frame=")?.trim().parse().ok()
+}
+
+/// The plan findings for a take of `frames` frames at `fps`, or its
+/// `duration_secs` when the frames weren't counted. Without a plan, one note
+/// that these weren't checked.
+pub fn plan_findings(
+    plan: Option<&TakePlan>,
+    fps: Option<f64>,
+    frames: Option<u64>,
+    duration_secs: Option<f64>,
+) -> Vec<Finding> {
+    let Some(plan) = plan else {
+        return vec![Finding::new(Check::NoPlan, Cause::Unknown, false)];
+    };
+    let rate = fps.filter(|f| f.is_finite() && *f > 0.0);
+    let mut out = Vec::new();
+    if let (Some(rate), Some(frames)) = (rate, frames)
+        && let Some(m) = take_plan::length_mismatch(plan, rate, frames)
+    {
+        out.push(Finding {
+            frames: Some(m.actual_frames),
+            planned_frames: Some(m.planned_frames),
+            secs: Some(m.actual_frames as f64 / rate),
+            ..Finding::new(Check::Length, Cause::Capture, true)
+        });
+    }
+    let video_secs = match (rate, frames) {
+        (Some(rate), Some(frames)) => Some(frames as f64 / rate),
+        _ => duration_secs,
+    };
+    if let Some(video_secs) = video_secs {
+        let outside = take_plan::kills_outside(plan, video_secs);
+        if let Some(&first) = outside.first() {
+            out.push(Finding {
+                at_secs: Some(first),
+                secs: Some(video_secs),
+                count: Some(outside.len() as u32),
+                ..Finding::new(Check::KillOutside, Cause::Capture, true)
+            });
+        }
+    }
+    out
+}
+
+/// A take's plan and the rate it was captured at, from the file beside it.
+fn recorded_plan(take_folder: &Path) -> (Option<TakePlan>, Option<f64>) {
+    match super::take_meta::read_for_take(take_folder) {
+        Some(meta) => (
+            meta.plan,
+            Some(f64::from(meta.capture_fps)).filter(|f| *f > 0.0),
+        ),
+        None => (None, None),
+    }
+}
+
 fn sound_stamp(wav: &Path) -> SourceStamp {
     take_frames::source_stamp(&StreamMedia::Video(wav.to_path_buf()))
 }
@@ -436,7 +520,8 @@ fn read_cached_for(
     let checks: TakeChecks = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
     let usable = checks.version == CHECKS_VERSION
         && checks.source == take_frames::source_stamp(media)
-        && checks.sound == wav.map(sound_stamp);
+        && checks.sound == wav.map(sound_stamp)
+        && checks.plan == recorded_plan(take_folder).0;
     usable.then_some(checks)
 }
 
@@ -484,6 +569,7 @@ pub async fn make_checks(
     let source = take_frames::source_stamp(&media);
     let sound = wav.as_deref().map(sound_stamp);
     let total_secs = total.unwrap_or(0.0);
+    let mut decoded_frames: Option<u64> = None;
     let run = take_frames::run_ffmpeg_watched(
         ffmpeg,
         &pass_args(&picture, wav.as_deref()),
@@ -492,6 +578,9 @@ pub async fn make_checks(
         |line| {
             if let Some(done) = progress_secs(line) {
                 progress(done.min(total_secs), total_secs);
+            }
+            if let Some(n) = progress_frames(line) {
+                decoded_frames = Some(n);
             }
         },
     )
@@ -509,12 +598,29 @@ pub async fn make_checks(
         ));
     }
     let report = parse_report(&run.stderr, total);
+    let frames = match &media {
+        StreamMedia::Sequence(files) => Some(files.len() as u64),
+        StreamMedia::Video(_) => decoded_frames,
+    };
+    let (plan, plan_fps) = recorded_plan(take_folder);
+    let mut found = findings(&report);
+    found.extend(plan_findings(
+        plan.as_ref(),
+        plan_fps.or(match &picture {
+            PictureInput::Sequence { fps, .. } => Some(*fps),
+            PictureInput::Video(_) => None,
+        }),
+        frames,
+        total,
+    ));
     let checks = TakeChecks {
         version: CHECKS_VERSION,
         stream: stream.to_string(),
         source,
         sound,
         duration_secs: total,
+        frames,
+        plan,
         peak_db: report
             .sound
             .and_then(|s| s.peak_db)
@@ -523,7 +629,7 @@ pub async fn make_checks(
             .sound
             .and_then(|s| s.rms_db)
             .filter(|v| v.is_finite()),
-        findings: findings(&report),
+        findings: found,
     };
 
     let dir = take_frames::cache_dir(take_folder, stream);
@@ -539,6 +645,7 @@ pub async fn make_checks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hlcr::take_meta;
     use crate::test_support::Scratch;
     use std::sync::atomic::Ordering;
 
@@ -720,6 +827,116 @@ mod tests {
     }
 
     #[test]
+    fn progress_lines_give_frames_done() {
+        assert_eq!(progress_frames("frame=1500"), Some(1500));
+        assert_eq!(progress_frames("frame=N/A"), None);
+        assert_eq!(progress_frames("out_time_us=5"), None);
+    }
+
+    fn plan(length_secs: f64, kills: &[f64]) -> TakePlan {
+        TakePlan {
+            length_secs,
+            kill_offsets_secs: kills.to_vec(),
+        }
+    }
+
+    fn kinds(found: &[Finding]) -> Vec<Check> {
+        found.iter().map(|f| f.check).collect()
+    }
+
+    #[test]
+    fn a_take_matching_its_plan_has_no_plan_findings() {
+        let found = plan_findings(
+            Some(&plan(19.0, &[5.0, 12.0])),
+            Some(300.0),
+            Some(5700),
+            None,
+        );
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_take_far_short_of_its_plan_is_a_capture_warning_with_both_counts() {
+        let found = plan_findings(Some(&plan(19.0, &[5.0])), Some(300.0), Some(1500), None);
+        let length = found.iter().find(|f| f.check == Check::Length).unwrap();
+        assert_eq!(
+            (length.frames, length.planned_frames),
+            (Some(1500), Some(5700))
+        );
+        assert_eq!((length.cause, length.warn), (Cause::Capture, true));
+    }
+
+    #[test]
+    fn a_kill_past_the_video_is_one_warning_counting_them_all() {
+        let found = plan_findings(
+            Some(&plan(19.0, &[2.0, 12.0, 15.0])),
+            Some(300.0),
+            Some(2400),
+            None,
+        );
+        let kill = found
+            .iter()
+            .find(|f| f.check == Check::KillOutside)
+            .unwrap();
+        assert_eq!((kill.count, kill.at_secs), (Some(2), Some(12.0)));
+        assert_eq!(kill.secs, Some(8.0));
+        assert!(kill.warn);
+    }
+
+    #[test]
+    fn without_a_frame_count_kills_are_held_to_the_decoded_length() {
+        let found = plan_findings(Some(&plan(19.0, &[12.0])), None, None, Some(8.0));
+        assert_eq!(kinds(&found), vec![Check::KillOutside]);
+    }
+
+    #[test]
+    fn a_take_without_a_plan_gets_one_unknown_note_never_a_warning() {
+        let found = plan_findings(None, Some(300.0), Some(5700), Some(19.0));
+        assert_eq!(kinds(&found), vec![Check::NoPlan]);
+        assert_eq!((found[0].warn, found[0].cause), (false, Cause::Unknown));
+    }
+
+    #[test]
+    fn nothing_measured_means_no_plan_findings() {
+        assert!(plan_findings(Some(&plan(19.0, &[30.0])), None, None, None).is_empty());
+    }
+
+    #[test]
+    fn results_made_for_another_plan_are_not_reused() {
+        let take = Scratch::new("take_checks_plan_cache");
+        let take = take.path();
+        std::fs::create_dir_all(take.join("all")).unwrap();
+        std::fs::write(take.join("all").join("video.avi"), b"video").unwrap();
+        let media = take_frames::stream_media(&take.join("all")).unwrap();
+        let checks = TakeChecks {
+            version: CHECKS_VERSION,
+            stream: "all".to_string(),
+            source: take_frames::source_stamp(&media),
+            sound: None,
+            duration_secs: Some(1.0),
+            frames: Some(30),
+            plan: None,
+            peak_db: None,
+            rms_db: None,
+            findings: Vec::new(),
+        };
+        let dir = take_frames::cache_dir(take, "all");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(CHECKS_FILE),
+            serde_json::to_string(&checks).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(read_cached(take, "all"), Some(checks));
+        let meta = take_meta::SessionMeta {
+            plan: Some(plan(1.0, &[])),
+            ..take_meta::SessionMeta::new("s", 30)
+        };
+        take_meta::write(take, &meta).unwrap();
+        assert_eq!(read_cached(take, "all"), None);
+    }
+
+    #[test]
     fn progress_lines_give_seconds_done() {
         assert_eq!(progress_secs("out_time_us=1500000"), Some(1.5));
         assert_eq!(progress_secs("out_time_us=N/A"), None);
@@ -822,6 +1039,43 @@ mod tests {
             .unwrap();
         assert!(cached);
         assert_eq!(again, checks);
+
+        // Without a plan the length and kills are unknown, and say so.
+        assert!(kinds.contains(&Check::NoPlan), "{checks:?}");
+        assert_eq!(checks.frames, Some(180), "{checks:?}");
+
+        // A take that gets a plan is checked again against it: 6 s of video
+        // against 20 planned, and one of two kills past its end.
+        let plan = TakePlan {
+            length_secs: 20.0,
+            kill_offsets_secs: vec![2.0, 9.0],
+        };
+        let meta = take_meta::SessionMeta {
+            plan: Some(plan),
+            ..take_meta::SessionMeta::new("s", 30)
+        };
+        take_meta::write(take, &meta).unwrap();
+        assert_eq!(read_cached(take, "all"), None);
+        let (planned, cached) = make_checks(&ffmpeg, take, "all", None, cancel.clone(), |_, _| {})
+            .await
+            .unwrap();
+        assert!(!cached);
+        let length = planned
+            .findings
+            .iter()
+            .find(|f| f.check == Check::Length)
+            .unwrap_or_else(|| panic!("{planned:?}"));
+        assert_eq!(
+            (length.frames, length.planned_frames),
+            (Some(180), Some(600))
+        );
+        let kills = planned
+            .findings
+            .iter()
+            .find(|f| f.check == Check::KillOutside)
+            .unwrap_or_else(|| panic!("{planned:?}"));
+        assert_eq!((kills.count, kills.at_secs), (Some(1), Some(9.0)));
+        assert!(!planned.findings.iter().any(|f| f.check == Check::NoPlan));
 
         // A new sound.wav makes the results stale.
         make(&[
