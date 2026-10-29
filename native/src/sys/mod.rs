@@ -4,6 +4,9 @@ pub mod analysis_server;
 /// Whether reading a file would download it from a cloud drive (#992).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cloud_file;
+/// Releases the mouse a killed game left confined (#1095).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cursor_clip;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod dialogs;
 pub mod disk;
@@ -23,6 +26,9 @@ pub mod installs;
 pub mod junction;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod minimize;
+/// The DLLs a running process has loaded: which hook DLL a game has (#725).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod modules;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod packet_limit;
 #[cfg(not(target_arch = "wasm32"))]

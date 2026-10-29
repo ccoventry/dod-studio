@@ -1524,6 +1524,16 @@ mod tests {
         assert_eq!(line, format!("{}: OK", path.display()));
     }
 
+    /// The OBS capture test's bundled demo, cut at its end with
+    /// `analysis/examples/trim_demo.rs`.
+    #[test]
+    fn the_benchmark_demo_passes_the_integrity_check() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../test-fixtures/dodstudio_benchmark_anzio.dem");
+        let (ok, line) = integrity_line(&path);
+        assert!(ok, "{line}");
+    }
+
     #[test]
     fn an_unreadable_demo_fails_the_integrity_check_and_names_itself() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("no-such-demo.dem");
@@ -1540,9 +1550,18 @@ mod tests {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures");
         let nowhere = fixtures.join("no-such-folder");
         let (demos, missing) = collect_demos(&[fixture_path(), fixtures, nowhere.clone()]);
-        // The fixture named directly and found in its folder is listed once.
-        assert_eq!(demos.len(), 1, "{demos:?}");
-        assert!(demos[0].ends_with("ci_fixture.dem"));
+        // The fixture named directly and found in its folder is listed once,
+        // beside the folder's other demo.
+        let mut names: Vec<_> = demos
+            .iter()
+            .map(|d| d.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            ["ci_fixture.dem", "dodstudio_benchmark_anzio.dem"],
+            "{demos:?}"
+        );
         assert_eq!(missing, [nowhere]);
     }
 

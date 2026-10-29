@@ -258,7 +258,7 @@
 		"visible"		"1"
 		"enabled"		"1"
 		"editable"		"0"
-		"helptext"		"Go to the game folder, a drive, one of Studio's demo folders (the Capture page's list), or a folder visited lately."
+		"helptext"		"Go to the game folder, a drive, one of Studio's demo folders (the Highlights page's list), or a folder visited lately."
 	}
 	"FolderPath"
 	{

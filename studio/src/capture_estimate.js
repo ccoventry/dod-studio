@@ -30,7 +30,8 @@ export function streakSeconds(streak) {
  * must not be double-counted, since the engine records that overlap once.
  * Base cost is `w * h * 3` bytes/frame at the configured capture FPS, unless
  * `bytesPerFrame` is given — AGR mode passes its own much smaller figure
- * (`AGR_BYTES_PER_FRAME`, mirroring `sys::disk::AGR_BYTES_PER_FRAME`).
+ * (`AGR_BYTES_PER_FRAME`, mirroring `sys::disk::AGR_BYTES_PER_FRAME`). With
+ * `bytesPerSecond` the take is billed by its length instead (OBS, #1096).
  *
  * Does not account for `mirv_movie_separate_hud 1` typed into Initial
  * Commands — that triples the real cost (HUD pass recorded as its own
@@ -41,7 +42,7 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
   const {
     preRollSeconds, postRollSeconds,
     recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight, bytesPerFrame,
+    captureFps, resWidth, resHeight, bytesPerFrame, bytesPerSecond,
   } = opts;
   let totalSeconds = 0;
 
@@ -85,9 +86,49 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
     }
   });
 
+  // A take billed by time, not frames (OBS, #1096): whole seconds, as the
+  // backend bills each block.
+  if (bytesPerSecond != null) return Math.ceil(bytesPerSecond * Math.ceil(Math.max(0, totalSeconds)));
   const frames = Math.ceil(Math.max(0, totalSeconds) * captureFps);
   return frames * (bytesPerFrame ?? resWidth * resHeight * 3);
 }
 
 /** What one recorded AGR frame costs on disk — see `sys::disk::AGR_BYTES_PER_FRAME`. */
 export const AGR_BYTES_PER_FRAME = 8 * 1024;
+
+/** Bytes a pixel of a lossless video take — see `sys::disk::LOSSLESS_VIDEO_BYTES_PER_PIXEL` (#1096). */
+export const LOSSLESS_VIDEO_BYTES_PER_PIXEL = 2;
+
+/**
+ * What one frame is billed at for a capture mode and codec, or `undefined`
+ * for raw frames (3 bytes a pixel): AGR's own figure, and a compressed
+ * direct-to-video take at two thirds of raw. Mirrors the backend's
+ * `block_byte_estimate`.
+ */
+export function bytesPerFrameFor(mode, codec, width, height) {
+  if (mode === 'agr') return AGR_BYTES_PER_FRAME;
+  if (mode === 'direct_to_video' && codec !== 'rawvideo') return width * height * LOSSLESS_VIDEO_BYTES_PER_PIXEL;
+  return undefined;
+}
+
+/**
+ * MB (10^6 bytes) a minute an OBS take is billed at, per OBS Quality: the
+ * largest take measured in #1060 at 2560x1440 and 120 fps plus ~20% margin.
+ * Mirrors `sys::disk::obs_mb_per_minute`.
+ */
+export const OBS_MB_PER_MINUTE = {
+  small: 2300, standard: 3800, high: 5700, max: 6900, obs_simple: 4000,
+};
+
+/**
+ * Bytes a second of an OBS take is billed at: the quality's rate, scaled up
+ * (never down) for a picture bigger than 2560x1440 or a capture faster than
+ * 120 fps. Mirrors `sys::disk::calculate_obs_bytes`, which the pinned
+ * figures in both test suites keep in step.
+ */
+export function obsBytesPerSecond(quality, width, height, obsFps) {
+  const perMinute = OBS_MB_PER_MINUTE[quality] ?? OBS_MB_PER_MINUTE.standard;
+  const pixels = Math.max(0, width) * Math.max(0, height) / (2560 * 1440);
+  const rate = Math.max(0, obsFps) / 120;
+  return perMinute * 1_000_000 / 60 * Math.max(1, pixels) * Math.max(1, rate);
+}
