@@ -518,7 +518,7 @@ export const STRINGS = {
     KILL_GAPS_FAST_FORWARD: 'Fast-forward',
     KILL_GAPS_SPEED_UNIT: 'x',
     KILL_GAPS_HINT:
-      "Fast-forward plays a long wait between two kills sped up inside the clip, from 2 s after one kill to 4 s before the next. The clip comes out shorter and the speed-up is part of it: it can't be undone in the edit. Sound in the sped-up stretch is choppy. Needs Seek Between Clips (Pipeline tab); a batch that is patched keeps its gaps.",
+      "Fast-forward speeds up a long wait between two kills inside the clip, from 2 s after one to 4 s before the next. It's part of the clip (no undo in the edit), and its sound is choppy. Needs Seek Between Clips.",
     INITIAL_DELAY_LABEL: 'Initial Delay (s):',
     INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
