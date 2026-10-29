@@ -50,7 +50,7 @@ pub async fn take_checks(
     let cancel = checks.start();
     let mut last: Option<Instant> = None;
     let key = take_folder.clone();
-    let (result, _) = take_checks::check_take(
+    let (result, _) = take_checks::make_checks(
         &ffmpeg,
         Path::new(&take_folder),
         &stream,

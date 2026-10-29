@@ -432,10 +432,11 @@ fn read_cached_for(
     usable.then_some(checks)
 }
 
-/// Checks a take's stream, or reads back the results already made from
-/// what it holds now. `progress(done_secs, total_secs)` while FFmpeg runs.
+/// Checks a take's stream and saves the results beside it, or reads back
+/// the results already made from what it holds now.
+/// `progress(done_secs, total_secs)` while FFmpeg runs.
 /// `fps` is a frame sequence's rate when the take doesn't record its own.
-pub async fn check_take(
+pub async fn make_checks(
     ffmpeg: &Path,
     take_folder: &Path,
     stream: &str,
@@ -585,6 +586,28 @@ mod tests {
         assert_eq!(found[0].check, Check::Black);
         assert_eq!(found[0].cause, Cause::Capture);
         assert_eq!((found[0].at_secs, found[0].secs), (Some(2.0), Some(3.5)));
+    }
+
+    #[test]
+    fn a_black_stretch_is_not_also_reported_frozen() {
+        // A black picture never moves either: one finding, as black.
+        let report = parse_report(
+            "[blackdetect @ 0] black_start:2 black_end:5.5 black_duration:3.5\n\
+             [freezedetect @ 0] lavfi.freezedetect.freeze_start: 2\n\
+             [freezedetect @ 0] lavfi.freezedetect.freeze_duration: 3.5\n\
+             [freezedetect @ 0] lavfi.freezedetect.freeze_start: 7\n\
+             [freezedetect @ 0] lavfi.freezedetect.freeze_duration: 2.5\n\
+             [Parsed_astats_0 @ 0] Overall\n[Parsed_astats_0 @ 0] Peak level dB: -6\n",
+            Some(10.0),
+        );
+        let found: Vec<(Check, Option<f64>)> = findings(&report)
+            .iter()
+            .map(|f| (f.check, f.at_secs))
+            .collect();
+        assert_eq!(
+            found,
+            vec![(Check::Black, Some(2.0)), (Check::Frozen, Some(7.0))]
+        );
     }
 
     #[test]
@@ -754,7 +777,7 @@ mod tests {
 
         let cancel = Arc::new(AtomicBool::new(false));
         let mut ticks = Vec::new();
-        let (checks, cached) = check_take(&ffmpeg, take, "all", None, cancel.clone(), |d, t| {
+        let (checks, cached) = make_checks(&ffmpeg, take, "all", None, cancel.clone(), |d, t| {
             ticks.push((d, t))
         })
         .await
@@ -780,7 +803,7 @@ mod tests {
         assert_eq!(frozen.len(), 1, "{checks:?}");
         assert!((frozen[0].at_secs.unwrap() - 3.5).abs() < 0.2, "{frozen:?}");
 
-        let (again, cached) = check_take(&ffmpeg, take, "all", None, cancel.clone(), |_, _| {})
+        let (again, cached) = make_checks(&ffmpeg, take, "all", None, cancel.clone(), |_, _| {})
             .await
             .unwrap();
         assert!(cached);
@@ -799,9 +822,44 @@ mod tests {
         assert_eq!(read_cached(take, "all"), None);
 
         cancel.store(true, Ordering::SeqCst);
-        let err = check_take(&ffmpeg, take, "all", None, cancel, |_, _| {})
+        let err = make_checks(&ffmpeg, take, "all", None, cancel, |_, _| {})
             .await
             .unwrap_err();
         assert!(take_frames::is_cancelled(&err), "{err}");
+    }
+
+    /// The live check: `DS_TAKE_CHECKS_TAKES` lists take folders (HLAE's
+    /// `take0000`, `;`-separated) to check, each printed with its findings
+    /// and how long the pass took. Needs FFmpeg (`DODSTUDIO_TEST_FFMPEG`).
+    #[tokio::test]
+    #[ignore = "needs real takes: set DS_TAKE_CHECKS_TAKES and DODSTUDIO_TEST_FFMPEG"]
+    async fn real_takes() {
+        let ffmpeg = test_ffmpeg().expect("no FFmpeg: set DODSTUDIO_TEST_FFMPEG");
+        let list = std::env::var("DS_TAKE_CHECKS_TAKES").expect("DS_TAKE_CHECKS_TAKES is not set");
+        for take in list.split(';').filter(|s| !s.is_empty()) {
+            let started = std::time::Instant::now();
+            let result = make_checks(
+                &ffmpeg,
+                Path::new(take),
+                "all",
+                None,
+                Arc::new(AtomicBool::new(false)),
+                |_, _| {},
+            )
+            .await;
+            println!("{take} ({:.1} s):", started.elapsed().as_secs_f64());
+            match result {
+                Ok((checks, cached)) => {
+                    println!(
+                        "  cached {cached}, {:?} s, peak {:?} dB, rms {:?} dB",
+                        checks.duration_secs, checks.peak_db, checks.rms_db
+                    );
+                    for f in &checks.findings {
+                        println!("  {f:?}");
+                    }
+                }
+                Err(e) => println!("  error: {e}"),
+            }
+        }
     }
 }
