@@ -660,6 +660,8 @@ pub fn poll() {
     crate::pov_live_bob::poll();
     // A float compare unless ds_view_show_own_blood changed (#1035).
     crate::own_blood::poll();
+    // A float compare unless ds_map_weather changed (#1129).
+    crate::map_weather::poll();
     crate::map_sounds::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
@@ -840,6 +842,9 @@ fn status_text() -> String {
     }
     if let Some(blood) = crate::own_blood::status_line() {
         lines.push(blood);
+    }
+    if let Some(weather) = crate::map_weather::status_line() {
+        lines.push(weather);
     }
     lines.push(crate::player_overrides::status());
     if let Some(renames) = crate::player_names::status_line() {
@@ -1909,6 +1914,9 @@ pub fn install() {
     if let Some(blood) = register(crate::own_blood::NAME, "0") {
         crate::own_blood::set_cvar(blood);
     }
+    if let Some(weather) = register(crate::map_weather::NAME, "0") {
+        crate::map_weather::set_cvar(weather);
+    }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
             family.set_cvar(mute);
@@ -2115,6 +2123,7 @@ mod tests {
             crate::pov_live_bob::NAME,
             crate::pov_live_bob::LOG_NAME,
             crate::own_blood::NAME,
+            crate::map_weather::NAME,
             crate::map_sounds::VICTORY_MUSIC_NAME,
             crate::map_sounds::FLAG_CAPTURE_NAME,
             crate::map_sounds::LOG_NAME,
@@ -2143,6 +2152,7 @@ mod tests {
             crate::strafe_twitch::NAME,
             missing_shots::NAME,
             crate::own_blood::NAME,
+            crate::map_weather::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")
