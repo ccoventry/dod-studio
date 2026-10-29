@@ -700,6 +700,7 @@ mod tests {
 
     #[test]
     fn a_miss_upgrades_an_older_entry_and_leaves_the_old_one() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("upgrade");
         let demo = dir.join("x.dem");
         std::fs::write(&demo, b"not really a demo").unwrap();
@@ -726,6 +727,7 @@ mod tests {
 
     #[test]
     fn an_older_entry_that_cannot_be_upgraded_is_a_miss() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("no_upgrade");
         let demo = dir.join("x.dem");
         std::fs::write(&demo, b"not really a demo").unwrap();
@@ -799,6 +801,7 @@ mod tests {
 
     #[test]
     fn a_rescan_estimate_sorts_demos_by_what_the_cache_holds() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("estimate");
         let root = dir.join("cache");
         let [current, older, changed, never, unreadable_upgrade] =

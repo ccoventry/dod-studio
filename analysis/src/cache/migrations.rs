@@ -64,26 +64,72 @@ pub const MIGRATIONS: &[Migration] = &[
         to: 13,
         upgrade: v12_to_v13,
     },
-    Migration {
-        from: 13,
-        to: 14,
-        upgrade: v13_to_v14,
-    },
+    // No step to 14 (#1128): a kill's headshot comes from the demo's helmet
+    // events, which no entry keeps, so every entry with a kill would need a
+    // re-parse anyway. With no step, older entries are a plain miss: the
+    // rescan estimate counts them as full reads (an "upgradable" entry is
+    // estimated at milliseconds), and the stale-cache sweep can delete the
+    // old folders. The steps below still run in tests.
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
 const LEFT: &str = "a player with kills left before the demo ended";
 const RECONNECTED: &str = "a player with kills reconnected";
 
+/// The steps the cache runs: [`MIGRATIONS`], or in a test the table it set
+/// with [`use_steps`].
+#[cfg(not(test))]
+fn steps() -> &'static [Migration] {
+    MIGRATIONS
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_STEPS: std::cell::Cell<&'static [Migration]> = const { std::cell::Cell::new(MIGRATIONS) };
+}
+
+#[cfg(test)]
+fn steps() -> &'static [Migration] {
+    TEST_STEPS.with(std::cell::Cell::get)
+}
+
+/// Puts back the steps a test replaced, when it ends.
+#[cfg(test)]
+pub(crate) struct StepsGuard(&'static [Migration]);
+
+#[cfg(test)]
+impl Drop for StepsGuard {
+    fn drop(&mut self) {
+        TEST_STEPS.with(|t| t.set(self.0));
+    }
+}
+
+/// Makes the cache use `table` for its steps on this thread until the guard
+/// drops. The cache's own tests need a schema that upgrades, which the real
+/// table lacks right after a bump with no step (v14, #1128).
+#[cfg(test)]
+pub(crate) fn use_steps(table: &'static [Migration]) -> StepsGuard {
+    StepsGuard(TEST_STEPS.with(|t| t.replace(table)))
+}
+
+/// v7 upgraded by the real steps as far as they go (v13), standing in for a
+/// step to the current schema: what the cache's plumbing tests upgrade with.
+#[cfg(test)]
+pub(crate) const V7_UPGRADES: &[Migration] = &[Migration {
+    from: 7,
+    to: super::SCHEMA_VERSION,
+    upgrade: |analysis| upgrade_with(MIGRATIONS, 7, 13, analysis),
+}];
+
 /// Whether an entry from schema `version` can be upgraded to the current one.
 pub fn upgrades_from(version: u32) -> bool {
-    version < super::SCHEMA_VERSION && chain(MIGRATIONS, version, super::SCHEMA_VERSION).is_some()
+    version < super::SCHEMA_VERSION && chain(steps(), version, super::SCHEMA_VERSION).is_some()
 }
 
 /// Runs every step from schema `from` to the current one on `analysis` (an
 /// entry's `analysis` object).
 pub fn upgrade(from: u32, analysis: &mut Value) -> Upgrade {
-    upgrade_with(MIGRATIONS, from, super::SCHEMA_VERSION, analysis)
+    upgrade_with(steps(), from, super::SCHEMA_VERSION, analysis)
 }
 
 fn upgrade_with(migrations: &[Migration], from: u32, to: u32, analysis: &mut Value) -> Upgrade {
@@ -258,8 +304,6 @@ fn v11_to_v12(analysis: &mut Value) -> Upgrade {
     Upgrade::Done
 }
 
-const HEADSHOTS_NEED_THE_DEMO: &str = "a kill's headshot comes from the demo's helmet events";
-
 const ROCKET_OPENS_STREAK: &str = "a kill streak starts with a rocket kill";
 
 /// #1091: a rocket kill after its shooter's death joins the life it was
@@ -290,20 +334,6 @@ fn v12_to_v13(analysis: &mut Value) -> Upgrade {
         }
     }
     Upgrade::Done
-}
-
-/// #1128: every kill says whether it was a headshot, told from the helmet
-/// events in the demo itself, which an entry does not keep. Only an entry
-/// with no kills has nothing to tell.
-fn v13_to_v14(analysis: &mut Value) -> Upgrade {
-    match analysis
-        .pointer("/state/kill_positions")
-        .and_then(Value::as_array)
-    {
-        None => Upgrade::NeedsReparse(MALFORMED),
-        Some(kills) if kills.is_empty() => Upgrade::Done,
-        Some(_) => Upgrade::NeedsReparse(HEADSHOTS_NEED_THE_DEMO),
-    }
 }
 
 #[cfg(test)]
@@ -370,24 +400,31 @@ mod tests {
     }
 
     #[test]
-    fn the_real_chain_goes_7_9_10_11_12_13_14_and_8_has_none() {
-        let hops: Vec<_> = chain(MIGRATIONS, 7, 14)
+    fn the_real_chain_goes_7_9_10_11_12_13_and_8_has_none() {
+        let hops: Vec<_> = chain(MIGRATIONS, 7, 13)
             .unwrap()
             .iter()
             .map(|m| (m.from, m.to))
             .collect();
-        assert_eq!(
-            hops,
-            [(7, 9), (9, 10), (10, 11), (11, 12), (12, 13), (13, 14)]
-        );
-        assert!(upgrades_from(7) && upgrades_from(9) && upgrades_from(10) && upgrades_from(11));
+        assert_eq!(hops, [(7, 9), (9, 10), (10, 11), (11, 12), (12, 13)]);
         assert!(!upgrades_from(8) && !upgrades_from(6));
         assert!(!upgrades_from(super::super::SCHEMA_VERSION));
     }
 
-    /// The chain up to v13: what the fixture's entries still upgrade through.
-    /// v14's step asks for a re-parse of any entry with kills (#1128), so an
-    /// upgrade to the current schema can't be compared with a fresh analysis.
+    /// v14 (#1128) has no step: a v13 entry has no helmet events to tell a
+    /// headshot from, so it, and every older one, is a miss. An "upgradable"
+    /// entry would be estimated at milliseconds by the rescan prompt while
+    /// it re-parses in full, and would keep its old folder from the sweep.
+    #[test]
+    fn no_entry_older_than_14_upgrades() {
+        assert_eq!(super::super::SCHEMA_VERSION, 14);
+        for version in 0..14 {
+            assert!(!upgrades_from(version), "v{version}");
+        }
+    }
+
+    /// The chain up to v13, the last schema with a step: what the fixture's
+    /// entries still upgrade through, so the steps stay tested.
     fn upgrade_to_13(from: u32, analysis: &mut Value) -> Upgrade {
         upgrade_with(MIGRATIONS, from, 13, analysis)
     }
@@ -448,23 +485,6 @@ mod tests {
     }
 
     #[test]
-    fn a_v13_entry_with_kills_asks_for_a_reparse_and_one_without_is_current() {
-        let mut with_kills = json!({"state": {"kill_positions": [{}]}});
-        assert_eq!(
-            v13_to_v14(&mut with_kills),
-            Upgrade::NeedsReparse(HEADSHOTS_NEED_THE_DEMO)
-        );
-        assert_eq!(
-            v13_to_v14(&mut json!({"state": {"kill_positions": []}})),
-            Upgrade::Done
-        );
-        assert_eq!(
-            v13_to_v14(&mut json!({"state": {}})),
-            Upgrade::NeedsReparse(MALFORMED)
-        );
-    }
-
-    #[test]
     fn a_malformed_entry_asks_for_a_reparse_and_never_panics() {
         for mut value in [
             json!(null),
@@ -480,7 +500,7 @@ mod tests {
         ] {
             for from in [7, 8, 9] {
                 assert!(
-                    matches!(upgrade(from, &mut value), Upgrade::NeedsReparse(_)),
+                    matches!(upgrade_to_13(from, &mut value), Upgrade::NeedsReparse(_)),
                     "{from}: {value}"
                 );
             }
@@ -599,7 +619,7 @@ mod tests {
             serde_json::to_value(&fresh).unwrap()
         );
         assert_eq!(
-            upgrade(10, &mut json!({"state": {}})),
+            upgrade_to_13(10, &mut json!({"state": {}})),
             Upgrade::NeedsReparse(MALFORMED)
         );
     }
