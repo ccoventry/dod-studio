@@ -38,7 +38,7 @@ static BOXED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new()
 const SEEK_KEY: &CStr = c"seek";
 const TARGET_KEY: &CStr = c"target";
 /// The columns past the row number (which is the window's own `demoname`
-/// column, retitled), as the Capture page's Highlights table names them:
+/// column, retitled), as the Highlights page's Highlight Details table names them:
 /// key, heading, width. The Player column is hidden for a POV demo.
 const COLUMNS: [(&CStr, &CStr, i32); 5] = [
     (c"player", c"Player", 140),

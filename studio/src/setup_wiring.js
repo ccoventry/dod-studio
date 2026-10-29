@@ -1,5 +1,5 @@
 // setup_wiring.js
-// Glue for the first-run Setup window and the Capture page's checklist card
+// Glue for the first-run Setup window and the Highlights page's checklist card
 // (#599): gathers what is set (paths, HLAE's FFmpeg, folders with their free
 // space, demos) into one snapshot, redraws both from it, and runs their
 // actions against the same fields and lists Configuration edits, so the two
