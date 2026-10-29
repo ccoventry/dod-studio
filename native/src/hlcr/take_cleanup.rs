@@ -15,7 +15,7 @@
 //! touched: the take would be the only copy left.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::hlcr::scanner::{ClipData, scan_folder_background};
 use crate::hlcr::take_delete::{TakeDeletion, plan_take_deletion};
@@ -169,16 +169,12 @@ pub fn folder_key(path: &str) -> String {
         .to_string()
 }
 
-/// The drive a path is on (`d:`, or `\\server\share`), so two Destinations
-/// folders on one drive count its free space once. Empty for a path with no
-/// drive, which every such path then shares.
+/// The volume a path is on (`sys::disk::volume_key`), so two Destinations
+/// folders on one drive count its free space once, and a disk mounted as a
+/// folder counts apart (#1041). Empty for a path with no drive, which every
+/// such path then shares.
 pub fn volume_of(path: &Path) -> String {
-    match path.components().next() {
-        Some(Component::Prefix(prefix)) => {
-            prefix.as_os_str().to_string_lossy().to_ascii_lowercase()
-        }
-        _ => String::new(),
-    }
+    crate::sys::disk::volume_key(path).unwrap_or_default()
 }
 
 /// Free space on the drives a job writes to, and the pieces it writes there.
@@ -812,12 +808,15 @@ mod tests {
     }
 
     #[test]
-    fn a_volume_is_the_drive_letter() {
+    fn folders_on_one_drive_are_one_volume() {
         if cfg!(windows) {
-            let mut path = PathBuf::from("D:");
+            let mut path = PathBuf::from("C:");
             path.push("captures");
             path.push("s1");
-            assert_eq!(volume_of(&path), "d:");
+            let mut other = PathBuf::from("c:");
+            other.push("clips");
+            assert_eq!(volume_of(&path), volume_of(&other));
+            assert!(!volume_of(&path).is_empty());
         }
         assert_eq!(volume_of(Path::new("relative")), "");
     }

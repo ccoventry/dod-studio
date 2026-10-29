@@ -2068,3 +2068,83 @@ fn a_direct_to_video_take_is_billed_as_compressed_video_not_raw_frames() {
     config.ffmpeg_capture_codec = CaptureCodec::RawVideo;
     assert_eq!(bill(&config), frames);
 }
+
+#[test]
+fn an_obs_take_is_billed_by_its_quality_setting_not_as_raw_frames() {
+    use crate::patch::{CaptureMode, ObsRecordingQuality as Q};
+    // #1096: one clip of a few seconds. The figures are pinned in
+    // studio/src/capture_estimate.test.js too, so the Capture tab and the
+    // backend stay in step.
+    assert_eq!(
+        crate::sys::disk::calculate_obs_bytes(Q::Standard, 2560, 1440, 120, 10.0),
+        633_333_334
+    );
+    // A bigger picture or a faster capture scales it up, a smaller one does not shrink it.
+    assert_eq!(
+        crate::sys::disk::calculate_obs_bytes(Q::Standard, 3840, 2160, 240, 10.0),
+        2_850_000_000
+    );
+    assert_eq!(
+        crate::sys::disk::calculate_obs_bytes(Q::Standard, 1280, 720, 60, 10.0),
+        633_333_334
+    );
+    // Above the largest take measured per quality (MB a minute, #1060).
+    for (quality, measured) in [
+        (Q::Small, 1_900u64),
+        (Q::Standard, 3_170),
+        (Q::High, 4_740),
+        (Q::Max, 5_720),
+        (Q::ObsSimple, 3_340),
+    ] {
+        let minute = crate::sys::disk::calculate_obs_bytes(quality, 2560, 1440, 120, 60.0);
+        assert!(minute > measured * 1_000_000, "{quality:?}");
+        assert!(
+            minute < measured * 1_000_000 * 5 / 4,
+            "{quality:?} within 25%"
+        );
+    }
+
+    let mut config = PatcherConfig::default();
+    config.capture_mode = CaptureMode::Obs;
+    config.obs.recording_quality = Q::Standard;
+    config.resolution_width = 2560;
+    config.resolution_height = 1440;
+    config.obs_capture_fps = 120;
+    config.capture_fps = 300;
+    let streak = CaptureStreak {
+        start_tick: 1000,
+        end_tick: 1200,
+        source_demo: "demo1.dem".to_string(),
+        target_player: None,
+        kill_count: 1,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 0,
+        kills: Vec::new(),
+        start_index: 0,
+        end_index: 0,
+        total_demo_frames: 3000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
+        status: Default::default(),
+    };
+    let secs = config.calculate_total_capture_duration(2.0);
+    let billed = block_byte_estimate(&config, &streak, 100.0);
+    assert_eq!(
+        billed,
+        crate::sys::disk::calculate_obs_bytes(Q::Standard, 2560, 1440, 120, secs)
+    );
+    let raw = crate::sys::disk::calculate_raw_sequence_bytes(2560, 1440, 300, secs);
+    assert!(
+        billed * 10 < raw,
+        "not billed as raw frames at the capture fps"
+    );
+    config.obs.recording_quality = Q::Max;
+    assert!(block_byte_estimate(&config, &streak, 100.0) > billed);
+}
