@@ -505,6 +505,28 @@ export async function stopHighlightReview() {
     });
 }
 
+/** The review library's saved marks (#848) for the demos with these
+ *  `source_key`s: `{ [key]: { name, highlights: { [id]: entry } } }`. */
+export async function reviewLibraryGet(keys) {
+  return invoke("review_library_get", { keys })
+    .catch((err) => {
+      console.error("IPC Execution Error (review_library_get):", err);
+      showToast(STRINGS.IPC.reviewLibraryFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
+/** Saves one demo's changed highlights to the review library (#848):
+ *  `changes` maps a highlight id to its entry, or null to remove it. */
+export async function reviewLibraryUpdate(key, name, changes) {
+  return invoke("review_library_update", { key, name, changes })
+    .catch((err) => {
+      console.error("IPC Execution Error (review_library_update):", err);
+      showToast(STRINGS.IPC.reviewLibraryFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */

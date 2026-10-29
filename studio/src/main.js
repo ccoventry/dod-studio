@@ -5,7 +5,7 @@ import { renderMasterList, initMasterPane } from './master_pane.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
-import { renderDetailView, initDetailPane } from './detail_pane.js';
+import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
 import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
@@ -58,6 +58,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { createReviewLibrary } from './review_library.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { createSetup } from './setup_wiring.js';
 import { offerPinnedReview } from './pinned_review.js';
@@ -109,6 +110,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     getProjectTeams: () => projectTeams,
     onChange: () => markProjectDirty(),
   });
+  // Review marks kept outside the project, for demos a scan adds (#848).
+  const reviewLibrary = createReviewLibrary({
+    getDemos: () => currentScannedDemos, hasProjectFile: () => !!projectSession.currentPath(),
+    onBroughtIn: (streaks) => { streaks.forEach(updateStreakVisuals); refreshAfterRelocation(true); },
+  });
   // Save / Load / New Session, the unsaved-changes prompt and the header's
   // session indicator: project_session.js. checkMissingDemos is declared
   // further down this scope, so it's reached through a closure.
@@ -126,6 +132,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Match and half per demo (#685), from the analyzer cache; declared
       // further down (queue_match_groups.js), reached through the closure.
       regroupMatches();
+      reviewLibrary.noteLoaded();
     },
     getTakeIndex: () => takeIndex,
     setTakeIndex: (index) => { takeIndex = index; },
@@ -139,7 +146,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     offerConvert: createProjectConvert({ persist: () => persistAppSettings() }).offerConvert,
     onProjectRenamed: (oldPath, newPath) => recentProjects.rename(oldPath, newPath),
   });
-  const { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
+  const { markProjectDirty: markSessionDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation, openProject } = projectSession;
+  const markProjectDirty = () => { markSessionDirty(); reviewLibrary.sync(); }; // the library sees every change
   // File → Open Recent (#935), saved in the settings file.
   const recentProjects = createRecentProjects({ openProject, persistAppSettings: () => persistAppSettings() });
 
@@ -435,7 +443,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
-  startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation, persistAppSettings });
+  startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,
+    persistAppSettings: async () => { await reviewLibrary.flush(); await persistAppSettings(); } });
 
   // Delete callback: remove a demo from the active scan list and re-render.
   // Called by master_pane.js when the 🗑 button is clicked on a row. Returns
