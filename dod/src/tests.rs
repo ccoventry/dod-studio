@@ -433,6 +433,25 @@ fn weapon_is_grenade() {
 }
 
 #[test]
+fn weapon_is_projectile() {
+    let projectiles: Vec<Weapon> = (0..=43u8)
+        .map(|id| weapon(&[id]).unwrap().1)
+        .filter(Weapon::is_projectile)
+        .collect();
+    assert_eq!(
+        projectiles,
+        vec![
+            Weapon::Mk2Grenade,
+            Weapon::StickGrenade,
+            Weapon::Bazooka,
+            Weapon::Panzerschreck,
+            Weapon::Piat,
+            Weapon::MillsBomb
+        ]
+    );
+}
+
+#[test]
 fn ammo_ids() {
     let cases = [
         (0u8, "Unknown"),

@@ -34,12 +34,15 @@ use std::path::{Path, PathBuf};
 
 use crate::patch::types::{CaptureStreak, PatchJob};
 
-/// A batch the hook runs: its file, and the copies of demos on another
-/// drive it plays from (`patch::source_copies`), which go when it ends.
+/// A batch the hook runs: its file, the copies of demos on another drive it
+/// plays from (`patch::source_copies`, for a hook DLL older than #779),
+/// which go when it ends, and whether it plays a demo on another drive by
+/// its full path (#779).
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeBatch {
     pub file: PathBuf,
     pub source_copies: Vec<PathBuf>,
+    pub other_drives_in_place: bool,
     /// The open game the batch runs in instead of launching one
     /// (`patch::batch_reuse`, #725), by PID.
     pub reuse_game: Option<u32>,
@@ -188,7 +191,8 @@ pub fn batch_file(
 
 /// [`batch_file`], with a demo in `play_as` played from that path instead
 /// of its own: a demo on another drive than the game is copied into the
-/// game's folder for the batch (`patch::source_copies`). The highlights
+/// game's folder for the batch when the hook DLL is older than #779
+/// (`patch::source_copies`). The highlights
 /// still belong to the original, so the clock is the original's.
 pub fn batch_file_playing(
     jobs: &[PatchJob],
@@ -297,9 +301,19 @@ pub fn early_lines(keep_game_behind: bool) -> Vec<String> {
     lines
 }
 
-/// The console line that starts `file`, once the game has settled.
-pub fn start_lines(file: &Path) -> Vec<String> {
-    vec![format!("{BATCH_COMMAND} start \"{}\"", file.display())]
+/// The console line that starts `batch`'s file, once the game has settled.
+/// A batch that plays a demo on another drive by its full path first turns
+/// the hook's other-drive opens on, in case the player turned them off.
+pub fn start_lines(batch: &RuntimeBatch) -> Vec<String> {
+    let mut lines = Vec::new();
+    if batch.other_drives_in_place {
+        lines.push(crate::preview_in_place::OTHER_DRIVES_ON.to_string());
+    }
+    lines.push(format!(
+        "{BATCH_COMMAND} start \"{}\"",
+        batch.file.display()
+    ));
+    lines
 }
 
 #[cfg(test)]
@@ -498,9 +512,22 @@ mod tests {
             early_lines(false),
             ["ds_capture_run_in_background 1", "ds_capture_stay_behind 0"]
         );
+        let mut batch = RuntimeBatch {
+            file: PathBuf::from("C:/x y/b.txt"),
+            ..Default::default()
+        };
         assert_eq!(
-            start_lines(Path::new("C:/x y/b.txt")),
+            start_lines(&batch),
             ["ds_capture_batch start \"C:/x y/b.txt\""]
+        );
+        // A demo played from another drive by its full path (#779).
+        batch.other_drives_in_place = true;
+        assert_eq!(
+            start_lines(&batch),
+            [
+                "ds_demo_other_drives 1",
+                "ds_capture_batch start \"C:/x y/b.txt\""
+            ]
         );
     }
 }

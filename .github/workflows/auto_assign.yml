@@ -1,0 +1,38 @@
+# A new issue or PR that nobody assigned goes to the repo owner, so nothing
+# sits unassigned. GitHub doesn't assign anyone by itself, and Author and
+# Assignee are separate fields. An assignee set when the item is opened is
+# kept as it is. The job keeps the name `assign`, which PRs already show as a check.
+#
+# Issue events run the copy of this file on the default branch (main), so the
+# issue half only starts working once this file reaches main. PR events run
+# the copy on the PR's base branch.
+name: Auto-assign
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign the repo owner when no one is assigned
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          ASSIGNEES: ${{ toJSON(github.event.issue.assignees || github.event.pull_request.assignees) }}
+        run: |
+          if [ "$(echo "$ASSIGNEES" | jq 'length')" != "0" ]; then
+            echo "Already assigned; leaving it as set."
+            exit 0
+          fi
+          gh api -X POST "repos/$REPO/issues/$NUMBER/assignees" -f "assignees[]=$OWNER" --silent
+          echo "Assigned #$NUMBER to $OWNER."

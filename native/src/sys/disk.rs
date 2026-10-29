@@ -2,6 +2,22 @@ pub fn calculate_raw_sequence_bytes(w: i32, h: i32, fps: i32, duration_secs: f32
     (w * h * 3) as u64 * (fps as u64) * (duration_secs as f64).ceil() as u64
 }
 
+/// Bytes per pixel a lossless direct-to-video take (Ut Video, FFV1, x264
+/// lossless) is billed at: two thirds of the raw frame's 3 (#1096). Measured
+/// 2026-10-28 on three real Ut Video captures (two clips, 2560x1440 at
+/// 300 fps): 1.18 and 1.66 bytes a pixel, so this is ~20% over the larger.
+/// FFV1 and x264 lossless are smaller than Ut Video on the same frames
+/// (`CaptureCodec`'s transcode figures), so the same bound covers them.
+pub const LOSSLESS_VIDEO_BYTES_PER_PIXEL: u64 = 2;
+
+/// What a lossless direct-to-video take of `duration_secs` is expected to
+/// need on disk: an upper bound, see [`LOSSLESS_VIDEO_BYTES_PER_PIXEL`].
+pub fn calculate_lossless_video_bytes(w: i32, h: i32, fps: i32, duration_secs: f32) -> u64 {
+    (w.max(0) as u64 * h.max(0) as u64 * LOSSLESS_VIDEO_BYTES_PER_PIXEL)
+        * (fps.max(0) as u64)
+        * (duration_secs as f64).ceil() as u64
+}
+
 /// Bytes one recorded `mirv_agr` frame costs, rounded up. Measured on #403's
 /// test take: 7.3 MB for 32.6 s at 30 fps is ~7.5 KB a frame. It grows with
 /// how many models are on screen, so this is a planning figure, not a bound.
@@ -19,15 +35,63 @@ pub fn calculate_agr_bytes(fps: i32, duration_secs: f32) -> u64 {
 /// literals that could silently drift apart.
 pub const MIN_DRIVE_HEADROOM_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 
-/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
-/// `None` for a path with no prefix. Folders with the same key share one
-/// drive's free space, so planners budget per key, not per folder (#774).
+/// The volume a path is on, lowercased: its `\\?\volume{guid}\` name when
+/// Windows can tell, so a disk mounted as a folder inside another drive
+/// (`D:\Captures`) keys apart from `D:` itself (#1041); else the drive
+/// (`c:`) or share (`\\server\share`). `None` for a path with no prefix.
+/// Folders with the same key share one drive's free space, so planners budget
+/// per key, not per folder (#774).
 pub fn volume_key(path: &std::path::Path) -> Option<String> {
-    match path.components().next()? {
-        std::path::Component::Prefix(prefix) => {
-            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+    let std::path::Component::Prefix(prefix) = path.components().next()? else {
+        return None;
+    };
+    // Only a drive letter is asked about: asking about a share that's offline
+    // waits on the network.
+    #[cfg(windows)]
+    if matches!(
+        prefix.kind(),
+        std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)
+    ) && let Some(name) = win_volume::volume_name(path)
+    {
+        return Some(name.to_lowercase());
+    }
+    Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+}
+
+/// `GetVolumePathNameW` (the mount point a path is under, its nearest
+/// existing folder deciding) then `GetVolumeNameForVolumeMountPointW`.
+/// `None` for a `subst` drive or a drive that isn't there.
+#[cfg(windows)]
+mod win_volume {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetVolumePathNameW(file_name: *const u16, volume_path: *mut u16, len: u32) -> i32;
+        fn GetVolumeNameForVolumeMountPointW(
+            mount_point: *const u16,
+            volume_name: *mut u16,
+            len: u32,
+        ) -> i32;
+    }
+
+    pub fn volume_name(path: &std::path::Path) -> Option<String> {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut mount = vec![0u16; wide.len().max(4) + 1];
+        if unsafe { GetVolumePathNameW(wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) } == 0
+        {
+            return None;
         }
-        _ => None,
+        // A volume name is `\\?\Volume{GUID}\`: 49 characters and the nul.
+        let mut name = [0u16; 64];
+        if unsafe {
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), name.len() as u32)
+        } == 0
+        {
+            return None;
+        }
+        let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+        Some(String::from_utf16_lossy(&name[..len]))
     }
 }
 
@@ -67,6 +131,23 @@ pub fn group_by_volume(
 // issuing blocking kernel disk-enumeration syscalls on every frame.
 const TTL_MS: u128 = 2_000;
 
+/// Bumped by [`forget_free_space`]; a cached answer or disk list from an
+/// older epoch is re-read.
+#[cfg(not(target_arch = "wasm32"))]
+static FREE_SPACE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Drops every cached free-space answer, so the next [`get_available_bytes`]
+/// asks the OS again. Call it after deleting files on purpose to make room:
+/// the take cleanup (#644) deletes a take and `build_batch_queue` reads the
+/// drive within the 2 s cache, which then still reported the space as taken.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn forget_free_space() {
+    FREE_SPACE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn forget_free_space() {}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     use std::collections::HashMap;
@@ -76,10 +157,12 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
     // Shared sysinfo disk list and when it was last re-listed — only
     // refreshed when older than TTL_MS.
-    static DISKS: OnceLock<Mutex<(Disks, Instant)>> = OnceLock::new();
+    static DISKS: OnceLock<Mutex<(Disks, Instant, u64)>> = OnceLock::new();
 
-    // Per-path TTL cache: path_key → (last_refresh, available_bytes)
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64)>>> = OnceLock::new();
+    // Per-path TTL cache: path_key → (last_refresh, available_bytes, epoch)
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64, u64)>>> = OnceLock::new();
+
+    let epoch = FREE_SPACE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
 
     // Normalise path to a lowercase forward-slash key in a single pass.
     let path_key: String = path
@@ -98,7 +181,8 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
     // Fast path: return cached value if within TTL.
     if let Ok(guard) = cache.lock()
-        && let Some(&(last, bytes)) = guard.get(&path_key)
+        && let Some(&(last, bytes, cached_epoch)) = guard.get(&path_key)
+        && cached_epoch == epoch
         && last.elapsed().as_millis() < TTL_MS
     {
         return bytes;
@@ -116,17 +200,19 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     let result = match diagnose_path(path) {
         PathStatus::Malformed | PathStatus::NotAbsolute | PathStatus::NotADirectory => u64::MAX,
         PathStatus::Ok | PathStatus::NotFound => {
-            let disks_mutex = DISKS
-                .get_or_init(|| Mutex::new((Disks::new_with_refreshed_list(), Instant::now())));
+            let disks_mutex = DISKS.get_or_init(|| {
+                Mutex::new((Disks::new_with_refreshed_list(), Instant::now(), epoch))
+            });
 
             if let Ok(mut guard) = disks_mutex.lock() {
-                let (disks, refreshed_at) = &mut *guard;
+                let (disks, refreshed_at, listed_epoch) = &mut *guard;
                 // Callers that queued on the lock behind a refresh use its list
                 // instead of each re-listing every volume again (#853).
-                if !list_is_fresh(*refreshed_at, Instant::now()) {
+                if !list_is_fresh(*refreshed_at, Instant::now()) || *listed_epoch != epoch {
                     // Re-lists too, so a drive plugged in since the last call counts.
                     disks.refresh(true);
                     *refreshed_at = Instant::now();
+                    *listed_epoch = epoch;
                 }
 
                 let mut best_bytes = u64::MAX;
@@ -160,7 +246,7 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
 
     // Store result in cache.
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(path_key, (Instant::now(), result));
+        guard.insert(path_key, (Instant::now(), result, epoch));
     }
 
     result
@@ -261,6 +347,29 @@ mod tests {
             volume_key(Path::new(r"\\NAS\Movies\b"))
         );
         assert_eq!(volume_key(Path::new("relative")), None);
+    }
+
+    /// #1041: a real drive keys by its volume name, which a disk mounted as a
+    /// folder has of its own; a folder that isn't there yet keys by the
+    /// volume it will be on.
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_keys_by_its_volume_name() {
+        use std::path::Path;
+        let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let key = volume_key(&Path::new(&system).join("Windows")).unwrap();
+        assert!(key.starts_with(r"\\?\volume{"), "{key}");
+        assert_eq!(
+            volume_key(&Path::new(&system).join("no-such-folder-1041").join("x")),
+            Some(key)
+        );
+        // No such drive: the letter, as before.
+        let missing = (b'A'..=b'Z')
+            .map(|c| format!("{}:", c as char))
+            .find(|d| !Path::new(&format!("{d}\\")).exists());
+        if let Some(d) = missing {
+            assert_eq!(volume_key(&Path::new(&d).join("x")), Some(d.to_lowercase()));
+        }
     }
 
     /// #774: two folders on C: get one budget, D: its own, and folders with

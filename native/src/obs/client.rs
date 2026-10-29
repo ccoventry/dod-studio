@@ -407,6 +407,31 @@ impl ObsClient {
         ))
     }
 
+    /// All four of `GetStats`'s frame counters: frames OBS skipped because the
+    /// encoder lagged, and frames it missed because rendering lagged, each with
+    /// its total. Cumulative for the OBS process, like `output_frame_stats`.
+    /// `None` on any failure: the live drop rate (#172) is advice only.
+    pub fn frame_counters(&mut self) -> Option<super::drop_rate::FrameCounters> {
+        let stats = self.request("GetStats", json!({})).ok()?;
+        Some(super::drop_rate::FrameCounters {
+            output_total: stats["outputTotalFrames"].as_i64()?,
+            output_skipped: stats["outputSkippedFrames"].as_i64()?,
+            render_total: stats["renderTotalFrames"].as_i64()?,
+            render_skipped: stats["renderSkippedFrames"].as_i64()?,
+        })
+    }
+
+    /// `(outputActive, outputDuration in ms)` from `GetRecordStatus`, `None`
+    /// on any failure. The duration going back down while still active is a
+    /// new recording that started before a poll saw the last one stop.
+    pub fn record_status(&mut self) -> Option<(bool, i64)> {
+        let status = self.request("GetRecordStatus", json!({})).ok()?;
+        Some((
+            status["outputActive"].as_bool()?,
+            status["outputDuration"].as_i64().unwrap_or(0),
+        ))
+    }
+
     /// A profile setting, read-only.
     ///
     /// `GetProfileParameter` is deliberately not in `REQUIRED_REQUESTS`: these
@@ -586,6 +611,17 @@ impl ObsClient {
             .as_str()
             .unwrap_or_default()
             .to_string())
+    }
+
+    /// `GetStats`'s whole answer, for the capture test (#646). `None` on any
+    /// failure: like `output_frame_stats`, it only produces advice.
+    pub fn stats(&mut self) -> Option<Value> {
+        self.request("GetStats", json!({})).ok()
+    }
+
+    /// `GetRecordStatus`'s `outputActive`, `None` on any failure.
+    pub fn record_active(&mut self) -> Option<bool> {
+        self.request("GetRecordStatus", json!({})).ok()?["outputActive"].as_bool()
     }
 
     /// A setting of the current profile: `(value, OBS's default for it)`.

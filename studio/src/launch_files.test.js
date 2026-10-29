@@ -83,7 +83,7 @@ describe('createLaunchFiles', () => {
     expect(app.showQueue.mock.invocationCallOrder[0]).toBeLessThan(app.addDemosToQueue.mock.invocationCallOrder[0]);
   });
 
-  it("the queue is Studio's Capture sub-tab, whichever sub-tab was open", () => {
+  it("the queue is Studio's Highlights sub-tab, whichever sub-tab was open", () => {
     showCaptureQueue();
     expect(switchNavTab).toHaveBeenCalledWith('workspace');
     expect(setCaptureDetailSubtab).toHaveBeenCalledWith('highlights');

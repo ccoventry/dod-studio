@@ -54,8 +54,14 @@ pub fn is_batch_complete(marker: &str) -> bool {
 /// Called by `events` for every marker line the game echoes.
 pub fn on_marker(marker: &str) {
     if is_batch_complete(marker) {
-        let _ = SEEN_AT_MS.compare_exchange(0, now_ms() + 1, Ordering::AcqRel, Ordering::Relaxed);
+        batch_ended();
     }
+}
+
+/// The batch ended without its `BATCH_COMPLETE` line: a held batch whose
+/// Studio went away (#861). The same quit follows when no Studio is there.
+pub fn batch_ended() {
+    let _ = SEEN_AT_MS.compare_exchange(0, now_ms() + 1, Ordering::AcqRel, Ordering::Relaxed);
 }
 
 /// What to do about a batch's end.

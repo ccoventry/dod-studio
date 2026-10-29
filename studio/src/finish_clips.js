@@ -103,12 +103,16 @@ export function renderQueueBusy(jobs) {
 
 /**
  * Why a verified batch will not be finished automatically — `null` when it
- * will. `off` and `nothing` are silent (the setting is off, or no take is
- * renderable, which the verification toast already reported); `cancelled`
- * and `no_export_dir` are worth telling the user about.
+ * will. `off`, `rendered_while_capturing` and `nothing` are silent (the
+ * setting is off, Render While Capturing (#861) queued every take already, or
+ * no take is renderable, which the verification toast already reported);
+ * `cancelled` and `no_export_dir` are worth telling the user about.
  */
-export function finishSkipReason({ enabled, outcome, folders, exportDirs }) {
+export function finishSkipReason({ enabled, outcome, folders, exportDirs, renderedWhileCapturing }) {
   if (!enabled) return 'off';
+  // Its renders are in the Render tab already, the last ones queued after
+  // this check; starting them again finds nothing left to render.
+  if (renderedWhileCapturing) return 'rendered_while_capturing';
   // A cancelled batch is one the user stopped; starting minutes of encoding
   // behind it is not what stopping asked for. Its takes stay for the Render tab.
   if (outcome === 'cancelled') return 'cancelled';
@@ -132,6 +136,7 @@ export function finishSkipReason({ enabled, outcome, folders, exportDirs }) {
  *   queue(payload) -> Promise<number>   queue_render_batch
  *   start() -> Promise<void>            start_queued_render
  *   onWaiting(request)                  a request is waiting on a busy Render tab
+ *   onScanning(request)                 a request is looking for its takes (#954)
  *   onStarted(total)                    a request's jobs are queued and started
  *   onProgress(counts)                  an active finish's counts changed
  *   onDone(counts, jobs)                every job of the active finish ended
@@ -147,6 +152,7 @@ export function createFinishController(deps) {
 
   async function launch(request) {
     launching = true;
+    deps.onScanning?.(request);
     let count = 0;
     try {
       count = await deps.queue(request.payload);
@@ -285,16 +291,28 @@ function readSettings() {
  * status line and progress bar the capture itself used. Left alone while a
  * capture is running, which owns the footer until it ends.
  */
-function setFooter(text, pct) {
+function setFooter(text, pct, { indeterminate = false } = {}) {
   if (captureRunning) return;
   const statusEl = document.querySelector('#batch-status');
   const container = document.querySelector('#capture-progress-container');
   const bar = document.querySelector('#capture-progress-bar');
   if (statusEl) statusEl.textContent = text;
-  if (pct != null) {
+  // The sliding block (#954) for the steps that can't be measured: the wait
+  // for the Render tab and the scan for the new takes.
+  if (container) container.classList.toggle('indeterminate', indeterminate);
+  if (indeterminate) {
+    if (container) container.style.display = 'block';
+  } else if (pct != null) {
     if (container) container.style.display = 'block';
     if (bar) bar.style.width = `${Math.max(0, Math.min(100, Math.round(pct)))}%`;
   }
+}
+
+/** Hides the sliding block of a step that ended without progress to show. */
+function hideFooterBar() {
+  if (captureRunning) return;
+  const container = document.querySelector('#capture-progress-container');
+  if (container) container.style.display = 'none';
 }
 
 function openRenderTab() {
@@ -312,7 +330,13 @@ export function requestFinishClips(verified, captureMode) {
   const settings = readSettings();
   const folders = finishFolders(verified?.blocks);
   const exportDirs = (getExportDirsFn ? getExportDirsFn() : []).filter(Boolean);
-  const reason = finishSkipReason({ enabled: settings.enabled, outcome: verified?.outcome, folders, exportDirs });
+  const reason = finishSkipReason({
+    enabled: settings.enabled,
+    outcome: verified?.outcome,
+    folders,
+    exportDirs,
+    renderedWhileCapturing: !!verified?.rendered_while_capturing,
+  });
   if (reason === 'cancelled') {
     showToast(STRINGS.FINISH.SKIPPED_CANCELLED, 'info', 6000);
     return;
@@ -323,27 +347,42 @@ export function requestFinishClips(verified, captureMode) {
   }
   if (reason) return;
 
-  const { codec, customArgs } = finishCodecFor(captureMode, settings.codecs);
-  if (codec === 'custom' && !customArgs) {
+  const built = renderPayloadFor(folders, verified?.capture_fps, captureMode, { settings, exportDirs });
+  if (built.skip === 'custom_args') {
     showToast(STRINGS.FINISH.SKIPPED_CUSTOM_ARGS, 'warning', 8000);
     return;
   }
-  const captureFps = Number(verified?.capture_fps) || 0;
-  controller.request({
+  controller.request({ payload: built.payload });
+}
+
+/**
+ * The `queue_render_batch` payload that renders `folders`, takes a batch
+ * captured in `captureMode` at `captureFps`, with the finish step's codec
+ * and the Render tab's other settings. `{ payload }`, or `{ skip }` when it
+ * can't: `no_export_dir` or `custom_args`. Render While Capturing (#861)
+ * queues each take through this too, as it lands.
+ */
+export function renderPayloadFor(folders, captureFps, captureMode, { settings = readSettings(), exportDirs } = {}) {
+  const dirs = exportDirs || (getExportDirsFn ? getExportDirsFn() : []).filter(Boolean);
+  if (dirs.length === 0) return { skip: 'no_export_dir' };
+  const { codec, customArgs } = finishCodecFor(captureMode, settings.codecs);
+  if (codec === 'custom' && !customArgs) return { skip: 'custom_args' };
+  const fps = Number(captureFps) || 0;
+  return {
     payload: {
       render_directories: folders,
       codec,
       custom_codec_args: customArgs,
       // A frame sequence is timed by this number, so it must be the rate the
       // batch captured at, not whatever the Render tab happens to show.
-      fps: captureFps > 0 ? captureFps : settings.renderFps,
+      fps: fps > 0 ? fps : settings.renderFps,
       ffmpeg_path: settings.ffmpegPath,
-      export_directories: exportDirs,
+      export_directories: dirs,
       max_concurrent_renders: settings.maxConcurrent,
       // The same clip names (#441) the Render tab's Scan gives these takes.
-      clip_names: getClipNamesFn ? getClipNamesFn(exportDirs) : {},
+      clip_names: getClipNamesFn ? getClipNamesFn(dirs) : {},
     },
-  });
+  };
 }
 
 /** See `createFinishController`'s `ownsJobs`. */
@@ -365,7 +404,8 @@ export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange 
     // takes it found.
     queue: (payload) => queueRenderBatch(payload).then((summary) => summary?.total ?? 0),
     start: () => startQueuedRender(),
-    onWaiting: () => setFooter(STRINGS.FINISH.WAITING_STATUS, null),
+    onWaiting: () => setFooter(STRINGS.FINISH.WAITING_STATUS, null, { indeterminate: true }),
+    onScanning: () => setFooter(STRINGS.FINISH.SCANNING_STATUS, null, { indeterminate: true }),
     onStarted: (total) => {
       setFooter(STRINGS.FINISH.progressStatus(0, total, 0), 0);
       showToast(STRINGS.FINISH.startedToast(total), 'info', 8000, {
@@ -386,9 +426,14 @@ export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange 
     },
     onFailed: (err) => {
       setFooter(STRINGS.FINISH.FAILED_STATUS, null);
+      hideFooterBar();
       showToast(STRINGS.FINISH.failedToast(err), 'error', 8000);
     },
-    onNothingFound: () => showToast(STRINGS.FINISH.NOTHING_FOUND, 'info'),
+    onNothingFound: () => {
+      setFooter(STRINGS.FINISH.NOTHING_FOUND, null);
+      hideFooterBar();
+      showToast(STRINGS.FINISH.NOTHING_FOUND, 'info');
+    },
   });
 
   listen('render_jobs_snapshot', (event) => {

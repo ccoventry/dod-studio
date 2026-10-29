@@ -44,7 +44,7 @@ pub struct Streak {
     /// The last kill's, the same way.
     pub last_kill: f32,
     /// Each kill's weapon, and from the second on the time since the one
-    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Capture page's
+    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Highlights page's
     /// Details column (`CaptureStreak::update_visuals`).
     pub details: String,
     /// The player's number (entity index, what `ds_spec_target`
@@ -87,7 +87,7 @@ impl Streak {
         })
     }
 
-    /// From the first kill to the last, as the Capture page's Dur. column
+    /// From the first kill to the last, as the Highlights page's Dur. column
     /// shows it.
     pub fn duration_text(&self) -> String {
         gap_text(self.last_kill - self.first_kill)
@@ -115,10 +115,10 @@ pub struct Found {
 
 /// The streaks to list, earliest first: the highlights
 /// `analysis::highlights` keeps (#573, D18: a POV demo's recorder's, an HLTV
-/// demo's everyone's), the same ones the Capture page lists. Each carries the
+/// demo's everyone's), the same ones the Highlights page lists. Each carries the
 /// number its player had when the kills happened, so a player who left
 /// before the demo ended still has one for Go to spectate (#706). Weapon
-/// names are `analysis`' own, the Capture page's: built-in English when the
+/// names are `analysis`' own, the Highlights page's: built-in English when the
 /// game's folder has no `localizations`.
 pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
     let found = analysis::highlights::highlights(analysis);
@@ -159,7 +159,7 @@ pub fn with_damage(text: String, found: &Found) -> String {
     }
 }
 
-/// A span of time as `m:ss`, rounded to the second, as the Capture page
+/// A span of time as `m:ss`, rounded to the second, as the Highlights page
 /// shows its gaps and durations.
 fn gap_text(secs: f32) -> String {
     let secs = secs.max(0.0).round() as u64;

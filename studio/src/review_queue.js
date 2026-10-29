@@ -126,14 +126,13 @@ export function sortReviewRows(rows, order = REVIEW_ORDER.TIME) {
 
 /**
  * The highlights to review, in queue order: each ticked demo's highlights
- * with at least `minKills` kills and a Review mark `covers` takes in, in
- * `order` (sortReviewRows); in an HLTV demo, only `hltvPlayers`' (#822: a
+ * with a Review mark `covers` takes in, in `order` (sortReviewRows); in an HLTV demo, only `hltvPlayers`' (#822: a
  * list, a function of the demo giving one, or null = everyone's), each with
  * the player the game's camera goes on. A highlight with no demo-player
  * times (a project saved before they existed) can't be found in the demo,
  * so it is counted in `skipped` instead.
  */
-export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL, hltvPlayers = null, order = REVIEW_ORDER.TIME) {
+export function buildReviewQueue(demos, checkedPaths, covers = REVIEW_COVERS.ALL, hltvPlayers = null, order = REVIEW_ORDER.TIME) {
   const checked = new Set(checkedPaths);
   const highlights = [];
   let skipped = 0;
@@ -143,7 +142,6 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
     if (!checked.has(demo.path)) continue;
     const players = typeof hltvPlayers === 'function' ? hltvPlayers(demo) : hltvPlayers;
     const streaks = listedStreaks(demo)
-      .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills)
       .filter((s) => coveredByReview(s, covers))
       .filter((s) => {
         const keep = !isHltvHighlight(demo, s) || hltvPlayerChosen(s, players);
