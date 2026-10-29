@@ -480,7 +480,51 @@
                 <p class="setting-hint" data-str="CAPTURE_CONFIG.OBS_CAPTURE_FPS_WARNING">
                   Too high for your machine and OBS drops frames — test a short capture first.
                 </p>
+                <div class="control-group">
+                  <label for="config-obs-recording-quality" data-str="CAPTURE_CONFIG.OBS_QUALITY_LABEL" data-str-title="CAPTURE_CONFIG.OBS_QUALITY_TITLE">OBS Quality:</label>
+                  <select id="config-obs-recording-quality" data-str-title="CAPTURE_CONFIG.OBS_QUALITY_TITLE">
+                    <option value="small" data-str="CAPTURE_CONFIG.OBS_QUALITY_SMALL">Small (~1.7 GB/min)</option>
+                    <option value="standard" selected data-str="CAPTURE_CONFIG.OBS_QUALITY_STANDARD">Standard (~3 GB/min)</option>
+                    <option value="high" data-str="CAPTURE_CONFIG.OBS_QUALITY_HIGH">High (~4.5 GB/min)</option>
+                    <option value="max" data-str="CAPTURE_CONFIG.OBS_QUALITY_MAX">Max, full colour (~5.3 GB/min)</option>
+                    <option value="obs_simple" data-str="CAPTURE_CONFIG.OBS_QUALITY_OBS_SIMPLE">OBS's own (may drop frames at 120 fps)</option>
+                  </select>
+                </div>
                 <div id="obs-status" class="path-warning" style="display: none;"></div>
+                <!-- OBS capture test (#646): obs_capture_test.js. -->
+                <div class="control-group obs-test-controls">
+                  <button id="obs-capture-test-btn" data-str="OBS_TEST.TEST_BUTTON" data-str-title="OBS_TEST.TEST_BUTTON_TITLE">Test OBS capture</button>
+                  <button id="obs-fps-ladder-btn" data-str="OBS_TEST.LADDER_BUTTON" data-str-title="OBS_TEST.LADDER_BUTTON_TITLE">Find my highest steady FPS</button>
+                  <button id="obs-test-stop-btn" hidden data-str="OBS_TEST.STOP_BUTTON">Stop test</button>
+                </div>
+                <div class="control-group obs-test-demo-row">
+                  <span data-str="OBS_TEST.DEMO_LABEL">Test demo:</span>
+                  <span id="obs-test-demo-name" class="obs-test-demo-name" data-str="OBS_TEST.DEMO_BUNDLED">the one that comes with DoD Studio</span>
+                  <button id="obs-test-demo-pick-btn" data-str="OBS_TEST.DEMO_PICK" data-str-title="OBS_TEST.DEMO_PICK_TITLE">Use another demo…</button>
+                  <button id="obs-test-demo-reset-btn" hidden data-str="OBS_TEST.DEMO_RESET">Use the bundled demo</button>
+                  <label id="obs-test-long-label" hidden data-str-title="OBS_TEST.LONG_TITLE"><input type="checkbox" id="obs-test-long" /> <span data-str="OBS_TEST.LONG_LABEL">1-minute clips</span></label>
+                </div>
+                <div id="obs-test-panel" class="obs-test-panel" hidden>
+                  <p class="setting-hint" data-str="OBS_TEST.DEMO_NOTE"></p>
+                  <div id="obs-test-step" class="obs-test-step"></div>
+                  <div id="obs-test-bar" class="progress-bar-container" hidden><div id="obs-test-bar-fill" class="progress-bar-fill"></div></div>
+                  <div id="obs-test-result" class="obs-test-result"></div>
+                  <table id="obs-test-table" class="obs-test-table" hidden>
+                    <thead>
+                      <tr>
+                        <th data-str="OBS_TEST.COL_FPS">OBS FPS</th>
+                        <th data-str="OBS_TEST.COL_RESULT">Result</th>
+                        <th data-str="OBS_TEST.COL_SKIPPED">Skipped (encoder)</th>
+                        <th data-str="OBS_TEST.COL_MISSED">Missed (rendering)</th>
+                        <th data-str="OBS_TEST.COL_REPEATED">Repeated</th>
+                        <th data-str="OBS_TEST.COL_GAME">Game fps (1% low)</th>
+                        <th data-str="OBS_TEST.COL_SOUND">Sound</th>
+                      </tr>
+                    </thead>
+                    <tbody id="obs-test-rows"></tbody>
+                  </table>
+                  <button id="obs-test-apply-btn" hidden data-str-title="OBS_TEST.APPLY_TITLE"></button>
+                </div>
               </div>
             </div>
 
@@ -673,6 +717,26 @@
               </div>
               <div id="target-drive-list" class="list-editor-list"></div>
               <div id="target-drive-same-warning" class="path-warning" style="display: none;"></div>
+              <!-- "After a clip is finished" (#644) — take_cleanup.js. Here, not
+                   under Render Output: "Only when space is needed" acts before
+                   captures too (#1094). Keep by default; the permanent choice
+                   asks once when turned on, and "Only when space is needed"
+                   needs it, since the Recycle Bin frees nothing until emptied. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-take-after-finish" data-str="TAKE_CLEANUP.AFTER_LABEL" data-str-title="TAKE_CLEANUP.AFTER_TITLE">After a clip is finished:</label>
+                  <select id="config-take-after-finish" data-str-title="TAKE_CLEANUP.AFTER_TITLE">
+                    <option value="keep" data-str="TAKE_CLEANUP.AFTER_KEEP">Keep the take</option>
+                    <option value="recycle" data-str="TAKE_CLEANUP.AFTER_RECYCLE">Move the take to the Recycle Bin</option>
+                    <option value="delete" data-str="TAKE_CLEANUP.AFTER_DELETE">Delete the take permanently</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <input type="checkbox" id="config-take-delete-when-needed" disabled />
+                  <label for="config-take-delete-when-needed" data-str="TAKE_CLEANUP.WHEN_NEEDED_LABEL">Only when space is needed</label>
+                </div>
+              </div>
+              <p id="config-take-after-finish-hint" class="setting-hint">Takes stay on disk. Delete them from the Render tab when you are done.</p>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency
@@ -792,6 +856,16 @@
                   </select>
                 </div>
               </div>
+              <!-- "Render while capturing" (#861) — render_while_capturing.js.
+                   Off by default: a render slows the capture by however much
+                   this machine has to spare. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <input type="checkbox" id="config-render-while-capturing" />
+                  <label for="config-render-while-capturing" data-str="RENDER_WHILE_CAPTURING.LABEL" data-str-title="RENDER_WHILE_CAPTURING.TITLE">Render while capturing</label>
+                </div>
+              </div>
+              <p id="config-render-while-capturing-hint" class="setting-hint">Clips render after the batch.</p>
               <!-- Clip names (#441): the finished file of each highlight is
                    named from this template, unless its row has a typed name. -->
               <div class="input-row" style="margin-top: 10px;">
@@ -1795,6 +1869,8 @@
                lands in one place, with the whole row's width, and the space
                readouts above stay centred like the Render footer's. -->
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
+          <!-- OBS mode only, while a batch runs: frames OBS drops (#172). -->
+          <p id="obs-drop-rate" class="status-text" hidden></p>
           <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>

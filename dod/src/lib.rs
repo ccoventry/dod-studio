@@ -223,6 +223,17 @@ impl Weapon {
             Self::MillsBomb | Self::Mk2Grenade | Self::StickGrenade
         )
     }
+
+    /// A rocket launcher: its round can kill after its shooter has died.
+    pub fn is_rocket(&self) -> bool {
+        matches!(self, Self::Bazooka | Self::Panzerschreck | Self::Piat)
+    }
+
+    /// A weapon whose shot flies on its own, grenades and rockets, so its
+    /// kill can come after its shooter's death (#664, #1091).
+    pub fn is_projectile(&self) -> bool {
+        self.is_grenade() || self.is_rocket()
+    }
 }
 
 /// Ammunition used by a [Weapon].

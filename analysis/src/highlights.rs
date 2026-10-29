@@ -24,7 +24,7 @@ use crate::{Analysis, Connection, Weapon};
 /// A change to what `kill.rs` caches needs both bumps, or the rescan reads
 /// the old highlights back out of the analyzer cache. Mirrored in
 /// `studio/src/scan_version.js`; a test checks the two agree.
-pub const HIGHLIGHTS_VERSION: u32 = 1;
+pub const HIGHLIGHTS_VERSION: u32 = 2;
 
 /// One kill in a highlight.
 #[derive(Debug, Clone, PartialEq)]

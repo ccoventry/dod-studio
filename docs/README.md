@@ -5,6 +5,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 ## Start here
 - [features.md](features.md) — what DoD Studio does today, page by page.
 - [app_architecture.md](app_architecture.md) — how the Tauri app, `native` and the parsers fit together, and the rules they follow.
+- [coding_standards.md](coding_standards.md) — how code here is written: one area per file, one task per function, names, types, errors, duplication, tests.
 - [goldsrc_dod_quirks.md](goldsrc_dod_quirks.md) — engine and DoD behaviour the pipeline depends on. Read before touching capture or patching.
 - [vac_safety.md](vac_safety.md) — what keeps the hook DLL away from VAC-secured servers.
 

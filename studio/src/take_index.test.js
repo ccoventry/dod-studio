@@ -114,3 +114,23 @@ describe('curation (#44)', () => {
     expect(after.streaks[0].curation).toBe(CURATION.SKIP);
   });
 });
+
+describe('markBlockCaptured', () => {
+  it('marks the highlights a block covers Captured and records the take for its render', async () => {
+    const { markBlockCaptured, resolveTake, streakUid } = await import('./take_index.js');
+    const { HIGHLIGHT_STATUS } = await import('./status_colors.js');
+    const a = streak({ status: HIGHLIGHT_STATUS.PENDING });
+    const b = streak({ player_index: 2, status: HIGHLIGHT_STATUS.RENDERED });
+    const dispatch = { streaks: [a, b], demoPaths: ['d1.dem', 'd1.dem'] };
+    const takeIndex = {};
+    const marked = markBlockCaptured({ take_key: 's/b0', source_streak_indices: [0, 1] }, dispatch, takeIndex);
+    expect(a.status).toBe(HIGHLIGHT_STATUS.CAPTURED);
+    // Status only moves forward: a verified Rendered stays.
+    expect(b.status).toBe(HIGHLIGHT_STATUS.RENDERED);
+    expect(marked).toEqual({ advanced: 1, markCleared: false });
+    expect(resolveTake(takeIndex, 's/b0')).toEqual([streakUid('d1.dem', a), streakUid('d1.dem', b)]);
+    // Seen again at the batch's end (#861 marks it first): nothing changes.
+    expect(markBlockCaptured({ take_key: 's/b0', source_streak_indices: [0, 1] }, dispatch, takeIndex))
+      .toEqual({ advanced: 0, markCleared: false });
+  });
+});

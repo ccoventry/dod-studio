@@ -129,6 +129,10 @@ pub struct AppSettings {
     /// switched off. Never logged — see `ObsConfig::redacted`.
     #[serde(default)]
     pub obs_password: String,
+    /// OBS mode's recording quality, `ObsRecordingQuality`'s id (#1060).
+    /// Empty (an older settings file) is the default, `standard`.
+    #[serde(default)]
+    pub obs_recording_quality: String,
     /// Path to `obs64.exe`/`obs.exe`, for the "Launch OBS" button. Spawn-and-
     /// forget, same as `launch_standalone_game` — OBS is the user's own
     /// software, not ours to manage, so nothing here tracks its lifecycle.
@@ -253,6 +257,23 @@ pub struct AppSettings {
     pub finish_codec_video: String,
     #[serde(default = "default_finish_codec_render_tab")]
     pub finish_codec_frames: String,
+    /// "After a clip is finished" (#644): `"keep"`, `"recycle"` (the Recycle
+    /// Bin) or `"delete"` (for good). A string so a value this build does not
+    /// know still loads, and reads as `"keep"`
+    /// (`native::hlcr::take_cleanup::AfterFinish::from_setting`). Keep by
+    /// default, and for every settings file written before it existed.
+    #[serde(default = "default_take_after_finish")]
+    pub take_after_finish: String,
+    /// "Only when space is needed" (#644), read only with `"delete"`: takes
+    /// stay until a capture or finish job is short of room.
+    #[serde(default)]
+    pub take_delete_only_when_space_needed: bool,
+    /// "Render while capturing" (#861): each take renders as soon as the
+    /// batch has recorded it, one render at a time, and a batch short of room
+    /// holds between clips until renders free enough. Off by default: how
+    /// much a render slows the capture depends on the machine.
+    #[serde(default)]
+    pub render_while_capturing: bool,
     /// How a highlight's clip name is built (#441), in the placeholder syntax
     /// of `studio/src/clip_name.js`. Configuration > Render Output.
     #[serde(default = "default_clip_name_template")]
@@ -472,6 +493,9 @@ fn default_finish_codec_obs() -> String {
 fn default_finish_codec_render_tab() -> String {
     "render_tab".to_string()
 }
+fn default_take_after_finish() -> String {
+    "keep".to_string()
+}
 fn default_dem_open_target() -> String {
     "analyzer".to_string()
 }
@@ -506,6 +530,7 @@ impl Default for AppSettings {
             obs_host: default_obs_host(),
             obs_port: default_obs_port(),
             obs_password: String::new(),
+            obs_recording_quality: String::new(),
             obs_exe_path: String::new(),
             auto_clear_logs: false,
             auto_clear_previews: false,
@@ -555,6 +580,9 @@ impl Default for AppSettings {
             finish_codec_obs: default_finish_codec_obs(),
             finish_codec_video: default_finish_codec_render_tab(),
             finish_codec_frames: default_finish_codec_render_tab(),
+            take_after_finish: default_take_after_finish(),
+            take_delete_only_when_space_needed: false,
+            render_while_capturing: false,
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
@@ -774,6 +802,11 @@ mod tests {
         assert_eq!(settings.finish_codec_obs, "source_copy");
         assert_eq!(settings.finish_codec_video, "render_tab");
         assert_eq!(settings.finish_codec_frames, "render_tab");
+        // Settings saved before #644 keep every take.
+        assert_eq!(settings.take_after_finish, "keep");
+        assert!(!settings.take_delete_only_when_space_needed);
+        // Settings saved before #861 don't render while capturing.
+        assert!(!settings.render_while_capturing);
         // No render_codec saved: today's default, ProRes 422.
         assert_eq!(settings.render_codec, "prores_422");
         // Settings saved before #246 get today's worker count.
