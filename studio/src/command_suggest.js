@@ -9,6 +9,7 @@
 import { GAME_NAMES, HLAE_NAMES, DODSTUDIO_NAMES } from './console_commands_data.js';
 import { STRINGS } from './strings.js';
 import { OLD_NAMES, OLD_PREFIX } from './console_renames.js';
+import { stockMovieHint } from './stock_movie_cvars.js';
 
 /** At most this many suggestions show at once. */
 export const MAX_SUGGESTIONS = 12;
@@ -56,7 +57,7 @@ const ALL = (() => {
   const add = (entry) => { if (!byName.has(entry.name)) byName.set(entry.name, entry); };
   DODSTUDIO_NAMES.forEach(([name, hint]) => add({ name, source: 'dodstudio', kind: null, builds: 'both', hint }));
   HLAE_NAMES.forEach((name) => add({ name, source: 'hlae', kind: 'cmd', builds: 'both', hint: '' }));
-  GAME_NAMES.forEach(([name, kind, builds]) => add({ name, source: 'game', kind, builds, hint: '' }));
+  GAME_NAMES.forEach(([name, kind, builds]) => add({ name, source: 'game', kind, builds, hint: stockMovieHint(name) }));
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 })();
 

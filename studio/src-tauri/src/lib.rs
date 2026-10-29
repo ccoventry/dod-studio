@@ -304,7 +304,7 @@ fn cancel_audit(state: tauri::State<'_, AuditManager>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     audit_manager::reveal_in_explorer_impl(path)
 }
