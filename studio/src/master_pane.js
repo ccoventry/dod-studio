@@ -12,7 +12,7 @@ import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { noCameraDataBadge } from './camera_data.js';
 import { multiMapSplitButton } from './queue_multimap.js';
-import { listedStreaks, matchesQuickFilters, hasTickedHighlight, KILLS_FILTER } from './queue_filters.js';
+import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { matchesInQueue } from './queue_match_groups.js';
 import { groupDemos, currentGroupBy } from './queue_group_by.js';
 import { makeClearable } from './clearable_input.js';
@@ -74,9 +74,9 @@ const lookedUpRecorders = new Map();
 let recorderLookupRequest = 0;
 let recorderLookupKey = '';
 let playerOptionsKey = '';
-// #54: the header's quick filters; #127 adds Ticked only. `keepPath` is the
-// demo last opened in Highlight Details, which Ticked only keeps listed.
-const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false, tickedOnly: false, keepPath: null };
+// #54: the header's quick filters; #127 adds Tracked only. `keepPath` is the
+// demo last opened in Highlight Details, which Tracked only keeps listed.
+const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false, trackedOnly: false, keepPath: null };
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
@@ -223,8 +223,8 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
     quickFilters.ownerOnly = e.target.checked;
     renderMasterList(currentDemos, null, currentOnSelectDemo);
   });
-  document.querySelector('#master-ticked-only-cb')?.addEventListener('change', (e) => {
-    quickFilters.tickedOnly = e.target.checked;
+  document.querySelector('#master-tracked-only-cb')?.addEventListener('change', (e) => {
+    quickFilters.trackedOnly = e.target.checked;
     renderMasterList(currentDemos, null, currentOnSelectDemo);
   });
 
@@ -308,16 +308,16 @@ function syncClearSelectedButtonState() {
   if (btn) btn.disabled = checkedPaths.size === 0;
 }
 
-/** Ticked only is dimmed while no demo has a highlight ticked, since it would
- *  hide every demo; once on, it stays clickable so it can be turned off. */
-function syncTickedOnlyControl() {
-  const cb = document.querySelector('#master-ticked-only-cb');
+/** Tracked only is dimmed while no demo is tracked, since it would hide every
+ *  demo; once on, it stays clickable so it can be turned off. */
+function syncTrackedOnlyControl() {
+  const cb = document.querySelector('#master-tracked-only-cb');
   if (!cb) return;
   const label = cb.closest('label');
-  const off = !cb.checked && !currentDemos.some(hasTickedHighlight);
+  const off = !cb.checked && !currentDemos.some(isDemoTracked);
   cb.disabled = off;
   label?.classList.toggle('is-disabled', off);
-  if (label) label.title = off ? STRINGS.WORKSPACE.TICKED_ONLY_NONE_TITLE : STRINGS.WORKSPACE.TICKED_ONLY_TITLE;
+  if (label) label.title = off ? STRINGS.WORKSPACE.TRACKED_ONLY_NONE_TITLE : STRINGS.WORKSPACE.TRACKED_ONLY_TITLE;
 }
 
 function syncSelectAllCheckboxState(visibleDemos) {
@@ -341,7 +341,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   if (Number.isInteger(selectedDemoIdx) && currentDemos[selectedDemoIdx]) {
     quickFilters.keepPath = currentDemos[selectedDemoIdx].path;
   }
-  syncTickedOnlyControl();
+  syncTrackedOnlyControl();
 
   const tableBody = document.querySelector('#master-demo-table-body');
   if (!tableBody) return;

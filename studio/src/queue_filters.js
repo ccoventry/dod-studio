@@ -2,6 +2,8 @@
 // The Master Queue's quick filters (#54), and the highlights they and the
 // queue's counts read. Pure, so it can be tested on its own.
 
+import { isDemoTracked } from './take_index.js';
+
 /**
  * The demo's highlights. Whose they are is decided once, by the scan
  * (`analysis::highlights`, the in-game Highlights tab's rule too: a POV
@@ -41,25 +43,17 @@ export const KILLS_FILTER = {
 };
 
 /**
- * Whether any of `demo`'s highlights is ticked for capture. Every ticked one
- * counts, even one the Player filter hides, since the capture batch takes it
- * too.
- */
-export function hasTickedHighlight(demo) {
-  return (demo?.streaks || []).some((s) => s.selected === true);
-}
-
-/**
  * Whether `demo` passes the quick filters: `kills` (a KILLS_FILTER value),
  * `ownerOnly` (hide demos with no resolvable recording player) and
- * `tickedOnly` (hide demos with no highlight ticked, #127). `keepPath` is the
- * demo open in Highlight Details: Ticked only keeps it listed, so unticking
- * its last highlight doesn't pull the row out from under the user.
+ * `trackedOnly` (hide demos with no tracked work, #127: `isDemoTracked`, the
+ * rule behind the row's bookmark badge and Clear Untracked). `keepPath` is the
+ * demo open in Highlight Details: Tracked only keeps it listed, so clearing
+ * its last note or mark doesn't pull the row out from under the user.
  */
-export function matchesQuickFilters(demo, { kills = KILLS_FILTER.ALL, ownerOnly = false, tickedOnly = false, keepPath = null } = {}) {
+export function matchesQuickFilters(demo, { kills = KILLS_FILTER.ALL, ownerOnly = false, trackedOnly = false, keepPath = null } = {}) {
   const hasOwner = demo.local_player_index !== null && demo.local_player_index !== undefined;
   if (ownerOnly && !hasOwner) return false;
-  if (tickedOnly && !hasTickedHighlight(demo) && !(keepPath && demo.path === keepPath)) return false;
+  if (trackedOnly && !isDemoTracked(demo) && !(keepPath && demo.path === keepPath)) return false;
   if (kills === KILLS_FILTER.ALL) return true;
   const own = listedStreaks(demo);
   if (kills === KILLS_FILTER.WITH_KILLS) return own.some((s) => (s.kill_count || 0) > 0);

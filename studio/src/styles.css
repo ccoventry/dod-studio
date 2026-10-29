@@ -629,14 +629,14 @@ html.picking-path * {
   margin-right: 2px;
 }
 
-.queue-filter-ticked-only {
+.queue-filter-tracked-only {
   display: flex;
   gap: 3px;
   align-items: center;
 }
 
 /* Dimmed while no highlight is ticked anywhere (#127). */
-.queue-filter-ticked-only.is-disabled {
+.queue-filter-tracked-only.is-disabled {
   opacity: 0.45;
 }
 

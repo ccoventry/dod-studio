@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listedStreaks, dropOtherPlayersSavedStreaks, matchesQuickFilters, hasTickedHighlight, KILLS_FILTER } from './queue_filters.js';
+import { listedStreaks, dropOtherPlayersSavedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 
 const streak = (player_index, kill_count) => ({ player_index, kill_count });
 
@@ -62,31 +62,25 @@ describe('matchesQuickFilters', () => {
     expect(matchesQuickFilters(multi, { ownerOnly: true })).toBe(true);
   });
 
-  it('ticked only hides demos with no highlight ticked for capture', () => {
-    const ticked = { path: 'a.dem', streaks: [streak(2, 1), { ...streak(2, 2), selected: true }] };
-    const unticked = { path: 'b.dem', streaks: [{ ...streak(2, 3), selected: false }, streak(2, 1)] };
-    const f = { tickedOnly: true };
-    expect(matchesQuickFilters(ticked, f)).toBe(true);
-    expect(matchesQuickFilters(unticked, f)).toBe(false);
+  it('tracked only hides demos with no tracked work, as the bookmark badge reads it', () => {
+    const noted = { path: 'a.dem', streaks: [streak(2, 1), { ...streak(2, 2), notes: 'clutch' }] };
+    const marked = { path: 'c.dem', streaks: [{ ...streak(2, 2), curation: 'Keep' }] };
+    const plain = { path: 'b.dem', streaks: [{ ...streak(2, 3), selected: true }, streak(2, 1)] };
+    const f = { trackedOnly: true };
+    expect(matchesQuickFilters(noted, f)).toBe(true);
+    expect(matchesQuickFilters(marked, f)).toBe(true);
+    // A tick alone isn't tracked work (isDemoTracked).
+    expect(matchesQuickFilters(plain, f)).toBe(false);
     expect(matchesQuickFilters(noKills, f)).toBe(false);
-    expect(matchesQuickFilters(unticked)).toBe(true);
+    expect(matchesQuickFilters(plain)).toBe(true);
   });
 
-  it('ticked only keeps the demo open in Highlight Details listed', () => {
+  it('tracked only keeps the demo open in Highlight Details listed', () => {
     const open = { path: 'open.dem', streaks: [streak(2, 1)] };
-    expect(matchesQuickFilters(open, { tickedOnly: true, keepPath: 'open.dem' })).toBe(true);
-    expect(matchesQuickFilters(open, { tickedOnly: true, keepPath: 'other.dem' })).toBe(false);
+    expect(matchesQuickFilters(open, { trackedOnly: true, keepPath: 'open.dem' })).toBe(true);
+    expect(matchesQuickFilters(open, { trackedOnly: true, keepPath: 'other.dem' })).toBe(false);
     // The other filters still apply to it.
     const ownerless = { path: 'open.dem', local_player_index: null, streaks: [] };
-    expect(matchesQuickFilters(ownerless, { tickedOnly: true, ownerOnly: true, keepPath: 'open.dem' })).toBe(false);
-  });
-});
-
-describe('hasTickedHighlight', () => {
-  it('counts only a highlight ticked with true', () => {
-    expect(hasTickedHighlight({ streaks: [{ selected: true }] })).toBe(true);
-    expect(hasTickedHighlight({ streaks: [{ selected: false }, {}] })).toBe(false);
-    expect(hasTickedHighlight({})).toBe(false);
-    expect(hasTickedHighlight(null)).toBe(false);
+    expect(matchesQuickFilters(ownerless, { trackedOnly: true, ownerOnly: true, keepPath: 'open.dem' })).toBe(false);
   });
 });

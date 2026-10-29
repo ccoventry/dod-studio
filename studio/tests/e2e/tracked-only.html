@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+  Harness for the Master Queue's Tracked only filter (#127): the queue table
+  and the checkbox master_pane.js queries. noted.dem has a highlight with a
+  note; plain.dem (ticked, nothing else) and other.dem are untracked.
+  window.__note(name, text) sets or clears a demo's first highlight's note and
+  re-renders, as Highlight Details does.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tracked only test harness</title>
+</head>
+<body>
+  <label class="queue-filter-tracked-only" title="">
+    <input type="checkbox" id="master-tracked-only-cb" />
+    <span>Tracked only</span>
+  </label>
+  <table>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+
+    const demos = [
+      { name: 'noted.dem', path: 'C:\\demos\\noted.dem', streaks: [{ kill_count: 2, notes: 'clutch' }, { kill_count: 1 }] },
+      { name: 'plain.dem', path: 'C:\\demos\\plain.dem', streaks: [{ kill_count: 3, selected: true }] },
+      { name: 'other.dem', path: 'C:\\demos\\other.dem', streaks: [{ kill_count: 1 }] },
+    ];
+    let open = null;
+    const onSelect = (_demo, idx) => { open = idx; };
+    initMasterPane(null, null, null, null, null);
+    renderMasterList(demos, open, onSelect);
+    window.__note = (name, text) => {
+      demos.find((d) => d.name === name).streaks[0].notes = text;
+      renderMasterList(demos, open, onSelect);
+    };
+    window.__clearAll = () => {
+      demos.forEach((d) => d.streaks.forEach((s) => { delete s.notes; }));
+      renderMasterList(demos, open, onSelect);
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

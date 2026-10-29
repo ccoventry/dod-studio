@@ -117,12 +117,12 @@ test("Studio's first sub-tab is Highlights, and every queue filter sits in one F
   // #127: every demo filter sits in one row. Min Kills is gone (#1070).
   const row = page.locator('#queue-filter-row');
   await expect(row).toContainText('Filters');
-  for (const id of ['demo-search-input', 'master-player-filter', 'master-kills-filter', 'master-owner-only-cb', 'master-ticked-only-cb']) {
+  for (const id of ['demo-search-input', 'master-player-filter', 'master-kills-filter', 'master-owner-only-cb', 'master-tracked-only-cb']) {
     await expect(row.locator(`#${id}`)).toHaveCount(1);
   }
-  // Ticked only: an empty queue has nothing ticked, so it boots dimmed with a reason.
-  await expect(row.locator('#master-ticked-only-cb')).toBeDisabled();
-  await expect(row.locator('.queue-filter-ticked-only')).toHaveText('Ticked only');
-  await expect(row.locator('.queue-filter-ticked-only')).toHaveAttribute('title', /No highlight is ticked yet/);
+  // Tracked only: an empty queue has nothing tracked, so it boots dimmed with a reason.
+  await expect(row.locator('#master-tracked-only-cb')).toBeDisabled();
+  await expect(row.locator('.queue-filter-tracked-only')).toHaveText('Tracked only');
+  await expect(row.locator('.queue-filter-tracked-only')).toHaveAttribute('title', /No demo is tracked yet/);
   await expect(page.locator('#input-min-kills')).toHaveCount(0);
 });
