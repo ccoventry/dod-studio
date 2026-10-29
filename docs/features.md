@@ -80,7 +80,7 @@ Status can be changed by hand in either direction. A status set by hand shows a 
 
 Buttons:
 
-- **Launch Preview** opens the demo with `viewdemo`. With the hook DLL and the demo on the game's drive, the game plays the original in place and opens the in-game window's Highlights tab, which lists the highlights with Go (#434); nothing is written. Otherwise it patches a `<stem>_preview.dem` with a bookmark per highlight. Your Initial and Scheduled Commands don't run in a preview, nor in Launch Game: only a capture batch runs them.
+- **Launch Preview** opens the demo with `viewdemo`. With the hook DLL and the demo on the game's drive (or on any drive, by its full path, with a hook DLL from #779 on), the game plays the original in place and opens the in-game window's Highlights tab, which lists the highlights with Go (#434); nothing is written. Otherwise it patches a `<stem>_preview.dem` with a bookmark per highlight. Your Initial and Scheduled Commands don't run in a preview, nor in Launch Game: only a capture batch runs them.
 - **Launch Game**, beside it, starts the game with no demo, in every build.
 - **View Match Telemetry** jumps to the Demo Analyzer on that demo.
 
@@ -183,7 +183,7 @@ Each block gets a disk estimate, and blocks are packed onto the Destinations wit
 By default (**Seek Between Clips**, on the Pipeline tab) the batch plays your original demos: the hook DLL loads each one with `viewdemo`, runs the batch's commands on the demo player's clock and seeks to each clip instead of fast-forwarding to it (`%APPDATA%\dod-studio\dodstudio_batch.txt` holds the plan; `ds_capture_batch` in `dodstudio_commands.md`). Nothing is patched. Two things happen first when they are needed, each with a status line and an activity-log line:
 
 - A highlight from a project saved before the demo player's clip times existed is read again from its demo (from the analyzer cache when it has it) to get them.
-- A demo on another drive than the game is copied as it is into `<game>\dod\` as `dodstudio_src_NN_<stem>.dem`, after a free-space check (the copies plus 1 GB), played from there and removed when the batch ends, is cancelled or fails. A demo on the game's drive is played where it is.
+- A demo on the game's drive is played where it is, by a path relative to `dod\`. A demo on another drive is played where it is too, by its full path (`viewdemo "D:/folder/demo"`, `ds_demo_other_drives`, #776, #779), and the batch turns that setting on before it starts; the activity log names each such demo. Only with a hook DLL from before #779, which can't do that, is such a demo copied as it is into `<game>\dod\` as `dodstudio_src_NN_<stem>.dem`, after a free-space check (the copies plus 1 GB), played from there and removed when the batch ends, is cancelled or fails. A path too long for `viewdemo` (over 240 characters), with a `"` or `;` in it, or with any character outside ASCII (`viewdemo` lower-cases the name byte by byte, which breaks `ü` and the like, on the game's drive too) is copied the same way, under a plain name.
 
 A batch that cannot run this way (no hook DLL, or a demo whose kills still have no clip times) is patched as below, and the activity log says why. Turning the setting off patches every batch.
 
@@ -405,7 +405,7 @@ A highlight is one life's kills by one player, at least one kill, for every conn
 | Blender | `%APPDATA%\dod-studio\blender\` (the chosen `blender.exe`); each take's work folder beside its `.agr` |
 | Project files | wherever you save them |
 | Patched demos, helper cfg | `<game>\dod\` (`dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`, and `dodstudio_primer.dem` without the hook DLL) |
-| Batch plan, copies of demos from another drive | `%APPDATA%\dod-studio\dodstudio_batch.txt`; `<game>\dod\dodstudio_src_NN_<stem>.dem` for the batch only |
+| Batch plan, copies of demos from another drive (hook DLL from before #779 only) | `%APPDATA%\dod-studio\dodstudio_batch.txt`; `<game>\dod\dodstudio_src_NN_<stem>.dem` for the batch only |
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |

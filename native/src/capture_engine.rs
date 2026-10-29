@@ -180,7 +180,8 @@ struct CaptureCleanupGuard {
     /// unwinds and no `Drop` runs. That gap, a hard kill and a power cut are
     /// all covered by `obs::recover` on the next start instead.
     obs: Option<std::sync::Arc<std::sync::Mutex<Option<crate::obs::ObsClient>>>>,
-    /// Copies of demos on another drive a hook-run batch plays from
+    /// Copies of demos on another drive a hook-run batch plays from when its
+    /// hook DLL is older than #779
     /// (`patch::source_copies`), removed however the batch ends.
     source_copies: Vec<PathBuf>,
     _wake_lock: Option<keepawake::KeepAwake>,
@@ -759,7 +760,7 @@ pub fn spawn_capture_engine(
                 Some(batch) => (
                     with_start("+exec dodstudio_helper.cfg"),
                     crate::patch::runtime_batch::early_lines(config.keep_game_behind),
-                    crate::patch::runtime_batch::start_lines(&batch.file),
+                    crate::patch::runtime_batch::start_lines(batch),
                 ),
                 None => {
                     let (args, lines) = crate::game_handoff::first_demo_start(

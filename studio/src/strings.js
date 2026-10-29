@@ -499,7 +499,7 @@ export const STRINGS = {
     SAVE_LOCAL_PATCHED_LABEL: 'Save Local Patched Copy',
     HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips',
     HOOK_RUNS_BATCH_TITLE:
-      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. A demo on another drive than the game is copied into the game folder for the batch and removed afterwards. Needs the DoD Studio hook DLL; a batch that cannot run this way is patched as before. Turn off to patch every batch.',
+      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. Demos on other drives play where they are, with nothing copied (an older hook DLL copies them into the game folder for the batch and removes them afterwards). Needs the DoD Studio hook DLL; a batch that cannot run this way is patched as before. Turn off to patch every batch.',
     KEEP_GAME_BEHIND_LABEL: 'Keep the Game Behind Your Windows While Capturing',
     KEEP_GAME_BEHIND_TITLE:
       'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
