@@ -53,6 +53,7 @@ export const PICK_FIELDS = {
   'project.open': 'documents',
   'project.locate_demo': 'demos',
   'analyzer.demo': 'demos',
+  'obs_test.demo': 'demos',
   'analyzer.pin_folder': 'demos',
   'auditor.target_folder': 'demos',
   'auditor.add_folder': 'demos',

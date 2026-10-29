@@ -1,6 +1,6 @@
 // setup_checklist.js
 // What DoD Studio needs before it can capture, and how much of it is set
-// (#599). Pure: the Setup window (setup_window.js) and the Capture page's
+// (#599). Pure: the Setup window (setup_window.js) and the Highlights page's
 // checklist card (setup_card.js) both read one answer from here, so they
 // never disagree about what is done. No DOM, no IPC.
 

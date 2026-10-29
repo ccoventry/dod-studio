@@ -164,7 +164,7 @@ export function updateStreakVisuals(streak) {
   streak.timeline_string = parts.join(', ');
 }
 
-/** Selects every currently-visible (Player + Min Kills filtered) streak in
+/** Selects every currently-visible (Player filtered) streak in
  *  `currentDemo` — the header checkbox's checked state. Only the rows on
  *  screen: selecting the raw list once checked highlights that were never
  *  rendered and could not be unchecked. The batch groups by (demo, target player), so
@@ -192,14 +192,7 @@ function deselectAllStreaks() {
 
 // Initialize event listeners for detail pane buttons
 window.addEventListener("DOMContentLoaded", () => {
-  const inputMinKills = document.querySelector('#input-min-kills');
   const btnLaunchPreview = document.querySelector('#btn-launch-preview');
-
-  if (inputMinKills) {
-    inputMinKills.addEventListener('input', () => {
-      renderDetailView(currentDemo, currentDemoIdx);
-    });
-  }
 
   /** Actually invokes launch_demo_preview — shared by the direct click path
    *  (no conflicting process) and the modal's Force Relaunch path. */
@@ -336,21 +329,17 @@ window.addEventListener("DOMContentLoaded", () => {
  * Whose highlights `demo.streaks` holds is the scan's decision, the same one
  * the in-game Highlights tab makes (`analysis::highlights`: a POV demo's
  * recorder's, an HLTV demo's everyone's; #247 D18, #573). The table only
- * narrows them, and both filters matter to anything that acts on "all" rows:
- *
- *  1. **The Player filter,** shown when the rows are every player's.
- *  2. **Min Kills.**
+ * narrows them by the Player filter, shown when the rows are every player's,
+ * and that matters to anything that acts on "all" rows.
  *
  * Select All uses this too. When it did not, it checked highlights that were
  * never rendered and could not be unchecked — and since the batch builder
  * groups by (demo, target player), each of those became its own chained demo.
  * One fifteen-row table turned into five passes over the same file.
  */
-function isVisibleStreak(demo, streak, minKills) {
+function isVisibleStreak(demo, streak) {
   if (!demo || !streak) return false;
-  if (listsEveryPlayer(demo) && !matchesPlayer(demo, streak, detailPlayer)) return false;
-  const threshold = minKills ?? parseInt(document.querySelector('#input-min-kills')?.value || "1", 10);
-  return streak.kill_count >= threshold;
+  return !listsEveryPlayer(demo) || matchesPlayer(demo, streak, detailPlayer);
 }
 
 /** The rows are every player's, each naming whose it is: the demo has no
@@ -360,15 +349,12 @@ function listsEveryPlayer(demo) {
   return demo.local_player_index === null || demo.local_player_index === undefined;
 }
 
-/** Every one of `demo`'s highlights, regardless of
- *  Min Kills or checkbox selection (minKills 0 bypasses that half of
- *  isVisibleStreak's filter, keeping only the player filter). Previewing is
- *  how you decide what's worth checking in the first place, not a view of
- *  what's already checked — the bookmark-preview patch has nothing to do
- *  with either filter (see #128). */
+/** Every one of `demo`'s highlights the Player filter shows, ticked or not.
+ *  Previewing is how you decide what's worth checking in the first place,
+ *  not a view of what's already checked (see #128). */
 function allPreviewableStreaks(demo) {
   if (!demo || !demo.streaks) return [];
-  return demo.streaks.filter(s => isVisibleStreak(demo, s, 0));
+  return demo.streaks.filter(s => isVisibleStreak(demo, s));
 }
 
 export function renderDetailView(demo, selectedDemoIdx) {
@@ -404,7 +390,6 @@ export function renderDetailView(demo, selectedDemoIdx) {
     return;
   }
 
-  const minKills = parseInt(document.querySelector('#input-min-kills')?.value || "1", 10);
   titleEl.textContent = STRINGS.HIGHLIGHTS.detailTitle(demo.name);
   // CSS truncates this with an ellipsis at narrow widths (same treatment as
   // the Master Queue's demo-name column) — the title attribute keeps the
@@ -447,16 +432,16 @@ export function renderDetailView(demo, selectedDemoIdx) {
   const tbody = table.querySelector('tbody');
 
   // Sequential display numbering is tracked separately from the streak's
-  // position in demo.streaks — POV/min-kills filtering below skips entries,
+  // position in demo.streaks — the Player filter below skips entries,
   // and Row # must count only rows actually rendered (matches dev's
   // `filtered_indices` + `row_idx + 1` behavior), not the raw array index.
   let renderedRowNum = 0;
 
   demo.streaks.forEach((streak, streakIdx) => {
-    // Both filters live in isVisibleStreak so Select All applies exactly the
+    // The filter lives in isVisibleStreak so Select All applies exactly the
     // same rule. They disagreed once, and the result was five chained demos
     // from a fifteen-row table.
-    if (!isVisibleStreak(demo, streak, minKills)) {
+    if (!isVisibleStreak(demo, streak)) {
       return;
     }
 
@@ -662,7 +647,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
   const selectAllHeaderCb = table.querySelector('#detail-select-all-cb');
   if (selectAllHeaderCb) {
     // Skip rows can't be ticked, so they don't count toward "all ticked".
-    const visibleStreaks = demo.streaks.filter(s => isVisibleStreak(demo, s, minKills) && !isSkipped(s));
+    const visibleStreaks = demo.streaks.filter(s => isVisibleStreak(demo, s) && !isSkipped(s));
     const selectedVisible = visibleStreaks.filter(s => s.selected).length;
     selectAllHeaderCb.checked = visibleStreaks.length > 0 && selectedVisible === visibleStreaks.length;
     selectAllHeaderCb.indeterminate = selectedVisible > 0 && selectedVisible < visibleStreaks.length;
@@ -672,15 +657,15 @@ export function renderDetailView(demo, selectedDemoIdx) {
     });
   }
 
-  if (showPlayer) container.appendChild(playerFilterRow(demo, minKills));
+  if (showPlayer) container.appendChild(playerFilterRow(demo));
   tableWrapper.appendChild(table);
   container.appendChild(tableWrapper);
 }
 
 /** The Player filter above an HLTV demo's table: everyone, or one player's
- *  highlights, each with how many Min Kills keeps. */
-function playerFilterRow(demo, minKills) {
-  const players = playersOf(demo, minKills);
+ *  highlights, each with how many they have. */
+function playerFilterRow(demo) {
+  const players = playersOf(demo);
   const row = document.createElement('div');
   row.className = 'detail-player-filter-row';
   // Sticky: an HLTV table runs to 150+ rows, and the filter is what shortens it.
