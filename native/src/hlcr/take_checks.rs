@@ -487,6 +487,22 @@ pub fn plan_findings(
     out
 }
 
+/// The rate a take's frames are counted at against its plan: a sequence's
+/// own, a video's from its file (an OBS take records at OBS's rate, not the
+/// batch's capture rate the take's file holds), else the capture rate.
+fn frame_rate(
+    picture: &PictureInput,
+    video_fps: Option<f64>,
+    capture_fps: Option<f64>,
+) -> Option<f64> {
+    match picture {
+        PictureInput::Sequence { fps, .. } => Some(*fps),
+        PictureInput::Video(_) => video_fps
+            .filter(|f| f.is_finite() && *f > 0.0)
+            .or(capture_fps),
+    }
+}
+
 /// A take's plan and the rate it was captured at, from the file beside it.
 fn recorded_plan(take_folder: &Path) -> (Option<TakePlan>, Option<f64>) {
     match super::take_meta::read_for_take(take_folder) {
@@ -547,10 +563,10 @@ pub async fn make_checks(
         return Ok((checks, true));
     }
 
-    let (picture, total) = match &media {
+    let (picture, total, video_fps) = match &media {
         StreamMedia::Video(video) => {
-            let (secs, _) = take_frames::probe_video(ffmpeg, video, &cancel).await?;
-            (PictureInput::Video(video.clone()), Some(secs))
+            let (secs, video_fps) = take_frames::probe_video(ffmpeg, video, &cancel).await?;
+            (PictureInput::Video(video.clone()), Some(secs), video_fps)
         }
         StreamMedia::Sequence(files) => {
             let rate = super::take_meta::recorded_fps(take_folder)
@@ -560,7 +576,7 @@ pub async fn make_checks(
                 .ok_or_else(|| crate::messages::take_checks_no_rate(take_folder.display()))?;
             let input = sequence_input(files, rate)
                 .ok_or_else(|| crate::messages::take_checks_unnumbered(take_folder.display()))?;
-            (input, Some(files.len() as f64 / rate))
+            (input, Some(files.len() as f64 / rate), None)
         }
     };
 
@@ -606,10 +622,7 @@ pub async fn make_checks(
     let mut found = findings(&report);
     found.extend(plan_findings(
         plan.as_ref(),
-        plan_fps.or(match &picture {
-            PictureInput::Sequence { fps, .. } => Some(*fps),
-            PictureInput::Video(_) => None,
-        }),
+        frame_rate(&picture, video_fps, plan_fps),
         frames,
         total,
     ));
@@ -824,6 +837,28 @@ mod tests {
         assert_eq!(obs.last().unwrap(), "-");
         // The video decodes on a few cores, not all of them.
         assert!(obs.windows(2).any(|w| w == ["-threads", "4"]));
+    }
+
+    #[test]
+    fn a_video_is_counted_at_its_own_rate_not_the_capture_rate() {
+        // An OBS take: the batch captured "at 300", OBS recorded at 60.
+        let video = PictureInput::Video(PathBuf::from("video.mp4"));
+        assert_eq!(frame_rate(&video, Some(60.0), Some(300.0)), Some(60.0));
+        assert_eq!(frame_rate(&video, None, Some(300.0)), Some(300.0));
+        assert_eq!(frame_rate(&video, Some(f64::NAN), Some(300.0)), Some(300.0));
+        let found = plan_findings(
+            Some(&plan(19.0, &[5.0, 14.0])),
+            frame_rate(&video, Some(60.0), Some(300.0)),
+            Some(1140),
+            Some(19.0),
+        );
+        assert!(found.is_empty(), "{found:?}");
+        let sequence = PictureInput::Sequence {
+            pattern: PathBuf::from("%05d.bmp"),
+            start: 0,
+            fps: 120.0,
+        };
+        assert_eq!(frame_rate(&sequence, None, Some(300.0)), Some(120.0));
     }
 
     #[test]

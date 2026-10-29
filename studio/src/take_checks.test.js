@@ -41,7 +41,7 @@ describe('take checks (#1084)', () => {
   it('shows a take with no plan as OK with a note that its length and kills are unknown', () => {
     const chip = checkChip({ status: CHECK_STATE.DONE, result: { findings: [{ check: 'no_plan', cause: 'unknown', warn: false }] } });
     expect(chip.label).toBe('OK');
-    expect(chip.title).toBe("The clip's length and kills weren't checked: this take has no plan recorded (captured before Studio kept one).");
+    expect(chip.title).toBe("The clip's length and kills weren't checked: this take has no plan recorded (captured before Studio kept one, or from a demo scanned before then).");
     expect(findingLine({ check: 'no_plan', cause: 'unknown', warn: false }).cause).toBe('');
   });
 

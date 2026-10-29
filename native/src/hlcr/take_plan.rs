@@ -2,11 +2,16 @@
 //! (#1084).
 //!
 //! A batch plans each recording block: the demo frames recording starts and
-//! stops on, and the kills inside them. Those become seconds of demo time
-//! (`frame_times`, the demo's own clock), and the capture rate turns the span
-//! into a frame count: HLAE writes one frame per `1 / mirv_movie_fps` seconds
-//! of demo time. The plan is written beside the take (`take_meta`), so the
-//! checks can hold the video to it long after the batch is gone:
+//! stops on, and the kills inside them. Those become seconds on the
+//! `viewdemo` clock (`patch::viewdemo_clock`), the clock the hook DLL runs a
+//! Seek Between Clips batch on, so the plan is the window it records (a
+//! patched demo plays the same frames on the demo's own clock, which keeps
+//! pace with it). Not the scanner's `frame_times`: they stop at the end of
+//! the demo's loading segment, a few dozen frames, so they never reach a
+//! clip. The video's frame rate turns the span into a frame count: HLAE
+//! writes one frame per `1 / mirv_movie_fps` seconds of demo time. The plan
+//! is written beside the take (`take_meta`), so the checks can hold the
+//! video to it long after the batch is gone:
 //!
 //! - **Length**: a video well short of or past its planned frame count is a
 //!   capture problem (frames lost, or recording started or stopped at the
@@ -19,8 +24,9 @@
 //!   minus the recording's start. One outside the video is a bad seek or a
 //!   wrong recording window.
 //!
-//! A take captured before the plan was recorded, or whose demo had no frame
-//! times, has none, and is reported as unknown, never as a problem.
+//! A take captured before the plan was recorded, or whose demo's kills have
+//! no `viewdemo` times (a scan older than them), has none, and is reported as
+//! unknown, never as a problem.
 
 use crate::hlcr::take_length::{SHORT_MIN_SECONDS, SHORT_SHARE};
 
@@ -40,26 +46,27 @@ pub struct TakePlan {
     pub kill_offsets_secs: Vec<f64>,
 }
 
-/// The plan for a block that records frames `start_frame` to `stop_frame` of
-/// a demo whose frame `i` is at `frame_times[i]` seconds, with kills on
-/// `kill_frames`. `None` when `frame_times` doesn't reach the recording's
-/// last frame (a demo scanned only in part) or the window is empty: nothing
-/// trustworthy to plan from.
+/// The plan for a block that records frames `start_frame` to `stop_frame`,
+/// with kills on `kill_frames`, where `seconds` places a frame on the clock
+/// the recording runs on. `None` when the window is empty: nothing to plan.
 pub fn plan_for_block(
-    frame_times: &[f32],
+    seconds: impl Fn(i32) -> f64,
     start_frame: i32,
     stop_frame: i32,
     kill_frames: &[i32],
 ) -> Option<TakePlan> {
-    let at = |frame: i32| usize::try_from(frame).ok().and_then(|i| frame_times.get(i));
-    let start = f64::from(*at(start_frame)?);
-    let stop = f64::from(*at(stop_frame)?);
-    if stop <= start {
+    if start_frame < 0 || stop_frame <= start_frame {
+        return None;
+    }
+    let start = seconds(start_frame);
+    let stop = seconds(stop_frame);
+    if !(start.is_finite() && stop.is_finite()) || stop <= start {
         return None;
     }
     let kill_offsets_secs = kill_frames
         .iter()
-        .filter_map(|&frame| at(frame).map(|&t| f64::from(t) - start))
+        .map(|&frame| seconds(frame) - start)
+        .filter(|at| at.is_finite())
         .collect();
     Some(TakePlan {
         length_secs: stop - start,
@@ -108,9 +115,9 @@ pub fn kills_outside(plan: &TakePlan, video_secs: f64) -> Vec<f64> {
 mod tests {
     use super::*;
 
-    /// A demo at 100 fps: frame `i` is at `i / 100` seconds.
-    fn clock(frames: usize) -> Vec<f32> {
-        (0..frames).map(|i| i as f32 / 100.0).collect()
+    /// A clock at 100 fps: frame `i` is at `i / 100` seconds.
+    fn clock(frame: i32) -> f64 {
+        f64::from(frame) / 100.0
     }
 
     fn plan(length_secs: f64, kills: &[f64]) -> TakePlan {
@@ -122,32 +129,24 @@ mod tests {
 
     #[test]
     fn a_plan_is_the_recording_window_and_each_kill_in_it() {
-        let p = plan_for_block(&clock(5000), 1000, 2900, &[1500, 2000]).unwrap();
-        assert!((p.length_secs - 19.0).abs() < 1e-4);
-        assert!((p.kill_offsets_secs[0] - 5.0).abs() < 1e-4);
-        assert!((p.kill_offsets_secs[1] - 10.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn a_demo_without_frame_times_has_no_plan() {
-        assert_eq!(plan_for_block(&[], 100, 300, &[150]), None);
-    }
-
-    #[test]
-    fn a_window_past_the_scanned_frames_has_no_plan() {
-        assert_eq!(plan_for_block(&clock(2000), 1000, 2900, &[1500]), None);
+        let p = plan_for_block(clock, 1000, 2900, &[1500, 2000]).unwrap();
+        assert!((p.length_secs - 19.0).abs() < 1e-9);
+        assert!((p.kill_offsets_secs[0] - 5.0).abs() < 1e-9);
+        assert!((p.kill_offsets_secs[1] - 10.0).abs() < 1e-9);
     }
 
     #[test]
     fn an_empty_or_backwards_window_has_no_plan() {
-        assert_eq!(plan_for_block(&clock(5000), 1000, 1000, &[]), None);
-        assert_eq!(plan_for_block(&clock(5000), 2000, 1000, &[]), None);
-        assert_eq!(plan_for_block(&clock(5000), -3, 1000, &[]), None);
+        assert_eq!(plan_for_block(clock, 1000, 1000, &[]), None);
+        assert_eq!(plan_for_block(clock, 2000, 1000, &[]), None);
+        assert_eq!(plan_for_block(clock, -3, 1000, &[]), None);
     }
 
     #[test]
-    fn a_kill_past_the_scanned_frames_is_left_out_not_guessed() {
-        let p = plan_for_block(&clock(3000), 1000, 2900, &[1500, 9000]).unwrap();
+    fn a_clock_that_cannot_place_a_frame_gives_no_plan_or_leaves_the_kill_out() {
+        let broken = |frame: i32| if frame > 2500 { f64::NAN } else { clock(frame) };
+        assert_eq!(plan_for_block(broken, 1000, 2900, &[1500]), None);
+        let p = plan_for_block(broken, 1000, 2400, &[1500, 2600]).unwrap();
         assert_eq!(p.kill_offsets_secs.len(), 1);
     }
 

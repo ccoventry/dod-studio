@@ -879,7 +879,7 @@ export const STRINGS = {
     takeCheckClipping: (pct) => `The sound clips: ${pct}% of it is at full volume. Lower the capture's sound volume.`,
     takeCheckLength: (frames, planned, secs) => `The take has ${frames} frames (${secs} s) but ${planned} were planned: part of the clip is missing or it ran on too long.`,
     takeCheckKillOutside: (count, at, secs) => `${count === 1 ? 'A kill is' : `${count} kills are`} not in the clip (${count === 1 ? 'it' : 'the first'} falls at ${at} s of a ${secs} s clip).`,
-    TAKE_CHECK_NO_PLAN: "The clip's length and kills weren't checked: this take has no plan recorded (captured before Studio kept one).",
+    TAKE_CHECK_NO_PLAN: "The clip's length and kills weren't checked: this take has no plan recorded (captured before Studio kept one, or from a demo scanned before then).",
     TAKE_SHEET_CHECKS_TITLE: 'Checks',
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
