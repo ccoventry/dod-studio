@@ -6,6 +6,7 @@ pub mod combine;
 pub mod config;
 pub mod renderer;
 pub mod scanner;
+pub mod take_checks;
 pub mod take_cleanup;
 pub mod take_delete;
 pub mod take_frames;

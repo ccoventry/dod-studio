@@ -981,8 +981,88 @@ test.describe('take pictures (#1069)', () => {
       window.__mockInvokeHandlers['take_preview_thumb'] = () => { throw 'FFmpeg made no picture'; };
     });
     await emitSnapshot(page, [job({ stream_folder: 'all' })]);
-    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-cell');
+    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-pic');
     await expect(cell).toHaveText('—');
     await expect(cell).toHaveAttribute('title', 'No picture: FFmpeg made no picture');
+  });
+
+  test('a failed picture is made on a later refresh, and a re-captured take gets its new one', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => { throw 'FFmpeg made no picture'; };
+      window.__fakeNowOffset = 0;
+      const real = Date.now.bind(Date);
+      Date.now = () => real() + window.__fakeNowOffset;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const cell = page.locator('tr[data-job-id="0"] .rj-thumb-cell');
+    await expect(cell).toHaveText('—');
+    // A refresh right away asks nothing more.
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    expect(await invocationsFor(page, 'take_preview_thumb')).toHaveLength(1);
+    // After the wait the next refresh tries again, and the picture appears.
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: false });
+      window.__fakeNowOffset += 31_000;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    await expect(cell.locator('img.rj-thumb')).toHaveAttribute('src', PIXEL);
+    // The take is captured again: the next refresh after the minute swaps it.
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri: uri + '#new', cached: false });
+      window.__fakeNowOffset += 61_000;
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    await expect(cell.locator('img.rj-thumb')).toHaveAttribute('src', PIXEL + '#new');
+  });
+});
+
+test.describe('take checks (#1084)', () => {
+  const PIXEL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+  const HOLDS = { check: 'holds', cause: 'demo', warn: false, at_secs: 7.4, secs: 0.34, count: 9 };
+
+  test('each take is checked after the pictures, and its row and sheet say what was found', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(({ uri, holds }) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: true });
+      window.__mockInvokeHandlers['take_preview_sheet'] = () => ({ kind: 'video', duration_secs: 18, fps: 300, frames: [{ uri, frame: 0, secs: 0 }] });
+      window.__mockInvokeHandlers['take_checks'] = ({ stream }) => ({
+        findings: stream === 'all'
+          ? [holds]
+          : [{ check: 'black', cause: 'capture', warn: true, at_secs: 2, secs: 3.5 }, { check: 'no_sound', cause: 'capture', warn: true }],
+      });
+    }, { uri: PIXEL, holds: HOLDS });
+    await emitSnapshot(page, [
+      job({ id: '0', stream_folder: 'all' }),
+      job({ id: '1', name: 'other', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', stream_folder: 'hudColor' }),
+    ]);
+    const good = page.locator('tr[data-job-id="0"] .rj-check');
+    const bad = page.locator('tr[data-job-id="1"] .rj-check');
+    await expect(good).toHaveText('OK');
+    await expect(good).toHaveAttribute('title', /holds still briefly 9 times/);
+    await expect(bad).toHaveText('⚠ 2');
+    await expect(bad).toHaveAttribute('title', /Black picture for 3\.5 s from 2\.0 s\. \(Capturing again helps\)/);
+    await expect(page.locator('#render-take-checks-progress')).toBeHidden();
+    // The pictures come first: every thumb call is before the first check.
+    const calls = await page.evaluate(() => window.__mockInvocations.map((c) => c.cmd).filter((c) => c === 'take_preview_thumb' || c === 'take_checks'));
+    expect(calls).toEqual(['take_preview_thumb', 'take_preview_thumb', 'take_checks', 'take_checks']);
+
+    await page.locator('tr[data-job-id="1"] img.rj-thumb').click();
+    const list = page.locator('#take-sheet-modal .take-sheet-checks');
+    await expect(list).toBeVisible();
+    await expect(list.locator('li')).toHaveCount(2);
+    await expect(list.locator('li').first()).toContainText('Black picture for 3.5 s from 2.0 s.');
+  });
+
+  test('a take that can\'t be checked shows a question mark that says why', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((uri) => {
+      window.__mockInvokeHandlers['take_preview_thumb'] = () => ({ uri, cached: true });
+      window.__mockInvokeHandlers['take_checks'] = () => { throw 'FFmpeg failed: bad file'; };
+    }, PIXEL);
+    await emitSnapshot(page, [job({ stream_folder: 'all' })]);
+    const chip = page.locator('tr[data-job-id="0"] .rj-check');
+    await expect(chip).toHaveText('?');
+    await expect(chip).toHaveAttribute('title', "Couldn't check this take: FFmpeg failed: bad file");
   });
 });

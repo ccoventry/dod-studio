@@ -343,6 +343,22 @@ pub fn take_frames_bad_stream_name(stream: &str) -> String {
     format!("`{stream}` isn't a stream folder name")
 }
 
+// ── hlcr/take_checks.rs (#1084) ───────────────────────────────────────────
+
+pub fn take_checks_no_rate(take: impl Display) -> String {
+    format!("{take}'s frame rate isn't known, so its frames can't be timed for the checks")
+}
+
+pub fn take_checks_unnumbered(take: impl Display) -> String {
+    format!(
+        "{take}'s frame files aren't numbered the way HLAE numbers them, so they weren't checked"
+    )
+}
+
+pub fn take_checks_timed_out(minutes: u64) -> String {
+    format!("FFmpeg took over {minutes} min checking the take and was stopped")
+}
+
 // ── demo_rename.rs (#469) ─────────────────────────────────────────────────
 
 pub const RENAME_NOT_IN_PLACE: &str =
