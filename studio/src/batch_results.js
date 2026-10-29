@@ -8,6 +8,8 @@
 // Fed by capture_pane.js: `batchStarted()` when a batch starts,
 // `batchEnded(kind, text)` from capture_status, and `batchVerified(payload,
 // dispatch)` from capture_takes_verified, in whichever order they arrive.
+// In OBS mode, `batchObsClip(report)` from obs_drop_rate.js adds what each
+// take lost to OBS's frame drops.
 
 import { revealInExplorer } from './ipc_bridge.js';
 import { highlightStartSeconds } from './highlight_time.js';
@@ -15,6 +17,22 @@ import { clockFloor } from './time_format.js';
 import { STRINGS } from './strings.js';
 
 let state = null; // { endedAt, kind, text, rows, totals } once a batch ends
+let obsClips = []; // OBS mode: each clip's closing drop-rate report, in order
+
+/** A take folder as either spelling of it compares. */
+function folderKey(path) {
+  return String(path || '').replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/** Each row's OBS report, or null: matched by take folder, else by order
+ *  (OBS records the takes in the order the panel lists them). */
+export function obsForRows(rows, clips) {
+  if (!clips?.length) return rows.map(() => null);
+  const byFolder = new Map(clips.filter((c) => c.take_folder).map((c) => [folderKey(c.take_folder), c]));
+  return rows.map((row, i) => byFolder.get(folderKey(row.folder))
+    ?? clips.find((c) => !c.take_folder && c.clip === i + 1)
+    ?? null);
+}
 
 function panel() {
   return document.querySelector('#batch-results');
@@ -92,14 +110,20 @@ function render() {
   const totals = state.totals
     ? S.totals(state.totals.captured, state.totals.takes, formatBytes(state.totals.bytes), state.totals.captured - state.totals.renderable)
     : S.CHECKING;
-  summary.textContent = [outcome, totals].filter(Boolean).join(' ');
+  const obs = obsForRows(state.rows || [], obsClips);
+  const obsMeasured = obs.filter(Boolean);
+  const obsLagging = obsMeasured.filter((o) => o.lagging);
+  const obsLine = obsLagging.length
+    ? S.obsSummary(obsLagging.length, obsMeasured.length, STRINGS.OBS_DROP_RATE.fix(obsLagging[0].capture_fps))
+    : '';
+  summary.textContent = [outcome, totals, obsLine].filter(Boolean).join(' ');
 
   const children = [head, summary];
   if (state.rows?.length) {
     const table = document.createElement('table');
     table.className = 'analyzer-table batch-results-table';
     const body = document.createElement('tbody');
-    for (const row of state.rows) {
+    for (const [i, row] of state.rows.entries()) {
       const tr = document.createElement('tr');
       tr.className = `batch-results-row-${row.status}`;
       const status = document.createElement('td');
@@ -116,7 +140,18 @@ function render() {
         btn.addEventListener('click', () => revealInExplorer(row.folder).catch(() => {}));
         open.append(btn);
       }
-      tr.append(status, label, size, open);
+      const cells = [status, label, size];
+      if (obsMeasured.length) {
+        const dropped = document.createElement('td');
+        const o = obs[i];
+        if (o) {
+          dropped.textContent = S.obsCell(o.skipped_pct, o.missed_pct);
+          dropped.title = S.obsCellTitle(o.skipped, o.frames, o.missed, o.rendered);
+          if (o.lagging) dropped.className = 'batch-results-obs-lagging';
+        }
+        cells.push(dropped);
+      }
+      tr.append(...cells, open);
       body.append(tr);
     }
     table.append(body);
@@ -131,6 +166,7 @@ function render() {
 /** A new batch: the last one's results go. */
 export function batchStarted() {
   state = null;
+  obsClips = [];
   render();
 }
 
@@ -144,4 +180,10 @@ export function batchEnded(kind, text) {
 export function batchVerified(payload, dispatch) {
   state = { endedAt: new Date(), ...(state || {}), ...resultsOf(payload, dispatch) };
   render();
+}
+
+/** OBS mode: one clip's totals, from its closing drop-rate report. */
+export function batchObsClip(report) {
+  obsClips.push(report);
+  if (state) render();
 }

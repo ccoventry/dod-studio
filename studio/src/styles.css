@@ -614,6 +614,32 @@ html.picking-path * {
   padding-bottom: 6px;
 }
 
+/* The Master Demo Queue's filters, a row of their own under its toolbar (#127). */
+.queue-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.queue-filter-row-label {
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.queue-filter-tracked-only {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+/* Dimmed while no highlight is ticked anywhere (#127). */
+.queue-filter-tracked-only.is-disabled {
+  opacity: 0.45;
+}
+
 .panel-header h2, .panel-header h3 {
   font-size: 14px;
   font-weight: 600;
@@ -1230,6 +1256,22 @@ button.danger-btn {
   line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+/* OBS mode's live drop rate (#172), under the status line. */
+#obs-drop-rate {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+#obs-drop-rate[hidden] {
+  display: none;
+}
+
+#obs-drop-rate.lagging {
+  color: #ffb74d;
+  font-weight: 600;
 }
 
 #export-pool-free-indicator,
@@ -1877,6 +1919,10 @@ button.danger-btn {
 
 .batch-results-row-ok td:first-child {
   color: #66bb6a;
+}
+
+.batch-results-obs-lagging {
+  color: #ffb74d;
 }
 
 /* The Commands tab's type-ahead (#215). */
@@ -3659,7 +3705,7 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 12px;
 }
 
-/* The Capture page's card. */
+/* The Highlights tab's card. */
 .setup-card {
   margin: 8px;
   padding: 10px 12px;
@@ -4123,4 +4169,62 @@ button.setup-skip:hover:not(:disabled) {
   padding: 6px 10px;
   border: 1px solid var(--border-accent);
   border-radius: 4px;
+}
+
+/* OBS capture test (#646, obs_capture_test.js). */
+.obs-test-controls {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.obs-test-panel {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-card);
+  max-width: 760px;
+}
+
+.obs-test-panel[hidden],
+.obs-test-table[hidden],
+#obs-test-bar[hidden] {
+  display: none;
+}
+
+.obs-test-step {
+  color: var(--text-muted);
+  min-height: 1.2em;
+}
+
+.obs-test-result {
+  white-space: pre-line;
+  margin-top: 6px;
+  user-select: text;
+}
+
+.obs-test-result[data-kind="steady"] { color: #7fc77f; }
+.obs-test-result[data-kind="borderline"] { color: #e0b050; }
+.obs-test-result[data-kind="not_steady"],
+.obs-test-result[data-kind="error"] { color: #e07a5f; }
+
+.obs-test-table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.obs-test-table th,
+.obs-test-table td {
+  padding: 2px 10px 2px 0;
+  text-align: left;
+}
+
+.obs-test-table tr[data-level="steady"] td:nth-child(2) { color: #7fc77f; }
+.obs-test-table tr[data-level="borderline"] td:nth-child(2) { color: #e0b050; }
+.obs-test-table tr[data-level="not_steady"] td:nth-child(2) { color: #e07a5f; }
+
+#obs-test-apply-btn {
+  margin-top: 8px;
 }

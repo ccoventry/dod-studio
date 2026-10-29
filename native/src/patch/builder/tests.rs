@@ -501,6 +501,69 @@ fn test_drive_headroom_includes_drive_0_when_a_block_actually_lands_there() {
 }
 
 #[test]
+fn clips_that_fit_one_at_a_time_are_planned_when_renders_free_space_while_capturing() {
+    // #861: Render While Capturing holds the batch between clips until
+    // renders have freed the room, so two clips that only fit the drive one
+    // at a time are planned rather than refused.
+    let mut config = mock_config();
+    let temp_drive = std::env::temp_dir().join("dod_test_render_while_capturing_drive");
+    std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
+    config.capture_directories = vec![temp_drive.clone()];
+    let room = crate::sys::disk::get_available_bytes(&temp_drive)
+        .saturating_sub(crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES);
+    assert!(
+        room > 1_000_000_000,
+        "the test drive needs a GB past the headroom"
+    );
+    // Two clips far apart in one demo, each about 60% of the room.
+    let streaks = || {
+        vec![
+            streak_with_kills(1000, 3000, &[1000, 3000]),
+            streak_with_kills(60_000, 62_000, &[60_000, 62_000]),
+        ]
+    };
+    config.capture_fps = 1;
+    let per_fps = estimate_batch_capture_bytes(&streaks()[..1], &config).max(1);
+    config.capture_fps = ((room as f64 * 0.6) / per_fps as f64).ceil() as i32;
+
+    let refused = build_batch_queue(streaks(), &config, &std::collections::HashMap::new());
+    assert!(refused.is_err(), "both clips at once don't fit the drive");
+
+    config.render_while_capturing = true;
+    let (jobs, headroom) =
+        build_batch_queue(streaks(), &config, &std::collections::HashMap::new()).unwrap();
+    let blocks: usize = jobs.iter().map(|j| j.blocks.len()).sum();
+    assert_eq!(blocks, 2);
+    assert_eq!(headroom.len(), 1);
+    assert_eq!(headroom[0].path, temp_drive);
+    assert!(
+        headroom[0].free_bytes >= crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
+        "the room beside one clip passes the pre-launch check"
+    );
+}
+
+#[test]
+fn a_clip_bigger_than_the_drive_is_refused_even_when_renders_free_space_while_capturing() {
+    // #861: deleting takes can't give a drive more room than it had, so a
+    // clip that can't fit on its own would start a batch that can't finish.
+    let mut config = mock_config();
+    let temp_drive = std::env::temp_dir().join("dod_test_render_while_capturing_drive");
+    std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
+    config.capture_directories = vec![temp_drive.clone()];
+    // Petabytes per second of footage: more than any drive has free.
+    config.resolution_width = 20_000;
+    config.resolution_height = 20_000;
+    config.capture_fps = 100_000;
+    config.render_while_capturing = true;
+    let refused = build_batch_queue(
+        vec![streak_with_kills(1000, 3000, &[1000, 3000])],
+        &config,
+        &std::collections::HashMap::new(),
+    );
+    assert!(refused.is_err(), "the clip can't fit the drive on its own");
+}
+
+#[test]
 fn test_patched_demos_land_directly_in_dod_not_on_a_capture_directory() {
     // See issue #8: capture_directories is only about where recorded
     // video blocks land now, never these small demo files -- both the

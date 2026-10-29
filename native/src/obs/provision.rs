@@ -24,9 +24,12 @@
 //! ever launched: it's the same mechanism that lets a source configured once
 //! keep finding the game across every later relaunch.
 
+use std::path::PathBuf;
+
 use serde_json::json;
 
 use super::client::{ObsClient, ObsError};
+use super::encoder::{self, AdvancedEncoder, ObsRecordingQuality};
 use crate::log_markdown;
 
 /// The profile dod-studio owns. Never the user's own — see module docs.
@@ -77,13 +80,29 @@ pub fn ensure_dod_studio_setup(
     height: i32,
     fps_num: i32,
     fps_den: i32,
+    quality: ObsRecordingQuality,
+) -> Result<ProvisionResult, ObsError> {
+    let roots = encoder::config_roots();
+    setup_with_config_roots(client, width, height, fps_num, fps_den, quality, &roots)
+}
+
+/// [`ensure_dod_studio_setup`], looking for OBS's profile folders under
+/// `roots` (tests point it at a temporary folder).
+fn setup_with_config_roots(
+    client: &mut ObsClient,
+    width: i32,
+    height: i32,
+    fps_num: i32,
+    fps_den: i32,
+    quality: ObsRecordingQuality,
+    roots: &[PathBuf],
 ) -> Result<ProvisionResult, ObsError> {
     let previous_profile = ensure_profile(client)?;
     // Before the video settings: rebuilding the outputs (see
     // ensure_recording_settings) switches profiles, which reloads the
     // profile's own canvas and frame rate. Best-effort: OBS still records if
     // these can't be set, just at whatever quality the profile was left on.
-    if let Err(e) = ensure_recording_settings(client, previous_profile.as_deref()) {
+    if let Err(e) = ensure_recording_settings(client, previous_profile.as_deref(), quality, roots) {
         log_markdown(&format!(
             "⚠️ **OBS** — couldn't set the `{PROFILE_NAME}` profile's recording quality ({e}). \
              Clips record at whatever OBS's Settings → Output has for it."
@@ -133,16 +152,19 @@ fn ensure_on_own_profile(client: &mut ObsClient) -> Result<(), ObsError> {
     Ok(())
 }
 
-/// The recording settings DoD Studio's profile records with (#645), as
-/// `(category, name, value)` for `SetProfileParameter`.
+/// The recording settings DoD Studio's profile records with (#645, #1060),
+/// as `(category, name, value)` for `SetProfileParameter`.
 ///
-/// - **Simple output mode**, because its settings live in the profile's
-///   `basic.ini`, which obs-websocket can write. Advanced mode keeps the
-///   encoder's settings in `recordEncoder.json`, which it can't.
-/// - **"Indistinguishable quality"** (`HQ`): constant QP (16 on NVENC at
-///   2560x1440, read from OBS 32.2.2's log), about 390 Mbps for a 120 fps
-///   clip. A new profile records "Same as stream" instead: 6 Mbps CBR, a
-///   sixtieth of that for the same clip.
+/// - **Advanced output mode with a fast NVENC setup** when `advanced` is
+///   given (see `encoder`): Simple mode's NVENC setup can't keep up with
+///   120 fps at 1440p. Its encoder settings live in `recordEncoder.json`,
+///   which `encoder` writes; the rest is here: standard recording (custom
+///   FFmpeg output ignores `SetRecordDirectory`), track 1, no split files.
+/// - **Otherwise Simple output mode at "Indistinguishable quality"** (`HQ`):
+///   constant QP (16 on NVENC at 2560x1440, read from OBS 32.2.2's log). A
+///   new profile records "Same as stream" instead: 6 Mbps CBR, a sixtieth of
+///   that for the same clip. Simple mode's settings are written in both
+///   cases, so a switch back to it finds them right.
 /// - **The encoder OBS picked for this PC** (`default_encoder`, OBS's own
 ///   default for a new profile): the hardware encoder when there is one.
 ///   Setting it back undoes a change to x264, which can't keep up with a
@@ -151,26 +173,56 @@ fn ensure_on_own_profile(client: &mut ObsClient) -> Result<(), ObsError> {
 ///   while writing still plays to the moment it died, and the finished file is
 ///   a plain MP4 every editor opens. Older OBS keeps whatever it had.
 /// - **No replay buffer**: it would hold the recording output.
+/// - **Rec. 709, limited range, NV12** (I444 for the 4:4:4 choice): OBS's own defaults, and what the
+///   render step and video editors assume of an H.264/HEVC file. Full range
+///   or an HDR colour space here would give washed-out or crushed blacks in
+///   an editor that reads the file as limited-range Rec. 709.
 fn recording_settings(
     obs_version: &str,
     default_encoder: &str,
+    advanced: Option<&AdvancedEncoder>,
 ) -> Vec<(&'static str, &'static str, String)> {
+    let mode = if advanced.is_some() {
+        "Advanced"
+    } else {
+        "Simple"
+    };
     let mut wanted = vec![
-        ("Output", "Mode", "Simple".to_string()),
+        ("Output", "Mode", mode.to_string()),
         ("SimpleOutput", "RecQuality", "HQ".to_string()),
         ("SimpleOutput", "RecRB", "false".to_string()),
+        (
+            "Video",
+            "ColorFormat",
+            advanced.map_or("NV12", |a| a.color_format).to_string(),
+        ),
+        ("Video", "ColorSpace", "709".to_string()),
+        ("Video", "ColorRange", "Partial".to_string()),
     ];
     if !default_encoder.is_empty() {
         wanted.push(("SimpleOutput", "RecEncoder", default_encoder.to_string()));
     }
-    if version_at_least(obs_version, (30, 2)) {
+    let hybrid = version_at_least(obs_version, (30, 2));
+    if hybrid {
         wanted.push(("SimpleOutput", "RecFormat2", "hybrid_mp4".to_string()));
+    }
+    if let Some(enc) = advanced {
+        wanted.extend([
+            ("AdvOut", "RecType", "Standard".to_string()),
+            ("AdvOut", "RecEncoder", enc.id.to_string()),
+            ("AdvOut", "RecTracks", "1".to_string()),
+            ("AdvOut", "RecRB", "false".to_string()),
+            ("AdvOut", "RecSplitFile", "false".to_string()),
+        ]);
+        if hybrid {
+            wanted.push(("AdvOut", "RecFormat2", "hybrid_mp4".to_string()));
+        }
     }
     wanted
 }
 
 /// Whether `version` (`32.2.2`, `30.2.0-beta1`) is at least `min`.
-fn version_at_least(version: &str, min: (u32, u32)) -> bool {
+pub(super) fn version_at_least(version: &str, min: (u32, u32)) -> bool {
     let mut parts = version
         .split(|c: char| !c.is_ascii_digit())
         .map(|p| p.parse::<u32>().unwrap_or(0));
@@ -191,11 +243,16 @@ fn version_at_least(version: &str, min: (u32, u32)) -> bool {
 fn ensure_recording_settings(
     client: &mut ObsClient,
     previous_profile: Option<&str>,
+    quality: ObsRecordingQuality,
+    roots: &[PathBuf],
 ) -> Result<(), ObsError> {
     let version = client.obs_version()?;
     let (_, default_encoder) = client.profile_parameter("SimpleOutput", "RecEncoder")?;
     let mut changed = Vec::new();
-    for (category, name, value) in recording_settings(&version, &default_encoder) {
+    let advanced = encoder::advanced_encoder(quality, &default_encoder, &version)
+        .and_then(|enc| write_encoder_file(client, &enc, roots, &mut changed).then_some(enc));
+    for (category, name, value) in recording_settings(&version, &default_encoder, advanced.as_ref())
+    {
         let (current, default) = client.profile_parameter(category, name)?;
         let effective = if current.is_empty() { default } else { current };
         if effective != value {
@@ -225,6 +282,57 @@ fn ensure_recording_settings(
         changed.join(", ")
     ));
     Ok(())
+}
+
+/// The `basic.ini` key `write_encoder_file` marks the profile with.
+const MARKER_CATEGORY: &str = "DoDStudio";
+const MARKER_KEY: &str = "ProvisionMarker";
+
+/// Writes `enc`'s settings into the current profile's `recordEncoder.json`
+/// and says whether Advanced mode can use them. False, logged, when the
+/// profile's folder can't be found or written: Simple mode then records as
+/// before #1060, never Advanced mode on whatever encoder settings happen to
+/// be there (OBS's NVENC defaults are 10 Mbps CBR).
+///
+/// The folder is found by a fresh marker written through obs-websocket,
+/// which saves `basic.ini` on every write.
+fn write_encoder_file(
+    client: &mut ObsClient,
+    enc: &AdvancedEncoder,
+    roots: &[PathBuf],
+    changed: &mut Vec<String>,
+) -> bool {
+    let marker = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default()
+        .to_string();
+    let dir = client
+        .set_profile_parameter(MARKER_CATEGORY, MARKER_KEY, &marker)
+        .ok()
+        .and_then(|()| encoder::find_profile_dir(roots, MARKER_KEY, &marker));
+    let Some(dir) = dir else {
+        log_markdown(&format!(
+            "⚠️ **OBS** — couldn't find the `{PROFILE_NAME}` profile's folder, so it records in \
+             OBS's Simple mode, which may drop frames at 120 fps."
+        ));
+        return false;
+    };
+    match encoder::write_record_encoder(&dir, &enc.settings) {
+        Ok(true) => {
+            changed.push(format!("encoder settings → {}", enc.settings));
+            true
+        }
+        Ok(false) => true,
+        Err(e) => {
+            log_markdown(&format!(
+                "⚠️ **OBS** — couldn't write `{}` ({e}), so the `{PROFILE_NAME}` profile records \
+                 in OBS's Simple mode, which may drop frames at 120 fps.",
+                dir.join("recordEncoder.json").display()
+            ));
+            false
+        }
+    }
 }
 
 fn ensure_scene_and_sources(
@@ -332,6 +440,152 @@ mod tests {
     use crate::obs::fake_obs::{FakeObs, Reply, serve};
     use std::sync::{Arc, Mutex};
 
+    /// Provisions at 1440p120 Standard, finding no profile folder.
+    fn setup(client: &mut ObsClient) -> Result<ProvisionResult, ObsError> {
+        setup_with_config_roots(
+            client,
+            2560,
+            1440,
+            120,
+            1,
+            ObsRecordingQuality::Standard,
+            &[],
+        )
+    }
+
+    fn recording_settings_simple(
+        version: &str,
+        encoder: &str,
+    ) -> Vec<(&'static str, &'static str, String)> {
+        recording_settings(version, encoder, None)
+    }
+
+    /// An OBS 33 on our profile with NVENC, whose profile folder lives under
+    /// `root` (when given) and gets the marker the way OBS saves `basic.ini`.
+    /// Gives the `SetProfileParameter` writes as `category/name=value`.
+    fn nvenc_obs(root: Option<PathBuf>) -> (FakeObs, Arc<Mutex<Vec<String>>>) {
+        let params = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&params);
+        let obs = serve(move |kind, data| match kind {
+            "GetProfileList" => Reply::ok(json!({
+                "profiles": ["Mine", PROFILE_NAME],
+                "currentProfileName": PROFILE_NAME,
+            })),
+            "GetVersion" => Reply::ok(json!({ "obsVersion": "33.0.0" })),
+            "GetProfileParameter" => {
+                let default = match data["parameterName"].as_str() {
+                    Some("RecEncoder") => "nvenc",
+                    _ => "",
+                };
+                Reply::ok(json!({ "parameterValue": "", "defaultParameterValue": default }))
+            }
+            "SetProfileParameter" => {
+                let (cat, name, value) = (
+                    data["parameterCategory"].as_str().unwrap_or_default(),
+                    data["parameterName"].as_str().unwrap_or_default(),
+                    data["parameterValue"].as_str().unwrap_or_default(),
+                );
+                log.lock().unwrap().push(format!("{cat}/{name}={value}"));
+                if let Some(root) = &root {
+                    let ini = root.join("basic/profiles/DoDStudio/basic.ini");
+                    let mut text = std::fs::read_to_string(&ini).unwrap_or_default();
+                    text.push_str(&format!("{name}={value}\n"));
+                    std::fs::write(ini, text).unwrap();
+                }
+                Reply::ok(json!({}))
+            }
+            _ => Reply::ok(json!({})),
+        });
+        (obs, params)
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "dodstudio-obs-provision-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("basic/profiles/DoDStudio")).unwrap();
+        std::fs::create_dir_all(root.join("basic/profiles/Mine")).unwrap();
+        root
+    }
+
+    /// With NVENC, the profile records in Advanced mode with the fast
+    /// encoder settings written into its own folder (#1060), and OBS rebuilds
+    /// its outputs to read them.
+    #[test]
+    fn nvenc_records_in_advanced_mode_with_the_fast_settings_file() {
+        let root = temp_root("nvenc");
+        let (obs, params) = nvenc_obs(Some(root.clone()));
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        setup_with_config_roots(
+            &mut client,
+            2560,
+            1440,
+            120,
+            1,
+            ObsRecordingQuality::Standard,
+            std::slice::from_ref(&root),
+        )
+        .expect("provisions");
+        let params = params.lock().unwrap().clone();
+        assert!(params.contains(&"Output/Mode=Advanced".to_string()));
+        assert!(params.contains(&"AdvOut/RecEncoder=obs_nvenc_h264_tex".to_string()));
+        assert!(params.contains(&"AdvOut/RecType=Standard".to_string()));
+        let file: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("basic/profiles/DoDStudio/recordEncoder.json"))
+                .expect("recordEncoder.json written in our profile's folder"),
+        )
+        .unwrap();
+        assert_eq!(file["multipass"], "disabled");
+        assert!(!root.join("basic/profiles/Mine/recordEncoder.json").exists());
+        // Switched away and back so OBS reads the new file.
+        assert_eq!(obs.sent("SetCurrentProfile"), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// No profile folder found: Simple mode, never Advanced mode on whatever
+    /// encoder settings happen to be there.
+    #[test]
+    fn no_profile_folder_keeps_simple_mode() {
+        let (obs, params) = nvenc_obs(None);
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        setup(&mut client).expect("provisions");
+        let params = params.lock().unwrap().clone();
+        assert!(params.contains(&"Output/Mode=Simple".to_string()));
+        assert!(!params.iter().any(|p| p.starts_with("AdvOut/")));
+    }
+
+    /// The "OBS's own" choice switches a profile back to Simple mode.
+    #[test]
+    fn obs_simple_choice_switches_back_to_simple_mode() {
+        let root = temp_root("simple");
+        let (obs, params) = nvenc_obs(Some(root.clone()));
+        let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
+        setup_with_config_roots(
+            &mut client,
+            2560,
+            1440,
+            120,
+            1,
+            ObsRecordingQuality::ObsSimple,
+            std::slice::from_ref(&root),
+        )
+        .expect("provisions");
+        assert!(
+            params
+                .lock()
+                .unwrap()
+                .contains(&"Output/Mode=Simple".to_string())
+        );
+        assert!(
+            !root
+                .join("basic/profiles/DoDStudio/recordEncoder.json")
+                .exists()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// An OBS on the user's own profile, with ours recording "Same as
     /// stream", whose switch back to ours fails `failed_returns` times. Gives
     /// the profile each `SetVideoSettings` landed on.
@@ -381,7 +635,7 @@ mod tests {
     fn a_failed_switch_back_never_writes_the_users_profile() {
         let (obs, video_writes) = obs_whose_switch_back_fails(1);
         let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
-        let result = ensure_dod_studio_setup(&mut client, 2560, 1440, 120, 1).expect("provisions");
+        let result = setup(&mut client).expect("provisions");
         assert_eq!(result.previous_profile.as_deref(), Some("Mine"));
         assert_eq!(
             *video_writes.lock().unwrap(),
@@ -390,7 +644,7 @@ mod tests {
 
         let (obs, video_writes) = obs_whose_switch_back_fails(usize::MAX);
         let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
-        assert!(ensure_dod_studio_setup(&mut client, 2560, 1440, 120, 1).is_err());
+        assert!(setup(&mut client).is_err());
         assert!(video_writes.lock().unwrap().is_empty());
     }
 
@@ -400,7 +654,7 @@ mod tests {
     fn changed_settings_are_written_and_applied_by_a_round_trip() {
         let (obs, video_writes) = obs_whose_switch_back_fails(0);
         let mut client = ObsClient::connect(&obs.url, "").expect("connect to the fake");
-        ensure_dod_studio_setup(&mut client, 2560, 1440, 120, 1).expect("provisions");
+        setup(&mut client).expect("provisions");
         assert_eq!(
             *video_writes.lock().unwrap(),
             vec![PROFILE_NAME.to_string()]
@@ -422,7 +676,7 @@ mod tests {
     /// whose settings obs-websocket can write.
     #[test]
     fn records_at_constant_quality_in_simple_mode() {
-        let wanted = recording_settings("32.2.2", "nvenc");
+        let wanted = recording_settings_simple("32.2.2", "nvenc");
         assert_eq!(value(&wanted, "Mode"), Some("Simple"));
         assert_eq!(value(&wanted, "RecQuality"), Some("HQ"));
         assert_eq!(value(&wanted, "RecRB"), Some("false"));
@@ -431,9 +685,9 @@ mod tests {
     /// The encoder is whatever OBS picked for this PC, never one named here.
     #[test]
     fn keeps_the_encoder_obs_picked_for_this_pc() {
-        let amd = recording_settings("32.2.2", "amd");
+        let amd = recording_settings_simple("32.2.2", "amd");
         assert_eq!(value(&amd, "RecEncoder"), Some("amd"));
-        let unknown = recording_settings("32.2.2", "");
+        let unknown = recording_settings_simple("32.2.2", "");
         assert_eq!(value(&unknown, "RecEncoder"), None);
     }
 
@@ -441,21 +695,27 @@ mod tests {
     #[test]
     fn hybrid_mp4_only_where_obs_has_it() {
         assert_eq!(
-            value(&recording_settings("30.2.0", "nvenc"), "RecFormat2"),
+            value(&recording_settings_simple("30.2.0", "nvenc"), "RecFormat2"),
             Some("hybrid_mp4")
         );
         assert_eq!(
-            value(&recording_settings("31.0.0-beta1", "nvenc"), "RecFormat2"),
+            value(
+                &recording_settings_simple("31.0.0-beta1", "nvenc"),
+                "RecFormat2"
+            ),
             Some("hybrid_mp4")
         );
         assert_eq!(
-            value(&recording_settings("30.1.2", "nvenc"), "RecFormat2"),
+            value(&recording_settings_simple("30.1.2", "nvenc"), "RecFormat2"),
             None
         );
         assert_eq!(
-            value(&recording_settings("29.1.3", "nvenc"), "RecFormat2"),
+            value(&recording_settings_simple("29.1.3", "nvenc"), "RecFormat2"),
             None
         );
-        assert_eq!(value(&recording_settings("?", "nvenc"), "RecFormat2"), None);
+        assert_eq!(
+            value(&recording_settings_simple("?", "nvenc"), "RecFormat2"),
+            None
+        );
     }
 }

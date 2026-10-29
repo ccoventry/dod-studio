@@ -108,3 +108,21 @@ test('swallows reload and session shortcuts and the browser context menu', async
   });
   expect(prevented).toEqual({ f5: true, ctrlR: true, ctrlW: true, plainR: false, noKey: false, menu: true });
 });
+
+test("Studio's first sub-tab is Highlights, and every queue filter sits in one Filters row", async ({ page }) => {
+  await page.goto('/index.html');
+  await expect(page.locator('#export-pool-free-indicator')).toContainText('10.0');
+  await expect(page.locator('.capture-detail-subtab-btn[data-capture-subtab="highlights"]')).toHaveText('Highlights');
+
+  // #127: every demo filter sits in one row. Min Kills is gone (#1070).
+  const row = page.locator('#queue-filter-row');
+  await expect(row).toContainText('Filters');
+  for (const id of ['demo-search-input', 'master-player-filter', 'master-kills-filter', 'master-owner-only-cb', 'master-tracked-only-cb']) {
+    await expect(row.locator(`#${id}`)).toHaveCount(1);
+  }
+  // Tracked only: an empty queue has nothing tracked, so it boots dimmed with a reason.
+  await expect(row.locator('#master-tracked-only-cb')).toBeDisabled();
+  await expect(row.locator('.queue-filter-tracked-only')).toHaveText('Tracked only');
+  await expect(row.locator('.queue-filter-tracked-only')).toHaveAttribute('title', /No demo is tracked yet/);
+  await expect(page.locator('#input-min-kills')).toHaveCount(0);
+});

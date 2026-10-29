@@ -1,7 +1,8 @@
 //! Launch Preview without patching (#434, step 2), the Studio half.
 //!
 //! When the game will run with the goldsrc-hooks DLL and can reach the demo
-//! by a relative path (`native::preview_in_place`), Launch Preview plays the
+//! by a relative path, or by its full path on another drive with a hook DLL
+//! from #779 on (`native::preview_in_place`), Launch Preview plays the
 //! original demo and opens the in-game DoD Studio window's Highlights tab,
 //! which lists the highlights with Go (#565). Nothing is written to disk. In
 //! every other case Launch Preview patches a `<stem>_preview.dem` with a
@@ -11,7 +12,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use native::patch::PatcherConfig;
-use native::preview_in_place::{OPEN_HIGHLIGHTS, viewdemo_arg, viewdemo_line};
+use native::preview_in_place::{
+    OPEN_HIGHLIGHTS, hook_plays_other_drives, preview_lines, viewdemo_arg_any_drive,
+};
 use native::sys::game_remote::{Sent, send_console_commands};
 
 use crate::capture_manager::SerializedStreak;
@@ -34,12 +37,14 @@ pub fn plan(
     dod_dir: &Path,
     streaks: &[SerializedStreak],
 ) -> Option<String> {
-    config.goldsrc_hooks_dll()?;
+    let dll = config.goldsrc_hooks_dll()?;
     let demo = Path::new(&streaks.first()?.source_demo);
     if !demo.is_file() {
         return None;
     }
-    viewdemo_arg(dod_dir, demo)
+    // The DLL file is only read for a demo on another drive.
+    viewdemo_arg_any_drive(dod_dir, demo, false)
+        .or_else(|| viewdemo_arg_any_drive(dod_dir, demo, hook_plays_other_drives(&dll)))
 }
 
 /// Starts the game, then, once it takes commands, plays the original demo and
@@ -59,9 +64,9 @@ pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Resul
         "[preview] in place: launched the game for \"{arg}\" (no patched copy)"
     ));
     crate::capture_manager::watch_for_error_dialogs(app, launcher);
-    let line = viewdemo_line(arg);
+    let lines = preview_lines(arg);
     std::thread::spawn(move || {
-        if let Some(pid) = send_when_ready(&before, &[line]) {
+        if let Some(pid) = send_when_ready(&before, &lines) {
             open_highlights_later(pid);
         }
     });
@@ -81,18 +86,18 @@ fn open_highlights_later(pid: u32) {
 /// Sends the preview to a running game. `Ok(Some(line))` when one took it,
 /// `Ok(None)` when none takes commands.
 pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String> {
-    let lines = [viewdemo_line(arg)];
+    let lines = preview_lines(arg);
+    let viewdemo = lines.last().cloned().unwrap_or_default();
     for &pid in pids {
         match send_console_commands(pid, &lines)
             .map_err(crate::messages::failed_to_send_to_running_game)?
         {
             Sent::Delivered => {
                 native::log_markdown(&format!(
-                    "[preview] in place: sent \"{}\" to the running game (pid {pid})",
-                    lines[0]
+                    "[preview] in place: sent \"{viewdemo}\" to the running game (pid {pid})"
                 ));
                 std::thread::spawn(move || open_highlights_later(pid));
-                return Ok(Some(lines[0].clone()));
+                return Ok(Some(viewdemo));
             }
             Sent::NotListening => continue,
         }
