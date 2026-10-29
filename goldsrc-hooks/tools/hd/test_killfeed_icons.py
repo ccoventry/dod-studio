@@ -843,6 +843,17 @@ class EvenLayoutTest(unittest.TestCase):
         # The same columns cut from both: a's art keeps its place left of b's.
         self.assertLess(np.nonzero(ta[..., 3].any(0))[0].min(), np.nonzero(tb[..., 3].any(0))[0].min())
 
+    def test_trim_group_of_one_is_trim_box(self):
+        # build_even trims the butt group however few variants composed: a
+        # lone d_garandbutt is still cut to its art.
+        a = np.zeros((26 * 4, 53 * 4, 4))
+        a[40:60, 20:150, 3] = 1.0
+        (ta,), size = K.trim_group([a], (53, 26), 4)
+        tb, size_b = K.trim_box(a, (53, 26), 4)
+        self.assertEqual(size, size_b)
+        self.assertLess(size[0], 53)
+        np.testing.assert_array_equal(ta, tb)
+
     def test_trim_box_leaves_a_box_its_art_fills(self):
         # A long gun's art reaches to half a texel of each edge already.
         img = np.zeros((26 * 4, 82 * 4, 4))

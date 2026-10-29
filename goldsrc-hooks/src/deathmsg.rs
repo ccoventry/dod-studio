@@ -1298,7 +1298,7 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     if let Some(base) = engine::client_module_base() {
         restamp_display_time(base);
     }
-    // After the restamp: the note is keyed by the line's expiry time.
+    // After the line is in the array: the note reads its names from there.
     if weapon == i32::from(butt::BUTT_WEAPON) {
         note_butt(killer, victim);
     }

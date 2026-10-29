@@ -121,8 +121,9 @@ fn unpack(slot: u64, key: u64) -> Option<usize> {
     (slot != 0 && slot >> 8 == key & KEY_MASK).then_some((slot & 0x7f) as usize)
 }
 
-/// More than the feed's ceiling of 127 lines would need only if every one
-/// were a butt stroke; the oldest is overwritten first.
+/// Fewer than the feed's ceiling of 127 lines: past this many butt strokes
+/// on screen at once the oldest is overwritten first, and its line draws
+/// `d_garandbutt`.
 const REMEMBERED: usize = 32;
 static LINES: [AtomicU64; REMEMBERED] = [const { AtomicU64::new(0) }; REMEMBERED];
 static NEXT: AtomicUsize = AtomicUsize::new(0);

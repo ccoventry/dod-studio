@@ -35,9 +35,8 @@ import numpy as np
 import killfeed_icons as K
 from studiomodel import MdlError, StudioModel
 
-# Bump when any composite's look changes (killfeed_icons.VERSION and
-# EVEN_VERSION include it).
-COMPOSITES_VERSION = 1
+# When any composite's look changes, bump killfeed_icons.VERSION and
+# EVEN_VERSION: their records are what make a built sheet or atlas go stale.
 
 # The atlas names of the butt-stroke variants: (killer's rifle, victim's
 # head). d_garandbutt is hud.txt's own name, the rest are the atlas's, all

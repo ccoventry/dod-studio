@@ -2150,7 +2150,7 @@ def build_even(out_dir, sprite_dir=None, sheets_dir=None, force=False, log=print
         log("no kill-feed icon could go into the atlas; nothing written")
         return 0
     group = [k for k in KC.BUTT_VARIANTS if k in imgs]
-    if len(group) > 1:
+    if group:  # one alone is trimmed too: the loop below skips the group
         trimmed, size = trim_group([imgs[k] for k in group], sizes[group[0]], 4)
         for k, im in zip(group, trimmed):
             imgs[k], sizes[k] = im, size
