@@ -910,6 +910,7 @@ export const STRINGS = {
     progressStatus: (finished, total, rendering) =>
       `Finishing clips: ${finished} of ${total}${rendering > 0 ? `, ${rendering} in progress` : ''}`,
     WAITING_STATUS: 'Finishing clips: waiting for the Render tab to finish what it is already doing',
+    SCANNING_STATUS: 'Finishing clips: looking for the new takes',
     startedToast: (n) => `Finishing ${n} clip${n === 1 ? '' : 's'}.`,
     VIEW_IN_RENDER_TAB: 'View in Render tab',
     NOTIFY_TITLE: 'Clips ready',

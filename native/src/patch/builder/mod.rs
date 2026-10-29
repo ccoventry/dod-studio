@@ -252,6 +252,15 @@ fn block_byte_estimate(config: &PatcherConfig, streak: &CaptureStreak, demo_fps:
     let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         crate::sys::disk::calculate_agr_bytes(config.effective_agr_fps(), clip_duration_secs)
+    } else if config.capture_mode == crate::patch::CaptureMode::Obs {
+        // OBS's encoder takes, by its quality setting (#1096).
+        crate::sys::disk::calculate_obs_bytes(
+            config.obs.recording_quality,
+            config.resolution_width,
+            config.resolution_height,
+            config.obs_capture_fps,
+            clip_duration_secs,
+        )
     } else if config.capture_mode == crate::patch::CaptureMode::DirectToVideo
         && config.ffmpeg_capture_codec != crate::patch::types::CaptureCodec::RawVideo
     {
