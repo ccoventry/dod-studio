@@ -4232,6 +4232,7 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 0.85em;
   opacity: 0.8;
   margin-top: 2px;
+}
 
 /* What's new (#1013): release notes drawn by whats_new.js. */
 .whats-new-content {
