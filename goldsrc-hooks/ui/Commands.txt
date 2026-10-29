@@ -1,6 +1,6 @@
 SPECTATING (HLTV demos)
   ds_spec_match_pov 0/1
-      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone eye height, the gun lowering.
+      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone and crouch eye height, the gun lowering.
   ds_spec_lock 0/1
       Keep the camera on the player you are watching when they die.
   ds_spec_deathcam 0/1
