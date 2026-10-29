@@ -974,6 +974,7 @@ mod tests {
             killer_origin: None,
             victim_origin: None,
             distance: None,
+            headshot: Default::default(),
         };
         state.kill_positions.push(kill);
     }

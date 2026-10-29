@@ -4,15 +4,18 @@
 //! `CaptureStreak.kills` is `(tick, time, weapon)`, which the patcher uses and
 //! which stays as it is. These facts ride beside it on the Studio side only.
 
-use analysis::{Analysis, Connection, Team};
+use analysis::{Analysis, Connection, Headshot, Team, headshot_of};
 
-/// A highlight's facts for its clip name, one victim entry per kill.
+/// A highlight's facts beside its streak (the clip name, the headshot
+/// filter), one entry per kill.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StreakFacts {
     /// "Allies", "British", "Axis", "Spectator" or "Unknown".
     pub faction: String,
     pub victims: Vec<String>,
     pub victim_factions: Vec<String>,
+    /// Whether each kill was a headshot (#1128).
+    pub headshots: Vec<Headshot>,
 }
 
 /// A side as a clip name spells it. `allies_are_british` covers a demo
@@ -60,7 +63,10 @@ pub fn streak_facts(
         faction: faction_name(player.team.as_ref(), british).to_string(),
         ..StreakFacts::default()
     };
-    for (_, _, victim_id) in &streak.kills {
+    for (time, _, victim_id) in &streak.kills {
+        facts
+            .headshots
+            .push(headshot_of(&analysis.state.kill_positions, time, victim_id));
         let victim = players.iter().find(|p| &p.id == victim_id);
         facts
             .victims
@@ -85,5 +91,34 @@ mod tests {
         assert_eq!(faction_name(Some(&Team::Spectators), false), "Spectator");
         assert_eq!(faction_name(Some(&Team::Unassigned), false), "Unknown");
         assert_eq!(faction_name(None, false), "Unknown");
+    }
+
+    #[test]
+    fn a_streaks_facts_say_which_of_its_kills_were_headshots() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let analysis = Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = analysis::highlights::highlights(&analysis);
+        let mut headshots = 0;
+        for highlight in highlights.shown() {
+            let first = highlight.kills[0].frame_index as i32;
+            let slot = usize::from(highlight.slot.unwrap());
+            let facts = streak_facts(&analysis, slot, first).unwrap();
+            assert_eq!(facts.headshots.len(), highlight.kills.len());
+            assert_eq!(facts.headshots.len(), facts.victims.len());
+            headshots += facts
+                .headshots
+                .iter()
+                .filter(|h| **h == Headshot::Yes)
+                .count();
+        }
+        assert_eq!(
+            headshots,
+            highlights.shown().map(|h| h.headshot_counts().0).sum()
+        );
+        assert!(headshots > 0);
     }
 }

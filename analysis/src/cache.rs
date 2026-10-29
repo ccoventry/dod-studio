@@ -31,7 +31,7 @@ pub mod migrations;
 /// silently deserializing with new fields missing/defaulted. When the new
 /// fields can be worked out from an old entry, add a step to
 /// [`migrations::MIGRATIONS`] too, and old entries are upgraded instead.
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 14;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

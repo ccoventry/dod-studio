@@ -95,6 +95,18 @@ describe('highlightValues', () => {
   });
 });
 
+describe('{headshots} (#1128)', () => {
+  it('counts the headshots in the chosen kill range', () => {
+    const s = streak({ start_index: 1, end_index: 3, headshots: ['yes', 'no', 'yes', 'yes'] });
+    expect(automaticClipName(demo([s]), s, '{headshots}hs').name).toBe('2hs');
+  });
+
+  it('gives unknown for a highlight scanned before headshots were kept', () => {
+    const s = streak({});
+    expect(automaticClipName(demo([s]), s, '{headshots}hs').name).toBe('unknownhs');
+  });
+});
+
 describe('{player}, the old name (#751)', () => {
   it('still parses and gives the name as it is, tag included, as {full_name} does', () => {
     const s = streak({ target_player: 'dicE: m00cat' });
