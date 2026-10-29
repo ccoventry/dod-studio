@@ -1224,6 +1224,13 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
         // writing the settings keeps it.
         let meta = native::hlcr::take_meta::SessionMeta {
             renders: native::hlcr::take_meta::read_history(folder),
+            // What the plan held for this block, so the take's length and
+            // kills can be checked against it (#1084).
+            plan: manifest
+                .blocks
+                .iter()
+                .find(|b| b.take_folder == folder)
+                .and_then(|b| b.plan.clone()),
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
@@ -4348,6 +4355,7 @@ mod tests {
                     end_tick: 1,
                     record_start_tick: 0,
                     record_stop_tick: 1,
+                    plan: None,
                 })
                 .collect(),
             capture_fps: 120,
@@ -4369,6 +4377,63 @@ mod tests {
         let kept = take_meta::read_for_take(&block).unwrap();
         assert_eq!(kept.capture_fps, 120);
         assert_eq!(kept.renders, vec![attempt]);
+    }
+
+    /// The plan a block was built with is written beside its take (#1084),
+    /// where the take checks read it back.
+    #[test]
+    fn a_blocks_plan_is_recorded_beside_its_take() {
+        use native::hlcr::take_meta;
+        use native::hlcr::take_plan::TakePlan;
+        let scratch = Scratch::new("plan_recorded");
+        let planned = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b0");
+        let unplanned = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b1");
+        for folder in [&planned, &unplanned] {
+            std::fs::create_dir_all(folder.join("take0000")).unwrap();
+            std::fs::write(folder.join("take0000").join("sound.wav"), b"x").unwrap();
+        }
+        let plan = TakePlan {
+            length_secs: 12.5,
+            kill_offsets_secs: vec![4.0, 9.0],
+        };
+        let manifest = CaptureManifest {
+            session_id: "session_1".into(),
+            blocks: [(&planned, Some(plan.clone())), (&unplanned, None)]
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(block_index, (folder, plan))| native::patch::types::CaptureBlock {
+                        demo_name: "d".into(),
+                        block_index,
+                        drive_index: 0,
+                        take_folder: folder.to_path_buf(),
+                        take_key: String::new(),
+                        source_streak_indices: vec![],
+                        start_tick: 0,
+                        end_tick: 1,
+                        record_start_tick: 0,
+                        record_stop_tick: 1,
+                        plan,
+                    },
+                )
+                .collect(),
+            capture_fps: 300,
+            capture_mode: String::new(),
+            agr_fps: 0,
+            streak_uids: vec![],
+            streak_sources: vec![],
+            project_path: None,
+        };
+        let verified = verify_capture_takes(&manifest, &mut |_| {});
+        record_capture_settings(&manifest, &verified);
+        assert_eq!(take_meta::read_for_take(&planned).unwrap().plan, Some(plan));
+        assert_eq!(take_meta::read_for_take(&unplanned).unwrap().plan, None);
     }
 
     /// OBS's update box opens in front of the user's windows; the minimised
@@ -5483,6 +5548,7 @@ mod tests {
                     // alone can't tell two demos' blocks apart.
                     record_start_tick: 100 * (block_index as i32 + 1),
                     record_stop_tick: 0,
+                    plan: None,
                 })
                 .collect(),
             capture_fps: 300,

@@ -161,6 +161,7 @@ pub mod scanner;
 pub mod sound_mute;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod source_copies;
+pub mod viewdemo_clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod viewdemo_refresh;
 
