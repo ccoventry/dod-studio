@@ -32,7 +32,7 @@ export function whenNeededAvailable(choice) {
 }
 
 /** With "Only when space is needed" on, finished takes may cover a capture's
- *  shortfall, so the capture tab doesn't stop the batch up front: the backend
+ *  shortfall, so the Highlights tab doesn't stop the batch up front: the backend
  *  makes room first and stops the batch itself when that can't help. */
 export function makesRoomBeforeCapture(choice, whenNeeded) {
   return choice === AFTER_FINISH.DELETE && !!whenNeeded;
