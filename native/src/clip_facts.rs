@@ -117,7 +117,10 @@ mod tests {
         }
         assert_eq!(
             headshots,
-            highlights.shown().map(|h| h.headshot_counts().0).sum()
+            highlights
+                .shown()
+                .map(|h| h.headshot_counts().0)
+                .sum::<usize>()
         );
         assert!(headshots > 0);
     }
