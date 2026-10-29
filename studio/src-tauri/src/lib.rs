@@ -1146,6 +1146,7 @@ pub fn run() {
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
+            updater_manager::release_history,
             updater_manager::is_debug_build,
             updater_manager::local_git_branch,
             updater_manager::hook_dll_override_allowed,
