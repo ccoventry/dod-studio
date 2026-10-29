@@ -173,7 +173,9 @@ pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
     let spawned = std::thread::Builder::new()
         .name("review-ask".into())
         .spawn(move || {
-            set_status(ask(&line));
+            let end = ask(&line);
+            log(&format!("{end:?}"));
+            set_status(end);
             IN_FLIGHT.store(false, Ordering::Release);
         });
     if let Err(e) = spawned {
@@ -182,6 +184,13 @@ pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
         return Err(format!("could not start asking DoD Studio: {e}"));
     }
     Ok(())
+}
+
+/// To the hook's log only: this runs off the game's thread, where the
+/// console can't be printed to.
+fn log(line: &str) {
+    // Safety: `report` only appends to the log file.
+    unsafe { crate::debug::report(&format!("review ask: {line}")) };
 }
 
 /// One request, start to end: the status it ends on.
@@ -200,7 +209,10 @@ fn ask(line: &str) -> Status {
     for line in BufReader::new(pipe).lines() {
         let Ok(line) = line else { break };
         match parse_reply(&line) {
-            Reply::Progress(text) => set_status(Status::Asking(text)),
+            Reply::Progress(text) => {
+                log(&format!("DoD Studio: {text}"));
+                set_status(Status::Asking(text));
+            }
             Reply::Done => return Status::Sent,
             Reply::Failed(why) => return Status::Failed(why),
             Reply::Other => {}
