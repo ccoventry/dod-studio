@@ -15,6 +15,8 @@ import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile, getBuiltinProfileNotice } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
+import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
+import { getRenderWhileCapturing, setRenderWhileCapturing } from './render_while_capturing.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 import { getPlayers, setPlayers } from './players_ui.js';
 import { refreshHookDllRow } from './hook_dll_row.js';
@@ -118,6 +120,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      obs_recording_quality: document.querySelector('#config-obs-recording-quality')?.value || '',
       agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
@@ -181,6 +184,10 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       pick_folders: getPickFolders(),
       ...readReviewSettings(),
       ...scanRateSettings(),
+      // "After a clip is finished" (#644).
+      ...getTakeCleanupSetting(),
+      // "Render while capturing" (#861).
+      ...getRenderWhileCapturing(),
       ...rescanOfferSettings(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -255,6 +262,10 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (settings.obs_capture_fps) {
     const inputEl = document.querySelector('#config-obs-capture-fps');
     if (inputEl) inputEl.value = settings.obs_capture_fps;
+  }
+  if (settings.obs_recording_quality) {
+    const selectEl = document.querySelector('#config-obs-recording-quality');
+    if (selectEl) selectEl.value = settings.obs_recording_quality;
   }
   // 0 is "the same as Capture FPS" and stays an empty box.
   if (settings.agr_fps > 0) {
@@ -402,4 +413,6 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     // Only a value the select offers — assigning an unknown one blanks it.
     if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
   });
+  setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
+  setRenderWhileCapturing(settings.render_while_capturing);
 }

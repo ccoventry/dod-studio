@@ -37,8 +37,8 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
 
         if let Some(victim) = victim {
             // A life with no kills yet has no record. Give it one first, so
-            // a grenade that kills after this death finds the life it was
-            // thrown in below, not the next one.
+            // a grenade or rocket that kills after this death finds the life
+            // it was fired in below, not the next one.
             if victim.kill_streaks.is_empty() {
                 victim.kill_streaks.push(KillStreak::default());
             }
@@ -64,7 +64,7 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
             }
 
             let index = if killer.is_dead()
-                && death_msg.weapon.is_grenade()
+                && death_msg.weapon.is_projectile()
                 && killer.kill_streaks.len() >= 2
             {
                 killer.kill_streaks.len() - 2
@@ -250,6 +250,51 @@ mod tests {
         streak_death(&mut state, 2, 1, 10); // allies kills axis
         streak_death(&mut state, 1, 2, 14); // axis's grenade lands after
         assert_eq!(streak_sizes(&state.players[0]), [2, 0]);
+    }
+
+    /// #1091: the laurateam-3v3-tensions-allies case, a bazooka round
+    /// landing 0.66 s after its shooter died.
+    #[test]
+    fn a_rocket_kill_after_dying_joins_the_life_it_was_fired_in() {
+        for rocket in [29, 30, 31] {
+            let mut state = AnalyzerState::default();
+            for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+                let mut player = Player::new_mock(slot, name);
+                player.team = Some(team);
+                state.players.push(player);
+            }
+            streak_death(&mut state, 1, 2, rocket); // axis kills allies
+            streak_death(&mut state, 2, 1, 24); // allies kills axis
+            streak_death(&mut state, 1, 2, rocket); // axis's rocket lands after
+            assert_eq!(streak_sizes(&state.players[0]), [2, 0], "weapon {rocket}");
+        }
+    }
+
+    #[test]
+    fn a_rocket_kill_after_dying_in_a_first_life_without_kills_stays_in_that_life() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 2, 1, 10); // allies kills axis: no kills yet
+        streak_death(&mut state, 1, 2, 30); // axis's panzerschreck round lands after
+        assert_eq!(streak_sizes(&state.players[0]), [1, 0]);
+    }
+
+    #[test]
+    fn a_hitscan_kill_after_dying_still_opens_the_next_life() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 1, 2, 10); // axis kills allies
+        streak_death(&mut state, 2, 1, 24); // allies kills axis
+        streak_death(&mut state, 1, 2, 10); // a K98 kill: axis has respawned
+        assert_eq!(streak_sizes(&state.players[0]), [1, 1]);
     }
 
     #[test]

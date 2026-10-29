@@ -141,13 +141,13 @@ fn leading_frame_times(
     Ok((frame_times, stopped || !truncated))
 }
 
-/// The Capture page's rows: one per highlight, as `analysis::highlights`
+/// The Highlights page's rows: one per highlight, as `analysis::highlights`
 /// defines them, each built on `demo` (the fields every row of the demo
 /// shares). Whose rows exist is decided here and nowhere later (#573):
 /// `Highlights::shown`, the same rule the in-game Highlights tab applies
 /// (D18: a POV demo's recorder, an HLTV demo's everyone), so the two list
-/// the same highlights; the frontend only narrows them by Min Kills and its
-/// Player filter. Saved projects index these rows in this order. The slot is
+/// the same highlights; the frontend only narrows them by its Player
+/// filter. Saved projects index these rows in this order. The slot is
 /// the one the kills were scored from, which capture spectates (#706), so a
 /// player who left before the demo ended keeps theirs; only a highlight
 /// whose slot is unknown is skipped, as capture needs one to anchor the
@@ -627,7 +627,7 @@ mod tests {
         }
     }
 
-    /// How many rows the Capture page showed before #573: every highlight
+    /// How many rows the Highlights page showed before #573: every highlight
     /// with a known slot was scanned, and the frontend kept the recorder's
     /// slot's (`local_player_index`) when the demo had one.
     fn rows_before_573(analysis: &analysis::Analysis) -> usize {

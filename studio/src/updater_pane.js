@@ -5,6 +5,7 @@ import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
 import { showUpdateChip, RECHECK_MS } from './update_chip.js';
 import { updateDownloadLine, showBytes, showSliding } from './download_progress.js';
+import { showPendingNotes } from './whats_new.js';
 
 function currentChannel() {
   return document.querySelector('#config-update-channel')?.value || 'stable';
@@ -112,6 +113,7 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
 
   if (info) {
     setStatus(STRINGS.UPDATE_MODAL.STATUS_AVAILABLE(info.version));
+    showPendingNotes(info.notes);
     if (downloadBtn) downloadBtn.style.display = 'inline-block';
     setFooterButtonState(true, info.version);
     // Once per version: the check runs again every few hours (#868).
@@ -125,6 +127,7 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
     }
   } else {
     setStatus(STRINGS.UPDATE_MODAL.STATUS_UP_TO_DATE);
+    showPendingNotes(null);
     if (downloadBtn) downloadBtn.style.display = 'none';
     setFooterButtonState(false);
   }

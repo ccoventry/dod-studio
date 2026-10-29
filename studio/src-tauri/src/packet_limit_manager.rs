@@ -1,4 +1,4 @@
-//! The engine's packet-entity limit for the Capture page's warning (#207):
+//! The engine's packet-entity limit for the Highlights page's warning (#207):
 //! `native::sys::packet_limit`, for the `hl.exe` Studio launches.
 
 /// The `MAX_PACKET_ENTITIES` of the engine beside `game_path`, or `None` when
