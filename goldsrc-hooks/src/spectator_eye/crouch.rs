@@ -58,7 +58,7 @@ const STEP_TOLERANCE: f32 = 3.5;
 /// A step not crossed after this long is taken as crossed: the interpolation
 /// is at most 0.1 s behind, so only a missed snapshot gets here.
 const STEP_GIVE_UP_SECONDS: f64 = 0.35;
-/// A frame further than this from the last, or behind it, is a seek: the
+/// A frame further than this from the last, either way, is a seek: the
 /// camera settles where the game puts it, with no ease across it.
 const SEEK_SECONDS: f64 = 0.25;
 /// The drawn origin moving further than this in one frame is a teleport (a
@@ -182,18 +182,24 @@ impl CrouchEase {
     /// The height to add to the drawn origin this frame. Call once per
     /// rendered frame; a second call for the same `time` changes nothing.
     pub(crate) fn eye_height(&mut self, frame: &Frame) -> f32 {
-        if self.starts_over(frame) {
+        let now = if self.starts_over(frame) {
             self.settle(frame.snapshot.small_hull);
             self.target = frame.target;
             self.snapshots = [Some(frame.previous), Some(frame.snapshot)];
+            frame.time
         } else {
-            self.note_snapshot(frame.previous, frame.time);
-            self.note_snapshot(frame.snapshot, frame.time);
-        }
-        self.last_time = frame.time;
+            // An HLTV demo's clock steps back a few milliseconds several
+            // times a second above its packet rate (#927); the ease holds
+            // still through those rather than run backwards.
+            let now = frame.time.max(self.last_time);
+            self.note_snapshot(frame.previous, now);
+            self.note_snapshot(frame.snapshot, now);
+            now
+        };
+        self.last_time = now;
         self.last_drawn_z = frame.drawn_z;
-        self.depth = self.depth_at(frame.time);
-        STAND_EYE + self.shown(frame) - self.depth
+        self.depth = self.depth_at(now);
+        STAND_EYE + self.shown(frame.drawn_z, now) - self.depth
     }
 
     /// A new player, a seek or a teleport: nothing before it says anything
@@ -202,7 +208,7 @@ impl CrouchEase {
         let gap = frame.time - self.last_time;
         let newest = self.snapshots[1];
         frame.target != self.target
-            || !(0.0..=SEEK_SECONDS).contains(&gap)
+            || !(-SEEK_SECONDS..=SEEK_SECONDS).contains(&gap)
             || newest.is_some_and(|s| frame.snapshot.msg_time < s.msg_time)
             || (frame.drawn_z - self.last_drawn_z).abs() > TELEPORT_UNITS
     }
@@ -291,21 +297,21 @@ impl CrouchEase {
     /// How much of the hull's step the drawn origin shows: 0 standing, 18
     /// crouched. Crosses the waiting steps in order, as the interpolation
     /// does.
-    fn shown(&mut self, frame: &Frame) -> f32 {
+    fn shown(&mut self, drawn_z: f32, now: f64) -> f32 {
         loop {
             let Some(step) = self.steps[0].as_mut() else {
                 return self.settled_shown;
             };
             let span = step.to_z - step.from_z;
             let along = if span.abs() > f32::EPSILON {
-                ((frame.drawn_z - step.from_z) / span).clamp(0.0, 1.0)
+                ((drawn_z - step.from_z) / span).clamp(0.0, 1.0)
             } else {
                 1.0
             };
             step.crossed = step.crossed.max(along);
             let into_small_hull = step.into_small_hull;
             let crossed = step.crossed;
-            if crossed < 1.0 && frame.time - step.arrived < STEP_GIVE_UP_SECONDS {
+            if crossed < 1.0 && now - step.arrived < STEP_GIVE_UP_SECONDS {
                 return if into_small_hull {
                     HULL_STEP * crossed
                 } else {
@@ -524,6 +530,28 @@ mod tests {
         run(&mut sim, 0.5, 1.1, 120.0);
         // Jump ahead to 5.0, crouched: straight to crouch height.
         assert!((sim.camera(5.0) - 36.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_clock_stepping_back_a_moment_keeps_the_ease_going() {
+        let mut sim = crouch(1.0, 10.0, 3.0);
+        run(&mut sim, 0.9, 1.15, 120.0);
+        let before = sim.camera(1.15);
+        // HLTV playback's clock steps back a millisecond or two (#927).
+        let back = sim.camera(1.1485);
+        assert!((back - before).abs() < 0.3, "{before} then {back}");
+        assert!(back > 37.0, "settled at crouch height: {back}");
+    }
+
+    #[test]
+    fn a_seek_back_settles_without_an_ease() {
+        let mut sim = crouch(1.0, 10.0, 6.0);
+        run(&mut sim, 0.5, 5.0, 60.0);
+        // Back to just after the flip, before the ease would be done.
+        let mut ease_from_scratch = crouch(1.0, 10.0, 6.0);
+        let settled = ease_from_scratch.camera(1.1);
+        assert!((sim.camera(1.1) - settled).abs() < 1e-3);
+        assert!((settled - 36.0).abs() < 1e-3);
     }
 
     #[test]
