@@ -216,7 +216,7 @@ export const STRINGS = {
     COL_KILL_RANGE: 'Kill Range',
     COL_KILLS: 'Kills',
     COL_HEADSHOTS: 'HS',
-    COL_HEADSHOTS_TITLE: 'Headshots among the kills in the Kill Range, from the helmet that flies off in the demo. A + ? means some kills could not be told (two kills on one frame, or a British victim, who has no helmet). HLTV demos lose some, so their count is a lower bound. A dash: scan the demo again.',
+    COL_HEADSHOTS_TITLE: 'Headshots among the kills in the Kill Range, from the helmet that flies off in the demo. A + ? means some kills could not be told: two kills on one frame, a British victim, whose helmet may not pop, or in an HLTV demo any kill with no helmet seen, since HLTV demos lose about half of them. A dash: scan the demo again.',
     // #247: an HLTV demo lists every player's highlights; a capture follows that player.
     COL_PLAYER: 'Player',
     COL_PLAYER_TITLE: 'Whose highlight. An HLTV demo lists every player\'s, and its capture keeps the camera on that player.',
@@ -3129,7 +3129,7 @@ export const STRINGS = {
       faction: 'Their side: Allies, British, Axis',
       enemy_faction: 'The side of the players they killed',
       kills: "Kills in the chosen Kill Range (Rename Demos' {kills} is the player's kills in the whole demo instead)",
-      headshots: 'Headshots in the chosen Kill Range, from the helmet that flies off in the demo. A kill the demo cannot tell (a British victim, who has no helmet) is not counted; with none known it gives unknown. HLTV demos lose some, so it is a lower bound',
+      headshots: 'Headshots in the chosen Kill Range, from the helmet that flies off in the demo. A kill the demo cannot tell (a British victim, whose helmet may not pop, or in an HLTV demo, which loses about half of them, a kill with no helmet seen) is not counted; with none known it gives unknown',
       weapons: 'Each weapon used, joined with -',
       first_weapon: 'The weapon of the first kill',
       victims: 'The players killed, joined with -',

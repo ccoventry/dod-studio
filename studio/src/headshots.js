@@ -3,8 +3,8 @@
 // verdict per kill in `streak.headshots` ('yes', 'no' or 'unknown', beside
 // `kills`), told from the helmet-pop event in the demo
 // (analysis/src/headshot.rs): 'unknown' is a double kill on one frame the
-// demo can't settle, or a British victim, who has no helmet to pop. An HLTV
-// demo loses some events, so its count is a lower bound. Pure, no DOM.
+// demo can't settle, a British victim, whose helmet may not pop, or any kill
+// with no pop in an HLTV demo, which loses about half of them. Pure, no DOM.
 
 /** The Kill Range's kills only: `start_index..=end_index`, as every other
  *  per-kill field is read. `null` when the highlight carries no verdicts

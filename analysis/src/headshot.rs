@@ -11,11 +11,19 @@
 //! demo cannot say is [`Headshot::Unknown`], never a guess:
 //!
 //! - two kills on one frame and one pop that position cannot tell apart;
-//! - a British victim: the British have no helmet, so no pop is no evidence
-//!   (`dbo1`'s 21 deaths had none).
-//!
-//! An HLTV demo loses some events (the same gap as its missing gunshots), so
-//! its `No` means "no pop was seen"; its headshot counts are a lower bound.
+//! - a British victim: whether a British player's helmet pops is not
+//!   established, so no pop is no evidence. (#1128 took `solifotw-dbo1`'s
+//!   21 deaths with no pop as a British sign, but that demo is Allies on
+//!   dod_solitude2; none of the 452 POV demos in the PRE `dod` folder has a
+//!   British side, so no demo here can settle it.)
+//! - any kill with no pop in an HLTV demo. The proxy loses events (the same
+//!   gap as its missing gunshots): over six `wsod25_*` halves the HLTV demo
+//!   carried 43% of the pops the same half's POV demos saw (897 of 2108
+//!   pairings), while a POV demo misses almost none of the HLTV's (3 of 900),
+//!   other players' kills included. How much a proxy loses varies by
+//!   recording (15-61% of gunshots), so no demo's loss can be assumed small.
+//!   An HLTV `Yes` is sure; its no-pop kills
+//!   are `Unknown`, and its headshot counts a lower bound.
 //!
 //! Pairing needs every kill of the demo, so it runs when the demo ends
 //! ([`use_headshot_updates`]), after teams are final.
@@ -67,6 +75,8 @@ pub(crate) struct HelmetPop {
 pub(crate) struct HeadshotTracker {
     helmet_event_ids: HashSet<u32>,
     pops: Vec<HelmetPop>,
+    /// An HLTV proxy recorded the demo, so a missing pop is no evidence.
+    hltv: bool,
 }
 
 /// An event's `origin[0..3]`, when the event carries all three.
@@ -88,6 +98,9 @@ fn event_origin(delta: &Delta) -> Option<[f32; 3]> {
 /// `headshot` on every `kill_positions` entry.
 pub fn use_headshot_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     match event {
+        AnalyzerEvent::EngineMessage(message) if crate::is_hltv_message(message) => {
+            state.headshots.hltv = true;
+        }
         AnalyzerEvent::EngineMessage(EngineMessage::SvcResourceList(list)) => {
             for resource in &list.resources {
                 if resource.type_.to_u8() != RESOURCE_TYPE_EVENT {
@@ -119,8 +132,9 @@ pub fn use_headshot_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         }
         AnalyzerEvent::Finalization => {
             let verdicts = pair(&state.kill_positions, &state.headshots.pops);
+            let hltv = state.headshots.hltv;
             for (kill, verdict) in state.kill_positions.iter_mut().zip(verdicts) {
-                kill.headshot = verdict;
+                kill.headshot = no_pop_in_hltv_is_unknown(verdict, hltv);
             }
         }
         _ => {}
@@ -202,6 +216,14 @@ pub(crate) fn pair(kills: &[KillPosition], pops: &[HelmetPop]) -> Vec<Headshot> 
             None => Headshot::No,
         })
         .collect()
+}
+
+/// An HLTV demo's `No` is only "no pop seen" (see the module docs).
+fn no_pop_in_hltv_is_unknown(verdict: Headshot, hltv: bool) -> Headshot {
+    match verdict {
+        Headshot::No if hltv => Headshot::Unknown,
+        verdict => verdict,
+    }
 }
 
 /// The verdict recorded for the kill of `victim` at `time`, `Unknown` when
@@ -355,6 +377,19 @@ mod tests {
     fn a_pop_with_no_kill_is_ignored() {
         let kills = [kill(10.0, None, Team::Axis)];
         assert_eq!(pair(&kills, &[pop(50.0, None)]), [Headshot::No]);
+    }
+
+    #[test]
+    fn an_hltv_kill_with_no_pop_is_unknown_and_one_with_a_pop_is_a_headshot() {
+        assert_eq!(
+            no_pop_in_hltv_is_unknown(Headshot::No, true),
+            Headshot::Unknown
+        );
+        assert_eq!(
+            no_pop_in_hltv_is_unknown(Headshot::Yes, true),
+            Headshot::Yes
+        );
+        assert_eq!(no_pop_in_hltv_is_unknown(Headshot::No, false), Headshot::No);
     }
 
     #[test]
