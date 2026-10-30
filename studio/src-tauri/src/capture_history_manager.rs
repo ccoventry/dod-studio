@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::path::Path;
 
 /// One take folder's state on disk.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Serialize)]
 pub struct TakeCaptureState {
     /// The take folder is there.
     exists: bool,
