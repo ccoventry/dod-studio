@@ -14,6 +14,7 @@ import {
 } from './placeholder_catalogue.js';
 import { nameWithoutTag, sideTag, sideTeams, teamsForHighlight } from './project_teams.js';
 import { headshotsPlaceholder } from './headshots.js';
+import { useAsName } from './player_alias.js';
 import { STRINGS } from './strings.js';
 
 export { MODIFIERS, WITH_FALLBACK };
@@ -167,7 +168,8 @@ export function highlightRow(demo, streak) {
  *
  * The team placeholders come from the project's Teams list (#445):
  * `context.projectTeams` resolves them per highlight, or `context.teams`
- * gives them ready-made.
+ * gives them ready-made. `context.useAs` looks a SteamID up in the Players
+ * tab's Use as names (player_alias.js); tests pass their own.
  */
 export function highlightValues(demo, streak, context = {}) {
   const kills = streak?.kills || [];
@@ -181,10 +183,13 @@ export function highlightValues(demo, streak, context = {}) {
   const row = context.row ?? highlightRow(demo, streak);
   const teams = context.teams
     || (context.projectTeams ? teamsForHighlight(demo, streak, context.projectTeams) : {});
+  // The Players tab's Use as name (#686) stands for both the player's name
+  // and the full one; the tag is already out of it.
+  const useAs = (context.useAs || useAsName)(streak?.steam_id);
   const player = streak?.target_player || null;
   return {
-    name: nameWithoutTag(player, sideTag(demo, streak?.faction)),
-    full_name: player,
+    name: useAs || nameWithoutTag(player, sideTag(demo, streak?.faction)),
+    full_name: useAs || player,
     faction: streak?.faction || null,
     enemy_faction: mostCommon(victimSides),
     map,

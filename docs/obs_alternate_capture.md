@@ -330,10 +330,11 @@ risk in the document and it is now closed on evidence rather than on the absence
 target process has exited records black into a file that is valid in every other respect — right
 resolution, right frame rate, right duration, sometimes real audio from another source. Two probe
 recordings were wasted that way before the cause was understood, and the second one looked exactly
-like a hook collision. dod-studio owns the game's lifecycle, and *any* rebuild of the workspace while
-`tauri dev` is watching takes `hl.exe` down with it — including a `git checkout` that touches
-`Cargo.toml`. The game having been launched earlier in a session is not evidence that it is running
-now, which is why `probe_obs` checks and says so.
+like a hook collision. dod-studio owns the game's lifecycle, and at the time *any* rebuild of the
+workspace while `tauri dev` was watching took `hl.exe` down with it — including a `git checkout` that
+touches `Cargo.toml` (a dev build now starts the game outside cargo's job, so it survives, #545). The
+game having been launched earlier in a session is not evidence that it is running now, which is why
+`probe_obs` checks and says so.
 
 ---
 

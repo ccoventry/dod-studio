@@ -105,7 +105,7 @@ impl std::fmt::Display for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Id::Slot(slot) => write!(f, "{slot}"),
-            Id::Steam(id) => match crate::deathmsg::classic_steam_id(*id) {
+            Id::Steam(id) => match crate::steam_id::classic(*id) {
                 Some(classic) => f.write_str(&classic),
                 None => write!(f, "{id}"),
             },
@@ -140,44 +140,12 @@ struct Parsed {
     warnings: Vec<String>,
 }
 
-/// Puts back what GoldSrc's tokenizer split: it makes `:` and `,` tokens of
-/// their own, so `STEAM_0:1:123` arrives as five pieces and `a,b` as three
-/// (`goldsrc-misc-facts`: hw+0x2b18b). A `:` or `,` is glued to the token
-/// before it and the one after. A quoted argument arrives whole, so a name in
-/// quotes is never touched.
-///
-/// Beside each token: whether it was glued from several, so `add` can warn
-/// that an unquoted name lost any spaces around its `:` or `,`.
-fn rejoin(tokens: &[String]) -> (Vec<String>, Vec<bool>) {
-    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
-    let mut glued: Vec<bool> = Vec::with_capacity(tokens.len());
-    let mut glue_next = false;
-    for token in tokens {
-        let separator = token == ":" || token == ",";
-        match (out.last_mut(), glued.last_mut()) {
-            (Some(last), Some(mark)) if separator => {
-                last.push_str(token);
-                *mark = true;
-                glue_next = true;
-                continue;
-            }
-            (Some(last), Some(_)) if glue_next => last.push_str(token),
-            _ => {
-                out.push(token.clone());
-                glued.push(false);
-            }
-        }
-        glue_next = false;
-    }
-    (out, glued)
-}
-
 /// `self`, a SteamID in any form `ds_hud_deathmsg block` takes, or a slot.
 fn parse_id(text: &str) -> Result<Id, String> {
     if text.eq_ignore_ascii_case("self") {
         return Ok(Id::OwnPov);
     }
-    if let Some(id) = crate::deathmsg::parse_steam_id(text) {
+    if let Some(id) = crate::steam_id::parse(text) {
         return Ok(Id::Steam(id));
     }
     match text.parse::<i32>() {
@@ -234,7 +202,7 @@ fn check_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `add`'s named parameters, in any order. `glued` is [`rejoin`]'s mark for
+/// `add`'s named parameters, in any order. `glued` is [`crate::console_tokens::rejoin_colons_and_commas`]'s mark for
 /// each of `args`.
 fn parse_add(args: &[String], glued: &[bool]) -> Result<Parsed, String> {
     let mut id = None;
@@ -317,7 +285,7 @@ fn no_more(verb: &str, rest: &[String]) -> Result<(), String> {
 
 /// The arguments after the command name.
 fn parse(raw: &[String]) -> Result<Parsed, String> {
-    let (tokens, glued) = rejoin(raw);
+    let (tokens, glued) = crate::console_tokens::rejoin_colons_and_commas(raw);
     let Some((verb, rest)) = tokens.split_first() else {
         return Ok(Parsed {
             command: Command::List,
@@ -593,7 +561,7 @@ fn real_player(slot: i32, hltv: bool, want_steam_id: bool) -> Option<(&'static [
     }
     let steam_id = if want_steam_id {
         // Safety: `info.name` is the engine's own record pointer.
-        unsafe { crate::deathmsg::steam_id_from_record(info.name) }
+        unsafe { crate::steam_id::from_record(info.name) }
     } else {
         0
     };

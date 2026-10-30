@@ -445,7 +445,7 @@ pub fn use_objective_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         }
 
         AnalyzerEvent::UserMessage(UserMessage::ObjScore(obj_score)) => {
-            let Some(slot) = obj_score.client_index.checked_sub(1) else {
+            let Some(slot) = crate::wire_index::wire_slot(obj_score.client_index) else {
                 return;
             };
             let Some(player) = state.find_player_by_client_index(slot) else {

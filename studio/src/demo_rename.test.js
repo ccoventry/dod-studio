@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { setUseAsTable } from './player_alias.js';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, parseDemoTemplate, demoValues, planRenames, renamePairs,
   placeholdersFor, nameWithoutTag, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, listProgressView,
@@ -268,5 +269,31 @@ describe('Rename and Undo progress (#958)', () => {
     expect(renameDoneLine('apply', ok, '1.2 s')).toBe('Renamed 40 demos in 1.2 s.');
     expect(renameDoneLine('undo', { renamed: [{}], failed: [{}, {}] }, '0.1 s'))
       .toBe("Put back 1 demo in 0.1 s. 2 couldn't be renamed.");
+  });
+});
+
+describe('Use as names (#686)', () => {
+  const ID = '76561197961831029';
+
+  it('name the recording player in {name} and {player}', () => {
+    const facts = pov('a.dem', { steam_id: ID });
+    const values = demoValues(facts, emptyProjectTeams(), (id) => (id === ID ? 'Chris' : null));
+    expect(values.name).toBe('Chris');
+    expect(values.full_name).toBe('Chris');
+  });
+
+  it('leave a demo without a recording player, or an unset one, as it was', () => {
+    const lookup = () => null;
+    expect(demoValues(pov('a.dem', { steam_id: ID }), emptyProjectTeams(), lookup).name).toBe('krod');
+    const asked = [];
+    demoValues(hltv('b.dem'), emptyProjectTeams(), (id) => { asked.push(id); return null; });
+    expect(asked).toEqual([undefined]);
+  });
+
+  it('reach the planned file name through the shared lookup', () => {
+    setUseAsTable({ players: [{ steam_id: ID, name: 'krod', use_as: 'Chris' }] });
+    const row = plan([pov('a.dem', { steam_id: ID })])[0];
+    setUseAsTable(null);
+    expect(row.to).toBe('Chris_31k_v_dicE_anzio.dem');
   });
 });

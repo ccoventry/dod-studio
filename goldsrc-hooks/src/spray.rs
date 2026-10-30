@@ -72,7 +72,7 @@ use crate::texture_hires::{Rgba, game_dir};
 
 /// `ds_player_spray`: list the PNGs in `logos\`, switch to one, or list
 /// each player and the spray the Players table gives them. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = console_name!("player_spray");
 const LOGOS: &str = "logos";
 const TEMPDECAL: &str = "tempdecal.wad";

@@ -18,7 +18,7 @@ pub const NAME: &str = console_name!("player_overrides");
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// The registered cvar, from `commands.rs`.
+/// The registered cvar, from `commands/install.rs`.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
