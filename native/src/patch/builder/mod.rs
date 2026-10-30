@@ -1,10 +1,13 @@
 // patch/builder/mod.rs
-// Batch job construction: `build_batch_queue` and the init commands it adds.
-// The helpers it uses live beside it — `timing` (tick walks, roll floors,
-// block merging), `speed` (the fast-forward and normal-speed aliases),
-// `kill_gaps` (long gaps between kills recorded sped up, #831),
-// `alloc` (drive allocation), `workspace` (junctions and the legacy
-// channel-based worker spawner), `preview` (preview patches).
+// Batch job construction: `build_batch_queue`, the steps it runs in order,
+// and the init commands it adds. The helpers it uses live beside it —
+// `blocks` (highlights into chain jobs and recording blocks), `schedule`
+// (each job's scheduled commands and director events), `helper_cfg` (the
+// helper cfg's aliases), `timing` (tick walks, roll floors, block merging),
+// `speed` (the fast-forward and normal-speed aliases), `kill_gaps` (long
+// gaps between kills recorded sped up, #831), `alloc` (drive allocation),
+// `workspace` (junctions and the legacy channel-based worker spawner),
+// `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
 use crate::patch::engine::StreamPatcher;
@@ -15,59 +18,34 @@ use crate::shared::paths::{CHAIN_DEMO_PREFIX, PRIMER_DEMO_STEM};
 use std::sync::{Arc, atomic::AtomicBool};
 
 mod alloc;
+mod blocks;
+mod helper_cfg;
 pub mod kill_gaps;
 mod preview;
+mod schedule;
 mod speed;
 mod timing;
 mod workspace;
 
-use alloc::{allocate_blocks_first_fit_decreasing, allocate_blocks_one_at_a_time};
+use alloc::DriveBudget;
+// The builder's tests reach these through `use super::*`.
+#[cfg(test)]
+use alloc::{allocate_blocks_first_fit_decreasing, no_room_message};
+use blocks::{Blocks, HighlightGroup, cut_blocks, group_highlights};
+#[cfg(test)]
+use helper_cfg::record_alias_lines;
+use helper_cfg::{
+    helper_cfg_preamble, next_alias_line, remove_previous_batch_cfgs, route_alias_line,
+    write_helper_cfg,
+};
 pub use preview::*;
+use schedule::{
+    ChainJob, ClipWindow, JobSchedule, clip_window, director_events, frame_times_for,
+    log_post_roll_cut,
+};
 pub use speed::*;
 pub use timing::*;
 pub use workspace::*;
-
-// ── Record aliases ────────────────────────────────────────────────────────────
-
-/// The helper cfg's `sys_record_start` / `sys_record_stop` definitions for this
-/// batch's capture mode.
-///
-/// Every mode schedules the same two alias names at the same ticks, so the
-/// patched demos are identical whatever the mode — only what the names do
-/// changes, and that lives here.
-///
-/// AGR mode (#450): `mirv_agr` records one frame per `Host_Frame`, stamped with
-/// `host_frametime`, so the recorded rate is whatever `host_framerate` pins it
-/// to (#403 did exactly this by hand). Start pins it to `1 / agr_fps`; stop
-/// ends the recording and hands playback back to real time for the post-roll,
-/// the way `mirv_recordmovie_stop` releases its own timestep. The recording
-/// itself is started by the block's route alias, which is the one place that
-/// knows the block's file — see `route_alias_line`.
-fn record_alias_lines(config: &PatcherConfig) -> String {
-    match config.capture_mode {
-        crate::patch::CaptureMode::FrameSequence | crate::patch::CaptureMode::DirectToVideo => {
-            "alias sys_record_start \"mirv_recordmovie_start; stopsound\"\n\
-             alias sys_record_stop \"mirv_recordmovie_stop\"\n"
-                .to_string()
-        }
-        // No `stopsound` at the record start, unlike HLAE's modes: OBS has been
-        // recording for a second by then (it starts at AUDIO_SYNC, whose own
-        // `stopsound` clears the fast-forward's sound), and nothing changes
-        // the timestep here, so the stop would only cut the clip's sound.
-        // Measured (#645): with it, every OBS clip had ~250 ms of silence at
-        // its start; without it the sound runs on unbroken.
-        crate::patch::CaptureMode::Obs => {
-            "alias sys_record_start \"echo [dod-studio] OBS_MODE_NO_HLAE_START\"\n\
-             alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
-                .to_string()
-        }
-        crate::patch::CaptureMode::Agr => format!(
-            "alias sys_record_start \"host_framerate {}\"\n\
-             alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
-            agr_host_framerate(config)
-        ),
-    }
-}
 
 /// The `fps_max` OBS mode gives the game: twice OBS's rate (see
 /// `final_init_commands`), within the engine's own 1000 cap. A rate that
@@ -128,33 +106,6 @@ pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> 
         "_route_{drive_idx}/{demo_name}_b{block_index}/{}",
         agr_file_name(demo_name, block_index)
     )
-}
-
-/// The helper cfg line defining a block's `<demo>_route_<N>` alias, scheduled
-/// at the block's record start just ahead of `sys_record_start`.
-///
-/// For the movie modes it points `mirv_movie_filename` at the block's take
-/// folder; HLAE makes the folder itself. In AGR mode it starts the recording
-/// into that folder instead (made ahead of the batch by `build_batch_queue`).
-fn route_alias_line(
-    config: &PatcherConfig,
-    demo_name: &str,
-    block_index: usize,
-    drive_idx: usize,
-) -> String {
-    if config.capture_mode == crate::patch::CaptureMode::Agr {
-        format!(
-            "alias {}_route_{} \"mirv_agr start {}\"\n",
-            demo_name,
-            block_index,
-            agr_route_path(drive_idx, demo_name, block_index)
-        )
-    } else {
-        format!(
-            "alias {}_route_{} \"mirv_movie_filename _route_{}/{}_b{}\"\n",
-            demo_name, block_index, drive_idx, demo_name, block_index
-        )
-    }
 }
 
 /// Every command the engine will run at demo load: the user's own init
@@ -372,126 +323,126 @@ pub fn plays_primer(hook_dll: bool) -> bool {
     !hook_dll
 }
 
-/// The refusal when a capture block fits on no drive, in the player's words:
-/// shown as the batch's error toast (#1097). `needed` includes the headroom
-/// each drive keeps; `best` is the most free on any one drive.
-fn no_room_message(needed: u64, best: u64) -> String {
-    use crate::hlcr::take_cleanup::format_gb;
-    format!(
-        "Not enough free space on any capture drive for this batch: a clip needs {} free on one drive, and the most any one has is {}.",
-        format_gb(needed),
-        format_gb(best)
-    )
-}
-
+/// Builds a capture batch: one [`PatchJob`] per demo and player whose
+/// highlights `raw_streaks` lists (plus the primer first when
+/// [`plays_primer`]), each block routed to a capture drive, and the helper
+/// cfg every job's scheduled commands call into. Returns the jobs in play
+/// order and the headroom left on each capture drive the batch records to.
+///
+/// `global_arrays` holds each demo's frame times when the caller has them,
+/// by demo path; a highlight's own `frame_times` stand in otherwise.
+///
+/// Side effects, in the game's folder: removes the previous batch's cfg
+/// files, writes `dodstudio_helper.cfg`, makes the `_route_<N>` junctions
+/// and the session folders, and in AGR mode every block's take folder.
+/// Logs a warning for rolls shorter than the capture needs, a note for each
+/// Scheduled Command that runs during fast-forward and each post-roll cut at
+/// a demo's end.
+///
+/// Errors when `game_path` has no parent folder or `primary_media_dir` is
+/// unset (`NotFound`), when a block fits on no capture drive, and when a
+/// folder or the helper cfg can't be made.
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,
     global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
 ) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
-    // tickrate is extracted dynamically from streaks per-demo.
-    // Each streak is carried alongside its index in `raw_streaks` so the blocks
-    // built below can point back at the exact highlights the caller dispatched,
-    // even after the overlap merge collapses several into one recording.
-    let mut grouped: std::collections::HashMap<(&str, Option<&str>), Vec<(usize, &CaptureStreak)>> =
-        std::collections::HashMap::new();
-    for (idx, streak) in raw_streaks.iter().enumerate() {
-        grouped
-            .entry((streak.source_demo.as_str(), streak.target_player.as_deref()))
-            .or_default()
-            .push((idx, streak));
-    }
+    let groups = group_highlights(&raw_streaks);
+    warn_short_rolls(config);
 
-    // The rolls are load-bearing now — the audio resync, the sound flush, the
-    // decal sweep's lead and any Scheduled Command's offset all measure against
-    // them — so say when one is too short rather than leaving it to be found in
-    // a capture that looks almost right.
-    let floors = roll_floors(config);
-    if config.pre_roll_seconds < floors.pre_roll {
-        crate::log_markdown(&format!(
-            "⚠️ **Pre-roll is shorter than this capture needs** — {:.1}s, against a {:.1}s floor \
-             set by {}. Playback returns to real time {:.1}s before recording, which is not enough \
-             for it: the engine's audio buffers are left unflushed by the fast-forward. Raise the \
-             pre-roll to at least {:.1}s.",
-            config.pre_roll_seconds,
-            floors.pre_roll,
-            floors.pre_roll_binding,
-            config.pre_roll_seconds,
-            floors.pre_roll
-        ));
-    }
-    if config.post_roll_seconds < floors.post_roll {
-        crate::log_markdown(&format!(
-            "⚠️ **Post-roll is shorter than this capture needs** — {:.1}s, against a {:.1}s floor \
-             set by {}. Anything past the post-roll fires while playback is fast-forwarding again.",
-            config.post_roll_seconds, floors.post_roll, floors.post_roll_binding
-        ));
-    }
+    let dod_dir = game_mod_dir(config)?;
+    remove_previous_batch_cfgs(&dod_dir);
+    // Snapshot every capture directory's free bytes so each clip is routed
+    // to a drive with room for it at build time.
+    let mut drives = DriveBudget::snapshot(&config.capture_directories);
+    let session_dir = make_session_dir(config)?;
 
-    // Sort grouped chronologically by the start_tick of their first streak
-    let mut sorted_groups: Vec<_> = grouped.into_iter().collect();
-    sorted_groups
-        .sort_by_key(|(_, streaks)| streaks.iter().map(|(_, s)| s.start_tick).min().unwrap_or(0));
+    let mut helper_cfg = helper_cfg_preamble(config, &dod_dir);
+    announce_capture_mode(config);
 
+    let total_jobs = groups.len();
     let mut jobs = Vec::new();
-    let total_jobs = sorted_groups.len();
+    if total_jobs > 0 {
+        helper_cfg.push_str("# Demo specific next demos\n");
+    }
+    // The primer, only when the launch has no hook DLL ([`plays_primer`],
+    // #365). It is then first, so a test asserting on this queue gets one job
+    // more than the streak groups it passed in; with the DLL the game starts
+    // on dodstudio_chain_01 directly.
+    if let Some(first_group) = groups.first()
+        && plays_primer(config.goldsrc_hooks_dll().is_some())
+    {
+        let (primer, alias_line) = primer_job(config, first_group.source_demo, &dod_dir);
+        helper_cfg.push_str(&alias_line);
+        jobs.push(primer);
+    }
 
-    let date_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let mut helper_cfg_content = String::new();
-
-    let game_path_buf = std::path::PathBuf::from(&config.game_path);
-    let dod_dir = match game_path_buf.parent() {
-        Some(parent) => crate::shared::paths::mod_dir(parent),
-        None => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Target game output directory not found",
-            ));
-        }
+    let batch = BatchContext {
+        config,
+        highlights: &raw_streaks,
+        global_arrays,
+        dod_dir: &dod_dir,
+        session_dir: &session_dir,
+        total_jobs,
     };
-
-    // Remove stale config from dod_dir
-    let _ = std::fs::remove_file(dod_dir.join("dodstudio_helper.cfg"));
-    let _ = std::fs::remove_file(dod_dir.join("dodstudio_capture_done.cfg"));
-    let _ = std::fs::remove_file(dod_dir.join("dod_quit.cfg"));
-    if let Ok(entries) = std::fs::read_dir(&dod_dir) {
-        for entry in entries.flatten() {
-            let filename = entry.file_name().to_string_lossy().to_string();
-            if filename.starts_with("dodstudio_chain_") && filename.ends_with(".cfg") {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
+    for (job_idx, group) in groups.into_iter().enumerate() {
+        jobs.push(chain_job(
+            &batch,
+            job_idx,
+            group,
+            &mut drives,
+            &mut helper_cfg,
+        )?);
     }
 
-    // ── AOT disk-space simulation ─────────────────────────────────────────────
-    // Snapshot current free bytes for every configured capture directory so we
-    // can route each clip to the drive with sufficient headroom at build time.
-    // Directories on one volume share one budget (#774).
-    const FAILOVER_THRESHOLD: u64 = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES;
-    let (mut volume_of_drive, mut drive_free) = crate::sys::disk::group_by_volume(
-        &config.capture_directories,
-        crate::sys::disk::get_available_bytes,
-    );
-    let mut active_drive_idx: usize = 0;
-    // If no capture directories are configured, fall back to a single sentinel
-    // that has "unlimited" free space so existing single-drive behaviour is
-    // preserved without an error.
-    if drive_free.is_empty() {
-        volume_of_drive.push(0);
-        drive_free.push(u64::MAX);
-    }
-    // What each drive had when the batch was planned: the most Render While
-    // Capturing (#861) can ever free there for one block.
-    let drive_capacity = drive_free.clone();
+    // Every patched demo lands in dod/, never on a capture directory, so the
+    // drives in use are only those that receive a recording block (#8).
+    let utilized_drives: std::collections::HashSet<usize> = jobs
+        .iter()
+        .flat_map(|j| j.blocks.iter().map(|b| b.drive_index))
+        .collect();
+    make_route_junctions(config, &utilized_drives)?;
+    make_agr_take_folders(config, &jobs)?;
+    write_helper_cfg(&dod_dir, &helper_cfg)?;
 
-    let active_export_dir = match config.primary_media_dir.clone() {
-        Some(dir) => dir,
-        None => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Target game output directory not found",
-            ));
-        }
+    let drive_headroom = drives.headroom(utilized_drives, &config.capture_directories);
+    Ok((jobs, drive_headroom))
+}
+
+/// What every chain job of a batch reads and none changes.
+struct BatchContext<'a> {
+    config: &'a PatcherConfig,
+    /// The batch's highlights as dispatched, for the `viewdemo` clock.
+    highlights: &'a [CaptureStreak],
+    global_arrays: &'a std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
+    dod_dir: &'a std::path::Path,
+    session_dir: &'a std::path::Path,
+    total_jobs: usize,
+}
+
+/// The game's mod folder (`dod/`) beside `config.game_path`: where every
+/// patched demo and the helper cfg go, since it is the only place GoldSrc's
+/// `playdemo` finds a demo (#8). `NotFound` when `game_path` has no parent.
+fn game_mod_dir(config: &PatcherConfig) -> std::io::Result<std::path::PathBuf> {
+    match std::path::Path::new(&config.game_path).parent() {
+        Some(parent) => Ok(crate::shared::paths::mod_dir(parent)),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Target game output directory not found",
+        )),
+    }
+}
+
+/// The batch's session folder under `primary_media_dir` (the folder itself
+/// when there is no session id), made if missing: where a block's take lands
+/// when no capture directory is configured. `NotFound` when
+/// `primary_media_dir` is unset.
+fn make_session_dir(config: &PatcherConfig) -> std::io::Result<std::path::PathBuf> {
+    let Some(active_export_dir) = config.primary_media_dir.clone() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Target game output directory not found",
+        ));
     };
     let session_dir = if !config.session_id.is_empty() {
         active_export_dir.join(&config.session_id)
@@ -499,100 +450,22 @@ pub fn build_batch_queue(
         active_export_dir
     };
     if !session_dir.exists() {
+        // A folder that can't be made shows up when the first take can't be
+        // written there, which names the folder.
         let _ = std::fs::create_dir_all(&session_dir);
     }
+    Ok(session_dir)
+}
 
-    helper_cfg_content.push_str(&format!(
-        "# dodstudio_helper.cfg\n# Created by: dod_studio.exe v{}\n# Date: {}\n\n",
-        crate::VERSION,
-        date_time
-    ));
-    // Marks exactly where this file execs relative to the engine's own
-    // config.cfg/movie.cfg chain, which lands in qconsole.log too (-condebug
-    // is passed on every launch) — cheap enough to leave in permanently rather than
-    // re-add it every time this ordering question comes up again. See
-    // docs/goldsrc_dod_quirks.md's Command Precedence entry.
-    helper_cfg_content.push_str("echo dodstudio_helper.cfg exec'd here\n\n");
-
-    helper_cfg_content.push_str("# Global aliases\n");
-    helper_cfg_content.push_str("alias sys_autodir \"spec_autodirector 1\"\n");
-    // The fast-forward runs uncapped with nothing drawn, and the pre-roll
-    // puts back whatever the user's own commands and configs had (#724). An
-    // alias body is not a ConsoleCommand frame: the demo carries only the
-    // name, so the 64-byte frame limit does not apply to it.
-    helper_cfg_content.push_str(&speed_alias_lines(
-        config,
-        &final_init_commands(config),
-        Some(&crate::patch::cfg_scan::scan_cached(&dod_dir)),
-    ));
-    helper_cfg_content.push_str(&ramp_alias_lines(config));
-    helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
-    // In OBS mode HLAE records nothing: the recorder is an external process
-    // driven off the console-log markers these same stages already echo, so the
-    // record aliases must not issue `mirv_recordmovie_*` at all.
-    //
-    // This is what keeps the clip at real time. `mirv_recordmovie_start` pins
-    // the engine's timestep to `1/mirv_movie_fps`; without it the engine simply
-    // stays at the `host_framerate 0` that `sys_normal_speed` set at the
-    // pre-roll, which is exactly what OBS needs in order to capture a clip that
-    // plays at the right speed.
-    //
-    // `stopsound` is kept. It exists to flush the audio buffers fast-forward
-    // corrupts, and that corruption happens whoever is recording. It lands
-    // ~1s before the first captured frame, inside the pre-roll head that gets
-    // trimmed, so it is not audible in the finished clip.
-    //
-    // `sys_record_stop` becomes an echo rather than an empty alias: GoldSrc
-    // treats an alias with an empty body as a parse oddity, and a no-op that
-    // announces itself is easier to recognise in a log than one that vanishes.
-    //
-    // AGR mode has its own pair — see `record_alias_lines`.
-    helper_cfg_content.push_str(&record_alias_lines(config));
-    helper_cfg_content.push_str("alias sys_capture_done_path \"mirv_movie_filename DOD_STUDIO_EXIT_TRIGGER; mirv_recordmovie_start; mirv_recordmovie_stop\"\n");
-
-    // Direct-to-video (docs/direct_to_video_capture.md), driven by the capture-
-    // mode toggle. The probe that introduced this settled all four of its open
-    // questions against a real capture: {AFX_STREAM_PATH} resolves to the
-    // per-stream folder, it follows mirv_movie_filename (so the _route_N
-    // junction routing keeps working), takes are still auto-numbered into
-    // take0000, and sound.wav still lands beside the video.
-    //
-    // `all` here is HLAE's stream *group*, not the folder name it happens to
-    // share with the composited stream. Measured with mirv_movie_separate_hud
-    // on: the group does reach hudColor and hudAlpha, so all three streams get
-    // a video and no per-stream enabled/options lines are needed. The folders
-    // HLAE writes are lowercase (`hudcolor`/`hudalpha`) even though the command
-    // names those streams in camelCase.
-    //
-    // Set here, once, at load — never as an injected ConsoleCommand frame. The
-    // options string is several times the 64 bytes a ConsoleCommand frame's
-    // command field holds, with no staggering available (one argument to one
-    // command), and an
-    // injected frame would shift every later frame ordinal by +1 and desync the
-    // scheduled capture commands. Same rule r_decals follows.
-    //
-    // Not inside an alias either: GoldSrc cannot parse nested quotes in one, and
-    // this argument has to carry them. As a plain command in an exec'd cfg it is
-    // ordinary syntax. {QUOTE} is HLAE's own token for a literal quote, which is
-    // what keeps the inner path quoting away from the engine's parser entirely.
-    //
-    // The codec comes from the config — see `CaptureCodec` for why every option
-    // is lossless and RGB/4:4:4, and why the size ranking there is not the
-    // real-time-viability ranking.
+/// Says in the activity log how a direct-to-video or AGR batch records,
+/// since neither writes the frame sequence the other modes do.
+fn announce_capture_mode(config: &PatcherConfig) {
     if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
-        let codec_args = config.ffmpeg_capture_codec.args();
-        helper_cfg_content.push_str("\n# Direct-to-video capture\n");
-        helper_cfg_content.push_str("mirv_movie_ffmpeg all enabled 1\n");
-        helper_cfg_content.push_str(&format!(
-            "mirv_movie_ffmpeg all options \"{} {{QUOTE}}{{AFX_STREAM_PATH}}\\{}{{QUOTE}}\"\n",
-            codec_args,
-            crate::hlcr::scanner::VIDEO_FILE,
-        ));
         crate::log_markdown(&format!(
             "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{}`) instead of \
              writing a BMP sequence, one `{}` per stream folder. Render Studio reads these the \
              same way it reads frame sequences.",
-            codec_args,
+            config.ffmpeg_capture_codec.args(),
             crate::hlcr::scanner::VIDEO_FILE,
         ));
     }
@@ -604,822 +477,317 @@ pub fn build_batch_queue(
             config.effective_agr_fps(),
         ));
     }
+}
 
-    if total_jobs > 0 {
-        helper_cfg_content.push_str("# Demo specific next demos\n");
+/// The patched demo stem of chain job `job_idx` (0-based):
+/// `dodstudio_chain_01` for the first.
+fn chain_demo_name(job_idx: usize) -> String {
+    format!("{}{:02}", CHAIN_DEMO_PREFIX, job_idx + 1)
+}
+
+/// The primer job, played before the first chain job when the launch has no
+/// hook DLL: `first_source` (the first chain job's demo) patched to load its
+/// map and, after [`crate::patch::PRIMER_DELAY_TICKS`], play
+/// `dodstudio_chain_01`. Returns the job and the helper cfg line defining
+/// the alias it schedules.
+fn primer_job(
+    config: &PatcherConfig,
+    first_source: &str,
+    dod_dir: &std::path::Path,
+) -> (PatchJob, String) {
+    let mut primer_init = config.init_commands.clone();
+    primer_init.push("sys_autodir".to_string());
+
+    // Every patched demo lands directly in the game's own dod/ folder --
+    // that's the only place GoldSrc's `playdemo` can find it. This used
+    // to resolve to capture_directories[0] instead, with capture_engine.rs
+    // copying it into dod/ as a second step -- pure redundant I/O, since
+    // that copy loop already ran everything upfront before hl.exe even
+    // launched, so dod/'s drive needed the full batch footprint either
+    // way. capture_directories is only ever about where recorded video
+    // blocks land now, not these small demo files. See issue #8.
+    let primer_out = dod_dir.join(format!("{PRIMER_DEMO_STEM}.dem"));
+
+    // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the
+    // 2-second GoldSrc server handshake without buffer overflows before jumping to the first real chain.
+    let primer_next_alias = format!("{PRIMER_DEMO_STEM}_next");
+    let alias_line = format!("alias {primer_next_alias} \"playdemo {CHAIN_DEMO_PREFIX}01\"\n");
+    let primer_scheduled = vec![(crate::patch::PRIMER_DELAY_TICKS, primer_next_alias)];
+
+    let job = PatchJob {
+        source_demo: first_source.to_string(),
+        output_demo: primer_out,
+        streaks: Vec::new(),
+        target_player: None,
+        init_commands: primer_init,
+        scheduled_commands: primer_scheduled,
+        director_events: Vec::new(),
+        block_routes: Vec::new(),
+        blocks: Vec::new(),
+    };
+    (job, alias_line)
+}
+
+/// Builds chain job `job_idx` from one demo and player's highlights: cuts
+/// them into blocks, routes each block to a drive in `drives`, schedules
+/// every clip, and appends the job's route and `_next` aliases to
+/// `helper_cfg`. Errors when a block fits on no drive or a capture
+/// directory's path can't be made absolute.
+fn chain_job(
+    batch: &BatchContext,
+    job_idx: usize,
+    group: HighlightGroup,
+    drives: &mut DriveBudget,
+    helper_cfg: &mut String,
+) -> std::io::Result<PatchJob> {
+    let config = batch.config;
+    let first = group.first();
+
+    // An HLTV demo's camera follows no one by itself (#247): every clip
+    // puts it on the highlight's player, by number (slot + 1), and the
+    // lock keeps it there through their death. A job is one player's
+    // highlights (grouped by demo and player).
+    let spectate = first
+        .spectated
+        .then(|| format!("{SPEC_TARGET} {}", first.player_index + 1));
+    let director_events = director_events(&group);
+    let demo_fps = Some(first.demo_fps)
+        .filter(|&fps| fps > 0.0)
+        .unwrap_or(30.0);
+    let total_demo_frames = first.total_demo_frames;
+
+    let demo_name = chain_demo_name(job_idx);
+    // Lands directly in dod/ -- see `primer_job` for why.
+    let output_demo = batch.dod_dir.join(format!("{}.dem", demo_name));
+
+    let cut = cut_blocks(&group.highlights, config, demo_fps);
+    let block_estimates: Vec<u64> = cut
+        .streaks
+        .iter()
+        .map(|streak| block_byte_estimate(config, streak, demo_fps))
+        .collect();
+    let assignments = drives.allocate(&block_estimates, config)?;
+    let (mut blocks, block_routes) =
+        capture_blocks(batch, &demo_name, &cut, &assignments, helper_cfg)?;
+    helper_cfg.push_str(&next_alias_line(&demo_name, job_idx, batch.total_jobs));
+
+    let spectated = spectate.is_some();
+    let job = ChainJob {
+        demo_name: &demo_name,
+        index: job_idx,
+        total: batch.total_jobs,
+        clip_count: cut.streaks.len(),
+        demo_fps,
+        spectate,
+    };
+    let scheduled_commands = schedule_clips(batch, job, &cut, &mut blocks, total_demo_frames);
+
+    let mut final_init_commands = final_init_commands(config);
+    if spectated {
+        final_init_commands.push(format!("{SPEC_LOCK} 1"));
     }
 
-    // 1. Primer Job, only when the launch has no hook DLL ([`plays_primer`],
-    // #365). It is then first, so a test asserting on this queue gets one job
-    // more than the streak groups it passed in; with the DLL the game starts
-    // on dodstudio_chain_01 directly.
-    if total_jobs > 0 && plays_primer(config.goldsrc_hooks_dll().is_some()) {
-        let first_source = sorted_groups[0].0.0.to_string();
-        let mut primer_init = config.init_commands.clone();
-        primer_init.push("sys_autodir".to_string());
+    Ok(PatchJob {
+        source_demo: group.source_demo.to_string(),
+        output_demo,
+        streaks: cut.streaks,
+        target_player: group.target_player.map(|s| s.to_string()),
+        init_commands: final_init_commands,
+        scheduled_commands,
+        director_events,
+        block_routes,
+        blocks,
+    })
+}
 
-        // Every patched demo lands directly in the game's own dod/ folder --
-        // that's the only place GoldSrc's `playdemo` can find it. This used
-        // to resolve to capture_directories[0] instead, with capture_engine.rs
-        // copying it into dod/ as a second step -- pure redundant I/O, since
-        // that copy loop already ran everything upfront before hl.exe even
-        // launched, so dod/'s drive needed the full batch footprint either
-        // way. capture_directories is only ever about where recorded video
-        // blocks land now, not these small demo files. See issue #8.
-        let primer_out = dod_dir.join(format!("{PRIMER_DEMO_STEM}.dem"));
-
-        // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the
-        // 2-second GoldSrc server handshake without buffer overflows before jumping to the first real chain.
-        let mut primer_scheduled = Vec::new();
-        let primer_next_alias = format!("{PRIMER_DEMO_STEM}_next");
-        helper_cfg_content.push_str(&format!(
-            "alias {primer_next_alias} \"playdemo {CHAIN_DEMO_PREFIX}01\"\n"
+/// One [`CaptureBlock`](crate::patch::types::CaptureBlock) per block of
+/// `cut`, on the drive `assignments` gives it, sorted by block index, and
+/// the job's `(start_tick, end_tick, drive)` block routes. Appends each
+/// block's route alias to `helper_cfg`, in allocation order. The record
+/// bounds and plan are left empty for [`schedule_clips`] to fill.
+fn capture_blocks(
+    batch: &BatchContext,
+    demo_name: &str,
+    cut: &Blocks,
+    assignments: &[(usize, usize)],
+    helper_cfg: &mut String,
+) -> std::io::Result<(
+    Vec<crate::patch::types::CaptureBlock>,
+    Vec<(i32, i32, usize)>,
+)> {
+    // Route aliases key off each block's original index in `cut`, not
+    // allocation order, so the scheduling (which walks `cut` in its
+    // original order) is unaffected.
+    let mut block_routes = Vec::new();
+    let mut blocks: Vec<crate::patch::types::CaptureBlock> = Vec::new();
+    for &(block_index, drive_idx) in assignments {
+        let streak = &cut.streaks[block_index];
+        block_routes.push((streak.start_tick, streak.end_tick, drive_idx));
+        helper_cfg.push_str(&route_alias_line(
+            batch.config,
+            demo_name,
+            block_index,
+            drive_idx,
         ));
-        primer_scheduled.push((crate::patch::PRIMER_DELAY_TICKS, primer_next_alias));
 
-        jobs.push(PatchJob {
-            source_demo: first_source.clone(),
-            output_demo: primer_out,
-            streaks: Vec::new(),
-            target_player: None,
-            init_commands: primer_init,
-            scheduled_commands: primer_scheduled,
-            director_events: Vec::new(),
-            block_routes: Vec::new(),
-            blocks: Vec::new(),
+        let take_folder = take_folder(batch, demo_name, block_index, drive_idx)?;
+        blocks.push(crate::patch::types::CaptureBlock {
+            demo_name: demo_name.to_string(),
+            block_index,
+            drive_index: drive_idx,
+            take_key: crate::shared::paths::take_key(&take_folder).unwrap_or_default(),
+            take_folder,
+            source_streak_indices: cut.sources[block_index].clone(),
+            start_tick: streak.start_tick,
+            end_tick: streak.end_tick,
+            // Filled in by `schedule_clips`, which is where the record
+            // bounds are actually derived. Left at 0 here rather than
+            // duplicating that arithmetic.
+            record_start_tick: 0,
+            record_stop_tick: 0,
+            ramped_gaps: 0,
+            plan: None,
         });
     }
+    blocks.sort_by_key(|b| b.block_index);
+    Ok((blocks, block_routes))
+}
 
-    // 2. Chained Jobs
-    // Every patched demo file now lands directly in dod/ (see the primer's
-    // own resolution above), not on any capture_directories entry -- so
-    // utilized_drives only ever needs to track drives that actually receive
-    // a real recording block. See issue #8.
-    let mut utilized_drives = std::collections::HashSet::new();
-    for (job_idx, ((source_demo, target_player), mut streak_refs)) in
-        sorted_groups.into_iter().enumerate()
-    {
-        // Sort by start_tick in ascending order
-        streak_refs.sort_by_key(|(_, s)| s.start_tick);
-        let (streak_payload_indices, streaks): (Vec<usize>, Vec<CaptureStreak>) = streak_refs
-            .into_iter()
-            .map(|(idx, s)| (idx, s.clone()))
-            .unzip();
-
-        let total_demo_frames = streaks.first().map(|s| s.total_demo_frames).unwrap_or(0);
-
-        // An HLTV demo's camera follows no one by itself (#247): every clip
-        // puts it on the highlight's player, by number (slot + 1), and the
-        // lock keeps it there through their death. A job is one player's
-        // highlights (grouped by demo and player above).
-        let spectate = streaks
-            .first()
-            .filter(|s| s.spectated)
-            .map(|s| format!("{SPEC_TARGET} {}", s.player_index + 1));
-
-        // One svc_director STUFFTEXT event per streak — label mirrors the highlight table:
-        // "#<row>: <kill_count> kills: <timeline_string>"
-        let mut director_events: Vec<(i32, String)> = streaks
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let label = format!("#{}: {} kills: {}", i + 1, s.kill_count, s.timeline_string);
-                (s.start_tick, label)
-            })
-            .collect();
-
-        if let Some(first_streak) = streaks.first() {
-            let match_tick = first_streak.match_start_tick.unwrap_or(0);
-            director_events.push((match_tick, "echo [dod-studio] MATCH_START".to_string()));
-            let demo_end_tick = total_demo_frames;
-            director_events.push((demo_end_tick, "echo [dod-studio] DEMO_END".to_string()));
-        }
-        director_events.sort_by_key(|e| e.0);
-
-        let demo_fps = streaks
-            .first()
-            .map(|s| s.demo_fps)
-            .filter(|&fps| fps > 0.0)
-            .unwrap_or(30.0);
-
-        let demo_name = format!("{}{:02}", CHAIN_DEMO_PREFIX, job_idx + 1);
-        let next_demo_name = format!("{}{:02}", CHAIN_DEMO_PREFIX, job_idx + 2);
-        let output_name = format!("{}.dem", demo_name);
-        // Lands directly in dod/ -- see the primer's own resolution above for why.
-        let output_demo = dod_dir.join(&output_name);
-
-        // ── AOT failover routing (Per-Block) ───────────────────────────────────
-
-        // Block cutting.
-        //
-        // Two separate questions, deliberately not conflated (they used to be,
-        // which made every roll-window collision collapse into one take full of
-        // dead air between the two highlights):
-        //
-        //  1. Do the recordings themselves overlap? Only then must the two
-        //     highlights become a single take — you can't run two
-        //     mirv_recordmovie sessions at once.
-        //  2. Otherwise they stay separate takes, but if the fast-forward
-        //     round trip between them doesn't fit, it's dropped and playback
-        //     just stays at normal speed across the gap. Costs a couple of
-        //     seconds of real-time playback and yields two clean clips instead
-        //     of one blob. The stopsound flush goes with it — that exists to
-        //     repair audio the fast-forward desyncs, and there's no
-        //     fast-forward here to repair.
-        //
-        // `merged_sources` stays index-aligned with `merged_streaks`, recording
-        // which dispatched highlights each block covers — the merge keeps only
-        // the first streak's fields, so the mapping back to the caller's
-        // highlights would otherwise be lost here. `chained_to_previous` marks
-        // blocks that run straight on from the one before at normal speed.
-        let dynamic_pre_roll_ticks = (config.pre_roll_seconds * demo_fps) as i32;
-        let dynamic_post_roll_ticks = (config.post_roll_seconds * demo_fps) as i32;
-        let start_lead_ticks = (config.record_start_lead * demo_fps) as i32;
-        let stop_trail_ticks = (config.record_stop_trail * demo_fps) as i32;
-
-        let mut merged_streaks: Vec<CaptureStreak> = Vec::new();
-        let mut merged_sources: Vec<Vec<usize>> = Vec::new();
-        let mut chained_to_previous: Vec<bool> = Vec::new();
-        // Every kill each block records, for the gaps between them (#831).
-        // The merge below keeps only an absorbed highlight's last kill in the
-        // block's own list, which would hide the gaps inside it.
-        let mut merged_kill_frames: Vec<Vec<i32>> = Vec::new();
-
-        for (current, payload_idx) in streaks.into_iter().zip(streak_payload_indices) {
-            let current_kills = block_kill_frames(&current);
-            if merged_streaks.is_empty() {
-                merged_streaks.push(current);
-                merged_sources.push(vec![payload_idx]);
-                chained_to_previous.push(false);
-                merged_kill_frames.push(current_kills);
-                continue;
-            }
-
-            let prev_stop = last_kill_frame(merged_streaks.last().unwrap());
-            let next_start = first_kill_frame(&current);
-
-            // Recordings overlap, or sit too close for a safe stop/start cycle.
-            // OBS needs longer between takes than HLAE does: ~1.065s to
-            // finalise a file after `StopRecord` returned, against HLAE's
-            // ~0.28s (#9). So each mode brings its own separation, and the
-            // HLAE one would ask OBS for a stop/start cycle it cannot service.
-            let min_separation_ticks = (take_separation_seconds(config) * demo_fps) as i32;
-            if blocks_merge(
-                prev_stop,
-                next_start,
-                start_lead_ticks,
-                stop_trail_ticks + min_separation_ticks,
-            ) {
-                let last = merged_streaks.last_mut().unwrap();
-                last.end_tick = last.end_tick.max(current.end_tick);
-                // The record-stop mark is derived from kills[end_index] below,
-                // not from end_tick, so the absorbed highlight's final kill has
-                // to join this block's kill list too. Without it recording stops
-                // at the *first* highlight's last kill and everything merged in
-                // after that is missing from the take — while still looking like
-                // one successfully captured block.
-                let absorbed_last = current.end_index.min(current.kills.len().saturating_sub(1));
-                if let Some(kill) = current.kills.get(absorbed_last).cloned() {
-                    last.kills.push(kill);
-                    last.end_index = last.kills.len() - 1;
-                }
-                merged_sources.last_mut().unwrap().push(payload_idx);
-                let kills = merged_kill_frames.last_mut().unwrap();
-                kills.extend(current_kills);
-                kills.sort_unstable();
-                kills.dedup();
-            } else {
-                let rolls_collide = blocks_merge(
-                    prev_stop,
-                    next_start,
-                    start_lead_ticks + dynamic_pre_roll_ticks,
-                    stop_trail_ticks + dynamic_post_roll_ticks,
-                );
-                merged_streaks.push(current);
-                merged_sources.push(vec![payload_idx]);
-                chained_to_previous.push(rolls_collide);
-                merged_kill_frames.push(current_kills);
-            }
-        }
-
-        let mut block_routes = Vec::new();
-
-        // Byte estimate per block, index-aligned with merged_streaks.
-        let block_estimates: Vec<u64> = merged_streaks
-            .iter()
-            .map(|streak| block_byte_estimate(config, streak, demo_fps))
-            .collect();
-
-        let assignments = match allocate_blocks_first_fit_decreasing(
-            &block_estimates,
-            &volume_of_drive,
-            &mut drive_free,
-            &mut active_drive_idx,
-            FAILOVER_THRESHOLD,
-        ) {
-            Ok(assignments) => assignments,
-            // Render While Capturing (#861) frees space as the batch runs and
-            // holds it between clips until there is room, so the blocks that
-            // don't fit now still get a drive, as long as each fits one on
-            // its own: counted as if the earlier blocks will have been freed
-            // by the time it records. A block bigger than any drive could
-            // ever hold is still refused, rather than starting a batch that
-            // can't finish.
-            Err(_) if config.render_while_capturing => {
-                let (pairs, left) = allocate_blocks_one_at_a_time(
-                    &block_estimates,
-                    &volume_of_drive,
-                    &drive_capacity,
-                    &mut active_drive_idx,
-                    FAILOVER_THRESHOLD,
-                )
-                .map_err(|block_index| {
-                    std::io::Error::other(no_room_message(
-                        block_estimates[block_index] + FAILOVER_THRESHOLD,
-                        drive_capacity.iter().copied().max().unwrap_or(0),
-                    ))
-                })?;
-                for (free, left) in drive_free.iter_mut().zip(left) {
-                    if let Some(left) = left {
-                        *free = left;
-                    }
-                }
-                pairs
-            }
-            Err(block_index) => {
-                return Err(std::io::Error::other(no_room_message(
-                    block_estimates[block_index] + FAILOVER_THRESHOLD,
-                    drive_free.iter().copied().max().unwrap_or(0),
-                )));
-            }
-        };
-
-        // Route aliases key off each block's original index in merged_streaks,
-        // not allocation order, so the scheduled-command lookup below (which
-        // still walks merged_streaks in its original order) is unaffected.
-        let mut blocks: Vec<crate::patch::types::CaptureBlock> = Vec::new();
-        for (block_index, drive_idx) in assignments {
-            let streak = &merged_streaks[block_index];
-            block_routes.push((streak.start_tick, streak.end_tick, drive_idx));
-            utilized_drives.insert(drive_idx);
-            helper_cfg_content.push_str(&route_alias_line(
-                config,
-                &demo_name,
-                block_index,
-                drive_idx,
-            ));
-
-            // Mirror of the junction target built after this loop, so the two
-            // can't drift: _route_{drive} links to <capture_dir>/<session_id>,
-            // and HLAE writes <demo_name>_b<block_index> underneath it.
-            let take_folder = match config.capture_directories.get(drive_idx) {
-                Some(out_dir) => {
-                    let absolute_drive = std::path::absolute(out_dir)?;
-                    let session_root = if config.session_id.is_empty() {
-                        absolute_drive
-                    } else {
-                        absolute_drive.join(&config.session_id)
-                    };
-                    session_root.join(format!("{}_b{}", demo_name, block_index))
-                }
-                // No capture directories configured — the drive_free sentinel
-                // path. Falls back to the session dir resolved from
-                // primary_media_dir above, matching where output actually lands.
-                None => session_dir.join(format!("{}_b{}", demo_name, block_index)),
-            };
-
-            blocks.push(crate::patch::types::CaptureBlock {
-                demo_name: demo_name.clone(),
-                block_index,
-                drive_index: drive_idx,
-                take_key: crate::shared::paths::take_key(&take_folder).unwrap_or_default(),
-                take_folder,
-                source_streak_indices: merged_sources[block_index].clone(),
-                start_tick: streak.start_tick,
-                end_tick: streak.end_tick,
-                // Filled in by the scheduling loop below, which is where the
-                // record bounds are actually derived. Left at 0 here rather
-                // than duplicating that arithmetic.
-                record_start_tick: 0,
-                record_stop_tick: 0,
-                ramped_gaps: 0,
-                plan: None,
-            });
-        }
-        blocks.sort_by_key(|b| b.block_index);
-
-        if job_idx < total_jobs - 1 {
-            helper_cfg_content.push_str(&format!(
-                "alias {}_next \"playdemo {}\"\n",
-                demo_name, next_demo_name
-            ));
-        } else {
-            helper_cfg_content.push_str(&format!(
-                "alias {}_next \"sys_capture_done_path\"\n",
-                demo_name
-            ));
-        }
-
-        // Generate scheduled commands
-        let mut scheduled_commands = Vec::new();
-
-        // Initialize Engine Speed after Initial Load Delay
-        let initial_delay_ticks = (config.initial_delay * demo_fps) as i32;
-        scheduled_commands.push((initial_delay_ticks, "sys_fast_forward".to_string()));
-        if let Some(target) = &spectate {
-            scheduled_commands.push((initial_delay_ticks, IN_EYE.to_string()));
-            scheduled_commands.push((initial_delay_ticks, target.clone()));
-        }
-
-        // One marker per demo, at its very first scheduled tick — the engine's
-        // own live signal that this demo has started playing. Read back by
-        // `native/src/obs/log_tail.rs` as `MarkerKind::DemoStart`, carrying
-        // (job_idx, total_jobs, clip_count) 1-based, and forwarded up as
-        // `EngineEvent::DemoLoading` for the "loading demo N of M" OS
-        // notification (issue #98). `merged_streaks.len()` is this job's
-        // final clip count, already settled by the merge loop above.
-        for (t, echo_cmd) in build_safe_echos(
-            initial_delay_ticks,
-            &format!(
-                "DEMO_START {} {} {}",
-                job_idx + 1,
-                total_jobs,
-                merged_streaks.len()
-            ),
-        ) {
-            scheduled_commands.push((t, echo_cmd));
-        }
-
-        // Fast-forward towards clip 1 starts at the very same tick as
-        // DEMO_START above — playback has nothing to do before it. Read back
-        // as `MarkerKind::NextClip` for the "fast-forwarding to clip N of M"
-        // OS notification (issue #98).
-        for (t, echo_cmd) in build_safe_echos(
-            initial_delay_ticks,
-            &format!(
-                "NEXT_CLIP {} {} {} {}",
-                job_idx + 1,
-                total_jobs,
-                1,
-                merged_streaks.len()
-            ),
-        ) {
-            scheduled_commands.push((t, echo_cmd));
-        }
-
-        for (i, streak) in merged_streaks.iter().enumerate() {
-            let frame_times_ref = global_arrays
-                .get(std::path::Path::new(&streak.source_demo))
-                .map(|a| a.as_slice())
-                .unwrap_or_else(|| streak.frame_times.as_slice());
-
-            // Always use streak.total_demo_frames (which maps to the demo's true
-            // playback_frames from the header) as the authoritative final frame count.
-            // Do not trust frame_times_ref.len() on its own, as it is truncated
-            // at the demo section boundary (type_byte == 5) during scanning.
-            let absolute_final_frame = streak.total_demo_frames.max(frame_times_ref.len() as i32);
-            let exit_frame = absolute_final_frame.saturating_sub(5);
-            let danger_zone = absolute_final_frame.saturating_sub(10);
-
-            // Resolve the physical frame index for the start/end kills directly from
-            // kills[i].0 (= frame_index, the 1-based frame counter used during scanning),
-            // which is aligned with frame_times_ref[].
-            //
-            // NOTE: Do NOT apply a .min(frame_times_ref.len()-1) clamp here.
-            // When frame_times_ref is empty that saturates to 0 and destroys the index.
-            // find_tick_backwards / find_tick_forwards already clamp start_frame
-            // internally, and return start_frame as-is when frame_times is empty.
-            //
-            // NOTE: Do NOT use viewdemo_times here. viewdemo_times[i] stores
-            // viewdemo_offset (= SVC_TIME server game clock, e.g. 300.0 s from server
-            // start), while frame_times_ref[] contains demo-playback timestamps starting
-            // near 0.0. The two domains are incompatible — a position() search would
-            // always return None → unwrap_or(0) → every command collapsed to tick 0.
-            let physical_frame = first_kill_frame(streak).max(0) as usize;
-            let physical_end_frame = last_kill_frame(streak).max(0) as usize;
-
-            let record_start_tick = find_tick_backwards(
-                physical_frame,
-                config.record_start_lead,
-                frame_times_ref,
-                demo_fps,
-            );
-            // Pre-roll is the settle window: playback drops back to normal speed
-            // this far ahead of the record start so audio isn't glitched by the
-            // fast-forward, then stopsound flushes just before recording begins.
-            // The sound flush is clamped so it can never precede the speed drop
-            // (which it would for any pre-roll under a second).
-            let s_speed_tick = find_tick_backwards(
-                record_start_tick.max(0) as usize,
-                config.pre_roll_seconds,
-                frame_times_ref,
-                demo_fps,
-            );
-            let sound_lead = config.pre_roll_seconds.min(SOUND_FLUSH_LEAD_SECONDS);
-            let s_sound_tick = find_tick_backwards(
-                record_start_tick.max(0) as usize,
-                sound_lead,
-                frame_times_ref,
-                demo_fps,
-            );
-            let mut r_stop = find_tick_forwards(
-                physical_end_frame,
-                config.record_stop_trail,
-                frame_times_ref,
-                demo_fps,
-            );
-            let mut s_end = find_tick_forwards(
-                r_stop.max(0) as usize,
-                config.post_roll_seconds,
-                frame_times_ref,
-                demo_fps,
-            );
-
-            let mut is_clutch = false;
-            if s_end >= danger_zone {
-                let demo_file_name = std::path::Path::new(&streak.source_demo)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                crate::log_markdown(&format!(
-                    "⚠️ **EOF Boundary Reached:** Highlight #{} in demo '{}' (Player: {}) has a post-roll that exceeds the demo's end frame. Post-roll truncated to save batch.",
-                    i + 1,
-                    demo_file_name,
-                    streak.target_player.as_deref().unwrap_or("Unknown")
-                ));
-                is_clutch = true;
-                r_stop = r_stop.min(exit_frame);
-                s_end = exit_frame;
-            } else {
-                r_stop = r_stop.min(exit_frame);
-                s_end = s_end.min(exit_frame);
-            }
-
-            // Hand the finished record bounds back to the block. This loop and
-            // the block-allocation loop above both walk `merged_streaks` in its
-            // original order, so `i` is the block index — matched on rather
-            // than indexed with, since allocation may reorder `blocks`.
-            // The decal flush is the consumer: it needs the frames that end up
-            // in the take, which `start_tick`/`end_tick` are not.
-            // On the clock the hook records on (`viewdemo_clock`), from the
-            // same highlights `runtime_batch` builds it from:
-            // `frame_times_ref` stops at the demo's loading segment and never
-            // reaches a clip's frames.
-            let clock =
-                crate::patch::viewdemo_clock::clock_for(&streak.source_demo, &raw_streaks).ok();
-            // Long gaps between kills, recorded sped up (#831). Inside the
-            // record window by construction: between two of its kills.
-            let ramp_speed = config.kill_gaps.ramp_speed();
-            let ramps = match ramp_speed {
-                Some(_) => kill_gaps::ramps(
-                    &merged_kill_frames[i],
-                    config.kill_gaps.over_seconds,
-                    &kill_gaps::Timeline {
-                        frame_times: frame_times_ref,
-                        fps: demo_fps,
-                        clock: clock.as_ref(),
-                    },
-                    (record_start_tick, r_stop),
-                ),
-                None => Vec::new(),
-            };
-            if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
-                block.record_start_tick = record_start_tick;
-                block.record_stop_tick = r_stop;
-                block.ramped_gaps = ramps.len();
-                // Every kill the block records, the merged highlights' too, so
-                // the check finds any of them outside the video. A ramp makes
-                // the video shorter than the window, which the plan carries.
-                block.plan = clock.as_ref().and_then(|clock| {
-                    let mut plan = crate::hlcr::take_plan::plan_for_block(
-                        |tick| clock.seconds(tick),
-                        record_start_tick,
-                        r_stop,
-                        &merged_kill_frames[i],
-                    )?;
-                    let start = clock.seconds(record_start_tick);
-                    plan.sped_up = kill_gaps::sped_up(&ramps, ramp_speed.unwrap_or(1.0), |tick| {
-                        clock.seconds(tick) - start
-                    });
-                    Some(plan)
-                });
-            }
-
-            // Custom command overrides
-            for (idx, custom) in config.custom_commands.iter().enumerate() {
-                let relation_str = match custom.relation {
-                    CommandRelation::Before => "BEFORE",
-                    CommandRelation::After => "AFTER",
-                };
-                let target_tick = match custom.relation {
-                    CommandRelation::Before => {
-                        let mut t = find_tick_backwards(
-                            physical_frame,
-                            custom.offset,
-                            frame_times_ref,
-                            demo_fps,
-                        );
-                        if t == s_speed_tick || t == s_sound_tick || t == record_start_tick {
-                            t += 1;
-                        }
-                        t
-                    }
-                    CommandRelation::After => {
-                        let mut t = find_tick_forwards(
-                            physical_end_frame,
-                            custom.offset,
-                            frame_times_ref,
-                            demo_fps,
-                        );
-                        if t == r_stop {
-                            t += 1;
-                        }
-                        t
-                    }
-                };
-
-                for (t, echo_cmd) in build_safe_echos(
-                    target_tick,
-                    &format!(
-                        "CUSTOM_CMD{}_{} - Tick {}",
-                        idx + 1,
-                        relation_str,
-                        target_tick
-                    ),
-                ) {
-                    scheduled_commands.push((t, echo_cmd));
-                }
-                // Playback runs at `host_framerate 0.05`, uncapped and with
-                // nothing drawn (`r_norefresh 1`, #724), until the pre-roll
-                // drops it back to real time at `s_speed_tick`, and resumes
-                // fast-forwarding once the post-roll ends at `s_end`. A command
-                // landing outside that window still executes, but it executes
-                // while the engine is racing through frames with its audio
-                // buffers in a bad state — so anything about sound, timing or
-                // rendering does something other than what it looks like it
-                // does, and nothing in the captured video explains why.
-                if runs_during_fast_forward(target_tick, s_speed_tick, s_end) {
-                    let (where_, fix) = if target_tick < s_speed_tick {
-                        (
-                            "before playback drops back to real time",
-                            format!(
-                                "keep the offset under the {:.1}s pre-roll, or raise the pre-roll",
-                                config.pre_roll_seconds
-                            ),
-                        )
-                    } else {
-                        (
-                            "after the post-roll ends and fast-forward resumes",
-                            format!(
-                                "keep the offset under the {:.1}s post-roll, or raise the post-roll",
-                                config.post_roll_seconds
-                            ),
-                        )
-                    };
-                    crate::log_markdown(&format!(
-                        "ℹ️ **Scheduled command runs during fast-forward** — `{}` is set {} {:.1}s \
-                         {} the highlight, which lands at tick {}, {}. Setting a cvar there is \
-                         usually fine — it simply takes effect early. It is worth checking only \
-                         for commands that depend on playback running at real speed: anything \
-                         touching sound, recording, or rendering, since the engine is at \
-                         `host_framerate {}`, drawing nothing, with its audio buffers unflushed. \
-                         To have it run at normal speed instead, {}.",
-                        custom.command,
-                        relation_str.to_lowercase(),
-                        custom.offset,
-                        if matches!(custom.relation, CommandRelation::Before) {
-                            "before"
-                        } else {
-                            "after"
-                        },
-                        target_tick,
-                        where_,
-                        fast_forward_host_framerate(config),
-                        fix
-                    ));
-                }
-                scheduled_commands.push((target_tick, custom.command.clone()));
-            }
-
-            // Stages 1 and 1.5 are the exit from fast-forward. A block chained
-            // to the one before it never left normal speed, so there's nothing
-            // to drop back to and no fast-forward-induced audio drift to flush.
-            let resumes_from_fast_forward = !chained_to_previous.get(i).copied().unwrap_or(false);
-
-            if resumes_from_fast_forward {
-                // Back on the player as playback drops to real time: the
-                // camera may have been moved while fast-forwarding.
-                if let Some(target) = &spectate {
-                    scheduled_commands.push((s_speed_tick, IN_EYE.to_string()));
-                    scheduled_commands.push((s_speed_tick, target.clone()));
-                }
-
-                // At Speed Flush (Stage 1)
-                scheduled_commands.push((s_speed_tick, "sys_normal_speed".to_string()));
-                scheduled_commands.push((s_speed_tick + 1, "sys_normal_speed".to_string()));
-                scheduled_commands.push((s_speed_tick + 2, "sys_normal_speed".to_string()));
-                for (t, echo_cmd) in build_safe_echos(
-                    s_speed_tick,
-                    &format!("SPEED_FLUSH - Tick {}", s_speed_tick),
-                ) {
-                    scheduled_commands.push((t, echo_cmd));
-                }
-
-                // At Sound Flush (Stage 1.5)
-                scheduled_commands.push((s_sound_tick, "sys_sound".to_string()));
-            }
-
-            // OBS starts each take's recording on its AUDIO_SYNC
-            // (`obs::TRIGGER_MARKER`) and hands out take folders in that
-            // order, so a chained block needs one too, without the sound
-            // flush, which would cut the sound playing on from the clip
-            // before (#1169). It lands at least a second after that clip's
-            // STOP_RECORD: chained blocks sit OBS's take separation apart.
-            if resumes_from_fast_forward || config.capture_mode == crate::patch::CaptureMode::Obs {
-                for (t, echo_cmd) in
-                    build_safe_echos(s_sound_tick, &format!("AUDIO_SYNC - Tick {}", s_sound_tick))
-                {
-                    scheduled_commands.push((t, echo_cmd));
-                }
-            }
-
-            // At Start Frame (Stage 2)
-            scheduled_commands.push((record_start_tick, format!("{}_route_{}", demo_name, i)));
-            scheduled_commands.push((record_start_tick, "sys_record_start".to_string()));
-            for (t, echo_cmd) in build_safe_echos(
-                record_start_tick,
-                &format!("START_RECORD - Tick {}", record_start_tick),
-            ) {
-                scheduled_commands.push((t, echo_cmd));
-            }
-
-            for ramp in &ramps {
-                scheduled_commands.push((ramp.on_tick, kill_gaps::RAMP_ON.to_string()));
-                scheduled_commands.push((ramp.off_tick, kill_gaps::RAMP_OFF.to_string()));
-            }
-
-            // At End Frame (Stage 3)
-            scheduled_commands.push((r_stop, "sys_record_stop".to_string()));
-            for (t, echo_cmd) in build_safe_echos(r_stop, &format!("STOP_RECORD - Tick {}", r_stop))
-            {
-                scheduled_commands.push((t, echo_cmd));
-            }
-
-            // At Post-Roll End (Stage 4).
-            // Skipped when the next block starts too soon for the round trip to
-            // fit — playback just stays at normal speed into it instead.
-            let next_block_chained = chained_to_previous.get(i + 1).copied().unwrap_or(false);
-            if !next_block_chained {
-                scheduled_commands.push((s_end, "sys_fast_forward".to_string()));
-                for (t, echo_cmd) in
-                    build_safe_echos(s_end, &format!("FAST_FORWARD - Tick {}", s_end))
-                {
-                    scheduled_commands.push((t, echo_cmd));
-                }
-                // `chained_to_previous.get(i + 1)` also returns the "false"
-                // default when there simply is no block i+1 (the last block
-                // in the demo) -- that's not a real next clip to announce, so
-                // this needs its own bounds check rather than reusing
-                // `!next_block_chained` alone.
-                if i + 1 < merged_streaks.len() {
-                    for (t, echo_cmd) in build_safe_echos(
-                        s_end,
-                        &format!(
-                            "NEXT_CLIP {} {} {} {}",
-                            job_idx + 1,
-                            total_jobs,
-                            i + 2,
-                            merged_streaks.len()
-                        ),
-                    ) {
-                        scheduled_commands.push((t, echo_cmd));
-                    }
-                }
-            }
-
-            if i == merged_streaks.len() - 1 {
-                // At Absolute EOF
-                if job_idx == total_jobs - 1 {
-                    let echos = build_safe_echos(s_end, "BATCH_COMPLETE");
-                    let echos_len = echos.len() as i32;
-                    for (t, echo_cmd) in echos {
-                        scheduled_commands.push((t, echo_cmd));
-                    }
-                    let final_tick = if is_clutch {
-                        exit_frame
-                    } else {
-                        s_end + echos_len
-                    };
-                    scheduled_commands.push((final_tick, format!("{}_next", demo_name)));
-                } else {
-                    let final_tick = if is_clutch { exit_frame } else { s_end };
-                    scheduled_commands.push((final_tick, format!("{}_next", demo_name)));
-                }
-            }
-        }
-
-        // Implement Global Breadcrumb Loop
-        let total_demo_frames = merged_streaks
-            .first()
-            .map(|s| s.total_demo_frames)
-            .unwrap_or(0);
-        let mut step = 0;
-        while step < total_demo_frames {
-            scheduled_commands.push((
-                step,
-                format!("echo \"[dod-studio] BREADCRUMB - Tick {}\"", step),
-            ));
-            step += crate::patch::BREADCRUMB_INTERVAL_TICKS;
-        }
-
-        // Sort scheduled_commands by tick
-        scheduled_commands.sort_by_key(|(tick, _)| *tick);
-
-        let mut final_init_commands = final_init_commands(config);
-        if spectate.is_some() {
-            final_init_commands.push(format!("{SPEC_LOCK} 1"));
-        }
-
-        jobs.push(PatchJob {
-            source_demo: source_demo.to_string(),
-            output_demo,
-            streaks: merged_streaks,
-            target_player: target_player.map(|s| s.to_string()),
-            init_commands: final_init_commands,
-            scheduled_commands,
-            director_events,
-            block_routes,
-            blocks,
-        });
-    }
-
-    // Create directory junctions for utilized drives
-    let game_path_buf = std::path::PathBuf::from(&config.game_path);
-    let hl_exe_parent = game_path_buf.parent().unwrap_or(std::path::Path::new(""));
-    for &drive_idx in &utilized_drives {
-        if let Some(out_dir) = config.capture_directories.get(drive_idx) {
+/// The folder a block's take lands in.
+///
+/// Mirror of the junction target `make_route_junctions` builds, so the two
+/// can't drift: `_route_{drive}` links to `<capture_dir>/<session_id>`, and
+/// HLAE writes `<demo_name>_b<block_index>` underneath it. With no capture
+/// directories configured (the drive budget's sentinel), the session dir
+/// under `primary_media_dir`, where output actually lands.
+fn take_folder(
+    batch: &BatchContext,
+    demo_name: &str,
+    block_index: usize,
+    drive_idx: usize,
+) -> std::io::Result<std::path::PathBuf> {
+    let folder = format!("{}_b{}", demo_name, block_index);
+    Ok(match batch.config.capture_directories.get(drive_idx) {
+        Some(out_dir) => {
             let absolute_drive = std::path::absolute(out_dir)?;
-            let session_dir = if !config.session_id.is_empty() {
-                absolute_drive.join(&config.session_id)
-            } else {
+            let session_root = if batch.config.session_id.is_empty() {
                 absolute_drive
+            } else {
+                absolute_drive.join(&batch.config.session_id)
             };
-
-            if !session_dir.exists() {
-                let _ = std::fs::create_dir_all(&session_dir);
-            }
-
-            let junction_path = hl_exe_parent.join(format!("_route_{}", drive_idx));
-            let _ = std::fs::remove_dir(&junction_path);
-
-            let junction_str = junction_path.to_str().unwrap_or_default();
-            let target_str = session_dir.to_str().unwrap_or_default();
-
-            if !junction_str.is_empty() && !target_str.is_empty() {
-                let _ = std::process::Command::new("cmd")
-                    .args(["/C", "mklink", "/J", junction_str, target_str])
-                    .output();
-            }
+            session_root.join(folder)
         }
+        None => batch.session_dir.join(folder),
+    })
+}
+
+/// A chain job's scheduled commands, sorted by tick: its start, every
+/// clip's stages and Scheduled Commands, the hand-over and the breadcrumbs
+/// up to `total_demo_frames`.
+///
+/// Also hands each of `blocks` the record window, ramp count and take plan
+/// its clip was just scheduled with: the decal flush needs the frames that
+/// end up in the take, which `start_tick`/`end_tick` are not, and the take
+/// checks (#1084) need the plan.
+fn schedule_clips(
+    batch: &BatchContext,
+    job: ChainJob,
+    cut: &Blocks,
+    blocks: &mut [crate::patch::types::CaptureBlock],
+    total_demo_frames: i32,
+) -> Vec<(i32, String)> {
+    let config = batch.config;
+    let demo_fps = job.demo_fps;
+    let mut schedule = JobSchedule::start(config, job);
+    let ramp_speed = config.kill_gaps.ramp_speed();
+
+    for (i, streak) in cut.streaks.iter().enumerate() {
+        let frame_times = frame_times_for(streak, batch.global_arrays);
+        let window = clip_window(streak, frame_times, config, demo_fps);
+        if window.cut_at_demo_end {
+            log_post_roll_cut(i, streak);
+        }
+
+        // On the clock the hook records on (`viewdemo_clock`), from the
+        // same highlights `runtime_batch` builds it from: `frame_times`
+        // stops at the demo's loading segment and never reaches a clip's
+        // frames.
+        let clock =
+            crate::patch::viewdemo_clock::clock_for(&streak.source_demo, batch.highlights).ok();
+        let timeline = kill_gaps::Timeline {
+            frame_times,
+            fps: demo_fps,
+            clock: clock.as_ref(),
+        };
+        // Long gaps between kills, recorded sped up (#831). Inside the
+        // record window by construction: between two of its kills.
+        let ramps = match ramp_speed {
+            Some(_) => kill_gaps::ramps(
+                &cut.kill_frames[i],
+                config.kill_gaps.over_seconds,
+                &timeline,
+                (window.record_start_tick, window.record_stop_tick),
+            ),
+            None => Vec::new(),
+        };
+        // `blocks` is sorted by block index and `cut` is in block order, so
+        // `i` is the block index — matched on rather than indexed with.
+        if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
+            block.record_start_tick = window.record_start_tick;
+            block.record_stop_tick = window.record_stop_tick;
+            block.ramped_gaps = ramps.len();
+            block.plan = take_plan(&timeline, &window, &cut.kill_frames[i], &ramps, ramp_speed);
+        }
+
+        schedule.push_custom_commands(&window, frame_times);
+        schedule.push_clip_stages(i, &window, &cut.chained_to_previous, &ramps);
     }
 
-    // `mirv_agr start` opens its file with a plain `_wfopen_s` and creates no
-    // folders (#403: a missing parent means it says "Started AGR recording."
-    // and writes nothing). HLAE's movie recorder makes its own take folder, so
-    // only this mode needs them made in advance. Failing here is loud on
-    // purpose: the alternative is a batch that runs to the end and saves
-    // nothing.
+    schedule.push_breadcrumbs(total_demo_frames);
+    schedule.into_sorted()
+}
+
+/// The plan a block's take is checked against (#1084): its length and where
+/// each of `kill_frames` falls in it, every kill the block records, the
+/// merged highlights' too, so the check finds any of them outside the
+/// video. A ramp makes the video shorter than the window, which the plan
+/// carries. `None` without a `viewdemo` clock.
+fn take_plan(
+    timeline: &kill_gaps::Timeline,
+    window: &ClipWindow,
+    kill_frames: &[i32],
+    ramps: &[kill_gaps::Ramp],
+    ramp_speed: Option<f32>,
+) -> Option<crate::hlcr::take_plan::TakePlan> {
+    let clock = timeline.clock?;
+    let mut plan = crate::hlcr::take_plan::plan_for_block(
+        |tick| clock.seconds(tick),
+        window.record_start_tick,
+        window.record_stop_tick,
+        kill_frames,
+    )?;
+    let start = clock.seconds(window.record_start_tick);
+    plan.sped_up = kill_gaps::sped_up(ramps, ramp_speed.unwrap_or(1.0), |tick| {
+        clock.seconds(tick) - start
+    });
+    Some(plan)
+}
+
+/// Makes every block's take folder ahead of an AGR batch.
+///
+/// `mirv_agr start` opens its file with a plain `_wfopen_s` and creates no
+/// folders (#403: a missing parent means it says "Started AGR recording."
+/// and writes nothing). HLAE's movie recorder makes its own take folder, so
+/// only this mode needs them made in advance. Failing here is loud on
+/// purpose: the alternative is a batch that runs to the end and saves
+/// nothing.
+fn make_agr_take_folders(config: &PatcherConfig, jobs: &[PatchJob]) -> std::io::Result<()> {
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         for block in jobs.iter().flat_map(|j| j.blocks.iter()) {
             std::fs::create_dir_all(&block.take_folder)?;
         }
     }
-
-    // Write dodstudio_helper.cfg to dod_dir
-    if !dod_dir.exists() {
-        std::fs::create_dir_all(&dod_dir)?;
-    }
-    let cfg_path = dod_dir.join("dodstudio_helper.cfg");
-    std::fs::write(&cfg_path, helper_cfg_content)?;
-
-    // Final per-drive headroom for every drive this batch actually touches,
-    // handed back so the pre-launch abort in `capture_engine.rs` re-validates
-    // the exact numbers this allocation pass already computed instead of
-    // recomputing a third, narrower (primary-drive-only) answer.
-    let drive_headroom: Vec<crate::patch::types::DriveHeadroom> = utilized_drives
-        .into_iter()
-        .filter_map(|idx| {
-            config
-                .capture_directories
-                .get(idx)
-                .map(|p| crate::patch::types::DriveHeadroom {
-                    path: p.clone(),
-                    free_bytes: drive_free[volume_of_drive[idx]],
-                })
-        })
-        .collect();
-
-    Ok((jobs, drive_headroom))
+    Ok(())
 }
 
 #[cfg(test)]
