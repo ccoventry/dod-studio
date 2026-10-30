@@ -1,5 +1,5 @@
 // web-analyzer/www holds hand-made copies of the analyzer's report code
-// (#238): render.js from analyzer_pane.js, plus strings.js, analyzer_flags.js
+// (#238): render.js from analyzer_report.js, plus strings.js, analyzer_flags.js
 // and steam_ids.js. Until the copy is replaced by a shared module, these
 // tests make drift fail here instead of shipping a web analyzer that quietly
 // behaves differently.
@@ -46,8 +46,11 @@ const DESKTOP_ONLY_LINES = {
   renderSummaryTab: ['[STRINGS.ANALYZER.FILE_PATH_LABEL, esc(r.file_dir)],'],
 };
 
-describe('web-analyzer/www/render.js is a copy of analyzer_pane.js (#238)', () => {
-  const desktop = functions(read('studio', 'src', 'analyzer_pane.js'));
+describe('web-analyzer/www/render.js is a copy of analyzer_report.js (#238)', () => {
+  const desktop = functions([
+    read('studio', 'src', 'analyzer_report.js'),
+    read('studio', 'src', 'analyzer_report_logic.js'),
+  ].join('\n'));
   const web = functions(read('web-analyzer', 'www', 'render.js'));
   const shared = [...web.keys()].filter((name) => desktop.has(name));
 
@@ -58,7 +61,7 @@ describe('web-analyzer/www/render.js is a copy of analyzer_pane.js (#238)', () =
   it.each(shared)('%s matches, apart from the listed desktop-only lines', (name) => {
     const only = new Set(DESKTOP_ONLY_LINES[name] || []);
     const d = desktop.get(name).filter((l) => !only.has(l.trim()));
-    expect(web.get(name), `copy studio/src/analyzer_pane.js's ${name} into render.js`).toEqual(d);
+    expect(web.get(name), `copy studio/src/analyzer_report.js's ${name} into render.js`).toEqual(d);
   });
 
   it('every listed desktop-only line still exists', () => {
