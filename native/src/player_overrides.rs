@@ -62,6 +62,12 @@ pub struct PlayerRow {
     /// 1..=16, the tile of the sprite's 4x4 grid; 0 for none.
     #[serde(default)]
     pub crosshair_tile: u8,
+    /// The name `{name}` and `{player}` show for this player in clip and demo
+    /// names (#686), instead of their in-game name. Empty means unset. Only a
+    /// row with a SteamID uses it. Studio-only: [`table_text`] leaves it out,
+    /// the hook has no use for it.
+    #[serde(default)]
+    pub use_as: String,
 }
 
 /// What a player not in the table gets for their spray.
@@ -507,6 +513,7 @@ mod tests {
             png: png.into(),
             crosshair_sprite: sprite.into(),
             crosshair_tile: tile,
+            use_as: String::new(),
         };
         PlayerTable {
             use_in_game: true,
@@ -594,6 +601,29 @@ mod tests {
         assert_eq!(partial.pov_fallback, SprayFallback::Png);
         assert_eq!(partial.crosshair_fallback, CrosshairFallback::Sprite);
         assert_eq!(partial.hltv_fallback, SprayFallback::Png);
+    }
+
+    #[test]
+    fn a_row_saved_before_use_as_loads_with_it_unset() {
+        let table: PlayerTable = serde_json::from_str(
+            r#"{"players":[{"steam_id":"76561197972576011","name":"m00cat","png":"a.png"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(table.players[0].use_as, "");
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back, table);
+    }
+
+    #[test]
+    fn use_as_is_saved_but_never_reaches_the_hook() {
+        let mut table = fixture_table();
+        let plain = table_text(&table);
+        table.players[0].use_as = "Chris".into();
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.players[0].use_as, "Chris");
+        assert_eq!(table_text(&table), plain);
     }
 
     #[test]

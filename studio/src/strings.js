@@ -3124,8 +3124,8 @@ export const STRINGS = {
     // Rename Demos' own meaning of a placeholder, where it isn't the one in
     // PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
-      name: "The recording player's name without their team's tag",
-      full_name: "The recording player's name as it is, tag included",
+      name: "The recording player's name without their team's tag, or their Use as name from the Players tab",
+      full_name: "The recording player's name as it is, tag included, or their Use as name from the Players tab",
       kills: "The recording player's kills in the whole demo (a clip name's {kills} is the highlight's kills instead)",
       deaths: "The recording player's deaths",
       faction: "The recording player's side: Allies, British or Axis",
@@ -3194,8 +3194,8 @@ export const STRINGS = {
     // The clip name's own meaning of a placeholder, where it isn't the one
     // in PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
-      name: "The highlight player's name without their team's tag ({player} still works: the name as it is)",
-      full_name: "The highlight player's name as it is, tag included",
+      name: "The highlight player's name without their team's tag, or their Use as name from the Players tab ({player} still works: the name as it is)",
+      full_name: "The highlight player's name as it is, tag included, or their Use as name from the Players tab",
       faction: 'Their side: Allies, British, Axis',
       enemy_faction: 'The side of the players they killed',
       kills: "Kills in the chosen Kill Range (Rename Demos' {kills} is the player's kills in the whole demo instead)",
@@ -3228,6 +3228,11 @@ export const STRINGS = {
     REFRESH_BUTTON: 'Refresh',
     REFRESH_TITLE: "Read the logos and sprites folders and the queue's players again",
     COLUMN_PLAYER: 'Player',
+    COLUMN_USE_AS: 'Use as',
+    USE_AS_TITLE: 'Used for {name} and {player} in clip and demo names instead of the in-game name. Leave empty to use the in-game name.',
+    USE_AS_PLACEHOLDER: 'In-game name',
+    USE_AS_NEEDS_STEAMID: 'A name is only swapped for a player with a SteamID: a player added by name has none.',
+    useAsAria: (who) => `Use as name for ${who}`,
     COLUMN_SPRAY: 'Spray',
     COLUMN_CROSSHAIR: 'Crosshair',
     PICK_PNG: 'Pick a PNG…',

@@ -19,6 +19,7 @@ import {
 import { STRINGS } from './strings.js';
 import { showBar, hideBar } from './progress_view.js';
 import { createCrosshairImport } from './crosshair_import_ui.js';
+import { setUseAsTable } from './player_alias.js';
 import {
   normalizePlayers,
   playerOptions as groupOptions,
@@ -65,11 +66,13 @@ export function getPlayers() {
 /** Sets the tab from saved settings. */
 export function setPlayers(raw) {
   current = normalizePlayers(raw);
+  setUseAsTable(current);
   render();
 }
 
 function edit(next) {
   current = next;
+  setUseAsTable(current);
   render();
   onEdit();
 }
@@ -218,9 +221,14 @@ function renderRows() {
   }
   const head = document.createElement('div');
   head.className = 'players-row players-head';
-  for (const text of [S().COLUMN_PLAYER, S().COLUMN_SPRAY, S().COLUMN_CROSSHAIR, '']) {
+  const columns = [
+    [S().COLUMN_PLAYER], [S().COLUMN_USE_AS, S().USE_AS_TITLE], [S().COLUMN_SPRAY],
+    [S().COLUMN_CROSSHAIR], [''],
+  ];
+  for (const [text, title] of columns) {
     const cell = document.createElement('span');
     cell.textContent = text;
+    if (title) cell.title = title;
     head.append(cell);
   }
   const rows = [head];
@@ -231,6 +239,18 @@ function renderRows() {
     who.className = 'players-name';
     who.textContent = playerLabel(row);
     who.title = row.steam_id ? S().MATCHED_BY_STEAMID : S().MATCHED_BY_NAME;
+    const useAs = document.createElement('input');
+    useAs.type = 'text';
+    useAs.className = 'players-use-as';
+    useAs.value = row.use_as || '';
+    useAs.placeholder = S().USE_AS_PLACEHOLDER;
+    useAs.title = row.steam_id ? S().USE_AS_TITLE : S().USE_AS_NEEDS_STEAMID;
+    useAs.disabled = !row.steam_id;
+    useAs.setAttribute('aria-label', S().useAsAria(playerLabel(row)));
+    // On change, not on every key: an edit redraws the table.
+    useAs.addEventListener('change', () => {
+      edit(updatePlayer(current, i, { use_as: useAs.value }));
+    });
     const spray = fileSelect(pngs, row.png, S().FALLBACK_SPRAY_OPTION, S().pngMissingOption, (png) => {
       edit(updatePlayer(current, i, { png }));
     }, [{ value: OWN_SPRAY, label: S().FROM_DEMO_OPTION, title: S().FROM_DEMO_TITLE }]);
@@ -248,7 +268,7 @@ function renderRows() {
       openPicker = null;
       edit(removePlayer(current, i));
     });
-    item.append(who, spray, crosshair, remove);
+    item.append(who, useAs, spray, crosshair, remove);
     rows.push(item);
     if (openPicker === i && row.crosshair_sprite) {
       rows.push(tilePicker(row.crosshair_sprite, row.crosshair_tile, (t) => {

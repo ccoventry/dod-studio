@@ -12,6 +12,7 @@
 
 import { groupPlayers, steamIdText } from './player_filter.js';
 import { steamIdForms } from './steam_ids.js';
+import { cleanUseAs } from './player_alias.js';
 
 /** Spray fallbacks offered for POV demos, and HLTV's: an HLTV demo records
  *  that a player sprayed, never the image, so "their own" isn't one. */
@@ -83,6 +84,7 @@ export function normalizePlayers(raw) {
       png: text(p?.png),
       crosshair_sprite: text(p?.crosshair_sprite),
       crosshair_tile: cleanTile(p?.crosshair_tile),
+      use_as: cleanUseAs(p?.use_as),
     }))
     .filter((p) => p.steam_id || p.name);
   return {
@@ -161,7 +163,7 @@ export function addPlayer(table, player) {
     t.players[at] = { ...t.players[at], name: t.players[at].name || row.name };
     return { table: t, index: at };
   }
-  t.players.push({ ...row, png: '', crosshair_sprite: '', crosshair_tile: 0 });
+  t.players.push({ ...row, png: '', crosshair_sprite: '', crosshair_tile: 0, use_as: '' });
   return { table: t, index: t.players.length - 1 };
 }
 
