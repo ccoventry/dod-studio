@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { BYTES_PER_MB, BYTES_PER_GB, gbOrMbText, renderSizeText } from './byte_size.js';
+import { BYTES_PER_MB, BYTES_PER_GB, gbOrMbText, gigabytes, renderSizeText } from './byte_size.js';
+
+describe('gigabytes', () => {
+  it('counts 1024-based gigabytes, as every other size in the app does (#1181)', () => {
+    expect(gigabytes(BYTES_PER_GB)).toBe('1.00');
+    // 50 decimal gigabytes: "50.00" in a 1e9 count, 46.57 in Explorer's.
+    expect(gigabytes(50e9)).toBe('46.57');
+  });
+
+  it('rounds to two places', () => {
+    expect(gigabytes(1.239 * BYTES_PER_GB)).toBe('1.24');
+    expect(gigabytes(0)).toBe('0.00');
+  });
+});
 
 describe('gbOrMbText', () => {
   it('shows gigabytes to two places from one gigabyte up', () => {
