@@ -26,6 +26,7 @@ documented in its own `//!` header.
 | `seek_burst` | How much network data can a few seconds of a demo hold (the stepped seek's budget, #596)? |
 | `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
 | `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
+| `capture_area_probe` | Which capture-area messages (`ClientAreas`, `PlayersIn`, `CurMarker`) does a demo carry, and about whom? (#1132) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `round_restart_probe` | When does a demo start a new round (`RoundState`), and what led to it: a win, a clan match going live, a wait for players? |
@@ -84,6 +85,7 @@ that panics the parser cannot take down the run:
 | --- | --- |
 | `snapshot_inject` | Rebuilds the client's entity table at a join with a synthetic full snapshot. |
 | `snapshot_check` | Does an injected snapshot hold as many entities as the stream expects? |
+| `entity_count_fix` | Restates each packet's `entity_count` as the set the engine really builds (#15's crash at a join). |
 | `entset_probe` | How many entities does a snapshot describe, and how does the set evolve? |
 | `entity0_encoding` | How a real `svc_packetentities` encodes entity 0 (world). |
 | `index_encoding_survey` | Every entity-index encoding used across a demo's packets. |
@@ -95,6 +97,10 @@ that panics the parser cannot take down the run:
 | `writer_fidelity` | Does dem's writer reproduce GoldSrc's real bytes? |
 | `packet_entity_probe` | Peak packet-entity count against the engine limit that crashes playback. |
 | `map_entity_probe` | Names the entities an HLTV demo puts on the wire, for trimming a map. |
+| `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). |
+
+`shared/entity_carry.rs` is not a probe: it carries each snapshot's entity set
+forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.
 
 ### HLTV, spectating and weapons
 

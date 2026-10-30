@@ -330,6 +330,10 @@ pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
 pub fn failed_to_send_review(e: impl std::fmt::Display) -> String {
     format!("Could not send the review to the game: {e}")
 }
+/// The game asked for a review, and the page could not be told (#1142).
+pub fn game_review_not_handed_on(e: impl std::fmt::Display) -> String {
+    format!("DoD Studio's window could not take the request: {e}")
+}
 pub fn could_not_write_review_queue(e: impl std::fmt::Display) -> String {
     format!("Could not save the list of highlights to review: {e}")
 }

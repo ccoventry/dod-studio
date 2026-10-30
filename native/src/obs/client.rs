@@ -838,7 +838,12 @@ impl ObsClient {
     /// So a start that doesn't happen is sent once more, and when OBS still
     /// answers "not recording", that is OBS refusing, not the connection
     /// failing: no reconnect, and the batch is told why.
-    pub fn start_record(&mut self) -> Result<(), ObsError> {
+    ///
+    /// Returns when the start was read: the `OUTPUT_STARTED` event's arrival,
+    /// or, when only a status check found it running, that check's answer,
+    /// which is as late as the start can have been. The capture holds it
+    /// against the clip's `START_RECORD` marker (#1109).
+    pub fn start_record(&mut self) -> Result<Instant, ObsError> {
         for (attempt, wait) in [RECORD_START_FIRST_WAIT, RECORD_START_TIMEOUT]
             .into_iter()
             .enumerate()
@@ -848,16 +853,16 @@ impl ObsClient {
                 if attempt == 0 || e.is_transport() || !self.is_recording().unwrap_or(false) {
                     return Err(e);
                 }
-                return Ok(());
+                return Ok(Instant::now());
             }
             if self
                 .wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STARTED", wait)
                 .is_some()
             {
-                return Ok(());
+                return Ok(Instant::now());
             }
             match self.is_recording() {
-                Ok(true) => return Ok(()),
+                Ok(true) => return Ok(Instant::now()),
                 Ok(false) => {}
                 Err(_) => {
                     return Err(ObsError::Transport(

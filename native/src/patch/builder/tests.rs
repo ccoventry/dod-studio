@@ -1771,6 +1771,69 @@ fn test_colliding_rolls_keep_separate_takes_without_fast_forwarding_between() {
     );
 }
 
+/// Ticks of the `AUDIO_SYNC` echoes, the marker OBS starts each take on.
+fn audio_sync_ticks(job: &PatchJob) -> Vec<i32> {
+    job.scheduled_commands
+        .iter()
+        .filter(|(_, c)| c.starts_with("echo") && c.contains("AUDIO_SYNC - Tick"))
+        .map(|(t, _)| *t)
+        .collect()
+}
+
+#[test]
+fn obs_mode_starts_a_chained_clip_on_its_own_audio_sync() {
+    // #1169: 2.5 s between the recordings (250 ticks @ 100 fps), past OBS's
+    // 2 s take separation so they stay two takes, inside the 2.6 s of rolls
+    // so the second is chained. OBS records each take from its AUDIO_SYNC,
+    // so the chained one needs its own, after the first take stopped, and
+    // without a sound flush that would cut the sound playing on.
+    let mut config = mock_config();
+    config.capture_mode = crate::patch::CaptureMode::Obs;
+    config.pre_roll_seconds = 2.0;
+    config.post_roll_seconds = 0.6;
+    let raw_streaks = vec![
+        streak_with_kills(1000, 1200, &[1000, 1200]),
+        streak_with_kills(1450, 1650, &[1450, 1650]),
+    ];
+    let (jobs, _) =
+        build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = &jobs[1];
+    assert_eq!(job.blocks.len(), 2, "two takes");
+    let syncs = audio_sync_ticks(job);
+    let starts = ticks_for(job, "sys_record_start");
+    let stops = ticks_for(job, "sys_record_stop");
+    assert!(
+        !ticks_for(job, "sys_fast_forward")
+            .iter()
+            .any(|&t| t > stops[0] && t < starts[1]),
+        "chained: no fast-forward between them"
+    );
+    assert_eq!(syncs.len(), 2, "one AUDIO_SYNC a take: {syncs:?}");
+    assert!(syncs[0] < starts[0]);
+    assert!(
+        stops[0] < syncs[1] && syncs[1] < starts[1],
+        "the chained take's AUDIO_SYNC between the first's stop and its own start: \
+         stop {stops:?}, sync {syncs:?}, start {starts:?}"
+    );
+    assert_eq!(
+        ticks_for(job, "sys_sound").len(),
+        1,
+        "no sound flush for the chained take"
+    );
+
+    // HLAE's modes start on sys_record_start: no AUDIO_SYNC for a chained
+    // take there, as before.
+    config.capture_mode = crate::patch::CaptureMode::DirectToVideo;
+    let raw_streaks = vec![
+        streak_with_kills(1000, 1200, &[1000, 1200]),
+        streak_with_kills(1450, 1650, &[1450, 1650]),
+    ];
+    let (jobs, _) =
+        build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+    assert_eq!(jobs[1].blocks.len(), 2);
+    assert_eq!(audio_sync_ticks(&jobs[1]).len(), 1);
+}
+
 #[test]
 fn test_takes_too_close_together_are_merged_rather_than_restarted() {
     // Only 0.4s (40 ticks @ 100fps) between one recording stopping and the

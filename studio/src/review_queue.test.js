@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS, REVIEW_ORDER, reviewKills } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, applyReviewEdit, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS, REVIEW_ORDER, reviewKills } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -192,6 +192,15 @@ describe('Review highlights answers (#623)', () => {
     const d = demo('a.dem', [s]);
     applyReviewAnswer([d], answerFor(d, s, { from: 3, to: 9 }));
     expect([s.start_index, s.end_index]).toEqual([2, 2]);
+  });
+
+  it("the game's kill range and note form sets both and leaves the mark and tick alone (#1139)", () => {
+    const s = streak({ curation: 'Maybe', selected: true, notes: 'old' });
+    const d = demo('a.dem', [s]);
+    const { verdict: _, ...edit } = answerFor(d, s, { note: 'the flick' });
+    expect(applyReviewEdit([d], edit)).toBe(s);
+    expect(s).toMatchObject({ curation: 'Maybe', selected: true, start_index: 1, end_index: 2, notes: 'the flick' });
+    expect(applyReviewEdit([d], { ...edit, key: 'nope' })).toBeNull();
   });
 
   it('an answer for a highlight no longer in the queue changes nothing', () => {

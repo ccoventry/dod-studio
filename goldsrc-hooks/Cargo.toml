@@ -26,6 +26,9 @@ analysis = { path = "../analysis" }
 # with the demo patcher so a map loading in the game is classified the same
 # way as on disk (`map_sounds.rs`).
 dod = { path = "../dod" }
+# Look-ahead (#1154): reads the playing demo's frames ahead of playback
+# with the same frame and message parsers the analysis uses.
+dem = { workspace = true }
 # HD player sprays are PNGs in the game's `logos` folder (#428); the one
 # image format the rest of the hook reads is TGA, decoded by hand.
 png = "0.18"

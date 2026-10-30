@@ -7,6 +7,7 @@ mod builtin_profiles;
 mod capture_manager;
 mod capture_room_manager;
 mod combine_manager;
+mod config_checks_cmd;
 mod consolidate_manager;
 mod crash_maps_manager;
 mod dem_open_with;
@@ -989,6 +990,8 @@ pub fn run() {
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
+            // ...and its Review tab to review the demo it has loaded (#1142).
+            review_manager::serve_game_requests(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then
             // the page is told and the window comes to the front.
             #[cfg(windows)]
@@ -1054,6 +1057,8 @@ pub fn run() {
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_manager::game_review_progress,
+            review_manager::game_review_finished,
             review_library::review_library_get,
             review_library::review_library_update,
             scan_orphaned_previews,
@@ -1148,8 +1153,8 @@ pub fn run() {
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
             map_manager::download_map,
-            map_manager::scan_game_configs,
-            map_manager::roll_floors,
+            config_checks_cmd::scan_game_configs,
+            config_checks_cmd::roll_floors,
             hd_manager::hd_status,
             hd_manager::hd_setup_tools,
             hd_manager::hd_cancel,

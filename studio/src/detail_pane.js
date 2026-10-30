@@ -17,6 +17,7 @@ import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
 import { playersOf, matchesPlayer } from './detail_player_filter.js';
 import { headshotsCell } from './headshots.js';
+import { fileNameOf } from './path_display.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -62,7 +63,7 @@ export function initDetailPane(_getAllDemos, onSelectionChange, onDirty, { getPr
 let pendingLaunch = null;
 
 function demoStemFromPath(path) {
-  const base = String(path || '').split(/[\\/]/).pop() || '';
+  const base = fileNameOf(path) || '';
   return base.replace(/\.dem$/i, '');
 }
 

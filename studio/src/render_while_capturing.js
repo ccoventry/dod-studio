@@ -21,6 +21,7 @@ import { renderPayloadFor } from './finish_clips.js';
 import { markClipCaptured, showCaptureRoomLine } from './capture_pane.js';
 import { STRINGS } from './strings.js';
 import { showToast } from './toast.js';
+import { renderSizeText } from './byte_size.js';
 
 /** The line under the setting, from it and "After a clip is finished". */
 export function settingHint(enabled, takeChoice) {
@@ -116,10 +117,7 @@ export function roomStatusLine(status, formatSize) {
 let enabled = false;
 
 function sizeText(bytes) {
-  const gb = (Number(bytes) || 0) / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(1))
-    : STRINGS.RENDER.fileSizeMb(((Number(bytes) || 0) / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 1);
 }
 
 function paint() {

@@ -36,7 +36,7 @@ the death cam).
 
 | cvar | default | what it does | doc |
 | --- | --- | --- | --- |
-| `ds_spec_match_pov` | `1` (on) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` at launch | one switch for making a spectated first-person view look like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `ds_hud_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; the camera going down into a crouch over the 0.4 s their own view takes, where the game drops it four times faster, and back up at their own view's speed (#1144); and the gun lowering off screen while they sprint, jump, go prone, crawl or climb a ladder, as their own does (`goldsrc-hooks/src/spectator_gun.rs`). All five stand down while a POV demo plays, which is the recording they match (#613); live play and HLTV demos are unaffected. The gunshots a demo lost are not part of it any more: they are `ds_sound_restore_gunshots`, in HLTV and POV demos alike (#1036). So a config that sets `ds_spec_match_pov 0` to silence the restored gunshots now needs `ds_sound_restore_gunshots 0` as well, and the "log every restored gunshot" that `ds_spec_match_pov 2` used to turn on is `ds_sound_restore_gunshots 2`. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
+| `ds_spec_match_pov` | `1` (on) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` at launch | one switch for making a spectated first-person view look like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the spectator crosshair drawn as the POV view draws it: the `sprites/customXHair.spr` tile `cl_xhair_style` gives it, or for `cl_xhair_style 0` the red crosshair with its gap following the watched player's weapon, bipod or sandbag and speed (#308; a Players-table crosshair for that player wins; loses to `ds_hud_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; the camera going down into a crouch over the 0.4 s their own view takes and ending when theirs does, where the game drops it four times faster and later, and back up at their own view's speed (#1144; to start with their view it reads the demo file ahead of playback on a background thread, #1154, and `ds_debug_status` says what it read); and the gun lowering off screen while they sprint, jump, go prone, crawl or climb a ladder, as their own does, and coming back up as theirs does when they let go of sprint running off an edge (#704, #1154) (`goldsrc-hooks/src/spectator_gun.rs`). All five stand down while a POV demo plays, which is the recording they match (#613); live play and HLTV demos are unaffected. The gunshots a demo lost are not part of it any more: they are `ds_sound_restore_gunshots`, in HLTV and POV demos alike (#1036). So a config that sets `ds_spec_match_pov 0` to silence the restored gunshots now needs `ds_sound_restore_gunshots 0` as well, and the "log every restored gunshot" that `ds_spec_match_pov 2` used to turn on is `ds_sound_restore_gunshots 2`. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `ds_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `ds_debug_log_gun_lowered` | `0` | R&D (#704): logs each time the first-person gun goes down or comes back up, with the demo player's clock: in a POV demo from `client.dll`'s own flag, in HLTV in-eye from `ds_spec_match_pov`'s copy with its reason (sprinting, prone transition, crawling, in the air, on a ladder). In a POV demo it reads `client.dll`'s own lowering sum (`g_ihidexhair`), not the gun that is drawn, so it misses POV's lowering on a jump or crouch-jump: check the drawn frames before calling a POV-vs-HLTV difference real | `goldsrc-hooks/src/gun_log.rs` |
 | `ds_debug_log_spectator_target` | `0` | logs who the spectator HUD thinks is being followed next to the entity the engine renders a viewmodel for, whenever either changes (issue #206) | `goldsrc-hooks/src/spectator_target.rs` |
@@ -86,7 +86,7 @@ the death cam).
 | `ds_demo_fast_load` | `1` | `viewdemo` reads the demo into its world for up to 8 ms of each frame instead of the engine's 33 network packets a frame, so a demo loads faster while it plays on. A number above 1 is the budget in milliseconds (at most 100); `0` is the engine's own 33 packets. A frame always reads at least 33, so loading is never slower than stock. On by default: faster loading is a clear win for everyone (#798). The hook log has one `fast_load:` line per load with its time, packets and frame times; `playdemo` is unaffected | `goldsrc-hooks/src/fast_load.rs`, [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) §5 |
 | `ds_ui_demo_list_folders` | `1` | the Load Demo window, and the DoD Studio window's Demos tab, also list folders and open them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/`. The Load Demo window lists `../` to go up; the Demos tab has an Up button instead. in the Load Demo window `dod/` also lists each drive (`D:/`), whose folders come straight from the disk and whose demo rows are full paths (`viewdemo` takes them with `ds_demo_other_drives`); the Demos tab has Back, Forward and Up, a Go to dropdown (game folder, Studio's analysed demos: every demo in the analyzer cache as one list, This PC: every drive as one list, which Up opens from a drive and greys out on, drives, Studio's demo folders, folders visited lately), remembers its folder between sessions, and shows an icon per row (up, folder, drive, POV demo, HLTV demo) in a first column (#779) | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
 | `ds_ui_demo_list_hide_empty` | `0` | while folders are listed and counted (`ds_ui_demo_list_show_counts 1`), a folder with no demo anywhere inside it (any depth) is left out | `goldsrc-hooks/src/demo_list_folders.rs` |
-| `ds_ui_demo_list_count_subfolders` | `0` | a folder row's demo count on the Demos tab includes its subfolders (the Settings tab's "Include subfolders"); `0` counts only the demos directly in it, and a folder with none there but some deeper reads "0 here, 12 inside" (Hide empty folders keeps it, since empty means none at any depth). Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
+| `ds_ui_demo_list_count_subfolders` | `0` | a folder row's demo count on the Demos tab includes its subfolders (the Settings tab's "Counts include subfolders"); `0` counts only the demos directly in it, and a folder with none there but some deeper reads "0 here, 12 inside" (Hide empty folders keeps it, since empty means none at any depth). Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
 | `ds_ui_demo_list_show_counts` | `0` (counting every folder slows the window on a big library) | folders are counted in the background, and folder rows on the Demos tab end in "(N demos)" (the game's own Load Demo window shows no counts either way). `0` counts nothing at all, so a folder opens with no progress bar and no second fill; `ds_ui_demo_list_hide_empty` and `_count_subfolders` need the counts, so they do nothing then and their Settings boxes hide | same, #787 |
 | `ds_demo_other_drives` | `1` | `viewdemo` and `playdemo` open a demo on another drive by its full path, as in `viewdemo "D:/folder/demo"`. The first time a drive is named its root (`D:\`) is added as a search path, last and under the hook's own path ID, and the rest of the path is opened under it; the game's own files are never looked for there. `0` leaves such a name to the game, which does not find it (the Anniversary file system asserts on the `:` and closes the game) | `goldsrc-hooks/src/demo_other_drives.rs`, #776 |
 | `ds_demo_show_load_progress` | `1` | while `viewdemo` is still reading a demo, the stock VCR bar shows a percent and a progress bar where its time label sits (the buffered span over the demo's own playback length, the Playback tab's number), hidden again once the console says "Demo file completely loaded.". Only on the bar layout DoD Studio's launch writes to `dod_addon\resource\DemoPlayerDialog.res` (`native/src/demo_bar_res.rs`, from the user's own `dod\resource` one or the stock `valve` one, never written back), so a game started without `-addons` or without Studio shows nothing; does nothing while `ds_ui_viewdemo_in_panel` is on, since the Playback tab shows it then | `goldsrc-hooks/src/demo_bar_progress.rs`, #465 |
@@ -94,7 +94,7 @@ the death cam).
 | `ds_ui_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `ds_ui_resizable_windows` | `1` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `ds_ui_remember_layout` | `1` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
-| `ds_ui_review_keys` | `1` | Review highlights answers on the game screen: while a highlight plays and at its end, where the review pauses, a box lists Y Yes, M Maybe, N No, R Replay, B Back, Space Next (on without answering), S Stop: one key for each of the Review tab's buttons, in their order. An answer while the highlight plays ends it and moves on (#1141). For 1 s after each highlight starts playing the keys are greyed and do nothing, so a double press can't answer the next one unseen. ESC opens the DoD Studio window's Review tab for the kill range and note. The keys work only during a review highlight and while keys go to the game: never while typing in the console, chat or a window's box, and at any other time each key does what it always does. They take no bind, so `config.cfg` is untouched. `0` opens the Review tab at each highlight's end instead (#660) | `goldsrc-hooks/src/review_keys.rs` |
+| `ds_ui_review_keys` | `1` | Review highlights answers on the game screen: while a highlight plays and at its end, where the review pauses, a box lists Y Yes, M Maybe, N No, R Replay, B Back, Space Next (on without answering), S Stop: one key for each of the Review tab's buttons, in their order. An answer while the highlight plays ends it and moves on (#1141). For 1 s after each highlight starts playing the keys are greyed and do nothing, so a double press can't answer the next one unseen. E opens a small form over the demo for the kill range and note (#1139; Tab between boxes, Enter saves, Esc cancels; the answer keys do nothing while it shows), and ESC still opens the DoD Studio window's Review tab. The keys work only during a review highlight and while keys go to the game: never while typing in the console, chat or a window's box, and at any other time each key does what it always does. They take no bind, so `config.cfg` is untouched. `0` opens the Review tab at each highlight's end instead (#660) | `goldsrc-hooks/src/review_keys.rs` |
 | `ds_ui_review_info` | `1` | Review highlights: while a highlight loads and plays, a box on the game screen says which it is, whose and how many kills, with the answer keys. While it plays the box lists its kills (time, victim, weapon), the next one to come in amber behind a `>` (#1140). The answer keys' box shows at a highlight's end either way (#660); with this off the keys still answer while a highlight plays, unseen | `goldsrc-hooks/src/review_keys.rs` |
 
 The HD rows work the same on the pre-Anniversary and the 25th Anniversary
@@ -347,6 +347,12 @@ renders free space for the next clip (#861). A held batch repeats
 `BATCH_HELD` every 5 s; when Studio has been gone from the events pipe for
 10 s, the batch ends there, keeping its clips, and the game quits as after a
 batch Studio stopped watching.
+In OBS mode Studio puts an `at` line running `ds_capture_batch wait_for_recording`
+at each clip's `AUDIO_SYNC`: the batch pauses the demo there with a
+`BATCH_WAITING_FOR_RECORDING` line on the events pipe, and plays on when
+Studio sends `recording` once OBS has started (#1109). With no `recording`
+after 20 s it plays on anyway; with Studio gone from the events pipe for
+10 s it ends the batch as the space hold does.
 `stop` ends the batch; bare says where it is. With
 `ds_capture_stay_behind` on when it starts, the game steps aside behind
 the other windows (minimised if it had the foreground, which then parks it
@@ -366,7 +372,20 @@ those off, on the window's Review tab, which it opens. When the queue's header a
 sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 `no` answer with the Review tab's kill range and note and move on; `replay`, `next` (skip without answering),
 `back` and `stop` move around. `range <from> <to>` and `note <text>` set the
-answer from the console, for key binds. Bare prints where the review is.
+answer from the console, for key binds. `form` opens the kill range and note
+form over the demo, as **E** does during a highlight (#1139): a small window of
+its own with the menu closed (`ReviewForm.res`); Tab moves between its boxes,
+Enter saves (a `[dod-studio] REVIEW_EDIT` line: Studio sets the row's kill
+range and note and leaves its mark), Esc cancels, and it closes by itself when
+the review moves on or the menu comes up. Clicking its buttons works on the
+pre-Anniversary build; the keyboard does everything on both. Bare prints where the review is.
+With no review running, `ask start` and `ask here` (the Review tab's **From
+the start** and **From here**, #1142) ask DoD Studio, over its game pipe, to
+review the demo playing: every highlight, from the first or from the first
+at or after the demo's clock now (`from=` on the queue's header; Back still
+reaches the ones before). Studio scans the demo first when it isn't in the
+Master Demo Queue, and the tab shows what it is doing. The buttons are
+greyed while DoD Studio isn't running or no demo plays.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
 move the camera off the highlight's player (#826), and the console refuses
@@ -634,8 +653,24 @@ far each has got (`Loading: Demo 45%   Highlights 60%`, #797). A demo too big fo
 the game's memory (analysis takes about 12 times the demo's size; the
 pre-Anniversary game has under 1 GB free) is refused with a note to open it in
 the Demo Analyzer instead. On the
-Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
-shows the value and sets it when clicked (add more in build mode).
+Settings tab, every setting on this page a player would change is listed under
+its area's heading (Spectating, HUD, View, Players, Map, Sound, Demo playback,
+DoD Studio window, HD textures), with `hud_draw` and `r_drawviewmodel`; left out
+are what Studio sets itself (`ds_spec_lock`, `ds_capture_*`,
+`ds_player_overrides`) and `ds_debug_*` (#899). A control named `cvar_<name>`
+is bound to that cvar: a check box for on/off, a dropdown for the settings with
+a few values (`ds_hud_overview_players`, `ds_hud_overview_team_marker`,
+`ds_view_show_own_blood`, `ds_demo_fast_load`, `ds_demo_ex_interp_max`) and for
+`ds_hd_style` (the styles built on disk). It shows the live value, so a value a
+`.cfg` set shows, and a value none of a dropdown's entries has shows as itself.
+A click saves that one setting to `dodstudio_ui\settings.cfg` (never
+`config.cfg`), applied once when the game starts; Studio's Initial Commands,
+and any `.cfg` they `exec`, run at every demo load and win for the session,
+and never rewrite it. The tab scrolls with the mouse wheel or its ▲/▼ buttons
+when the window is too short for every row. The list lives in
+`goldsrc-hooks/src/settings_tab.rs` and `Settings.res` is generated from it: a
+new setting is one row there, and a test fails while `Commands.txt` has a
+setting the tab neither lists nor leaves out on purpose.
 `ds_ui_panel [1|0|reset|<tab>]`: bare opens or closes it, `1` opens, `0`
 closes, `reset` writes the default layouts back and rebuilds the window, and a
 tab's name (`ds_ui_panel highlights`) opens it on that tab. With
@@ -647,7 +682,7 @@ is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod_addon\dodstudio_ui\` (or `dod\dodstudio_ui\` when the game has no `-addons`, or while only that one exists, as before #415): `DodStudio.res` for the window and
-one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), written
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), and `ReviewForm.res` for the review's kill range and note form (#1139), written
 the first time and never overwritten. The empty `...Slot` controls in
 `Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,

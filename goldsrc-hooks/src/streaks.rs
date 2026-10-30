@@ -385,7 +385,7 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
 
 /// DoD Studio's analysis pipe; must match `native::sys::analysis_server::
 /// PIPE_NAME` to the character.
-const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
+pub(crate) const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
 
 /// One line of DoD Studio's answer (`native::sys::analysis_server`'s
 /// protocol).
