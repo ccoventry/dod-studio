@@ -1,7 +1,8 @@
 //! The crosshair part of `ds_spec_match_pov`: draw the spectator crosshair
 //! from the same sprite and the same tile the player's own `cl_xhair_style`
-//! picks. (It had a cvar of its own, `dodstudio_match_pov_crosshair`, until
-//! the three match-POV settings became one.)
+//! picks, or for style 0 the same red crosshair. (It had a cvar of its own,
+//! `dodstudio_match_pov_crosshair`, until the three match-POV settings became
+//! one.)
 //!
 //! ## The two crosshairs are drawn by two different code paths
 //!
@@ -52,7 +53,8 @@
 //! become the tile `cl_xhair_style` selects. Swapping the handle without the
 //! rect would sample a 24x24 corner out of a 256x256 sprite; changing the rect
 //! without the handle would sample off the end of a 128x128 one. They are one
-//! change, which is why they are one patch.
+//! change, which is why they are one patch. Style 0 writes the span's third
+//! form, the jump below.
 //!
 //! ## The tile arithmetic is DoD's, not ours
 //!
@@ -72,22 +74,29 @@
 //! [`tile_rect`] reproduces that arithmetic rather than inventing a layout, so
 //! the spectator view gets the *same* tile the player sees, whatever they set.
 //!
-//! ## `cl_xhair_style 0` is not a tile, and is not implemented here
+//! ## `cl_xhair_style 0` is not a tile: the span jumps to POV's own draw
 //!
 //! The dispatcher at `client+0x2cd5c` checks `style == 0` *before* calling
-//! `client+0x2ced0` at all: zero calls `client+0x2cda0` instead, a
-//! completely different function that draws the classic four-segment dynamic
-//! crosshair (its gap driven by per-frame weapon accuracy fields on the HUD
-//! object, and gated by the separate `cl_dynamic_xhair` cvar) rather than
-//! blitting a sprite tile. `client+0x2ced0` -- the function this module
-//! mirrors -- is never reached for style 0, confirmed by disassembly.
+//! `client+0x2ced0` at all: zero calls `client+0x2cda0` instead, which draws
+//! POV's red crosshair, a dot and four arms out of `dodcross.spr` with a gap
+//! that follows the weapon's spread. For that style the span's first eight
+//! bytes become a tail call into that draw (#308):
 //!
-//! Replicating that for a spectated player would mean re-deriving their
-//! weapon-accuracy state the same way the animation fix re-derives body
-//! animation, and it is not known whether that state is replicated in a demo
-//! at all. Out of scope here: this leaves the stock spectator rect in place
-//! for style 0 and says so in `ds_debug_status` rather than inventing a
-//! tile. Filed as a follow-up.
+//! ```text
+//!     +0x2d205  add esp, 0x10             ; undo this function's sub esp
+//!     +0x2d208  jmp client+0x2cda0        ; its `ret` returns to Draw
+//! ```
+//!
+//! `ecx` still holds the HUD object there, which is all the draw takes. The
+//! gate before the span runs first, so the zoom skip and the #310 hide below
+//! work for it unchanged; the rest of the span keeps its stock bytes and is
+//! not reached. The draw's gap would be the *local* client's, which for a
+//! spectator holds no weapon, so `spectator_crosshair_gap` points its gap
+//! call at the spectated player's first, and the jump is only written once
+//! that is in. When it can't be, the stock dot stays.
+//!
+//! A Players-table crosshair for the player on screen (#428) wins over this:
+//! `player_crosshair` swaps the stock spectator rect, so the span keeps it.
 //!
 //! ## `cl_xhair_style < 0` draws the whole sheet
 //!
@@ -178,6 +187,20 @@ const CUSTOM_HANDLE: u8 = 0x74;
 /// The stock 24x24 rect, in the span's own field order.
 const STOCK_RECT: [i32; 4] = [24, 0, 48, 24];
 
+/// `mov dword [ecx+0x64], imm32`'s first three bytes and the next `mov`'s
+/// opcode at byte 7: what the red crosshair's jump covers besides the left
+/// immediate, and what going back to a rect puts back.
+const FIRST_MOV: [u8; 3] = [0xC7, 0x41, 0x64];
+const SECOND_MOV_AT: usize = 7;
+const SECOND_MOV: u8 = 0xC7;
+/// `add esp, 0x10`, undoing the function's own `sub esp, 0x10`.
+const ADD_ESP: [u8; 3] = [0x83, 0xC4, 0x10];
+/// `add esp, 0x10; jmp rel32`.
+const JUMP_LEN: usize = 8;
+/// [`ACTIVE_STYLE`] while the span jumps to POV's red crosshair. Not a style:
+/// `cl_xhair_style 0` is also what the stock rect is written for.
+const POV_RED: i32 = i32::MAX;
+
 /// How far before the span the function's gate starts, and how long it is.
 const GATE: usize = 13;
 /// `test eax, eax; jle +9; cmp eax, 90; jl +0x99`: draw unless zoomed.
@@ -215,9 +238,12 @@ static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// to the menu -- neither of which has been tested.
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
-/// The style currently written into the code, or 0 for the stock rect. Read by
-/// [`status`] and by `ds_debug_status`.
+/// The style currently written into the code, 0 for the stock rect or
+/// [`POV_RED`]. Read by [`status`] and by `ds_debug_status`.
 static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
+/// Set once the red crosshair could not be set up, so the reason is logged
+/// once and `status` can say why the stock dot is showing.
+static RED_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// Why the player's own view would have no crosshair this frame, as
 /// `anim_fix::CrosshairHidden`'s code, or 0 while it would have one.
@@ -304,9 +330,30 @@ fn span_address() -> Result<usize, String> {
     Ok(address)
 }
 
-/// What the bytes currently in the span say. `None` for anything this module
-/// did not write and the game did not ship.
-fn read_state(present: &[u8]) -> Option<i32> {
+/// The red crosshair's first eight bytes for a span at `span`: `add esp,
+/// 0x10`, then `jmp` to the style-0 draw at `draw`.
+fn red_jump(span: usize, draw: usize) -> [u8; JUMP_LEN] {
+    let rel = (draw as u32).wrapping_sub((span as u32).wrapping_add(JUMP_LEN as u32));
+    let mut jump = [0u8; JUMP_LEN];
+    jump[..3].copy_from_slice(&ADD_ESP);
+    jump[3] = 0xE9;
+    jump[4..].copy_from_slice(&rel.to_le_bytes());
+    jump
+}
+
+/// What the bytes currently in the span say: a style, 0 for the stock rect,
+/// or [`POV_RED`] for `jump` (the red crosshair's bytes, when known). `None`
+/// for anything this module did not write and the game did not ship.
+fn read_state(present: &[u8], jump: Option<&[u8; JUMP_LEN]>) -> Option<i32> {
+    if present[..ADD_ESP.len()] == ADD_ESP {
+        // The rest of the span stays stock under the jump.
+        let stock = wanted(present, 0, None)?;
+        return (present[..JUMP_LEN] == jump?[..] && present[JUMP_LEN..] == stock[JUMP_LEN..])
+            .then_some(POV_RED);
+    }
+    if present[..FIRST_MOV.len()] != FIRST_MOV || present[SECOND_MOV_AT] != SECOND_MOV {
+        return None;
+    }
     let rect = [
         i32::from_le_bytes(present[LEFT_AT..LEFT_AT + 4].try_into().ok()?),
         i32::from_le_bytes(present[TOP_AT..TOP_AT + 4].try_into().ok()?),
@@ -321,20 +368,41 @@ fn read_state(present: &[u8]) -> Option<i32> {
     }
 }
 
-/// The 57 bytes the span should hold for `style` (0 meaning the stock rect),
-/// built by editing what is there rather than from a literal, so nothing
-/// between the five patched fields is ever rewritten.
-fn wanted(present: &[u8], style: i32) -> Option<Vec<u8>> {
+/// The 57 bytes the span should hold for `style` (0 meaning the stock rect,
+/// [`POV_RED`] the stock rect under `jump`), built by editing what is there
+/// rather than from a literal, so nothing between the patched fields is ever
+/// rewritten.
+fn wanted(present: &[u8], style: i32, jump: Option<&[u8; JUMP_LEN]>) -> Option<Vec<u8>> {
     let (handle, rect) = match style {
-        0 => (STOCK_HANDLE, STOCK_RECT),
+        0 | POV_RED => (STOCK_HANDLE, STOCK_RECT),
         _ => (CUSTOM_HANDLE, tile_rect(style)?),
     };
     let mut want = present.to_vec();
+    want[..FIRST_MOV.len()].copy_from_slice(&FIRST_MOV);
+    want[SECOND_MOV_AT] = SECOND_MOV;
     for (at, value) in [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT].iter().zip(rect) {
         want[*at..*at + 4].copy_from_slice(&value.to_le_bytes());
     }
     want[HANDLE_AT] = handle;
+    if style == POV_RED {
+        want[..JUMP_LEN].copy_from_slice(jump?);
+    }
     Some(want)
+}
+
+/// The red crosshair's jump for the span at `span`, once the style-0 draw
+/// has been found.
+fn jump_for(span: usize) -> Result<[u8; JUMP_LEN], String> {
+    crate::spectator_crosshair_gap::style0_draw().map(|draw| red_jump(span, draw))
+}
+
+/// Sets up the red crosshair for the span at `span`: its gap call first, so
+/// the draw never runs on the local client's gap. Returns the jump and
+/// whether the gap call was written.
+fn red_ready(span: usize) -> Result<([u8; JUMP_LEN], bool), String> {
+    let jump = jump_for(span)?;
+    let hooked = crate::spectator_crosshair_gap::set_hooked(true)?;
+    Ok((jump, hooked))
 }
 
 /// DoD's `cl_xhair_style`, truncated and clamped the way the POV path does.
@@ -357,8 +425,9 @@ fn requested_style() -> i32 {
     (value as i32).min(MAX_STYLE)
 }
 
-/// Points the spectator crosshair at `customXHair.spr`, or back at the stock
-/// sprite, returning whether anything was written.
+/// Points the spectator crosshair at `customXHair.spr`, at POV's red
+/// crosshair for style 0, or back at the stock sprite, returning whether
+/// anything was written.
 ///
 /// `matching` is the cvar's own sense: `true` makes the spectator crosshair
 /// follow `cl_xhair_style`, `false` is the game's stock behaviour.
@@ -374,15 +443,44 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     // Safety: the scan proved `SPAN` bytes of mapped code start here.
     let present = unsafe { std::slice::from_raw_parts(address as *const u8, SPAN) };
 
-    if read_state(present).is_none() {
+    // Only looked for when the span holds a jump, so a viewer who never
+    // picks style 0 never scans for the red crosshair's draw.
+    let present_jump = if present[..ADD_ESP.len()] == ADD_ESP {
+        jump_for(address).ok()
+    } else {
+        None
+    };
+    if read_state(present, present_jump.as_ref()).is_none() {
         return Err(format!(
-            "the spectator crosshair rect holds an encoding that is neither DoD's nor one of this module's tiles (sprite displacement {:#04x}) -- something else has patched it",
-            present[HANDLE_AT]
+            "the spectator crosshair rect holds an encoding that is neither DoD's nor one of this module's (first byte {:#04x}, sprite displacement {:#04x}) -- something else has patched it",
+            present[0], present[HANDLE_AT]
         ));
     }
 
-    let style = if matching { requested_style() } else { 0 };
-    let Some(want) = wanted(present, style) else {
+    let mut style = if matching { requested_style() } else { 0 };
+    let mut wrote = false;
+    let mut jump = None;
+    // A Players-table crosshair swaps the stock rect (`player_crosshair`),
+    // so it keeps the rect rather than the red crosshair.
+    if matching && style == 0 && !crate::player_crosshair::overriding() {
+        match red_ready(address) {
+            Ok((ready, hooked)) => {
+                style = POV_RED;
+                jump = Some(ready);
+                wrote |= hooked;
+            }
+            Err(why) => {
+                if !RED_FAILED.swap(true, Ordering::Relaxed) {
+                    unsafe {
+                        crate::debug::report(&format!(
+                            "spectator_crosshair: POV's red crosshair could not be set up, the stock one stays -- {why}"
+                        ))
+                    };
+                }
+            }
+        }
+    }
+    let Some(want) = wanted(present, style, jump.as_ref()) else {
         return Err(format!(
             "{STYLE_CVAR} resolved to {style}, which is not a tile"
         ));
@@ -395,18 +493,20 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     // value: every negative style writes the identical whole-sheet rect (see
     // `tile_rect`), so `cl_xhair_style` moving between -1 and -5 must not
     // count as a change needing a write, even though the two numbers differ.
-    if present == want.as_slice() {
-        ACTIVE_STYLE.store(style, Ordering::Release);
-        return Ok(false);
-    }
-
-    // Safety: writing to code the scan vouched for, through the same
-    // protect/write/restore used everywhere else in this DLL.
-    if !unsafe { crate::patch::write_code_bytes(address, &want) } {
-        return Err("could not make the spectator crosshair rect writable".to_string());
+    if present != want.as_slice() {
+        // Safety: writing to code the scan vouched for, through the same
+        // protect/write/restore used everywhere else in this DLL.
+        if !unsafe { crate::patch::write_code_bytes(address, &want) } {
+            return Err("could not make the spectator crosshair rect writable".to_string());
+        }
+        wrote = true;
     }
     ACTIVE_STYLE.store(style, Ordering::Release);
-    Ok(true)
+    // After the span stops jumping to the draw, never before.
+    if style != POV_RED {
+        wrote |= crate::spectator_crosshair_gap::set_hooked(false)?;
+    }
+    Ok(wrote)
 }
 
 /// What the gate should hold: the skip while POV would have no crosshair,
@@ -436,7 +536,7 @@ fn set_gate(span: usize, skip: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether the spectator crosshair is currently drawn from `customXHair.spr`.
+/// Whether the spectator crosshair is currently anything but the stock one.
 #[cfg(test)]
 fn matching() -> bool {
     ACTIVE_STYLE.load(Ordering::Relaxed) != 0
@@ -450,8 +550,18 @@ fn matching() -> bool {
 /// player to work out from two settings that otherwise look unrelated.
 pub fn status() -> String {
     let text = match ACTIVE_STYLE.load(Ordering::Relaxed) {
+        0 if crate::player_crosshair::overriding() => {
+            "the spectator crosshair is DoD's own rect, which the Players table's crosshair for this player replaces".to_string()
+        }
+        0 if RED_FAILED.load(Ordering::Relaxed) => format!(
+            "the spectator crosshair is DoD's own 24x24 tile of crosshairs.spr: POV's red one ({STYLE_CVAR} 0) could not be set up, the log says why"
+        ),
         0 => format!(
-            "the spectator crosshair is DoD's own 24x24 tile of crosshairs.spr (set {STYLE_CVAR} to 1-{MAX_STYLE} and {NAME} to 1 to use your own)"
+            "the spectator crosshair is DoD's own 24x24 tile of crosshairs.spr (set {NAME} to 1 to draw the one {STYLE_CVAR} gives the POV view)"
+        ),
+        POV_RED => format!(
+            "the spectator crosshair is POV's red one ({STYLE_CVAR} 0), its {}",
+            crate::spectator_crosshair_gap::status()
         ),
         style if style < 0 => format!(
             "the spectator crosshair draws the whole customXHair.spr sheet, the same as the POV view at {STYLE_CVAR} {style}"
@@ -605,12 +715,16 @@ mod tests {
     #[test]
     fn every_state_reads_back_as_the_style_that_wrote_it() {
         let stock = stock_span();
-        assert_eq!(read_state(&stock), Some(0), "the shipped bytes are style 0");
+        assert_eq!(
+            read_state(&stock, None),
+            Some(0),
+            "the shipped bytes are style 0"
+        );
 
         for style in 0..=MAX_STYLE {
-            let written = wanted(&stock, style).expect("a writable state");
+            let written = wanted(&stock, style, None).expect("a writable state");
             assert_eq!(written.len(), SPAN);
-            assert_eq!(read_state(&written), Some(style), "style {style}");
+            assert_eq!(read_state(&written, None), Some(style), "style {style}");
         }
     }
 
@@ -623,8 +737,12 @@ mod tests {
     fn negative_styles_all_read_back_as_whole_sheet() {
         let stock = stock_span();
         for style in [-1, -2, -16, -1000] {
-            let written = wanted(&stock, style).expect("a writable state");
-            assert_eq!(read_state(&written), Some(WHOLE_SHEET), "style {style}");
+            let written = wanted(&stock, style, None).expect("a writable state");
+            assert_eq!(
+                read_state(&written, None),
+                Some(WHOLE_SHEET),
+                "style {style}"
+            );
         }
     }
 
@@ -660,7 +778,7 @@ mod tests {
     #[test]
     fn nothing_outside_the_five_fields_is_touched() {
         let stock = stock_span();
-        let written = wanted(&stock, 9).unwrap();
+        let written = wanted(&stock, 9, None).unwrap();
         let patched: Vec<usize> = [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT]
             .iter()
             .flat_map(|at| *at..*at + 4)
@@ -680,11 +798,69 @@ mod tests {
     fn an_unrecognised_encoding_is_refused() {
         let mut span = stock_span();
         span[HANDLE_AT] = 0x58; // the POV path's own handle: plausible, not ours
-        assert_eq!(read_state(&span), None);
+        assert_eq!(read_state(&span, None), None);
 
         let mut span = stock_span();
         span[LEFT_AT] = 7; // a rect that is neither stock nor a tile
-        assert_eq!(read_state(&span), None);
+        assert_eq!(read_state(&span, None), None);
+
+        let mut span = stock_span();
+        span[0] = 0xE9; // a jump of someone else's over the first write
+        assert_eq!(read_state(&span, None), None);
+    }
+
+    /// Where the span sits in the shipped client.dll, and the style-0 draw.
+    const SPAN_AT: usize = 0x192_d205;
+    const DRAW_AT: usize = 0x192_cda0;
+
+    /// `add esp, 0x10` undoes the function's `sub esp, 0x10`, so the jump
+    /// leaves the stack as `Draw`'s call left it and the draw's own `ret`
+    /// returns there. The `rel32` counts from the jump's end.
+    #[test]
+    fn the_red_jump_is_a_tail_call_to_the_style_0_draw() {
+        let jump = red_jump(SPAN_AT, DRAW_AT);
+        assert_eq!(&jump[..3], &[0x83, 0xC4, 0x10]);
+        assert_eq!(jump[3], 0xE9);
+        let rel = i32::from_le_bytes(jump[4..].try_into().unwrap());
+        assert_eq!((SPAN_AT + JUMP_LEN) as i64 + i64::from(rel), DRAW_AT as i64);
+        // `sub esp, 0x10` in the function's prologue, before the gate.
+        assert_eq!(ADD_ESP[2], 0x10);
+    }
+
+    /// The jump reads back as the red crosshair, leaves the rest of the span
+    /// stock, and every other state can be written over it and back.
+    #[test]
+    fn the_red_crosshair_round_trips_with_every_other_state() {
+        let stock = stock_span();
+        let jump = red_jump(SPAN_AT, DRAW_AT);
+        let red = wanted(&stock, POV_RED, Some(&jump)).unwrap();
+        assert_eq!(&red[..JUMP_LEN], &jump);
+        assert_eq!(&red[JUMP_LEN..], &stock[JUMP_LEN..]);
+        assert_eq!(read_state(&red, Some(&jump)), Some(POV_RED));
+        for style in [0, 1, 9, MAX_STYLE, WHOLE_SHEET] {
+            let back = wanted(&red, style, None).unwrap();
+            assert_eq!(back, wanted(&stock, style, None).unwrap(), "style {style}");
+            assert_eq!(read_state(&back, Some(&jump)), Some(style), "style {style}");
+            let tile = wanted(&stock, style, None).unwrap();
+            assert_eq!(wanted(&tile, POV_RED, Some(&jump)).unwrap(), red);
+        }
+        // No jump to hand, no red crosshair.
+        assert_eq!(wanted(&stock, POV_RED, None), None);
+    }
+
+    /// A jump somewhere else, or one whose span underneath was changed, is
+    /// not ours.
+    #[test]
+    fn a_jump_this_module_did_not_write_is_refused() {
+        let stock = stock_span();
+        let jump = red_jump(SPAN_AT, DRAW_AT);
+        let red = wanted(&stock, POV_RED, Some(&jump)).unwrap();
+        assert_eq!(read_state(&red, None), None, "the draw is not known");
+        let elsewhere = red_jump(SPAN_AT, DRAW_AT + 0x10);
+        assert_eq!(read_state(&red, Some(&elsewhere)), None);
+        let mut tampered = red.clone();
+        tampered[HANDLE_AT] = CUSTOM_HANDLE;
+        assert_eq!(read_state(&tampered, Some(&jump)), None);
     }
 
     #[test]
@@ -705,6 +881,10 @@ mod tests {
         assert!(status().contains("whole"), "{}", status());
         assert!(status().contains("customXHair.spr"), "{}", status());
         assert!(matching());
+
+        ACTIVE_STYLE.store(POV_RED, Ordering::Release);
+        assert!(status().contains("red"), "{}", status());
+        assert!(status().contains("gap"), "{}", status());
 
         ACTIVE_STYLE.store(saved, Ordering::Release);
     }

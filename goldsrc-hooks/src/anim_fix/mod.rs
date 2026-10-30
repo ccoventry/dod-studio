@@ -521,6 +521,7 @@ pub fn apply() {
     let no_view = || {
         forget_published_view();
         crate::spectator_crosshair::set_pov_hides(None);
+        crate::spectator_crosshair_gap::forget();
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
     };
@@ -546,6 +547,7 @@ pub fn apply() {
             }
         });
         crate::spectator_crosshair::set_pov_hides(reason);
+        crate::spectator_crosshair_gap::forget();
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
     };
@@ -884,6 +886,18 @@ pub fn apply() {
         held_stem: model_stem(&held_name),
     };
     crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(&pov_view, now));
+    // The gap POV's red crosshair would have (#308).
+    crate::spectator_crosshair_gap::note_watched(&crate::spectator_crosshair_gap::Watched {
+        entity: viewmodel_index,
+        viewmodel: &viewmodel_name,
+        deployed: crosshair_rule::is_deployed(pov_view.body),
+        time: f64::from(spectated.curstate.msg_time),
+        origin: [
+            spectated.curstate.origin.x,
+            spectated.curstate.origin.y,
+            spectated.curstate.origin.z,
+        ],
+    });
     // After hidden_because, which keeps the prone timer current.
     let lowered = crosshair_rule::gun_lowered_code(&pov_view, now);
     crate::spectator_gun::set_lowered(lowered != 0);
