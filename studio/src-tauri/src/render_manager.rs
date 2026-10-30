@@ -138,7 +138,7 @@ pub struct HistoryEntry {
     output_exists: bool,
 }
 
-fn history_for(take_folder: &str) -> Vec<HistoryEntry> {
+pub(crate) fn history_for(take_folder: &str) -> Vec<HistoryEntry> {
     native::hlcr::take_meta::read_history(std::path::Path::new(take_folder))
         .into_iter()
         .map(|attempt| HistoryEntry {

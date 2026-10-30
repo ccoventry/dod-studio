@@ -155,7 +155,7 @@ use crate::engine;
 use crate::scan;
 
 /// The cvar this follows, for status and error text. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = crate::names::SPEC_MATCH_POV;
 
 /// DoD's own cvar, read here rather than mirrored: whatever the player sets for

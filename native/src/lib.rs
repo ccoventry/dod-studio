@@ -21,7 +21,10 @@ pub mod shared;
 pub mod sys;
 pub mod utils;
 
-mod messages;
+/// The app's text; public only so the command-line binaries can print from it
+/// (#237).
+#[doc(hidden)]
+pub mod messages;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;

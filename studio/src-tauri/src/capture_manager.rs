@@ -1502,9 +1502,37 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
+        // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
+        let trimmed = match crate::trimmed_demos::for_batch(
+            &app_handle_clone,
+            &patch_jobs,
+            &patcher_config.game_path,
+            &cancel_token_arc,
+        ) {
+            Ok(copies) => copies,
+            Err(status) => {
+                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                *running = false;
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": status
+                    }),
+                );
+                return;
+            }
+        };
+
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
-            match crate::hook_batch::prepare(&patch_jobs, &planned_streaks, &patcher_config) {
+            match crate::hook_batch::prepare(
+                &patch_jobs,
+                &planned_streaks,
+                &patcher_config,
+                &trimmed,
+            ) {
                 Ok(mut batch) => {
                     batch.reuse_game = reuse_game_pid;
                     Some(batch)
@@ -1619,11 +1647,18 @@ pub async fn start_capture_batch_impl(
         // Every way out before the engine starts ends it too.
         let mut room_guard = RoomGuard(capture_room.clone());
         // The hook plays the original demos: nothing to patch or copy.
-        let patch_jobs = if runtime_batch.is_some() {
+        let mut patch_jobs = if runtime_batch.is_some() {
             Vec::new()
         } else {
             patch_jobs
         };
+        // A patched demo over the entity limit is patched from its trimmed
+        // copy (#207). Its frames are the original's, so every tick holds.
+        for job in &mut patch_jobs {
+            if let Some(copy) = trimmed.get(&job.source_demo) {
+                job.source_demo = copy.to_string_lossy().into_owned();
+            }
+        }
         let total_patch_jobs = patch_jobs.len() as u32;
         // One start + one end notification for the whole patching phase, not
         // per-demo like capture_demo_loading -- decal clearing means patching

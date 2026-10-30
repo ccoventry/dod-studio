@@ -227,7 +227,7 @@
 //! The settings are `ds_*` **cvars**, so they behave like any other
 //! engine setting: `ds_spec_match_pov 1` from the console,
 //! `+ds_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
-//! user execs. `commands.rs` copies them into the runtime flags once per
+//! user execs. `commands/poll.rs` copies them into the runtime flags once per
 //! frame, and `ds_debug_status` reports what each part is actually
 //! doing rather than only what it is set to.
 //!
@@ -242,9 +242,11 @@ mod behind_imports;
 mod build_id;
 mod center_text;
 mod clan_text;
+mod clip_log;
 mod cmd_list;
 mod commands;
 mod connect_guard;
+mod console_tokens;
 mod crash;
 mod crosshair;
 mod deathmsg;
@@ -331,6 +333,7 @@ mod schedule;
 mod scoreboard;
 mod screen_effects;
 mod server_query;
+mod setting;
 mod settings_tab;
 mod spectator_bars;
 mod spectator_buttons;
@@ -347,6 +350,7 @@ mod spectator_text;
 mod spray;
 mod spray_hltv;
 mod sprite_blend;
+mod steam_id;
 mod strafe_twitch;
 mod streaks;
 mod studio_panel;
@@ -392,7 +396,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// player's own recording is a clear win
 /// for everyone. `ds_spec_match_pov 0` turns it off, and
 /// `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts it off. The value lands in
-/// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
+/// `anim_fix::LEVEL`, which `commands/install.rs` hands the engine as the cvar's
 /// default, and the cvar then drives every part.
 const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_MAX;
 

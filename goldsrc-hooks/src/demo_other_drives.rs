@@ -40,16 +40,15 @@
 // path logic for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("demo_other_drives");
 
-/// The fallback toggle's flag, when the cvar could not be registered.
-pub static ENABLED: AtomicBool = AtomicBool::new(true);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+/// `ds_demo_other_drives`, or its fallback toggle.
+pub static SETTING: Setting = Setting::new(NAME, true);
 /// Bit `letter - b'A'` is set once that drive's root is a search path.
 static DRIVES: AtomicU32 = AtomicU32::new(0);
 /// Set once the `Open` slot is ours.
@@ -85,19 +84,8 @@ const FS_SLOT_OPEN: usize = 10;
 /// (`GAME`, `GAMECONFIG`, ...) skips them; the demo opens name none.
 const PATH_ID: &std::ffi::CStr = c"DODSTUDIO";
 
-/// Called by `commands.rs` once `ds_demo_other_drives` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 pub(crate) fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        ENABLED.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
+    SETTING.on()
 }
 
 pub fn status() -> String {

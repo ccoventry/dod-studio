@@ -16,6 +16,7 @@ import { listen } from '@tauri-apps/api/event';
 import { catchUpUnwatchedBatches, readProjectFile, writeTextFile } from './ipc_bridge.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
+import { captureRateOf, attachCaptures, capturesToSave } from './take_record.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
@@ -38,7 +39,7 @@ export function isBatchStillRunningInGame() {
 }
 
 /**
- * Each captured block of `batch` as `{ takeKey, uids }`, the highlights it
+ * Each captured block of `batch` as `{ takeKey, uids, meta }`, the highlights it
  * covers. A block can cover several highlights (overlapping ones are
  * recorded as one take).
  */
@@ -48,6 +49,7 @@ export function capturedTakes(batch) {
     .filter((block) => block.captured)
     .map((block) => ({
       takeKey: block.take_key,
+      meta: { session_id: batch.session_id, capture_mode: batch.capture_mode, capture_fps: captureRateOf(batch.capture_mode, batch), take_folder: block.take_folder },
       uids: (block.source_streak_indices || []).map((i) => uids[i]).filter(Boolean),
     }))
     .filter((take) => take.uids.length > 0);
@@ -62,8 +64,8 @@ export function capturedTakes(batch) {
 export function applyCaughtUpBatch(batch, demos, takeIndex) {
   const takes = capturedTakes(batch);
   const wanted = new Set();
-  takes.forEach(({ takeKey, uids }) => {
-    if (takeKey) recordTake(takeIndex, takeKey, uids);
+  takes.forEach(({ takeKey, uids, meta }) => {
+    if (takeKey) recordTake(takeIndex, takeKey, uids, meta);
     uids.forEach((uid) => wanted.add(uid));
   });
 
@@ -112,7 +114,9 @@ export function createBatchCatchUp({
     try {
       const data = JSON.parse(await io.readProject(path));
       data.takeIndex = data.takeIndex || {};
+      attachCaptures(data.takeIndex, data.takeCaptures);
       const result = applyCaughtUpBatch(batch, data.demos || [], data.takeIndex);
+      if (result.changed) data.takeCaptures = capturesToSave(data.takeIndex);
       if (result.changed) await io.writeProject(path, JSON.stringify(data, null, 2));
       return { result, note: result.changed ? ` ${STRINGS.BATCH_CATCH_UP.projectUpdated(fileNameOf(path) || path)}` : '' };
     } catch (err) {

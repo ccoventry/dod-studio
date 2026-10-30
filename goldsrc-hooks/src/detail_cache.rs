@@ -36,11 +36,12 @@
 //! Found by a byte pattern per build, each unique in its own `hw.dll`;
 //! `tools/verify_detail_cache_offsets.py` re-derives both.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const KEEP_NAME: &str = console_name!("debug_keep_detail_cache");
 
@@ -93,7 +94,7 @@ const JE: u8 = 0x74;
 const JP: u8 = 0x7a;
 const JMP: u8 = 0xeb;
 
-static KEEP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static KEEP: Cvar = Cvar::new();
 /// The matched pattern's address; 1 when it can't be found, 0 before a look.
 static FOUND: AtomicUsize = AtomicUsize::new(0);
 static SITE: AtomicUsize = AtomicUsize::new(0);
@@ -101,14 +102,8 @@ static SITE: AtomicUsize = AtomicUsize::new(0);
 static STATE: AtomicU8 = AtomicU8::new(0);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 
-pub fn set_keep_cvar(cvar: *mut CvarSPartial) {
-    KEEP.store(cvar, Ordering::Release);
-}
-
 fn keep() -> bool {
-    let cvar = KEEP.load(Ordering::Acquire);
-    // Safety: the engine owns the cvar for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    KEEP.on()
 }
 
 /// The cache check, found once per session (hw.dll never reloads).

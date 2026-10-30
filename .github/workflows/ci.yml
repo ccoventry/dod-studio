@@ -163,6 +163,28 @@ jobs:
 
       - run: npm run test:e2e
 
+  # ESLint over studio/src (#1179): no-unused-vars as an error, max-params as a
+  # warning. Its own parallel job on ubuntu (no Windows code involved), so it
+  # adds no wall-clock time; npm is cached the way the e2e job does.
+  frontend-lint:
+    name: Frontend lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: studio/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
+
   # The hook DLL ships as 32-bit, so its tests run here, as 32-bit, and only
   # here; Clippy above lints it as 64-bit too (it is a workspace member).
   # Three of its tests are `#[cfg(target_arch = "x86")]`, and its 32-bit-only

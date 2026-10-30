@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "demos": [
+    {
+      "path": "C:/demos/fotw.dem",
+      "name": "fotw.dem",
+      "streaks": [
+        { "player_index": 3, "start_tick": 100, "end_tick": 400, "kills": [[100, 1.0, "K98"], [400, 4.0, "K98"]], "status": "Rendered" },
+        { "player_index": 4, "start_tick": 300, "end_tick": 700, "kills": [[300, 3.0, "BAR"], [700, 7.0, "BAR"]], "status": "Captured" }
+      ]
+    }
+  ],
+  "takeIndex": {
+    "session_a/chain_00_b0": ["C:/demos/fotw.dem#3#100#400"],
+    "session_a/chain_01_b1": ["C:/demos/fotw.dem#3#100#400", "C:/demos/fotw.dem#4#300#700"],
+    "session_gone/chain_00_b0": ["C:/demos/removed.dem#1#10#20"]
+  }
+}

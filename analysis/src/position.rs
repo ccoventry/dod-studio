@@ -143,9 +143,9 @@ pub fn use_position_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 .then(|| origin(death.killer_client_index))
                 .flatten();
 
-            let victim = state.find_player_by_client_index(death.victim_client_index - 1);
+            let victim = state.find_player_by_wire_index(death.victim_client_index);
             let killer = by_other
-                .then(|| state.find_player_by_client_index(death.killer_client_index - 1))
+                .then(|| state.find_player_by_wire_index(death.killer_client_index))
                 .flatten();
             let victim_team = victim.and_then(|p| p.team.clone());
             let killer_team = killer.and_then(|p| p.team.clone());

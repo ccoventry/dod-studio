@@ -229,6 +229,8 @@ pub(crate) fn enabled(app: &AppHandle) -> bool {
 }
 
 impl CaptureRoom {
+    // Constructor taking the room's inputs, each independent of the others.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         app: AppHandle,
         blocks: &[CaptureBlock],
@@ -328,10 +330,7 @@ impl CaptureRoom {
         let state = self.lock();
         let next_bytes = self.clip_bytes(&state, next)?;
         let folder = &self.blocks[next].folder;
-        let free = native::sys::disk::get_available_bytes(existing_ancestor(folder));
-        if free == u64::MAX {
-            return None;
-        }
+        let free = native::sys::disk::get_available_bytes(existing_ancestor(folder))?;
         let pending = self.pending_on(&state, &volume_of(folder), policy(&self.app));
         let inputs = RoomInputs {
             free_bytes: free,
