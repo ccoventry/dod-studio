@@ -109,6 +109,9 @@ pub async fn blender_run(
     }
     state.cancel.store(false, Ordering::SeqCst);
     let (running, cancel) = (Arc::clone(&state.running), Arc::clone(&state.cancel));
+    let step = step_name(&request);
+    native::log_markdown(&format!("[blender] {step} started for {}", request.map));
+    let map = request.map.clone();
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let status = blender::resolve(&blender::tools_dir(), Some(&scripts));
@@ -134,7 +137,30 @@ pub async fn blender_run(
     .await;
 
     running.store(false, Ordering::SeqCst);
+    native::log_markdown(&end_log(&step, &map, &result));
     result
+}
+
+/// The step's name (`import`, `scene`, ...) as the page sends it.
+fn step_name(request: &JobRequest) -> String {
+    serde_json::to_value(&request.step)
+        .ok()
+        .and_then(|v| v.get("kind").and_then(|k| k.as_str().map(str::to_string)))
+        .unwrap_or_else(|| "step".to_string())
+}
+
+/// The activity log's line when a Blender step ends.
+fn end_log(step: &str, map: &str, result: &Result<Outcome, String>) -> String {
+    match result {
+        Ok(o) => format!(
+            "[blender] {step} done for {map} in {} s: {} file(s), {} still(s), in {}",
+            o.elapsed_secs,
+            o.saved.len(),
+            o.images.len(),
+            Path::new(&o.work_dir).display()
+        ),
+        Err(e) => format!("[blender] {step} stopped for {map}: {e}"),
+    }
 }
 
 /// Stops the running step by ending Blender. A render keeps the frames it
@@ -142,4 +168,27 @@ pub async fn blender_run(
 #[tauri::command]
 pub fn blender_cancel(state: State<'_, BlenderManager>) {
     state.cancel.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn the_blender_end_line_counts_what_it_wrote() {
+        let ok = Ok(Outcome {
+            saved: vec!["a.blend".into()],
+            images: vec![],
+            elapsed_secs: 12,
+            work_dir: "work".into(),
+        });
+        assert_eq!(
+            end_log("import", "dod_anzio", &ok),
+            "[blender] import done for dod_anzio in 12 s: 1 file(s), 0 still(s), in work"
+        );
+        assert_eq!(
+            end_log("scene", "m", &Err("cancelled".into())),
+            "[blender] scene stopped for m: cancelled"
+        );
+    }
 }
