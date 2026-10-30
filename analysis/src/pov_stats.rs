@@ -85,74 +85,76 @@ pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 state.pov_stats.prev_health = health_val;
                 state.pov_stats.has_received_health = true;
             }
-            UserMessage::DeathMsg(msg) => {
-                if let Some(pov_idx) = state.pov_player_index {
-                    let is_killer_pov = wire_slot(msg.killer_client_index) == Some(pov_idx);
-                    let is_victim_pov = wire_slot(msg.victim_client_index) == Some(pov_idx);
-
-                    if is_killer_pov {
-                        if msg.killer_client_index == msg.victim_client_index {
-                            state.pov_stats.suicides += 1;
-                        } else {
-                            let killer_team = state
-                                .find_player_by_wire_index(msg.killer_client_index)
-                                .and_then(|p| p.team.clone());
-                            let victim_team = state
-                                .find_player_by_wire_index(msg.victim_client_index)
-                                .and_then(|p| p.team.clone());
-                            if killer_team.is_some()
-                                && victim_team.is_some()
-                                && killer_team == victim_team
-                            {
-                                state.pov_stats.teamkills_committed += 1;
-                            } else {
-                                let entry = state
-                                    .pov_stats
-                                    .weapon_stats
-                                    .entry(msg.weapon.clone())
-                                    .or_default();
-                                entry.kills += 1;
-                                if matches!(
-                                    msg.weapon,
-                                    Weapon::Springfield
-                                        | Weapon::ScopedK98
-                                        | Weapon::ScopedFg42
-                                        | Weapon::ScopedLeeEnfield
-                                ) {
-                                    if state.pov_stats.is_scoped {
-                                        entry.scoped_kills += 1;
-                                    } else {
-                                        entry.noscopes += 1;
-                                    }
-                                }
-                            }
-                        }
-                    } else if msg.killer_client_index == 0 && is_victim_pov {
-                        state.pov_stats.suicides += 1;
-                    }
-
-                    if is_victim_pov {
-                        state.pov_stats.is_scoped = false;
-                        if msg.killer_client_index > 0 && !is_killer_pov {
-                            let killer_team = state
-                                .find_player_by_wire_index(msg.killer_client_index)
-                                .and_then(|p| p.team.clone());
-                            let victim_team = state
-                                .find_player_by_wire_index(msg.victim_client_index)
-                                .and_then(|p| p.team.clone());
-                            if killer_team.is_some()
-                                && victim_team.is_some()
-                                && killer_team == victim_team
-                            {
-                                state.pov_stats.teamkills_suffered += 1;
-                            }
-                        }
-                    }
-                }
-            }
+            UserMessage::DeathMsg(msg) => use_pov_death(state, msg),
             _ => {}
         }
     }
+}
+
+/// The recorder's side of a death: their kills by weapon, their suicides and
+/// team kills, and the scope they lose when they die.
+fn use_pov_death(state: &mut AnalyzerState, msg: &dod::DeathMsg) {
+    let Some(pov_idx) = state.pov_player_index else {
+        return;
+    };
+    let is_killer_pov = wire_slot(msg.killer_client_index) == Some(pov_idx);
+    let is_victim_pov = wire_slot(msg.victim_client_index) == Some(pov_idx);
+
+    if is_killer_pov {
+        credit_pov_kill(state, msg);
+    } else if msg.killer_client_index == 0 && is_victim_pov {
+        state.pov_stats.suicides += 1;
+    }
+
+    if !is_victim_pov {
+        return;
+    }
+    state.pov_stats.is_scoped = false;
+    if msg.killer_client_index > 0
+        && !is_killer_pov
+        && are_teammates(state, msg.killer_client_index, msg.victim_client_index)
+    {
+        state.pov_stats.teamkills_suffered += 1;
+    }
+}
+
+/// The recorder killed someone: a suicide, a team kill or a kill with a weapon.
+fn credit_pov_kill(state: &mut AnalyzerState, msg: &dod::DeathMsg) {
+    if msg.killer_client_index == msg.victim_client_index {
+        state.pov_stats.suicides += 1;
+        return;
+    }
+    if are_teammates(state, msg.killer_client_index, msg.victim_client_index) {
+        state.pov_stats.teamkills_committed += 1;
+        return;
+    }
+    let entry = state
+        .pov_stats
+        .weapon_stats
+        .entry(msg.weapon.clone())
+        .or_default();
+    entry.kills += 1;
+    if matches!(
+        msg.weapon,
+        Weapon::Springfield | Weapon::ScopedK98 | Weapon::ScopedFg42 | Weapon::ScopedLeeEnfield
+    ) {
+        if state.pov_stats.is_scoped {
+            entry.scoped_kills += 1;
+        } else {
+            entry.noscopes += 1;
+        }
+    }
+}
+
+/// Both players are known and on one team.
+fn are_teammates(state: &AnalyzerState, wire_a: u8, wire_b: u8) -> bool {
+    let team_of = |wire| {
+        state
+            .find_player_by_wire_index(wire)
+            .and_then(|p| p.team.clone())
+    };
+    let (a, b) = (team_of(wire_a), team_of(wire_b));
+    a.is_some() && a == b
 }
 
 #[cfg(test)]
