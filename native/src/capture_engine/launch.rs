@@ -153,6 +153,9 @@ pub(super) struct Launched {
     pub(super) cfg_path: PathBuf,
     /// The done marker in the export folder, cleared before the launch.
     pub(super) dummy_path: PathBuf,
+    /// The games already running when HLAE was started, so the batch's own
+    /// is told apart from them (#1213).
+    pub(super) games_before_launch: Vec<super::processes::GameProcess>,
 }
 
 /// Starts the batch's game (or takes over the open one, #725) and marks the
@@ -188,6 +191,10 @@ pub(super) fn start_game(
     let (foreground_lock, foreground_locked_at) =
         foreground_lock(config.keep_game_behind, reuse_game);
 
+    let games_before_launch = {
+        use super::processes::Processes;
+        super::processes::Live::new().games()
+    };
     let child = match start_launcher(&mut cmd, reuse_game) {
         Ok(child) => child,
         Err(e) => {
@@ -217,6 +224,7 @@ pub(super) fn start_game(
         foreground_locked_at,
         cfg_path,
         dummy_path,
+        games_before_launch,
     })
 }
 
