@@ -704,6 +704,7 @@ unsafe fn name_of<'a>(sfx: *const u8) -> &'a [u8] {
     unsafe { std::slice::from_raw_parts(sfx, len) }
 }
 
+// The detours' shared body: takes the engine call's arguments one for one.
 #[allow(clippy::too_many_arguments)]
 unsafe fn start(
     kind: Kind,
@@ -768,6 +769,7 @@ unsafe fn start(
 }
 
 /// Stands in for `S_StartStaticSound` at its two `svc_` call sites.
+// A detour: must match S_StartStaticSound's signature.
 #[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn start_static(
     entnum: i32,
@@ -796,6 +798,7 @@ unsafe extern "C" fn start_static(
 }
 
 /// Stands in for `S_StartDynamicSound` at `svc_sound`'s call site.
+// A detour: must match S_StartDynamicSound's signature.
 #[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn start_dynamic(
     entnum: i32,

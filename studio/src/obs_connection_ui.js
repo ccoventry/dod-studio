@@ -135,7 +135,7 @@ export async function launchObsAndRetry() {
 
   try {
     await launchObs();
-  } catch (err) {
+  } catch {
     // Already toasted by ipc_bridge.js (missing/invalid path, etc.) — nothing
     // was launched, so there is nothing to wait for.
     return false;

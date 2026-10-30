@@ -3,9 +3,7 @@ import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPo
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
-import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
-import { confirmOverLimit } from './packet_entity_limit.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
@@ -19,7 +17,7 @@ import { initClearPreviewsModal } from './orphaned_previews_modal.js';
 import { describeProblemPaths } from './capture_pane_logic.js';
 import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus, isSkipped, markBlockCaptured } from './take_index.js';
+import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -29,7 +27,7 @@ import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
 import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_setting.js';
-import { setStatusLine, uiStatusText } from './status_line.js';
+import { uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
 import { startObsDropRate } from './obs_drop_rate.js';
@@ -509,7 +507,7 @@ async function initStandaloneLaunchButton() {
     try {
       await launchStandaloneGame();
       showToast(STRINGS.HIGHLIGHTS.LAUNCHING_HLAE_TOAST, 'info');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     } finally {
       btn.textContent = originalLabel;
@@ -524,7 +522,7 @@ async function initStandaloneLaunchButton() {
     let engineAlreadyRunning = false;
     try {
       engineAlreadyRunning = await checkEngineProcesses();
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js — fail open rather than blocking
       // a legitimate launch just because the detector itself errored.
     }
@@ -570,7 +568,7 @@ function initImportCfgButton() {
       notifySettingsChange();
       refreshInitCommandWarnings();
       showToast(STRINGS.CAPTURE_CONFIG.importedCfgToast(lines.length), 'success');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     }
   });
@@ -1195,12 +1193,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         .filter((d) => (d.streaks || []).some((s) => s.selected === true))
         .map((d) => d.path);
       if (!(await confirmCrashMaps(pickedPaths))) return;
-      // A demo with more entities in a snapshot than this game's engine takes
-      // closes the game when it gets there (#207). Ask before patching.
+      // A demo over the game's entity limit needs no ask: the batch plays
+      // a trimmed copy of it (#207, trimmed_demos.rs). One with no camera
+      // data captures a frozen view (#920).
       const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));
-      const hlPathNow = document.querySelector('#hl-path-input')?.value?.trim() || '';
-      if (!(await confirmOverLimit(picked, hlPathNow))) return;
-      // One with no camera data captures a frozen view (#920).
       if (!(await confirmNoCameraData(picked))) return;
 
       precheck.step('paths');
@@ -1238,7 +1234,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js — fail open rather than blocking a
         // legitimate batch because the detector itself errored.
       }

@@ -203,6 +203,8 @@ fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+// The CLI entry point: one flag per argument, each independent.
+#[allow(clippy::too_many_arguments)]
 fn run_patch_streak_subcommand(
     input: PathBuf,
     output: PathBuf,

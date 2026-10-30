@@ -229,6 +229,8 @@ pub(crate) fn enabled(app: &AppHandle) -> bool {
 }
 
 impl CaptureRoom {
+    // Constructor taking the room's inputs, each independent of the others.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         app: AppHandle,
         blocks: &[CaptureBlock],

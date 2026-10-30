@@ -97,7 +97,7 @@ that panics the parser cannot take down the run:
 | `writer_fidelity` | Does dem's writer reproduce GoldSrc's real bytes? |
 | `packet_entity_probe` | Peak packet-entity count against the engine limit that crashes playback. |
 | `map_entity_probe` | Names the entities an HLTV demo puts on the wire, for trimming a map. |
-| `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). |
+| `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). The R&D probe; Studio's own trim is `native::patch::entity_trim`. |
 
 `shared/entity_carry.rs` is not a probe: it carries each snapshot's entity set
 forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.

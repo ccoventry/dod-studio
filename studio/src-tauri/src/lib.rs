@@ -47,6 +47,7 @@ mod take_checks_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
+mod trimmed_demos;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
