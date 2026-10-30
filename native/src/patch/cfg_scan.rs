@@ -690,12 +690,20 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// block's own start simply closes it and opens the planned one (HLAE's start
 /// closes any recording already open). So it is refused only where it can
 /// actually misplace a take — the same shape as `mirv_movie_filename`.
+///
+/// `dem_speed` (#831) is the demo player's speed, which the pipeline sets
+/// itself: Fast-forward gaps between kills schedules `dem_speed <N>` and
+/// `dem_speed 1` around each long gap (`builder::kill_gaps`). A scheduled one
+/// would fight those, and one that outlasts its clip speeds up the next
+/// clip's whole recording. In Initial Commands it does nothing harmful: the
+/// hook's batch puts the speed back to 1 after each demo's init lines.
 pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
     "r_decals",
     "mirv_fov",
     "gl_widescreenfov",
     "mirv_movie_filename",
     "mirv_agr",
+    "dem_speed",
 ];
 
 // ── The demo command filter (#679) ──────────────────────────────────────────

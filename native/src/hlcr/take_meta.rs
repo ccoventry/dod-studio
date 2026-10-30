@@ -88,6 +88,11 @@ pub struct SessionMeta {
     /// Absent unless `capture_mode` is `"agr"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agr_fps: Option<i32>,
+    /// What the batch planned this take to hold (#1084), so its length and
+    /// kills can be checked against it later. Absent for a take captured
+    /// before it was recorded, or whose demo had no frame times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<super::take_plan::TakePlan>,
 }
 
 impl SessionMeta {
@@ -99,6 +104,7 @@ impl SessionMeta {
             renders: Vec::new(),
             capture_mode: None,
             agr_fps: None,
+            plan: None,
         }
     }
 

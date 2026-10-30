@@ -34,9 +34,13 @@ export function findingLine(f) {
     case 'no_sound': text = R.TAKE_CHECK_NO_SOUND; break;
     case 'silent': text = R.TAKE_CHECK_SILENT; break;
     case 'clipping': text = R.takeCheckClipping(((f.share ?? 0) * 100).toFixed(1)); break;
+    case 'length': text = R.takeCheckLength(f.frames ?? '?', f.planned_frames ?? '?', secs); break;
+    case 'kill_outside': text = R.takeCheckKillOutside(f.count ?? 1, at, secs); break;
+    case 'no_plan': text = R.TAKE_CHECK_NO_PLAN; break;
     default: return null;
   }
-  const cause = f.cause === 'demo' ? R.TAKE_CHECK_CAUSE_DEMO : R.TAKE_CHECK_CAUSE_CAPTURE;
+  // `unknown`: a check that couldn't be made, so there is no cause to name.
+  const cause = f.cause === 'unknown' ? '' : f.cause === 'demo' ? R.TAKE_CHECK_CAUSE_DEMO : R.TAKE_CHECK_CAUSE_CAPTURE;
   return { text, cause, warn: !!f.warn };
 }
 
@@ -58,7 +62,7 @@ export function checkChip(state) {
   const lines = findingLines(state.result);
   const warnings = lines.filter((l) => l.warn).length;
   const title = lines.length
-    ? lines.map((l) => `${l.warn ? '⚠ ' : ''}${l.text} (${l.cause})`).join('\n')
+    ? lines.map((l) => `${l.warn ? '⚠ ' : ''}${l.text}${l.cause ? ` (${l.cause})` : ''}`).join('\n')
     : R.TAKE_CHECK_ALL_GOOD;
   return warnings
     ? { label: R.takeCheckWarnings(warnings), cls: 'rj-check-warn', title }
@@ -242,11 +246,13 @@ export function wireSheetChecks({ table, checks, modal }) {
     for (const l of lines) {
       const li = document.createElement('li');
       li.className = l.warn ? 'take-check-warn' : 'take-check-note';
-      li.textContent = `${l.text} `;
-      const cause = document.createElement('span');
-      cause.className = 'take-check-cause';
-      cause.textContent = `(${l.cause})`;
-      li.appendChild(cause);
+      li.textContent = l.cause ? `${l.text} ` : l.text;
+      if (l.cause) {
+        const cause = document.createElement('span');
+        cause.className = 'take-check-cause';
+        cause.textContent = `(${l.cause})`;
+        li.appendChild(cause);
+      }
       ul.appendChild(li);
     }
     list.append(head, ul);
