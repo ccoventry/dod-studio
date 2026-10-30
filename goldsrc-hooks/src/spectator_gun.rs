@@ -33,7 +33,8 @@
 //!
 //! `anim_fix` decides each frame whether the spectated player's gun would be
 //! lowered (`crosshair_rule::gun_lowered`, the same signals as the crosshair:
-//! gait `dod_sprint`, body `jump` or a crouched take-off, the prone timer,
+//! gait `dod_sprint` (in a fall off an edge only while the body stays
+//! `sprint_*`), body `jump` or a crouched take-off, the prone timer,
 //! gait `prone_forward` while he moves, `movetype` 5). [`after_calc_refdef`]
 //! runs after `client.dll`'s own `V_CalcRefdef` (`cldll_func_t` slot 19),
 //! steps the offset and moves the viewmodel the way DoD does. Only while the

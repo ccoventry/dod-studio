@@ -1,5 +1,5 @@
-//! Two gun-lowering states the body and gait sequences miss, read from the
-//! watched player's newest snapshots instead (issue #704).
+//! Three gun-lowering states the body and gait sequences miss or get wrong,
+//! read from the watched player's newest snapshots instead (issue #704).
 //!
 //! - **A jump with duck held at take-off.** POV lowers the gun for it like
 //!   any jump, but in 11 of 21 such jumps (5 players) the HLTV body never
@@ -15,6 +15,19 @@
 //!   up; the server keeps gait `prone_forward` up to 0.6 s longer. The origin
 //!   stops at once, so a crawl ends after 0.1 s without it moving. A crawl
 //!   blocked against a wall still creeps 2-4 u/s, which counts as moving.
+//! - **Sprint let go after running off an edge.** The server keeps gait
+//!   `dod_sprint` through a fall however he moves, but POV raises the gun the
+//!   moment the sprint key comes up, and in 233 of 319 sprinting walk-offs
+//!   (5 players) it came up in the air; only 32 held it to the ground. The
+//!   speed doesn't show it (letting go doesn't slow him in the air); the body
+//!   does: it leaves `sprint_*` in 84% of the released falls (median 0.13 s
+//!   after the key) and in none of the held ones. So in a fall that is not a
+//!   jump (two snapshot intervals falling at least `FELL`, no `jump` body, no
+//!   crouched take-off), a body that is not `sprint_*` means he let go, until
+//!   the fall ends. Against the drawn POV gun on those falls' frames the
+//!   HLTV gun agreed 64.6% of the time on the gait alone, 70.9% with this
+//!   (93.4% on the held falls, from 98.4%); on moving ground frames, where it
+//!   rarely applies, 97.1% either way.
 //!
 //! Scored offline against the drawn POV gun of 5 players
 //! (`wsod25_grp2_h1_*` against `wsod25_grp2_h1_hltv`): duck-jump take-offs
@@ -80,6 +93,20 @@ pub(super) struct SnapshotMotion {
     /// When the take-off was seen, while he is in the air after one.
     airborne_since: Option<f64>,
     falling: bool,
+    /// How many intervals in a row have fallen at least `FELL`.
+    falling_run: u32,
+    fall: Fall,
+}
+
+/// What kind of fall he is in, by the snapshots.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+enum Fall {
+    #[default]
+    None,
+    /// Off an edge, no jump: `let_go` once the body has left `sprint_*`.
+    WalkOff { let_go: bool },
+    /// The way down from a jump, which lowers the gun on its own.
+    Jump,
 }
 
 impl SnapshotMotion {
@@ -141,6 +168,39 @@ impl SnapshotMotion {
             }
             _ => {}
         }
+        self.note_fall(body);
+    }
+
+    /// Follows a fall: it starts on the second interval in a row falling at
+    /// least `FELL`, and ends on the first that falls slower, the same
+    /// landing the jump above uses. A `jump` body or a crouched take-off at
+    /// any point makes it a jump's way down for the rest of it, so a jump's
+    /// landing frame never reads as a sprint let go.
+    fn note_fall(&mut self, body: &str) {
+        self.falling_run = match self.climb {
+            Some(climb) if climb <= -FELL => self.falling_run.saturating_add(1),
+            _ => 0,
+        };
+        let jumping = body == "jump" || self.airborne_since.is_some();
+        let sprint_body = body.starts_with("sprint_");
+        self.fall = match self.fall {
+            _ if self.falling_run == 0 => Fall::None,
+            _ if jumping => Fall::Jump,
+            Fall::None if self.falling_run >= 2 => Fall::WalkOff {
+                let_go: !sprint_body,
+            },
+            Fall::WalkOff { let_go } => Fall::WalkOff {
+                let_go: let_go || !sprint_body,
+            },
+            other => other,
+        };
+    }
+
+    /// In a fall off an edge (not a jump) after the body left `sprint_*`:
+    /// he let go of sprint, and the sprint gait the server keeps through the
+    /// fall says nothing.
+    pub(super) fn let_go_of_sprint(&self) -> bool {
+        matches!(self.fall, Fall::WalkOff { let_go: true })
     }
 
     /// In the air after a crouched take-off the body didn't show as `jump`.
@@ -175,6 +235,11 @@ pub(super) fn note_snapshot(time: f64, origin: [f32; 3], body: &str, movetype: i
 /// [`SnapshotMotion::in_the_air`] on the engine thread's state.
 pub(super) fn in_the_air() -> bool {
     STATE.with(|s| s.borrow().in_the_air())
+}
+
+/// [`SnapshotMotion::let_go_of_sprint`] on the engine thread's state.
+pub(super) fn let_go_of_sprint() -> bool {
+    STATE.with(|s| s.borrow().let_go_of_sprint())
 }
 
 /// [`SnapshotMotion::still`] on the engine thread's state.
@@ -394,5 +459,134 @@ mod tests {
         }
         s.snapshot(t + DT, [0.0, 0.0, z + 1.0], CROUCHED, WALK);
         assert!(!s.in_the_air());
+    }
+
+    const SPRINTING: &str = "sprint_bolt_aim";
+    const STANDING: &str = "stand_bolt_aim";
+
+    /// Sprints level at 270 u/s up to `t0`, runs off an edge there and falls
+    /// 100 units under 800 u/s² gravity, then stands on the floor below for
+    /// four snapshots. `body` names the body at each snapshot's time;
+    /// `each` sees every snapshot with its time. Returns the landing time.
+    fn walk_off(
+        s: &mut SnapshotMotion,
+        t0: f64,
+        body: impl Fn(f64) -> &'static str,
+        mut each: impl FnMut(&SnapshotMotion, f64),
+    ) -> f64 {
+        let mut t = t0 - 4.0 * DT;
+        let mut z: f32;
+        loop {
+            let a = (t - t0).max(0.0) as f32;
+            z = (-400.0 * a * a).max(-100.0);
+            s.snapshot(t, [(t - t0) as f32 * 270.0, 0.0, z], body(t), WALK);
+            each(s, t);
+            if z <= -100.0 {
+                break;
+            }
+            t += DT;
+        }
+        let landing = t;
+        for _ in 0..4 {
+            t += DT;
+            s.snapshot(t, [(t - t0) as f32 * 270.0, 0.0, z], body(t), WALK);
+            each(s, t);
+        }
+        landing
+    }
+
+    #[test]
+    fn sprint_held_off_an_edge_is_never_let_go() {
+        let mut s = SnapshotMotion::default();
+        walk_off(
+            &mut s,
+            10.0,
+            |_| SPRINTING,
+            |s, t| {
+                assert!(!s.let_go_of_sprint(), "{t}");
+            },
+        );
+    }
+
+    #[test]
+    fn sprint_is_let_go_in_a_fall_when_the_body_leaves_sprint() {
+        let mut s = SnapshotMotion::default();
+        // The body leaves sprint 0.2 s into the fall.
+        let body = |t: f64| if t < 10.2 { SPRINTING } else { STANDING };
+        let mut let_go = Vec::new();
+        let landing = walk_off(&mut s, 10.0, body, |s, t| {
+            if s.let_go_of_sprint() {
+                let_go.push(t);
+            }
+        });
+        // From the body change until the fall ends, the snapshot after the
+        // one on the floor.
+        assert!(
+            let_go.first().is_some_and(|t| (t - 10.2).abs() < DT),
+            "{let_go:?}"
+        );
+        assert!(
+            let_go.last().is_some_and(|t| *t < landing + DT),
+            "{let_go:?}"
+        );
+        // On the floor, a sprint body or not, it is over.
+        assert!(!s.let_go_of_sprint());
+    }
+
+    #[test]
+    fn sprint_let_go_before_the_edge_shows_once_the_fall_is_seen() {
+        let mut s = SnapshotMotion::default();
+        let mut first = None;
+        walk_off(
+            &mut s,
+            10.0,
+            |_| STANDING,
+            |s, t| {
+                if s.let_go_of_sprint() {
+                    first.get_or_insert(t);
+                }
+            },
+        );
+        // The second interval falling at least FELL.
+        assert!(first.is_some_and(|t| t > 10.0 && t < 10.15), "{first:?}");
+    }
+
+    #[test]
+    fn a_landing_ends_the_let_go_and_the_next_fall_starts_afresh() {
+        let mut s = SnapshotMotion::default();
+        let body = |t: f64| if t < 10.2 { SPRINTING } else { STANDING };
+        walk_off(&mut s, 10.0, body, |_, _| {});
+        assert!(!s.let_go_of_sprint());
+        // Sprinting again, off the next edge, holding it this time.
+        walk_off(
+            &mut s,
+            11.0,
+            |_| SPRINTING,
+            |s, t| {
+                assert!(!s.let_go_of_sprint(), "{t}");
+            },
+        );
+    }
+
+    #[test]
+    fn a_jump_is_never_a_sprint_let_go() {
+        // Standing jump: the body plays `jump` until the landing snapshot.
+        let mut s = SnapshotMotion::default();
+        let mut landed = false;
+        let landing = jump(&mut s, 10.0, "jump", |s| assert!(!s.let_go_of_sprint()));
+        for i in 0..4 {
+            s.snapshot(
+                landing + f64::from(i) * DT,
+                [130.0, 0.0, 0.0],
+                STANDING,
+                WALK,
+            );
+            assert!(!s.let_go_of_sprint(), "after landing {i}");
+            landed = true;
+        }
+        assert!(landed);
+        // Crouched take-off, which the body never shows as a jump.
+        let mut s = SnapshotMotion::default();
+        jump(&mut s, 10.0, CROUCHED, |s| assert!(!s.let_go_of_sprint()));
     }
 }

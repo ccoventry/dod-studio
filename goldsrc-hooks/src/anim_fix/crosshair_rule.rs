@@ -40,7 +40,7 @@
 //! | deploy | the viewmodel settling on a new weapon |
 //! | reload | the body sequence reading `*_reload` |
 //! | bolt-rifle shot | a shot (body animation or fire sound) while holding one |
-//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`) |
+//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`); in a fall off an edge, only while the body stays `sprint_*` (`snapshot_motion`) |
 //! | prone transition | 1.5s from the body entering `get_down` / `get_up` |
 //! | crawl | gait `prone_forward` while the origin moves (`dod_crawl` is the crouched walk; `snapshot_motion`) |
 //! | jump | body `jump`, from take-off until landing; a crouched take-off from the origin (`snapshot_motion`) |
@@ -331,7 +331,11 @@ fn lowered_because(view: &View, now: f64) -> Option<Hidden> {
         ..
     } = *view;
     if !is_deployed(body) {
-        if super::sprint_turn::lowered(gait == "dod_sprint", now) {
+        // The server keeps the sprint gait through a fall off an edge; the
+        // body says when he let go of the key.
+        if super::snapshot_motion::let_go_of_sprint() {
+            super::sprint_turn::let_go();
+        } else if super::sprint_turn::lowered(gait == "dod_sprint", now) {
             return Some(Hidden::Sprinting);
         }
         if since(&PRONE_TRANSITION_AT, now).is_some_and(|s| s < PRONE_TRANSITION_SECONDS) {
@@ -628,6 +632,37 @@ mod tests {
             );
         }
         assert_eq!(hidden_because(&crouched, 20.15), Some(Hidden::InTheAir));
+        forget();
+    }
+
+    #[test]
+    fn a_sprint_let_go_off_an_edge_raises_the_gun_until_he_lands() {
+        let _statics = lock_statics();
+        forget();
+        // Sprinting off an edge at 10.0, the body leaving sprint at 10.2;
+        // the gait reads sprint all the way down and after.
+        let body = |t: f64| {
+            if t < 10.2 {
+                "sprint_bolt_aim"
+            } else {
+                "stand_bolt_aim"
+            }
+        };
+        let mut seen = Vec::new();
+        for i in 0..24 {
+            let t = 9.86 + f64::from(i) * 0.035;
+            let a = (t - 10.0).max(0.0) as f32;
+            let z = (-400.0 * a * a).max(-100.0);
+            super::super::snapshot_motion::note_snapshot(t, [t as f32 * 270.0, 0.0, z], body(t), 3);
+            let down = gun_lowered(&view(body(t), "dod_sprint", "k98"), t);
+            seen.push((t, z, down));
+        }
+        // He reaches the floor on the snapshot at 10.525; the fall ends on
+        // the next one, which no longer falls.
+        for (t, z, down) in seen {
+            let falling_after_let_go = t > 10.2 && t < 10.53;
+            assert_eq!(down, !falling_after_let_go, "at {t:.3} (z {z:.1})");
+        }
         forget();
     }
 
