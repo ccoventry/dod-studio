@@ -10,6 +10,8 @@ use std::time::{Duration, UNIX_EPOCH};
 pub mod archive;
 pub mod backup;
 mod key_cache;
+/// The demo key's hash, defined once in `analysis` (#1107).
+pub use analysis::fnv1a::{Fnv1a, fnv1a_hash};
 pub use archive::{ZipDemoEntry, ZipRef};
 pub use backup::{ArchiveListing, ArchivedCopy, Backup, BackupIndex};
 pub use key_cache::{ArchiveEntry, KeyCache, KeyEntry};
@@ -92,40 +94,6 @@ pub enum AuditProgress {
     Found(usize),
     Failed(String),
     Done(Vec<DuplicateGroup>, usize, u64),
-}
-
-/// Deterministic FNV-1a 64-bit hashing.
-pub fn fnv1a_hash(data: &[u8]) -> u64 {
-    let mut hash = Fnv1a::new();
-    hash.update(data);
-    hash.finish()
-}
-
-/// [`fnv1a_hash`] fed in pieces: the same result as one call over them all.
-#[derive(Clone, Copy, Debug)]
-pub struct Fnv1a(u64);
-
-impl Default for Fnv1a {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Fnv1a {
-    pub const fn new() -> Self {
-        Self(0xcbf29ce484222325)
-    }
-
-    pub fn update(&mut self, data: &[u8]) {
-        for &byte in data {
-            self.0 ^= byte as u64;
-            self.0 = self.0.wrapping_mul(0x100000001b3);
-        }
-    }
-
-    pub fn finish(self) -> u64 {
-        self.0
-    }
 }
 
 /// Threads a walk or key pass shares between the SSDs: separate drives list
@@ -1500,16 +1468,6 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["a.dem", "b.dem"]);
-    }
-
-    #[test]
-    fn fnv_matches_the_reference_vectors() {
-        assert_eq!(fnv1a_hash(b""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a_hash(b"a"), 0xaf63_dc4c_8601_ec8c);
-        let mut pieces = Fnv1a::new();
-        pieces.update(b"ab");
-        pieces.update(b"c");
-        assert_eq!(pieces.finish(), fnv1a_hash(b"abc"));
     }
 
     fn fixture_path() -> PathBuf {

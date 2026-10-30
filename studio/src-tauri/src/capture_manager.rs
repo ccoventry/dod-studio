@@ -1551,7 +1551,6 @@ pub async fn start_capture_batch_impl(
     let cancel_token_arc = Arc::clone(&manager.cancel_token);
     let batch_start_arc = Arc::clone(&manager.batch_start);
     let manifest_arc = Arc::clone(&manager.last_manifest);
-    let hlae_path = PathBuf::from(&patcher_config.hlae_path);
     let hl_path = PathBuf::from(&patcher_config.game_path);
 
     let app_handle_clone = app_handle.clone();
@@ -2265,7 +2264,6 @@ pub async fn start_capture_batch_impl(
         // Delegate to the promoted library engine
         spawn_capture_engine(
             capture_jobs,
-            Arc::new(hlae_path),
             Arc::new(hl_path),
             engine_tx,
             cancel_token_arc,
