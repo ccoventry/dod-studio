@@ -85,8 +85,10 @@ pub async fn blender_set_exe(path: Option<String>) -> Result<(), String> {
                     return Err(crate::messages::blender_not_blender(path));
                 }
                 blender::set_chosen(&tools, Some(exe))
+                    .map_err(crate::messages::failed_to_set_blender_exe)
             }
-            None => blender::set_chosen(&tools, None),
+            None => blender::set_chosen(&tools, None)
+                .map_err(crate::messages::failed_to_set_blender_exe),
         }
     }))
     .await
