@@ -1,6 +1,6 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
+import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame, takeCaptureStates, revealInExplorer } from './ipc_bridge.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
@@ -18,6 +18,7 @@ import { escapeHtml } from './html.js';
 import { playersOf, matchesPlayer } from './detail_player_filter.js';
 import { headshotsCell } from './headshots.js';
 import { fileNameOf } from './path_display.js';
+import { createCaptureHistory } from './capture_history.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -40,13 +41,18 @@ let currentOnDirty = null;
 // The project's Teams list (#445), for the automatic clip name's
 // {team_name} and {opponent}.
 let currentGetProjectTeams = () => null;
+// Each row's capture history (#439), made once the project's take index is known.
+let captureHistory = null;
 
-// The first argument (every demo) fed Generate All Previews, which a preview
-// that plays the demo in place made unnecessary; main.js still passes it.
-export function initDetailPane(_getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
+// The first argument (every demo) names the highlights a take is shared with
+// (capture_history.js).
+export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams, getTakeIndex } = {}) {
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
   if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
+  captureHistory = getTakeIndex
+    ? createCaptureHistory({ getTakeIndex, getDemos: getAllDemos, fetchStates: takeCaptureStates, reveal: revealInExplorer })
+    : null;
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -647,6 +653,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     });
 
     tbody.appendChild(tr);
+    captureHistory?.attach(tr, demo, streak);
   });
 
   // Header checkbox tri-state, reflecting only the same visible rows the

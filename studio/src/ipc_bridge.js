@@ -856,6 +856,17 @@ export async function removeNonRenderingRenderJobs() {
     });
 }
 
+/** Capture history (#439): per take folder, in order, whether it is still
+ *  there and its renders. Resolves to `[{ exists, renders }]`, or null when
+ *  the check failed (the list then says it couldn't look). */
+export async function takeCaptureStates(takeFolders) {
+  return invoke("take_capture_states", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_capture_states):", err);
+      return null;
+    });
+}
+
 /** Delete Take (#644): checks each take folder and measures it for the
  *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
  *  with the reason when any take can't be deleted. */

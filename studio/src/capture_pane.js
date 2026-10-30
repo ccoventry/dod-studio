@@ -18,6 +18,7 @@ import { describeProblemPaths } from './capture_pane_logic.js';
 import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
+import { captureRateOf } from './take_record.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
@@ -1016,7 +1017,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        const marked = markBlockCaptured(block, lastDispatch, takeIndex);
+        const marked = markBlockCaptured(block, lastDispatch, takeIndex, payload.capture_fps);
         advanced += marked.advanced;
         markCleared ||= marked.markCleared;
       });
@@ -1092,6 +1093,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths, kill_gaps: settings.kill_gaps };
     // The finish step (#440) picks its codec by the mode this batch used.
     lastDispatch.captureMode = settings.capture_mode;
+    // The rate the mode really records at, for the take's capture history (#439).
+    lastDispatch.captureFps = captureRateOf(settings.capture_mode, settings);
     return {
       ...settings,
       streaks: selectedStreaks,
