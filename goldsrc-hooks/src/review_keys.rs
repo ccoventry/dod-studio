@@ -10,9 +10,12 @@
 //! One key for each of the Review tab's buttons, in its order ([`KEYS_LIST`]):
 //! Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop. Next has no
 //! letter of its own (N is No), so it takes Space, the "press Space to go
-//! on" key, which only skips: B brings the highlight back. ESC brings up the
+//! on" key, which only skips: B brings the highlight back. E opens a small
+//! form for the kill range and the note over the demo ([`FORM_KEY`],
+//! `review_form`, #1139); while it shows, its boxes take every key, and the
+//! answer keys do nothing. ESC brings up the
 //! menu as always, and the review opens the DoD Studio window on its Review
-//! tab with it, for the kill range and the note: vgui2 takes ESC before any
+//! tab with it, whose boxes hold the same two: vgui2 takes ESC before any
 //! client hook sees it (seen live on PRE), so the review watches the menu
 //! come up instead (`review::poll`). The keys are taken while the review
 //! has a highlight loading, playing or waiting at its end for an answer
@@ -60,7 +63,8 @@ use crate::demo_list_folders::Setting;
 use crate::names::console_name;
 
 /// `ds_ui_review_keys 1` (default): while a highlight plays and at its end,
-/// Y, M, N, R, B, Space or S answer it on the game screen, and at its end the
+/// Y, M, N, R, B, Space or S answer it on the game screen, E opens the kill
+/// range and note form (#1139), and at its end the
 /// review waits there instead of opening the Review tab, which ESC opens.
 /// `0` opens the tab at each end, as before #660.
 pub static KEYS: Setting = Setting::new(console_name!("ui_review_keys"), true);
@@ -73,7 +77,7 @@ pub static INFO: Setting = Setting::new(console_name!("ui_review_info"), true);
 
 pub fn keys_status() -> String {
     if KEYS.on() {
-        "while a highlight plays and at its end, Y M N R B Space S answer it on screen, ESC opens the Review tab"
+        "while a highlight plays and at its end, Y M N R B Space S answer it on screen, E opens the kill range and note form, ESC the Review tab"
             .to_string()
     } else {
         "at a highlight's end, the Review tab opens for the answer".to_string()
@@ -99,6 +103,8 @@ pub(crate) enum Action {
     Back,
     Next,
     Stop,
+    /// Opens the kill range and note form (#1139).
+    Form,
 }
 
 impl Action {
@@ -107,10 +113,7 @@ impl Action {
     }
 
     fn from_code(code: u32) -> Option<Action> {
-        KEYS_LIST
-            .iter()
-            .map(|k| k.action)
-            .find(|a| a.code() == code)
+        all_keys().map(|k| k.action).find(|a| a.code() == code)
     }
 }
 
@@ -145,12 +148,23 @@ const fn key(code: u8, label: &'static str, word: &'static str, action: Action) 
     }
 }
 
-/// The action a key stands for, and its place in [`KEYS_LIST`].
+/// E: the kill range and note form (#1139). Not a Review tab button (the tab
+/// has the boxes themselves), so not in [`KEYS_LIST`]; E is `+use`, which
+/// does nothing in a demo.
+pub(crate) const FORM_KEY: Key = key(b'e', "E", "kill range and note", Action::Form);
+
+/// Every key the review takes: the buttons' in order, then [`FORM_KEY`].
+fn all_keys() -> impl Iterator<Item = &'static Key> {
+    KEYS_LIST.iter().chain(std::iter::once(&FORM_KEY))
+}
+
+/// The action a key stands for, and its place in [`all_keys`], which is its
+/// bit in [`HELD`].
 fn action_for(key: i32) -> Option<(usize, Action)> {
-    KEYS_LIST
-        .iter()
-        .position(|k| k.code == key)
-        .map(|i| (i, KEYS_LIST[i].action))
+    all_keys()
+        .enumerate()
+        .find(|(_, k)| k.code == key)
+        .map(|(i, k)| (i, k.action))
 }
 
 /// Whether the answer keys are the review's now.
@@ -224,6 +238,13 @@ pub fn key_event(down: i32, key: i32) -> bool {
     swallow
 }
 
+/// Forgets every taken key still down: called as the kill range and note
+/// form takes the keyboard (#1139). Their releases go to the form's boxes,
+/// never here, so a kept bit would swallow that key's next press.
+pub(crate) fn forget_held() {
+    HELD.store(0, Ordering::Relaxed);
+}
+
 /// The action a key asked for since the last poll.
 pub(crate) fn take_pending() -> Option<Action> {
     Action::from_code(PENDING.swap(0, Ordering::AcqRel))
@@ -289,8 +310,11 @@ pub(crate) fn publish(panel: Option<Panel>, mode: KeyMode) {
     }
 }
 
-/// The line under the keys: the key, in the key colour, then what it does.
-pub(crate) const ESC_LINE: (&str, &str) = ("ESC", "kill range and note");
+/// The line under the keys, each key in the key colour, then what it does:
+/// E opens the kill range and note form (#1139), ESC the menu on the Review
+/// tab, as before.
+pub(crate) const LAST_LINE: [(&str, &str); 2] =
+    [(FORM_KEY.label, FORM_KEY.word), ("ESC", "Review tab")];
 
 /// Draws the box. Runs after `client.dll`'s own `HUD_Redraw`, every frame.
 ///
@@ -311,7 +335,7 @@ pub unsafe fn draw() {
 mod draw {
     use std::ffi::CString;
 
-    use super::{ESC_LINE, KEYS_LIST, KillState, Panel};
+    use super::{Action, KEYS_LIST, KillState, LAST_LINE, Panel};
 
     const WHITE: (f32, f32, f32) = (1.0, 1.0, 1.0);
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
@@ -373,10 +397,19 @@ mod draw {
                 keys.extend(run(&format!(" {}", k.word), word));
             }
             lines.push(keys);
-            let mut esc = Vec::new();
-            esc.extend(run(ESC_LINE.0, KEY));
-            esc.extend(run(&format!(" {}", ESC_LINE.1), WHITE));
-            lines.push(esc);
+            // E is greyed with the rest during the lockout; ESC always works.
+            let mut last = Vec::new();
+            for (i, (key, word)) in LAST_LINE.iter().enumerate() {
+                let gap = if i == 0 { "" } else { "    " };
+                let (key_colour, word_colour) = if i > 0 || panel.key_live(Action::Form) {
+                    (KEY, WHITE)
+                } else {
+                    (DIM, DIM)
+                };
+                last.extend(run(&format!("{gap}{key}"), key_colour));
+                last.extend(run(&format!(" {word}"), word_colour));
+            }
+            lines.push(last);
         }
         lines
     }
@@ -472,9 +505,20 @@ mod tests {
             decide(true, b'w' as i32, KeyMode::Live, 0),
             (false, None, 0)
         );
+    }
+
+    #[test]
+    fn e_opens_the_form_only_while_the_keys_are_live() {
+        let e = b'e' as i32;
         assert_eq!(
-            decide(true, b'e' as i32, KeyMode::Live, 0),
-            (false, None, 0)
+            decide(true, e, KeyMode::Live, 0),
+            (true, Some(Action::Form), 1 << KEYS_LIST.len())
+        );
+        // E is +use with no review highlight on.
+        assert_eq!(decide(true, e, KeyMode::Off, 0), (false, None, 0));
+        assert_eq!(
+            decide(true, e, KeyMode::Locked, 0),
+            (true, None, 1 << KEYS_LIST.len())
         );
     }
 
@@ -584,8 +628,9 @@ mod tests {
 
     #[test]
     fn every_key_and_label_is_its_own() {
-        for (i, a) in KEYS_LIST.iter().enumerate() {
-            for b in &KEYS_LIST[i + 1..] {
+        let keys: Vec<&Key> = all_keys().collect();
+        for (i, a) in keys.iter().enumerate() {
+            for b in &keys[i + 1..] {
                 assert_ne!(a.code, b.code, "{} and {}", a.label, b.label);
                 assert_ne!(a.label, b.label);
                 assert_ne!(a.action, b.action);
@@ -596,7 +641,8 @@ mod tests {
             }
         }
         // The held set has a bit for each key.
-        assert!(KEYS_LIST.len() <= 32);
+        assert!(keys.len() <= 32);
+        assert_eq!(Action::from_code(Action::Form.code()), Some(Action::Form));
     }
 
     #[test]

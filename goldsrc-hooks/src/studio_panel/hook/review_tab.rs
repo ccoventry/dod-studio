@@ -30,7 +30,9 @@ fn page() -> Vpanel {
     unsafe { vpanel_of(PAGE_OBJECTS[REVIEW_PAGE].load(Ordering::Acquire) as *mut c_void) }
 }
 
-unsafe fn set(vgui: &Vgui, page: Vpanel, name: &str, slot_index: usize, text: &str) {
+/// Sets the text of the control `name` on `page` through its `slot_index`
+/// (a label's or a text box's `SetText`); nothing when the layout has none.
+pub(super) unsafe fn set(vgui: &Vgui, page: Vpanel, name: &str, slot_index: usize, text: &str) {
     unsafe {
         let Some(object) = vgui
             .child_named(page, name)
@@ -127,7 +129,7 @@ unsafe fn enable(vgui: &Vgui, page: Vpanel, names: &[&str], on: bool) {
 }
 
 /// A text box's text, however long.
-unsafe fn long_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
+pub(super) unsafe fn long_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
     unsafe {
         let Some(entry) = vgui
             .child_named(page, name)

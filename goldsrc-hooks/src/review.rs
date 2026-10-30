@@ -19,6 +19,12 @@
 //! events pipe (#434), then moves on. `replay` plays the highlight again,
 //! `next` and `back` move without answering, `stop` ends the review.
 //!
+//! The kill range and note can also be set without the menu: E (or `form`)
+//! opens a small form over the demo (`review_form`, #1139), whose Enter puts
+//! them on the highlight and sends them at once as a `REVIEW_EDIT` line,
+//! which sets the row's range and note and leaves its mark. The answer after
+//! it carries the same values.
+//!
 //! ## The queue file
 //!
 //! [`QUEUE_HEADER`] on the first line, optionally followed by tab-separated
@@ -362,6 +368,19 @@ fn typed_kill(text: &str, count: usize) -> Option<usize> {
         .filter(|&n| (1..=count).contains(&n))
 }
 
+/// The marker Studio reads a kill range and note saved without an answer
+/// from (#1139's form): the highlight's mark stays as it is.
+fn edit_label(h: &Highlight) -> String {
+    format!(
+        "REVIEW_EDIT\t{}\t{}\t{}\t{}\t{}",
+        h.demo,
+        h.key,
+        h.from,
+        h.to,
+        clean_note(&h.note)
+    )
+}
+
 /// The marker Studio reads an answer from.
 fn answer_label(h: &Highlight, verdict: Verdict) -> String {
     format!(
@@ -654,6 +673,52 @@ pub(crate) fn tab_view() -> Option<TabView> {
     })
 }
 
+/// What the kill range and note form shows for the highlight the review is
+/// on (#1139), or `None` with no review running.
+pub(crate) fn form_view() -> Option<crate::review_form::FormView> {
+    let guard = lock();
+    let review = guard.as_ref()?;
+    let h = review.queue.get(review.at)?;
+    Some(crate::review_form::FormView {
+        key: h.key.clone(),
+        title: panel_title(&review.queue, review.at),
+        from: h.from,
+        to: h.to,
+        kills: h.kills.len(),
+        note: h.note.clone(),
+    })
+}
+
+/// Puts what the form saved on its highlight and sends it to Studio, which
+/// sets the row's kill range and note and leaves its mark (#1139). The answer
+/// after it carries the same values. A save for a highlight the review has
+/// left is dropped: the form closes when the highlight changes, so only a
+/// save racing that change gets here.
+fn apply_saved(saved: crate::review_form::Saved) {
+    let mut guard = lock();
+    let Some(review) = guard.as_mut() else {
+        trace("form: saved with no review running, dropped");
+        return;
+    };
+    let at = review.at;
+    let h = &mut review.queue[at];
+    if h.key != saved.key {
+        trace("form: saved for a highlight the review has left, dropped");
+        return;
+    }
+    h.from = saved.from.clamp(1, h.kills.len());
+    h.to = saved.to.clamp(h.from, h.kills.len());
+    h.note = clean_note(&saved.note);
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    crate::events::send(&edit_label(h));
+    say(&format!(
+        "highlight {}: kills {}-{} and the note saved",
+        at + 1,
+        h.from,
+        h.to
+    ));
+}
+
 /// "Demo 2 of 5 | highlight 3 of 9 | 4 left to answer".
 fn heading(queue: &[Highlight], at: usize) -> String {
     let mut demos: Vec<&str> = Vec::new();
@@ -812,6 +877,9 @@ pub fn poll() {
     if let Some(action) = crate::review_keys::take_pending() {
         key_action(action);
     }
+    if let Some(saved) = crate::review_form::take_saved() {
+        apply_saved(saved);
+    }
     let mut guard = lock();
     step(&mut guard);
     let (panel, mode) = match guard.as_ref() {
@@ -862,6 +930,17 @@ fn key_mode(review: &Review, keys_on: bool, now: Instant) -> KeyMode {
     }
 }
 
+/// The keys while the kill range and note form shows (#1139): taken but
+/// doing nothing, should one reach the game past the form's boxes, which
+/// keep every key they're typed in.
+fn under_form(mode: KeyMode, form_shown: bool) -> KeyMode {
+    if form_shown && mode == KeyMode::Live {
+        KeyMode::Locked
+    } else {
+        mode
+    }
+}
+
 /// What the on-screen panel shows for the review as it stands at `now`,
 /// with the demo player's clock at `clock`, and what the answer keys do.
 fn panel_view(
@@ -874,7 +953,7 @@ fn panel_view(
     let Some(_) = review.queue.get(review.at) else {
         return (None, KeyMode::Off);
     };
-    let mode = key_mode(review, keys, now);
+    let mode = under_form(key_mode(review, keys, now), crate::review_form::is_shown());
     let title = panel_title(&review.queue, review.at);
     let panel = |status: &str| crate::review_keys::Panel {
         title: title.clone(),
@@ -957,13 +1036,15 @@ fn kill_lines(h: &Highlight, clock: KillClock) -> Vec<crate::review_keys::KillLi
 fn key_action(action: crate::review_keys::Action) {
     use crate::review_keys::Action;
     let live = lock().as_ref().is_some_and(|r| {
-        key_mode(r, crate::review_keys::KEYS.on(), Instant::now()) == KeyMode::Live
+        let mode = key_mode(r, crate::review_keys::KEYS.on(), Instant::now());
+        under_form(mode, crate::review_form::is_shown()) == KeyMode::Live
     });
     if !live {
         return;
     }
     trace(&format!("key: {action:?}"));
     match action {
+        Action::Form => crate::review_form::request_open(),
         Action::Yes => answer(Verdict::Yes),
         Action::Maybe => answer(Verdict::Maybe),
         Action::No => answer(Verdict::No),
@@ -1233,7 +1314,17 @@ fn stop() {
     }
 }
 
-const USAGE: &str = "start \"<queue file>\" | ask start | ask here | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
+const USAGE: &str = "start \"<queue file>\" | ask start | ask here | yes | maybe | no | replay | next | back | form | range <from> <to> | note <text> | stop";
+
+/// `form`: the kill range and note form, as E opens it (#1139), for a bind
+/// or a test that can't press keys.
+fn open_form() {
+    if lock().is_some() {
+        crate::review_form::request_open();
+    } else {
+        say("no review running");
+    }
+}
 
 /// `ds_demo_review <what>`.
 pub unsafe extern "C" fn command() {
@@ -1256,6 +1347,7 @@ pub unsafe extern "C" fn command() {
         "replay" => replay(),
         "next" => next(),
         "back" => back(),
+        "form" => open_form(),
         "range" => {
             let mut guard = lock();
             let Some(review) = guard.as_mut() else {
@@ -1838,6 +1930,28 @@ mod tests {
         let (panel, mode) = panel_view(&review, now, None);
         assert_eq!(mode, KeyMode::Live);
         assert!(panel.is_some_and(|p| p.keys && p.live && p.status.is_empty()));
+    }
+
+    #[test]
+    fn the_keys_do_nothing_while_the_form_shows() {
+        // Typing a Y in the note must not answer, should it reach the game.
+        assert_eq!(under_form(KeyMode::Live, true), KeyMode::Locked);
+        assert_eq!(under_form(KeyMode::Live, false), KeyMode::Live);
+        // Off stays off: the form doesn't take keys the review doesn't.
+        assert_eq!(under_form(KeyMode::Off, true), KeyMode::Off);
+    }
+
+    #[test]
+    fn a_form_save_is_one_tab_separated_line_without_a_verdict() {
+        let mut h = highlight("C:/d/a.dem", Some(Verdict::Yes));
+        h.key = "4".to_string();
+        h.kills = vec![1.0, 2.0, 3.0];
+        (h.from, h.to) = (2, 3);
+        h.note = "nice\tflick ".to_string();
+        assert_eq!(
+            edit_label(&h),
+            "REVIEW_EDIT\tC:/d/a.dem\t4\t2\t3\tnice flick"
+        );
     }
 
     #[test]
