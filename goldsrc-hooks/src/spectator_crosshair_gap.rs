@@ -110,8 +110,11 @@ const MOVING_SPEED: f32 = 105.0;
 const STEP: i32 = 3;
 /// `CHudDoDCrossHair`'s last gap, which the game eases from.
 const LAST_GAP_AT: usize = 0x98;
-/// The span of snapshots the speed is read over, in seconds.
-const WINDOW: f64 = 0.15;
+/// The span of snapshots the speed is read over, in seconds. The snapshots'
+/// origins are uneven: over 0.15 s a player walking at a steady pace read
+/// anywhere from 68 to 142 u/s, flipping the gap across the 105 u/s line
+/// several times a second.
+const WINDOW: f64 = 0.3;
 /// A longer gap between snapshots starts afresh (as `snapshot_motion`).
 const GAP_SECONDS: f64 = 0.5;
 
@@ -739,7 +742,7 @@ mod tests {
             meter.snapshot(3, t, [200.0 * t as f32, 0.0, z]);
         }
         assert!((meter.speed() - 200.0).abs() < 0.5, "{}", meter.speed());
-        assert!(meter.snapshots.len() <= 5, "{}", meter.snapshots.len());
+        assert!(meter.snapshots.len() <= 8, "{}", meter.snapshots.len());
     }
 
     #[test]

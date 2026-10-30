@@ -202,7 +202,7 @@ and calls the original in POV, so live play and POV demos are untouched.
 | --- | --- | --- |
 | weapon | the local weapon id | the viewmodel, matched to the table row's own viewmodel path |
 | deployed | `g_iUser3 == 2` (prone with the bipod down) or the sandbag flag | body `bipod_*` / `sandbag_*` |
-| speed | the local predicted velocity, 3D | horizontal origin change over the newest 0.15 s of snapshots |
+| speed | the local predicted velocity, 3D | horizontal origin change over the newest 0.3 s of snapshots |
 
 **Deployed is not prone.** A prone rifleman keeps his standing gap; only the
 bipod and the sandbag swap `base` for `alt`.
