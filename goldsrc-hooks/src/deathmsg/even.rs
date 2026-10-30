@@ -475,6 +475,11 @@ static MAP_NAMES: AtomicUsize = AtomicUsize::new(0);
 static MAP_TABLE: AtomicU32 = AtomicU32::new(0);
 /// How many indices got a box, for `status`.
 static MATCHED: AtomicUsize = AtomicUsize::new(0);
+/// The butt stroke's variants (#1088): the sprite index of `d_garandbutt`
+/// (`usize::MAX`: none) and a leaked `[AtlasBox; 4]` in
+/// [`super::butt::VARIANT_NAMES`]' order (0: the table has no full set).
+static BUTT_INDEX: AtomicUsize = AtomicUsize::new(usize::MAX);
+static BUTT_BOXES: AtomicUsize = AtomicUsize::new(0);
 /// The table loaded with the atlas, and a count that moves at each load.
 /// Read and written at a load or a names change, never per frame.
 static TABLE: RwLock<Option<Table>> = RwLock::new(None);
@@ -513,6 +518,67 @@ pub(super) fn box_for(index: usize) -> Option<AtlasBox> {
     }
     // Safety: a leaked `[Option<AtlasBox>; len]`, never freed.
     unsafe { *(ptr as *const Option<AtlasBox>).add(index) }
+}
+
+/// The box the line `Draw` is drawing takes its icon from: sprite index
+/// `index`'s, or for a butt stroke the variant [`super::butt`] noted for the
+/// line at `slot_offset` (the line-start stub's `edi`). Every variant has
+/// the same size as `d_garandbutt`'s box (checked at load), so the line the
+/// game laid out fits whichever is drawn.
+pub(super) fn line_box(index: usize, slot_offset: i32) -> Option<AtlasBox> {
+    let own = box_for(index)?;
+    let boxes = BUTT_BOXES.load(Ordering::Acquire);
+    if index != BUTT_INDEX.load(Ordering::Relaxed) || boxes == 0 {
+        return Some(own);
+    }
+    #[cfg(target_arch = "x86")]
+    if let Some(v) = super::butt::line_variant(slot_offset) {
+        // Safety: a leaked `[AtlasBox; 4]`, never freed; `v` < 4.
+        return Some(unsafe { *(boxes as *const AtlasBox).add(v.min(3)) });
+    }
+    let _ = slot_offset;
+    Some(own)
+}
+
+/// The butt stroke's four variant boxes, in [`super::butt::VARIANT_NAMES`]'
+/// order, when the table has all four in one size; else `None`, and every
+/// butt stroke draws `d_garandbutt`'s own box.
+pub(super) fn butt_boxes(table: &Table) -> Option<[AtlasBox; 4]> {
+    let find = |name: &str| {
+        table
+            .boxes
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, b)| *b)
+    };
+    let names = super::butt::VARIANT_NAMES;
+    let boxes = [
+        find(names[0].0)?,
+        find(names[1].0)?,
+        find(names[2].0)?,
+        find(names[3].0)?,
+    ];
+    let size = |b: &AtlasBox| (b.rect.right - b.rect.left, b.rect.bottom - b.rect.top);
+    boxes
+        .iter()
+        .all(|b| size(b) == size(&boxes[0]))
+        .then_some(boxes)
+}
+
+/// The sprite index whose `m_rgszSpriteNames` entry is `name`, as
+/// [`boxes_by_index`] reads the entries.
+pub(super) fn index_of(names: &[u8], count: usize, name: &str) -> Option<usize> {
+    (0..count).find(|&i| {
+        names
+            .get(i * SPRITE_NAME_LEN..(i + 1) * SPRITE_NAME_LEN)
+            .is_some_and(|e| entry_name(e).eq_ignore_ascii_case(name.as_bytes()))
+    })
+}
+
+/// Whether `layout even` is asked for, drawing or not yet: the `DeathMsg`
+/// handler then notes butt strokes for [`line_box`].
+pub(super) fn wanted() -> bool {
+    WANT_EVEN.load(Ordering::Relaxed)
 }
 
 /// The atlas's handle, while the even layout draws.
@@ -777,6 +843,16 @@ fn map_indices() {
     let bytes = unsafe { std::slice::from_raw_parts(names as *const u8, span) };
     let map = boxes_by_index(bytes, count, table);
     let matched = map.iter().flatten().count();
+    let butt = butt_boxes(table);
+    BUTT_INDEX.store(
+        index_of(bytes, count, super::butt::VARIANT_NAMES[0].0).unwrap_or(usize::MAX),
+        Ordering::Relaxed,
+    );
+    // Leaked like the map, at most once per level load.
+    BUTT_BOXES.store(
+        butt.map_or(0, |b| Box::leak(Box::new(b)).as_ptr() as usize),
+        Ordering::Release,
+    );
     let ptr = Box::leak(map.into_boxed_slice()).as_ptr() as usize;
     // The old map is leaked rather than freed: one per level load at most,
     // and nothing then reads freed memory.
@@ -787,7 +863,12 @@ fn map_indices() {
     MATCHED.store(matched, Ordering::Relaxed);
     MAP_GENERATION.fetch_add(2, Ordering::Relaxed);
     report(&format!(
-        "{matched} of the HUD's {count} sprites draw from the atlas"
+        "{matched} of the HUD's {count} sprites draw from the atlas{}",
+        if butt.is_some() {
+            ", the butt stroke per line (four variants)"
+        } else {
+            ""
+        }
     ));
 }
 
@@ -968,6 +1049,45 @@ mod tests {
         assert_eq!(map[4], None, "d_skull isn't in this table");
         // A count past the array gives no box rather than a read past it.
         assert_eq!(boxes_by_index(&names, 7, &t)[6], None);
+        assert_eq!(index_of(&names, 5, "d_world"), Some(3));
+        assert_eq!(index_of(&names, 5, "D_MP44"), Some(1));
+        assert_eq!(index_of(&names, 5, "d_garandbutt"), None);
+        assert_eq!(
+            index_of(&names, 9, "d_garandbutt"),
+            None,
+            "no read past the array"
+        );
+    }
+
+    #[test]
+    fn the_butt_variants_count_only_as_a_full_set_of_one_size() {
+        let full = parse_table(
+            "dodstudio_killfeed 1 2\n\
+             d_garandbutt 1 2 2 53 26\n\
+             d_garandbutt_us 1 57 2 53 26\n\
+             d_k43butt_axis 1 112 2 53 26\n\
+             d_k43butt_us 1 167 2 53 26\n\
+             d_mp44 0 2 2 59 26\n",
+        )
+        .unwrap();
+        let boxes = butt_boxes(&full).unwrap();
+        assert_eq!(boxes[0], full.boxes[0].1, "hud.txt's own first");
+        assert_eq!(boxes[3], full.boxes[3].1);
+        // An atlas from before #1088: only d_garandbutt.
+        assert_eq!(butt_boxes(&parse_table(TABLE_TEXT).unwrap()), None);
+        let uneven = parse_table(
+            "dodstudio_killfeed 1 2\n\
+             d_garandbutt 1 2 2 53 26\n\
+             d_garandbutt_us 1 57 2 53 26\n\
+             d_k43butt_axis 1 112 2 50 26\n\
+             d_k43butt_us 1 167 2 53 26\n",
+        )
+        .unwrap();
+        assert_eq!(
+            butt_boxes(&uneven),
+            None,
+            "a narrower box would not fit the line"
+        );
     }
 
     #[test]

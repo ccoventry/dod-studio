@@ -117,9 +117,9 @@ static GAME_TEAM_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// `g_iUser1`, `g_iUser2`, and `g_PlayerExtraInfo[0].teamnumber`.
 const MODE_RVA: usize = 0xe8_8d4;
 const TARGET_RVA: usize = 0xe8_8d8;
-const EXTRA_TEAM_RVA: usize = 0xe9_120;
+pub(crate) const EXTRA_TEAM_RVA: usize = 0xe9_120;
 /// `sizeof(extra_player_info_t)`.
-const EXTRA_STRIDE: usize = 48;
+pub(crate) const EXTRA_STRIDE: usize = 48;
 /// Allies (British maps included) and Axis.
 const ALLIES: i32 = 1;
 const AXIS: i32 = 2;
