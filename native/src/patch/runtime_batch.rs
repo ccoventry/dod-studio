@@ -71,8 +71,16 @@ pub const WAIT_FOR_RECORDING: &str = "ds_capture_batch wait_for_recording";
 /// Studio's go-ahead for a clip waiting at [`WAIT_FOR_RECORDING`].
 pub const RECORDING_GO: &str = "ds_capture_batch recording";
 
-/// The helper cfg's sound flush, scheduled at each clip's `AUDIO_SYNC`.
-const SOUND_FLUSH: &str = "sys_sound";
+/// The marker OBS mode starts the recording on (`obs::TRIGGER_MARKER`), as
+/// the builder echoes it.
+const AUDIO_SYNC_MARKER: &str = "[dod-studio] AUDIO_SYNC - ";
+
+/// Whether `command` is a clip's `AUDIO_SYNC` echo. The wait goes with the
+/// marker itself rather than the `sys_sound` beside it: a clip chained to the
+/// one before (#1169) has no sound flush but still needs its recording.
+fn is_audio_sync_echo(command: &str) -> bool {
+    command.starts_with("echo") && command.contains(AUDIO_SYNC_MARKER)
+}
 
 fn clean(line: &str) -> String {
     line.replace(['\r', '\n', '\t'], " ")
@@ -178,9 +186,9 @@ pub fn batch_file_playing(
                 out.push(format!("next\t{}", seconds_text(at)));
             } else {
                 out.push(format!("at\t{}\t{}", seconds_text(at), clean(command)));
-                // `sys_sound` is the lead-in's AUDIO_SYNC stage, where OBS
-                // mode starts the recording.
-                if wait_for_recording && command == SOUND_FLUSH {
+                // OBS mode starts the recording on the AUDIO_SYNC echo, so the
+                // clip waits right after it.
+                if wait_for_recording && is_audio_sync_echo(command) {
                     out.push(format!("at\t{}\t{WAIT_FOR_RECORDING}", seconds_text(at)));
                 }
             }
@@ -356,8 +364,11 @@ mod tests {
             "a.dem",
             &[
                 (2800, "sys_sound"),
-                (2800, "echo [dod-studio] AUDIO_SYNC - Tick 2800"),
+                (2800, "echo \"[dod-studio] AUDIO_SYNC - Tick 2800\""),
                 (2900, "sys_record_start"),
+                // A clip chained to the one before (#1169): its AUDIO_SYNC
+                // has no sound flush beside it, and still waits.
+                (2950, "echo \"[dod-studio] AUDIO_SYNC - Tick 2950\""),
             ],
         )];
         // The hook's own names (goldsrc-hooks `batch.rs`, whose test pins
@@ -367,10 +378,16 @@ mod tests {
         let wait = format!("at\t328.000\t{WAIT_FOR_RECORDING}");
         let obs = batch_file_playing(&jobs, &streaks, false, &HashMap::new(), true).unwrap();
         assert!(
-            obs.contains(&format!("at\t328.000\tsys_sound\n{wait}\n")),
+            obs.contains(&format!(
+                "at\t328.000\techo \"[dod-studio] AUDIO_SYNC - Tick 2800\"\n{wait}\n"
+            )),
             "{obs}"
         );
-        assert_eq!(obs.matches(WAIT_FOR_RECORDING).count(), 1);
+        assert!(
+            obs.contains(&format!("at\t329.500\t{WAIT_FOR_RECORDING}\n")),
+            "{obs}"
+        );
+        assert_eq!(obs.matches(WAIT_FOR_RECORDING).count(), 2);
         let hlae = batch_file(&jobs, &streaks, false).unwrap();
         assert!(!hlae.contains(WAIT_FOR_RECORDING), "{hlae}");
     }

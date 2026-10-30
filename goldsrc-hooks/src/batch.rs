@@ -890,8 +890,10 @@ pub unsafe extern "C" fn command() {
             if lock().take().is_some() {
                 run("mirv_recordmovie_stop");
                 // A batch stopped inside a fast-forwarded gap (#831) would
-                // leave the demo playing sped up.
+                // leave the demo playing sped up, and one stopped while held
+                // (#861) or waiting for OBS (#1109) would leave it paused.
                 let _ = crate::demo_seek::set_time_scale(1.0);
+                let _ = crate::demo_seek::set_paused(false);
                 say("stopped");
             } else {
                 say("no batch running");
