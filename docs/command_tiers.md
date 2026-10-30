@@ -2,7 +2,7 @@
 
 A command a user types into Initial or Scheduled Commands falls into one of five lists in `native/src/patch/cfg_scan.rs`. **That file is the source of truth.** This page explains *why* each list exists; it names example members only to illustrate, and the set has been re-tiered more than once (`mirv_movie_filename` moved in #161; `mirv_movie_separate_hud` disappeared with #214). Read `cfg_scan.rs` before describing the current set.
 
-Enforcement runs twice, independently: in `map_manager::scan_game_configs`'s report, and again in `capture_manager::start_capture_batch_impl`. The Commands type-ahead (`studio/src/command_suggest.js`) mirrors the tiers, so a tier change must be mirrored there too.
+Enforcement runs twice, independently: in `native::patch::cfg_report`'s report (the `scan_game_configs` command), and again in `capture_manager::start_capture_batch_impl`. The Commands type-ahead (`studio/src/command_suggest.js`) mirrors the tiers, so a tier change must be mirrored there too.
 
 ## The five lists
 

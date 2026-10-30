@@ -265,13 +265,27 @@ fn default_resolution_height() -> i32 {
 /// One custom command row — serialisable across the Tauri IPC boundary.
 /// `relation` is a plain string ("Before" | "After") rather than
 /// `CommandRelation` directly so an unrecognised value fails safe (defaults
-/// to `Before` in `config_from_payload`) instead of rejecting the whole
-/// batch payload.
+/// to `Before` in the `From` below) instead of rejecting the whole batch
+/// payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomCommandPayload {
     pub command: String,
     pub relation: String,
     pub offset_seconds: f32,
+}
+
+/// The pipeline's form of a row: anything but "After" is `Before`.
+impl From<&CustomCommandPayload> for CustomCommand {
+    fn from(c: &CustomCommandPayload) -> Self {
+        CustomCommand {
+            command: c.command.clone(),
+            offset: c.offset_seconds,
+            relation: match c.relation.as_str() {
+                "After" => CommandRelation::After,
+                _ => CommandRelation::Before,
+            },
+        }
+    }
 }
 
 /// One highlight streak — serialisable across the Tauri IPC boundary.
@@ -492,14 +506,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.custom_commands = payload
         .custom_commands
         .iter()
-        .map(|c| CustomCommand {
-            command: c.command.clone(),
-            offset: c.offset_seconds,
-            relation: match c.relation.as_str() {
-                "After" => CommandRelation::After,
-                _ => CommandRelation::Before,
-            },
-        })
+        .map(CustomCommand::from)
         .collect();
     if let Some(v) = payload.decal_flush {
         cfg.decal_flush = v;
