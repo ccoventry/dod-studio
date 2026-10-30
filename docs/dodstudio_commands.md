@@ -94,7 +94,7 @@ the death cam).
 | `ds_ui_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `ds_ui_resizable_windows` | `1` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `ds_ui_remember_layout` | `1` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
-| `ds_ui_review_keys` | `1` | Review highlights answers on the game screen: while a highlight plays and at its end, where the review pauses, a box lists Y Yes, M Maybe, N No, R Replay, B Back, Space Next (on without answering), S Stop: one key for each of the Review tab's buttons, in their order. An answer while the highlight plays ends it and moves on (#1141). For 1 s after each highlight starts playing the keys are greyed and do nothing, so a double press can't answer the next one unseen. ESC opens the DoD Studio window's Review tab for the kill range and note. The keys work only during a review highlight and while keys go to the game: never while typing in the console, chat or a window's box, and at any other time each key does what it always does. They take no bind, so `config.cfg` is untouched. `0` opens the Review tab at each highlight's end instead (#660) | `goldsrc-hooks/src/review_keys.rs` |
+| `ds_ui_review_keys` | `1` | Review highlights answers on the game screen: while a highlight plays and at its end, where the review pauses, a box lists Y Yes, M Maybe, N No, R Replay, B Back, Space Next (on without answering), S Stop: one key for each of the Review tab's buttons, in their order. An answer while the highlight plays ends it and moves on (#1141). For 1 s after each highlight starts playing the keys are greyed and do nothing, so a double press can't answer the next one unseen. E opens a small form over the demo for the kill range and note (#1139; Tab between boxes, Enter saves, Esc cancels; the answer keys do nothing while it shows), and ESC still opens the DoD Studio window's Review tab. The keys work only during a review highlight and while keys go to the game: never while typing in the console, chat or a window's box, and at any other time each key does what it always does. They take no bind, so `config.cfg` is untouched. `0` opens the Review tab at each highlight's end instead (#660) | `goldsrc-hooks/src/review_keys.rs` |
 | `ds_ui_review_info` | `1` | Review highlights: while a highlight loads and plays, a box on the game screen says which it is, whose and how many kills, with the answer keys. While it plays the box lists its kills (time, victim, weapon), the next one to come in amber behind a `>` (#1140). The answer keys' box shows at a highlight's end either way (#660); with this off the keys still answer while a highlight plays, unseen | `goldsrc-hooks/src/review_keys.rs` |
 
 The HD rows work the same on the pre-Anniversary and the 25th Anniversary
@@ -364,7 +364,13 @@ those off, on the window's Review tab, which it opens. When the queue's header a
 sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 `no` answer with the Review tab's kill range and note and move on; `replay`, `next` (skip without answering),
 `back` and `stop` move around. `range <from> <to>` and `note <text>` set the
-answer from the console, for key binds. Bare prints where the review is.
+answer from the console, for key binds. `form` opens the kill range and note
+form over the demo, as **E** does during a highlight (#1139): a small window of
+its own with the menu closed (`ReviewForm.res`); Tab moves between its boxes,
+Enter saves (a `[dod-studio] REVIEW_EDIT` line: Studio sets the row's kill
+range and note and leaves its mark), Esc cancels, and it closes by itself when
+the review moves on or the menu comes up. Clicking its buttons works on the
+pre-Anniversary build; the keyboard does everything on both. Bare prints where the review is.
 With no review running, `ask start` and `ask here` (the Review tab's **From
 the start** and **From here**, #1142) ask DoD Studio, over its game pipe, to
 review the demo playing: every highlight, from the first or from the first
@@ -652,7 +658,7 @@ is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod_addon\dodstudio_ui\` (or `dod\dodstudio_ui\` when the game has no `-addons`, or while only that one exists, as before #415): `DodStudio.res` for the window and
-one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), written
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), and `ReviewForm.res` for the review's kill range and note form (#1139), written
 the first time and never overwritten. The empty `...Slot` controls in
 `Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,

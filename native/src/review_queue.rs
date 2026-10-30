@@ -1,7 +1,8 @@
 //! The review mode's two messages (issue #623): the queue Studio hands the
 //! game, and the lines the game sends back on its events pipe.
 //!
-//! The game side is `goldsrc-hooks/src/review.rs`. Neither crate depends on
+//! The game side is `goldsrc-hooks/src/review.rs` (its answers, and the kill
+//! range and note its form saves, #1139). Neither crate depends on
 //! the other, so each pins the same strings in its tests.
 
 use serde::{Deserialize, Serialize};
@@ -156,6 +157,15 @@ pub enum ReviewEvent {
         to: usize,
         note: String,
     },
+    /// A kill range and note saved in the game's form without an answer
+    /// (#1139): the row takes both and keeps its Review mark.
+    Edit {
+        demo: String,
+        key: String,
+        from: usize,
+        to: usize,
+        note: String,
+    },
     /// `done`, `stopped`, or `failed: <why>`.
     Ended {
         reason: String,
@@ -192,6 +202,21 @@ pub fn parse_event(line: &str) -> Option<ReviewEvent> {
                 demo,
                 key,
                 verdict,
+                from,
+                to,
+                note,
+            })
+        }
+        "REVIEW_EDIT" => {
+            let demo = fields.next()?.to_string();
+            let key = fields.next()?.to_string();
+            let from = fields.next()?.trim().parse().ok()?;
+            let to = fields.next()?.trim().parse().ok()?;
+            // As an answer's: an empty note leaves no field.
+            let note = fields.next().unwrap_or("").trim().to_string();
+            Some(ReviewEvent::Edit {
+                demo,
+                key,
                 from,
                 to,
                 note,
@@ -360,6 +385,28 @@ mod tests {
             panic!("not parsed");
         };
         assert_eq!(verdict, "maybe");
+    }
+
+    /// The game's `review::edit_label` line (#1139), and the JSON the
+    /// frontend's review_mode.js reads (`kind`, `from`, `to`, `note`).
+    #[test]
+    fn a_form_save_is_parsed_as_an_edit() {
+        let event =
+            parse_event("[dod-studio] REVIEW_EDIT\tC:/d/a.dem\t4\t2\t3\tnice flick").unwrap();
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({
+                "kind": "edit", "demo": "C:/d/a.dem", "key": "4",
+                "from": 2, "to": 3, "note": "nice flick"
+            })
+        );
+        let Some(ReviewEvent::Edit { note, .. }) =
+            parse_event("[dod-studio] REVIEW_EDIT\tC:/d/a.dem\t4\t1\t1")
+        else {
+            panic!("not parsed");
+        };
+        assert_eq!(note, "");
+        assert_eq!(parse_event("[dod-studio] REVIEW_EDIT\ta\tb\tx\t1"), None);
     }
 
     /// The game's `review_lock::refused_label` line, and the JSON the

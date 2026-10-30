@@ -30,8 +30,10 @@
 //! ## When it closes by itself
 //!
 //! When the review moves to another highlight or ends, and when the menu
-//! comes up (ESC; the form isn't part of it, so it would sit on top): each
-//! cancels, as Esc does.
+//! comes up (the form isn't part of it, so it would sit on top): each
+//! cancels, as Esc does. The engine brings the menu up on the very Esc the
+//! form cancels with, so a menu that comes up just after the form's Esc, or
+//! while it shows, is put away again: Esc on the form means the form.
 
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -89,16 +91,29 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 }
             }
         }
-        if !crate::review_form::is_shown() {
-            return;
+        if crate::review_form::is_shown() {
+            match form(vgui) {
+                Some((_, vp)) => {
+                    if let Some(why) = reason_to_close(vgui, vp) {
+                        vgui.set_visible(vp, false);
+                        close(why);
+                    }
+                }
+                None => close("its window has gone"),
+            }
         }
-        let Some((_, vp)) = form(vgui) else {
-            close("its window has gone");
-            return;
-        };
-        if let Some(why) = reason_to_close(vgui, vp) {
-            vgui.set_visible(vp, false);
-            close(why);
+        put_away_esc_menu(vgui);
+    }
+}
+
+/// Hides the menu the form's Esc brought up: the engine opens the menu on
+/// the same Esc the form takes to cancel (seen live on PRE). The review
+/// doesn't open its Review tab for it either (`review::watch_menu`).
+unsafe fn put_away_esc_menu(vgui: &Vgui) {
+    unsafe {
+        if crate::review_form::menu_is_from_esc() && menu_up(vgui) {
+            close_for_playback();
+            trace("put away the menu the form's Esc brought up");
         }
     }
 }
@@ -118,6 +133,8 @@ unsafe fn reason_to_close(vgui: &Vgui, vp: Vpanel) -> Option<&'static str> {
             return Some("the review moved to another highlight");
         }
         if menu_up(vgui) {
+            // Esc, whichever of the form and the engine saw it first.
+            crate::review_form::note_esc();
             return Some("the menu came up");
         }
         None
@@ -333,7 +350,10 @@ unsafe fn cancel() {
 unsafe extern "thiscall" fn form_on_key(this: *mut c_void, code: i32) {
     match code {
         KEY_ENTER | KEY_PAD_ENTER => unsafe { submit() },
-        KEY_ESCAPE => unsafe { cancel() },
+        KEY_ESCAPE => {
+            crate::review_form::note_esc();
+            unsafe { cancel() }
+        }
         _ => {
             let own = OWN_ON_KEY.load(Ordering::Acquire);
             if own != 0 {

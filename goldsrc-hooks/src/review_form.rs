@@ -2,7 +2,8 @@
 //! plays or waits at its end, E (or `ds_demo_review form`) opens a small form
 //! over the demo, with the menu closed: the kill range's first and last kill
 //! and a one-line note, as Highlight Details has them. Tab moves between the
-//! boxes, Enter saves, Esc cancels. The keyboard is enough: the form takes
+//! boxes, Enter saves, Esc cancels (and the menu the engine brings up on that
+//! same Esc goes away again). The keyboard is enough: the form takes
 //! the keys while it shows, so typing a Y or an N in it never answers.
 //! Clicking it works where the build passes the mouse on (pre-Anniversary).
 //!
@@ -23,6 +24,7 @@
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 /// What the form shows for one highlight.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +76,28 @@ pub(crate) fn set_shown(shown: bool) {
 /// Whether the form shows now.
 pub(crate) fn is_shown() -> bool {
     SHOWN.load(Ordering::Acquire)
+}
+
+/// How long after the form's Esc a menu coming up is Esc's doing. The engine
+/// brings the menu up on the same Esc that cancels the form (seen live on
+/// PRE), within a frame or two.
+const ESC_MENU_WINDOW: Duration = Duration::from_millis(500);
+
+/// When Esc last closed the form.
+static ESC_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Notes that Esc closed the form: the menu the same Esc brings up is put
+/// away again, and doesn't open the Review tab.
+pub(crate) fn note_esc() {
+    *ESC_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+}
+
+/// Whether Esc closed the form just now, so a menu coming up is its doing.
+pub(crate) fn menu_is_from_esc() -> bool {
+    ESC_AT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some_and(|at| at.elapsed() < ESC_MENU_WINDOW)
 }
 
 /// Hands a save to the review's next poll; a second save before it replaces
