@@ -9,35 +9,29 @@
 //!
 //! Read-only. This never writes, edits or removes a config file.
 
+use native::messages;
 use native::patch::cfg_scan;
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let dir = std::path::PathBuf::from(
-        args.next()
-            .expect("usage: check_cfgs <dod-folder> [\"init command\"...]"),
-    );
+    let dir = std::path::PathBuf::from(args.next().expect(messages::CHECK_CFGS_USAGE));
     let init_commands: Vec<String> = args.collect();
 
     let scan = cfg_scan::scan(&dir);
     println!(
-        "{}\n{} config file(s) executed\n",
-        dir.display(),
-        scan.files_read
+        "{}",
+        messages::cfgs_folder_and_count(dir.display(), scan.files_read)
     );
 
     let effective = scan.effective_settings();
     if effective.is_empty() {
-        println!("Nothing the pipeline depends on is set by an executed config.");
+        println!("{}", messages::CFGS_NOTHING_SET);
     } else {
-        println!("Set by configs the engine runs on its own:");
+        println!("{}", messages::CFGS_SET_BY_CONFIGS);
         for s in &effective {
             println!(
-                "  {:<12} {:<8} {}:{}",
-                s.cvar,
-                s.value,
-                s.file_name(),
-                s.line
+                "{}",
+                messages::cfgs_setting_row(&s.cvar, &s.value, s.file_name(), s.line)
             );
         }
     }
@@ -56,69 +50,68 @@ fn main() {
         })
         .collect();
     if !shadowed.is_empty() {
-        println!("\nAlso set, but overridden later in the chain:");
+        println!("{}", messages::CFGS_OVERRIDDEN_LATER);
         for s in shadowed {
             println!(
-                "  {:<12} {:<8} {}:{}",
-                s.cvar,
-                s.value,
-                s.file_name(),
-                s.line
+                "{}",
+                messages::cfgs_setting_row(&s.cvar, &s.value, s.file_name(), s.line)
             );
         }
     }
 
-    println!(
-        "\n{} assignment(s) seen across those configs.",
-        scan.settings.len()
-    );
+    println!("{}", messages::cfgs_assignments_seen(scan.settings.len()));
 
     if !init_commands.is_empty() {
         // The same rule the app's Initial Commands warning uses (#216).
         let warnings = cfg_scan::value_warnings(&scan, &init_commands, init_commands.len(), &[]);
         println!();
         if warnings.conflicts.is_empty() {
-            println!("No value those init commands set conflicts with another.");
+            println!("{}", messages::CFGS_NO_INIT_CONFLICT);
         } else {
-            println!("Values that conflict (the last one is in effect):");
+            println!("{}", messages::CFGS_INIT_CONFLICTS);
             for c in warnings.conflicts {
                 let values: Vec<String> = c
                     .values
                     .iter()
                     .map(|v| match &v.source {
-                        cfg_scan::ValueSource::Config { file, line } => format!(
-                            "{} ({}:{})",
-                            v.value,
-                            file.file_name().unwrap_or_default().to_string_lossy(),
-                            line
-                        ),
-                        _ => format!("{} (init)", v.value),
+                        cfg_scan::ValueSource::Config { file, line } => {
+                            messages::cfgs_value_from_config(
+                                &v.value,
+                                file.file_name().unwrap_or_default().to_string_lossy(),
+                                line,
+                            )
+                        }
+                        _ => messages::cfgs_value_from_init(&v.value),
                     })
                     .collect();
-                println!("  {:<20} {}", c.cvar, values.join(", "));
+                println!(
+                    "{}",
+                    messages::cfgs_conflict_row(&c.cvar, values.join(", "))
+                );
             }
         }
     }
 
     let fatal = cfg_scan::fatal_cvar_hazards(&scan);
     if !fatal.is_empty() {
-        println!("\nWill quit the game the moment the HUD renders:");
+        println!("{}", messages::CFGS_WILL_QUIT_GAME);
         for f in &fatal {
             println!(
-                "  {:<12} {:<8} DoD requires {} ({}:{})",
-                f.cvar,
-                f.value,
-                f.required,
-                f.file_name(),
-                f.line
+                "{}",
+                messages::cfgs_fatal_row(&f.cvar, &f.value, &f.required, f.file_name(), f.line)
             );
         }
     }
 
     if !scan.unreferenced.is_empty() {
-        println!("\nConfigs present that nothing execs (they set nothing today):");
+        println!("{}", messages::CFGS_UNREFERENCED);
         for p in &scan.unreferenced {
-            println!("  {}", p.file_name().unwrap_or_default().to_string_lossy());
+            println!(
+                "{}",
+                messages::cfgs_unreferenced_row(
+                    p.file_name().unwrap_or_default().to_string_lossy()
+                )
+            );
         }
     }
 }

@@ -5,13 +5,15 @@
 //!
 //! The HLAE launcher process injects into `hl.exe` and then exits on its own
 //! under `-noGui -autoStart` — that is expected handoff behaviour, not a
-//! crash. The thing that actually matters is whether `hl.exe` itself is
-//! still alive, so liveness is tracked separately via process name rather
-//! than via the launcher's own exit status.
+//! crash. The thing that actually matters is whether the batch's own
+//! `hl.exe` is still alive, so liveness is tracked separately in the process
+//! list (`game::BatchGame`, #1213) rather than via the launcher's own exit
+//! status.
 
 use super::EngineEvent;
-use super::game::{end_game, kill_hl_exe_and_wait, wait_for_hl_exe_to_exit};
+use super::game::{BatchGame, end_game, kill_hl_exe_and_wait, wait_for_hl_exe_to_exit};
 use super::markers::{RecordingGoAhead, console_log_len, marker_event};
+use super::processes::Processes;
 use crate::game_handoff::{BatchStart, GameHandoff, StartState};
 use crate::log_markdown;
 use crate::utils::duration_text::duration_text;
@@ -41,6 +43,17 @@ use std::time::{Duration, Instant};
 /// Tripping this kills the game and loses the batch, so it is deliberately
 /// biased towards waiting too long over firing on a slow one.
 const MARKER_STALL_FLOOR: Duration = Duration::from_secs(300);
+
+/// How long the game may be up without a single marker before a batch
+/// outside OBS mode is called never started (#1214): an old hook DLL, or a
+/// demo the game can't open, leaves it at its menu with nothing to show.
+///
+/// The first marker (`DEMO_START`) comes once the first demo has loaded.
+/// Measured over 46 batches in the hook DLL's and Studio's logs, 8 days of
+/// October 2026, launch to first demo loaded: median 32 s, 90th percentile
+/// 38 s, slowest 94 s (a demo that took 85 s to load). Four minutes is
+/// 2.5 times the slowest, for a slower drive or a bigger demo.
+const FIRST_MARKER_DEADLINE: Duration = Duration::from_secs(240);
 
 /// How long `hl.exe` may be up before a `qconsole.log` that has not grown is
 /// treated as the engine not writing it at all.
@@ -152,7 +165,7 @@ impl CompleteMarkers {
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 struct MarkerClock {
     /// Stays `None` until the first marker; outside OBS mode the stall
-    /// check that reads it never runs.
+    /// check only asks whether one has come (#1214).
     last_marker_at: Option<Instant>,
     longest_gap: Duration,
 }
@@ -186,11 +199,14 @@ struct Stall {
     never_started: bool,
 }
 
-/// Whether OBS mode's batch has stalled. Counts from the last marker, or from
-/// hl.exe first appearing when none has arrived yet — the second case is a
-/// demo that never started playing, which produces no markers to count from
-/// at all. Both mean the same thing: the game is alive and the batch is not
+/// Whether the batch has stalled: the game is alive and the batch is not
 /// advancing. A batch held for renders (#861) sends no markers on purpose.
+///
+/// OBS mode counts from the last marker, or from hl.exe first appearing when
+/// none has arrived yet, a demo that never started playing. Every other mode
+/// checks only that second case, against [`FIRST_MARKER_DEADLINE`] (#1214):
+/// there a stall mid-batch wastes time but fills no drive, while a demo that
+/// never starts leaves the game at its menu until someone presses Cancel.
 fn stalled(
     obs_mode: bool,
     holding: bool,
@@ -198,18 +214,21 @@ fn stalled(
     hl_first_seen: Option<Instant>,
     hl_alive: bool,
 ) -> Option<Stall> {
-    if obs_mode
-        && !holding
-        && let Some(since) = clock.last_marker_at.or(hl_first_seen)
-        && hl_alive
-        && since.elapsed() > marker_stall_deadline(clock.longest_gap)
-    {
-        return Some(Stall {
-            since,
-            never_started: clock.last_marker_at.is_none(),
-        });
+    if holding || !hl_alive {
+        return None;
     }
-    None
+    let (since, deadline) = match (obs_mode, clock.last_marker_at) {
+        (true, last) => (
+            last.or(hl_first_seen)?,
+            marker_stall_deadline(clock.longest_gap),
+        ),
+        (false, None) => (hl_first_seen?, FIRST_MARKER_DEADLINE),
+        (false, Some(_)) => return None,
+    };
+    (since.elapsed() > deadline).then_some(Stall {
+        since,
+        never_started: clock.last_marker_at.is_none(),
+    })
 }
 
 /// The stall's log line and the reason the batch fails with.
@@ -224,7 +243,9 @@ fn stall_texts(stalled_for: Duration, never_started: bool) -> (String, &'static 
         }
     );
     let reason = if never_started {
-        "the demo never started playing — hl.exe came up but produced no console markers at all"
+        "the demo never started: the game came up, but no demo began playing in it. Check that the \
+         hook DLL is up to date (an older one may not start this batch) and that the demo file is \
+         still where Studio found it"
     } else {
         "the batch stopped progressing while hl.exe was still running — no console markers arrived for several minutes"
     };
@@ -360,7 +381,10 @@ pub(super) struct BatchWatch<'a> {
     complete: CompleteMarkers,
     /// One-shot, so a batch cannot spam the log with it.
     condebug_write_checked: bool,
-    sys: sysinfo::System,
+    /// The process list and kills (`processes::Live` outside tests).
+    procs: Box<dyn Processes>,
+    /// Which hl.exe in it is the batch's.
+    game: BatchGame,
     last_process_check: Option<Instant>,
     last_dialog_check: Option<Instant>,
     /// What the game was last told (#861), and when a send last failed.
@@ -378,6 +402,7 @@ impl<'a> BatchWatch<'a> {
         io: WatchInputs<'a>,
         obs_session: Option<crate::obs::ObsSession>,
         child: Option<crate::sys::launcher::Launcher>,
+        game: BatchGame,
         handoff: Option<GameHandoff>,
         foreground_lock: crate::sys::foreground_lock::ForegroundLock,
         foreground_locked_at: Instant,
@@ -398,7 +423,8 @@ impl<'a> BatchWatch<'a> {
             clock: MarkerClock::default(),
             complete: CompleteMarkers::default(),
             condebug_write_checked: false,
-            sys: crate::sys::process::snapshot(),
+            procs: Box::new(super::processes::Live::new()),
+            game,
             last_process_check: None,
             last_dialog_check: None,
             hold_sent: false,
@@ -476,15 +502,12 @@ impl<'a> BatchWatch<'a> {
         if !self.go_ahead.owed() {
             return;
         }
-        let sent = crate::sys::process::game_pids_in(&self.sys)
-            .into_iter()
-            .next()
-            .map(|pid| {
-                crate::sys::game_remote::send_console_commands(
-                    pid,
-                    &[crate::patch::runtime_batch::RECORDING_GO.to_string()],
-                )
-            });
+        let sent = self.game.pid_in(&*self.procs).map(|pid| {
+            crate::sys::game_remote::send_console_commands(
+                pid,
+                &[crate::patch::runtime_batch::RECORDING_GO.to_string()],
+            )
+        });
         if let Some(Ok(crate::sys::game_remote::Sent::Delivered)) = sent
             && let Some(waited) = self.go_ahead.sent()
         {
@@ -507,15 +530,9 @@ impl<'a> BatchWatch<'a> {
         ) {
             return;
         }
-        let sent = crate::sys::process::game_pids_in(&self.sys)
-            .into_iter()
-            .next()
-            .map(|pid| {
-                crate::sys::game_remote::send_console_commands(
-                    pid,
-                    &[super::hold_command(want_hold)],
-                )
-            });
+        let sent = self.game.pid_in(&*self.procs).map(|pid| {
+            crate::sys::game_remote::send_console_commands(pid, &[super::hold_command(want_hold)])
+        });
         match sent {
             Some(Ok(crate::sys::game_remote::Sent::Delivered)) => {
                 if self.hold_sent && !want_hold {
@@ -542,7 +559,7 @@ impl<'a> BatchWatch<'a> {
         let Some(child) = self.child.as_mut() else {
             return;
         };
-        match child.exit_status(&self.sys) {
+        match self.procs.launcher_status(child) {
             Ok(Some(status)) => {
                 self.launcher_exit_logged = true;
                 log_markdown(&format!(
@@ -556,12 +573,13 @@ impl<'a> BatchWatch<'a> {
         }
     }
 
-    /// Re-reads the process list at most every [`PROCESS_CHECK_EVERY`].
+    /// Re-reads the process list at most every [`PROCESS_CHECK_EVERY`]. Only
+    /// the batch's own game counts as the game being up (#1213).
     fn note_game_alive(&mut self) {
         if is_due(self.last_process_check, PROCESS_CHECK_EVERY) {
             self.last_process_check = Some(Instant::now());
-            crate::sys::process::refresh(&mut self.sys);
-            self.hl_alive_cached = crate::sys::process::is_game_in(&self.sys);
+            self.procs.refresh();
+            self.hl_alive_cached = self.game.pid_in(&*self.procs).is_some();
         }
         self.hl_alive = self.hl_alive_cached;
         if self.hl_alive {
@@ -576,7 +594,8 @@ impl<'a> BatchWatch<'a> {
         let Some(handoff) = self.handoff.as_mut() else {
             return ControlFlow::Continue(());
         };
-        match handoff.poll(&crate::sys::process::game_pids_in(&self.sys)) {
+        let own: Vec<u32> = self.game.pid_in(&*self.procs).into_iter().collect();
+        match handoff.poll(&own) {
             Handoff::Waiting | Handoff::Sent => {}
             Handoff::JustSent(pid) => {
                 self.foreground_lock.release();
@@ -592,7 +611,7 @@ impl<'a> BatchWatch<'a> {
                 self.failure_reason = Some(why);
                 // An open game the batch never reached stays as it was.
                 if self.io.reuse_game.is_none() {
-                    kill_hl_exe_and_wait(&mut self.sys);
+                    kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
                 }
                 return ControlFlow::Break(());
             }
@@ -632,9 +651,9 @@ impl<'a> BatchWatch<'a> {
         }
         self.last_dialog_check = Some(Instant::now());
         let launcher_pid = self.child.as_ref().map(crate::sys::launcher::Launcher::id);
-        let game_pids = crate::sys::process::game_pids_in(&self.sys);
+        let game_pids: Vec<u32> = self.game.pid_in(&*self.procs).into_iter().collect();
         let mut launcher_pids = launcher_pid
-            .map(|pid| crate::sys::process::injector_pids_in(&self.sys, pid))
+            .map(|pid| self.procs.injectors_of(pid))
             .unwrap_or_default();
         if let Some(pid) = launcher_pid.filter(|_| !self.launcher_exit_logged) {
             launcher_pids.push(pid);
@@ -656,14 +675,14 @@ impl<'a> BatchWatch<'a> {
             .iter()
             .filter(|&&pid| Some(pid) != launcher_pid)
         {
-            crate::sys::process::kill_pid(*pid);
+            self.procs.kill_pid(*pid);
         }
         if !self.launcher_exit_logged
             && let Some(child) = self.child.as_mut()
         {
             child.kill();
         }
-        kill_hl_exe_and_wait(&mut self.sys);
+        kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
         // A game already exiting when its box came up (the
         // Anniversary !m_bMounted assert, after the user
         // clicked the Steam box themselves) can't be killed:
@@ -678,7 +697,7 @@ impl<'a> BatchWatch<'a> {
                 ));
                 crate::sys::dialogs::dismiss(dialog);
             }
-            wait_for_hl_exe_to_exit(&mut self.sys);
+            wait_for_hl_exe_to_exit(&mut *self.procs, &self.game);
         }
         ControlFlow::Break(())
     }
@@ -701,7 +720,7 @@ impl<'a> BatchWatch<'a> {
             child.kill();
             log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
         }
-        end_game(self.io.reuse_game, &mut self.sys);
+        end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -715,10 +734,18 @@ impl<'a> BatchWatch<'a> {
         ) else {
             return ControlFlow::Continue(());
         };
+        // A game that isn't writing its console log sends no markers even
+        // while it plays, so outside OBS mode, where markers only report
+        // progress, their absence proves nothing; `check_console_log_written`
+        // has said so in the log already.
+        if !self.io.obs_mode && console_log_len(self.io.log_path) == self.io.log_len_before_launch {
+            return ControlFlow::Continue(());
+        }
         let (line, reason) = stall_texts(stall.since.elapsed(), stall.never_started);
         log_markdown(&line);
         self.failure_reason = Some(reason.into());
-        kill_hl_exe_and_wait(&mut self.sys);
+        // A borrowed game (#725) is left open at its menu, as on Cancel.
+        end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -742,7 +769,7 @@ impl<'a> BatchWatch<'a> {
             self.failure_reason =
                 Some("lost contact with OBS mid-batch and could not reconnect".into());
         }
-        kill_hl_exe_and_wait(&mut self.sys);
+        kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -767,7 +794,7 @@ impl<'a> BatchWatch<'a> {
                 "taskkilling hl.exe"
             }
         ));
-        end_game(self.io.reuse_game, &mut self.sys);
+        end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -850,6 +877,10 @@ fn console_log_not_written_text(log_path: &Path) -> String {
         duration_text(CONDEBUG_WRITE_GRACE.as_secs_f64()),
     )
 }
+
+#[cfg(test)]
+#[path = "watch_pass_tests.rs"]
+mod pass_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1012,7 +1043,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stall_is_only_called_in_obs_mode_with_the_game_up_and_not_held() {
+    fn a_stall_mid_batch_is_only_called_in_obs_mode_with_the_game_up_and_not_held() {
         let quiet = MarkerClock {
             last_marker_at: Some(ago(301)),
             longest_gap: Duration::from_secs(5),
@@ -1048,6 +1079,27 @@ mod tests {
         assert_eq!(stalled(true, false, &none, Some(ago(10)), true), None);
     }
 
+    /// Outside OBS mode only a batch with no marker at all is called
+    /// stalled, once the game has been up for `FIRST_MARKER_DEADLINE`
+    /// (#1214); not while held, nor with the game gone.
+    #[test]
+    fn outside_obs_mode_only_a_demo_that_never_started_is_a_stall() {
+        let none = MarkerClock::default();
+        let over = FIRST_MARKER_DEADLINE.as_secs() + 1;
+        let stall = stalled(false, false, &none, Some(ago(over)), true).expect("stalled");
+        assert!(stall.never_started);
+        let under = FIRST_MARKER_DEADLINE.as_secs() - 1;
+        assert_eq!(stalled(false, false, &none, Some(ago(under)), true), None);
+        assert_eq!(stalled(false, false, &none, None, true), None);
+        assert_eq!(stalled(false, true, &none, Some(ago(over)), true), None);
+        assert_eq!(stalled(false, false, &none, Some(ago(over)), false), None);
+        let started = MarkerClock {
+            last_marker_at: Some(ago(3600)),
+            longest_gap: Duration::ZERO,
+        };
+        assert_eq!(stalled(false, false, &started, Some(ago(4000)), true), None);
+    }
+
     #[test]
     fn a_stall_says_whether_the_demo_ever_started() {
         let (line, reason) = stall_texts(Duration::from_secs(301), true);
@@ -1055,9 +1107,14 @@ mod tests {
             line,
             "[HLAE] No console markers for 5 min 1 s with hl.exe still running — treating the batch as stalled. Playback never produced a single marker, so the demo most likely failed to load."
         );
-        assert_eq!(
-            reason,
-            "the demo never started playing — hl.exe came up but produced no console markers at all"
+        assert!(
+            reason.starts_with("the demo never started: the game came up, but no demo began"),
+            "{reason}"
+        );
+        assert!(reason.contains("hook DLL is up to date"), "{reason}");
+        assert!(
+            reason.contains("demo file is still where Studio found it"),
+            "{reason}"
         );
         let (line, reason) = stall_texts(Duration::from_secs(30), false);
         assert!(line.starts_with("[HLAE] No console markers for 30.0 s with hl.exe still running"));

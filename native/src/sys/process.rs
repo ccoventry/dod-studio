@@ -87,16 +87,6 @@ pub fn injector_pids_in(sys: &System, launcher_pid: u32) -> Vec<u32> {
     children_named_in(sys, &["injector.exe"], launcher_pid)
 }
 
-/// Asks Windows to end every running game (`taskkill /F /IM hl.exe`). It
-/// returns when `taskkill` does, which can be before the game has left the
-/// process list.
-pub fn kill_game() {
-    std::process::Command::new("taskkill")
-        .args(["/F", "/IM", GAME_EXE])
-        .output()
-        .ok();
-}
-
 /// Asks Windows to end process `pid` (`taskkill /F /PID`).
 pub fn kill_pid(pid: u32) {
     std::process::Command::new("taskkill")

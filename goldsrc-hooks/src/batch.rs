@@ -887,6 +887,9 @@ pub unsafe extern "C" fn command() {
         Some("wait_for_recording") => {}
         Some("stop") => {
             HOLD.store(false, Ordering::Relaxed);
+            // A clip cut short by the stop gets its summary now (#1221),
+            // patched-demo batches' too, which have no batch here.
+            crate::clip_log::batch_stopped();
             if lock().take().is_some() {
                 run("mirv_recordmovie_stop");
                 // A batch stopped inside a fast-forwarded gap (#831) would
