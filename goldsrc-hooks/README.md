@@ -422,7 +422,10 @@ Per-feature details, and what is live-proven versus established by static
 analysis only, are in each module's `//!` doc and the linked `docs/` pages
 (listed under "The hook DLL" in the [docs index](../docs/README.md)).
 `tools/` holds a verifier per patched site, which checks the Rust constants
-against a real `client.dll` or `hw.dll`.
+against a real `client.dll` or `hw.dll`. `tools/name_client_dll.py` names
+`client.dll`'s functions from the symbols in DoD's Linux `client.so`; start
+new client-side work from its map
+([goldsrc_linux_debug_symbols.md](../docs/goldsrc_linux_debug_symbols.md)).
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites
 (world sprites and the HUD's atlases -- kill feed, weapon icons, scopes, but
