@@ -24,7 +24,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"In DoD Studio, tick demos in the Master Demo Queue and press Review highlights."
+		"labelText"		""
 		"textAlignment"		"west"
 		"helptext"		"Whose highlight it is, and what the review is doing."
 	}
@@ -238,5 +238,35 @@
 		"labelText"		"While a highlight plays or at its end: Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop."
 		"textAlignment"		"west"
 		"helptext"		"The keys answer on the game screen while a highlight plays or waits at its end, after a second's pause at each start so a double press can't answer the next one, and never while typing in a box. ds_ui_review_keys 0 turns them off."
+	}
+	"FromStartButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"FromStartButton"
+		"xpos"		"8"
+		"ypos"		"202"
+		"wide"		"120"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"0"
+		"labelText"		"From the start"
+		"textAlignment"		"center"
+		"Command"		"engine ds_demo_review ask start"
+		"helptext"		"Review every highlight of the demo playing, from the first. DoD Studio scans the demo first if it isn't in its Master Demo Queue. Needs DoD Studio running, and a demo playing; greyed otherwise, and the second line at the top says why."
+	}
+	"FromHereButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"FromHereButton"
+		"xpos"		"136"
+		"ypos"		"202"
+		"wide"		"120"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"0"
+		"labelText"		"From here"
+		"textAlignment"		"center"
+		"Command"		"engine ds_demo_review ask here"
+		"helptext"		"Review the demo playing from the next highlight at or after where it is now. The whole demo is the review: Back still reaches the highlights before. Needs DoD Studio running, and a demo playing; greyed otherwise, and the second line at the top says why."
 	}
 }

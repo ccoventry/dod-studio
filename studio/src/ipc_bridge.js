@@ -503,13 +503,33 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 
 /** Review highlights (#623): sends the highlights to the running game, or
  *  starts one. `fastForwardGap`: seconds between kills above which a gap
- *  plays fast, or null (#665). Resolves to `{ pid, launched, count }`. */
-export async function startHighlightReview(highlights, fastForwardGap = null) {
-  return invoke("start_highlight_review", { highlights, fastForwardGap })
+ *  plays fast, or null (#665). `startFrom`: the game starts at the first
+ *  highlight at or after this demo time, or null for the first (#1142).
+ *  Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights, fastForwardGap = null, startFrom = null) {
+  return invoke("start_highlight_review", { highlights, fastForwardGap, startFrom })
     .catch((err) => {
       console.error("IPC Execution Error (start_highlight_review):", err);
       showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
       throw err;
+    });
+}
+
+/** Tells the game what Studio is doing about its review request `id`
+ *  (#1142): `text` shows on its Review tab. */
+export async function gameReviewProgress(id, text) {
+  return invoke("game_review_progress", { id, text })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_review_progress):", err);
+    });
+}
+
+/** Tells the game its review request `id` has started (`error` null) or
+ *  why not (#1142). */
+export async function gameReviewFinished(id, error = null) {
+  return invoke("game_review_finished", { id, error })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_review_finished):", err);
     });
 }
 

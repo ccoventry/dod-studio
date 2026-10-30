@@ -61,6 +61,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { startReviewFromGame } from './review_from_game.js';
 import { createReviewLibrary } from './review_library.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { createSetup } from './setup_wiring.js';
@@ -351,7 +352,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     queue.redrawSelected();
   };
 
-  initReviewMode({
+  const reviewMode = initReviewMode({
     getDemos: queue.getDemos,
     getCheckedPaths: getCheckedDemoPaths,
     getShownPaths: () => getVisibleDemos().map((d) => d.path),
@@ -360,6 +361,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChanged: onHighlightStatusChange,
     hltvPick,
   });
+  // The in-game Review tab's From the start / From here (#1142).
+  startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
+    scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
 
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),

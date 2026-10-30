@@ -147,17 +147,22 @@ fn listen(app: &AppHandle, pid: u32) {
 }
 
 /// Starts reviewing `highlights` in the running game, or in one DoD Studio
-/// starts for it. `fast_forward_gap`: see [`format_queue`] (#665).
+/// starts for it. `fast_forward_gap` (#665) and `start_from` (#1142): see
+/// [`format_queue`].
 #[tauri::command]
 pub async fn start_highlight_review(
     app: AppHandle,
     highlights: Vec<ReviewHighlight>,
     fast_forward_gap: Option<f64>,
+    start_from: Option<f64>,
 ) -> Result<ReviewStarted, String> {
     let count = highlights.len();
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
-    std::fs::write(&queue, format_queue(&highlights, fast_forward_gap))
-        .map_err(crate::messages::could_not_write_review_queue)?;
+    std::fs::write(
+        &queue,
+        format_queue(&highlights, fast_forward_gap, start_from),
+    )
+    .map_err(crate::messages::could_not_write_review_queue)?;
     let settings = crate::game_process_manager::saved_settings(&app);
     let line = review_lines(&queue, settings.players.use_in_game);
 
@@ -212,6 +217,44 @@ pub async fn start_highlight_review(
         launched,
         count,
     })
+}
+
+/// The page's event for a review the game asked for (#1142): a
+/// `game_review_requests::ReviewRequest`, which the page answers through
+/// [`game_review_progress`] and [`game_review_finished`].
+const GAME_REQUEST_EVENT: &str = "game_review_request";
+
+/// Hands every review the in-game Review tab asks for to the page, which
+/// starts it as its Review highlights button would (#1142).
+pub fn serve_game_requests(app: AppHandle) {
+    use native::sys::game_review_requests::{ReviewUpdate, report, set_review_handler};
+    set_review_handler(move |request| {
+        let id = request.id;
+        if let Err(e) = app.emit(GAME_REQUEST_EVENT, request) {
+            report(
+                id,
+                ReviewUpdate::Failed(crate::messages::game_review_not_handed_on(e)),
+            );
+        }
+    });
+}
+
+/// Tells the game what DoD Studio is doing about its review request `id`.
+/// Cheap (a channel send), so it runs on the main thread.
+#[tauri::command]
+pub fn game_review_progress(id: u64, text: String) {
+    native::sys::game_review_requests::report(
+        id,
+        native::sys::game_review_requests::ReviewUpdate::Progress(text),
+    );
+}
+
+/// Tells the game its review request `id` has started (`error` none) or
+/// why it couldn't.
+#[tauri::command]
+pub fn game_review_finished(id: u64, error: Option<String>) {
+    use native::sys::game_review_requests::{ReviewUpdate, report};
+    report(id, error.map_or(ReviewUpdate::Done, ReviewUpdate::Failed));
 }
 
 /// Ends the review in the game being read; its answers so far are already in.
