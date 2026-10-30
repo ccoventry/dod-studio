@@ -163,6 +163,49 @@ fn the_process_list_is_re_read_only_once_its_interval_passed() {
     assert_eq!(procs.m().refreshes, 2);
 }
 
+/// A direct-to-video batch whose game has been up past
+/// `FIRST_MARKER_DEADLINE` with no marker at all ends, says the demo never
+/// started, and closes its own game (#1214).
+#[test]
+fn a_direct_batch_whose_demo_never_starts_ends_with_a_message() {
+    let rig = Rig::new("watch_pass_never_started");
+    std::fs::write(&rig.log_path, b"the game's startup lines").unwrap();
+    let procs = FakeProcesses::default();
+    procs.set(&[THEIRS, OURS]);
+    let mut watch = rig.watch(false, &procs);
+    watch.hl_first_seen = Some(Instant::now() - FIRST_MARKER_DEADLINE + Duration::from_secs(5));
+    assert!(watch.pass().is_continue(), "not yet past the deadline");
+    watch.hl_first_seen = Some(Instant::now() - FIRST_MARKER_DEADLINE - Duration::from_secs(1));
+    assert!(watch.pass().is_break());
+    let reason = watch.failure_reason.clone().unwrap_or_default();
+    assert!(reason.starts_with("the demo never started"), "{reason}");
+    assert_eq!(procs.m().killed, [OURS.pid]);
+    assert!(!watch.game_closed);
+}
+
+/// A marker, or a console log the game never wrote (so no marker could
+/// reach Studio from it), keeps a direct-to-video batch going (#1214).
+#[test]
+fn a_direct_batch_with_a_marker_or_no_console_log_is_not_ended() {
+    let rig = Rig::new("watch_pass_started");
+    std::fs::write(&rig.log_path, b"the game's startup lines").unwrap();
+    let procs = FakeProcesses::default();
+    procs.set(&[OURS]);
+    let long_ago = Instant::now() - FIRST_MARKER_DEADLINE * 2;
+    let mut watch = rig.watch(false, &procs);
+    watch.hl_first_seen = Some(long_ago);
+    rig.markers
+        .send(parse_marker("[dod-studio] DEMO_START 1 1 1").unwrap())
+        .unwrap();
+    assert!(watch.pass().is_continue());
+
+    std::fs::remove_file(&rig.log_path).unwrap();
+    let mut silent = rig.watch(false, &procs);
+    silent.hl_first_seen = Some(long_ago);
+    assert!(silent.pass().is_continue());
+    assert!(procs.m().killed.is_empty());
+}
+
 /// Cancel is checked on every pass, and ends only the batch's own game: the
 /// one open before the launch and one opened since are left (M1).
 #[test]
