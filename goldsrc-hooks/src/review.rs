@@ -1072,7 +1072,11 @@ fn watch_menu(mode: KeyMode) {
         return;
     };
     let was_up = MENU_WAS_UP.swap(state.0, Ordering::Relaxed);
-    if mode != KeyMode::Off && menu_opens_tab(was_up, state) {
+    // The form's Esc brings the menu up too; the form puts it away (#1139).
+    if mode != KeyMode::Off
+        && menu_opens_tab(was_up, state)
+        && !crate::review_form::menu_is_from_esc()
+    {
         trace("the menu came up during a highlight: opening the Review tab");
         open_tab();
     }
