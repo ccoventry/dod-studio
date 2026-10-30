@@ -3,10 +3,10 @@
 //! the engine's thread (`engine::set_per_frame_prologue`).
 
 use std::ffi::CStr;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 
 use super::*;
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::{
     anim_fix, crosshair, demo_list_folders, demo_other_drives, ex_interp, hand_signals, hudelement,
     overview_map, scoreboard, spectator_crosshair, spectator_eye, spectator_target, texture_hires,
@@ -18,12 +18,10 @@ use crate::{
 /// This runs every frame, so an unconditional log line would flood the file and
 /// slow a capture — the same reason `anim_fix`'s stage trace is
 /// change-triggered.
-fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
-    let ptr = cvar.load(Ordering::Relaxed);
-    if ptr.is_null() {
+fn poll_flag(name: &str, cvar: &Cvar, flag: &AtomicBool) {
+    let Some(wanted) = cvar.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*ptr).value } != 0.0;
+    };
     if flag.swap(wanted, Ordering::Relaxed) != wanted {
         let state = if wanted { "1 (on)" } else { "0 (off)" };
         unsafe { crate::debug::report(&format!("commands: {name} = {state}")) };
@@ -34,12 +32,10 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 /// `anim_fix::LEVEL`. Out-of-range values are clamped rather than refused, so
 /// an old `ds_spec_match_pov 2` still means on here (its "log every restored
 /// gunshot" is `ds_sound_restore_gunshots 2` now, #1036).
-fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
-    let ptr = cvar.load(Ordering::Relaxed);
-    if ptr.is_null() {
+fn poll_level(name: &str, cvar: &Cvar, level: &AtomicI32) {
+    let Some(raw) = cvar.value() else {
         return;
-    }
-    let raw = unsafe { (*ptr).value };
+    };
     // A cvar is a float; anything unparseable reads as 0, which is "off" and
     // is the safe way to land.
     let wanted = if raw.is_finite() { raw as i32 } else { 0 };
@@ -81,7 +77,7 @@ static OVERVIEWMAP_COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// cvars already hold a value handed to them on the launch line.
 fn poll_code_patch(
     name: &str,
-    cvar: &AtomicPtr<CvarSPartial>,
+    cvar: &Cvar,
     complained: &AtomicBool,
     apply: fn(bool) -> Result<bool, String>,
     describe: fn(bool) -> &'static str,
@@ -95,17 +91,15 @@ fn poll_code_patch(
 /// been turned off.
 fn poll_code_patch_when(
     name: &str,
-    cvar: &AtomicPtr<CvarSPartial>,
+    cvar: &Cvar,
     allowed: bool,
     complained: &AtomicBool,
     apply: fn(bool) -> Result<bool, String>,
     describe: fn(bool) -> &'static str,
 ) {
-    let ptr = cvar.load(Ordering::Relaxed);
-    if ptr.is_null() {
+    let Some(wanted) = cvar.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*ptr).value } != 0.0;
+    };
     let on = wanted && allowed;
     match apply(on) {
         Ok(false) => complained.store(false, Ordering::Relaxed),
@@ -160,11 +154,9 @@ fn describe_crosshair(on: bool) -> &'static str {
 /// it off has to forget: a stance remembered before a map change is not one to
 /// put back after it.
 fn poll_hand_signals() {
-    let ptr = CVAR_HAND_SIGNALS.load(Ordering::Relaxed);
-    if ptr.is_null() {
+    let Some(wanted) = CVAR_HAND_SIGNALS.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*ptr).value } != 0.0;
+    };
     if wanted != hand_signals::ENABLED.swap(wanted, Ordering::Relaxed) {
         if !wanted {
             hand_signals::reset();
@@ -190,11 +182,9 @@ fn poll_hand_signals() {
 /// the cvar to another bad number says so again while an unchanged bad one
 /// stays quiet.
 fn poll_ex_interp() {
-    let ptr = CVAR_EX_INTERP.load(Ordering::Relaxed);
-    if ptr.is_null() {
+    let Some(wanted) = CVAR_EX_INTERP.value() else {
         return;
-    }
-    let wanted = unsafe { (*ptr).value };
+    };
     if !wanted.is_finite() {
         return;
     }

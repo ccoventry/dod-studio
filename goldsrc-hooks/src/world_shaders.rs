@@ -48,10 +48,11 @@
 //! Default 0, like every other `ds_` switch: nothing changes until it
 //! is asked for.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::engine::{self, ClEngineFuncsPartial, CvarSPartial};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("map_allow_shaders");
 
@@ -60,10 +61,10 @@ const ENGINE_CVAR: &std::ffi::CStr = c"sv_allow_shaders";
 /// The client-side switch, reported but never written.
 const USE_SHADERS_CVAR: &std::ffi::CStr = c"gl_use_shaders";
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// `sv_allow_shaders`, once looked up. Engine cvars live for the whole
 /// process, so one lookup is enough.
-static TARGET: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static TARGET: Cvar = Cvar::new();
 static LOOKED_UP: AtomicBool = AtomicBool::new(false);
 /// This switch's value as last seen, so a change is logged once.
 static WANTED: AtomicBool = AtomicBool::new(false);
@@ -73,11 +74,6 @@ static OURS: AtomicBool = AtomicBool::new(false);
 /// How many times the engine's 0 was raised -- roughly once per demo load.
 static RAISES: AtomicU32 = AtomicU32::new(0);
 
-/// Called by `commands/install.rs` once `ds_map_allow_shaders` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 /// `sv_allow_shaders`, or `None` on an engine without it. Looks it up once,
 /// and checks the name it got back before trusting the pointer.
 fn target(engfuncs: &ClEngineFuncsPartial) -> Option<*mut CvarSPartial> {
@@ -86,7 +82,7 @@ fn target(engfuncs: &ClEngineFuncsPartial) -> Option<*mut CvarSPartial> {
         let name_matches = !found.is_null()
             && unsafe { (*found).name_str() }.is_some_and(|n| n == "sv_allow_shaders");
         let report = if name_matches {
-            TARGET.store(found, Ordering::Release);
+            TARGET.set(found);
             "world_shaders: found sv_allow_shaders (25th Anniversary engine)".to_string()
         } else if found.is_null() {
             "world_shaders: this engine has no sv_allow_shaders -- the pre-Anniversary build has no world shaders, so ds_map_allow_shaders does nothing".to_string()
@@ -95,7 +91,7 @@ fn target(engfuncs: &ClEngineFuncsPartial) -> Option<*mut CvarSPartial> {
         };
         unsafe { crate::debug::report(&report) };
     }
-    let ptr = TARGET.load(Ordering::Acquire);
+    let ptr = TARGET.ptr();
     (!ptr.is_null()).then_some(ptr)
 }
 
@@ -110,14 +106,12 @@ fn use_shaders(engfuncs: &ClEngineFuncsPartial) -> f32 {
 
 /// Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
+    };
     let Some(engfuncs) = engine::engfuncs() else {
         return;
     };
-    let wanted = unsafe { (*cvar).value } != 0.0;
 
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
@@ -164,11 +158,7 @@ pub fn poll() {
 
 /// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = CVAR.try_on()?;
     let raises = RAISES.load(Ordering::Relaxed);
     if !wanted && raises == 0 {
         return None;

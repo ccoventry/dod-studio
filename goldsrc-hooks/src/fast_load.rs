@@ -90,11 +90,11 @@
 
 use std::cell::RefCell;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("demo_fast_load");
 
@@ -232,29 +232,16 @@ fn stub(count: &[u8], callback: usize, resume_slot: usize) -> Vec<u8> {
     code
 }
 
-/// `ds_demo_fast_load`, once registered.
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-/// The fallback toggle's state when the cvar could not be registered: on
-/// means the default budget.
-pub static FALLBACK_ON: AtomicBool = AtomicBool::new(true);
-
-/// Called by `commands/install.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
+/// `ds_demo_fast_load`: the budget in milliseconds, or, when the cvar could
+/// not be registered, the fallback toggle, where on means the default budget.
+pub static SETTING: Setting = Setting::new(NAME, true);
 
 /// The budget the setting asks for now, in milliseconds.
 fn wanted_budget_ms() -> u32 {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        if FALLBACK_ON.load(Ordering::Relaxed) {
-            DEFAULT_BUDGET_MS
-        } else {
-            0
-        }
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        budget_ms(unsafe { (*cvar).value })
+    match SETTING.value() {
+        Some(value) => budget_ms(value),
+        None if SETTING.on() => DEFAULT_BUDGET_MS,
+        None => 0,
     }
 }
 
