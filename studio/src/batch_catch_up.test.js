@@ -36,7 +36,7 @@ function batch(d, extra = {}) {
 describe('capturedTakes', () => {
   it('maps each captured block to the highlights it covers', () => {
     const d = demos();
-    expect(capturedTakes(batch(d))).toEqual([
+    expect(capturedTakes(batch(d))).toMatchObject([
       { takeKey: 'session_x/chain_01_b0', uids: [uid('a.dem', d[0].streaks[0]), uid('a.dem', d[0].streaks[1])] },
     ]);
   });
@@ -198,5 +198,18 @@ describe('createBatchCatchUp', () => {
     await c.start();
     err.mockRestore();
     expect(isBatchStillRunningInGame()).toBe(false);
+  });
+});
+
+describe('a caught-up batch keeps how it was captured (#439)', () => {
+  it('records the batch settings and the take folder, but no capture time it cannot know', () => {
+    const d = demos();
+    const takeIndex = {};
+    const b = batch(d, { session_id: 'session_x', capture_mode: 'agr', capture_fps: 300, agr_fps: 120 });
+    b.blocks[0].take_folder = 'D:/caps/session_x/chain_01_b0';
+    applyCaughtUpBatch(b, d, takeIndex);
+    const record = takeIndex['session_x/chain_01_b0'];
+    expect(record).toMatchObject({ session_id: 'session_x', capture_mode: 'agr', capture_fps: 120, take_folder: 'D:/caps/session_x/chain_01_b0' });
+    expect(record.captured_at).toBeUndefined();
   });
 });

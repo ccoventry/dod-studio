@@ -123,7 +123,8 @@ export function recordTake(takeIndex, takeKey, uids, meta) {
  * (and may delete) a take before the batch ends. `{ advanced, markCleared }`.
  * The record keeps when and how the take was captured (#439): `block` is a
  * verified block or a `capture_clip_ready` payload (which carries its own
- * rate), `captureFps` the batch's rate for a block that doesn't.
+ * rate), the dispatch's own rate (what the mode really records at) wins, then
+ * `captureFps` for a block that carries none.
  */
 export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
   let advanced = 0;
@@ -162,7 +163,7 @@ export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
       session_id: block.session_id ?? dispatch?.sessionId,
       captured_at: Date.now(),
       capture_mode: block.capture_mode ?? dispatch?.captureMode,
-      capture_fps: block.capture_fps ?? captureFps,
+      capture_fps: dispatch?.captureFps ?? block.capture_fps ?? captureFps,
       take_folder: block.take_folder,
     });
   }

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   recordTake, resolveTake, pruneTakeIndex, renameDemoInTakeIndex, renameUidsInTakeIndex, markBlockCaptured, streakUid,
 } from './take_index.js';
-import { uidsOf, mapUids, recordInto } from './take_record.js';
+import { uidsOf, mapUids, recordInto, captureRateOf } from './take_record.js';
 import { markerRows } from './marker_list.js';
 
 // A project saved before #439: every take is a bare uid list.
@@ -86,5 +86,27 @@ describe('an old project (bare uid lists)', () => {
     recordTake(takeIndex, 'session_a/chain_00_b0', [FIRST], { captured_at: 5 });
     expect(takeIndex['session_a/chain_00_b0']).toEqual({ uids: [FIRST], captured_at: 5 });
     expect(Array.isArray(takeIndex['session_a/chain_01_b1'])).toBe(true);
+  });
+});
+
+describe('captureRateOf (#439)', () => {
+  it('names the rate the mode really records at, not the frame-sequence setting', () => {
+    const settings = { capture_fps: 300, obs_capture_fps: 120, agr_fps: 60 };
+    expect(captureRateOf('obs', settings)).toBe(120);
+    expect(captureRateOf('obs', { capture_fps: 300, obs_capture_fps: 0 })).toBe(60);
+    expect(captureRateOf('obs', { capture_fps: 300 })).toBeUndefined();
+    expect(captureRateOf('agr', settings)).toBe(60);
+    expect(captureRateOf('agr', { capture_fps: 300, agr_fps: 0 })).toBe(300);
+    expect(captureRateOf('direct_to_video', settings)).toBe(300);
+  });
+
+  it('a dispatch\'s own rate wins over the clip payload\'s capture_fps', () => {
+    const takeIndex = {};
+    const streaks = [{ player_index: 1, start_tick: 1, end_tick: 2 }];
+    markBlockCaptured(
+      { take_key: 's/b0', capture_fps: 300, source_streak_indices: [0] },
+      { streaks, demoPaths: ['d.dem'], captureMode: 'obs', captureFps: 120 }, takeIndex,
+    );
+    expect(takeIndex['s/b0'].capture_fps).toBe(120);
   });
 });

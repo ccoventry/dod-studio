@@ -36,3 +36,16 @@ export function recordInto(entry, uids, meta) {
   });
   return record;
 }
+
+/**
+ * The rate a batch really recorded at. `capture_fps` is the frame-sequence and
+ * direct-to-video setting only: OBS mode records at its own `obs_capture_fps`
+ * (60 when unset, as the backend counts it) and AGR at `agr_fps` (0 = the
+ * same as `capture_fps`). `undefined` when the source doesn't carry the OBS
+ * rate (a batch manifest read back after a restart).
+ */
+export function captureRateOf(mode, { capture_fps, obs_capture_fps, agr_fps } = {}) {
+  if (mode === 'obs') return obs_capture_fps === undefined ? undefined : (obs_capture_fps > 0 ? obs_capture_fps : 60);
+  if (mode === 'agr') return agr_fps > 0 ? agr_fps : capture_fps;
+  return capture_fps;
+}
