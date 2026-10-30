@@ -361,10 +361,14 @@ fn watched_frame(time: f64, target: i32) -> Option<crouch::Frame> {
     };
     let newest = player.curstate.msg_time;
     let started = std::time::Instant::now();
-    let upcoming_down = crate::lookahead::timeline(time)
-        .and_then(|t| t.next_crouch_down(target, newest, newest + crouch::LOOK_AHEAD_SECONDS));
+    let timeline = crate::lookahead::timeline(time);
+    let upcoming_down = timeline
+        .as_ref()
+        .and_then(|t| t.next_crouch_down(target, newest, crouch::LOOK_AHEAD_SECONDS));
     crate::lookahead::note_frame(
         started.elapsed(),
+        timeline.as_ref(),
+        target,
         time,
         newest,
         player.curstate.usehull == 1,

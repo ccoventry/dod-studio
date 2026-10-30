@@ -95,10 +95,11 @@ pub(crate) struct Frame {
     /// The newest snapshot's predecessor, so a frame that two snapshots
     /// arrived in still sees the flip between them.
     pub previous: Snapshot,
-    /// The `msg_time` of his next ground crouch's flip, when the demo file
-    /// says one comes within [`LOOK_AHEAD_SECONDS`] of the newest snapshot
-    /// (`crate::lookahead`); `None` without a timeline.
-    pub upcoming_down: Option<f32>,
+    /// When his next ground crouch's flip will arrive, on this clock
+    /// (`time`), when the demo file says one comes within
+    /// [`LOOK_AHEAD_SECONDS`] of the newest snapshot (`crate::lookahead`);
+    /// `None` without a timeline.
+    pub upcoming_down: Option<f64>,
 }
 
 /// What one snapshot says about the player.
@@ -158,14 +159,11 @@ pub(crate) struct CrouchEase {
     settled_shown: f32,
     depth: f32,
     ease: Ease,
-    /// `msg_time - time` when the newest snapshot arrived: turns a flip's
-    /// `msg_time` into when it will arrive on this clock.
-    arrival_offset: Option<f64>,
     /// When this ease started watching (a new player or a seek): a
     /// look-ahead ease that would have begun before it isn't started.
     started_at: f64,
     /// The flip a look-ahead ease is running for, until it arrives.
-    pre_eased: Option<f32>,
+    pre_eased: Option<f64>,
 }
 
 impl Default for CrouchEase {
@@ -197,7 +195,6 @@ impl CrouchEase {
             settled_shown: 0.0,
             depth: 0.0,
             ease: Ease::Still,
-            arrival_offset: None,
             started_at: f64::NEG_INFINITY,
             pre_eased: None,
         }
@@ -206,11 +203,9 @@ impl CrouchEase {
     /// Forgets everything: the camera goes where the game puts it for
     /// `small_hull`, at once.
     pub(crate) fn settle(&mut self, small_hull: bool) {
-        let (target, arrival_offset, started_at) =
-            (self.target, self.arrival_offset, self.started_at);
+        let (target, started_at) = (self.target, self.started_at);
         *self = Self::new();
         self.target = target;
-        self.arrival_offset = arrival_offset;
         self.started_at = started_at;
         self.settled_shown = if small_hull { HULL_STEP } else { 0.0 };
         self.depth = if small_hull { FULL_DEPTH } else { 0.0 };
@@ -262,7 +257,6 @@ impl CrouchEase {
             return;
         }
         self.snapshots = [Some(newest), Some(snapshot)];
-        self.arrival_offset = Some(f64::from(snapshot.msg_time) - now);
         if snapshot.small_hull == newest.small_hull {
             return;
         }
@@ -325,11 +319,8 @@ impl CrouchEase {
     /// nothing in flight, and only for an ease this view was there to see
     /// start: after a seek into the middle of one, the flip is waited for.
     fn look_ahead(&mut self, frame: &Frame, now: f64) {
-        let Some(offset) = self.arrival_offset else {
-            return;
-        };
         if let Some(flip) = self.pre_eased {
-            if now > f64::from(flip) - offset + LATE_SECONDS {
+            if now > flip + LATE_SECONDS {
                 self.pre_eased = None;
                 self.depth = self.depth_at(now);
                 self.ease = Ease::Up {
@@ -344,7 +335,7 @@ impl CrouchEase {
         };
         let standing =
             !frame.snapshot.small_hull && self.steps[0].is_none() && self.depth_at(now) <= 0.0;
-        let start = f64::from(flip) - offset - LEAD_SECONDS;
+        let start = flip - LEAD_SECONDS;
         if standing && now >= start && start >= self.started_at {
             self.pre_eased = Some(flip);
             self.ease = Ease::Down {
@@ -477,10 +468,13 @@ mod tests {
             let snapshot = self.snapshots[n];
             let previous = self.snapshots[n.saturating_sub(1)];
             let drawn_z = self.drawn(t);
-            let upcoming_down =
-                self.timeline.iter().copied().find(|f| {
-                    *f > snapshot.msg_time && *f <= snapshot.msg_time + LOOK_AHEAD_SECONDS
-                });
+            // Snapshots arrive at their own msg_time here.
+            let upcoming_down = self
+                .timeline
+                .iter()
+                .copied()
+                .find(|f| *f > snapshot.msg_time && *f <= snapshot.msg_time + LOOK_AHEAD_SECONDS)
+                .map(f64::from);
             let frame = Frame {
                 time: f64::from(t),
                 target: 3,

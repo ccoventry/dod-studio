@@ -158,7 +158,7 @@ fn body_leaves_sprint_soon(now: f64, spectated: &ClEntityS, body: &str) -> bool 
         .body_changes(
             spectated.index,
             newest,
-            newest + snapshot_motion::LET_GO_LOOK_AHEAD_SECONDS,
+            snapshot_motion::LET_GO_LOOK_AHEAD_SECONDS,
         )
         .iter()
         .any(|&(_, sequence)| {
