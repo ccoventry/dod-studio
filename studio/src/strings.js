@@ -1605,7 +1605,9 @@ export const STRINGS = {
   // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
   BATCH_RESUME: {
     TITLE: 'Capture the rest?',
-    message: (captured, total, left) => `A capture batch stopped before the end while DoD Studio was closed. ${captured} of ${total} clips are on disk and marked Captured; ${left === 1 ? '1 clip was' : `${left} clips were`} not captured.`,
+    message: (captured, total, left) => (captured === 0
+      ? `A capture batch stopped before the end while DoD Studio was closed, and none of its ${total === 1 ? 'clip is' : `${total} clips are`} on disk.`
+      : `A capture batch stopped before the end while DoD Studio was closed. ${captured} of ${total} clips are on disk and marked Captured; ${left === 1 ? '1 clip was' : `${left} clips were`} not captured.`),
     inProject: (name) => `Capture them now? Studio opens the project ${name}, ticks just those highlights and starts a capture batch.`,
     IN_QUEUE: 'Capture them now? Studio ticks just those highlights and starts a capture batch.',
     CAPTURE_BUTTON: 'Capture them now',

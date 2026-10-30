@@ -131,3 +131,12 @@ describe('createBatchResume', () => {
     expect(app.startCapture).not.toHaveBeenCalled();
   });
 });
+
+describe('the question', () => {
+  it('says plainly when none of the clips are on disk', async () => {
+    const d = demos();
+    const { app, resume } = setup({ queue: d, sessionPath: 'p.dodstudio' });
+    await resume.offer(batch(d, { project_path: 'p.dodstudio' }), { captured: 0, total: 3 });
+    expect(app.io.confirm.mock.calls[0][0]).toContain('none of its 3 clips are on disk');
+  });
+});
