@@ -17,7 +17,6 @@ struct Machine {
     games: Vec<GameProcess>,
     refreshes: u32,
     killed: Vec<u32>,
-    killed_by_name: u32,
     cursor_released: u32,
 }
 
@@ -45,11 +44,6 @@ impl Processes for FakeProcesses {
         let mut m = self.0.borrow_mut();
         m.killed.push(pid);
         m.games.retain(|g| g.pid != pid);
-    }
-    fn kill_every_game(&mut self) {
-        let mut m = self.0.borrow_mut();
-        m.killed_by_name += 1;
-        m.games.clear();
     }
     fn release_cursor(&mut self) -> bool {
         self.0.borrow_mut().cursor_released += 1;
@@ -163,6 +157,68 @@ fn the_process_list_is_re_read_only_once_its_interval_passed() {
     assert_eq!(procs.m().refreshes, 2);
 }
 
+/// A direct-to-video batch whose game has been up past
+/// `FIRST_MARKER_DEADLINE` with no marker at all ends, says the demo never
+/// started, and closes its own game (#1214).
+#[test]
+fn a_direct_batch_whose_demo_never_starts_ends_with_a_message() {
+    let rig = Rig::new("watch_pass_never_started");
+    std::fs::write(&rig.log_path, b"the game's startup lines").unwrap();
+    let procs = FakeProcesses::default();
+    procs.set(&[THEIRS, OURS]);
+    let mut watch = rig.watch(false, &procs);
+    watch.hl_first_seen = Some(Instant::now() - FIRST_MARKER_DEADLINE + Duration::from_secs(5));
+    assert!(watch.pass().is_continue(), "not yet past the deadline");
+    watch.hl_first_seen = Some(Instant::now() - FIRST_MARKER_DEADLINE - Duration::from_secs(1));
+    assert!(watch.pass().is_break());
+    let reason = watch.failure_reason.clone().unwrap_or_default();
+    assert!(reason.starts_with("the demo never started"), "{reason}");
+    assert_eq!(procs.m().killed, [OURS.pid]);
+    assert!(!watch.game_closed);
+}
+
+/// A marker, or a console log the game never wrote (so no marker could
+/// reach Studio from it), keeps a direct-to-video batch going (#1214).
+#[test]
+fn a_direct_batch_with_a_marker_or_no_console_log_is_not_ended() {
+    let rig = Rig::new("watch_pass_started");
+    std::fs::write(&rig.log_path, b"the game's startup lines").unwrap();
+    let procs = FakeProcesses::default();
+    procs.set(&[OURS]);
+    let long_ago = Instant::now() - FIRST_MARKER_DEADLINE * 2;
+    let mut watch = rig.watch(false, &procs);
+    watch.hl_first_seen = Some(long_ago);
+    rig.markers
+        .send(parse_marker("[dod-studio] DEMO_START 1 1 1").unwrap())
+        .unwrap();
+    assert!(watch.pass().is_continue());
+
+    std::fs::remove_file(&rig.log_path).unwrap();
+    let mut silent = rig.watch(false, &procs);
+    silent.hl_first_seen = Some(long_ago);
+    assert!(silent.pass().is_continue());
+    assert!(procs.m().killed.is_empty());
+}
+
+/// A stalled batch in an open game it borrowed (#725) leaves that game open,
+/// as Cancel does: it isn't the batch's to close (#1214).
+#[test]
+fn a_stalled_batch_in_a_borrowed_game_leaves_it_open() {
+    let rig = Rig::new("watch_pass_stall_borrowed");
+    std::fs::write(&rig.log_path, b"the game's startup lines").unwrap();
+    let procs = FakeProcesses::default();
+    procs.set(&[OURS]);
+    let mut watch = rig.watch(false, &procs);
+    watch.io.reuse_game = Some(OURS.pid);
+    watch.game = BatchGame::new(Vec::new(), Some(OURS.pid));
+    watch.hl_first_seen = Some(Instant::now() - FIRST_MARKER_DEADLINE - Duration::from_secs(1));
+    assert!(watch.pass().is_break());
+    let reason = watch.failure_reason.clone().unwrap_or_default();
+    assert!(reason.starts_with("the demo never started"), "{reason}");
+    assert!(procs.m().killed.is_empty(), "the borrowed game was closed");
+    assert_eq!(procs.m().games, [OURS]);
+}
+
 /// Cancel is checked on every pass, and ends only the batch's own game: the
 /// one open before the launch and one opened since are left (M1).
 #[test]
@@ -176,7 +232,6 @@ fn a_cancel_ends_the_batch_and_only_its_own_game() {
     rig.cancel.store(true, Ordering::Relaxed);
     assert!(watch.pass().is_break());
     assert_eq!(procs.m().killed, [OURS.pid]);
-    assert_eq!(procs.m().killed_by_name, 0);
     assert_eq!(procs.m().games, [THEIRS, LATER]);
     assert_eq!(procs.m().cursor_released, 0, "games are still open");
     assert_eq!(watch.failure_reason, None);
@@ -184,9 +239,10 @@ fn a_cancel_ends_the_batch_and_only_its_own_game() {
 }
 
 /// A batch that never saw its game (cancelled while HLAE was starting it)
-/// still ends one, by name, since ending nothing could leave it running.
+/// ends nothing: every game in the list was open before the launch, so none
+/// is the batch's (#1212).
 #[test]
-fn a_cancel_before_the_game_was_seen_ends_every_game_by_name() {
+fn a_cancel_before_the_game_was_seen_ends_no_game() {
     let rig = Rig::new("watch_pass_cancel_unseen");
     let procs = FakeProcesses::default();
     procs.set(&[THEIRS]);
@@ -194,8 +250,8 @@ fn a_cancel_before_the_game_was_seen_ends_every_game_by_name() {
     rig.cancel.store(true, Ordering::Relaxed);
     assert!(watch.pass().is_break());
     assert!(procs.m().killed.is_empty());
-    assert_eq!(procs.m().killed_by_name, 1);
-    assert_eq!(procs.m().cursor_released, 1, "no game is left");
+    assert_eq!(procs.m().games, [THEIRS]);
+    assert_eq!(procs.m().cursor_released, 0, "a game is still open");
 }
 
 /// The batch's end is checked before its game going away: an OBS-mode
@@ -218,7 +274,6 @@ fn a_complete_batch_whose_game_is_gone_is_finished_not_closed() {
     assert!(!watch.game_closed);
     assert_eq!(watch.failure_reason, None);
     assert!(procs.m().killed.is_empty(), "nothing left to end");
-    assert_eq!(procs.m().killed_by_name, 0);
 }
 
 /// A finished batch closes its own game by pid and leaves the other one.
@@ -252,5 +307,4 @@ fn the_batchs_game_going_away_is_noticed_with_another_game_open() {
     assert!(watch.game_closed);
     assert!(watch.failure_reason.is_some());
     assert!(procs.m().killed.is_empty());
-    assert_eq!(procs.m().killed_by_name, 0);
 }
