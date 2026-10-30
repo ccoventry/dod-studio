@@ -1573,7 +1573,9 @@ pub async fn start_capture_batch_impl(
         // A different demo saved under a scanned one's name would take every
         // highlight tick with it and crash the game minutes in (#196). Stop
         // before anything is patched.
-        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks) {
+        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks)
+            .map_err(crate::messages::failed_to_check_demo_sources)
+        {
             log_markdown(&format!("[capture] {}", e));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
@@ -3544,7 +3546,8 @@ fn patch_bookmark_previews(
     let capture_streaks: Vec<CaptureStreak> =
         streaks.into_iter().map(CaptureStreak::from).collect();
     // Same check as a capture batch (#196): a preview patched from a
-    // different file crashes the game the same way.
+    // different file crashes the game the same way. Unwrapped: the toast says
+    // "Preview failed" (`STRINGS.IPC.previewFailed`).
     native::patch::check_sources_unchanged(&capture_streaks)?;
     let jobs = build_preview_patch_jobs(capture_streaks, Some(dod_dir));
     if jobs.is_empty() {

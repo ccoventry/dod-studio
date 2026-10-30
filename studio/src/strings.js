@@ -751,6 +751,15 @@ export const STRINGS = {
     EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
     exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
+    // #110: the finished renders as an EDL for VEGAS Pro.
+    EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
+    EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
+    exportEdlNone: (skipped) => skipped > 0
+      ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
+      : 'No finished renders yet, so there is nothing to export.',
+    exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
+    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -2212,6 +2221,9 @@ export const STRINGS = {
     glMaxSizeLow: (value, source, px, cap, fix) => `This install runs with gl_max_size ${value} (${source}), so HD textures show at ${px} px at most, smaller than the ${cap} they are built at. ${fix}`,
     GL_MAX_SIZE_FIX_CFG: 'Copy the gl_max_size line above into movie.cfg, then restart the game.',
     GL_MAX_SIZE_FIX_INITIAL: 'Raise it in Initial Commands (Configuration), or take that line out and set it in movie.cfg.',
+    // #1155: a style built with an older version of the app's scripts (native::hd::outdated).
+    outdatedSteps: { killfeed_icons: 'the new kill-feed icons (about 5 minutes)' },
+    outdatedStyle: (style, what) => `${style} was built with an older version: build it again to get ${what}.`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
