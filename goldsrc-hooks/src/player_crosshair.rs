@@ -115,6 +115,12 @@ pub fn hud_reloaded() {
     GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Whether the Players table gives the player on screen a crosshair this
+/// frame, so the game's own crosshair draws are swapped for it.
+pub fn overriding() -> bool {
+    HANDLE.load(Ordering::Relaxed) != 0
+}
+
 /// Whether a draw of `sheet` with `rect` is the crosshair's.
 pub fn is_crosshair_draw(sheet: Sheet, rect: &Wrect, in_eye: bool) -> bool {
     match sheet {
