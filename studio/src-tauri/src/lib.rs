@@ -490,7 +490,7 @@ fn capture_output_diagnostics(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic
                 native::sys::disk::PathStatus::NotFound => "not_found",
                 native::sys::disk::PathStatus::NotADirectory => "not_a_directory",
             };
-            let usable = native::sys::disk::get_available_bytes(&p) != u64::MAX;
+            let usable = native::sys::disk::get_available_bytes(&p).is_some();
             CaptureOutputDiagnostic {
                 path: path_str,
                 status,
