@@ -471,6 +471,8 @@ pub fn poll() {
     crate::run_in_background::poll();
     // Times this frame while ds_debug_record_frame_times is on (#646).
     crate::frame_times::poll();
+    // An atomic load; an atomic add while a clip records (#1221).
+    crate::clip_log::poll();
     crate::pov_live_bob::poll();
     // A float compare unless ds_view_show_own_blood changed (#1035).
     crate::own_blood::poll();

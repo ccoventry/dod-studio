@@ -59,6 +59,8 @@ pub(super) struct ClipWindow {
     pub post_roll_end_tick: i32,
     /// Five frames before the demo's last: nothing is scheduled past it.
     pub exit_frame: i32,
+    /// The demo's last frame: a command scheduled past it is never written.
+    pub last_frame: i32,
     /// The post-roll reached the demo's last ten frames and was cut to
     /// `exit_frame`; the hand-over then runs at `exit_frame` too.
     pub cut_at_demo_end: bool,
@@ -150,6 +152,7 @@ pub(super) fn clip_window(
             post_roll_end_tick.min(exit_frame)
         },
         exit_frame,
+        last_frame: absolute_final_frame,
         cut_at_demo_end,
     }
 }
@@ -211,6 +214,35 @@ pub(super) fn custom_command_tick(
             t
         }
     }
+}
+
+/// What to tell the player when a Scheduled Command's tick falls past the
+/// demo's last frame, where the patcher cannot write it (#1192); `None` when
+/// it lands inside the demo. The offset is the cause, not the highlights.
+pub(super) fn past_demo_end_note(
+    custom: &crate::patch::CustomCommand,
+    target_tick: i32,
+    window: &ClipWindow,
+    streak: &CaptureStreak,
+) -> Option<String> {
+    if target_tick <= window.last_frame {
+        return None;
+    }
+    let (how, anchor) = match custom.relation {
+        CommandRelation::Before => ("before", window.first_kill_frame),
+        CommandRelation::After => ("after", window.last_kill_frame),
+    };
+    Some(format!(
+        "⚠️ **Scheduled command not written:** `{}` was set {:.1}s {} the highlight at frame {}, \
+         which is past the end of `{}` (it ends at frame {}). The highlights match the file; \
+         shorten the offset to have it run.",
+        custom.command,
+        custom.offset,
+        how,
+        anchor,
+        std::path::Path::new(&streak.source_demo).display(),
+        window.last_frame
+    ))
 }
 
 /// Logs a note when a Scheduled Command at `target_tick` lands outside the
@@ -369,10 +401,22 @@ impl<'a> JobSchedule<'a> {
 
     /// Every Scheduled Command for one block, each after its CUSTOM_CMD
     /// marker, logging a note for any that runs during fast-forward.
-    pub fn push_custom_commands(&mut self, window: &ClipWindow, frame_times: &[f32]) {
+    ///
+    /// One that lands past the demo's last frame is left out, with its marker,
+    /// and logged: the patcher could not write it anyway (#1192).
+    pub fn push_custom_commands(
+        &mut self,
+        window: &ClipWindow,
+        frame_times: &[f32],
+        streak: &CaptureStreak,
+    ) {
         let config = self.config;
         for (idx, custom) in config.custom_commands.iter().enumerate() {
             let target_tick = custom_command_tick(custom, window, frame_times, self.job.demo_fps);
+            if let Some(note) = past_demo_end_note(custom, target_tick, window, streak) {
+                crate::log_markdown(&note);
+                continue;
+            }
             let marker = format!(
                 "CUSTOM_CMD{}_{} - Tick {}",
                 idx + 1,
