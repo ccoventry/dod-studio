@@ -87,8 +87,7 @@ pub(crate) use panel_toggles::viewdemo_in_panel;
 use panel_toggles::*;
 pub use panel_toggles::{
     CONSOLE_IN_PANEL, CONSOLE_NAME, VIEWDEMO_IN_PANEL, VIEWDEMO_NAME, after_viewdemo,
-    bare_viewdemo, console_status, engine_toggleconsole, set_console_cvar, set_viewdemo_cvar,
-    viewdemo_status, write_game_menu,
+    bare_viewdemo, console_status, engine_toggleconsole, viewdemo_status, write_game_menu,
 };
 use saved_settings::*;
 
