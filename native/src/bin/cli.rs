@@ -9,7 +9,7 @@ use humantime::{format_duration, format_rfc3339_seconds};
 #[cfg(not(target_arch = "wasm32"))]
 use native::patch::{PatchOptions, patch_demo_highlights};
 #[cfg(not(target_arch = "wasm32"))]
-use native::{FileInfo, run_analyzer};
+use native::{FileInfo, messages, run_analyzer};
 #[cfg(not(target_arch = "wasm32"))]
 use serde_json::{Value, json};
 #[cfg(not(target_arch = "wasm32"))]
@@ -62,16 +62,14 @@ fn main() {
                     record_stop_trail,
                     post_record_buffer,
                 ) {
-                    eprintln!("Error: {}", e);
+                    eprintln!("{}", messages::cli_error(e));
                     std::process::exit(1);
                 }
             }
         }
     } else {
         if args.demo_paths.is_empty() {
-            eprintln!(
-                "Error: Please specify at least one demo file to analyze, or use a subcommand."
-            );
+            eprintln!("{}", messages::CLI_NO_DEMOS);
             std::process::exit(1);
         }
         run_analyze_subcommand(args.demo_paths, args.output_format);
@@ -85,7 +83,7 @@ fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat)
         match run_analyzer(p) {
             Ok(res) => analyses.push(res),
             Err(e) => {
-                eprintln!("Error analyzing {}: {}", p.display(), e);
+                eprintln!("{}", messages::cli_error_analyzing(p.display(), e));
             }
         }
     }
@@ -108,7 +106,7 @@ fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
     for p in &demo_paths {
         match run_analyzer(p) {
             Ok((file, analysis)) => rows.push(stats_json(&file, &analysis)),
-            Err(e) => eprintln!("Error analyzing {}: {}", p.display(), e),
+            Err(e) => eprintln!("{}", messages::cli_error_analyzing(p.display(), e)),
         }
     }
     println!("{}", Json(json!(rows)));
@@ -219,7 +217,7 @@ fn run_patch_streak_subcommand(
     record_stop_trail: f32,
     post_record_buffer: f32,
 ) -> Result<(), String> {
-    println!("Analyzing input demo: {}", input.display());
+    println!("{}", messages::cli_analyzing_input(input.display()));
     let (_file_info, analysis) = run_analyzer(&input)?;
 
     // Find player
@@ -235,21 +233,20 @@ fn run_patch_streak_subcommand(
     let player = match target_player {
         Some(p) => p,
         None => {
-            return Err(format!(
-                "Could not find player matching query '{}'. Available players: {}",
-                player_query,
+            return Err(messages::cli_no_player_match(
+                &player_query,
                 analysis
                     .state
                     .players
                     .iter()
                     .map(|p| p.name.as_str())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
             ));
         }
     };
 
-    println!("Found player: {} ({})", player.name, player.id);
+    println!("{}", messages::cli_found_player(&player.name, &player.id));
 
     // Collect killstreaks matching weapon & count filters
     let mut intervals = vec![];
@@ -275,21 +272,19 @@ fn run_patch_streak_subcommand(
             let stop_time = last_kill.0.real_offset.as_secs_f32();
             intervals.push((start_time, stop_time));
             println!(
-                "Selected Streak: {} kills starting at {:.2}s, ending at {:.2}s",
-                streak.kills.len(),
-                start_time,
-                stop_time
+                "{}",
+                messages::cli_selected_streak(streak.kills.len(), start_time, stop_time)
             );
         }
     }
 
     if intervals.is_empty() {
-        return Err("No killstreaks found matching the criteria.".to_string());
+        return Err(messages::CLI_NO_KILLSTREAKS.to_string());
     }
 
-    println!("Reading raw demo bytes...");
+    println!("{}", messages::CLI_READING_RAW_BYTES);
     let demo_bytes =
-        std::fs::read(&input).map_err(|e| format!("Failed to read {}: {}", input.display(), e))?;
+        std::fs::read(&input).map_err(|e| messages::cli_failed_to_read(input.display(), e))?;
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
         Some(player.name.clone())
@@ -318,15 +313,15 @@ fn run_patch_streak_subcommand(
         player_deaths: Some(player_deaths),
     };
 
-    println!("Patching demo highlights...");
+    println!("{}", messages::CLI_PATCHING_HIGHLIGHTS);
     let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)
-        .map_err(|e| format!("{}: {}", input.display(), e))?;
+        .map_err(|e| messages::labeled(input.display(), e))?;
 
-    println!("Writing patched demo to: {}", output.display());
+    println!("{}", messages::cli_writing_patched(output.display()));
     std::fs::write(&output, patched_bytes)
-        .map_err(|e| format!("Failed to write {}: {}", output.display(), e))?;
+        .map_err(|e| messages::cli_failed_to_write(output.display(), e))?;
 
-    println!("Successfully exported patched demo!");
+    println!("{}", messages::CLI_EXPORT_DONE);
     Ok(())
 }
 
