@@ -10,6 +10,7 @@ import {
 import { placeholderGroups, placeholderDescription } from './placeholder_catalogue.js';
 import { renderPlaceholderChips } from './placeholder_chips.js';
 import { STRINGS } from './strings.js';
+import { onUseAsChange } from './player_alias.js';
 
 let getPreviewHighlight = () => null;
 let getExportDirs = () => [];
@@ -148,5 +149,7 @@ export function initClipNameSettings({ getHighlight, getExportDirList, getProjec
     refreshClipNamePreview();
     if (onChange) onChange();
   });
+  // A Use as name edited on the Players tab (#686) changes the preview.
+  onUseAsChange(refreshClipNamePreview);
   refreshClipNamePreview();
 }

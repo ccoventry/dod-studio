@@ -50,11 +50,12 @@
 //! `client+0x4d340`, which the same BSP parse calls), so a forced rain falls
 //! straight on a map with no wind of its own.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("map_weather");
 
@@ -83,7 +84,7 @@ const OPERAND_AT: usize = 16;
 /// The weather type the patched read sees. The client code holds its
 /// address, so it stays a plain 4-byte static.
 static FORCED: AtomicI32 = AtomicI32::new(NONE);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's raw f32 bits the last time it was acted on; NaN until then.
 static SEEN: AtomicU32 = AtomicU32::new(0x7fc0_0000);
 /// The operand's address, for the `client.dll` base in [`SCANNED_BASE`].
@@ -93,10 +94,6 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// first write.
 static STOCK_OPERAND: AtomicU32 = AtomicU32::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The level a cvar value asks for, and whether it had to be clamped to get
 /// there. A fraction rounds down; NaN and infinities read as 0.
@@ -253,12 +250,12 @@ fn applied_message(level: i32, particlefx: Option<f32>) -> String {
 
 /// Once a frame from `commands::poll`, on the engine thread.
 pub fn poll() {
-    let ptr = CVAR.load(Ordering::Acquire);
-    if ptr.is_null() || GAVE_UP.load(Ordering::Relaxed) {
+    let Some(raw) = CVAR.value() else {
+        return;
+    };
+    if GAVE_UP.load(Ordering::Relaxed) {
         return;
     }
-    // Safety: the engine owns the cvar for the session.
-    let raw = unsafe { (*ptr).value };
     if SEEN.load(Ordering::Relaxed) == raw.to_bits() {
         return;
     }

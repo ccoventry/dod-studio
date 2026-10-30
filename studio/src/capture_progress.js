@@ -59,6 +59,10 @@ export function captureStepView(p) {
       const fill = inShare(share, of(index));
       return { fill, slideTo: p.measured === false ? inShare(share, of(Math.floor(index) + 1)) : null };
     }
+    case 'trimming':
+      // A trimmed copy being made (#207): its line has the percent, and a
+      // patched batch fills the same share afterwards, so it only slides.
+      return { fill: 0, slideTo: CAPTURE_SHARES.preparing[1] };
     case 'starting':
     case 'loading':
     case 'capturing': {

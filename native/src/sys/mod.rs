@@ -32,9 +32,15 @@ pub mod hook_copy;
 /// The Half-Life installs on this PC and their engine builds (#931).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod installs;
+/// Whether Studio's job object ends its processes when it closes (#545).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod job;
 /// Directory junctions, made and unlinked through Win32 (#376).
 #[cfg(windows)]
 pub mod junction;
+/// Starts the HLAE launcher outside a dev Studio's job and tracks it (#545).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod launcher;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod minimize;
 /// The DLLs a running process has loaded: which hook DLL a game has (#725).
@@ -53,3 +59,6 @@ pub mod recycle_bin;
 pub mod screen;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod steam;
+/// Starts a process through WMI, outside every job of Studio's (#545).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wmi_launch;

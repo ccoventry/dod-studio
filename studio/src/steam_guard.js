@@ -36,7 +36,7 @@ export async function ensureSteamReady() {
     if (!ok) return false;
     try {
       await startSteam();
-    } catch (err) {
+    } catch {
       return false; // already toasted by ipc_bridge.js
     }
   }

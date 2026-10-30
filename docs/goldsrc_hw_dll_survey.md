@@ -36,7 +36,7 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 > | the 64-byte command limit (§3.1) | not reachable | — | #256 |
 > | `CL_ParseServerMessage` / demo reader (§3.3) | no | — | — |
 > | `CL_FlushEntityPacket` predicate (§3.5, §8) | located offline, no command | — | #273 |
-> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207, open |
+> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207: Studio plays a trimmed copy of the demo instead |
 >
 > ### Read this before §1
 >

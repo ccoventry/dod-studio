@@ -43,10 +43,10 @@
 //! left up for its last 4 s. The `hw.dll` patch is checked every frame once
 //! the cvar has been on, and put back at 0.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_center_text");
 
@@ -56,7 +56,7 @@ const HUD_PRINTCENTER: u8 = 4;
 /// Hidden messages logged one by one before only the count goes on.
 const LOGGED_MAX: u32 = 20;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's value as last seen: what the message handler reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Messages hidden this session.
@@ -68,11 +68,6 @@ static TOUCHED: AtomicBool = AtomicBool::new(false);
 static ENGINE_HIDDEN: AtomicBool = AtomicBool::new(false);
 /// Whether the `hw.dll` patch's failure has been reported, so it is said once.
 static ENGINE_COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// Whether a `TextMsg` payload (destination byte, then the text or key) goes
 /// to the middle of the screen.
@@ -107,11 +102,9 @@ pub(crate) fn hide(payload: &[u8]) -> bool {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);
     }

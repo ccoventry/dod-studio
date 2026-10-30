@@ -159,7 +159,7 @@ fn crosshair_fallback(cells: &[&str]) -> Option<Crosshair> {
 
 /// A 17-digit SteamID64 (the form the file holds).
 fn steam_id64(text: &str) -> Option<u64> {
-    const BASE: u64 = 76561197960265728;
+    use crate::steam_id::BASE;
     let text = text.trim();
     if text.len() != 17 || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;

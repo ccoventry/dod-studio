@@ -17,8 +17,6 @@ use native::preview_in_place::{
 };
 use native::sys::game_remote::{Sent, send_console_commands};
 
-use crate::capture_manager::SerializedStreak;
-
 /// How long a launched game has to open its command pipe.
 const PIPE_WAIT: Duration = Duration::from_secs(90);
 /// After the pipe answers, how long before the window is opened: the pipe
@@ -30,15 +28,11 @@ const SETTLE: Duration = Duration::from_secs(5);
 /// the same message loses to it.
 const TAB_AFTER: Duration = Duration::from_secs(3);
 
-/// The `viewdemo` argument for previewing `streaks`' demo in place, or
-/// `None` when this preview has to be patched.
-pub fn plan(
-    config: &PatcherConfig,
-    dod_dir: &Path,
-    streaks: &[SerializedStreak],
-) -> Option<String> {
+/// The `viewdemo` argument for previewing `demo` in place (the highlights'
+/// demo, or its trimmed copy, #207), or `None` when this preview has to be
+/// patched.
+pub fn plan(config: &PatcherConfig, dod_dir: &Path, demo: &Path) -> Option<String> {
     let dll = config.goldsrc_hooks_dll()?;
-    let demo = Path::new(&streaks.first()?.source_demo);
     if !demo.is_file() {
         return None;
     }
@@ -57,8 +51,7 @@ pub fn plan(
 pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Result<(), String> {
     let before = crate::game_process_manager::running_game_pids();
     let mut cmd = config.build_hlae_process("");
-    let launcher = cmd
-        .spawn()
+    let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
         .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
     native::log_markdown(&format!(
         "[preview] in place: launched the game for \"{arg}\" (no patched copy)"

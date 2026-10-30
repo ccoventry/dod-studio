@@ -77,7 +77,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The cvar name, for status and error text. Registered in `commands.rs`.
+/// The cvar name, for status and error text. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("hud_hide_crosshair");
 
 /// `CHudDoDCrossHair::Draw`'s prologue. The wildcards cover the relative call

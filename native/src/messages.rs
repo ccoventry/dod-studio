@@ -7,8 +7,12 @@
 // e.g. `failed_to_patch_preview_demo`, but the inner text — what actually
 // went wrong — is authored here). Scoped to the modules studio's
 // Tauri layer actually calls (patch::map_fetch, shared::hlae_ffmpeg,
-// obs::session) — native's CLI probe binaries (native/src/bin/*) are never
-// reachable from the app and are out of scope. Issue #33.
+// obs::session), plus the user-facing output of the real command-line
+// binaries (`preview_cli`, `dod-studio-cli`, `check_maps`, `check_cfgs`; see
+// the `bin/` sections below). Not in scope: the dev-only binaries
+// (`dod-studio-dump`, `dod-studio-inspect`, `strip_decals`) and
+// `native/examples/`, whose output is for the developer running them
+// (#237, D19). Issue #33.
 
 use std::fmt::Display;
 
@@ -370,6 +374,283 @@ pub fn rename_bad_name(name: &str) -> String {
     format!("`{name}` isn't a usable demo name")
 }
 
+// ── bin/check_cfgs.rs (#237) ──────────────────────────────────────────────
+// Constants that start with "\n" keep the blank line the report puts before
+// a section; the binary prints each with `println!("{}", ..)`.
+
+pub const CHECK_CFGS_USAGE: &str = "usage: check_cfgs <dod-folder> [\"init command\"...]";
+pub const CFGS_NOTHING_SET: &str = "Nothing the pipeline depends on is set by an executed config.";
+pub const CFGS_SET_BY_CONFIGS: &str = "Set by configs the engine runs on its own:";
+pub const CFGS_OVERRIDDEN_LATER: &str = "\nAlso set, but overridden later in the chain:";
+pub const CFGS_NO_INIT_CONFLICT: &str = "No value those init commands set conflicts with another.";
+pub const CFGS_INIT_CONFLICTS: &str = "Values that conflict (the last one is in effect):";
+pub const CFGS_WILL_QUIT_GAME: &str = "\nWill quit the game the moment the HUD renders:";
+pub const CFGS_UNREFERENCED: &str =
+    "\nConfigs present that nothing execs (they set nothing today):";
+
+pub fn cfgs_folder_and_count(dir: impl Display, files_read: impl Display) -> String {
+    format!("{}\n{} config file(s) executed\n", dir, files_read)
+}
+
+/// One `cvar value file:line` row of the effective and overridden lists.
+pub fn cfgs_setting_row(
+    cvar: impl Display,
+    value: impl Display,
+    file: impl Display,
+    line: impl Display,
+) -> String {
+    format!("  {:<12} {:<8} {}:{}", cvar, value, file, line)
+}
+
+pub fn cfgs_assignments_seen(count: usize) -> String {
+    format!("\n{} assignment(s) seen across those configs.", count)
+}
+
+pub fn cfgs_value_from_config(
+    value: impl Display,
+    file: impl Display,
+    line: impl Display,
+) -> String {
+    format!("{} ({}:{})", value, file, line)
+}
+
+pub fn cfgs_value_from_init(value: impl Display) -> String {
+    format!("{} (init)", value)
+}
+
+pub fn cfgs_conflict_row(cvar: impl Display, values: impl Display) -> String {
+    format!("  {:<20} {}", cvar, values)
+}
+
+pub fn cfgs_fatal_row(
+    cvar: impl Display,
+    value: impl Display,
+    required: impl Display,
+    file: impl Display,
+    line: impl Display,
+) -> String {
+    format!(
+        "  {:<12} {:<8} DoD requires {} ({}:{})",
+        cvar, value, required, file, line
+    )
+}
+
+pub fn cfgs_unreferenced_row(file: impl Display) -> String {
+    format!("  {}", file)
+}
+
+// ── bin/check_maps.rs (#237) ──────────────────────────────────────────────
+
+pub const CHECK_MAPS_USAGE: &str = "usage: check_maps <demo-or-folder> [maps-dir] [--fetch]";
+pub const MAPS_READ_FOLDER_FAILED: &str = "read folder";
+pub const MAPS_TO_FETCH: &str = "\nmaps to fetch:";
+pub const MAPS_PASS_FETCH: &str = "\npass --fetch to download these.";
+
+pub fn maps_dir_line(dir: impl Display) -> String {
+    format!("maps: {}", dir)
+}
+
+pub fn maps_demo_count(count: usize) -> String {
+    format!("demos: {}\n", count)
+}
+
+pub fn maps_demo_status(name: impl Display, summary: impl Display) -> String {
+    format!("{:<52} {}", name, summary)
+}
+
+pub fn maps_unreadable_demo(name: impl Display, err: impl Display) -> String {
+    format!("{:<52} unreadable demo: {}", name, err)
+}
+
+pub fn maps_totals(
+    ok: usize,
+    wrong: usize,
+    missing: usize,
+    unverifiable: usize,
+    unreadable_map: usize,
+    unreadable_demo: usize,
+) -> String {
+    format!(
+        "\nok {}  wrong-build {}  missing {}  unverifiable {}  unreadable-map {}  unreadable-demo {}",
+        ok, wrong, missing, unverifiable, unreadable_map, unreadable_demo
+    )
+}
+
+pub fn maps_to_fetch_row(map: impl Display, build: u32, demos: usize, url: impl Display) -> String {
+    format!(
+        "  {:<24} build {:08x}, {} demo(s)  {}",
+        map, build, demos, url
+    )
+}
+
+pub fn maps_to_fetch_row_unstated(map: impl Display, demos: usize, url: impl Display) -> String {
+    format!("  {:<24} build unstated, {} demo(s)  {}", map, demos, url)
+}
+
+pub fn maps_already_correct(map: impl Display) -> String {
+    format!("  {:<24} already correct", map)
+}
+
+/// `previous_kept` is the ", previous kept at <path>" tail, or empty.
+pub fn maps_installed(
+    map: impl Display,
+    build: u32,
+    megabytes: f64,
+    previous_kept: &str,
+) -> String {
+    format!(
+        "  {:<24} installed {:08x} ({:.1} MB){}",
+        map, build, megabytes, previous_kept
+    )
+}
+
+pub fn maps_previous_kept_at(path: impl Display) -> String {
+    format!(", previous kept at {}", path)
+}
+
+pub fn maps_fetch_failed(map: impl Display, err: impl Display) -> String {
+    format!("  {:<24} FAILED: {}", map, err)
+}
+
+// ── bin/preview_cli/main.rs (#237) ────────────────────────────────────────
+
+pub const PREVIEW_DROP_PROMPT: &str =
+    "Drag and drop demo files or directories into this window and press Enter.";
+pub const PREVIEW_BLANK_TO_EXIT: &str = "(To exit without processing, leave blank and press Enter)";
+pub const PREVIEW_INPUT_PROMPT: &str = "> ";
+pub const PREVIEW_PRESS_ENTER_TO_EXIT: &str = "\nPress Enter to exit...";
+pub const PREVIEW_UNNAMED_PLAYER: &str = "<unnamed>";
+pub const PREVIEW_ALL_PLAYERS_HINT: &str =
+    "  HLTV demo: bookmarking all players. Re-run with --player to narrow it to one.";
+pub const PREVIEW_ROSTER_HEADER: &str =
+    "  players with highlights (pass one to --player, by name or index):";
+
+pub fn preview_create_dir_failed(dir: impl Display, err: impl Display) -> String {
+    format!("Failed to create output directory {}: {}", dir, err)
+}
+
+pub fn preview_output_dir(dir: impl Display) -> String {
+    format!("Output directory: {}", dir)
+}
+
+pub fn preview_read_dir_failed(dir: impl Display, err: impl Display) -> String {
+    format!("Failed to read directory {}: {}", dir, err)
+}
+
+pub fn preview_skipped_not_dem(path: impl Display) -> String {
+    format!("Skipped: {} — not a .dem file", path)
+}
+
+pub fn preview_skipped_not_found(path: impl Display) -> String {
+    format!("Skipped: {} — not found or not accessible", path)
+}
+
+pub fn preview_batch_complete(processed: usize, skipped: usize) -> String {
+    format!(
+        "\nBatch Complete\n  Processed: {}  |  Skipped: {}",
+        processed, skipped
+    )
+}
+
+pub fn preview_roster_row(index: usize, kills: u32, streaks: usize, name: impl Display) -> String {
+    format!("    {index:>3}  {kills:>3} kills in {streaks:>2} streaks   {name}")
+}
+
+pub fn preview_processing(name: impl Display) -> String {
+    format!("Processing: {}", name)
+}
+
+pub fn preview_skipped_unreadable(name: impl Display, err: impl Display) -> String {
+    format!("  Skipped: {} — could not read it as a demo: {}", name, err)
+}
+
+pub fn preview_player_ignored_for_pov(name: impl Display) -> String {
+    format!(
+        "  Note: {} is a POV demo — --player ignored (its camera is already one player's)",
+        name
+    )
+}
+
+pub fn preview_skipped_no_highlights(name: impl Display) -> String {
+    format!("  Skipped: {} — no highlights found", name)
+}
+
+pub fn preview_skipped_no_player_match(name: impl Display, want: impl Display) -> String {
+    format!(
+        "  Skipped: {} — no highlights for a player matching \"{}\"",
+        name, want
+    )
+}
+
+pub fn preview_bookmarking_only(name: impl Display, index: impl Display) -> String {
+    format!(
+        "  Bookmarking only {} (index {}) — the camera stays with the auto-director",
+        name, index
+    )
+}
+
+pub fn preview_saved(name: impl Display) -> String {
+    format!("  Saved: {}", name)
+}
+
+pub fn preview_write_failed(name: impl Display, err: impl Display) -> String {
+    format!("  Failed to write {}: {}", name, err)
+}
+
+// ── bin/cli.rs (dod-studio-cli, #237) ─────────────────────────────────────
+// The Markdown report's headings and table columns are the report's layout,
+// not messages, and stay in cli.rs; so does clap's `--help` text, which is the
+// doc comments on its argument structs.
+
+pub const CLI_NO_DEMOS: &str =
+    "Error: Please specify at least one demo file to analyze, or use a subcommand.";
+pub const CLI_NO_KILLSTREAKS: &str = "No killstreaks found matching the criteria.";
+pub const CLI_READING_RAW_BYTES: &str = "Reading raw demo bytes...";
+pub const CLI_PATCHING_HIGHLIGHTS: &str = "Patching demo highlights...";
+pub const CLI_EXPORT_DONE: &str = "Successfully exported patched demo!";
+
+pub fn cli_error(err: impl Display) -> String {
+    format!("Error: {}", err)
+}
+
+pub fn cli_error_analyzing(path: impl Display, err: impl Display) -> String {
+    format!("Error analyzing {}: {}", path, err)
+}
+
+pub fn cli_analyzing_input(path: impl Display) -> String {
+    format!("Analyzing input demo: {}", path)
+}
+
+pub fn cli_no_player_match(query: impl Display, available: impl Display) -> String {
+    format!(
+        "Could not find player matching query '{}'. Available players: {}",
+        query, available
+    )
+}
+
+pub fn cli_found_player(name: impl Display, id: impl Display) -> String {
+    format!("Found player: {} ({})", name, id)
+}
+
+pub fn cli_selected_streak(kills: usize, start: f32, stop: f32) -> String {
+    format!(
+        "Selected Streak: {} kills starting at {:.2}s, ending at {:.2}s",
+        kills, start, stop
+    )
+}
+
+pub fn cli_failed_to_read(path: impl Display, err: impl Display) -> String {
+    format!("Failed to read {}: {}", path, err)
+}
+
+pub fn cli_writing_patched(path: impl Display) -> String {
+    format!("Writing patched demo to: {}", path)
+}
+
+pub fn cli_failed_to_write(path: impl Display, err: impl Display) -> String {
+    format!("Failed to write {}: {}", path, err)
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any
@@ -448,6 +729,40 @@ mod tests {
                 "ffmpeg.exe", "handbrake version 1.0"
             )
         );
+    }
+
+    #[test]
+    fn bin_messages_match_their_original_inline_text() {
+        assert_eq!(
+            cfgs_setting_row("r_decals", 9, "movie.cfg", 1),
+            "  r_decals     9        movie.cfg:1"
+        );
+        assert_eq!(
+            cfgs_fatal_row("cl_x", 1, 0, "a.cfg", 3),
+            "  cl_x         1        DoD requires 0 (a.cfg:3)"
+        );
+        assert_eq!(cfgs_value_from_init(3), "3 (init)");
+        assert_eq!(
+            maps_to_fetch_row("dod_anzio", 0x801b771f, 1, "u"),
+            "  dod_anzio                build 801b771f, 1 demo(s)  u"
+        );
+        assert_eq!(
+            maps_installed("m", 0xab, 1.25, ""),
+            "  m                        installed 000000ab (1.2 MB)"
+        );
+        assert_eq!(
+            preview_roster_row(2, 4, 3, "x"),
+            "      2    4 kills in  3 streaks   x"
+        );
+        assert_eq!(
+            preview_batch_complete(1, 2),
+            "\nBatch Complete\n  Processed: 1  |  Skipped: 2"
+        );
+        assert_eq!(
+            cli_selected_streak(3, 1.0, 2.5),
+            "Selected Streak: 3 kills starting at 1.00s, ending at 2.50s"
+        );
+        assert_eq!(cli_error("boom"), "Error: boom");
     }
 
     #[test]

@@ -799,7 +799,7 @@ pub fn player(slot: usize) -> Option<(String, u64)> {
     let steam_id = if info.steam_id != 0 {
         info.steam_id
     } else {
-        unsafe { crate::deathmsg::steam_id_from_record(info.name) }
+        unsafe { crate::steam_id::from_record(info.name) }
     };
     Some((name, steam_id))
 }

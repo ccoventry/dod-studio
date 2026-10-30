@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!--
+  Harness for Highlight Details' capture history (#439): one demo with two
+  highlights and a take index holding, for the first, a capture whose take is
+  still there (shared with the second highlight, one finished render and one
+  failed), a capture whose take was deleted, and a capture from a project
+  saved before #439 (a bare uid list). The second highlight has the shared
+  take only.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>capture history harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <h3 id="detail-demo-title"></h3>
+  <div id="detail-streaks-container" style="width: 1400px"></div>
+
+  <script type="module">
+    import { initDetailPane, renderDetailView } from '/src/detail_pane.js';
+    import { streakUid } from '/src/take_index.js';
+    import { recordCapture } from '/src/take_record.js';
+
+    const streak = (t, player) => ({
+      kill_count: 2, start_index: 0, end_index: 1, selected: false, status: 'Rendered', notes: '', player_index: 1, target_player: player,
+      start_tick: t * 100, end_tick: (t + 3) * 100, kills: [[t * 100, t, 'K98'], [(t + 3) * 100, t + 3, 'K98']],
+    });
+    const demo = { name: 'test.dem', path: 'C:/demos/test.dem', is_pov: false, tickrate: 100, streaks: [streak(60, 'Ann'), streak(120, 'Bob')] };
+    const [first, second] = demo.streaks.map((s) => streakUid(demo.path, s));
+
+    // takeIndex is bare uid lists, as in every project file; how each take was
+    // captured sits beside it (take_record.js).
+    // takeIndex is bare uid lists, as in every project file; how each take was
+    // captured sits beside it (take_record.js).
+    const takeIndex = {
+      'old_session/chain_00_b0': [first],
+      'gone_session/chain_00_b0': [first],
+      'live_session/chain_01_b1': [first, second],
+    };
+    recordCapture(takeIndex, 'gone_session/chain_00_b0', { session_id: 'gone_session', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/gone_session/chain_00_b0' });
+    recordCapture(takeIndex, 'live_session/chain_01_b1', { session_id: 'live_session', captured_at: 1_700_100_000_000, capture_mode: 'direct_to_video', capture_fps: 120, take_folder: 'D:/caps/live_session/chain_01_b1' });
+    window.__demo = demo;
+    window.__revealed = [];
+
+    const attempt = (started, outcome, extra = {}) => ({ started_unix_ms: started, stream: 'all', codec: 'prores', fps: 60, outcome, output_path: '', ...extra });
+    window.__mockInvokeHandlers.take_capture_states = ({ takeFolders }) => takeFolders.map((folder) => (
+      folder.includes('live_session')
+        ? { exists: true, renders: [
+            attempt(1_700_100_100_000, 'finished', { output_path: 'D:/out/live.mov', output_exists: true, output_size_bytes: 5_000_000 }),
+            attempt(1_700_100_200_000, 'failed', { error: 'codec not found' }),
+          ] }
+        : { exists: false, renders: [] }
+    ));
+    window.__mockInvokeHandlers.reveal_in_explorer = ({ path }) => { window.__revealed.push(path); };
+
+    initDetailPane(() => [demo], () => {}, () => {}, { getTakeIndex: () => takeIndex });
+    renderDetailView(demo, 0);
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

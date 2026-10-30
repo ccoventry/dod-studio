@@ -191,6 +191,30 @@ export const STRINGS = {
     EMPTY_DASH: '—',
   },
 
+  // ── Highlight Details: every capture of a highlight (#439) ───────────────
+  CAPTURE_HISTORY: {
+    TOGGLE_TITLE: 'Show or hide every time this highlight was captured, with its take and its renders',
+    CHECKING: 'Checking the takes…',
+    CHECK_FAILED: 'Could not look at the takes on disk.',
+    NO_DATE: 'Captured earlier (date not recorded)',
+    NO_SETTINGS: 'settings not recorded',
+    take: (name) => `Take ${name}`,
+    TAKE_GONE: 'take deleted',
+    TAKE_GONE_TITLE: 'The take folder is not there any more. This line stays as the record of the capture.',
+    TAKE_FOLDER_UNKNOWN: 'folder not recorded',
+    TAKE_FOLDER_UNKNOWN_TITLE: 'This capture was recorded before Studio kept the take folder, so it cannot be checked.',
+    OPEN_FOLDER: 'Open Folder',
+    OPEN_FOLDER_TITLE: 'Show the take folder in Explorer',
+    OPEN_VIDEO: 'Show video',
+    OPEN_VIDEO_TITLE: 'Show the rendered video in Explorer',
+    sharedWith: (labels) => `Shared with ${labels.join(', ')}`,
+    SHARED_TITLE: 'Recorded together in one take',
+    otherHighlight: (time, player) => (player ? `${player} at ${time}` : `highlight at ${time}`),
+    UNKNOWN_HIGHLIGHT: 'a highlight no longer in the queue',
+    NO_RENDERS: 'not rendered',
+    REVEAL_FAILED: 'Could not show that in Explorer.',
+  },
+
   // ── Highlight Details (detail_pane.js) + Advanced Diagnostics ───────────
   HIGHLIGHTS: {
     // #441: the name the finished file gets.
@@ -1607,7 +1631,6 @@ export const STRINGS = {
   BATCH_CLOSE_MODAL: {
     TITLE: 'Capture batch running',
     MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own. Studio checks the takes and marks them Captured the next time it opens. To stop the batch instead, use Cancel Batch first.',
-    LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
     CLOSE_BUTTON: 'Close DoD Studio',
     KEEP_OPEN_BUTTON: 'Keep Studio open',
     // The batch's start has not reached the game yet (#545): Studio waits for
@@ -2469,18 +2492,11 @@ export const STRINGS = {
     listFailed: (reason) => `Could not read the linked folders: ${reason}`,
   },
 
-  // ── packet_entity_limit.js: demos the engine can't play (#207) ─────────
+  // ── packet_entity_limit.js: demos over the engine's limit (#207) ───────
   ENTITY_LIMIT: {
-    BADGE: "won't play",
-    badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so it can't play this demo: a capture or preview of it fails at that point.`,
-    batchTitle: (count) => `${count} demo${count === 1 ? '' : 's'} won't play in this game`,
-    batchMessage: (count, limit) => `${count === 1 ? 'This demo has' : 'These demos have'} more than ${limit} entities in one snapshot, and the game closes when it gets there. Start the batch anyway?`,
-    PREVIEW_TITLE: "This demo won't play in this game",
-    previewMessage: (limit) => `It has more than ${limit} entities in one snapshot, and the game closes when it gets there. Launch it anyway?`,
-    peakDetail: (peak) => `Up to ${peak} entities in one snapshot`,
-    ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024: set its hl.exe in Configuration → Paths for these.',
-    START_ANYWAY: 'Start anyway',
-    PREVIEW_ANYWAY: 'Launch anyway',
+    BADGE: 'trimmed copy',
+    badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so captures and previews play a trimmed copy: fog, invisible collision hulls and a few far decorations are left out of every snapshot. The original file is unchanged.`,
+    ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024 and plays the original: set its hl.exe in Configuration → Paths for these.',
   },
 
   // ── camera_data.js: demos with no camera data (#920) ───────────────────
@@ -3142,8 +3158,8 @@ export const STRINGS = {
     // Rename Demos' own meaning of a placeholder, where it isn't the one in
     // PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
-      name: "The recording player's name without their team's tag",
-      full_name: "The recording player's name as it is, tag included",
+      name: "The recording player's name without their team's tag, or their Use as name from the Players tab",
+      full_name: "The recording player's name as it is, tag included, or their Use as name from the Players tab",
       kills: "The recording player's kills in the whole demo (a clip name's {kills} is the highlight's kills instead)",
       deaths: "The recording player's deaths",
       faction: "The recording player's side: Allies, British or Axis",
@@ -3212,8 +3228,8 @@ export const STRINGS = {
     // The clip name's own meaning of a placeholder, where it isn't the one
     // in PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
-      name: "The highlight player's name without their team's tag ({player} still works: the name as it is)",
-      full_name: "The highlight player's name as it is, tag included",
+      name: "The highlight player's name without their team's tag, or their Use as name from the Players tab ({player} still works: the name as it is)",
+      full_name: "The highlight player's name as it is, tag included, or their Use as name from the Players tab",
       faction: 'Their side: Allies, British, Axis',
       enemy_faction: 'The side of the players they killed',
       kills: "Kills in the chosen Kill Range (Rename Demos' {kills} is the player's kills in the whole demo instead)",
@@ -3246,6 +3262,11 @@ export const STRINGS = {
     REFRESH_BUTTON: 'Refresh',
     REFRESH_TITLE: "Read the logos and sprites folders and the queue's players again",
     COLUMN_PLAYER: 'Player',
+    COLUMN_USE_AS: 'Use as',
+    USE_AS_TITLE: 'Used for {name} and {player} in clip and demo names instead of the in-game name. Leave empty to use the in-game name.',
+    USE_AS_PLACEHOLDER: 'In-game name',
+    USE_AS_NEEDS_STEAMID: 'A name is only swapped for a player with a SteamID: a player added by name has none.',
+    useAsAria: (who) => `Use as name for ${who}`,
     COLUMN_SPRAY: 'Spray',
     COLUMN_CROSSHAIR: 'Crosshair',
     PICK_PNG: 'Pick a PNG…',

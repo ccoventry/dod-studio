@@ -47,10 +47,9 @@ pub async fn movie_copy_plan(game_path: String) -> Result<MovieCopyPlan, String>
         let source = root.join(movie_copy::SOURCE_FOLDER);
         let plan = movie_copy::plan_movie_copy(&source, movie_copy::DEFAULT_COPY_NAME)
             .map_err(|e| format!("Couldn't list {} to copy it: {e}", source.display()))?;
-        let free = native::sys::disk::get_available_bytes(&root);
         Ok(MovieCopyPlan {
             summary: plan.summary(),
-            free_bytes: (free != u64::MAX).then_some(free),
+            free_bytes: native::sys::disk::get_available_bytes(&root),
             headroom_bytes: movie_copy::FREE_SPACE_HEADROOM_BYTES,
             existing: movie_copy::existing_names(&root),
             default_name: movie_copy::DEFAULT_COPY_NAME,

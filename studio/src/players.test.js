@@ -21,6 +21,27 @@ import {
 
 const M00CAT = '76561197972576011';
 
+describe('Use as (#686)', () => {
+  const id = '76561197961831029';
+
+  it('is trimmed, empty when unset, and absent from an old row', () => {
+    const t = normalizePlayers({ players: [
+      { steam_id: id, name: 'm00cat', use_as: '  Chris  ' },
+      { steam_id: '76561197960265729', name: 'old' },
+    ] });
+    expect(t.players.map((p) => p.use_as)).toEqual(['Chris', '']);
+  });
+
+  it('is set and cleared through updatePlayer, and a new row starts without one', () => {
+    let { table, index } = addPlayer(defaultPlayers(), { steam_id: id, name: 'm00cat' });
+    expect(table.players[index].use_as).toBe('');
+    table = updatePlayer(table, index, { use_as: ' Chris ' });
+    expect(table.players[index].use_as).toBe('Chris');
+    table = updatePlayer(table, index, { use_as: '   ' });
+    expect(table.players[index].use_as).toBe('');
+  });
+});
+
 describe('normalizePlayers', () => {
   it('gives the defaults for a settings file without a table', () => {
     const d = defaultPlayers();
@@ -50,7 +71,7 @@ describe('normalizePlayers', () => {
     expect(t.pov_fallback).toBe('own');
     expect(t.crosshair_fallback).toBe('game');
     expect(t.crosshair_fallback_tile).toBe(1);
-    expect(t.players).toEqual([{ steam_id: '', name: 'Bot', png: 'b.png', crosshair_sprite: 'x.spr', crosshair_tile: 3 }]);
+    expect(t.players).toEqual([{ steam_id: '', name: 'Bot', png: 'b.png', crosshair_sprite: 'x.spr', crosshair_tile: 3, use_as: '' }]);
   });
 });
 
@@ -102,9 +123,9 @@ describe('rows', () => {
     ({ table: t, index: at } = addPlayer(t, { steam_id: '', name: 'm00cat' }));
     expect(at).toBe(2);
     expect(t.players).toEqual([
-      { steam_id: M00CAT, name: 'm00cat', png: 'a.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 3 },
-      { steam_id: '', name: 'Bot', png: '', crosshair_sprite: '', crosshair_tile: 0 },
-      { steam_id: '', name: 'm00cat', png: '', crosshair_sprite: '', crosshair_tile: 0 },
+      { steam_id: M00CAT, name: 'm00cat', png: 'a.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 3, use_as: '' },
+      { steam_id: '', name: 'Bot', png: '', crosshair_sprite: '', crosshair_tile: 0, use_as: '' },
+      { steam_id: '', name: 'm00cat', png: '', crosshair_sprite: '', crosshair_tile: 0, use_as: '' },
     ]);
     expect(updatePlayer(t, 1, { crosshair_tile: 99 }).players[1].crosshair_tile).toBe(0);
     expect(removePlayer(t, 1).players.map((p) => p.name)).toEqual(['m00cat', 'm00cat']);
