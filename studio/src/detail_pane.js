@@ -206,7 +206,7 @@ window.addEventListener("DOMContentLoaded", () => {
     try {
       await launchDemoPreview(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
       showToast(STRINGS.HIGHLIGHTS.PREVIEW_LAUNCHING_TOAST, 'info');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     } finally {
       btnLaunchPreview.textContent = originalLabel;
@@ -229,7 +229,7 @@ window.addEventListener("DOMContentLoaded", () => {
         return true;
       }
       return false;
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js; the prompt still offers a way on.
       return false;
     } finally {
@@ -261,7 +261,7 @@ window.addEventListener("DOMContentLoaded", () => {
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js — fail open rather than blocking
         // a legitimate launch just because the detector itself errored.
       }
@@ -288,7 +288,7 @@ window.addEventListener("DOMContentLoaded", () => {
       processModalForceRelaunchBtn.disabled = true;
       try {
         await killEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js.
       }
       await new Promise(resolve => setTimeout(resolve, 500));

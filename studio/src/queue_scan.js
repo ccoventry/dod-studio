@@ -56,7 +56,6 @@ export function createQueueScan({
   getTakeIndex = () => ({}),
 }) {
   // ── scan_progress event listener (registered once on load) ────────────────
-  let unlistenScanProgress = null;
   // Cancel was clicked and the scan hasn't said it stopped yet: the status
   // line says so instead of a toast, so it isn't followed a moment later by
   // the cancelled one (#843).
@@ -98,7 +97,7 @@ export function createQueueScan({
       progress.show(active.place.job, shown);
       if (cancelScanBtn) cancelScanBtn.disabled = false;
     }
-  }).then(fn => { unlistenScanProgress = fn; });
+  });
 
   // ── Cancel Scan button ────────────────────────────────────────────────────
   const cancelScanBtn = document.querySelector('#cancel-scan-btn');
