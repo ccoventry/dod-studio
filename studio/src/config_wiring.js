@@ -7,7 +7,8 @@
 import { confirm } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
 import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs, obsCheckOrphan, obsRecoverOrphan } from './ipc_bridge.js';
-import { refreshLaunchGuard, runObsConnectionTest } from './capture_pane.js';
+import { refreshLaunchGuard } from './capture_pane.js';
+import { runObsConnectionTest } from './obs_connection_ui.js';
 import { showToast } from './toast.js';
 import { numberField } from './number_field.js';
 // The Steam-install and program-name checks (#373) are shared with the

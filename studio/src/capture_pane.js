@@ -1,8 +1,7 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, launchObs, obsTestConnection, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
-import { themedConfirm } from './themed_confirm.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
@@ -14,7 +13,11 @@ import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
 import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
-import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
+import { isObsConnected, obsConnectionChecked } from './obs_status.js';
+import { runObsConnectionTest, launchObsAndRetry, setObsCheckListener } from './obs_connection_ui.js';
+import { initClearPreviewsModal } from './orphaned_previews_modal.js';
+import { describeProblemPaths } from './capture_pane_logic.js';
+import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, recordTake, setVerifiedStatus, isSkipped, markBlockCaptured } from './take_index.js';
 import { STRINGS } from './strings.js';
@@ -34,7 +37,7 @@ import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
-import { BYTES_PER_MB, gigabytes } from './byte_size.js';
+import { gigabytes } from './byte_size.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
@@ -119,11 +122,6 @@ const FIELDS_THAT_BECOME_COMMANDS = [
   '#config-decal-flush',
 ];
 
-// Illustrative gap between the two kill anchors in the timing diagram below
-// — a real streak's length varies per capture; this is just enough to make
-// Start Lead/Stop Trail visually distinct from Pre-roll/Post-roll.
-const TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS = 8.0;
-
 /** Seconds of demo per frame while a batch fast-forwards (`host_framerate`),
  *  the settings' `fast_forward_speed`. Fixed, and no longer shown: batches
  *  skip straight to each clip, and fast-forward is only their fallback. */
@@ -135,52 +133,6 @@ export function setFastForwardStep(value) {
 }
 export function getFastForwardStep() {
   return fastForwardStep;
-}
-
-/**
- * Rebuilds the Timings tab's execution-timeline table (#150) — revives the
- * pre-Tauri egui build's "Mock Execution Timeline" (native/src/bin/gui/views/
- * capture/panels.rs, dropped in the egui purge): a sorted list of events at
- * their time relative to the first kill (0.0s), not a to-scale bar. Called
- * once at init and on every `input` event from the five timing fields.
- */
-export function renderTimingDiagram() {
-  const preRoll = numberField('#config-pre-roll', 0);
-  const postRoll = numberField('#config-post-roll', 0);
-  const startLead = numberField('#config-record-start-lead', 0);
-  const stopTrail = numberField('#config-record-stop-trail', 0);
-  const initialDelay = numberField('#config-initial-delay', 0);
-  const streak = TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS;
-
-  // Initial Delay only applies to patched demos: with Seek Between Clips on,
-  // the hook waits for the demo to load and moves to clip 1 straight away
-  // (native::patch::runtime_batch), so the field and its note are hidden.
-  const seeks = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
-  const delayGroup = document.querySelector('#config-initial-delay-group');
-  if (delayGroup) delayGroup.style.display = seeks ? 'none' : '';
-  const note = document.querySelector('#timing-diagram-initial-delay-note');
-  if (note) {
-    note.textContent = seeks ? '' : STRINGS.CAPTURE_CONFIG.timingDiagramInitialDelayNote(initialDelay);
-    note.style.display = seeks ? 'none' : '';
-  }
-
-  const C = STRINGS.CAPTURE_CONFIG;
-  const events = [
-    { time: -(startLead + preRoll), label: C.timingDiagramPreRollEvent(preRoll), anchor: false },
-    { time: -startLead, label: C.timingDiagramRecordStartEvent(startLead), anchor: false },
-    { time: 0, label: C.TIMING_DIAGRAM_FIRST_KILL_EVENT, anchor: true },
-    { time: streak, label: C.TIMING_DIAGRAM_LAST_KILL_EVENT, anchor: true },
-    { time: streak + stopTrail, label: C.timingDiagramRecordStopEvent(stopTrail), anchor: false },
-    { time: streak + stopTrail + postRoll, label: C.timingDiagramPostRollEvent(postRoll), anchor: false },
-  ].sort((a, b) => a.time - b.time);
-
-  const tbody = document.querySelector('#timing-diagram-events');
-  if (!tbody) return;
-  tbody.innerHTML = events.map((e) => `
-    <tr${e.anchor ? ' class="timing-diagram-anchor"' : ''}>
-      <td class="timing-diagram-time">${C.timingDiagramTime(e.time)}</td>
-      <td>${e.label}</td>
-    </tr>`).join('');
 }
 
 /**
@@ -240,165 +192,6 @@ function generateSessionId() {
 }
 
 // ── Pre-Flight Disk Space Estimator ───────────────────────────────────────────
-
-const PATH_PROBLEM_REASONS = {
-  not_absolute: STRINGS.CAPTURE.pathProblem.notAbsolute,
-  malformed: STRINGS.CAPTURE.pathProblem.malformed,
-  not_found: STRINGS.CAPTURE.pathProblem.notFound,
-  not_a_directory: STRINGS.CAPTURE.pathProblem.notADirectory,
-};
-
-const MAX_PROBLEM_PATHS_SHOWN = 3;
-
-/** Turns a list of non-"ok" diagnostics into a point-form list of reasons
- *  (one bullet per line, `warningEl`'s `white-space: pre-line` renders the
- *  `\n`s), capped so a long invalid list doesn't turn into a wall of text.
- *  Falls back to a single plain sentence when there's just one problem. */
-function describeProblemPaths(problems) {
-  const shown = problems.slice(0, MAX_PROBLEM_PATHS_SHOWN)
-    .map((d) => PATH_PROBLEM_REASONS[d.status]?.(d.path) || STRINGS.CAPTURE.pathProblem.unusable(d.path));
-  const remaining = problems.length - MAX_PROBLEM_PATHS_SHOWN;
-  if (remaining > 0) shown.push(STRINGS.CAPTURE.andNMore(remaining));
-  return shown.length === 1 ? shown[0] : shown.map((s) => `• ${s}`).join('\n');
-}
-
-/**
- * Runs `obs_test_connection` and renders the result — the manual Test
- * Connection button's own logic, extracted so it can also be run
- * automatically when actively switching into OBS mode (main.js), and as
- * Start Capture Batch's own pre-flight below. Deliberately NOT run at app
- * startup even when OBS mode is already the persisted choice — OBS is the
- * user's own program, not expected to already be running just because
- * dod-studio opened, same as HLAE.
- *
- * `auto` skips the button disable/relabel churn (there was no click to
- * originate it) but still populates the same status panel — quiet the same
- * way `obs_check_orphan` is quiet at startup: "OBS is not running yet" is
- * the ordinary case here, not something to interrupt the user over.
- *
- * Lives here rather than main.js (where the OBS Connection UI is otherwise
- * wired up) specifically so Start Capture Batch's click handler below can
- * call it directly — main.js already imports from this module, so importing
- * this back the other way would be circular.
- */
-export async function runObsConnectionTest({ auto = false } = {}) {
-  const btn = document.querySelector('#obs-test-btn');
-  const status = document.querySelector('#obs-status');
-  if (!status) return;
-  const label = btn ? btn.textContent : '';
-  if (!auto && btn) { btn.disabled = true; btn.textContent = STRINGS.CAPTURE_CONFIG.OBS_TESTING; }
-  status.style.display = '';
-  status.textContent = STRINGS.CAPTURE_CONFIG.OBS_TESTING;
-  try {
-    const report = await obsTestConnection({
-      host: document.querySelector('#config-obs-host')?.value?.trim() || '127.0.0.1',
-      port: parseInt(document.querySelector('#config-obs-port')?.value, 10) || 4455,
-      password: document.querySelector('#config-obs-password')?.value || '',
-      gameWidth: numberField('#config-res-width', 1280, { integer: true, positive: true }),
-      gameHeight: numberField('#config-res-height', 720, { integer: true, positive: true }),
-      obsCaptureFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
-      obsRecordingQuality: document.querySelector('#config-obs-recording-quality')?.value || '',
-    });
-    renderObsReport(report);
-  } catch (e) {
-    // Every invoke needs this: without it a Rust-side failure is swallowed
-    // and the button simply appears to do nothing.
-    status.textContent = STRINGS.CAPTURE_CONFIG.obsTestFailed(e);
-    setObsConnected(false);
-  } finally {
-    if (!auto && btn) { btn.disabled = false; btn.textContent = label || STRINGS.CAPTURE_CONFIG.OBS_TEST_BUTTON; }
-    // Whatever this check found, Start Capture Batch's gate (issue #147)
-    // needs to reflect it immediately, not wait for some unrelated field to
-    // trigger the next refreshLaunchGuard().
-    refreshLaunchGuard();
-  }
-}
-
-/**
- * Renders an `obs_test_connection` result into the status row.
- *
- * Warnings are shown rather than swallowed: the canvas mismatch in particular
- * costs most of the picture's detail and has no visible symptom, so it would
- * otherwise be found only by comparing a finished clip against expectations.
- * Should be rare now that `obs_test_connection` provisions dod-studio' own
- * profile/scene itself rather than validating whatever the user picked, but
- * still worth surfacing if OBS itself refuses one of those settings.
- */
-function renderObsReport(report) {
-  const status = document.querySelector('#obs-status');
-  if (!status) return;
-  status.style.display = '';
-
-  setObsConnected(!!report?.connected);
-
-  if (!report?.connected) {
-    status.textContent = report?.error || STRINGS.CAPTURE_CONFIG.OBS_UNREACHABLE;
-    return;
-  }
-
-  const lines = [
-    STRINGS.CAPTURE_CONFIG.obsConnectedSummary(report.obs_version, report.websocket_version),
-    // Read-only — dod-studio always targets its own fixed profile/scene now,
-    // there is nothing here for the user to pick.
-    STRINGS.CAPTURE_CONFIG.obsUsingSummary(report.current_profile, report.current_scene),
-    STRINGS.CAPTURE_CONFIG.obsCanvasSummary(report.canvas, report.output, report.fps),
-    STRINGS.CAPTURE_CONFIG.obsRecordingToSummary(report.record_directory),
-  ];
-  if (report.missing_requests?.length) {
-    lines.push(STRINGS.CAPTURE_CONFIG.obsMissingRequests(report.missing_requests));
-  }
-  if (report.recording) lines.push(STRINGS.CAPTURE_CONFIG.OBS_ALREADY_RECORDING);
-  if (report.streaming) lines.push(STRINGS.CAPTURE_CONFIG.OBS_ALREADY_STREAMING);
-  for (const w of report.warnings || []) lines.push(w);
-  status.textContent = lines.join('\n');
-}
-
-// obs-websocket does not start accepting connections the instant OBS's
-// process starts — OBS has its own window/plugin init to get through first
-// — so a single immediate retry after launching would still usually find it
-// unreachable. Polls instead of guessing a single fixed wait, since actual
-// startup time depends entirely on the machine and how many plugins/scenes
-// OBS has to load; not a measured constant like this codebase's other
-// timing figures, just a reasonable ceiling.
-const OBS_LAUNCH_RETRY_ATTEMPTS = 10;
-const OBS_LAUNCH_RETRY_DELAY_MS = 2000;
-
-/**
- * Launches OBS (via the configured "OBS Path") and retries the connection —
- * which also provisions dod-studio' own profile/scene, same as any other
- * check — while it starts up. Used by Start Capture Batch's pre-flight below
- * so OBS doesn't have to already be open (much like HLAE doesn't) — the
- * batch can bring it up itself. Returns whether OBS ended up reachable.
- *
- * No-ops (returns false immediately) if no OBS path is configured — nothing
- * to launch, and the caller's existing "not connected" error already covers
- * that case correctly.
- */
-export async function launchObsAndRetry() {
-  const obsExePath = document.querySelector('#config-obs-exe-path')?.value?.trim();
-  if (!obsExePath) return false;
-
-  const status = document.querySelector('#obs-status');
-  if (status) {
-    status.style.display = '';
-    status.textContent = STRINGS.CAPTURE_CONFIG.OBS_LAUNCHING_AND_CONNECTING;
-  }
-
-  try {
-    await launchObs();
-  } catch (err) {
-    // Already toasted by ipc_bridge.js (missing/invalid path, etc.) — nothing
-    // was launched, so there is nothing to wait for.
-    return false;
-  }
-
-  for (let attempt = 0; attempt < OBS_LAUNCH_RETRY_ATTEMPTS; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, OBS_LAUNCH_RETRY_DELAY_MS));
-    await runObsConnectionTest({ auto: true });
-    if (isObsConnected()) return true;
-  }
-  return false;
-}
 
 /**
  * Recomputes required-vs-available disk space and hard-locks the Launch
@@ -693,78 +486,6 @@ export function applyCommandsState(lists) {
   refreshRollFloors();
 }
 
-// ── Clear Previews audit modal ─────────────────────────────────────────────
-//
-// Audits `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (see the
-// block comment above `patch_bookmark_previews` in demo_preview.rs) left
-// behind across capture sessions, and lets the user purge them.
-
-let currentPreviewScanResults = [];
-
-function formatPreviewSize(bytes) {
-  return STRINGS.CAPTURE.megabytesLabel((bytes / BYTES_PER_MB).toFixed(2));
-}
-
-function updateClearPreviewsDeleteButtonState() {
-  const deleteBtn = document.querySelector('#clear-previews-delete-btn');
-  if (!deleteBtn) return;
-  const checked = document.querySelectorAll('.clear-previews-row-cb:checked');
-  deleteBtn.disabled = checked.length === 0;
-  deleteBtn.textContent = checked.length > 0 ? STRINGS.CAPTURE.deleteNSelected(checked.length) : STRINGS.CAPTURE.DELETE_SELECTED_DEFAULT;
-}
-
-function renderClearPreviewsResults() {
-  const tbody = document.querySelector('#clear-previews-body');
-  const footerEl = document.querySelector('#clear-previews-footer');
-  if (!tbody) return;
-
-  if (currentPreviewScanResults.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${STRINGS.CAPTURE.NO_ORPHANED_PREVIEWS}</td></tr>`;
-    if (footerEl) footerEl.textContent = STRINGS.CLEAR_PREVIEWS_MODAL.FOOTER_DEFAULT;
-    updateClearPreviewsDeleteButtonState();
-    return;
-  }
-
-  tbody.innerHTML = '';
-  let totalBytes = 0;
-
-  currentPreviewScanResults.forEach((entry) => {
-    totalBytes += entry.size_bytes;
-
-    const tr = document.createElement('tr');
-
-    const tdCb = document.createElement('td');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.className = 'clear-previews-row-cb';
-    cb.dataset.path = entry.demo_path;
-    cb.checked = true;
-    cb.addEventListener('change', updateClearPreviewsDeleteButtonState);
-    tdCb.appendChild(cb);
-
-    const tdFile = document.createElement('td');
-    tdFile.textContent = entry.file_name;
-
-    const tdSize = document.createElement('td');
-    tdSize.textContent = formatPreviewSize(entry.size_bytes);
-
-    const tdModified = document.createElement('td');
-    tdModified.textContent = entry.modified_unix_secs
-      ? new Date(entry.modified_unix_secs * 1000).toLocaleString()
-      : STRINGS.CAPTURE.EMPTY_DASH;
-
-    tr.appendChild(tdCb);
-    tr.appendChild(tdFile);
-    tr.appendChild(tdSize);
-    tr.appendChild(tdModified);
-    tbody.appendChild(tr);
-  });
-
-  const totalGb = gigabytes(totalBytes);
-  if (footerEl) footerEl.textContent = STRINGS.CLEAR_PREVIEWS_MODAL.foundReclaimable(currentPreviewScanResults.length, totalGb);
-  updateClearPreviewsDeleteButtonState();
-}
-
 // ── Standalone Game Launch ───────────────────────────────────────────────────
 //
 // Boots HLAE against hl.exe with no demo loaded. Routes through the same
@@ -853,76 +574,6 @@ function initImportCfgButton() {
       // Already toasted by ipc_bridge.js.
     }
   });
-}
-
-function initClearPreviewsModal() {
-  const openBtn = document.querySelector('#open-clear-previews-btn');
-  const modal = document.querySelector('#clear-previews-modal');
-  if (!openBtn || !modal) return;
-
-  const statusEl = document.querySelector('#clear-previews-status');
-  const closeBtn = document.querySelector('#clear-previews-close-btn');
-  const deleteBtn = document.querySelector('#clear-previews-delete-btn');
-  const selectAllBtn = document.querySelector('#clear-previews-select-all-btn');
-  const tbody = document.querySelector('#clear-previews-body');
-
-  openBtn.addEventListener('click', async () => {
-    const gameDir = document.querySelector('#hl-path-input')?.value?.trim() || '';
-    if (!gameDir) {
-      showToast(STRINGS.CAPTURE.CONFIGURE_HL_PATH_FIRST, 'error');
-      return;
-    }
-
-    modal.style.display = 'flex';
-    currentPreviewScanResults = [];
-    if (statusEl) statusEl.textContent = STRINGS.CAPTURE.SCANNING_ORPHANED_PREVIEWS;
-    if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${STRINGS.CLEAR_PREVIEWS_MODAL.SCANNING_ROW}</td></tr>`;
-    updateClearPreviewsDeleteButtonState();
-
-    try {
-      currentPreviewScanResults = await scanOrphanedPreviews(gameDir);
-      if (statusEl) statusEl.textContent = STRINGS.CAPTURE.SCAN_COMPLETE;
-      renderClearPreviewsResults();
-    } catch (e) {
-      if (statusEl) statusEl.textContent = STRINGS.CAPTURE.SCAN_FAILED;
-      if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${STRINGS.CAPTURE.scanFailedRow(e)}</td></tr>`;
-    }
-  });
-
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      modal.style.display = 'none';
-    });
-  }
-
-  if (selectAllBtn) {
-    selectAllBtn.addEventListener('click', () => {
-      const boxes = document.querySelectorAll('.clear-previews-row-cb');
-      const allChecked = boxes.length > 0 && Array.from(boxes).every(cb => cb.checked);
-      boxes.forEach(cb => { cb.checked = !allChecked; });
-      updateClearPreviewsDeleteButtonState();
-    });
-  }
-
-  if (deleteBtn) {
-    deleteBtn.addEventListener('click', async () => {
-      const checked = document.querySelectorAll('.clear-previews-row-cb:checked');
-      const pathsToDelete = Array.from(checked).map(cb => cb.dataset.path);
-      if (pathsToDelete.length === 0) return;
-      if (!(await themedConfirm(STRINGS.CAPTURE.deletePreviewsConfirm(pathsToDelete.length), { destructive: true }))) return;
-
-      deleteBtn.disabled = true;
-      try {
-        const deletedCount = await deleteOrphanedPreviews(pathsToDelete);
-        showToast(STRINGS.CAPTURE.deletedPreviews(deletedCount), 'success');
-        currentPreviewScanResults = currentPreviewScanResults.filter(entry => !pathsToDelete.includes(entry.demo_path));
-        renderClearPreviewsResults();
-      } catch (e) {
-        showToast(STRINGS.CAPTURE.deletionFailed(e), 'error');
-        updateClearPreviewsDeleteButtonState();
-      }
-    });
-  }
 }
 
 /**
@@ -1126,6 +777,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     },
   });
 
+  setObsCheckListener(() => refreshLaunchGuard());
   initClearPreviewsModal();
   initStandaloneLaunchButton();
   initImportCfgButton();
