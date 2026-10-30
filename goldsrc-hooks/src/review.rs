@@ -537,10 +537,6 @@ pub(crate) struct TabView {
 
 /// The Review tab's text with no review running.
 pub(crate) const IDLE_HEADING: &str = "No review running.";
-/// How a review starts from DoD Studio itself, the tab's last word when one
-/// can't start from here.
-const FROM_STUDIO: &str =
-    "Or, in DoD Studio, tick demos in the Master Demo Queue and press Review highlights.";
 
 /// The Review tab's two buttons that start a review of the demo playing
 /// (#1142), in `ui/Review.res`.
@@ -585,10 +581,13 @@ impl IdleFacts {
             }
             Status::Failed(_) | Status::Idle => {}
         }
+        // One line that fits the default window's 520-pixel label (about 85
+        // characters); the buttons' tooltips say the rest.
         if !self.studio {
-            format!("Start DoD Studio to review the demo playing from here. {FROM_STUDIO}")
+            "Start DoD Studio to review the demo playing from here.".to_string()
         } else if !self.demo {
-            format!("Play a demo to review it from here. {FROM_STUDIO}")
+            "Play a demo to review it from here, or use Review highlights in DoD Studio."
+                .to_string()
         } else {
             "Review the demo playing: From the start, or From here (the next highlight from now on)."
                 .to_string()
@@ -1588,6 +1587,13 @@ mod tests {
                 .detail()
                 .starts_with("Start DoD Studio")
         );
+        // Each fits the default window's line; a longer one was cut off.
+        for studio in [false, true] {
+            for demo in [false, true] {
+                let line = facts(studio, demo, Status::Idle).detail();
+                assert!(line.len() <= 88, "{line}");
+            }
+        }
     }
 
     #[test]
