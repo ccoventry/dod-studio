@@ -45,7 +45,8 @@ export function formatBytes(bytes) {
 }
 
 /** What a take covered: the first highlight's demo, player, kills and time,
- *  and how many more were merged into it. */
+ *  how many more were merged into it, and how many of its gaps between
+ *  kills it recorded sped up (#831), at the batch's speed. */
 export function takeLabel(block, dispatch) {
   const indices = block.source_streak_indices || [];
   const streak = dispatch?.streaks?.[indices[0]];
@@ -54,8 +55,12 @@ export function takeLabel(block, dispatch) {
   if (streak.target_player) parts.push(streak.target_player);
   parts.push(STRINGS.BATCH_RESULTS.kills(streak.kill_count));
   parts.push(clockFloor(highlightStartSeconds(streak)));
-  const label = parts.filter(Boolean).join(' · ');
-  return indices.length > 1 ? `${label} ${STRINGS.BATCH_RESULTS.merged(indices.length - 1)}` : label;
+  let label = parts.filter(Boolean).join(' · ');
+  if (indices.length > 1) label = `${label} ${STRINGS.BATCH_RESULTS.merged(indices.length - 1)}`;
+  if (block.ramped_gaps > 0) {
+    label = `${label} ${STRINGS.BATCH_RESULTS.rampedGaps(block.ramped_gaps, dispatch?.kill_gaps?.speed ?? 4)}`;
+  }
+  return label;
 }
 
 /** The panel's rows and totals from a capture_takes_verified payload. */
