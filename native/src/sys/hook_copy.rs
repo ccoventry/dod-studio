@@ -41,7 +41,10 @@ pub fn for_launch(source: &Path) -> PathBuf {
         Ok(copy) => {
             let removed = match folders_games_run() {
                 Some(mut keep) => {
+                    // The source too, should the Hooks DLL setting point
+                    // into one of the copies' folders.
                     keep.extend(copy.parent().map(Path::to_path_buf));
+                    keep.extend(source.parent().map(Path::to_path_buf));
                     remove_unused(&root, &keep, SystemTime::now())
                 }
                 None => 0,
@@ -165,7 +168,10 @@ pub fn remove_unused(root: &Path, keep: &[PathBuf], now: SystemTime) -> usize {
     let mut removed = 0;
     for entry in entries.flatten() {
         let dir = entry.path();
-        if !dir.is_dir() || keep.iter().any(|k| same(k, &dir)) {
+        // `file_type` does not follow links: a junction or symlink in here
+        // is not a copy, and following it would delete DLLs outside `root`.
+        let real_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+        if !real_dir || keep.iter().any(|k| same(k, &dir)) {
             continue;
         }
         let last_use = std::fs::metadata(dir.join(SOURCE_FILE))
@@ -304,6 +310,30 @@ mod tests {
         assert_eq!(remove_unused(&root, &keep, later), 1);
         assert_eq!(copies(&root), vec![b.parent().unwrap().to_path_buf()]);
         assert!(!a.exists());
+    }
+
+    /// A junction in the copies' folder is never followed: the DLL it
+    /// points at, here the source itself, stays.
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_among_the_copies_is_left_alone() {
+        let (root, source) = setup("junction", b"MZ DSHOOKBUILD:0.10.0+aaa\0 one");
+        std::fs::create_dir_all(&root).unwrap();
+        let link = root.join("link");
+        let made = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(source.parent().unwrap())
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let later = SystemTime::now() + KEEP_AFTER_LAST_USE * 2;
+        assert_eq!(remove_unused(&root, &[], later), 0);
+        assert!(source.exists());
+        // Removed by hand: remove_dir_all on the junction drops only the link.
+        std::fs::remove_dir(&link).unwrap();
     }
 
     #[test]
