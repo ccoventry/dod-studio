@@ -17,7 +17,6 @@ struct Machine {
     games: Vec<GameProcess>,
     refreshes: u32,
     killed: Vec<u32>,
-    killed_by_name: u32,
     cursor_released: u32,
 }
 
@@ -45,11 +44,6 @@ impl Processes for FakeProcesses {
         let mut m = self.0.borrow_mut();
         m.killed.push(pid);
         m.games.retain(|g| g.pid != pid);
-    }
-    fn kill_every_game(&mut self) {
-        let mut m = self.0.borrow_mut();
-        m.killed_by_name += 1;
-        m.games.clear();
     }
     fn release_cursor(&mut self) -> bool {
         self.0.borrow_mut().cursor_released += 1;
@@ -176,7 +170,6 @@ fn a_cancel_ends_the_batch_and_only_its_own_game() {
     rig.cancel.store(true, Ordering::Relaxed);
     assert!(watch.pass().is_break());
     assert_eq!(procs.m().killed, [OURS.pid]);
-    assert_eq!(procs.m().killed_by_name, 0);
     assert_eq!(procs.m().games, [THEIRS, LATER]);
     assert_eq!(procs.m().cursor_released, 0, "games are still open");
     assert_eq!(watch.failure_reason, None);
@@ -184,9 +177,10 @@ fn a_cancel_ends_the_batch_and_only_its_own_game() {
 }
 
 /// A batch that never saw its game (cancelled while HLAE was starting it)
-/// still ends one, by name, since ending nothing could leave it running.
+/// ends nothing: every game in the list was open before the launch, so none
+/// is the batch's (#1212).
 #[test]
-fn a_cancel_before_the_game_was_seen_ends_every_game_by_name() {
+fn a_cancel_before_the_game_was_seen_ends_no_game() {
     let rig = Rig::new("watch_pass_cancel_unseen");
     let procs = FakeProcesses::default();
     procs.set(&[THEIRS]);
@@ -194,8 +188,8 @@ fn a_cancel_before_the_game_was_seen_ends_every_game_by_name() {
     rig.cancel.store(true, Ordering::Relaxed);
     assert!(watch.pass().is_break());
     assert!(procs.m().killed.is_empty());
-    assert_eq!(procs.m().killed_by_name, 1);
-    assert_eq!(procs.m().cursor_released, 1, "no game is left");
+    assert_eq!(procs.m().games, [THEIRS]);
+    assert_eq!(procs.m().cursor_released, 0, "a game is still open");
 }
 
 /// The batch's end is checked before its game going away: an OBS-mode
@@ -218,7 +212,6 @@ fn a_complete_batch_whose_game_is_gone_is_finished_not_closed() {
     assert!(!watch.game_closed);
     assert_eq!(watch.failure_reason, None);
     assert!(procs.m().killed.is_empty(), "nothing left to end");
-    assert_eq!(procs.m().killed_by_name, 0);
 }
 
 /// A finished batch closes its own game by pid and leaves the other one.
@@ -252,5 +245,4 @@ fn the_batchs_game_going_away_is_noticed_with_another_game_open() {
     assert!(watch.game_closed);
     assert!(watch.failure_reason.is_some());
     assert!(procs.m().killed.is_empty());
-    assert_eq!(procs.m().killed_by_name, 0);
 }
