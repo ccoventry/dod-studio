@@ -209,9 +209,28 @@ So `ds_demo_seek_to`/`_by` take a forward jump of more than 5 seconds in
 5-second steps, one per sent frame (each step waits for `m_LastFrameTime` to
 reach it). Measured with `analysis/examples/seek_burst.rs` on four HLTV
 demos: no 5-second window held more than 55 KB of network data, entities
-included, and the catch-up leaves entities out. Backward jumps replay nothing
-either way, so going back past a join or a team change still shows the later
-state. `ds_demo_seek_skip_between 1` jumps at once, as before.
+included, and the catch-up leaves entities out. `ds_demo_seek_skip_between 1`
+jumps at once, as before.
+
+### Backward jumps in an HLTV demo (#830)
+
+A backward jump replays nothing: `WriteDatagram` moves the "last sent" mark
+to the frame before the landing, so only the landing frame goes out, and the
+client keeps whatever the later position left it. In a POV demo that is
+mostly harmless (the zoom, for one, is in every frame's client payload). In
+an HLTV demo each player's zoom comes only from the `HLTV` user message,
+sent once per change and kept by `client.dll` in a 64-slot table nothing
+else resets (`goldsrc-hooks/src/hltv_fov.rs`): after Review's Replay a sniper
+scoped in at the landing showed unzoomed, because he had unscoped by the old
+position. Teams, scores and names had the same staleness.
+
+So in an HLTV demo `ds_demo_seek_to`/`_by` take a backward jump as: clear the
+zoom table, set the clock to the demo's start, wait for that frame to be
+sent, then step forward to the target as above. Every message before the
+landing arrives in order. On `wsod25_grp2_h1_hltv` a jump back to 15:40
+took 182 steps, 1.4 s on PRE and 1.7 s on POST. The table is also cleared
+whenever a demo is loaded, since `client.dll` stays loaded between demos.
+POV demos and `ds_demo_seek_skip_between 1` still jump back at once.
 
 ### The replayed console commands (#702)
 

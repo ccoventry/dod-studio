@@ -765,8 +765,10 @@ mod tests {
             source_streak_indices: vec![block_index],
             start_tick: record_start_tick,
             end_tick: record_stop_tick,
+            plan: None,
             record_start_tick,
             record_stop_tick,
+            ramped_gaps: 0,
         }
     }
 

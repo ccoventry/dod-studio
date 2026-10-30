@@ -133,7 +133,7 @@
 		"labelText"		"Yes"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review yes"
-		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight."
+		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight. Key: Y at a highlight's end."
 	}
 	"MaybeButton"
 	{
@@ -148,7 +148,7 @@
 		"labelText"		"Maybe"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review maybe"
-		"helptext"		"Not sure yet: the row is marked Maybe, with this kill range and note, to look at again later. Then the next highlight."
+		"helptext"		"Not sure yet: the row is marked Maybe, with this kill range and note, to look at again later. Then the next highlight. Key: M."
 	}
 	"NoButton"
 	{
@@ -163,7 +163,7 @@
 		"labelText"		"No"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review no"
-		"helptext"		"Not this one. The note is still saved. Then the next highlight."
+		"helptext"		"Not this one. The note is still saved. Then the next highlight. Key: N."
 	}
 	"ReplayButton"
 	{
@@ -178,7 +178,7 @@
 		"labelText"		"Replay"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review replay"
-		"helptext"		"Watch this highlight again."
+		"helptext"		"Watch this highlight again. Key: R."
 	}
 	"BackButton"
 	{
@@ -193,7 +193,7 @@
 		"labelText"		"Back"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review back"
-		"helptext"		"The previous highlight, without answering this one."
+		"helptext"		"The previous highlight, without answering this one. Key: B."
 	}
 	"NextButton"
 	{
@@ -208,7 +208,7 @@
 		"labelText"		"Next"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review next"
-		"helptext"		"The next highlight, without answering this one."
+		"helptext"		"The next highlight, without answering this one. Key: Space."
 	}
 	"StopButton"
 	{
@@ -223,7 +223,7 @@
 		"labelText"		"Stop"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review stop"
-		"helptext"		"End the review. Every answer so far is already in DoD Studio."
+		"helptext"		"End the review. Every answer so far is already in DoD Studio. Key: S."
 	}
 	"ReviewHint"
 	{
@@ -235,8 +235,8 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Keys: bind a key to ds_demo_review yes, maybe, no, replay or next in the console."
+		"labelText"		"At a highlight's end: Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop."
 		"textAlignment"		"west"
-		"helptext"		"Bind keys so the mouse isn't needed."
+		"helptext"		"The keys answer on the game screen while the review waits at a highlight's end, never while typing in a box. ds_ui_review_keys 0 turns them off."
 	}
 }

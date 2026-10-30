@@ -273,6 +273,10 @@ pub struct CapturePayload {
     /// Decal ring size the flush pins `r_decals` to. Absent means the default.
     #[serde(default)]
     pub decal_ring_limit: Option<u32>,
+    /// Gaps between kills inside a clip: kept, or recorded sped up (#831).
+    /// Absent means kept.
+    #[serde(default)]
+    pub kill_gaps: native::patch::types::KillGaps,
 }
 
 fn default_initial_delay() -> f32 {
@@ -478,6 +482,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.record_stop_trail = payload.record_stop_trail;
     cfg.initial_delay = payload.initial_delay;
     cfg.fast_forward_speed = payload.fast_forward_speed;
+    cfg.kill_gaps = payload.kill_gaps;
     cfg.ffmpeg_override_path = payload.ffmpeg_override_path.clone();
     cfg.goldsrc_hooks_dll_path =
         crate::updater_manager::allowed_hook_dll(payload.goldsrc_hooks_dll_path.clone());
@@ -833,6 +838,9 @@ pub struct VerifiedBlock {
     /// stopped writing mid-clip. A partial take like a Cancel's, with both
     /// lengths.
     pub short_take: Option<native::hlcr::take_length::ShortTake>,
+    /// How many gaps between kills the take recorded sped up (#831), for its
+    /// label in the batch results panel.
+    pub ramped_gaps: usize,
 }
 
 /// What ended a batch while a clip was recording: the Last Batch panel and
@@ -1161,6 +1169,7 @@ pub(crate) fn verify_capture_takes_settling(
                 cut_short: false,
                 cut_by: None,
                 short_take: None,
+                ramped_gaps: block.ramped_gaps,
             }
         })
         .collect();
@@ -1224,6 +1233,13 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
         // writing the settings keeps it.
         let meta = native::hlcr::take_meta::SessionMeta {
             renders: native::hlcr::take_meta::read_history(folder),
+            // What the plan held for this block, so the take's length and
+            // kills can be checked against it (#1084).
+            plan: manifest
+                .blocks
+                .iter()
+                .find(|b| b.take_folder == folder)
+                .and_then(|b| b.plan.clone()),
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
@@ -1624,7 +1640,7 @@ pub async fn start_capture_batch_impl(
         } else {
             0
         };
-        let (patch_jobs, drive_headroom) = match build_batch_queue(
+        let (mut patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
             &std::collections::HashMap::new(),
@@ -1740,6 +1756,24 @@ pub async fn start_capture_batch_impl(
         } else {
             None
         };
+
+        // Fast-forwarded gaps need the hook's demo player (#831): a patched
+        // batch records them at real time, and its takes' labels say so.
+        if runtime_batch.is_none() {
+            let kept = native::patch::builder::kill_gaps::keep_gaps(&mut patch_jobs);
+            if kept > 0 {
+                log_markdown(&native::patch::builder::kill_gaps::kept_gaps_message(kept));
+                // The manifest was written before the route was known, and
+                // its blocks carry the plans the takes are checked against.
+                let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(manifest) = slot.as_mut() {
+                    manifest
+                        .blocks
+                        .iter_mut()
+                        .for_each(native::patch::builder::kill_gaps::keep_block_gaps);
+                }
+            }
+        }
 
         // ── Write each job's patched demo before the capture engine copies it ───
         // build_batch_queue only plans where each patched demo should land
@@ -3925,18 +3959,55 @@ pub async fn check_running_game(
         } = &check
         {
             log_markdown(&format!(
-                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}",
+                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}{}",
                 running.exe,
                 running.width,
                 running.height,
                 wanted.exe,
                 launch.resolution_width,
                 launch.resolution_height,
+                hook_dll_log(running, wanted, differs),
             ));
         }
         Ok(check)
     }))
     .await
+}
+
+/// The hook DLL part of the activity log's mismatch line (#1143), empty when
+/// the hook DLL is not what differs.
+fn hook_dll_log(
+    running: &native::patch::launch_settings::GameLaunch,
+    wanted: &native::patch::launch_settings::GameLaunch,
+    differs: &[native::patch::launch_settings::LaunchDifference],
+) -> String {
+    use native::patch::launch_settings::LaunchDifference;
+    let side = |launch: &native::patch::launch_settings::GameLaunch| {
+        format!(
+            "hook build {} ({})",
+            launch
+                .hook_build
+                .as_deref()
+                .unwrap_or("from before build ids"),
+            launch.hook_dll.as_deref().unwrap_or("?"),
+        )
+    };
+    if differs.contains(&LaunchDifference::HookUnreadable) {
+        format!(
+            "; which hook DLL the game has could not be read, Studio would launch {}",
+            side(wanted)
+        )
+    } else if differs.contains(&LaunchDifference::HookDll)
+        || differs.contains(&LaunchDifference::HookBuild)
+    {
+        format!(
+            "; the game runs {}, Studio would launch {}",
+            side(running),
+            side(wanted)
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// The open game a capture batch can run in instead of Force Relaunch
@@ -4348,6 +4419,8 @@ mod tests {
                     end_tick: 1,
                     record_start_tick: 0,
                     record_stop_tick: 1,
+                    ramped_gaps: 0,
+                    plan: None,
                 })
                 .collect(),
             capture_fps: 120,
@@ -4369,6 +4442,65 @@ mod tests {
         let kept = take_meta::read_for_take(&block).unwrap();
         assert_eq!(kept.capture_fps, 120);
         assert_eq!(kept.renders, vec![attempt]);
+    }
+
+    /// The plan a block was built with is written beside its take (#1084),
+    /// where the take checks read it back.
+    #[test]
+    fn a_blocks_plan_is_recorded_beside_its_take() {
+        use native::hlcr::take_meta;
+        use native::hlcr::take_plan::TakePlan;
+        let scratch = Scratch::new("plan_recorded");
+        let planned = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b0");
+        let unplanned = scratch
+            .path()
+            .join("session_1")
+            .join("dodstudio_chain_01_b1");
+        for folder in [&planned, &unplanned] {
+            std::fs::create_dir_all(folder.join("take0000")).unwrap();
+            std::fs::write(folder.join("take0000").join("sound.wav"), b"x").unwrap();
+        }
+        let plan = TakePlan {
+            length_secs: 12.5,
+            kill_offsets_secs: vec![4.0, 9.0],
+            sped_up: Vec::new(),
+        };
+        let manifest = CaptureManifest {
+            session_id: "session_1".into(),
+            blocks: [(&planned, Some(plan.clone())), (&unplanned, None)]
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(block_index, (folder, plan))| native::patch::types::CaptureBlock {
+                        demo_name: "d".into(),
+                        block_index,
+                        drive_index: 0,
+                        take_folder: folder.to_path_buf(),
+                        take_key: String::new(),
+                        source_streak_indices: vec![],
+                        start_tick: 0,
+                        end_tick: 1,
+                        record_start_tick: 0,
+                        record_stop_tick: 1,
+                        ramped_gaps: 0,
+                        plan,
+                    },
+                )
+                .collect(),
+            capture_fps: 300,
+            capture_mode: String::new(),
+            agr_fps: 0,
+            streak_uids: vec![],
+            streak_sources: vec![],
+            project_path: None,
+        };
+        let verified = verify_capture_takes(&manifest, &mut |_| {});
+        record_capture_settings(&manifest, &verified);
+        assert_eq!(take_meta::read_for_take(&planned).unwrap().plan, Some(plan));
+        assert_eq!(take_meta::read_for_take(&unplanned).unwrap().plan, None);
     }
 
     /// OBS's update box opens in front of the user's windows; the minimised
@@ -5118,6 +5250,7 @@ mod tests {
             ],
             decal_flush: None,
             decal_ring_limit: None,
+            kill_gaps: Default::default(),
         }
     }
 
@@ -5483,6 +5616,8 @@ mod tests {
                     // alone can't tell two demos' blocks apart.
                     record_start_tick: 100 * (block_index as i32 + 1),
                     record_stop_tick: 0,
+                    ramped_gaps: 0,
+                    plan: None,
                 })
                 .collect(),
             capture_fps: 300,
@@ -5511,6 +5646,7 @@ mod tests {
                 cut_short: false,
                 cut_by: None,
                 short_take: None,
+                ramped_gaps: 0,
             })
             .collect()
     }

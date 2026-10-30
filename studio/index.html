@@ -573,6 +573,21 @@
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and the game moving on to the next clip.</p>
                 </div>
+                <!-- Gaps between kills inside a clip (#831): kill_gaps_setting.js. -->
+                <div class="control-group control-group-stacked">
+                  <div class="control-group">
+                    <label for="config-kill-gap-seconds" data-str="CAPTURE_CONFIG.KILL_GAPS_LABEL">Gaps between kills over</label>
+                    <input type="number" step="1" min="1" id="config-kill-gap-seconds" value="8" style="width: 60px;" />
+                    <span data-str="CAPTURE_CONFIG.KILL_GAPS_UNIT">s:</span>
+                    <select id="config-kill-gap-mode">
+                      <option value="keep" data-str="CAPTURE_CONFIG.KILL_GAPS_KEEP">Keep</option>
+                      <option value="fast_forward" data-str="CAPTURE_CONFIG.KILL_GAPS_FAST_FORWARD">Fast-forward</option>
+                    </select>
+                    <input type="number" step="0.5" min="1.5" max="16" id="config-kill-gap-speed" value="4" style="width: 60px;" />
+                    <span data-str="CAPTURE_CONFIG.KILL_GAPS_SPEED_UNIT">x</span>
+                  </div>
+                  <p class="setting-hint" data-str="CAPTURE_CONFIG.KILL_GAPS_HINT">Fast-forward speeds up a long wait between two kills inside the clip.</p>
+                </div>
               </div>
 
               <!-- Execution timeline (#150) — revives the pre-Tauri egui
