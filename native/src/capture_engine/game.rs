@@ -63,18 +63,16 @@ impl BatchGame {
 /// whatever this window doesn't cover. Not cut short by Cancel: a cancelled
 /// batch removes its demo copies too, which is what the wait is for.
 ///
-/// A batch whose game was never seen waits for every hl.exe, the ones
-/// [`kill_hl_exe_and_wait`]'s fallback ended by name.
+/// A batch whose game was never seen ended nothing, so there is nothing to
+/// wait for.
 pub(super) fn wait_for_hl_exe_to_exit(procs: &mut dyn Processes, game: &BatchGame) {
+    let Some(own) = game.seen else {
+        return;
+    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
         procs.refresh();
-        let games = procs.games();
-        let gone = match game.seen {
-            Some(own) => !games.contains(&own),
-            None => games.is_empty(),
-        };
-        if gone || std::time::Instant::now() >= deadline {
+        if !procs.games().contains(&own) || std::time::Instant::now() >= deadline {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -86,10 +84,10 @@ pub(super) fn wait_for_hl_exe_to_exit(procs: &mut dyn Processes, game: &BatchGam
 /// that leaves the game running goes through here.
 ///
 /// A batch that never saw its game (a cancel while HLAE was still starting
-/// it) falls back to ending every hl.exe by name, as every batch used to, and
-/// says so: ending nothing could leave the batch's game running. A game seen
-/// and already gone is left at that. A killed game can't release the mouse it
-/// confined, so once no game is left Studio does (#1095).
+/// it) ends nothing and says so: every hl.exe in the list then was running
+/// before the launch, so none of them is the batch's to end (#1212, #1213).
+/// A game seen and already gone is left at that. A killed game can't release
+/// the mouse it confined, so once no game is left Studio does (#1095).
 pub(super) fn kill_hl_exe_and_wait(procs: &mut dyn Processes, game: &mut BatchGame) {
     procs.refresh();
     let own = game.find(&procs.games());
@@ -99,14 +97,10 @@ pub(super) fn kill_hl_exe_and_wait(procs: &mut dyn Processes, game: &mut BatchGa
             wait_for_hl_exe_to_exit(procs, game);
         }
         (None, Some(_)) => {}
-        (None, None) => {
-            log_markdown(
-                "[HLAE] This batch's hl.exe never showed up in the process list, so every hl.exe \
-                 is ended by name, any other game open included (#1213)",
-            );
-            procs.kill_every_game();
-            wait_for_hl_exe_to_exit(procs, game);
-        }
+        (None, None) => log_markdown(
+            "[HLAE] This batch's hl.exe was never seen in the process list, so no game is ended: \
+             any hl.exe open was running before the launch and isn't the batch's (#1212)",
+        ),
     }
     if procs.games().is_empty() && procs.release_cursor() {
         log_markdown("[capture] Released the mouse the closed game had confined to its window.");

@@ -181,33 +181,50 @@ fn a_batch_cancelled_before_it_starts_copies_nothing() {
     assert!(!folders.game().join("dod").join("my_clip.dem").exists());
 }
 
-/// A demo that can't be read sends an `Error` and the batch goes on to the
-/// next one; with none left, it completes. Pinned as it is: the `Error` ends
-/// the listener's batch while the engine carries on.
+/// A demo that can't be copied sends an `Error` and ends the batch there:
+/// the listener has ended it, so the game must not start, and the demos
+/// copied before it are removed (#1212).
 #[test]
-fn a_demo_that_cant_be_copied_sends_an_error_and_the_batch_goes_on() {
+fn a_demo_that_cant_be_copied_ends_the_batch_before_the_launch() {
     let folders = Folders::new("bad_demos");
-    let unnamed = CaptureJob {
-        patched_demo_path: PathBuf::from(".."),
-    };
+    let good = folders.demo("first-clip.dem", 16);
     let missing = CaptureJob {
         patched_demo_path: folders.root.path().join("src").join("gone.dem"),
     };
-    let events = Run::new(&folders).events(vec![unnamed, missing]);
-    assert_eq!(events.len(), 4, "{events:?}");
-    assert_eq!(events[0], "Starting(2)");
-    assert_eq!(events[1], aborted("Invalid demo path: .."));
+    let later = folders.demo("later-clip.dem", 16);
+    let events = Run::new(&folders).events(vec![good, missing, later]);
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events[0], "Starting(3)");
     assert!(
-        events[2]
+        events[1]
             .starts_with("Error(Capture Engine Aborted — Failed to open source demo for copy: "),
         "{}",
-        events[2]
+        events[1]
     );
-    assert_eq!(events[3], "AllCompleted");
+    let dod = folders.game().join("dod");
+    assert!(
+        !dod.join("first_clip.dem").exists(),
+        "the earlier copy is left"
+    );
+    assert!(!dod.join("later_clip.dem").exists(), "copying went on");
+    assert_nothing_linked(&folders);
+}
+
+/// A demo with no file name is the same: one `Error`, nothing launched.
+#[test]
+fn a_demo_path_with_no_name_ends_the_batch_before_the_launch() {
+    let folders = Folders::new("unnamed_demo");
+    let unnamed = CaptureJob {
+        patched_demo_path: PathBuf::from(".."),
+    };
+    assert_eq!(
+        Run::new(&folders).events(vec![unnamed]),
+        ["Starting(1)".to_string(), aborted("Invalid demo path: ..")]
+    );
 }
 
 /// A drive the plan found short of room stops the batch after `Launching`,
-/// with the demos already copied into `dod/` (named with `_` for `-`).
+/// and the demos already copied into `dod/` go with it (#1212).
 #[test]
 fn a_drive_without_headroom_stops_the_batch_before_the_launch() {
     let folders = Folders::new("headroom");
@@ -228,8 +245,45 @@ fn a_drive_without_headroom_stops_the_batch_before_the_launch() {
             )),
         ]
     );
-    let copied = folders.game().join("dod").join("my_clip.dem");
-    assert_eq!(std::fs::read(&copied).unwrap(), vec![7u8; 64]);
+    assert!(!folders.game().join("dod").join("my_clip.dem").exists());
+    assert!(folders.root.path().join("src").join("my-clip.dem").exists());
+    assert_nothing_linked(&folders);
+}
+
+/// A capture folder that can't be made, after one that could, leaves no
+/// `dod_pool_N` link behind (#1212).
+#[test]
+fn a_capture_folder_that_cant_be_made_leaves_no_links() {
+    let folders = Folders::new("link_partway");
+    let blocker = folders.root.path().join("a_file");
+    std::fs::write(&blocker, b"x").unwrap();
+    let mut run = Run::new(&folders);
+    run.config.capture_directories = vec![folders.capture_dir(), blocker.join("cap1")];
+    let job = folders.demo("clip.dem", 16);
+    let events = run.events(vec![job]);
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert!(
+        events[1].starts_with("Error(Capture Engine Aborted — Failed to create capture directory"),
+        "{}",
+        events[1]
+    );
+    assert_nothing_linked(&folders);
+    assert!(
+        folders.capture_dir().is_dir(),
+        "the capture folder itself stays"
+    );
+}
+
+/// No link or signal folder the batch made is left beside hl.exe.
+fn assert_nothing_linked(folders: &Folders) {
+    for link in [
+        "dodstudio_session",
+        "dod_pool_0",
+        "dod_pool_1",
+        "DOD_STUDIO_EXIT_TRIGGER",
+    ] {
+        assert!(!exists(&folders.game().join(link)), "{link} is left behind");
+    }
 }
 
 #[test]
@@ -246,4 +300,6 @@ fn obs_mode_with_no_planned_blocks_stops_before_the_launch() {
             aborted("OBS capture was requested but no blocks were planned"),
         ]
     );
+    assert!(!folders.game().join("dod").join("clip.dem").exists());
+    assert_nothing_linked(&folders);
 }

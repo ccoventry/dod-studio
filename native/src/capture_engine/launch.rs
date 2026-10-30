@@ -160,12 +160,12 @@ pub(super) struct Launched {
 
 /// Starts the batch's game (or takes over the open one, #725) and marks the
 /// batch's start as pending or not needed. `None` once a launch failure is
-/// reported; the demos copied into `dod/` and the quit cfg go with it.
+/// reported; the quit cfg goes with it, and the batch's `Leftovers` take
+/// the demos copied into `dod/` (#1212).
 pub(super) fn start_game(
     batch: &super::Batch,
     export_dir: &Path,
     dod_dir: &Path,
-    demo_copies: &[PathBuf],
 ) -> Option<Launched> {
     let config = &batch.config;
     let mut plan = LaunchPlan::new(config, batch.runtime_batch.as_ref(), &batch.jobs);
@@ -206,7 +206,6 @@ pub(super) fn start_game(
                     e
                 ),
             );
-            super::workspace::remove_demo_copies(demo_copies);
             std::fs::remove_file(&cfg_path).ok();
             return None;
         }
