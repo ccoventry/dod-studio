@@ -274,6 +274,11 @@ pub struct AppSettings {
     /// much a render slows the capture depends on the machine.
     #[serde(default)]
     pub render_while_capturing: bool,
+    /// Configuration > Timing's "Gaps between kills over N s" (#831): kept,
+    /// or recorded sped up. Kept by default, and for every settings file
+    /// written before it existed.
+    #[serde(default)]
+    pub kill_gaps: native::patch::types::KillGaps,
     /// How a highlight's clip name is built (#441), in the placeholder syntax
     /// of `studio/src/clip_name.js`. Configuration > Render Output.
     #[serde(default = "default_clip_name_template")]
@@ -583,6 +588,7 @@ impl Default for AppSettings {
             take_after_finish: default_take_after_finish(),
             take_delete_only_when_space_needed: false,
             render_while_capturing: false,
+            kill_gaps: native::patch::types::KillGaps::default(),
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
@@ -807,6 +813,12 @@ mod tests {
         assert!(!settings.take_delete_only_when_space_needed);
         // Settings saved before #861 don't render while capturing.
         assert!(!settings.render_while_capturing);
+        // Settings saved before #831 keep the gaps between kills.
+        assert_eq!(
+            settings.kill_gaps.mode,
+            native::patch::types::KillGapMode::Keep
+        );
+        assert_eq!(settings.kill_gaps.over_seconds, 8.0);
         // No render_codec saved: today's default, ProRes 422.
         assert_eq!(settings.render_codec, "prores_422");
         // Settings saved before #246 get today's worker count.
