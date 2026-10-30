@@ -14,8 +14,18 @@
 // Covers every Tauri command file's error/status strings: lib.rs,
 // capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
 // hd_manager.rs, updater_manager.rs, settings_manager.rs, and
-// dir_browser.rs. Not covered: native/analysis errors that bubble straight
-// through Tauri commands unwrapped (a separate crate — see issue #650).
+// dir_browser.rs. Errors built in `native` and `analysis` are wrapped here
+// too, as `failed_to_<action>(err)` around the lower crate's text (#650).
+// Where the frontend already names the action around the error
+// (`STRINGS.IPC.hdBuildFailed` and the like), the command passes the cause
+// through unwrapped rather than stacking two prefixes: the demo split and its
+// map read (`SPLIT.splitFailed`, `detailsFailed`, `queueSplitFailed`), the
+// menu size (`menuScaleFailed`), HLAE's FFmpeg link
+// (`HLAE_FFMPEG_LINK_FAILED`), the demo links list (`listFailed`), the map
+// download (`downloadFailedToast`), the take checks, previews and deletion
+// (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
+// `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
+// caller before wrapping.
 
 use std::fmt::Display;
 use std::path::Path;
@@ -567,6 +577,56 @@ pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) 
     format!("Failed to write settings file {}: {}", path.display(), err)
 }
 
+// ── native / analysis errors, named at the command boundary (#650) ──────────
+//
+// A `native` or `analysis` function returns its error as plain text, so a
+// command that passed it through showed the toast a bare cause ("Permission
+// denied") with no hint of what failed. Each function here puts the action
+// first and leaves the lower crate's text as the cause, so the crates keep
+// their wording for `preview_cli`, `dod-studio-cli` and the web analyzer.
+
+/// A stop the user asked for comes back as native's cancelled error, which
+/// the frontend matches exactly (`'cancelled'`), so it is never given a prefix.
+fn failed_to(action: &str, err: impl Display) -> String {
+    let cause = err.to_string();
+    if native::hlcr::take_frames::is_cancelled(&cause) {
+        return cause;
+    }
+    format!("Failed to {action}: {cause}")
+}
+
+pub fn failed_to_add_demo_link(err: impl Display) -> String {
+    failed_to("link the demo folder", err)
+}
+
+pub fn failed_to_remove_demo_link(err: impl Display) -> String {
+    failed_to("remove the demo folder link", err)
+}
+
+pub fn failed_to_forget_crash_map(err: impl Display) -> String {
+    failed_to("forget the crashed map", err)
+}
+
+pub fn failed_to_set_blender_exe(err: impl Display) -> String {
+    failed_to("use that Blender", err)
+}
+
+pub fn failed_to_check_demo_sources(err: impl Display) -> String {
+    failed_to("check the demos against the scan", err)
+}
+
+pub fn failed_to_copy_demos_for_batch(err: impl Display) -> String {
+    failed_to("copy the demos for the batch", err)
+}
+
+pub fn failed_to_read_map_for_flags(err: impl Display) -> String {
+    failed_to("read the map's flags", err)
+}
+
+pub fn failed_to_discard_render_autosave(err: impl Display) -> String {
+    failed_to("discard the saved render queue", err)
+}
+
 /// Pins every function/constant above against the exact `format!`/literal it
 /// replaced at its original call site (text copied verbatim from the pre-PR
 /// source, not re-derived), so this refactor can't have silently changed any
@@ -869,6 +929,30 @@ mod tests {
             failed_to_write_settings_file(std::path::Path::new("C:/settings.json"), "disk full"),
             "Failed to write settings file C:/settings.json: disk full"
         );
+    }
+
+    #[test]
+    fn lower_crate_errors_name_the_action_then_the_cause() {
+        assert_eq!(
+            failed_to_add_demo_link("not a folder"),
+            "Failed to link the demo folder: not a folder"
+        );
+        assert_eq!(
+            failed_to_copy_demos_for_batch("no room on D:"),
+            "Failed to copy the demos for the batch: no room on D:"
+        );
+        assert_eq!(
+            failed_to_set_blender_exe("not found"),
+            "Failed to use that Blender: not found"
+        );
+    }
+
+    #[test]
+    fn a_cancellation_is_never_given_an_action_prefix() {
+        // The frontend compares it to the bare word.
+        let cancelled = native::hlcr::take_frames::cancelled_error();
+        assert_eq!(failed_to(".", &cancelled), cancelled);
+        assert_eq!(cancelled, "cancelled");
     }
 
     // Every non-panicking call site's spawn_blocking wrapping was already

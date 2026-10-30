@@ -54,8 +54,8 @@ Issue #265's idea — write `CHudBase::Draw`'s address into vftable slot 3 — i
 one dword and cheaper. It also needs the vftable's address at runtime, which
 means resolving RTTI in the loaded module or signature-matching the constructor
 that stores it. Patching the function needs neither. The general
-`dodstudio_hudelement` command in #265 (shipped as `ds_hud_hide_element`, see `docs/goldsrc_hud_elements.md`) is still worth having; this is not it and
-does not block it.
+`dodstudio_hudelement` command in #265 (shipped as `ds_hud_hide_element`, retired in #342, see `docs/goldsrc_hud_elements.md`) was a separate thing; this is not it and
+did not block it.
 
 ### Both the POV and the spectator crosshair
 

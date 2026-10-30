@@ -4,6 +4,10 @@
 //! and `ds_player_hide_hand_signals` hides the gesture; this hides the list
 //! they picked it from.
 //!
+//! It also holds the menu half of `ds_hud_hide_plugin_text` (#342): while
+//! that is on, every `ShowMenu` menu that is not a voice menu is hidden the
+//! same way. `plugin_text.rs` owns the cvar and the HUD-message half.
+//!
 //! ## Two menus, two mechanisms
 //!
 //! Read from the shipped `client.dll` (one file, byte-identical on the PRE and
@@ -45,9 +49,10 @@
 //! is hidden, [`poll`] watches that time and puts the bit back the moment it
 //! passes, so the game's own `Draw` closes it without drawing a frame.
 //!
-//! Server plugin menus (AMX Mod X votes and the like) come through the same
-//! `ShowMenu` and are left alone: only the nine voice keys are hidden.
-//! `ds_hud_hide_element menu 1` still hides every text menu.
+//! Server plugin menus (AMX Mod X menus, votes, KTP's) come through the same
+//! `ShowMenu`. This cvar leaves them alone: only the nine voice keys are
+//! hidden. `ds_hud_hide_plugin_text` hides the rest, by the same flag, so a
+//! recorded number press still goes to the hidden menu, not to a weapon.
 //!
 //! ## The command menu: one byte
 //!
@@ -60,8 +65,8 @@
 //!
 //! ## Turning it on or off mid-menu
 //!
-//! [`poll`] runs every frame, before `HUD_Redraw`: it hides a voice menu
-//! already on screen, and puts back one it hid when the cvar goes to 0.
+//! [`poll`] runs every frame, before `HUD_Redraw`: it hides a menu already on
+//! screen, and puts back one it hid when its cvar goes to 0.
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
@@ -129,6 +134,8 @@ static WAITING_FOR_MORE: AtomicBool = AtomicBool::new(false);
 static HID_CURRENT: AtomicBool = AtomicBool::new(false);
 /// Voice menus kept off screen this session.
 static HIDDEN: AtomicU32 = AtomicU32::new(0);
+/// Plugin menus kept off screen this session, for `ds_hud_hide_plugin_text`.
+static PLUGIN_HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// `&gHUD.m_Menu`, `&gHUD.m_flTime` and the `je`, with the base they were
 /// resolved against.
@@ -156,21 +163,32 @@ fn is_voice_menu(payload: &[u8]) -> bool {
         .is_some_and(|text| VOICE_KEYS.iter().any(|key| text.starts_with(key)))
 }
 
+/// Whether a `ShowMenu` payload carries any text. DoD's server sends an empty
+/// one (no slots, no text) to close a menu; that is not a plugin menu to count.
+fn has_text(payload: &[u8]) -> bool {
+    payload.get(HEADER).is_some_and(|&b| b != 0)
+}
+
 /// Whether a `ShowMenu` payload says another chunk of the same menu follows.
 fn needs_more(payload: &[u8]) -> bool {
     payload.get(NEED_MORE_AT).is_some_and(|&b| b != 0)
 }
 
+/// Whether the held menu should be hidden: a voice menu by this module's
+/// cvar, any other by `ds_hud_hide_plugin_text`.
+fn hide_menu(voice: bool, hide_voice: bool, hide_plugin: bool) -> bool {
+    if voice { hide_voice } else { hide_plugin }
+}
+
 /// What to do with `CHudMenu`'s flags this frame, or `None` to leave them.
 ///
-/// `hide`: the cvar. `voice`: the held menu is a voice menu. `hid`: this module
-/// cleared the bit on it. `timed_out`: its shut-off time has passed, so `Draw`
-/// would close it without drawing.
+/// `hide`: the held menu's cvar ([`hide_menu`]). `hid`: this module cleared
+/// the bit on it. `timed_out`: its shut-off time has passed, so `Draw` would
+/// close it without drawing.
 fn wanted_flags(
     flags: u32,
     displayed: bool,
     hide: bool,
-    voice: bool,
     hid: bool,
     timed_out: bool,
 ) -> Option<u32> {
@@ -178,7 +196,7 @@ fn wanted_flags(
         return None;
     }
     let active = flags & HUD_ACTIVE != 0;
-    if hide && voice && !timed_out {
+    if hide && !timed_out {
         return active.then_some(flags & !HUD_ACTIVE);
     }
     // Showing it again, or letting the game's Draw time it out.
@@ -261,9 +279,9 @@ fn resolve() -> Result<(usize, usize, usize), String> {
     Ok((menu, hud_time, je))
 }
 
-/// Brings `CHudMenu`'s flags in line with the cvar. Cheap; called from the
-/// hook after each `ShowMenu` and every frame.
-fn apply_menu(hide: bool) -> Result<(), String> {
+/// Brings `CHudMenu`'s flags in line with the two cvars. Cheap; called from
+/// the hook after each `ShowMenu` and every frame.
+fn apply_menu(hide_voice: bool, hide_plugin: bool) -> Result<(), String> {
     let (menu, hud_time, _) = resolve()?;
     // Safety: a static `CHudMenu` inside client.dll's image, checked by RTTI
     // in `resolve`; the game reads and writes these fields on this thread.
@@ -275,7 +293,8 @@ fn apply_menu(hide: bool) -> Result<(), String> {
         let timed_out = shutoff > 0.0 && shutoff <= now;
         let hid = HID_CURRENT.load(Ordering::Relaxed);
         let voice = CURRENT_IS_VOICE.load(Ordering::Relaxed);
-        if let Some(new) = wanted_flags(flags, displayed, hide, voice, hid, timed_out) {
+        let hide = hide_menu(voice, hide_voice, hide_plugin);
+        if let Some(new) = wanted_flags(flags, displayed, hide, hid, timed_out) {
             std::ptr::write_volatile((menu + FLAGS) as *mut u32, new);
             HID_CURRENT.store(new & HUD_ACTIVE == 0, Ordering::Relaxed);
         }
@@ -309,8 +328,8 @@ fn complain_once(why: &str) {
     }
 }
 
-/// Lets the game handle a `ShowMenu`, then hides it if it is a voice menu
-/// and the cvar says so. `Some` for `ShowMenu` (always handled here), `None`
+/// Lets the game handle a `ShowMenu`, then hides it if its cvar says so: the
+/// voice menus this module's, any other `ds_hud_hide_plugin_text`. `Some` for `ShowMenu` (always handled here), `None`
 /// for any other message. Also called from `msglog`'s handler while it
 /// watches `ShowMenu` (see `clan_text`'s module doc).
 pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
@@ -329,6 +348,8 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
         HID_CURRENT.store(false, Ordering::Relaxed);
         if voice && WANTED.load(Ordering::Relaxed) {
             HIDDEN.fetch_add(1, Ordering::Relaxed);
+        } else if !voice && has_text(payload) && crate::plugin_text::wanted() {
+            PLUGIN_HIDDEN.fetch_add(1, Ordering::Relaxed);
         }
     }
     WAITING_FOR_MORE.store(needs_more(payload), Ordering::Relaxed);
@@ -341,7 +362,7 @@ pub(crate) fn filter(name: &str, size: i32, buf: *mut c_void) -> Option<i32> {
         (Some(original), Ok(c_name)) => unsafe { original(c_name.as_ptr(), size, buf) },
         _ => 1,
     };
-    if let Err(why) = apply_menu(WANTED.load(Ordering::Relaxed)) {
+    if let Err(why) = apply_menu(WANTED.load(Ordering::Relaxed), crate::plugin_text::wanted()) {
         complain_once(&why);
     }
     Some(result)
@@ -401,8 +422,9 @@ pub fn poll() {
     {
         unsafe { (engfuncs.pfn_hook_user_msg)(c_name.as_ptr(), hooked) };
     }
-    if (wanted || HID_CURRENT.load(Ordering::Relaxed))
-        && let Err(why) = apply_menu(wanted)
+    let plugin = crate::plugin_text::wanted();
+    if (wanted || plugin || HID_CURRENT.load(Ordering::Relaxed))
+        && let Err(why) = apply_menu(wanted, plugin)
     {
         complain_once(&why);
     }
@@ -416,17 +438,19 @@ pub fn status_line() -> Option<String> {
     }
     let wanted = unsafe { (*cvar).value } != 0.0;
     let hidden = HIDDEN.load(Ordering::Relaxed);
-    if !wanted && hidden == 0 {
+    let plugin_hidden = PLUGIN_HIDDEN.load(Ordering::Relaxed);
+    if !wanted && hidden == 0 && plugin_hidden == 0 {
         return None;
     }
     Some(format!(
-        "{NAME} = {} -- {hidden} voice menu(s) hidden this session; +commandmenu (hand signals) {}",
+        "{NAME} = {} -- {hidden} voice menu(s) hidden this session; +commandmenu (hand signals) {}; {plugin_hidden} plugin menu(s) hidden by {}",
         if wanted { "1" } else { "0" },
         if COMMAND_MENU_BLOCKED.load(Ordering::Relaxed) {
             "blocked"
         } else {
             "opens normally"
-        }
+        },
+        crate::plugin_text::NAME
     ))
 }
 
@@ -474,6 +498,15 @@ mod tests {
         assert!(is_voice_menu(b"\x00\x00\x00\x00#Menu_GerVoice2\0"));
     }
 
+    /// The server's empty `ShowMenu` closes a menu; it is not a plugin menu.
+    #[test]
+    fn an_empty_menu_has_no_text() {
+        assert!(!has_text(&[0, 0, 0, 0]));
+        assert!(!has_text(&[0, 0, 0, 0, 0]));
+        assert!(!has_text(&[]));
+        assert!(has_text(&show_menu(0, "Choose a map:")));
+    }
+
     #[test]
     fn need_more_is_the_fourth_byte() {
         assert!(!needs_more(&show_menu(0, "#Menu_GerVoice2")));
@@ -482,36 +515,45 @@ mod tests {
     }
 
     #[test]
-    fn a_voice_menu_loses_only_the_active_bit() {
-        assert_eq!(wanted_flags(0x3, true, true, true, false, false), Some(0x2));
+    fn a_hidden_menu_loses_only_the_active_bit() {
+        assert_eq!(wanted_flags(0x3, true, true, false, false), Some(0x2));
         // Already hidden: nothing to write.
-        assert_eq!(wanted_flags(0x2, true, true, true, true, false), None);
+        assert_eq!(wanted_flags(0x2, true, true, true, false), None);
+    }
+
+    /// Each kind of menu follows its own cvar, and only its own.
+    #[test]
+    fn voice_menus_follow_this_cvar_and_plugin_menus_plugin_text() {
+        assert!(hide_menu(true, true, false));
+        assert!(!hide_menu(true, false, true));
+        assert!(hide_menu(false, false, true));
+        assert!(!hide_menu(false, true, false));
     }
 
     #[test]
-    fn other_menus_are_left_alone() {
-        assert_eq!(wanted_flags(0x1, true, true, false, false, false), None);
-        assert_eq!(wanted_flags(0x0, true, true, false, false, false), None);
+    fn a_menu_whose_cvar_is_off_is_left_alone() {
+        assert_eq!(wanted_flags(0x1, true, false, false, false), None);
+        assert_eq!(wanted_flags(0x0, true, false, false, false), None);
     }
 
     #[test]
     fn nothing_is_touched_while_no_menu_is_held() {
-        assert_eq!(wanted_flags(0x1, false, true, true, false, false), None);
-        assert_eq!(wanted_flags(0x0, false, false, true, true, false), None);
+        assert_eq!(wanted_flags(0x1, false, true, false, false), None);
+        assert_eq!(wanted_flags(0x0, false, false, true, false), None);
     }
 
     #[test]
     fn turning_it_off_puts_back_only_what_it_hid() {
-        assert_eq!(wanted_flags(0x0, true, false, true, true, false), Some(0x1));
-        assert_eq!(wanted_flags(0x0, true, false, true, false, false), None);
+        assert_eq!(wanted_flags(0x0, true, false, true, false), Some(0x1));
+        assert_eq!(wanted_flags(0x0, true, false, false, false), None);
     }
 
     /// Past its shut-off time the game's own Draw has to run to close the
     /// menu, and it does so before drawing anything.
     #[test]
     fn a_timed_out_hidden_menu_is_handed_back_to_draw() {
-        assert_eq!(wanted_flags(0x0, true, true, true, true, true), Some(0x1));
-        assert_eq!(wanted_flags(0x1, true, true, true, false, true), None);
+        assert_eq!(wanted_flags(0x0, true, true, true, true), Some(0x1));
+        assert_eq!(wanted_flags(0x1, true, true, false, true), None);
     }
 
     #[test]

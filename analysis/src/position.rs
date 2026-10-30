@@ -88,6 +88,11 @@ pub struct KillPosition {
     /// unit is about an inch). Only for a kill by another player with both
     /// positions known.
     pub distance: Option<f32>,
+    /// Whether the kill was a headshot, told from the helmet event once the
+    /// demo has ended (#1128). `Unknown` until then, and in an entry cached
+    /// before it existed.
+    #[serde(default)]
+    pub headshot: crate::headshot::Headshot,
 }
 
 fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -159,6 +164,7 @@ pub fn use_position_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                 distance: killer_origin
                     .zip(victim_origin)
                     .map(|(a, b)| distance(a, b)),
+                headshot: Default::default(),
             };
             state.kill_positions.push(kill);
         }

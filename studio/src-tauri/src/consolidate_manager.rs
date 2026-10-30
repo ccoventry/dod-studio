@@ -27,7 +27,7 @@ fn emitter(app_handle: AppHandle) -> impl FnMut(&Progress) {
     move |p: &Progress| {
         let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
         let step_done = p.files_done == p.files_total;
-        if step_done || crate::capture_manager::progress_emit_due(&last_emit, now_ms) {
+        if step_done || crate::scan_manager::progress_emit_due(&last_emit, now_ms) {
             let _ = app_handle.emit("consolidate_progress", p.clone());
         }
     }

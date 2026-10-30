@@ -35,7 +35,6 @@ export const OLD_NAMES = Object.freeze({
   dodstudio_hide_hand_signals: 'ds_player_hide_hand_signals',
   dodstudio_hide_headshot_red_screen: 'ds_view_hide_headshot_red_screen',
   dodstudio_hide_hltv_messages: 'ds_spec_hide_hltv_messages',
-  dodstudio_hide_hudelement: 'ds_hud_hide_element',
   dodstudio_hide_map_text: 'ds_hud_hide_map_text',
   dodstudio_hide_scoreboard: 'ds_hud_hide_scoreboard',
   dodstudio_hide_screen_shake: 'ds_view_hide_screen_shake',

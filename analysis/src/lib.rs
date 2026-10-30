@@ -8,6 +8,9 @@ mod clan_match;
 /// The clock offset between two recordings of one half (#708).
 mod clock_offset;
 pub mod entity_replay;
+/// The 64-bit FNV-1a every crate hashes demo keys and file names with.
+pub mod fnv1a;
+mod headshot;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;
 /// Whether every delta decodes against a frame the file has (#41).
@@ -33,6 +36,7 @@ mod weapon_names;
 use crate::{
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
+    headshot::use_headshot_updates,
     kill::{
         use_kill_streak_updates, use_teamkill_and_suicide_updates, use_weapon_breakdown_updates,
     },
@@ -57,6 +61,7 @@ pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
 pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
     clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},
+    headshot::{Headshot, headshot_of},
     localization::{get_active_language, set_active_language, translate_key},
     match_group::{
         Half, HalfCall, HalfReason, MatchGroup, MatchHalf, MatchTeam, Side, find_demo,
@@ -155,6 +160,9 @@ pub struct AnalyzerState {
     /// Working state for `kill_positions`; never serialized.
     #[serde(skip)]
     positions: position::PositionTracker,
+    /// Working state for `KillPosition::headshot`; never serialized.
+    #[serde(skip)]
+    headshots: headshot::HeadshotTracker,
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
@@ -840,6 +848,8 @@ fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     use_pov_stats_updates(state, event);
     use_general_finalization(state, event);
     check_and_promote_british(state);
+    // Last: pairing reads the victims' final teams.
+    use_headshot_updates(state, event);
 }
 
 impl Analysis {

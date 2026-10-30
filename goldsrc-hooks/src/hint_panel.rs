@@ -50,6 +50,10 @@
 //!
 //! Defaults to 1: the panel is the recorder's own tutorial, it tells a viewer
 //! nothing about the footage, and it covers a corner of the shot.
+//!
+//! The same cvar hides the machine gun's "Deploy your machine gun to
+//! Reload!" prompt (#342), for the same reason: `mg_reload_hint.rs`, a patch
+//! of its own that [`poll`] drives.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
@@ -229,6 +233,7 @@ pub fn poll() {
         return;
     }
     let wanted = unsafe { (*cvar).value } != 0.0;
+    crate::mg_reload_hint::poll(wanted);
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);
     } else {
@@ -283,9 +288,15 @@ pub fn status_line() -> Option<String> {
         return None;
     }
     Some(if HIDDEN_NOW.load(Ordering::Relaxed) {
-        format!("{NAME} = 1 -- DoDViewport::ShowHint is stubbed, so auto-help hints do not open")
+        format!(
+            "{NAME} = 1 -- DoDViewport::ShowHint is stubbed, so auto-help hints do not open; {}",
+            crate::mg_reload_hint::status()
+        )
     } else {
-        format!("{NAME}: auto-help hints show")
+        format!(
+            "{NAME}: auto-help hints show; {}",
+            crate::mg_reload_hint::status()
+        )
     })
 }
 
