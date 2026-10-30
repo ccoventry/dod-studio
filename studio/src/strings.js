@@ -2228,6 +2228,9 @@ export const STRINGS = {
     glMaxSizeLow: (value, source, px, cap, fix) => `This install runs with gl_max_size ${value} (${source}), so HD textures show at ${px} px at most, smaller than the ${cap} they are built at. ${fix}`,
     GL_MAX_SIZE_FIX_CFG: 'Copy the gl_max_size line above into movie.cfg, then restart the game.',
     GL_MAX_SIZE_FIX_INITIAL: 'Raise it in Initial Commands (Configuration), or take that line out and set it in movie.cfg.',
+    // #1155: a style built with an older version of the app's scripts (native::hd::outdated).
+    outdatedSteps: { killfeed_icons: 'the new kill-feed icons (about 5 minutes)' },
+    outdatedStyle: (style, what) => `${style} was built with an older version: build it again to get ${what}.`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,

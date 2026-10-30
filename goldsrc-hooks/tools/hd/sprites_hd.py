@@ -65,7 +65,9 @@ CROSSHAIR = re.compile(r"^(crosshair|customogxhair|customxhair|dodcross)")
 # atlas, stay out of releases until the WSOD25 movie shows them first (#1157).
 # The app's bundled copy (hd-scripts) keeps the upscaled icons; the repo's
 # copy, which `tauri dev` and hand runs use, still paints them. #1157 deletes
-# this and its check.
+# this and its check. Studio's HD page reads this line and the folder rule
+# below to stay quiet while it holds (native::hd::outdated, #1155): keep it
+# `HOLD_KILLFEED_ICONS = True|False`, or change both.
 HOLD_KILLFEED_ICONS = True
 
 
