@@ -18,8 +18,9 @@
 //! [`LABEL`] line for Studio through [`crate::events::send`] (the same queue
 //! every marker uses) and writes the same line to the hook's own log, which
 //! keeps it when no Studio is listening. A clip whose `STOP_RECORD` never
-//! came is reported when the next clip starts, the next demo starts or the
-//! batch ends, with the stop left out.
+//! came is reported when the next clip starts, the next demo starts, the
+//! batch ends or `ds_capture_batch stop` runs (a Cancel), with the stop left
+//! out.
 //!
 //! The only per-frame cost is [`poll`]'s frame count: one atomic load, and
 //! one atomic add while a clip records.
@@ -75,6 +76,24 @@ pub(crate) fn on_marker(line: &str) {
     }
     RECORDING.store(state.recording(), Ordering::Relaxed);
     drop(state);
+    report(done);
+}
+
+/// `ds_capture_batch stop` ran: a Cancel, or the next batch taking over a
+/// game left open (#725). Neither echoes `BATCH_COMPLETE`, so a clip still
+/// recording is reported now, without its stop, rather than at the next
+/// batch's first `DEMO_START` with every frame drawn in between.
+pub fn batch_stopped() {
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let done = state.stopped(FRAMES.load(Ordering::Relaxed));
+    RECORDING.store(false, Ordering::Relaxed);
+    drop(state);
+    report(done);
+}
+
+/// Queues each ended clip's line for Studio and writes it to the hook's log.
+/// Called with no lock held.
+fn report(done: Vec<Clip>) {
     for clip in done {
         let label = clip.label();
         crate::events::send(&label);
@@ -201,6 +220,12 @@ impl Clips {
         done
     }
 
+    /// The batch was stopped: ends the clip recording now, if any, without
+    /// its stop.
+    pub fn stopped(&mut self, frames: u32) -> Vec<Clip> {
+        self.close(None, frames, false).into_iter().collect()
+    }
+
     /// Ends the clip recording now, or one stopped without a start: `stop` is
     /// whether a `STOP_RECORD` ended it. Nothing to end, nothing returned.
     fn close(&mut self, now: Option<f64>, frames: u32, stop: bool) -> Option<Clip> {
@@ -276,6 +301,27 @@ mod tests {
         assert_eq!(done[0].number, 2);
         assert_eq!(done[0].demo, Some((2, 2)));
         assert!(!done[0].stop_record);
+    }
+
+    /// A Cancel mid-clip (`ds_capture_batch stop`, no `BATCH_COMPLETE`)
+    /// reports the clip then, once, and the next batch starts clean.
+    #[test]
+    fn a_batch_stopped_mid_clip_reports_it_once_at_the_stop() {
+        let mut c = Clips::new();
+        run(&mut c, "DEMO_START 1 1 2", 0.0, 0);
+        run(&mut c, "START_RECORD - Tick 170", 11.0, 0);
+        let done = c.stopped(90);
+        assert_eq!(
+            done[0].label(),
+            "CLIP_SUMMARY\tclip=1\tdemo=1/1\tdemo_clip=1/2\tstart=11.000\tframes=90\t\
+             markers=START_RECORD"
+        );
+        assert!(!c.recording());
+        assert!(
+            c.stopped(500).is_empty(),
+            "a second stop has nothing to report"
+        );
+        assert!(run(&mut c, "DEMO_START 1 1 1", 0.0, 5000).is_empty());
     }
 
     #[test]
