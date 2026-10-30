@@ -205,39 +205,39 @@ pub fn install() {
     }
     // Same: independent of every other setting, so outside the tuple.
     if let Some(map_text) = register(crate::map_text::NAME, "0") {
-        crate::map_text::set_cvar(map_text);
+        crate::map_text::CVAR.set(map_text);
     }
     if let Some(clan_text) = register(crate::clan_text::NAME, "0") {
-        crate::clan_text::set_cvar(clan_text);
+        crate::clan_text::CVAR.set(clan_text);
     }
     if let Some(center_text) = register(crate::center_text::NAME, "0") {
-        crate::center_text::set_cvar(center_text);
+        crate::center_text::CVAR.set(center_text);
     }
     if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
-        crate::spectator_text::set_cvar(spectator_text);
+        crate::spectator_text::CVAR.set(spectator_text);
     }
     if let Some(plugin_text) = register(crate::plugin_text::NAME, "0") {
-        crate::plugin_text::set_cvar(plugin_text);
+        crate::plugin_text::CVAR.set(plugin_text);
     }
     if let Some(teammate_info) = register(crate::teammate_info::NAME, "0") {
-        crate::teammate_info::set_cvar(teammate_info);
+        crate::teammate_info::CVAR.set(teammate_info);
     }
     // On by default: the hint panel is the recorder's own tutorial and
     // covers a corner of the shot (#286).
     if let Some(hints) = register(crate::hint_panel::NAME, "1") {
-        crate::hint_panel::set_cvar(hints);
+        crate::hint_panel::CVAR.set(hints);
     }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
-        crate::voice_menus::set_cvar(voice_menus);
+        crate::voice_menus::CVAR.set(voice_menus);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
-        crate::hltv_messages::set_cvar(hltv_messages);
+        crate::hltv_messages::CVAR.set(hltv_messages);
     }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
-        crate::spectator_bars::set_cvar(bars);
+        crate::spectator_bars::CVAR.set(bars);
     }
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);

@@ -59,10 +59,11 @@
 //! puts the shipped byte back the frame either stops being true, so live
 //! play is left as shipped.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::scan;
+use crate::setting::Cvar;
 
 /// The stock cvar this follows. Registered by `client.dll` (`gHUD+0x6e2b8`
 /// caches its pointer), looked up by name.
@@ -81,7 +82,7 @@ const DRAW: u8 = 0x08;
 const SKIP: u8 = 0x00;
 
 /// `hud_fastswitch`, once the client has registered it.
-static FASTSWITCH_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static FASTSWITCH_CVAR: Cvar = Cvar::new();
 
 /// The resolved displacement byte and the module base it belongs to.
 static DISP_ADDRESS: AtomicUsize = AtomicUsize::new(0);
@@ -119,18 +120,16 @@ fn wanted_byte(present: u8, hide: bool) -> Result<Option<u8>, String> {
 
 /// `hud_fastswitch`'s value now, or `None` until the client registers it.
 fn fastswitch_on() -> Option<bool> {
-    let mut cvar = FASTSWITCH_CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    if FASTSWITCH_CVAR.ptr().is_null() {
         let engfuncs = engine::engfuncs()?;
         // Safety: a plain lookup by name; null when not registered.
-        cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(FASTSWITCH.as_ptr()) };
+        let cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(FASTSWITCH.as_ptr()) };
         if cvar.is_null() {
             return None;
         }
-        FASTSWITCH_CVAR.store(cvar, Ordering::Release);
+        FASTSWITCH_CVAR.set(cvar);
     }
-    // Safety: the engine owns the cvar for the session.
-    Some(unsafe { (*cvar).value } != 0.0)
+    FASTSWITCH_CVAR.try_on()
 }
 
 /// Resolves the displacement byte for the loaded `client.dll`.
