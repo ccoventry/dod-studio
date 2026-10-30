@@ -70,6 +70,7 @@ mod classify;
 mod crosshair_rule;
 mod grenade;
 mod sequences;
+mod snapshot_motion;
 mod sprint_turn;
 mod trace;
 
@@ -865,6 +866,16 @@ pub fn apply() {
         f64::from(spectated.curstate.msg_time),
         spectated.curstate.origin.x,
         spectated.curstate.origin.y,
+    );
+    snapshot_motion::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        [
+            spectated.curstate.origin.x,
+            spectated.curstate.origin.y,
+            spectated.curstate.origin.z,
+        ],
+        body_label.as_deref().unwrap_or(""),
+        spectated.curstate.movetype,
     );
     let pov_view = crosshair_rule::View {
         body: body_label.as_deref().unwrap_or(""),

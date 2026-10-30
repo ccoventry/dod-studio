@@ -64,21 +64,72 @@ pub const MIGRATIONS: &[Migration] = &[
         to: 13,
         upgrade: v12_to_v13,
     },
+    // No step to 14 (#1128): a kill's headshot comes from the demo's helmet
+    // events, which no entry keeps, so every entry with a kill would need a
+    // re-parse anyway. With no step, older entries are a plain miss: the
+    // rescan estimate counts them as full reads (an "upgradable" entry is
+    // estimated at milliseconds), and the stale-cache sweep can delete the
+    // old folders. The steps below still run in tests.
 ];
 
 const MALFORMED: &str = "the entry is not laid out as its schema writes it";
 const LEFT: &str = "a player with kills left before the demo ended";
 const RECONNECTED: &str = "a player with kills reconnected";
 
+/// The steps the cache runs: [`MIGRATIONS`], or in a test the table it set
+/// with [`use_steps`].
+#[cfg(not(test))]
+fn steps() -> &'static [Migration] {
+    MIGRATIONS
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_STEPS: std::cell::Cell<&'static [Migration]> = const { std::cell::Cell::new(MIGRATIONS) };
+}
+
+#[cfg(test)]
+fn steps() -> &'static [Migration] {
+    TEST_STEPS.with(std::cell::Cell::get)
+}
+
+/// Puts back the steps a test replaced, when it ends.
+#[cfg(test)]
+pub(crate) struct StepsGuard(&'static [Migration]);
+
+#[cfg(test)]
+impl Drop for StepsGuard {
+    fn drop(&mut self) {
+        TEST_STEPS.with(|t| t.set(self.0));
+    }
+}
+
+/// Makes the cache use `table` for its steps on this thread until the guard
+/// drops. The cache's own tests need a schema that upgrades, which the real
+/// table lacks right after a bump with no step (v14, #1128).
+#[cfg(test)]
+pub(crate) fn use_steps(table: &'static [Migration]) -> StepsGuard {
+    StepsGuard(TEST_STEPS.with(|t| t.replace(table)))
+}
+
+/// v7 upgraded by the real steps as far as they go (v13), standing in for a
+/// step to the current schema: what the cache's plumbing tests upgrade with.
+#[cfg(test)]
+pub(crate) const V7_UPGRADES: &[Migration] = &[Migration {
+    from: 7,
+    to: super::SCHEMA_VERSION,
+    upgrade: |analysis| upgrade_with(MIGRATIONS, 7, 13, analysis),
+}];
+
 /// Whether an entry from schema `version` can be upgraded to the current one.
 pub fn upgrades_from(version: u32) -> bool {
-    version < super::SCHEMA_VERSION && chain(MIGRATIONS, version, super::SCHEMA_VERSION).is_some()
+    version < super::SCHEMA_VERSION && chain(steps(), version, super::SCHEMA_VERSION).is_some()
 }
 
 /// Runs every step from schema `from` to the current one on `analysis` (an
 /// entry's `analysis` object).
 pub fn upgrade(from: u32, analysis: &mut Value) -> Upgrade {
-    upgrade_with(MIGRATIONS, from, super::SCHEMA_VERSION, analysis)
+    upgrade_with(steps(), from, super::SCHEMA_VERSION, analysis)
 }
 
 fn upgrade_with(migrations: &[Migration], from: u32, to: u32, analysis: &mut Value) -> Upgrade {
@@ -349,16 +400,33 @@ mod tests {
     }
 
     #[test]
-    fn the_real_chain_goes_7_9_10_11_12_and_8_has_none() {
-        let hops: Vec<_> = chain(MIGRATIONS, 7, 12)
+    fn the_real_chain_goes_7_9_10_11_12_13_and_8_has_none() {
+        let hops: Vec<_> = chain(MIGRATIONS, 7, 13)
             .unwrap()
             .iter()
             .map(|m| (m.from, m.to))
             .collect();
-        assert_eq!(hops, [(7, 9), (9, 10), (10, 11), (11, 12)]);
-        assert!(upgrades_from(7) && upgrades_from(9) && upgrades_from(10) && upgrades_from(11));
+        assert_eq!(hops, [(7, 9), (9, 10), (10, 11), (11, 12), (12, 13)]);
         assert!(!upgrades_from(8) && !upgrades_from(6));
         assert!(!upgrades_from(super::super::SCHEMA_VERSION));
+    }
+
+    /// v14 (#1128) has no step: a v13 entry has no helmet events to tell a
+    /// headshot from, so it, and every older one, is a miss. An "upgradable"
+    /// entry would be estimated at milliseconds by the rescan prompt while
+    /// it re-parses in full, and would keep its old folder from the sweep.
+    #[test]
+    fn no_entry_older_than_14_upgrades() {
+        assert_eq!(super::super::SCHEMA_VERSION, 14);
+        for version in 0..14 {
+            assert!(!upgrades_from(version), "v{version}");
+        }
+    }
+
+    /// The chain up to v13, the last schema with a step: what the fixture's
+    /// entries still upgrade through, so the steps stay tested.
+    fn upgrade_to_13(from: u32, analysis: &mut Value) -> Upgrade {
+        upgrade_with(MIGRATIONS, from, 13, analysis)
     }
 
     fn player(id: &str, connection: Value, reconnected: bool, streaks: Value) -> Value {
@@ -432,7 +500,7 @@ mod tests {
         ] {
             for from in [7, 8, 9] {
                 assert!(
-                    matches!(upgrade(from, &mut value), Upgrade::NeedsReparse(_)),
+                    matches!(upgrade_to_13(from, &mut value), Upgrade::NeedsReparse(_)),
                     "{from}: {value}"
                 );
             }
@@ -470,7 +538,7 @@ mod tests {
         let fresh = Analysis::try_from_bytes(&bytes).unwrap();
         let mut old = as_v7(&fresh);
         assert_ne!(old, serde_json::to_value(&fresh).unwrap());
-        assert_eq!(upgrade(7, &mut old), Upgrade::Done);
+        assert_eq!(upgrade_to_13(7, &mut old), Upgrade::Done);
         let upgraded: Analysis = serde_json::from_value(old).unwrap();
         assert_eq!(
             serde_json::to_value(&upgraded).unwrap(),
@@ -543,7 +611,7 @@ mod tests {
         let fresh = Analysis::try_from_bytes(&bytes).unwrap();
         let mut old = serde_json::to_value(&fresh).unwrap();
         old["demo_info"].as_object_mut().unwrap().remove("damage");
-        assert_eq!(upgrade(10, &mut old), Upgrade::Done);
+        assert_eq!(upgrade_to_13(10, &mut old), Upgrade::Done);
         let upgraded: Analysis = serde_json::from_value(old).unwrap();
         assert_eq!(upgraded.demo_info.damage, None);
         assert_eq!(
@@ -551,7 +619,7 @@ mod tests {
             serde_json::to_value(&fresh).unwrap()
         );
         assert_eq!(
-            upgrade(10, &mut json!({"state": {}})),
+            upgrade_to_13(10, &mut json!({"state": {}})),
             Upgrade::NeedsReparse(MALFORMED)
         );
     }
@@ -570,7 +638,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("no_camera_data");
-        assert_eq!(upgrade(11, &mut old), Upgrade::Done);
+        assert_eq!(upgrade_to_13(11, &mut old), Upgrade::Done);
         let upgraded: Analysis = serde_json::from_value(old).unwrap();
         assert_eq!(
             serde_json::to_value(&upgraded).unwrap(),

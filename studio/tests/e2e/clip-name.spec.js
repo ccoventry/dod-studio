@@ -81,7 +81,7 @@ test('the chips sit in the same rows as Rename Demos, plus Highlight (#751)', as
     .toHaveText(['Player', 'Sides', 'Teams', 'Demo', 'Highlight', 'Format']);
   await expect(page.locator('.placeholder-chip-group[data-group="player"] .clip-name-chip')).toHaveText(['{name}', '{full_name}']);
   await expect(page.locator('.placeholder-chip-group[data-group="highlight"] .clip-name-chip'))
-    .toHaveText(['{kills}', '{weapons}', '{first_weapon}', '{victims}', '{first_victim}', '{row}', '{time}']);
+    .toHaveText(['{kills}', '{headshots}', '{weapons}', '{first_weapon}', '{victims}', '{first_victim}', '{row}', '{time}']);
   // {kills} counts something else in Rename Demos, and says so.
   await expect(page.locator('.clip-name-chip:text-is("{kills}")')).toHaveAttribute('title', /Rename Demos/);
   await expect(page.locator('.clip-name-chip:text-is("{player}")')).toHaveCount(0);
