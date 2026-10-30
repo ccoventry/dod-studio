@@ -22,7 +22,7 @@ vi.mock('./themed_confirm.js', () => ({
 }));
 vi.mock('./ipc_bridge.js', () => ({ waitForBatchStart: vi.fn(), cancelCaptureBatch: vi.fn() }));
 
-import { batchCloseMessage, confirmCloseDuringBatch, START_WAIT_MS } from './batch_close_prompt.js';
+import { confirmCloseDuringBatch, START_WAIT_MS } from './batch_close_prompt.js';
 import { STRINGS } from './strings.js';
 
 const s = STRINGS.BATCH_CLOSE_MODAL;
@@ -40,7 +40,7 @@ function batch(states, { cancelStops = true } = {}) {
   return {
     waitForStart,
     cancelBatch,
-    args: { isRunning: () => running, isLocalBuild: async () => false, waitForStart, cancelBatch },
+    args: { isRunning: () => running, waitForStart, cancelBatch },
   };
 }
 
@@ -154,10 +154,5 @@ describe('closing Studio during a batch (#545)', () => {
     b.waitForStart.mockImplementationOnce(async () => 'sent');
     expect(await confirmCloseDuringBatch(b.args)).toBe(false);
     expect(titles()).toEqual([s.WAIT_TITLE, s.TITLE, s.TITLE]);
-  });
-
-  it('warns a local build that closing takes the game with it', () => {
-    expect(batchCloseMessage(true)).toContain(s.LOCAL_BUILD_NOTE);
-    expect(batchCloseMessage(false)).not.toContain(s.LOCAL_BUILD_NOTE);
   });
 });
