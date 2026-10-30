@@ -2,6 +2,7 @@
 //! out again however it ends: the session and capture-folder junctions, the
 //! patched demos copied into `dod/`, and the guards that clean up.
 
+use super::leftovers::Leftovers;
 use super::{CaptureJob, EngineEvent, abort};
 use crate::log_markdown;
 use std::path::{Path, PathBuf};
@@ -149,12 +150,14 @@ impl Workspace {
     /// Clears what a previous batch left, links `dodstudio_session` to this
     /// session's media folder and `dod_pool_N` to each capture folder, and
     /// arms the guards. `None` once a failure has been reported; the guard
-    /// made so far cleans up as it drops.
+    /// made so far cleans up as it drops, and `leftovers` holds the links
+    /// already made (#1212).
     pub(super) fn prepare(
         config: &crate::patch::PatcherConfig,
         runtime_batch: Option<&crate::patch::runtime_batch::RuntimeBatch>,
         hl_exe_parent: &Path,
         tx: &Sender<EngineEvent>,
+        leftovers: &mut Leftovers,
     ) -> Option<Self> {
         let dummy_path = hl_exe_parent.join("DOD_BATCH_DONE");
         std::fs::remove_dir_all(&dummy_path).ok();
@@ -200,14 +203,13 @@ impl Workspace {
         let route_junctions: Vec<PathBuf> = (0..config.capture_directories.len())
             .map(|idx| hl_exe_parent.join(format!("_route_{}", idx)))
             .collect();
-        let pool_junctions = match link_capture_folders(&config.capture_directories, hl_exe_parent)
+        if let Err(msg) =
+            link_capture_folders(&config.capture_directories, hl_exe_parent, leftovers)
         {
-            Ok(pool_junctions) => pool_junctions,
-            Err(msg) => {
-                abort(tx, &msg);
-                return None;
-            }
-        };
+            abort(tx, &msg);
+            return None;
+        }
+        let pool_junctions = leftovers.pool_junctions().to_vec();
 
         let links = crate::patch::WorkspaceGuard {
             session_junction: session_junction.clone(),
@@ -262,12 +264,13 @@ fn link_session(session_junction: &Path, session_dir: &Path) -> Result<(), Strin
 }
 
 /// Creates each capture folder and links `dod_pool_N` beside hl.exe to it,
-/// in order. The junctions made, or the first failure.
+/// in order, adding each junction to `leftovers` as it is made; the first
+/// failure stops it.
 fn link_capture_folders(
     capture_directories: &[PathBuf],
     hl_exe_parent: &Path,
-) -> Result<Vec<PathBuf>, String> {
-    let mut pool_junctions: Vec<PathBuf> = Vec::new();
+    leftovers: &mut Leftovers,
+) -> Result<(), String> {
     for (idx, target_dir) in capture_directories.iter().enumerate() {
         let junction_path = hl_exe_parent.join(format!("dod_pool_{}", idx));
         let _ = std::fs::remove_dir(&junction_path);
@@ -297,7 +300,7 @@ fn link_capture_folders(
                     junction_path.display(),
                     target_dir.display()
                 ));
-                pool_junctions.push(junction_path);
+                leftovers.add_pool_junction(junction_path);
             }
             Ok(out) => {
                 let err_msg = String::from_utf8_lossy(&out.stderr);
@@ -317,31 +320,30 @@ fn link_capture_folders(
             }
         }
     }
-    Ok(pool_junctions)
+    Ok(())
 }
 
 /// Copies each patched demo into `dod/`, where `playdemo` finds it, named
-/// with `_` for `-`. A demo that can't be copied is reported and skipped.
-/// The copies made, or `None` when the batch was cancelled first
-/// (`Cancelled` sent).
+/// with `_` for `-`, adding each copy to `leftovers`. `None` when the batch
+/// was cancelled first (`Cancelled` sent) or a demo couldn't be copied (its
+/// `Error` sent): the listener has ended the batch by then, so the game
+/// must not start (#1212).
 pub(super) fn copy_demos_into_game(
     jobs: &[CaptureJob],
     dod_dir: &Path,
     save_local_patched_copy: bool,
     cancel_token: &std::sync::atomic::AtomicBool,
     tx: &Sender<EngineEvent>,
-) -> Option<Vec<PathBuf>> {
-    let mut active_dest_paths = Vec::new();
+    leftovers: &mut Leftovers,
+) -> Option<()> {
     for job in jobs {
         if cancel_token.load(Ordering::Relaxed) {
             let _ = tx.send(EngineEvent::Cancelled);
             return None;
         }
-        if let Some(dest_demo_path) = copy_demo(job, dod_dir, save_local_patched_copy, tx) {
-            active_dest_paths.push(dest_demo_path);
-        }
+        leftovers.add_demo_copy(copy_demo(job, dod_dir, save_local_patched_copy, tx)?);
     }
-    Some(active_dest_paths)
+    Some(())
 }
 
 /// One demo into `dod/`: its path there, or `None` once the failure is
@@ -616,7 +618,10 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("take.avi"), b"x").unwrap();
         std::fs::create_dir_all(&game).unwrap();
-        let pools = link_capture_folders(std::slice::from_ref(&target), &game).unwrap();
+        let mut leftovers = Leftovers::default();
+        link_capture_folders(std::slice::from_ref(&target), &game, &mut leftovers).unwrap();
+        let pools = leftovers.pool_junctions().to_vec();
+        leftovers.launched();
         assert_eq!(pools, [game.join("dod_pool_0")]);
         let session = game.join("dodstudio_session");
         link_session(&session, &target).unwrap();
@@ -651,5 +656,33 @@ mod tests {
 
         files.remove_with_demo_copies();
         assert!(!demo.exists());
+    }
+
+    /// A capture folder that can't be made partway through stops the
+    /// linking, and the links already made go with the batch (#1212).
+    #[cfg(windows)]
+    #[test]
+    fn a_link_that_fails_partway_leaves_the_earlier_links_to_be_removed() {
+        let root = Scratch::new("workspace_link_partway");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        let good = root.join("takes");
+        let blocker = root.join("a_file");
+        std::fs::write(&blocker, b"x").unwrap();
+        let mut leftovers = Leftovers::default();
+        let err = link_capture_folders(
+            &[good.clone(), blocker.join("takes")],
+            &game,
+            &mut leftovers,
+        )
+        .unwrap_err();
+        assert!(
+            err.starts_with("Failed to create capture directory"),
+            "{err}"
+        );
+        assert_eq!(leftovers.pool_junctions(), [game.join("dod_pool_0")]);
+        drop(leftovers);
+        assert!(std::fs::symlink_metadata(game.join("dod_pool_0")).is_err());
+        assert!(good.is_dir(), "the capture folder itself stays");
     }
 }

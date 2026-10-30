@@ -242,6 +242,7 @@ mod behind_imports;
 mod build_id;
 mod center_text;
 mod clan_text;
+mod clip_log;
 mod cmd_list;
 mod commands;
 mod connect_guard;

@@ -14,6 +14,7 @@
 
 mod game;
 mod launch;
+mod leftovers;
 mod markers;
 mod obs_capture;
 mod preflight;
@@ -195,24 +196,31 @@ fn run_batch(batch: Batch) {
     };
     let dod_dir = crate::shared::paths::mod_dir(hl_exe_parent);
 
+    // Declared first so it drops last: every return before the launch
+    // takes the copies, links and readers made so far with it (#1212).
+    let mut leftovers = leftovers::Leftovers::default();
     let Some(mut workspace) = workspace::Workspace::prepare(
         &batch.config,
         batch.runtime_batch.as_ref(),
         hl_exe_parent,
         tx,
+        &mut leftovers,
     ) else {
         return;
     };
-    let Some(demo_copies) = workspace::copy_demos_into_game(
+    if workspace::copy_demos_into_game(
         &batch.jobs,
         &dod_dir,
         batch.config.save_local_patched_copy,
         &batch.cancel_token,
         tx,
-    ) else {
+        &mut leftovers,
+    )
+    .is_none()
+    {
         return;
-    };
-    if demo_copies.is_empty() && batch.runtime_batch.is_none() {
+    }
+    if leftovers.demo_copies().is_empty() && batch.runtime_batch.is_none() {
         let _ = tx.send(EngineEvent::AllCompleted);
         return;
     }
@@ -221,7 +229,6 @@ fn run_batch(batch: Batch) {
         .is_err()
     {
         abort(tx, "Failed to send Launching event (channel disconnected)");
-        workspace::remove_demo_copies(&demo_copies);
         return;
     }
     if let Err(problem) = preflight::check_room(
@@ -237,10 +244,11 @@ fn run_batch(batch: Batch) {
     let Some(mut feed) = start_marker_feed(&batch, &mut workspace.cleanup, hl_exe_parent) else {
         return;
     };
-    let Some(game) = launch::start_game(&batch, &workspace.export_dir, &dod_dir, &demo_copies)
-    else {
+    leftovers.add_readers(&feed.tail_cancel);
+    let Some(game) = launch::start_game(&batch, &workspace.export_dir, &dod_dir) else {
         return;
     };
+    leftovers.launched();
 
     let drop_poller = feed.drop_poller.take();
     let mut watch = watch::BatchWatch::new(
@@ -269,7 +277,7 @@ fn run_batch(batch: Batch) {
 
     stop_markers(tx, &mut watch, &feed, drop_poller);
     let files = workspace::BatchFiles {
-        demo_copies: &demo_copies,
+        demo_copies: leftovers.demo_copies(),
         cfg_path: &game.cfg_path,
         dummy_path: &game.dummy_path,
         exit_trigger: &workspace.exit_trigger,

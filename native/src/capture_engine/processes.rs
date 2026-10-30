@@ -27,8 +27,6 @@ pub(super) trait Processes {
     fn launcher_status(&self, launcher: &mut Launcher) -> std::io::Result<Option<String>>;
     /// Asks Windows to end process `pid` (`taskkill /F /PID`).
     fn kill_pid(&mut self, pid: u32);
-    /// Asks Windows to end every `hl.exe` (`taskkill /F /IM hl.exe`).
-    fn kill_every_game(&mut self);
     /// Frees the mouse a closed game confined (#1095); true when it was.
     fn release_cursor(&mut self) -> bool;
 }
@@ -73,10 +71,6 @@ impl Processes for Live {
 
     fn kill_pid(&mut self, pid: u32) {
         crate::sys::process::kill_pid(pid);
-    }
-
-    fn kill_every_game(&mut self) {
-        crate::sys::process::kill_game();
     }
 
     fn release_cursor(&mut self) -> bool {

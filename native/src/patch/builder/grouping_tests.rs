@@ -92,3 +92,60 @@ fn test_build_batch_queue_grouping() {
         "Expected exactly 3 patch jobs (1 primer + 2 grouped chains) after grouping by source demo and player"
     );
 }
+
+fn streak_at(demo: &str, player: &str, start_tick: i32) -> CaptureStreak {
+    CaptureStreak {
+        start_tick,
+        end_tick: start_tick + 100,
+        source_demo: demo.to_string(),
+        target_player: Some(player.to_string()),
+        kill_count: 2,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 1,
+        kills: vec![],
+        start_index: 0,
+        end_index: 0,
+        total_demo_frames: 1000,
+        demo_fps: 100.0,
+        viewdemo_times: vec![],
+        frame_times: Arc::new(vec![]),
+        status: crate::patch::types::HighlightStatus::None,
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
+    }
+}
+
+/// Groups whose first highlights share a tick come out in demo-then-player
+/// order whatever order the highlights arrive in (#1191).
+#[test]
+fn test_group_order_is_the_same_when_first_ticks_tie() {
+    let all = [
+        streak_at("b.dem", "Zed", 100),
+        streak_at("a.dem", "Yan", 100),
+        streak_at("a.dem", "Xia", 100),
+        streak_at("c.dem", "Win", 50),
+    ];
+    let expected = [
+        ("c.dem", "Win"),
+        ("a.dem", "Xia"),
+        ("a.dem", "Yan"),
+        ("b.dem", "Zed"),
+    ];
+    for run in 0..50 {
+        let mut input = all.to_vec();
+        input.rotate_left(run % 4);
+        if run % 2 == 1 {
+            input.reverse();
+        }
+        let order: Vec<(&str, &str)> = super::blocks::group_highlights(&input)
+            .iter()
+            .map(|g| (g.source_demo, g.target_player.unwrap()))
+            .collect();
+        // Borrowed from `input`, so compare before it drops.
+        assert_eq!(order, expected, "run {run}");
+    }
+}
