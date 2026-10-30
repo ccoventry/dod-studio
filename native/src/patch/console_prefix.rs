@@ -108,6 +108,7 @@ mod tests {
         "hud_hide_hints",
         "hud_hide_server_text",
         "hud_overview_hide_speaker",
+        "map_weather",
         "player_change_name",
         "player_fix_model_flicker",
         "sound_mute_flag_capture",

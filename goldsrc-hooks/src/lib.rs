@@ -177,6 +177,9 @@
 //! - `world_shaders`: the `ds_map_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
+//!   or none, by pointing the weather updater's type read at our own value
+//!   (#1129).
 //! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
@@ -280,6 +283,7 @@ mod lightmap_gamma;
 mod list_panel;
 mod map_sounds;
 mod map_text;
+mod map_weather;
 mod missing_shots;
 mod msglog;
 mod names;
