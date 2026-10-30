@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::process::Command;
 
 use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
+
+mod ffmpeg_args;
+mod ffmpeg_run;
 
 #[derive(Clone, Debug)]
 pub enum RenderUpdate {
@@ -205,8 +205,8 @@ fn try_reserve(
     None
 }
 
-/// RAII release for a JIT export-drive reservation claimed in
-/// `run_render_job`'s routing block below. `run_render_job` has many early
+/// RAII release for a JIT export-drive reservation claimed by
+/// `reserve_export_dir` below. `run_render_job` has many early
 /// returns after a drive is selected (success, error, cancellation) —
 /// releasing on `Drop` means every one of them releases correctly, including
 /// any added later, without a release call having to be hand-placed at each.
@@ -243,6 +243,9 @@ impl Drop for ReservationGuard {
 pub const NO_EXPORT_FOLDER: &str =
     "Not rendered: there is no export folder. Add one in Configuration → Render Settings.";
 
+/// Renders one take into the export pool and reports it on `tx`, ending
+/// with exactly one `Finished`: checks the take, reserves room on an export
+/// drive, then copies the source video (Skip) or runs FFmpeg.
 pub async fn run_render_job(
     job_id: String,
     clip: ClipData,
@@ -251,211 +254,362 @@ pub async fn run_render_job(
     cancel_rx: Arc<AtomicBool>,
     reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
 ) {
-    // "Skip" — leave an OBS take as OBS wrote it. No FFmpeg involved at all,
-    // just a copy into the export pool with the pipeline's naming applied.
-    let is_source_copy = config.target_codec == super::config::RenderCodec::SourceCopy;
-    let ffmpeg_path = PathBuf::from(&config.ffmpeg_path);
-
-    let take_folder = PathBuf::from(&clip.take_folder);
+    let job = RenderJob::new(job_id, clip, config, tx, cancel_rx);
     // The take's own capture rate when its `dodstudio_take.json` says, else
     // Render Settings' Source FPS (`take_meta::render_fps`).
-    let (fps_used, fps_from_take) = super::take_meta::render_fps(&take_folder, config.fps);
-    let fps = fps_used.to_string();
-    // `None` is an OBS take: its audio is already muxed into `video_file`,
-    // so there is nothing to join against a wav.
-    let wav_file: Option<PathBuf> = clip.wav_file.as_ref().map(|w| take_folder.join(w));
-    let is_hud = clip.clip_type == "hud_only";
+    let (fps_used, fps_from_take) = super::take_meta::render_fps(&job.take_folder, job.config.fps);
 
-    let is_global = config.ffmpeg_path == "ffmpeg";
-
-    // Initial validations. Skip mode never spawns FFmpeg, so a misconfigured
-    // FFmpeg path must not block a plain file copy.
-    if !is_source_copy && !is_global && (!ffmpeg_path.exists() || !ffmpeg_path.is_file()) {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(format!("FFmpeg not found at: {}", ffmpeg_path.display())),
-        ));
+    if let Err(reason) = check_inputs(&job) {
+        job.refuse(reason);
         return;
     }
-    if !take_folder.exists() || !take_folder.is_dir() {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(format!("Take folder not found: {}", take_folder.display())),
-        ));
+    log_render_fps(&job, fps_used, fps_from_take);
+
+    // Releases this job's reservation on every exit path below — see
+    // `ReservationGuard`'s own doc comment.
+    let (output_folder, _reservation_guard) = match reserve_export_dir(&job, &reservations) {
+        Ok(reserved) => reserved,
+        Err(reason) => {
+            job.refuse(reason);
+            return;
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(&output_folder) {
+        job.refuse(format!("Failed to create output folder: {}", e));
         return;
+    }
+    let naming = OutputNaming::new(&job);
+
+    if job.is_source_copy {
+        copy_source_video(&job, &output_folder, &naming).await;
+        return;
+    }
+
+    let encode = match ffmpeg_args::encode_settings(job.is_hud, &job.config) {
+        Ok(encode) => encode,
+        Err(reason) => {
+            job.refuse(reason);
+            return;
+        }
+    };
+    let out_file = output_folder.join(naming.file_name(&job, &output_folder, encode.file_ext));
+    let threads = ffmpeg_args::threads_per_process(
+        std::thread::available_parallelism().ok().map(|n| n.get()),
+        job.config.max_concurrent_renders,
+    );
+    let args = ffmpeg_args::FfmpegArgs {
+        clip: &job.clip,
+        fps: fps_used,
+        encode: &encode,
+        threads,
+        out_file: &out_file,
+    }
+    .to_args();
+    ffmpeg_run::run_ffmpeg(&job, args, &out_file).await;
+}
+
+/// One render job as every stage sees it: the job, where its updates go,
+/// its cancel flag, and what is worked out once from the take.
+struct RenderJob {
+    job_id: String,
+    clip: ClipData,
+    config: RenderConfig,
+    tx: mpsc::Sender<RenderUpdate>,
+    cancel: Arc<AtomicBool>,
+    take_folder: PathBuf,
+    is_hud: bool,
+    /// "Skip" — leave an OBS take as OBS wrote it. No FFmpeg involved at
+    /// all, just a copy into the export pool with the pipeline's naming applied.
+    is_source_copy: bool,
+}
+
+impl RenderJob {
+    fn new(
+        job_id: String,
+        clip: ClipData,
+        config: RenderConfig,
+        tx: mpsc::Sender<RenderUpdate>,
+        cancel: Arc<AtomicBool>,
+    ) -> Self {
+        let take_folder = PathBuf::from(&clip.take_folder);
+        let is_hud = clip.clip_type == "hud_only";
+        let is_source_copy = config.target_codec == RenderCodec::SourceCopy;
+        Self {
+            job_id,
+            clip,
+            config,
+            tx,
+            cancel,
+            take_folder,
+            is_hud,
+            is_source_copy,
+        }
+    }
+
+    /// The listener may be gone (the window closed); nobody is left to tell.
+    fn send(&self, update: RenderUpdate) {
+        let _ = self.tx.send(update);
+    }
+
+    /// Ends a job that never started its work: one `Finished` with the reason.
+    fn refuse(&self, reason: String) {
+        self.send(RenderUpdate::Finished(
+            self.job_id.clone(),
+            false,
+            Some(reason),
+        ));
+    }
+
+    fn finish_cancelled(&self) {
+        self.send(RenderUpdate::Status(
+            self.job_id.clone(),
+            "Cancelled".to_string(),
+        ));
+        self.send(RenderUpdate::Finished(
+            self.job_id.clone(),
+            false,
+            Some("Cancelled by user".to_string()),
+        ));
+    }
+
+    /// `Finished` before 100 % and the path: the scheduler's completion
+    /// handling reads them in this order.
+    fn finish_ok(&self, out_file: String) {
+        self.send(RenderUpdate::Status(
+            self.job_id.clone(),
+            "Finished".to_string(),
+        ));
+        self.send(RenderUpdate::Progress(self.job_id.clone(), 100));
+        self.send(RenderUpdate::OutputPath(self.job_id.clone(), out_file));
+        self.send(RenderUpdate::Finished(self.job_id.clone(), true, None));
+    }
+
+    fn finish_error(&self, message: String) {
+        self.send(RenderUpdate::Status(
+            self.job_id.clone(),
+            "Error".to_string(),
+        ));
+        self.send(RenderUpdate::Finished(
+            self.job_id.clone(),
+            false,
+            Some(message),
+        ));
+    }
+}
+
+/// Why the job can't start, checked in this order before anything is
+/// reserved or written: FFmpeg, the take folder, its wav, a HUD take's wav,
+/// any audio at all, and whether Skip is allowed for the take.
+fn check_inputs(job: &RenderJob) -> Result<(), String> {
+    let clip = &job.clip;
+    let ffmpeg_path = PathBuf::from(&job.config.ffmpeg_path);
+    let is_global = job.config.ffmpeg_path == "ffmpeg";
+    // `None` is an OBS take: its audio is already muxed into `video_file`,
+    // so there is nothing to join against a wav.
+    let wav_file: Option<PathBuf> = clip.wav_file.as_ref().map(|w| job.take_folder.join(w));
+
+    // Skip mode never spawns FFmpeg, so a misconfigured FFmpeg path must not
+    // block a plain file copy.
+    if !job.is_source_copy && !is_global && (!ffmpeg_path.exists() || !ffmpeg_path.is_file()) {
+        return Err(format!("FFmpeg not found at: {}", ffmpeg_path.display()));
+    }
+    if !job.take_folder.exists() || !job.take_folder.is_dir() {
+        return Err(format!(
+            "Take folder not found: {}",
+            job.take_folder.display()
+        ));
     }
     if let Some(wav) = &wav_file
         && !wav.exists()
     {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(format!("Audio file not found: {}", wav.display())),
-        ));
-        return;
+        return Err(format!("Audio file not found: {}", wav.display()));
     }
     // The alpha stream carries no sound of its own, so a HUD/alpha composite
     // always needs a separate wav — an OBS take's muxed-in audio can't cover it.
-    if is_hud && wav_file.is_none() {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(
-                "HUD/alpha clips need a separate audio track (sound.wav), but this take has none."
-                    .to_string(),
-            ),
-        ));
-        return;
+    if job.is_hud && wav_file.is_none() {
+        return Err(
+            "HUD/alpha clips need a separate audio track (sound.wav), but this take has none."
+                .to_string(),
+        );
     }
     if clip.video_file.is_none() && wav_file.is_none() {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(
-                "No audio source for this take: no sound.wav and no audio-bearing video."
-                    .to_string(),
-            ),
-        ));
-        return;
+        return Err(
+            "No audio source for this take: no sound.wav and no audio-bearing video.".to_string(),
+        );
     }
     // Gated on the same predicate the Tauri layer uses to decide whether to
     // offer the toggle at all (`clip_is_skip_eligible`), so this can never
     // quietly diverge from what the frontend thinks is skippable — this is
     // the actual enforcement, the frontend gate is only a convenience.
-    if is_source_copy && !super::scanner::clip_is_skip_eligible(&clip) {
-        let reason = if is_hud {
+    if job.is_source_copy && !super::scanner::clip_is_skip_eligible(clip) {
+        let reason = if job.is_hud {
             "Skip (keep original) isn't available for HUD/alpha clips — pick a codec to render them."
         } else if clip.wav_file.is_some() {
             "Skip (keep original) isn't available for a take with its own separate audio track — pick a codec to render it."
         } else {
             "Skip (keep original) requires a captured video file, but this take has none."
         };
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(reason.to_string()),
-        ));
-        return;
+        return Err(reason.to_string());
     }
+    Ok(())
+}
 
-    // The FPS is fed to `-framerate` *before* the BMP input, so it is not an
-    // output preference — it is how FFmpeg is told to interpret the frame
-    // sequence's timing. A value that disagrees with the capture produces a
-    // wrong computed duration and `-shortest` then trims the audio to match, so
-    // the render would succeed and the clip simply be the wrong speed. Hence the
-    // take's own recorded rate wins over the setting (#14, `hlcr::take_meta`).
-    //
-    // Logged, not sent as a `Status` update: `job.status` is a state field with
-    // a fixed vocabulary ("Queued" | "Rendering" | "Finished" | "Error" |
-    // "Cancelled") that the scheduler's own transitions test against. The row
-    // itself shows the rate through the job's settings summary.
-    if !is_source_copy && clip.video_file.is_none() {
+/// Logs the rate a BMP take's frames are read at, and where it came from.
+///
+/// The FPS is fed to `-framerate` *before* the BMP input, so it is not an
+/// output preference — it is how FFmpeg is told to interpret the frame
+/// sequence's timing. A value that disagrees with the capture produces a
+/// wrong computed duration and `-shortest` then trims the audio to match, so
+/// the render would succeed and the clip simply be the wrong speed. Hence the
+/// take's own recorded rate wins over the setting (#14, `hlcr::take_meta`).
+///
+/// Logged, not sent as a `Status` update: `job.status` is a state field with
+/// a fixed vocabulary ("Queued" | "Rendering" | "Finished" | "Error" |
+/// "Cancelled") that the scheduler's own transitions test against. The row
+/// itself shows the rate through the job's settings summary.
+fn log_render_fps(job: &RenderJob, fps_used: u32, fps_from_take: bool) {
+    if !job.is_source_copy && job.clip.video_file.is_none() {
         crate::log_markdown(&format!(
             "[render-fps] job {} — reading the frames at {} fps, {}",
-            job_id,
+            job.job_id,
             fps_used,
             if fps_from_take {
                 "the rate the take was captured at".to_string()
             } else {
                 format!(
                     "Render Settings' Source FPS (the take doesn't say what it was captured at; {})",
-                    take_folder.display()
+                    job.take_folder.display()
                 )
             }
         ));
     }
+}
 
-    let clip_type = clip.clip_type.as_str();
-
-    // ── JIT export-drive routing ──────────────────────────────────────────────
-    // Select the first directory with enough room for *this specific job* —
-    // "enough room" meaning live free space minus whatever other
-    // concurrently-running jobs have already provisionally reserved on that
-    // same drive (`reservations`), not just the live free-space number
-    // alone. Without that ledger, several jobs starting in the same
-    // scheduler tick can all see the same live free-space number and all
-    // pick the same drive before any of them has written a byte — the flat
-    // 20 GiB threshold this replaced was only ever sized to be safe for one
-    // job at a time.
+/// JIT export-drive routing: the first export folder with enough room for
+/// *this specific job*, its reservation claimed in `reservations` until the
+/// returned guard drops; or why there is none.
+///
+/// "Enough room" means live free space minus whatever other
+/// concurrently-running jobs have already provisionally reserved on that
+/// same drive (`reservations`), not just the live free-space number
+/// alone. Without that ledger, several jobs starting in the same
+/// scheduler tick can all see the same live free-space number and all
+/// pick the same drive before any of them has written a byte — the flat
+/// 20 GiB threshold this replaced was only ever sized to be safe for one
+/// job at a time.
+fn reserve_export_dir(
+    job: &RenderJob,
+    reservations: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+) -> Result<(PathBuf, ReservationGuard), String> {
+    let config = &job.config;
     let reservation_estimate =
-        job_reservation_estimate(&clip, config.target_codec, &config.custom_codec_args);
+        job_reservation_estimate(&job.clip, config.target_codec, &config.custom_codec_args);
 
     // No export folder: refused, never written into the working directory
     // (for an installed app, its install folder), where nobody would look.
     if config.export_directories.is_empty() {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(NO_EXPORT_FOLDER.to_string()),
-        ));
-        return;
+        return Err(NO_EXPORT_FOLDER.to_string());
     }
-    let mut selected_export_dir: Option<PathBuf> = None;
-    {
-        let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((dir, already_reserved, live_free)) = try_reserve(
-            &mut ledger,
-            &config.export_directories,
-            reservation_estimate,
-            EXPORT_SAFETY_MARGIN_BYTES,
-            crate::sys::disk::get_available_bytes,
-        ) {
-            // Shows this job's own estimate against what else was already
-            // reserved on this drive *before* this job's own addition, so
-            // concurrent jobs' numbers are directly comparable in the log —
-            // this is what made it possible to confirm live, under a real
-            // concurrent batch, that the ledger correctly reflects other
-            // in-flight jobs' reservations rather than every job seeing the
-            // same live free-space number.
-            crate::log_markdown(&format!(
-                "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
-                job_id,
-                reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
-                dir,
-                already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
-                live_free as f64 / (1024.0 * 1024.0 * 1024.0),
-            ));
-            selected_export_dir = Some(dir);
+    let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
+    let Some((dir, already_reserved, live_free)) = try_reserve(
+        &mut ledger,
+        &config.export_directories,
+        reservation_estimate,
+        EXPORT_SAFETY_MARGIN_BYTES,
+        crate::sys::disk::get_available_bytes,
+    ) else {
+        return Err(format!(
+            "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
+            config.export_directories.len(),
+            (reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
+        ));
+    };
+    // Shows this job's own estimate against what else was already
+    // reserved on this drive *before* this job's own addition, so
+    // concurrent jobs' numbers are directly comparable in the log —
+    // this is what made it possible to confirm live, under a real
+    // concurrent batch, that the ledger correctly reflects other
+    // in-flight jobs' reservations rather than every job seeing the
+    // same live free-space number.
+    crate::log_markdown(&format!(
+        "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
+        job.job_id,
+        reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
+        dir,
+        already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
+        live_free as f64 / (1024.0 * 1024.0 * 1024.0),
+    ));
+    drop(ledger);
+    let guard = ReservationGuard {
+        ledger: reservations.clone(),
+        dir: ledger_key(&dir),
+        amount: reservation_estimate,
+        job_id: job.job_id.clone(),
+    };
+    Ok((dir, guard))
+}
+
+/// The pieces of a finished file's name, shared by the FFmpeg render path
+/// and the Skip copy, so a skipped take and a rendered one land under the
+/// same scheme — "where do I find my finished clips" stays answered the
+/// same way regardless of which option a take took.
+struct OutputNaming {
+    stream_type: &'static str,
+    wav_part: String,
+    hash_str: String,
+    take_name: String,
+    demo_name: String,
+}
+
+impl OutputNaming {
+    fn new(job: &RenderJob) -> Self {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
+        let take_folder = &job.take_folder;
+        Self {
+            stream_type: if job.is_hud { "hud" } else { "all" },
+            wav_part: wav_part(job.clip.wav_file.as_deref()),
+            hash_str: format!("{:04x}", timestamp % 0x10000),
+            take_name: take_folder
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            demo_name: take_folder
+                .parent()
+                .and_then(|p| p.file_name())
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
         }
     }
-    let Some(output_folder) = selected_export_dir.clone() else {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(format!(
-                "Not rendered: every export folder ({}) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
-                config.export_directories.len(),
-                (reservation_estimate + EXPORT_SAFETY_MARGIN_BYTES) as f64 / (1024.0 * 1024.0 * 1024.0)
-            )),
-        ));
-        return;
-    };
-    // Releases this job's reservation on every remaining exit path below —
-    // see `ReservationGuard`'s own doc comment.
-    let _reservation_guard = selected_export_dir.as_ref().map(|dir| ReservationGuard {
-        ledger: reservations.clone(),
-        dir: ledger_key(dir),
-        amount: reservation_estimate,
-        job_id: job_id.clone(),
-    });
 
-    if let Err(e) = std::fs::create_dir_all(&output_folder) {
-        let _ = tx.send(RenderUpdate::Finished(
-            job_id.clone(),
-            false,
-            Some(format!("Failed to create output folder: {}", e)),
-        ));
-        return;
+    /// The file name in `output_folder` for an output with `file_ext` (with
+    /// its dot): the clip name made unique there (#441), else
+    /// `<demo>_<take><wav part>_<stream>_<hash><ext>`.
+    fn file_name(&self, job: &RenderJob, output_folder: &Path, file_ext: &str) -> String {
+        match clip_file_stem(&job.clip, &self.wav_part, job.is_hud) {
+            Some(stem) => get_unique_filename(output_folder, &stem, file_ext),
+            None => format!(
+                "{}_{}{}_{}_{}{}",
+                self.demo_name,
+                self.take_name,
+                self.wav_part,
+                self.stream_type,
+                self.hash_str,
+                file_ext
+            ),
+        }
     }
+}
 
-    // Naming pieces shared by both the FFmpeg render path and the skip/copy
-    // path below, so a skipped take and a rendered one land under the same
-    // scheme — "where do I find my finished clips" stays answered the same
-    // way regardless of which option a take took.
-    let stream_type = if is_hud { "hud" } else { "all" };
-    let wav_part = match &clip.wav_file {
+/// The wav's part of a file name: `_<stem>`, nothing for the usual
+/// `sound.wav`. An OBS take has no wav to derive a suffix from — base_name
+/// already carries the distinguishing "-obs" suffix the scanner gave it.
+fn wav_part(wav_file: Option<&str>) -> String {
+    match wav_file {
         Some(wav) => {
             let wav_stem = std::path::Path::new(wav)
                 .file_stem()
@@ -468,606 +622,50 @@ pub async fn run_render_job(
                 format!("_{}", wav_stem)
             }
         }
-        // An OBS take has no wav to derive a suffix from — base_name already
-        // carries the distinguishing "-obs" suffix the scanner gave it.
         None => String::new(),
-    };
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_micros();
-    let hash_str = format!("{:04x}", timestamp % 0x10000);
-    // Reuses `take_folder` (already parsed from this same `clip.take_folder`
-    // string above) rather than re-parsing a second `PathBuf` from it.
-    let take_name = take_folder
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let demo_name = take_folder
-        .parent()
-        .and_then(|p| p.file_name())
-        .unwrap_or_default()
-        .to_string_lossy();
-
-    if is_source_copy {
-        // Validated above: video_file and a non-hud clip_type are guaranteed here.
-        let video_name = clip.video_file.as_deref().unwrap_or_default();
-        let source_video = take_folder.join(&clip.img_folder).join(video_name);
-        if !source_video.is_file() {
-            let _ = tx.send(RenderUpdate::Finished(
-                job_id.clone(),
-                false,
-                Some(format!(
-                    "Source video not found: {}",
-                    source_video.display()
-                )),
-            ));
-            return;
-        }
-        // Kept from whatever OBS wrote — renaming would make the file lie
-        // about its own container to every tool that reads it afterwards.
-        let ext = source_video
-            .extension()
-            .map(|e| e.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "mp4".to_string());
-        let final_name = match clip_file_stem(&clip, &wav_part, is_hud) {
-            Some(stem) => get_unique_filename(&output_folder, &stem, &format!(".{ext}")),
-            None => format!(
-                "{}_{}{}_{}_{}.{}",
-                demo_name, take_name, wav_part, stream_type, hash_str, ext
-            ),
-        };
-        let out_file = output_folder.join(&final_name);
-        let out_file_str = out_file.to_string_lossy().into_owned();
-
-        if cancel_rx.load(Ordering::Relaxed) {
-            let _ = tx.send(RenderUpdate::Status(
-                job_id.clone(),
-                "Cancelled".to_string(),
-            ));
-            let _ = tx.send(RenderUpdate::Finished(
-                job_id,
-                false,
-                Some("Cancelled by user".to_string()),
-            ));
-            return;
-        }
-        let _ = tx.send(RenderUpdate::Status(
-            job_id.clone(),
-            "Rendering".to_string(),
-        ));
-        // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
-        // during a large copy (Custom Output/lossless OBS captures — see
-        // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
-        // being silently ignored until the whole file has already moved.
-        match copy_cancellable(&source_video, &out_file, &cancel_rx).await {
-            Ok(true) => {
-                let _ = tx.send(RenderUpdate::Status(
-                    job_id.clone(),
-                    "Cancelled".to_string(),
-                ));
-                let _ = tx.send(RenderUpdate::Finished(
-                    job_id,
-                    false,
-                    Some("Cancelled by user".to_string()),
-                ));
-            }
-            Ok(false) => {
-                let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
-                let _ = tx.send(RenderUpdate::Progress(job_id.clone(), 100));
-                let _ = tx.send(RenderUpdate::OutputPath(job_id.clone(), out_file_str));
-                let _ = tx.send(RenderUpdate::Finished(job_id, true, None));
-            }
-            Err(e) => {
-                let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
-                let _ = tx.send(RenderUpdate::Finished(
-                    job_id,
-                    false,
-                    Some(format!("Failed to copy source video to export pool: {}", e)),
-                ));
-            }
-        }
-        return;
-    }
-
-    // Extension decided in the same match as the codec args, not looked up
-    // separately, so the two can't silently drift apart the way the old
-    // string-keyed get_codec_preset() already had (it matched "h264" for
-    // .mp4, but RenderCodec::NvencH264 has always mapped to the distinct
-    // "h264_nvenc" id — dead code, removed, never actually wired to a
-    // render). Alpha/HUD output always needs a MOV container regardless of
-    // the selected codec (QuickTime-style alpha), matching dev's own
-    // behaviour and the dropdown's "MP4" label applying only to the
-    // non-alpha H.264 variants.
-    // Not `'static`: the Custom arm below borrows from `config.custom_codec_args`,
-    // an owned `String` that lives only as long as this function call.
-    let mut codec_args: Vec<&str> = Vec::new();
-    let file_ext = if is_hud {
-        codec_args.extend_from_slice(&[
-            "-c:v",
-            "prores_ks",
-            "-profile:v",
-            "4444",
-            "-pix_fmt",
-            "yuva444p10le",
-        ]);
-        ".mov"
-    } else {
-        match config.target_codec {
-            super::config::RenderCodec::NvencH264 => {
-                codec_args.extend_from_slice(&[
-                    "-c:v",
-                    "h264_nvenc",
-                    "-preset",
-                    "p6",
-                    "-tune",
-                    "hq",
-                    "-cq",
-                    "15",
-                    "-pix_fmt",
-                    "yuv420p",
-                ]);
-                ".mp4"
-            }
-            super::config::RenderCodec::H264Software => {
-                codec_args.extend_from_slice(&[
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p",
-                ]);
-                ".mp4"
-            }
-            codec @ (super::config::RenderCodec::ProRes
-            | super::config::RenderCodec::ProRes422
-            | super::config::RenderCodec::ProResLt
-            | super::config::RenderCodec::ProRes4444) => {
-                codec_args.extend(prores_args(codec));
-                ".mov"
-            }
-            super::config::RenderCodec::DnxHr => {
-                codec_args.extend_from_slice(&[
-                    "-c:v",
-                    "dnxhd",
-                    "-profile:v",
-                    "dnxhr_hq",
-                    "-pix_fmt",
-                    "yuv422p",
-                ]);
-                ".mov"
-            }
-            super::config::RenderCodec::HuffYuv => {
-                codec_args.extend_from_slice(&["-c:v", "huffyuv", "-pix_fmt", "yuv422p"]);
-                ".avi"
-            }
-            super::config::RenderCodec::Uncompressed => {
-                codec_args.extend_from_slice(&["-c:v", "rawvideo", "-pix_fmt", "yuv422p"]);
-                ".avi"
-            }
-            // No allow-list, no parsing beyond the whitespace split --
-            // FFmpeg itself is what validates this, exactly as it would a
-            // codec typed directly at a terminal. `config` is owned by this
-            // call and lives for the rest of the function, so these `&str`
-            // slices staying borrowed from it (rather than `'static`, like
-            // every other arm's literals) is fine.
-            super::config::RenderCodec::Custom => {
-                if config.custom_codec_args.trim().is_empty() {
-                    let _ = tx.send(RenderUpdate::Finished(
-                        job_id.clone(),
-                        false,
-                        Some(
-                            "Custom codec selected but no FFmpeg arguments were entered."
-                                .to_string(),
-                        ),
-                    ));
-                    return;
-                }
-                codec_args.extend(config.custom_codec_args.split_whitespace());
-                ".mkv"
-            }
-            // `is_source_copy` already returned before this match — it has
-            // its own extension and never runs an FFmpeg encode at all. Not
-            // `unreachable!()`: release builds run with `panic = "abort"`
-            // (see `obs::session::ObsSession::stop_handle`'s doc comment), so
-            // a panic here would kill the whole render batch, not just this
-            // job, if some future edit ever broke that invariant. Failing
-            // loudly through the normal update channel costs nothing today
-            // and is safe if it ever turns out to be reachable.
-            super::config::RenderCodec::SourceCopy => {
-                let _ = tx.send(RenderUpdate::Finished(
-                    job_id.clone(),
-                    false,
-                    Some("Internal error: SourceCopy reached the FFmpeg codec path.".to_string()),
-                ));
-                return;
-            }
-        }
-    };
-
-    // MP4 has never had solid cross-player support for raw PCM audio — ffmpeg's
-    // MP4 muxer boxes it as `ipcm`, which FFmpeg/VLC read fine but which Vegas
-    // Pro (and likely other strict NLEs) can't decode, producing garbled/static
-    // audio despite the samples themselves being intact (confirmed: the exact
-    // same PCM bytes remuxed into a .mov container instead, where ffmpeg uses
-    // the older/broadly-supported `sowt` tag, play back correctly everywhere).
-    // AAC sidesteps the whole box-tag mess and is the standard choice for MP4
-    // audio; every other codec here (ProRes/DNxHD's .mov, HuffYUV/rawvideo's
-    // .avi) stays lossless PCM since none of them are .mp4.
-    let audio_codec_args: &[&str] = if file_ext == ".mp4" {
-        &["-c:a", "aac", "-b:a", "192k"]
-    } else {
-        &["-c:a", "pcm_s16le"]
-    };
-
-    let final_name = match clip_file_stem(&clip, &wav_part, is_hud) {
-        Some(stem) => get_unique_filename(&output_folder, &stem, file_ext),
-        None => format!(
-            "{}_{}{}_{}_{}{}",
-            demo_name, take_name, wav_part, stream_type, hash_str, file_ext
-        ),
-    };
-    let out_file = output_folder.join(&final_name);
-
-    // Calculate thread scaling
-    let max_concurrent = config.max_concurrent_renders;
-    let threads_per_process = match std::thread::available_parallelism() {
-        Ok(val) => std::cmp::max(1, val.get() / max_concurrent),
-        Err(_) => 2,
-    };
-
-    // The alpha half of a HUD pair, as the scanner recorded it. Older autosaves
-    // predate the field, so fall back to the literal the renderer used to
-    // hardcode — that is exactly what those takes were scanned as.
-    let alpha_folder = clip.alpha_folder.as_deref().unwrap_or("hudalpha");
-
-    let mut cmd_args = vec!["-y", "-hide_banner"];
-    let img_input: String;
-    // Inputs for a take captured through `mirv_movie_ffmpeg`: one video per
-    // stream folder instead of a numbered frame sequence.
-    let video_input: String;
-    // Shared by both HUD branches — one holds a video path, the other a BMP
-    // sequence pattern, and the branches are mutually exclusive.
-    let hud_color_input: String;
-    let hud_alpha_input: String;
-
-    // `-framerate` is deliberately absent for these. It tells FFmpeg how to
-    // interpret an untimed image sequence; a video carries its own timing, and
-    // forcing a rate onto it would re-time the clip. That also means a video
-    // take cannot suffer the FPS mismatch that BMP takes can — there is no
-    // second number to disagree with.
-    if let Some(video) = clip.video_file.as_deref() {
-        if clip_type == "hud_only" {
-            let wav = clip
-                .wav_file
-                .as_deref()
-                .expect("validated above: HUD clips require a wav");
-            hud_color_input = format!("{}/{}", clip.img_folder, video);
-            hud_alpha_input = format!("{}/{}", alpha_folder, video);
-            cmd_args.extend(vec![
-                "-i",
-                &hud_color_input,
-                "-i",
-                &hud_alpha_input,
-                "-thread_queue_size",
-                "512",
-                "-i",
-                wav,
-                "-filter_complex",
-                "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
-                "-map",
-                "[hud]",
-                "-map",
-                "2:a",
-            ]);
-        } else if let Some(wav) = clip.wav_file.as_deref() {
-            video_input = format!("{}/{}", clip.img_folder, video);
-            cmd_args.extend(vec![
-                "-i",
-                &video_input,
-                "-thread_queue_size",
-                "512",
-                "-i",
-                wav,
-            ]);
-        } else {
-            // An OBS take: the video already carries its own audio stream, so
-            // there is nothing to mux against. A single input with no `-map`
-            // needed — FFmpeg's default stream selection already picks one
-            // video and one audio stream out of it.
-            video_input = format!("{}/{}", clip.img_folder, video);
-            cmd_args.extend(vec!["-i", &video_input]);
-        }
-    } else if clip_type == "hud_only" {
-        let wav = clip
-            .wav_file
-            .as_deref()
-            .expect("validated above: HUD clips require a wav");
-        hud_color_input = format!("{}/%05d.bmp", clip.img_folder);
-        hud_alpha_input = format!("{}/%05d.bmp", alpha_folder);
-        cmd_args.extend(vec![
-            // Skip probe/analyze on known BMP sequences; add read-ahead buffering.
-            "-probesize",
-            "32",
-            "-analyzeduration",
-            "0",
-            "-thread_queue_size",
-            "512",
-            "-framerate",
-            &fps,
-            "-i",
-            &hud_color_input,
-            "-probesize",
-            "32",
-            "-analyzeduration",
-            "0",
-            "-thread_queue_size",
-            "512",
-            "-framerate",
-            &fps,
-            "-i",
-            &hud_alpha_input,
-            "-thread_queue_size",
-            "512",
-            "-i",
-            wav,
-            "-filter_complex",
-            "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
-            "-map",
-            "[hud]",
-            "-map",
-            "2:a",
-        ]);
-    } else {
-        // BMP shape is never admitted without a wav — see `take_shape_is_renderable`.
-        let wav = clip
-            .wav_file
-            .as_deref()
-            .expect("validated above: BMP takes require a wav");
-        img_input = format!("{}/%05d.bmp", clip.img_folder);
-        cmd_args.extend(vec![
-            // Skip probe/analyze on known BMP sequences; add read-ahead buffering.
-            "-probesize",
-            "32",
-            "-analyzeduration",
-            "0",
-            "-thread_queue_size",
-            "512",
-            "-framerate",
-            &fps,
-            "-i",
-            &img_input,
-            "-thread_queue_size",
-            "512",
-            "-i",
-            wav,
-        ]);
-    }
-
-    cmd_args.extend(codec_args);
-    let threads_str = threads_per_process.to_string();
-    let out_file_str = out_file.to_string_lossy().into_owned();
-
-    cmd_args.extend(vec!["-threads", &threads_str]);
-    cmd_args.extend_from_slice(audio_codec_args);
-    cmd_args.extend(vec![
-        "-shortest",
-        // +faststart is only needed for HTTP streaming; omitting it avoids the
-        // post-render moov-atom rewrite pass on what can be multi-GB files.
-        "-progress",
-        "pipe:1",
-        "-loglevel",
-        "error",
-        &out_file_str,
-    ]);
-
-    let mut cmd = Command::new(ffmpeg_path);
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
-    cmd.kill_on_drop(true);
-    cmd.args(cmd_args);
-    cmd.current_dir(&take_folder);
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let _ = tx.send(RenderUpdate::Status(
-        job_id.clone(),
-        "Rendering".to_string(),
-    ));
-
-    let existed_before = out_file.exists();
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
-                "FFmpeg not found. Please install FFmpeg or set a custom path in Settings."
-                    .to_string()
-            } else {
-                format!("Failed to spawn FFmpeg process: {}", e)
-            };
-            let _ = tx.send(RenderUpdate::Finished(
-                job_id.clone(),
-                false,
-                Some(error_msg),
-            ));
-            return;
-        }
-    };
-
-    // Spawn stderr reader task to prevent deadlock
-    let mut stderr_handle = child.stderr.take().unwrap();
-    let stderr_log = Arc::new(Mutex::new(String::new()));
-    let stderr_log_clone = Arc::clone(&stderr_log);
-
-    tokio::spawn(async move {
-        let mut buf = vec![0u8; 1024];
-        while let Ok(n) = stderr_handle.read(&mut buf).await {
-            if n == 0 {
-                break;
-            }
-            if let Ok(s) = std::str::from_utf8(&buf[..n])
-                && let Ok(mut log) = stderr_log_clone.lock()
-            {
-                log.push_str(s);
-            }
-        }
-    });
-
-    // Read stdout for progress updates
-    let stdout_handle = child.stdout.take().unwrap();
-    let mut reader = BufReader::new(stdout_handle);
-    let mut line = String::new();
-
-    let mut current_fps = "0".to_string();
-    let mut current_speed = "0x".to_string();
-
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
-
-    loop {
-        line.clear();
-        tokio::select! {
-            _ = interval.tick() => {
-                if cancel_rx.load(Ordering::Relaxed) {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                    remove_partial_output(&out_file, existed_before).await;
-                    let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
-                    let _ = tx.send(RenderUpdate::Finished(
-                        job_id.clone(),
-                        false,
-                        Some("Cancelled by user".to_string()),
-                    ));
-                    return;
-                }
-            }
-            read_res = reader.read_line(&mut line) => {
-                match read_res {
-                    Ok(0) => break, // EOF
-                    Ok(_) => {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-                        if let Some(pos) = trimmed.find('=') {
-                            let key = trimmed[..pos].trim();
-                            let val = trimmed[pos + 1..].trim();
-
-                            match key {
-                                "frame" => {
-                                    if let Ok(current_frame) = val.parse::<usize>()
-                                        && let Some(ratio) =
-                                            (current_frame * 100).checked_div(clip.frame_count)
-                                    {
-                                        let percent = std::cmp::min(100, ratio) as u32;
-                                        let _ = tx.send(RenderUpdate::Progress(job_id.clone(), percent));
-                                    }
-                                }
-                                "fps" => {
-                                    current_fps = val.to_string();
-                                    let _ = tx.send(RenderUpdate::Speed(
-                                        job_id.clone(),
-                                        format!("{} fps ({})", current_fps, current_speed),
-                                    ));
-                                }
-                                "speed" => {
-                                    current_speed = val.to_string();
-                                    let _ = tx.send(RenderUpdate::Speed(
-                                        job_id.clone(),
-                                        format!("{} fps ({})", current_fps, current_speed),
-                                    ));
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        }
-    }
-
-    // Wait for the process to exit with cancellation check
-    let exit_status = loop {
-        tokio::select! {
-            res = child.wait() => {
-                break res;
-            }
-            _ = interval.tick() => {
-                if cancel_rx.load(Ordering::Relaxed) {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                    remove_partial_output(&out_file, existed_before).await;
-                    let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
-                    let _ = tx.send(RenderUpdate::Finished(
-                        job_id.clone(),
-                        false,
-                        Some("Cancelled by user".to_string()),
-                    ));
-                    return;
-                }
-            }
-        }
-    };
-
-    let err_log = if let Ok(log) = stderr_log.lock() {
-        if log.trim().is_empty() {
-            None
-        } else {
-            Some(log.clone())
-        }
-    } else {
-        None
-    };
-
-    match exit_status {
-        Ok(status) if status.success() => {
-            if let Ok(meta) = std::fs::metadata(&out_file_str) {
-                record_output_size(
-                    &clip,
-                    config.target_codec,
-                    &config.custom_codec_args,
-                    meta.len(),
-                );
-            }
-            let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
-            let _ = tx.send(RenderUpdate::Progress(job_id.clone(), 100));
-            let _ = tx.send(RenderUpdate::OutputPath(
-                job_id.clone(),
-                out_file_str.clone(),
-            ));
-            let _ = tx.send(RenderUpdate::Finished(job_id, true, None));
-        }
-        Ok(status) => {
-            let exit_code = status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
-            let error_msg = format!(
-                "FFmpeg failed with exit code: {}. Log: {}",
-                exit_code,
-                err_log.as_deref().unwrap_or("")
-            );
-            remove_partial_output(&out_file, existed_before).await;
-            let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
-            let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
-        }
-        Err(e) => {
-            let error_msg = format!("Failed to wait for FFmpeg: {}", e);
-            let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
-            let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
-        }
     }
 }
 
-/// The main picture's `-c:v` args for a ProRes choice; empty for any other
-/// codec. The HUD stream never comes here: it is always 4444 with alpha.
-fn prores_args(codec: RenderCodec) -> Vec<&'static str> {
-    match codec.prores_profile() {
-        Some((profile, pix_fmt, _)) => vec![
-            "-c:v",
-            "prores_ks",
-            "-profile:v",
-            profile,
-            "-pix_fmt",
-            pix_fmt,
-        ],
-        None => Vec::new(),
+/// Skip: copies the take's video into `output_folder` as OBS wrote it and
+/// sends the job's updates to its `Finished`.
+async fn copy_source_video(job: &RenderJob, output_folder: &Path, naming: &OutputNaming) {
+    let clip = &job.clip;
+    // `check_inputs` ensured video_file and a non-hud clip_type here.
+    let video_name = clip.video_file.as_deref().unwrap_or_default();
+    let source_video = job.take_folder.join(&clip.img_folder).join(video_name);
+    if !source_video.is_file() {
+        job.refuse(format!(
+            "Source video not found: {}",
+            source_video.display()
+        ));
+        return;
+    }
+    // Kept from whatever OBS wrote — renaming would make the file lie
+    // about its own container to every tool that reads it afterwards.
+    let ext = source_video
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "mp4".to_string());
+    let final_name = naming.file_name(job, output_folder, &format!(".{ext}"));
+    let out_file = output_folder.join(&final_name);
+    let out_file_str = out_file.to_string_lossy().into_owned();
+
+    if job.cancel.load(Ordering::Relaxed) {
+        job.finish_cancelled();
+        return;
+    }
+    job.send(RenderUpdate::Status(
+        job.job_id.clone(),
+        "Rendering".to_string(),
+    ));
+    // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
+    // during a large copy (Custom Output/lossless OBS captures — see
+    // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
+    // being silently ignored until the whole file has already moved.
+    match copy_cancellable(&source_video, &out_file, &job.cancel).await {
+        Ok(true) => job.finish_cancelled(),
+        Ok(false) => job.finish_ok(out_file_str),
+        Err(e) => job.finish_error(format!("Failed to copy source video to export pool: {}", e)),
     }
 }
 
@@ -1274,28 +872,6 @@ mod tests {
             job_reservation_estimate(&big, RenderCodec::DnxHr, ""),
             1234 * 568 * 3 * 10
         );
-    }
-
-    #[test]
-    fn each_prores_choice_renders_with_its_own_profile() {
-        let args = |c: RenderCodec| prores_args(c).join(" ");
-        assert_eq!(
-            args(RenderCodec::ProRes),
-            "-c:v prores_ks -profile:v hq -pix_fmt yuv422p10le"
-        );
-        assert_eq!(
-            args(RenderCodec::ProRes422),
-            "-c:v prores_ks -profile:v standard -pix_fmt yuv422p10le"
-        );
-        assert_eq!(
-            args(RenderCodec::ProResLt),
-            "-c:v prores_ks -profile:v lt -pix_fmt yuv422p10le"
-        );
-        assert_eq!(
-            args(RenderCodec::ProRes4444),
-            "-c:v prores_ks -profile:v 4444 -pix_fmt yuv444p10le"
-        );
-        assert_eq!(args(RenderCodec::DnxHr), "");
     }
 
     /// Each ProRes profile learns its own rate; until it has one, it borrows
