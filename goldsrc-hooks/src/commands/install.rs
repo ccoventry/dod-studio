@@ -65,7 +65,7 @@ pub fn install() {
     // so it needs no poll, and a failed registration costs only this one
     // setting's type-ahead -- a plain toggle stands in for it.
     match register(demo_seek::SKIP_BETWEEN_NAME, "0") {
-        Some(cvar) => demo_seek::set_skip_between_cvar(cvar),
+        Some(cvar) => demo_seek::SKIP_BETWEEN.set_cvar(cvar),
         None => add_command(demo_seek::SKIP_BETWEEN_NAME, cmd_seek_skip_between),
     }
     add_command(
@@ -79,12 +79,12 @@ pub fn install() {
     // registration costs only this one setting's type-ahead -- a plain toggle
     // stands in for it.
     match register(demo_list_folders::NAME, "1") {
-        Some(cvar) => demo_list_folders::set_cvar(cvar),
+        Some(cvar) => demo_list_folders::FOLDERS.set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
     }
     // Read by the file system's Open hook on a `D:/...` name (#776).
     match register(demo_other_drives::NAME, "1") {
-        Some(cvar) => demo_other_drives::set_cvar(cvar),
+        Some(cvar) => demo_other_drives::SETTING.set_cvar(cvar),
         None => add_command(demo_other_drives::NAME, cmd_demo_other_drives),
     }
     // The three below default off (0.2.0): each lists more by reading every
@@ -102,7 +102,7 @@ pub fn install() {
     }
     // On by default (#798); read by fast_load::poll each frame.
     match register(crate::fast_load::NAME, "1") {
-        Some(cvar) => crate::fast_load::set_cvar(cvar),
+        Some(cvar) => crate::fast_load::SETTING.set_cvar(cvar),
         None => add_command(crate::fast_load::NAME, cmd_demo_fast_load),
     }
     match register(demo_list_folders::SHOW_COUNTS.name, "0") {
@@ -122,7 +122,10 @@ pub fn install() {
         register(window_layout::RESIZABLE_NAME, "1"),
         register(window_layout::REMEMBER_NAME, "1"),
     ) {
-        (Some(resizable), Some(remember)) => window_layout::set_cvars(resizable, remember),
+        (Some(resizable), Some(remember)) => {
+            window_layout::RESIZABLE.set_cvar(resizable);
+            window_layout::REMEMBER.set_cvar(remember);
+        }
         _ => {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
@@ -132,11 +135,11 @@ pub fn install() {
     // Both on by default: the window is how DoD
     // Studio's console and playback controls are reached.
     match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
-        Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
+        Some(cvar) => crate::studio_panel::VIEWDEMO_IN_PANEL.set_cvar(cvar),
         None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
     }
     match register(crate::studio_panel::CONSOLE_NAME, "1") {
-        Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
+        Some(cvar) => crate::studio_panel::CONSOLE_IN_PANEL.set_cvar(cvar),
         None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
     // On by default too: it only shows anything on the layout Studio's own
@@ -254,14 +257,14 @@ pub fn install() {
     // On by default: a model turned round for a frame is wrong in any demo
     // (#927). A failed registration falls back to a plain toggle.
     match register(crate::strafe_twitch::NAME, "1") {
-        Some(flicker) => crate::strafe_twitch::set_cvar(flicker),
+        Some(flicker) => crate::strafe_twitch::FIX_MODEL_FLICKER.set_cvar(flicker),
         None => add_command(crate::strafe_twitch::NAME, cmd_fix_model_flicker),
     }
     // On by default: a round fired in view should be heard (#1036). One
     // switch for every gunshot path, read by `missing_shots::poll` and
     // `pov_recorder_shots::poll` themselves; `2` also logs every round.
     match register(missing_shots::NAME, "1") {
-        Some(restore) => missing_shots::set_cvar(restore),
+        Some(restore) => missing_shots::SETTING.set_cvar(restore),
         None => add_command(missing_shots::NAME, cmd_restore_gunshots),
     }
     // On by default: a demo then shows the sniper scope the player saw.
