@@ -61,6 +61,17 @@ HUD = re.compile(r"^(320|640|1clip_|1hud_|1rockets|clip_|crosshair|customogxhair
 # and ignored gl_spriteblend 0 (#733). So they are not built.
 CROSSHAIR = re.compile(r"^(crosshair|customogxhair|customxhair|dodcross)")
 
+# Temporary: the kill-feed icons from the weapon models, and the even layout's
+# atlas, stay out of releases until the WSOD25 movie shows them first (#1157).
+# The app's bundled copy (hd-scripts) keeps the upscaled icons; the repo's
+# copy, which `tauri dev` and hand runs use, still paints them. #1157 deletes
+# this and its check.
+HOLD_KILLFEED_ICONS = True
+
+
+def killfeed_icons_held(script_dir=os.path.dirname(os.path.abspath(__file__))):
+    return HOLD_KILLFEED_ICONS and os.path.basename(script_dir) == "hd-scripts"
+
 
 def hud_layout_names(game):
     names = set()
@@ -193,6 +204,9 @@ def killfeed_icons(out_dir):
     `ds_hud_deathmsg layout even` draws from (#1022; under a minute). A
     failure there leaves the upscaled icons, or the game's layout, never
     fails the sprites step."""
+    if killfeed_icons_held():
+        print("kill-feed icons from the models: not in this release, the upscaled ones stay", flush=True)
+        return
     try:
         import killfeed_icons as K
         n = K.build(out_dir)

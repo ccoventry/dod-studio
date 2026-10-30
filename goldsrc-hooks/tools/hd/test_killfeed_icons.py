@@ -732,6 +732,17 @@ class RecordTest(unittest.TestCase):
             self.assertEqual(K.load_record(p), {"ultrasharp": {}})
 
 
+class ReleaseHoldTest(unittest.TestCase):
+    """Releases skip the kill-feed icons for now (#1157): only the app's
+    bundled copy of the scripts is held, never the repo's."""
+
+    def test_only_the_bundled_copy_is_held(self):
+        import sprites_hd
+        self.assertTrue(sprites_hd.killfeed_icons_held(os.path.join("C:", "Program Files", "DoD Studio", "hd-scripts")))
+        self.assertFalse(sprites_hd.killfeed_icons_held(os.path.join("repo", "goldsrc-hooks", "tools", "hd")))
+        self.assertFalse(sprites_hd.killfeed_icons_held(os.path.dirname(os.path.abspath(sprites_hd.__file__))))
+
+
 class EvenLayoutTest(unittest.TestCase):
     """The even layout's atlas (#1022): which rule each icon gets, the
     packing, and the sprite and table the hook reads."""
