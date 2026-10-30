@@ -87,11 +87,11 @@ pub fn use_rounds_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
 
         AnalyzerEvent::UserMessage(UserMessage::DeathMsg(death_msg)) => {
             let killer = if death_msg.killer_client_index > 0 {
-                state.find_player_by_client_index(death_msg.killer_client_index - 1)
+                state.find_player_by_wire_index(death_msg.killer_client_index)
             } else {
                 None
             };
-            let victim = state.find_player_by_client_index(death_msg.victim_client_index - 1);
+            let victim = state.find_player_by_wire_index(death_msg.victim_client_index);
 
             let kill_info = match (killer, victim) {
                 (Some(killer), Some(victim)) => Some((
