@@ -87,11 +87,12 @@
 use std::collections::BTreeSet;
 use std::ffi::CStr;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const VICTORY_MUSIC_NAME: &str = console_name!("sound_mute_victory_music");
 pub const FLAG_CAPTURE_NAME: &str = console_name!("sound_mute_flag_capture");
@@ -318,9 +319,9 @@ const FLAG_CAPTURE: &[&str] = &[
 
 type StartSoundFn = unsafe extern "C" fn(i32, i32, *const u8, *const f32, f32, f32, i32, i32);
 
-static VICTORY_MUSIC_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static FLAG_CAPTURE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static LOG_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static VICTORY_MUSIC_CVAR: Cvar = Cvar::new();
+static FLAG_CAPTURE_CVAR: Cvar = Cvar::new();
+pub static LOG_CVAR: Cvar = Cvar::new();
 /// `S_StartStaticSound` and `S_StartDynamicSound`, once the calls are
 /// redirected; 0 before.
 static ORIGINAL_STATIC: AtomicUsize = AtomicUsize::new(0);
@@ -620,31 +621,17 @@ impl Family {
         }
     }
 
-    fn cvar(self) -> &'static AtomicPtr<CvarSPartial> {
+    pub fn cvar(self) -> &'static Cvar {
         match self {
             Family::VictoryMusic => &VICTORY_MUSIC_CVAR,
             Family::FlagCapture => &FLAG_CAPTURE_CVAR,
         }
     }
 
-    pub fn set_cvar(self, cvar: *mut CvarSPartial) {
-        self.cvar().store(cvar, Ordering::Release);
-    }
-
     /// Whether this family's setting is on.
     pub fn on(self) -> bool {
-        cvar_on(self.cvar())
+        self.cvar().on()
     }
-}
-
-pub fn set_log_cvar(cvar: *mut CvarSPartial) {
-    LOG_CVAR.store(cvar, Ordering::Release);
-}
-
-fn cvar_on(cvar: &AtomicPtr<CvarSPartial>) -> bool {
-    let cvar = cvar.load(Ordering::Acquire);
-    // Safety: the engine owns the cvar for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
 }
 
 fn any_on() -> bool {
@@ -652,7 +639,7 @@ fn any_on() -> bool {
 }
 
 fn logging() -> bool {
-    cvar_on(&LOG_CVAR)
+    LOG_CVAR.on()
 }
 
 /// `raw` as the list spells names: lowercase, forward slashes, without the

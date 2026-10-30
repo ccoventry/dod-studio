@@ -332,6 +332,7 @@ mod schedule;
 mod scoreboard;
 mod screen_effects;
 mod server_query;
+mod setting;
 mod settings_tab;
 mod spectator_bars;
 mod spectator_buttons;

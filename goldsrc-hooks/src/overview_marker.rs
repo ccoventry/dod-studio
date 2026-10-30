@@ -70,11 +70,12 @@
 //! `*_camera.spr` (#677). `tools/verify_hide_text_offsets.py` checks both
 //! branches, the `fld` after the skip and the epilogue it lands on.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_overview_team_marker");
 
@@ -100,7 +101,7 @@ pub const TEAM: i32 = 1;
 /// No camera icon at all.
 pub const NONE: i32 = 2;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The pattern's start, 0 before a successful scan.
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -123,10 +124,6 @@ pub(crate) const EXTRA_STRIDE: usize = 48;
 /// Allies (British maps included) and Axis.
 const ALLIES: i32 = 1;
 const AXIS: i32 = 2;
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The pattern's start and the client.dll base it is in.
 fn pattern_address() -> Result<(usize, usize), String> {
@@ -268,11 +265,9 @@ fn describe(mode: i32) -> &'static str {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(raw) = CVAR.value() else {
         return;
-    }
-    let raw = unsafe { (*cvar).value };
+    };
     let wanted = if raw.is_finite() { raw as i32 } else { GAME };
     let wanted = if (GAME..=NONE).contains(&wanted) {
         wanted

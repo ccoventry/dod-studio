@@ -24,32 +24,23 @@
 //! entity the same element adds in `CreateEntities`, not `Draw`, so it stays;
 //! `cl_identiconmode 0` is the stock way to hide it.
 
-use std::sync::atomic::{AtomicPtr, Ordering};
-
-use crate::engine::CvarSPartial;
 use crate::hudelement;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_teammate_info");
 
 /// The element in `hudelement::ELEMENTS` this hides.
 const ELEMENT: &str = "statusbar";
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands/install.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
+pub static CVAR: Cvar = Cvar::new();
 
 /// Follows the cvar. Called every frame from `commands::poll`, before
 /// `hudelement::apply`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if let Some(index) = hudelement::find(ELEMENT)
         && hudelement::is_hidden(index) != wanted
     {

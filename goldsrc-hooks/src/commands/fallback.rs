@@ -269,7 +269,7 @@ pub(super) unsafe extern "C" fn cmd_texture_hires_log() {
 pub(super) unsafe extern "C" fn cmd_demo_list_folders() {
     handle_toggle(
         demo_list_folders::NAME,
-        &demo_list_folders::ENABLED,
+        &demo_list_folders::FOLDERS.fallback,
         demo_list_folders::status,
     );
 }
@@ -278,7 +278,7 @@ pub(super) unsafe extern "C" fn cmd_demo_list_folders() {
 pub(super) unsafe extern "C" fn cmd_demo_other_drives() {
     handle_toggle(
         demo_other_drives::NAME,
-        &demo_other_drives::ENABLED,
+        &demo_other_drives::SETTING.fallback,
         demo_other_drives::status,
     );
 }
@@ -317,7 +317,7 @@ pub(super) unsafe extern "C" fn cmd_demo_list_show_counts() {
 pub(super) unsafe extern "C" fn cmd_demo_fast_load() {
     handle_toggle(
         crate::fast_load::NAME,
-        &crate::fast_load::FALLBACK_ON,
+        &crate::fast_load::SETTING.fallback,
         crate::fast_load::status,
     );
 }
@@ -326,7 +326,7 @@ pub(super) unsafe extern "C" fn cmd_demo_fast_load() {
 pub(super) unsafe extern "C" fn cmd_viewdemo_in_panel() {
     handle_toggle(
         crate::studio_panel::VIEWDEMO_NAME,
-        &crate::studio_panel::VIEWDEMO_IN_PANEL,
+        &crate::studio_panel::VIEWDEMO_IN_PANEL.fallback,
         crate::studio_panel::viewdemo_status,
     );
 }
@@ -335,23 +335,25 @@ pub(super) unsafe extern "C" fn cmd_viewdemo_in_panel() {
 pub(super) unsafe extern "C" fn cmd_fix_model_flicker() {
     handle_toggle(
         crate::strafe_twitch::NAME,
-        &crate::strafe_twitch::FIX_MODEL_FLICKER,
+        &crate::strafe_twitch::FIX_MODEL_FLICKER.fallback,
         crate::strafe_twitch::status,
     );
 }
 
 /// Only registered when `missing_shots::NAME` could not be a cvar.
 pub(super) unsafe extern "C" fn cmd_restore_gunshots() {
-    handle_toggle(missing_shots::NAME, &missing_shots::WITHOUT_A_CVAR, || {
-        String::from("HLTV and POV demos: rounds with no fire event")
-    });
+    handle_toggle(
+        missing_shots::NAME,
+        &missing_shots::SETTING.fallback,
+        || String::from("HLTV and POV demos: rounds with no fire event"),
+    );
 }
 
 /// Only registered when `ds_ui_console_in_panel` could not be a cvar.
 pub(super) unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
         crate::studio_panel::CONSOLE_NAME,
-        &crate::studio_panel::CONSOLE_IN_PANEL,
+        &crate::studio_panel::CONSOLE_IN_PANEL.fallback,
         crate::studio_panel::console_status,
     );
 }
@@ -387,7 +389,7 @@ pub(super) unsafe extern "C" fn cmd_review_info() {
 pub(super) unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
-        &window_layout::RESIZABLE,
+        &window_layout::RESIZABLE.fallback,
         window_layout::resizable_status,
     );
 }
@@ -396,7 +398,7 @@ pub(super) unsafe extern "C" fn cmd_resizable_windows() {
 pub(super) unsafe extern "C" fn cmd_remember_window_layout() {
     handle_toggle(
         window_layout::REMEMBER_NAME,
-        &window_layout::REMEMBER,
+        &window_layout::REMEMBER.fallback,
         window_layout::remember_status,
     );
 }
@@ -405,7 +407,7 @@ pub(super) unsafe extern "C" fn cmd_remember_window_layout() {
 pub(super) unsafe extern "C" fn cmd_seek_skip_between() {
     handle_toggle(
         demo_seek::SKIP_BETWEEN_NAME,
-        &demo_seek::SKIP_BETWEEN,
+        &demo_seek::SKIP_BETWEEN.fallback,
         demo_seek::status,
     );
 }

@@ -56,10 +56,11 @@
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_clan_text");
 
@@ -83,7 +84,7 @@ const POST_OBJECT_AT: usize = 16;
 /// The object's hold: the client time its line stops showing, an `f32`.
 const HOLD_UNTIL: usize = 0x14;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's value as last seen: what the message handler reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Messages hidden or changed this session.
@@ -103,11 +104,6 @@ struct Last {
     /// Seconds, and the client time it arrived at.
     clan_timer: Option<(u8, f64)>,
     game_rules: Option<Vec<u8>>,
-}
-
-/// Called by `commands/install.rs` once `ds_hud_hide_clan_text` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
 }
 
 // ── Pure decisions ───────────────────────────────────────────────────────────
@@ -330,11 +326,9 @@ fn install_hook(message: &str) {
 /// was playing (through `ds_debug_msglog`) saw every one -- the same
 /// timing `map_text`, `deathmsg` and `msglog` use.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
@@ -360,11 +354,7 @@ pub fn poll() {
 
 /// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = CVAR.try_on()?;
     let hidden = HIDDEN.load(Ordering::Relaxed);
     if !wanted && hidden == 0 {
         return None;
