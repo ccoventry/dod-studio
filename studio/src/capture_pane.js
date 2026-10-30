@@ -36,6 +36,7 @@ import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 import { BYTES_PER_MB, gigabytes } from './byte_size.js';
+import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -55,6 +56,15 @@ let captureProgress = null;
 /** Whether a capture batch is running right now (#545's close prompt). */
 export function isCaptureRunning() {
   return capturingInFlight;
+}
+
+// Start Capture Batch's click, once initCaptureUI has wired it.
+let startCaptureClick = null;
+
+/** Runs Start Capture Batch as its click does, every check included, for a
+ *  batch Studio offers itself (batch_resume.js, #20). */
+export function startCaptureFromOffer() {
+  return startCaptureClick ? startCaptureClick() : Promise.resolve();
 }
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
@@ -1443,7 +1453,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   }
 
   if (startBtn) {
-    startBtn.addEventListener('click', async () => {
+    startCaptureClick = async () => {
       if (precheck.isChecking()) return;
       precheck.begin();
       try {
@@ -1452,7 +1462,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // A check that threw, or returned without saying why.
         precheck.stop();
       }
-    });
+    };
+    startBtn.addEventListener('click', startCaptureClick);
 
     // Start Capture Batch's checks, in order, each on the footer line (#953).
     // A check that stops the batch calls precheck.stop() with the reason its
@@ -1464,6 +1475,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         showToast(text, 'error');
         precheck.stop(text);
       };
+
+      // A batch from before Studio closed may still be capturing in the open
+      // game, and a new one would run in that game and stop it (#20).
+      if (isBatchStillRunningInGame()) {
+        stopWith(STRINGS.BATCH_CATCH_UP.STILL_RUNNING_NOT_STARTED);
+        return;
+      }
 
       // OBS mode: verify live, right before committing to a batch, rather
       // than trusting whatever a check found minutes (or a whole session)

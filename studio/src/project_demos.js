@@ -5,7 +5,8 @@
 // there, so it's reached through getDemos() rather than held.
 
 import { pickPath } from './pick_path.js';
-import { locateMissingDemos, changedDemos } from './ipc_bridge.js';
+import { locateMissingDemos, changedDemos, logFrontendEvent } from './ipc_bridge.js';
+import { missingDemosLine, changedDemosLine } from './project_log.js';
 import { renameDemoInTakeIndex } from './take_index.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
@@ -45,6 +46,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       dirs
     );
     onSearched?.();
+    logFrontendEvent(missingDemosLine(demos.length, missing.length, missing.filter((m) => m.candidate).length));
     // A demo marked missing earlier that is back where the queue says.
     const missingPaths = new Set(missing.map((m) => m.path));
     const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));
@@ -144,6 +146,7 @@ export function createProjectDemos({ getDemos, getTakeIndex, getScanPaths, refre
       details: changed.map((p) => ({ primary: fileNameOf(p), secondary: shortFolder(folderOf(p)), title: p })),
       footer: STRINGS.MAIN.CHANGED_DEMOS_QUESTION,
     });
+    logFrontendEvent(changedDemosLine(changed.length, !!rescan));
     if (rescan) await scan(changed);
     return false;
   }

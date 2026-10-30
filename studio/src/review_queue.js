@@ -124,6 +124,16 @@ export function sortReviewRows(rows, order = REVIEW_ORDER.TIME) {
     : (a, b) => byTime(a, b) || byName(a, b));
 }
 
+/** Each kill's victim and weapon, as Highlight Details lists them, for the
+ *  game's list while the highlight plays (#1140). A scan's `kills[i]` is
+ *  `[tick, seconds, weapon]`; `victims[i]` names who died. */
+export function reviewKills(streak) {
+  return (streak.kills || []).map((kill, i) => ({
+    victim: String(streak.victims?.[i] ?? ''),
+    weapon: String(kill?.[2] ?? ''),
+  }));
+}
+
 /**
  * The highlights to review, in queue order: each ticked demo's highlights
  * with a Review mark `covers` takes in, in `order` (sortReviewRows); in an HLTV demo, only `hltvPlayers`' (#822: a
@@ -171,6 +181,8 @@ export function buildReviewQueue(demos, checkedPaths, covers = REVIEW_COVERS.ALL
         note: streak.notes || '',
         // The game numbers players from 1; the scan from 0 (as capture does).
         spectate: hltv && Number.isInteger(streak.player_index) ? streak.player_index + 1 : null,
+        // Listed on the game screen while the highlight plays (#1140).
+        kills: reviewKills(streak),
       });
     }
     highlights.push(...sortReviewRows(rows, order));

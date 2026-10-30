@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { capturedTakes, applyCaughtUpBatch, createBatchCatchUp } from './batch_catch_up.js';
+import { capturedTakes, applyCaughtUpBatch, createBatchCatchUp, isBatchStillRunningInGame } from './batch_catch_up.js';
 import { streakUid } from './take_index.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 
@@ -70,6 +70,8 @@ describe('applyCaughtUpBatch', () => {
   });
 });
 
+const fakeResume = () => ({ offer: vi.fn(async () => {}) });
+
 function fakeIo(overrides = {}) {
   return {
     catchUp: vi.fn(async () => ({ batches: [], waiting_for_game: false })),
@@ -87,7 +89,7 @@ describe('createBatchCatchUp', () => {
     const onStatusChange = vi.fn();
     const io = fakeIo({ catchUp: vi.fn(async () => ({ batches: [batch(d)], waiting_for_game: false })) });
     const takeIndex = {};
-    const c = createBatchCatchUp({ getDemos: () => d, getTakeIndex: () => takeIndex, getSessionPath: () => null, onStatusChange, io });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => takeIndex, getSessionPath: () => null, onStatusChange, io });
     await c.start();
     expect(d[0].streaks[0].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
     expect(onStatusChange).toHaveBeenCalledTimes(1);
@@ -100,7 +102,7 @@ describe('createBatchCatchUp', () => {
     const file = JSON.stringify({ version: '0.12.0', demos: saved });
     const io = fakeIo({ readProject: vi.fn(async () => file) });
     const onStatusChange = vi.fn();
-    const c = createBatchCatchUp({ getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange, io });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange, io });
     await c.applyBatches([batch(saved, { project_path: 'C:/projects/match.json' })]);
 
     expect(io.readProject).toHaveBeenCalledWith('C:/projects/match.json');
@@ -117,7 +119,7 @@ describe('createBatchCatchUp', () => {
     const d = demos();
     const io = fakeIo();
     const onStatusChange = vi.fn();
-    const c = createBatchCatchUp({ getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange, io });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => 'p.json', onStatusChange, io });
     await c.applyBatches([batch(d, { project_path: 'p.json' })]);
     expect(io.readProject).not.toHaveBeenCalled();
     expect(d[0].streaks[1].status).toBe(HIGHLIGHT_STATUS.CAPTURED);
@@ -126,7 +128,7 @@ describe('createBatchCatchUp', () => {
 
   it('says so when the project file cannot be read', async () => {
     const io = fakeIo({ readProject: vi.fn(async () => { throw new Error('gone'); }) });
-    const c = createBatchCatchUp({ getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
     await c.applyBatches([batch(demos(), { project_path: 'gone.json' })]);
     expect(io.writeProject).not.toHaveBeenCalled();
     expect(io.toast).toHaveBeenCalledWith(expect.stringContaining('Could not mark them in the project gone.json'), 'error');
@@ -134,8 +136,67 @@ describe('createBatchCatchUp', () => {
 
   it('toasts when the check itself fails', async () => {
     const io = fakeIo({ catchUp: vi.fn(async () => { throw 'boom'; }) });
-    const c = createBatchCatchUp({ getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
     await c.start();
     expect(io.toast).toHaveBeenCalledWith(expect.stringContaining('boom'), 'error');
+  });
+  it('offers the clips the newest unfinished batch never got to, once', async () => {
+    const d = demos();
+    const resume = fakeResume();
+    const done = { ...batch(d, { session_id: 'session_y' }), blocks: batch(d).blocks.map((b) => ({ ...b, captured: true })) };
+    const c = createBatchCatchUp({ resume, getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io: fakeIo() });
+    const unfinished = batch(d);
+    await c.applyBatches([unfinished, done]);
+    expect(resume.offer).toHaveBeenCalledTimes(1);
+    expect(resume.offer).toHaveBeenCalledWith(unfinished, expect.objectContaining({ captured: 1, total: 2 }));
+  });
+
+  it('offers nothing when every clip is on disk', async () => {
+    const d = demos();
+    const resume = fakeResume();
+    const done = { ...batch(d), blocks: batch(d).blocks.map((b) => ({ ...b, captured: true })) };
+    const c = createBatchCatchUp({ resume, getDemos: () => d, getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io: fakeIo() });
+    await c.applyBatches([done]);
+    expect(resume.offer).not.toHaveBeenCalled();
+  });
+
+  it('holds Start while a game may still be capturing, until the check after it closes', async () => {
+    let onEvent = null;
+    const io = fakeIo({
+      catchUp: vi.fn(async () => ({ batches: [], waiting_for_game: true })),
+      listen: vi.fn(async (_name, handler) => { onEvent = handler; return () => {}; }),
+    });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.start();
+    expect(isBatchStillRunningInGame()).toBe(true);
+    expect(io.toast).toHaveBeenCalledWith(expect.stringContaining('may still be capturing'), 'info', expect.any(Number));
+    await onEvent({ payload: [] });
+    expect(isBatchStillRunningInGame()).toBe(false);
+  });
+
+  it('does not hold Start when the check after the game came before the reply', async () => {
+    let onEvent = null;
+    const io = fakeIo({
+      listen: vi.fn(async (_name, handler) => { onEvent = handler; return () => {}; }),
+      catchUp: vi.fn(async () => {
+        await onEvent({ payload: [] });
+        return { batches: [], waiting_for_game: true };
+      }),
+    });
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.start();
+    expect(isBatchStillRunningInGame()).toBe(false);
+  });
+
+  it('does not hold Start when it could not listen for the end of the wait', async () => {
+    const io = fakeIo({
+      listen: vi.fn(async () => { throw new Error('no events'); }),
+      catchUp: vi.fn(async () => ({ batches: [], waiting_for_game: true })),
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const c = createBatchCatchUp({ resume: fakeResume(), getDemos: () => [], getTakeIndex: () => ({}), getSessionPath: () => null, onStatusChange: vi.fn(), io });
+    await c.start();
+    err.mockRestore();
+    expect(isBatchStillRunningInGame()).toBe(false);
   });
 });

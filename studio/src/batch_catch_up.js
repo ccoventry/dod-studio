@@ -19,9 +19,23 @@ import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
+import { createBatchResume } from './batch_resume.js';
 
 /** The event the backend sends once a running game has closed. */
 export const CATCH_UP_EVENT = 'batch_catch_up';
+
+/** How long the "still running in the game" toast stays up. */
+const WAITING_TOAST_MS = 10000;
+
+// Set while the backend waits for a running game to close before checking a
+// batch from before Studio closed. Module state: capture_pane.js reads it.
+let waitingForGame = false;
+
+/** Whether a batch from before Studio closed may still be capturing in an
+ *  open game, unchecked: Start Capture Batch refuses until it has been. */
+export function isBatchStillRunningInGame() {
+  return waitingForGame;
+}
 
 /**
  * Each captured block of `batch` as `{ takeKey, uids }`, the highlights it
@@ -83,11 +97,16 @@ const defaultIo = {
 
 /**
  * @param {object} app  What this needs from main.js: getDemos() the queue,
- *   getTakeIndex(), getSessionPath() the open project file or null, and
- *   onStatusChange() to re-render and mark the project unsaved. `io` swaps
- *   the IPC and toasts out in tests.
+ *   getTakeIndex(), getSessionPath() the open project file or null,
+ *   onStatusChange() to re-render and mark the project unsaved, and for the
+ *   offer to capture the rest (batch_resume.js) openProject(path) and
+ *   startCapture(). `io` swaps the IPC and toasts out in tests, `resume` the
+ *   offer.
  */
-export function createBatchCatchUp({ getDemos, getTakeIndex, getSessionPath, onStatusChange, io = defaultIo }) {
+export function createBatchCatchUp({
+  getDemos, getTakeIndex, getSessionPath, onStatusChange, openProject, startCapture, io = defaultIo,
+  resume = createBatchResume({ openProject, getSessionPath, getDemos, onSelectionChange: onStatusChange, startCapture }),
+}) {
   /** Marks `batch` in the project file it came from. Returns a note for the toast. */
   async function applyToProjectFile(batch, path) {
     try {
@@ -105,31 +124,55 @@ export function createBatchCatchUp({ getDemos, getTakeIndex, getSessionPath, onS
     }
   }
 
+  /** Marks `batch` and toasts what it found. Resolves its counts, or null
+   *  when its project file could not be updated. */
   async function applyBatch(batch) {
     const project = batch.project_path;
     if (project && project !== getSessionPath()) {
       const { result, note, failed } = await applyToProjectFile(batch, project);
       io.toast(`${STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked)}${note}`,
         failed ? 'error' : toastKind(result));
-      return;
+      return failed ? null : result;
     }
     const result = applyCaughtUpBatch(batch, getDemos(), getTakeIndex());
     if (result.changed) onStatusChange();
     io.toast(STRINGS.BATCH_CATCH_UP.caughtUp(result.captured, result.total, result.marked), toastKind(result));
+    return result;
   }
 
+  /** Marks every batch, then offers to capture what the newest one with
+   *  clips missing never got to: one question, not one per batch. */
   async function applyBatches(batches) {
+    let unfinished = null;
     for (const batch of batches || []) {
-      await applyBatch(batch);
+      const result = await applyBatch(batch);
+      if (result && result.captured < result.total) unfinished = { batch, result };
     }
+    if (unfinished) await resume.offer(unfinished.batch, unfinished.result);
   }
 
   /** Run once at startup, before any batch of this Studio's own. */
   async function start() {
-    io.listen(CATCH_UP_EVENT, (event) => applyBatches(event.payload))
-      .catch((err) => console.error(`Failed to register ${CATCH_UP_EVENT} listener:`, err));
+    // Listening before asking: the game can close between the backend's look
+    // and its reply, so the event may come first, and then there is nothing
+    // left to wait for.
+    let checkedAfterGame = false;
+    // Unheard, the end of the wait would never clear the refusal, so Start
+    // is only held while the event can arrive.
+    const listening = await io.listen(CATCH_UP_EVENT, (event) => {
+      checkedAfterGame = true;
+      waitingForGame = false;
+      return applyBatches(event.payload);
+    }).then(() => true, (err) => {
+      console.error(`Failed to register ${CATCH_UP_EVENT} listener:`, err);
+      return false;
+    });
     try {
       const found = await io.catchUp();
+      if (found?.waiting_for_game && listening && !checkedAfterGame) {
+        waitingForGame = true;
+        io.toast(STRINGS.BATCH_CATCH_UP.WAITING_FOR_GAME, 'info', WAITING_TOAST_MS);
+      }
       await applyBatches(found?.batches);
     } catch (err) {
       io.toast(STRINGS.BATCH_CATCH_UP.checkFailed(err), 'error');
