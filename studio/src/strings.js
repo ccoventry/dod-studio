@@ -686,13 +686,15 @@ export const STRINGS = {
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel') => {
-      const missing = total - captured - cutShort - stoppedEarly;
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly - startedLate;
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
+      // OBS started recording after the clip's first frame (#1109).
+      if (startedLate > 0) parts.push(`${startedLate} OBS started recording late (missing the clip's opening, not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -1602,10 +1604,26 @@ export const STRINGS = {
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
     projectUpdated: (name) => `Marked them in the project ${name}.`,
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
+    // The game is open, so the batch may still be capturing in it (#20).
+    WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
+    STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
+  },
+
+  // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
+  BATCH_RESUME: {
+    TITLE: 'Capture the rest?',
+    message: (captured, total, left) => (captured === 0
+      ? `A capture batch stopped before the end while DoD Studio was closed, and none of its ${total === 1 ? 'clip is' : `${total} clips are`} on disk.`
+      : `A capture batch stopped before the end while DoD Studio was closed. ${captured} of ${total} clips are on disk and marked Captured; ${left === 1 ? '1 clip was' : `${left} clips were`} not captured.`),
+    inProject: (name) => `Capture them now? Studio opens the project ${name}, ticks just those highlights and starts a capture batch.`,
+    IN_QUEUE: 'Capture them now? Studio ticks just those highlights and starts a capture batch.',
+    CAPTURE_BUTTON: 'Capture them now',
+    NOT_NOW_BUTTON: 'Not now',
+    NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -2376,6 +2394,7 @@ export const STRINGS = {
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
       short: 'Video stops early (partial take, not captured)',
+      late: 'OBS started late (missing the opening, not captured)',
     },
     // A clip the batch's end cut short, by what ended it (#1081).
     cutShortBy: (cutBy) => ({
@@ -2384,6 +2403,8 @@ export const STRINGS = {
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
+    // A take OBS started recording after its clip's first frame (#1109).
+    startedLate: (ms) => `OBS started ${ms} ms late: missing the clip's opening (not captured)`,
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,

@@ -59,6 +59,28 @@ pub struct RecordedBlock {
     pub salvaged: bool,
 }
 
+/// A clip OBS started recording after the clip's first frame (#1109): its take
+/// is missing the clip's opening, by `late`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LateStart {
+    pub take_folder: PathBuf,
+    pub late: std::time::Duration,
+}
+
+/// How late OBS started against the clip's `START_RECORD` marker, if it did.
+/// Both are when Studio read them, each a few ms after it happened (the
+/// marker 5-40 ms, `docs/obs_alternate_capture.md`), so a few ms either way
+/// is noise; with the game waiting for the recording, OBS starts a whole
+/// lead-in ahead and this never comes close.
+pub(crate) fn started_late(
+    obs_started: std::time::Instant,
+    clip_started: std::time::Instant,
+) -> Option<std::time::Duration> {
+    obs_started
+        .checked_duration_since(clip_started)
+        .filter(|d| !d.is_zero())
+}
+
 pub struct ObsSession {
     /// Shared with the cleanup guard so a cancel or crash can still stop a
     /// recording. `None` once the session has been shut down.
@@ -83,6 +105,9 @@ pub struct ObsSession {
     /// Destination folder of the recording in progress, if any.
     active: Option<PathBuf>,
     active_since: Option<std::time::Instant>,
+    /// When OBS said the recording in progress started, until the clip's
+    /// `START_RECORD` marker is held against it.
+    obs_started: Option<std::time::Instant>,
     /// Scene that was active before the batch switched away, to restore.
     previous_scene: Option<String>,
     /// Profile that was active before the batch switched away, to restore.
@@ -166,6 +191,7 @@ impl ObsSession {
                 next_block: 0,
                 active: None,
                 active_since: None,
+                obs_started: None,
                 previous_scene,
                 previous_profile,
                 frame_stats_baseline: None,
@@ -190,14 +216,33 @@ impl ObsSession {
     /// Feeds one console-log marker in.
     ///
     /// Markers that are not stage boundaries are ignored, so breadcrumbs and
-    /// custom-command echoes cost nothing.
-    pub fn on_marker(&mut self, marker: &Marker) {
+    /// custom-command echoes cost nothing. Returns the clip OBS started
+    /// recording late, at that clip's `START_RECORD`.
+    pub fn on_marker(&mut self, marker: &Marker) -> Option<LateStart> {
         match marker.kind {
             k if k == TRIGGER_MARKER => self.begin_block(),
             k if k == STOP_MARKER => self.end_block(),
             MarkerKind::BatchComplete => self.end_block(),
+            MarkerKind::StartRecord => return self.check_start(marker.at),
             _ => {}
         }
+        None
+    }
+
+    /// The clip's first frame came at `clip_started`: did OBS start after it?
+    /// The safety net under the game's wait for the recording (#1109), for a
+    /// hook DLL without the wait, a patched batch, or a wait that timed out.
+    fn check_start(&mut self, clip_started: std::time::Instant) -> Option<LateStart> {
+        let obs_started = self.obs_started.take()?;
+        let late = started_late(obs_started, clip_started)?;
+        let take_folder = take_folder_of(self.active.as_ref()?);
+        log_markdown(&format!(
+            "⚠️ **OBS** — started recording {} ms after the clip's first frame, so `{}` is \
+             missing the clip's opening; it won't count as captured.",
+            late.as_millis(),
+            take_folder.display()
+        ));
+        Some(LateStart { take_folder, late })
     }
 
     fn begin_block(&mut self) {
@@ -231,14 +276,25 @@ impl ObsSession {
         // One reconnect and one retry before giving up: OBS being closed or
         // crashing between blocks is survivable, and a batch has minutes of
         // fast-forward in it during which it can plausibly come back.
-        if let Err(e) = self.try_begin(&dest) {
-            let recovered = e.is_transport() && self.reconnect() && self.try_begin(&dest).is_ok();
-            if !recovered {
-                self.note_failure(format!("OBS failed to start recording: {e}"), &e);
-                return;
+        let started = match self.try_begin(&dest) {
+            Ok(at) => at,
+            Err(e) => {
+                let retried = if e.is_transport() && self.reconnect() {
+                    self.try_begin(&dest).ok()
+                } else {
+                    None
+                };
+                match retried {
+                    Some(at) => at,
+                    None => {
+                        self.note_failure(format!("OBS failed to start recording: {e}"), &e);
+                        return;
+                    }
+                }
             }
-        }
+        };
 
+        self.obs_started = Some(started);
         self.active = Some(dest);
         self.active_since = Some(std::time::Instant::now());
         // Best-effort, and deliberately after start_record rather than
@@ -252,7 +308,7 @@ impl ObsSession {
 
     // Split out so `begin_block` can run it twice around a reconnect without
     // holding the client lock across the retry.
-    fn try_begin(&self, dest: &Path) -> Result<(), ObsError> {
+    fn try_begin(&self, dest: &Path) -> Result<std::time::Instant, ObsError> {
         let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
         let client = guard
             .as_mut()
@@ -261,14 +317,14 @@ impl ObsSession {
         // later move a rename rather than a cross-drive copy, and it is what
         // keeps blocks routed across the export pool.
         client.set_record_directory(&dest.to_string_lossy())?;
-        client.start_record()?;
-        Ok(())
+        client.start_record()
     }
 
     fn end_block(&mut self) {
         let Some(dest) = self.active.take() else {
             return;
         };
+        self.obs_started = None;
         let seconds = self
             .active_since
             .take()
@@ -611,6 +667,62 @@ mod tests {
             assert_eq!(out.file_name().unwrap(), want);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn session_recording(dest: &Path, obs_started: std::time::Instant) -> ObsSession {
+        ObsSession {
+            client: Arc::new(Mutex::new(None)),
+            cfg: ObsConfig::default(),
+            dead: false,
+            refused: None,
+            take_folders: Vec::new(),
+            next_block: 1,
+            active: Some(dest.to_path_buf()),
+            active_since: Some(obs_started),
+            obs_started: Some(obs_started),
+            previous_scene: None,
+            previous_profile: None,
+            frame_stats_baseline: None,
+            recorded: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+
+    fn start_record_at(at: std::time::Instant) -> Marker {
+        Marker {
+            at,
+            ..super::super::log_tail::parse_marker("[dod-studio] START_RECORD - Tick 900").unwrap()
+        }
+    }
+
+    /// The safety net (#1109): a recording OBS started after the clip's
+    /// first frame is reported once, with the take it belongs to.
+    #[test]
+    fn a_recording_that_started_after_the_clip_is_reported_late_once() {
+        let dest = Path::new("D:/takes/chain_01_b0")
+            .join(TAKE_FOLDER)
+            .join(STREAM_FOLDER);
+        let clip = std::time::Instant::now();
+        let obs = clip + std::time::Duration::from_millis(120);
+        let mut session = session_recording(&dest, obs);
+        assert_eq!(
+            session.on_marker(&start_record_at(clip)),
+            Some(LateStart {
+                take_folder: PathBuf::from("D:/takes/chain_01_b0"),
+                late: std::time::Duration::from_millis(120),
+            })
+        );
+        assert_eq!(session.on_marker(&start_record_at(clip)), None, "once");
+
+        // OBS ahead of the clip, as the lead-in (and the game's wait) leaves it.
+        let mut session = session_recording(&dest, clip);
+        let first_frame = clip + std::time::Duration::from_millis(900);
+        assert_eq!(session.on_marker(&start_record_at(first_frame)), None);
+        assert_eq!(
+            started_late(clip, clip),
+            None,
+            "at the same moment: in time"
+        );
     }
 
     /// OBS reporting a path that is not there is exactly the "capture ran and

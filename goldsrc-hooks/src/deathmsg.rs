@@ -1339,6 +1339,11 @@ fn usage() -> String {
          \x20                               draw the names in that font (size {}..{} px), live;\n\
          \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
          \x20 {COMMAND} font default       the game's own font again\n\
+         \x20 {COMMAND} fallback <face> [<face> ...]\n\
+         \x20                               up to {} faces to try, in order, for a character\n\
+         \x20                               the font lacks, before Tahoma (quote a face with\n\
+         \x20                               a space: fallback \"Segoe UI\" Tahoma)\n\
+         \x20 {COMMAND} fallback default   Tahoma only again (the default)\n\
          \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
          \x20                               lines spaced and right-aligned to match (default 1)\n\
          \x20 {COMMAND} scale default      the game's own size again\n\
@@ -1371,6 +1376,7 @@ fn usage() -> String {
          \x20 {COMMAND} clear_on default   neither (the default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
+        font::MAX_BACKUP_FACES,
         scale::MIN_SCALE,
         scale::MAX_SCALE,
         even::MAX_GAP,
@@ -1543,6 +1549,19 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} font: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} font: {why}\n"),
+            }
+        }
+        "fallback" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", font::describe_fallback(), usage());
+            }
+            match font::parse_fallback_args(rest) {
+                Ok(faces) => match font::set_fallback(faces) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} fallback: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} fallback: {why}\n"),
             }
         }
         "scale" => {

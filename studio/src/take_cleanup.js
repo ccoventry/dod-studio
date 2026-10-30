@@ -17,6 +17,7 @@ import { listen } from '@tauri-apps/api/event';
 import { STRINGS } from './strings.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
+import { renderSizeText } from './byte_size.js';
 
 export const AFTER_FINISH = { KEEP: 'keep', RECYCLE: 'recycle', DELETE: 'delete' };
 
@@ -160,10 +161,7 @@ let setting = null;
 let loaded = { choice: AFTER_FINISH.KEEP, whenNeeded: false };
 
 function sizeText(bytes) {
-  const gb = (Number(bytes) || 0) / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(2))
-    : STRINGS.RENDER.fileSizeMb(((Number(bytes) || 0) / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 2);
 }
 
 function renderSetting({ choice, whenNeeded, whenNeededEnabled, hint }) {

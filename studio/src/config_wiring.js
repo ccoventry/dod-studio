@@ -6,8 +6,7 @@
 
 import { confirm } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
-import { invoke } from '@tauri-apps/api/core';
-import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs } from './ipc_bridge.js';
+import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs, obsCheckOrphan, obsRecoverOrphan } from './ipc_bridge.js';
 import { refreshLaunchGuard, runObsConnectionTest } from './capture_pane.js';
 import { showToast } from './toast.js';
 import { numberField } from './number_field.js';
@@ -114,7 +113,7 @@ function obsSettingsFromForm() {
 export async function checkObsOrphanOnStartup() {
   if (currentCaptureMode() !== 'obs') return;
 
-  const report = await invoke('obs_check_orphan', obsSettingsFromForm()).catch((err) => {
+  const report = await obsCheckOrphan(obsSettingsFromForm()).catch((err) => {
     console.error('OBS orphan check failed:', err);
     return null;
   });
@@ -128,7 +127,7 @@ export async function checkObsOrphanOnStartup() {
   }).catch(() => false);
   if (!stop) return;
 
-  await invoke('obs_recover_orphan', obsSettingsFromForm())
+  await obsRecoverOrphan(obsSettingsFromForm())
     .then((video) => {
       showToast(
         video

@@ -132,6 +132,8 @@ pub mod bsp_entities;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod builder;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod cfg_report;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
 pub mod console_prefix;
 #[cfg(not(target_arch = "wasm32"))]

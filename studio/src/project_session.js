@@ -7,8 +7,7 @@
 import { save } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
 import { whileDialogOpens } from './dialog_wait.js';
-import { invoke } from '@tauri-apps/api/core';
-import { defaultProjectsDir, logFrontendEvent } from './ipc_bridge.js';
+import { defaultProjectsDir, readProjectFile, writeProjectFile, logFrontendEvent } from './ipc_bridge.js';
 import {
   projectSavedLine, projectOpenedLine, projectFailedLine, NEW_SESSION_LINE,
 } from './project_log.js';
@@ -24,6 +23,7 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
 import { createProjectOpenProgress } from './project_open_progress.js';
+import { fileNameOf } from './path_display.js';
 
 /**
  * @param {object} app  What this needs from main.js:
@@ -103,7 +103,7 @@ export function createProjectSession({
     if (!el) return;
     const dirtySuffix = hasUnsavedChanges ? ' • unsaved' : '';
     if (currentSessionPath) {
-      const filename = currentSessionPath.split(/[\\/]/).pop() || currentSessionPath;
+      const filename = fileNameOf(currentSessionPath) || currentSessionPath;
       el.textContent = filename + dirtySuffix;
       el.title = currentSessionPath;
     } else {
@@ -167,7 +167,7 @@ export function createProjectSession({
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
       }, null, 2);
-      await invoke('save_project_session', { path: filePath, contents: projectData });
+      await writeProjectFile(filePath, projectData);
       currentSessionPath = filePath;
       hasUnsavedChanges = false;
       updateSessionFileIndicator();
@@ -256,7 +256,7 @@ export function createProjectSession({
   async function loadProjectFile(selected, { quiet = false, rescanOffer = !quiet } = {}) {
     openProgress.opening();
     try {
-      const content = await invoke('load_project_session', { path: selected });
+      const content = await readProjectFile(selected);
       const data = JSON.parse(content);
       if (!data) return false;
       currentSessionPath = selected;
