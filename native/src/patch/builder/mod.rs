@@ -1227,6 +1227,15 @@ pub fn build_batch_queue(
 
                 // At Sound Flush (Stage 1.5)
                 scheduled_commands.push((s_sound_tick, "sys_sound".to_string()));
+            }
+
+            // OBS starts each take's recording on its AUDIO_SYNC
+            // (`obs::TRIGGER_MARKER`) and hands out take folders in that
+            // order, so a chained block needs one too, without the sound
+            // flush, which would cut the sound playing on from the clip
+            // before (#1169). It lands at least a second after that clip's
+            // STOP_RECORD: chained blocks sit OBS's take separation apart.
+            if resumes_from_fast_forward || config.capture_mode == crate::patch::CaptureMode::Obs {
                 for (t, echo_cmd) in
                     build_safe_echos(s_sound_tick, &format!("AUDIO_SYNC - Tick {}", s_sound_tick))
                 {

@@ -92,14 +92,54 @@ const WAV_HEADER_SCAN_BYTES: usize = 4096;
 /// bytes the file holds after it. `None` for anything that isn't a PCM wav
 /// header.
 pub fn wav_seconds(path: &Path) -> Option<f64> {
+    let (buf, file_len) = read_wav_header(path)?;
+    wav_seconds_in(&buf, file_len)
+}
+
+/// Whether the take under `block_folder` (or the take folder itself) was
+/// never finished: HLAE fills in its `sound.wav`'s `data` size when the
+/// recording stops, so a size still unset with sound after the header means
+/// the game or HLAE ended mid-clip. Its video stops at the same moment, so
+/// [`short_take`] can't tell; this is how a batch nobody watched end tells
+/// a partial take from a whole one without the batch's markers (#20, live:
+/// a game killed 10 s into a 27 s clip left `data` = 0 over 0.9 MB of
+/// sound). `false` without a wav (OBS, AGR).
+pub fn is_unfinished_take(block_folder: &Path) -> bool {
+    take_folders(block_folder).into_iter().any(|folder| {
+        super::scanner::take_wav(&folder)
+            .and_then(|wav| read_wav_header(&wav))
+            .is_some_and(|(buf, file_len)| wav_unfinished_in(&buf, file_len))
+    })
+}
+
+/// The start of the wav at `path` and the file's length.
+fn read_wav_header(path: &Path) -> Option<(Vec<u8>, u64)> {
     let file_len = std::fs::metadata(path).ok()?.len();
     let mut buf = vec![0u8; WAV_HEADER_SCAN_BYTES];
     let read = std::fs::File::open(path).ok()?.read(&mut buf).ok()?;
     buf.truncate(read);
-    wav_seconds_in(&buf, file_len)
+    Some((buf, file_len))
 }
 
-fn wav_seconds_in(buf: &[u8], file_len: u64) -> Option<f64> {
+/// A wav's `data` chunk as its header gives it.
+struct DataChunk {
+    /// Where the chunk's bytes start.
+    body: usize,
+    /// The size the header says; 0 until the writer fills it in.
+    size: u32,
+    /// The `fmt ` chunk's byte rate, when one came before.
+    byte_rate: Option<u32>,
+}
+
+impl DataChunk {
+    /// The writer never filled the size in: 0, or past the end of a file
+    /// holding `after` bytes after the header (it was killed).
+    fn size_unset(&self, after: u64) -> bool {
+        self.size == 0 || u64::from(self.size) > after
+    }
+}
+
+fn data_chunk_in(buf: &[u8]) -> Option<DataChunk> {
     if buf.len() < 12 || &buf[0..4] != b"RIFF" || &buf[8..12] != b"WAVE" {
         return None;
     }
@@ -116,14 +156,11 @@ fn wav_seconds_in(buf: &[u8], file_len: u64) -> Option<f64> {
         match id {
             b"fmt " => byte_rate = u32_at(body + 8).filter(|&r| r > 0),
             b"data" => {
-                let rate = f64::from(byte_rate?);
-                let after = file_len.saturating_sub(body as u64);
-                let bytes = if size == 0 || u64::from(size) > after {
-                    after
-                } else {
-                    u64::from(size)
-                };
-                return Some(bytes as f64 / rate);
+                return Some(DataChunk {
+                    body,
+                    size,
+                    byte_rate,
+                });
             }
             _ => {}
         }
@@ -132,6 +169,27 @@ fn wav_seconds_in(buf: &[u8], file_len: u64) -> Option<f64> {
             .checked_add(size as usize & 1)?;
     }
     None
+}
+
+fn wav_seconds_in(buf: &[u8], file_len: u64) -> Option<f64> {
+    let chunk = data_chunk_in(buf)?;
+    let rate = f64::from(chunk.byte_rate?);
+    let after = file_len.saturating_sub(chunk.body as u64);
+    let bytes = if chunk.size_unset(after) {
+        after
+    } else {
+        u64::from(chunk.size)
+    };
+    Some(bytes as f64 / rate)
+}
+
+/// Whether a wav's `data` size was never filled in while sound follows its
+/// header.
+fn wav_unfinished_in(buf: &[u8], file_len: u64) -> bool {
+    data_chunk_in(buf).is_some_and(|chunk| {
+        let after = file_len.saturating_sub(chunk.body as u64);
+        after > 0 && chunk.size_unset(after)
+    })
 }
 
 #[cfg(test)]
@@ -202,6 +260,45 @@ mod tests {
         // Not a wav.
         assert_eq!(wav_seconds_in(b"RIFF\0\0\0\0AVI ", 12), None);
         assert_eq!(wav_seconds_in(b"", 0), None);
+    }
+
+    #[test]
+    fn a_wav_whose_size_was_never_filled_in_is_unfinished() {
+        let mut w = wav_header(0);
+        let header = w.len();
+        w.resize(header + 22050 * 4, 0);
+        assert!(wav_unfinished_in(&w, w.len() as u64));
+        // A size past the end of the file: cut off after it was written.
+        let mut w = wav_header(22050 * 4 * 10);
+        w.resize(header + 22050 * 4, 0);
+        assert!(wav_unfinished_in(&w, w.len() as u64));
+    }
+
+    #[test]
+    fn a_finished_or_empty_wav_is_not_unfinished() {
+        let w = wav(2.5);
+        assert!(!wav_unfinished_in(&w, w.len() as u64));
+        // Nothing after the header: no sound was ever written.
+        let w = wav_header(0);
+        assert!(!wav_unfinished_in(&w, w.len() as u64));
+        assert!(!wav_unfinished_in(b"RIFF\0\0\0\0AVI ", 12));
+    }
+
+    #[test]
+    fn a_take_is_unfinished_by_its_wav_inside_hlaes_take_folder() {
+        let block = Scratch::new("take_length_unfinished");
+        let take = block.path().join("take0000");
+        bmp_take(&take, 30, 3.0);
+        assert!(!is_unfinished_take(block.path()));
+
+        let mut w = wav_header(0);
+        w.resize(w.len() + 22050 * 4, 0);
+        std::fs::write(take.join("sound.wav"), w).unwrap();
+        assert!(is_unfinished_take(block.path()));
+
+        // No wav at all (OBS, AGR): never judged.
+        let empty = Scratch::new("take_length_unfinished_empty");
+        assert!(!is_unfinished_take(empty.path()));
     }
 
     fn bmp_take(take: &Path, frames: usize, audio_secs: f64) {

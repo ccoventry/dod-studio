@@ -28,6 +28,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_client_dll_survey.md](goldsrc_client_dll_survey.md) — what in `client.dll` can be controlled.
 - [goldsrc_hw_dll_survey.md](goldsrc_hw_dll_survey.md) — what in `hw.dll` HLAE already owns, how the engine reads a `playdemo` demo, and what is left.
 - [goldsrc_viewdemo.md](goldsrc_viewdemo.md) — how `viewdemo` plays and seeks a demo.
+- [goldsrc_linux_debug_symbols.md](goldsrc_linux_debug_symbols.md) — Valve's own names from DoD's unstripped Linux builds: the `client.dll` name map, user message layouts, and how far to trust them (#1127).
 
 ### Per feature
 - [goldsrc_death_notices.md](goldsrc_death_notices.md) — the kill feed (`ds_hud_deathmsg`).
@@ -41,7 +42,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_objective_icons.md](goldsrc_objective_icons.md) — placing the objective icons.
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.
 - [goldsrc_spectator_bars.md](goldsrc_spectator_bars.md) — the spectator top and bottom bars.
-- [goldsrc_spectator_camera.md](goldsrc_spectator_camera.md) — keeping the camera on one player, the in-eye camera on a prone player, the death cam when he dies, and the chase cameras drawing the players around them (#918).
+- [goldsrc_spectator_camera.md](goldsrc_spectator_camera.md) — keeping the camera on one player, the in-eye camera on a prone or crouching player (#329, #1144), the death cam when he dies, and the chase cameras drawing the players around them (#918).
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.

@@ -108,3 +108,10 @@ export function setThemedConfirmMessage(message) {
 export function dismissThemedConfirm(result) {
   if (pendingResolve) resolveAndClose(result);
 }
+
+/** Whether a dialog is open now. A second `themedConfirm` replaces the open
+ *  one and its caller never hears back, so a prompt nobody clicked for
+ *  (batch_resume.js) waits for this to clear. */
+export function isThemedConfirmOpen() {
+  return pendingResolve !== null;
+}

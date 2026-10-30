@@ -70,6 +70,13 @@ const MOVED: f32 = 0.01;
 const GAP_SECONDS: f64 = 0.5;
 /// `MOVETYPE_FLY`: on a ladder.
 const MOVETYPE_FLY: i32 = 5;
+/// Look-ahead (#1154): how far past the newest snapshot the demo file is
+/// asked whether the body leaves `sprint_*`. The body shows a let-go a
+/// median 0.13 s after the key (p90 0.30 s). Against the drawn POV gun on
+/// the walk-off frames of 5 players: 71.5% without, 79.1% at 0.10 s, 83.3%
+/// at 0.20 s (held-to-the-ground falls 93.4% -> 92.1%), 83.4% at 0.30 s
+/// (held 86.5%).
+pub(super) const LET_GO_LOOK_AHEAD_SECONDS: f32 = 0.20;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Snapshot {
@@ -96,6 +103,9 @@ pub(super) struct SnapshotMotion {
     /// How many intervals in a row have fallen at least `FELL`.
     falling_run: u32,
     fall: Fall,
+    /// The demo file says the body leaves `sprint_*` within
+    /// [`LET_GO_LOOK_AHEAD_SECONDS`] of the newest snapshot.
+    leaving_sprint: bool,
 }
 
 /// What kind of fall he is in, by the snapshots.
@@ -182,7 +192,7 @@ impl SnapshotMotion {
             _ => 0,
         };
         let jumping = body == "jump" || self.airborne_since.is_some();
-        let sprint_body = body.starts_with("sprint_");
+        let sprint_body = body.starts_with("sprint_") && !self.leaving_sprint;
         self.fall = match self.fall {
             _ if self.falling_run == 0 => Fall::None,
             _ if jumping => Fall::Jump,
@@ -230,6 +240,12 @@ thread_local! {
 /// [`SnapshotMotion::snapshot`] on the engine thread's state.
 pub(super) fn note_snapshot(time: f64, origin: [f32; 3], body: &str, movetype: i32) {
     STATE.with(|s| s.borrow_mut().snapshot(time, origin, body, movetype));
+}
+
+/// Whether the demo file says the body is about to leave `sprint_*`; read
+/// by the next [`note_snapshot`]. False without a timeline.
+pub(super) fn note_body_ahead(leaving_sprint: bool) {
+    STATE.with(|s| s.borrow_mut().leaving_sprint = leaving_sprint);
 }
 
 /// [`SnapshotMotion::in_the_air`] on the engine thread's state.
@@ -530,6 +546,48 @@ mod tests {
             "{let_go:?}"
         );
         // On the floor, a sprint body or not, it is over.
+        assert!(!s.let_go_of_sprint());
+    }
+
+    #[test]
+    fn looking_ahead_the_let_go_shows_before_the_body_change() {
+        // The body leaves sprint 0.2 s into the fall, and the demo file
+        // says so LET_GO_LOOK_AHEAD_SECONDS before that snapshot arrives.
+        let mut s = SnapshotMotion::default();
+        let change = 10.2;
+        let mut first = None;
+        let mut t = 10.0 - 4.0 * DT;
+        while t < 10.5 {
+            let body = if t < change { SPRINTING } else { STANDING };
+            s.leaving_sprint = body == SPRINTING
+                && (t..=t + f64::from(LET_GO_LOOK_AHEAD_SECONDS)).contains(&change);
+            let a = (t - 10.0).max(0.0) as f32;
+            s.snapshot(
+                t,
+                [(t - 10.0) as f32 * 270.0, 0.0, -400.0 * a * a],
+                body,
+                WALK,
+            );
+            if s.let_go_of_sprint() {
+                first.get_or_insert(t);
+            }
+            t += DT;
+        }
+        let lead = f64::from(LET_GO_LOOK_AHEAD_SECONDS);
+        assert!(
+            first.is_some_and(|t| t < change && t >= change - lead - DT),
+            "{first:?}"
+        );
+    }
+
+    #[test]
+    fn looking_ahead_doesnt_let_go_on_the_ground() {
+        // Sprinting level, the body about to change: no fall, no let-go.
+        let mut s = SnapshotMotion {
+            leaving_sprint: true,
+            ..Default::default()
+        };
+        standing(&mut s, 10.0, SPRINTING);
         assert!(!s.let_go_of_sprint());
     }
 

@@ -96,7 +96,9 @@ fn version_dir(root: &Path, version: u32) -> PathBuf {
 /// The file name of `demo_path`'s entry, the same in every `v<N>` folder.
 fn entry_name(demo_path: &Path) -> Option<String> {
     let canonical = std::fs::canonicalize(demo_path).ok()?;
-    let hash = fnv1a(canonical.to_string_lossy().as_bytes());
+    // The same hash `hl_demo_auditor` named every entry with before this
+    // module existed (`native` tests that the names stay).
+    let hash = crate::fnv1a::fnv1a_hash(canonical.to_string_lossy().as_bytes());
     Some(format!("{hash:016x}.json"))
 }
 
@@ -613,17 +615,6 @@ pub fn fill_missing_players(root: &Path) -> usize {
     written
 }
 
-/// The same FNV-1a as `hl_demo_auditor::fnv1a_hash`, which named every entry
-/// written before this module existed (`native` tests that the two agree).
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -894,11 +885,5 @@ mod tests {
         let entry: PlayersEntry = serde_json::from_str(json).unwrap();
         assert!(entry.demo.players[0].recorder);
         assert_eq!(serde_json::to_string(&entry).unwrap(), json);
-    }
-
-    #[test]
-    fn fnv1a_matches_the_published_test_vectors() {
-        assert_eq!(fnv1a(b""), 0xcbf29ce484222325);
-        assert_eq!(fnv1a(b"a"), 0xaf63dc4c8601ec8c);
     }
 }

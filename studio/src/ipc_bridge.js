@@ -666,6 +666,39 @@ export async function launchObs() {
     });
 }
 
+/** Configuration's Test OBS Connection (#147): connects with `settings`
+ *  (`{ host, port, password, gameWidth, gameHeight, obsCaptureFps,
+ *  obsRecordingQuality }`) and resolves the report. Rejects with the
+ *  backend's reason, which the panel shows. */
+export async function obsTestConnection(settings) {
+  return invoke("obs_test_connection", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_test_connection):", err);
+      throw err;
+    });
+}
+
+/** Whether OBS is still recording a batch nobody is watching (Studio crashed
+ *  mid-batch): `{ reachable, recording, directory, ours }` for `{ host, port,
+ *  password }`. Rejects only when the check itself failed. */
+export async function obsCheckOrphan(settings) {
+  return invoke("obs_check_orphan", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_check_orphan):", err);
+      throw err;
+    });
+}
+
+/** Stops that orphaned recording and moves its file into the take folder.
+ *  Resolves the video's path, or "" when OBS had nothing left to stop. */
+export async function obsRecoverOrphan(settings) {
+  return invoke("obs_recover_orphan", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_recover_orphan):", err);
+      throw err;
+    });
+}
+
 /** Aggressively kills any running `hl.exe`/`hlae.exe` instances. */
 export async function killEngineProcesses() {
   return invoke("kill_engine_processes")

@@ -163,12 +163,12 @@ pub async fn start_highlight_review(
         format_queue(&highlights, fast_forward_gap, start_from),
     )
     .map_err(crate::messages::could_not_write_review_queue)?;
-    let settings = crate::capture_manager::saved_settings(&app);
+    let settings = crate::game_process_manager::saved_settings(&app);
     let line = review_lines(&queue, settings.players.use_in_game);
 
-    let launch = crate::capture_manager::launch_config(
+    let launch = crate::game_process_manager::launch_config(
         &settings,
-        &crate::capture_manager::LaunchRequest::default(),
+        &crate::game_process_manager::LaunchRequest::default(),
     );
     let sent = {
         let line = line.clone();
@@ -192,7 +192,7 @@ pub async fn start_highlight_review(
             if !native::sys::process::game_pids().is_empty() {
                 return Err(crate::messages::REVIEW_GAME_NOT_FROM_STUDIO.to_string());
             }
-            crate::capture_manager::launch_standalone_game(app.clone()).await?;
+            crate::game_process_manager::launch_standalone_game(app.clone()).await?;
             let pid =
                 crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
                     let since = Instant::now();

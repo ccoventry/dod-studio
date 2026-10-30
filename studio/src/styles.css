@@ -1914,6 +1914,7 @@ button.danger-btn {
 
 .batch-results-row-unrenderable td:first-child,
 .batch-results-row-cut_short td:first-child,
+.batch-results-row-late td:first-child,
 .batch-results-row-short td:first-child {
   color: #ffb74d;
 }
@@ -2571,6 +2572,7 @@ tr.keyboard-selected {
 }
 
 .hd-style-coverage,
+.hd-outdated,
 .hd-gl-max-size-low {
   color: #ffb74d;
 }

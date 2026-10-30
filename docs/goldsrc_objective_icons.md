@@ -159,9 +159,10 @@ at 1080p, 0 apart while spectating — which is exactly why a single "move the
 objective HUD by N" setting would have been the wrong shape. They are two
 positions and they get two settings.
 
-`[0x19e88d4]` is not a flag despite being tested as one: `CHudSpectator::Draw`
+`[0x19e88d4]` is not a flag despite being tested as one: `CHudSpectator::SetModes`
 sets it to 1, 2, 3 or 4 (`+0x3896c`, `+0x38978`, `+0x38993`, `+0x389c9`) and
-`CHudSpectator::Reset` puts it back to 0 (`+0x3a15e`). Every HUD element that
+`CHudSpectator::InitHUDData` puts it back to 0 (`+0x3a15e`); both names are
+from `client.so`'s symbols (`docs/goldsrc_linux_debug_symbols.md`). Every HUD element that
 consults it only asks whether it is zero, so "the spectator interface is up" is
 the right reading for this purpose — but it carries more than that, and anything
 that wants to tell DoD's spectator modes apart has the value already.

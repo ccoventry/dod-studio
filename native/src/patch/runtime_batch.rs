@@ -64,6 +64,24 @@ pub const SETTLE_SECONDS: f64 = 30.0;
 /// The hook DLL's batch command.
 pub const BATCH_COMMAND: &str = "ds_capture_batch";
 
+/// The batch line that pauses a clip's lead-in until Studio says OBS is
+/// recording (goldsrc-hooks `batch::WAIT_FOR_RECORDING_LINE`, #1109).
+pub const WAIT_FOR_RECORDING: &str = "ds_capture_batch wait_for_recording";
+
+/// Studio's go-ahead for a clip waiting at [`WAIT_FOR_RECORDING`].
+pub const RECORDING_GO: &str = "ds_capture_batch recording";
+
+/// The marker OBS mode starts the recording on (`obs::TRIGGER_MARKER`), as
+/// the builder echoes it.
+const AUDIO_SYNC_MARKER: &str = "[dod-studio] AUDIO_SYNC - ";
+
+/// Whether `command` is a clip's `AUDIO_SYNC` echo. The wait goes with the
+/// marker itself rather than the `sys_sound` beside it: a clip chained to the
+/// one before (#1169) has no sound flush but still needs its recording.
+fn is_audio_sync_echo(command: &str) -> bool {
+    command.starts_with("echo") && command.contains(AUDIO_SYNC_MARKER)
+}
+
 fn clean(line: &str) -> String {
     line.replace(['\r', '\n', '\t'], " ")
 }
@@ -83,19 +101,22 @@ pub fn batch_file(
     streaks: &[CaptureStreak],
     clear_decals: bool,
 ) -> Result<String, String> {
-    batch_file_playing(jobs, streaks, clear_decals, &HashMap::new())
+    batch_file_playing(jobs, streaks, clear_decals, &HashMap::new(), false)
 }
 
 /// [`batch_file`], with a demo in `play_as` played from that path instead
 /// of its own: a demo on another drive than the game is copied into the
 /// game's folder for the batch when the hook DLL is older than #779
 /// (`patch::source_copies`). The highlights
-/// still belong to the original, so the clock is the original's.
+/// still belong to the original, so the clock is the original's. With
+/// `wait_for_recording` (OBS mode), each clip's lead-in pauses at its
+/// `AUDIO_SYNC` until Studio says OBS is recording (#1109).
 pub fn batch_file_playing(
     jobs: &[PatchJob],
     streaks: &[CaptureStreak],
     clear_decals: bool,
     play_as: &HashMap<String, PathBuf>,
+    wait_for_recording: bool,
 ) -> Result<String, String> {
     let mut out = vec![HEADER.to_string()];
     let mut demos = 0;
@@ -165,6 +186,11 @@ pub fn batch_file_playing(
                 out.push(format!("next\t{}", seconds_text(at)));
             } else {
                 out.push(format!("at\t{}\t{}", seconds_text(at), clean(command)));
+                // OBS mode starts the recording on the AUDIO_SYNC echo, so the
+                // clip waits right after it.
+                if wait_for_recording && is_audio_sync_echo(command) {
+                    out.push(format!("at\t{}\t{WAIT_FOR_RECORDING}", seconds_text(at)));
+                }
             }
         }
     }
@@ -332,6 +358,41 @@ mod tests {
     }
 
     #[test]
+    fn obs_mode_waits_for_the_recording_at_each_audio_sync() {
+        let streaks = [streak("a.dem", &[(3000, 330.0)], 100.0)];
+        let jobs = [job(
+            "a.dem",
+            &[
+                (2800, "sys_sound"),
+                (2800, "echo \"[dod-studio] AUDIO_SYNC - Tick 2800\""),
+                (2900, "sys_record_start"),
+                // A clip chained to the one before (#1169): its AUDIO_SYNC
+                // has no sound flush beside it, and still waits.
+                (2950, "echo \"[dod-studio] AUDIO_SYNC - Tick 2950\""),
+            ],
+        )];
+        // The hook's own names (goldsrc-hooks `batch.rs`, whose test pins
+        // the same text).
+        assert_eq!(WAIT_FOR_RECORDING, "ds_capture_batch wait_for_recording");
+        assert_eq!(RECORDING_GO, "ds_capture_batch recording");
+        let wait = format!("at\t328.000\t{WAIT_FOR_RECORDING}");
+        let obs = batch_file_playing(&jobs, &streaks, false, &HashMap::new(), true).unwrap();
+        assert!(
+            obs.contains(&format!(
+                "at\t328.000\techo \"[dod-studio] AUDIO_SYNC - Tick 2800\"\n{wait}\n"
+            )),
+            "{obs}"
+        );
+        assert!(
+            obs.contains(&format!("at\t329.500\t{WAIT_FOR_RECORDING}\n")),
+            "{obs}"
+        );
+        assert_eq!(obs.matches(WAIT_FOR_RECORDING).count(), 2);
+        let hlae = batch_file(&jobs, &streaks, false).unwrap();
+        assert!(!hlae.contains(WAIT_FOR_RECORDING), "{hlae}");
+    }
+
+    #[test]
     fn a_demo_with_no_viewdemo_times_has_to_be_patched() {
         let mut s = streak("a.dem", &[(3000, 330.0)], 100.0);
         s.viewdemo_times.clear();
@@ -347,7 +408,7 @@ mod tests {
             "D:/demos/a.dem".to_string(),
             PathBuf::from("C:/game/dod/dodstudio_src_01_a.dem"),
         )]);
-        let text = batch_file_playing(&jobs, &streaks, false, &play_as).unwrap();
+        let text = batch_file_playing(&jobs, &streaks, false, &play_as, false).unwrap();
         assert!(
             text.contains("demo\tC:/game/dod/dodstudio_src_01_a.dem\n"),
             "{text}"

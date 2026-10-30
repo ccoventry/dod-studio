@@ -14,6 +14,7 @@ import {
 } from './audit_duplicates.js';
 import { createClock, readLastRun, rememberLastRun, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
+import { BYTES_PER_MB } from './byte_size.js';
 
 /// Demo Auditor › Duplicates (#844). `getDemos` is the project's queue:
 /// copies in it are kept first and never start ticked. `onSettingsChange`
@@ -228,7 +229,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
 
     tbody.innerHTML = '';
     currentAuditResults.forEach((group, groupIdx) => {
-      const sizeMb = (group.size / (1024 * 1024)).toFixed(2);
+      const sizeMb = (group.size / BYTES_PER_MB).toFixed(2);
       const hashStr = group.header_hash.toString(16);
       const isExpanded = !collapsedGroups.has(groupIdx);
 
