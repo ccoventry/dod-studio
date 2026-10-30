@@ -21,8 +21,9 @@
 //!   at the demo's own frame rate, so a few frames either way are normal, and
 //!   a take that is wrong is wrong by seconds.
 //! - **Kills in the clip**: each kill's place in the video is its demo time
-//!   minus the recording's start. One outside the video is a bad seek or a
-//!   wrong recording window.
+//!   minus the recording's start, less what any sped-up stretch before it
+//!   saves (#831). One outside the video is a bad seek or a wrong recording
+//!   window.
 //!
 //! A take captured before the plan was recorded, or whose demo's kills have
 //! no `viewdemo` times (a scan older than them), has none, and is reported as
@@ -41,9 +42,50 @@ pub const KILL_MARGIN_SECS: f64 = 0.1;
 pub struct TakePlan {
     /// The recording's planned length in seconds of demo time.
     pub length_secs: f64,
-    /// Where each of the block's kills falls in the recording, in seconds
-    /// from its first frame (negative: before it starts).
+    /// Where each of the block's kills falls in the recording, in seconds of
+    /// demo time from its first frame (negative: before it starts).
     pub kill_offsets_secs: Vec<f64>,
+    /// The stretches recorded sped up (#831's fast-forwarded gaps between
+    /// kills). The video holds each at its speed, so it is shorter than
+    /// `length_secs` and a kill after one sits earlier in it; the checks go
+    /// through [`TakePlan::video_secs`]. Empty for a take recorded at real
+    /// time, and in every plan written before #831.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sped_up: Vec<SpedUp>,
+}
+
+/// One stretch of a recording played faster than real time.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SpedUp {
+    /// Where it starts and ends, in seconds of demo time from the
+    /// recording's first frame.
+    pub from_secs: f64,
+    pub to_secs: f64,
+    /// How many times real time it plays at.
+    pub speed: f64,
+}
+
+impl TakePlan {
+    /// Where `demo_secs` (demo time from the recording's first frame) falls
+    /// in the video: less the time each sped-up stretch before it saves. A
+    /// stretch with a speed that isn't above 1 saves nothing.
+    pub fn video_secs(&self, demo_secs: f64) -> f64 {
+        let saved: f64 = self
+            .sped_up
+            .iter()
+            .filter(|s| s.speed.is_finite() && s.speed > 1.0)
+            .map(|s| {
+                let played = (demo_secs.min(s.to_secs) - s.from_secs.max(0.0)).max(0.0);
+                played * (1.0 - 1.0 / s.speed)
+            })
+            .sum();
+        demo_secs - saved
+    }
+
+    /// The video's planned length in seconds.
+    pub fn video_length_secs(&self) -> f64 {
+        self.video_secs(self.length_secs)
+    }
 }
 
 /// The plan for a block that records frames `start_frame` to `stop_frame`,
@@ -71,6 +113,7 @@ pub fn plan_for_block(
     Some(TakePlan {
         length_secs: stop - start,
         kill_offsets_secs,
+        sped_up: Vec::new(),
     })
 }
 
@@ -83,7 +126,7 @@ pub struct LengthMismatch {
 
 /// The planned frame count for `plan` at `fps`.
 pub fn planned_frames(plan: &TakePlan, fps: f64) -> u64 {
-    (plan.length_secs * fps).round().max(0.0) as u64
+    (plan.video_length_secs() * fps).round().max(0.0) as u64
 }
 
 /// Whether `actual_frames` is noticeably short of or past the plan at `fps`.
@@ -93,7 +136,7 @@ pub fn length_mismatch(plan: &TakePlan, fps: f64, actual_frames: u64) -> Option<
         return None;
     }
     let planned = planned_frames(plan, fps);
-    let slack_secs = (plan.length_secs * SHORT_SHARE).max(SHORT_MIN_SECONDS);
+    let slack_secs = (plan.video_length_secs() * SHORT_SHARE).max(SHORT_MIN_SECONDS);
     let off_secs = (actual_frames as f64 - planned as f64).abs() / fps;
     (off_secs > slack_secs).then_some(LengthMismatch {
         planned_frames: planned,
@@ -102,11 +145,11 @@ pub fn length_mismatch(plan: &TakePlan, fps: f64, actual_frames: u64) -> Option<
 }
 
 /// The kills that fall outside a video `video_secs` long, as their offsets
-/// from its start, in plan order.
+/// from its start in the video, in plan order.
 pub fn kills_outside(plan: &TakePlan, video_secs: f64) -> Vec<f64> {
     plan.kill_offsets_secs
         .iter()
-        .copied()
+        .map(|&at| plan.video_secs(at))
         .filter(|&at| at < -KILL_MARGIN_SECS || at > video_secs + KILL_MARGIN_SECS)
         .collect()
 }
@@ -124,6 +167,20 @@ mod tests {
         TakePlan {
             length_secs,
             kill_offsets_secs: kills.to_vec(),
+            sped_up: Vec::new(),
+        }
+    }
+
+    /// A 28 s plan with kills at 5 s and 23 s and the gap between them, 7 s
+    /// to 19 s, at 4x: 12 s of it play in 3 s, so the video is 19 s.
+    fn ramped() -> TakePlan {
+        TakePlan {
+            sped_up: vec![SpedUp {
+                from_secs: 7.0,
+                to_secs: 19.0,
+                speed: 4.0,
+            }],
+            ..plan(28.0, &[5.0, 23.0])
         }
     }
 
@@ -215,6 +272,57 @@ mod tests {
     fn a_kill_a_hair_off_either_end_is_inside_the_margin() {
         let p = plan(19.0, &[-0.05, 19.05]);
         assert!(kills_outside(&p, 19.0).is_empty());
+    }
+
+    #[test]
+    fn a_sped_up_stretch_shortens_the_video_by_what_it_saves() {
+        let p = ramped();
+        assert!((p.video_length_secs() - 19.0).abs() < 1e-9);
+        assert_eq!(planned_frames(&p, 60.0), 1140);
+    }
+
+    #[test]
+    fn a_time_before_inside_or_after_a_sped_up_stretch_maps_into_the_video() {
+        let p = ramped();
+        assert!((p.video_secs(5.0) - 5.0).abs() < 1e-9);
+        assert!((p.video_secs(11.0) - 8.0).abs() < 1e-9);
+        assert!((p.video_secs(23.0) - 14.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_take_as_long_as_its_sped_up_plan_is_fine_and_one_at_real_time_is_not() {
+        let p = ramped();
+        assert_eq!(length_mismatch(&p, 60.0, 1140), None);
+        // The gap recorded at real time: 28 s against 19.
+        assert!(length_mismatch(&p, 60.0, 28 * 60).is_some());
+    }
+
+    #[test]
+    fn a_kill_after_a_sped_up_stretch_is_inside_the_shorter_video() {
+        assert!(kills_outside(&ramped(), 19.0).is_empty());
+        assert_eq!(kills_outside(&ramped(), 10.0), vec![14.0]);
+    }
+
+    #[test]
+    fn a_speed_of_one_or_less_saves_nothing() {
+        let mut p = ramped();
+        p.sped_up[0].speed = 1.0;
+        assert!((p.video_length_secs() - 28.0).abs() < 1e-9);
+        p.sped_up[0].speed = f64::NAN;
+        assert!((p.video_length_secs() - 28.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_plan_written_before_sped_up_stretches_reads_as_real_time() {
+        let p: TakePlan =
+            serde_json::from_str(r#"{"length_secs":19.0,"kill_offsets_secs":[5.0]}"#).unwrap();
+        assert_eq!(p, plan(19.0, &[5.0]));
+    }
+
+    #[test]
+    fn a_sped_up_plan_round_trips_through_json() {
+        let text = serde_json::to_string(&ramped()).unwrap();
+        assert_eq!(serde_json::from_str::<TakePlan>(&text).unwrap(), ramped());
     }
 
     #[test]

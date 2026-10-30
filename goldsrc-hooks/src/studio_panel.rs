@@ -4550,6 +4550,17 @@ mod hook {
         "brought the menu up".to_string()
     }
 
+    /// See the outer `menu_state`.
+    pub(super) fn menu_state() -> Option<(bool, bool, bool)> {
+        let vgui = Vgui::get().ok()?;
+        // Safety: handles read from vgui2 on the engine's thread, as poll does.
+        unsafe {
+            let (_, vp) = window(&vgui)?;
+            let console = vgui.popup(CONSOLE).is_some_and(|c| vgui.visible(c));
+            Some((vgui.shown(vgui.parent_of(vp)), vgui.visible(vp), console))
+        }
+    }
+
     /// Closes the window and, when the menu around it is up, the menu too, as
     /// Resume Game does.
     pub(super) fn close_for_playback() {
@@ -4567,6 +4578,17 @@ mod hook {
             hide(base_ui);
         }
     }
+}
+
+/// Whether the menu is up and, with it, our window or the console window:
+/// `(menu, window, console)`, or `None` before the window was first built.
+/// For the review's ESC (#660): vgui2 takes ESC before any client key hook
+/// sees it, so the review watches the menu come up instead.
+pub(crate) fn menu_state() -> Option<(bool, bool, bool)> {
+    #[cfg(target_arch = "x86")]
+    return hook::menu_state();
+    #[cfg(not(target_arch = "x86"))]
+    None
 }
 
 /// Set by the review (#623) when a highlight starts playing; the next
