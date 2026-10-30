@@ -522,7 +522,20 @@ still frame, inside the lead-in.
   opening: the take is not counted as captured, Render While Capturing skips it, and Last Batch says
   by how many ms.
 
-Measured (#1109): see the PR for the live numbers on PRE and POST.
+**Measured (#1109, 2026-10-30, POST and PRE, 120 fps, 1280x720, one m00cat demo, 27 clips in 10 batches):**
+
+- **Cost:** the game waited 68-112 ms per clip (hook log; 79-87 ms on PRE), OBS's own start.
+- **Demo clock:** the demo player's clock reads the same at the pause and at the resume (783.644 and
+  783.644), and the takes are the same length with and without the wait (20.358 s both), so nothing
+  is skipped or replayed.
+- **Still frame:** none at the head of any take: OBS's first frame comes with the go-ahead, a few ms
+  after `OUTPUT_STARTED`, so the file starts on the moving lead-in, a second ahead of the clip.
+- **Sound:** the same four clips recorded with and without the wait line up within the run-to-run
+  spread (picture against sound, take against take: -15 to -12 ms on POST, +8 to +19 ms on PRE;
+  two runs both with the wait differ by up to ±14 ms), so the pause moves neither against the other.
+- **Slow start:** with OBS's start held back 1.5 s, the game waited 1573-1584 ms and both takes
+  were whole. Without the wait, the same start left both takes 589-605 ms late, and Last Batch
+  marked them. Held back 25 s, the wait gave up at 20 s and the take was marked 4066 ms late.
 
 ## The output, and the recommendation that keeps the rest of the pipeline
 
