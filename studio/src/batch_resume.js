@@ -17,6 +17,7 @@ import { streakUid } from './take_index.js';
 import { showToast } from './toast.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { STRINGS } from './strings.js';
+import { fileNameOf } from './path_display.js';
 
 /** The ids of the highlights in `batch`'s blocks that have no take. */
 export function uncapturedUids(batch) {
@@ -53,7 +54,7 @@ export function applySelectOnly(demos, uids) {
 }
 
 function fileName(path) {
-  return path.split(/[\\/]/).pop() || path;
+  return fileNameOf(path) || path;
 }
 
 /** How often the offer looks again while another dialog is open. */

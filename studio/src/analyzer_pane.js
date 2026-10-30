@@ -13,7 +13,7 @@ import { readDemoHeadsInto, mapCellText } from './demo_heads.js';
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
-import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
+import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
@@ -26,6 +26,7 @@ import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
 import { renderFlagsTab } from './analyzer_flags.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
+import { fileNameOf } from './path_display.js';
 
 function setAnalyzerFileIndicator(text) {
   const titleEl = document.querySelector('#analyzer-current-file');
@@ -1190,7 +1191,7 @@ async function splitAnalyzedDemo(path, update) {
   } finally {
     unlisten();
   }
-  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileName(w.path))), 'success', 6000);
+  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileNameOf(w.path))), 'success', 6000);
   if (currentDir && currentDir === parentDirOf(path)) await setCurrentDir(currentDir);
   if (written.length) await loadAnalyzerDemo(written[0].path);
 }
