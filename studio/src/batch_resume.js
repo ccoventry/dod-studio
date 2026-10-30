@@ -12,7 +12,7 @@
 // each payload index is and the project it came from (#545). A batch with no
 // project can only be resumed while its demos are in the open queue.
 
-import { themedConfirm } from './themed_confirm.js';
+import { themedConfirm, isThemedConfirmOpen } from './themed_confirm.js';
 import { streakUid } from './take_index.js';
 import { showToast } from './toast.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
@@ -56,8 +56,13 @@ function fileName(path) {
   return path.split(/[\\/]/).pop() || path;
 }
 
+/** How often the offer looks again while another dialog is open. */
+const DIALOG_POLL_MS = 500;
+
 const defaultIo = {
   confirm: themedConfirm,
+  dialogOpen: isThemedConfirmOpen,
+  wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   toast: showToast,
   showHighlights: () => {
     switchNavTab('workspace');
@@ -96,6 +101,10 @@ export function createBatchResume({ openProject, getSessionPath, getDemos, onSel
     const text = question(batch, result, uids);
     if (!text) return;
     const S = STRINGS.BATCH_RESUME;
+    // The offer can come at any time (when the old batch's game closes): a
+    // dialog the user has open is answered first, or it would be replaced
+    // and its caller never hear back.
+    while (io.dialogOpen?.()) await io.wait(DIALOG_POLL_MS);
     const yes = await io.confirm(text, { title: S.TITLE, confirmLabel: S.CAPTURE_BUTTON, cancelLabel: S.NOT_NOW_BUTTON });
     if (!yes) return;
 

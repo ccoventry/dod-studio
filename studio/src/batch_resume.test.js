@@ -92,6 +92,17 @@ describe('createBatchResume', () => {
     expect(app.startCapture).toHaveBeenCalledTimes(1);
   });
 
+  it('waits for a dialog the user has open before asking', async () => {
+    const d = demos();
+    const { app, resume } = setup({ queue: d, sessionPath: 'p.dodstudio' });
+    let open = 2;
+    app.io.dialogOpen = () => open > 0;
+    app.io.wait = vi.fn(async () => { open -= 1; });
+    await resume.offer(batch(d, { project_path: 'p.dodstudio' }), result);
+    expect(app.io.wait).toHaveBeenCalledTimes(2);
+    expect(app.io.confirm).toHaveBeenCalledTimes(1);
+  });
+
   it('does not reopen the project that is already open', async () => {
     const d = demos();
     const { app, resume } = setup({ queue: d, sessionPath: 'p.dodstudio' });
