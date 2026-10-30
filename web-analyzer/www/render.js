@@ -1,11 +1,11 @@
-// render.js — port of studio/src/analyzer_pane.js's report-rendering
+// render.js — port of studio/src/analyzer_report.js's report-rendering
 // logic (Summary / Scoreboard / Player Details / Team Details / Timeline /
 // Rounds / Chat Log tabs) for the browser/WASM build. Deliberately excludes
 // analyzer_pane.js's Explorer sidebar + folder-browsing code — this build is
 // single-file-drop only, see docs/demo_stats_feasibility.md sibling decision
 // in the web port planning conversation. Report shape (demo_info + state) is
 // identical to what desktop's analyze_demo_full Tauri command returns, so
-// these functions are a near-verbatim copy of their analyzer_pane.js source.
+// these functions are a near-verbatim copy of their analyzer_report.js source.
 // studio/src/web_analyzer_copy.test.js fails when a shared function drifts,
 // and lists the deliberate differences (#238).
 import { STRINGS } from './strings.js';
