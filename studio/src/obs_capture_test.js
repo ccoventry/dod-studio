@@ -12,7 +12,8 @@ import {
   startCaptureBatch, cancelCaptureBatch, checkEngineProcesses,
   obsTestClip, obsTestWatchStart, obsTestAnalyze, obsTestCancel, obsTestDeleteTake,
 } from './ipc_bridge.js';
-import { batchSettingsPayload, runObsConnectionTest, launchObsAndRetry, isCaptureRunning } from './capture_pane.js';
+import { batchSettingsPayload, isCaptureRunning } from './capture_pane.js';
+import { runObsConnectionTest, launchObsAndRetry } from './obs_connection_ui.js';
 import { isObsConnected } from './obs_status.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { setObsTestBatch } from './obs_test_flag.js';
