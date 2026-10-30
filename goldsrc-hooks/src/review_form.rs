@@ -16,14 +16,15 @@
 //!
 //! Everything here runs on the engine's thread: the review's poll asks for
 //! the form, the panel's poll opens it, and vgui2 calls the form's key and
-//! button handlers from the engine's input. The atomics and the mutex only
-//! hand values between those calls.
+//! button handlers from the engine's input. The atomics and the lock only
+//! hand values between those calls; what is asked every frame is an atomic
+//! load (CLAUDE.md's rule for per-frame code).
 
 // The window is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 /// What the form shows for one highlight.
@@ -55,8 +56,9 @@ pub(crate) struct Saved {
 static OPEN_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// Whether the form shows now, set by the panel as it shows and hides it.
 static SHOWN: AtomicBool = AtomicBool::new(false);
-/// A save waiting for the review's next poll.
-static SAVED: Mutex<Option<Saved>> = Mutex::new(None);
+/// A save waiting for the review's next poll, and whether there is one.
+static SAVED: RwLock<Option<Saved>> = RwLock::new(None);
+static HAS_SAVED: AtomicBool = AtomicBool::new(false);
 
 /// Asks for the form over the playing demo, on the next frame.
 pub(crate) fn request_open() {
@@ -83,32 +85,45 @@ pub(crate) fn is_shown() -> bool {
 /// PRE), within a frame or two.
 const ESC_MENU_WINDOW: Duration = Duration::from_millis(500);
 
-/// When Esc last closed the form.
-static ESC_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// When Esc last closed the form, as milliseconds since [`EPOCH`] plus one;
+/// 0 for never. An atomic, since [`menu_is_from_esc`] is asked every frame
+/// (CLAUDE.md: no blocking locks per frame).
+static ESC_AT: AtomicU64 = AtomicU64::new(0);
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+fn millis_now() -> u64 {
+    let epoch = *EPOCH.get_or_init(Instant::now);
+    u64::try_from(epoch.elapsed().as_millis()).unwrap_or(u64::MAX - 1)
+}
 
 /// Notes that Esc closed the form: the menu the same Esc brings up is put
 /// away again, and doesn't open the Review tab.
 pub(crate) fn note_esc() {
-    *ESC_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    ESC_AT.store(millis_now() + 1, Ordering::Release);
 }
 
 /// Whether Esc closed the form just now, so a menu coming up is its doing.
 pub(crate) fn menu_is_from_esc() -> bool {
-    ESC_AT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some_and(|at| at.elapsed() < ESC_MENU_WINDOW)
+    match ESC_AT.load(Ordering::Acquire) {
+        0 => false,
+        at => millis_now().saturating_sub(at - 1) < ESC_MENU_WINDOW.as_millis() as u64,
+    }
 }
 
 /// Hands a save to the review's next poll; a second save before it replaces
 /// the first.
 pub(crate) fn save(saved: Saved) {
-    *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = Some(saved);
+    *SAVED.write().unwrap_or_else(|e| e.into_inner()) = Some(saved);
+    HAS_SAVED.store(true, Ordering::Release);
 }
 
-/// The save since the last call, if any.
+/// The save since the last call, if any. Asked every frame: an atomic load
+/// until there is one.
 pub(crate) fn take_saved() -> Option<Saved> {
-    SAVED.lock().unwrap_or_else(|e| e.into_inner()).take()
+    if !HAS_SAVED.swap(false, Ordering::AcqRel) {
+        return None;
+    }
+    SAVED.write().unwrap_or_else(|e| e.into_inner()).take()
 }
 
 /// The kill range typed in the From and To boxes, for a highlight with
@@ -194,6 +209,14 @@ mod tests {
         });
         assert_eq!(take_saved().map(|s| s.to), Some(2));
         assert_eq!(take_saved(), None);
+    }
+
+    #[test]
+    fn a_menu_just_after_the_forms_esc_is_the_escs() {
+        note_esc();
+        assert!(menu_is_from_esc());
+        ESC_AT.store(0, Ordering::Release);
+        assert!(!menu_is_from_esc(), "never pressed");
     }
 
     #[test]

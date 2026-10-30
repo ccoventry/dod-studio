@@ -64,15 +64,20 @@ static FORM: AtomicUsize = AtomicUsize::new(0);
 /// The class's own `OnKeyCodeTyped` and `OnCommand`, for what isn't ours.
 static OWN_ON_KEY: AtomicUsize = AtomicUsize::new(0);
 static OWN_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
-/// The highlight the form shows, while it shows.
-static SHOWING: std::sync::Mutex<Option<FormView>> = std::sync::Mutex::new(None);
+/// The highlight the form shows, while it shows. Read every frame it shows,
+/// so an `RwLock` (CLAUDE.md: no blocking mutex per frame).
+static SHOWING: std::sync::RwLock<Option<FormView>> = std::sync::RwLock::new(None);
 
 fn trace(line: &str) {
     unsafe { crate::debug::report(&format!("review_form: {line}")) };
 }
 
-fn showing() -> std::sync::MutexGuard<'static, Option<FormView>> {
-    SHOWING.lock().unwrap_or_else(|e| e.into_inner())
+fn showing() -> std::sync::RwLockReadGuard<'static, Option<FormView>> {
+    SHOWING.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn set_showing(view: Option<FormView>) {
+    *SHOWING.write().unwrap_or_else(|e| e.into_inner()) = view;
 }
 
 /// Runs every frame: opens the form when the review asked for it, and
@@ -149,7 +154,7 @@ unsafe fn menu_up(vgui: &Vgui) -> bool {
 /// Notes the form closed, without saving.
 fn close(why: &str) {
     crate::review_form::set_shown(false);
-    *showing() = None;
+    set_showing(None);
     trace(&format!("closed: {why}"));
 }
 
@@ -259,7 +264,7 @@ unsafe fn open(vgui: &Vgui) -> Result<String, String> {
             view.kills,
             vgui.describe(vp)
         );
-        *showing() = Some(view);
+        set_showing(Some(view));
         Ok(note)
     }
 }
