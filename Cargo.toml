@@ -79,10 +79,6 @@ field_reassign_with_default = "allow"
 # ordinal) and maps keyed on PathBuf to Arc<Vec<f32>>. A type alias would name
 # the shape without explaining it.
 type_complexity = "allow"
-# `spawn_capture_engine` (8) and the CLI entry point (12). Both are one-call
-# seams where every argument is independent; a params struct would exist only
-# to satisfy the lint.
-too_many_arguments = "allow"
 # Indexing by axis (`for axis in 0..3 { out[axis] = ... }`) reads better than an
 # iterator when the index *is* the meaning -- x, y, z.
 needless_range_loop = "allow"

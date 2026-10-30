@@ -1215,6 +1215,7 @@ mod hook {
     unsafe extern "system" {
         fn CreateCompatibleDC(hdc: *mut c_void) -> *mut c_void;
         fn DeleteDC(hdc: *mut c_void) -> i32;
+        // FFI declaration: must match the Win32 signature.
         #[allow(clippy::too_many_arguments)]
         fn CreateFontA(
             height: i32,
