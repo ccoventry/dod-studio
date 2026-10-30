@@ -510,6 +510,78 @@ mod tests {
         assert_eq!(read(not_a_demo, &|| false), Err(ReadError::NotADemo));
     }
 
+    /// The fixture with its frames from `cut` on replaced by `tail`, and its
+    /// directory kept (moved to the new end), so the read gets past the
+    /// directory and into the damaged frames.
+    fn with_frames_cut(cut: usize, tail: &[u8]) -> Vec<u8> {
+        const DIRECTORY_AT: usize = 540;
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        ))
+        .unwrap();
+        let directory =
+            u32::from_le_bytes(bytes[DIRECTORY_AT..DIRECTORY_AT + 4].try_into().unwrap()) as usize;
+        let mut out = bytes[..cut.min(directory)].to_vec();
+        out.extend_from_slice(tail);
+        let moved = out.len() as u32;
+        out.extend_from_slice(&bytes[directory..]);
+        out[DIRECTORY_AT..DIRECTORY_AT + 4].copy_from_slice(&moved.to_le_bytes());
+        out
+    }
+
+    /// xorshift64*, so a failing case reproduces.
+    fn rng(seed: u64) -> impl FnMut() -> u64 {
+        let mut x = seed;
+        move || {
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            x.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+    }
+
+    /// A damaged or cut-off demo must end the read, never panic: the hook's
+    /// release build aborts on a panic, and this runs inside hl.exe.
+    #[test]
+    fn a_truncated_or_damaged_demo_ends_the_read_without_panicking() {
+        let mut next = rng(0x1154);
+        let len = std::fs::metadata(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        ))
+        .unwrap()
+        .len() as usize;
+        // Small counts so CI stays quick; 240 cases of the same kinds (seed
+        // 0x1154_7777) passed when this was written.
+        // Cut off at points through the file, the directory kept.
+        for k in 1..=4 {
+            let file = with_frames_cut(544 + len * k / 5, &[]);
+            let _ = read(std::io::Cursor::new(file), &|| false);
+        }
+        // Garbage in place of the frames from a point on.
+        for _ in 0..4 {
+            let cut = 544 + (next() as usize % len);
+            let garbage: Vec<u8> = (0..64 << 10).map(|_| next() as u8).collect();
+            let file = with_frames_cut(cut, &garbage);
+            let _ = read(std::io::Cursor::new(file), &|| false);
+        }
+        // A few bytes flipped in the frames, the rest as recorded.
+        for _ in 0..6 {
+            let mut file = with_frames_cut(usize::MAX, &[]);
+            let frames_end = file.len() - 4 - 92 * 2;
+            for _ in 0..8 {
+                let at = 544 + next() as usize % (frames_end - 544);
+                file[at] ^= (next() as u8) | 1;
+            }
+            let _ = read(std::io::Cursor::new(file), &|| false);
+        }
+        // An HLDEMO header over nothing but garbage.
+        let mut garbage: Vec<u8> = (0..1 << 20).map(|_| next() as u8).collect();
+        garbage[..8].copy_from_slice(b"HLDEMO\0\0");
+        let _ = read(std::io::Cursor::new(garbage), &|| false);
+    }
+
     /// The survey demo, when it's there: `DOD_LOOKAHEAD_DEMO` or the PRE
     /// install's `wsod25_grp2_h1_hltv.dem`.
     #[test]
