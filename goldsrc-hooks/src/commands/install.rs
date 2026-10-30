@@ -188,12 +188,12 @@ pub fn install() {
     // all-or-nothing tuple, since the HD textures fall back to their default
     // style without it.
     if let Some(style) = register(texture_hires::STYLE_NAME, texture_hires::DEFAULT_STYLE) {
-        texture_hires::set_style_cvar(style);
+        texture_hires::STYLE_CVAR.set(style);
     }
     // Same for the HD switch; texture_hires::poll_hd follows it, and installs
     // the hook if it's turned on in a session that started without it.
     if let Some(hd) = register(texture_hires::HD_NAME, bit(texture_hires::enabled())) {
-        texture_hires::set_hd_cvar(hd);
+        texture_hires::HD_CVAR.set(hd);
     }
     // Outside the all-or-nothing tuple for the same reason as the HD switch:
     // it is independent of every other setting here.
@@ -201,7 +201,7 @@ pub fn install() {
         crate::gun_log::set_cvar(gun_log);
     }
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
-        crate::world_shaders::set_cvar(shaders);
+        crate::world_shaders::CVAR.set(shaders);
     }
     // Same: independent of every other setting, so outside the tuple.
     if let Some(map_text) = register(crate::map_text::NAME, "0") {
@@ -240,19 +240,19 @@ pub fn install() {
         crate::spectator_bars::CVAR.set(bars);
     }
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
-        crate::spectator_follow::set_cvar(lock);
+        crate::spectator_follow::CVAR.set(lock);
     }
     if let Some(deathcam) = register(crate::spectator_deathcam::NAME, "0") {
-        crate::spectator_deathcam::set_cvar(deathcam);
+        crate::spectator_deathcam::CVAR.set(deathcam);
     }
     if let Some(icons) = register(crate::overview_players::NAME, "0") {
-        crate::overview_players::set_cvar(icons);
+        crate::overview_players::CVAR.set(icons);
     }
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
-        crate::overview_marker::set_cvar(marker);
+        crate::overview_marker::CVAR.set(marker);
     }
     if let Some(speaker) = register(crate::overview_speaker::NAME, "0") {
-        crate::overview_speaker::set_cvar(speaker);
+        crate::overview_speaker::CVAR.set(speaker);
     }
     // On by default: a model turned round for a frame is wrong in any demo
     // (#927). A failed registration falls back to a plain toggle.
@@ -269,7 +269,7 @@ pub fn install() {
     }
     // On by default: a demo then shows the sniper scope the player saw.
     if let Some(scope) = register(crate::demo_scope::NAME, "1") {
-        crate::demo_scope::set_cvar(scope);
+        crate::demo_scope::CVAR.set(scope);
     }
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
@@ -281,24 +281,24 @@ pub fn install() {
         crate::hlae_window::set_cloak_cvar(cloak);
     }
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
-        crate::pov_live_bob::set_cvar(bob);
+        crate::pov_live_bob::CVAR.set(bob);
     }
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
-        crate::pov_live_bob::set_log_cvar(log);
+        crate::pov_live_bob::LOG_CVAR.set(log);
     }
     if let Some(blood) = register(crate::own_blood::NAME, "0") {
-        crate::own_blood::set_cvar(blood);
+        crate::own_blood::CVAR.set(blood);
     }
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
-        crate::map_weather::set_cvar(weather);
+        crate::map_weather::CVAR.set(weather);
     }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
-            family.set_cvar(mute);
+            family.cvar().set(mute);
         }
     }
     if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
-        crate::map_sounds::set_log_cvar(log);
+        crate::map_sounds::LOG_CVAR.set(log);
     }
     // Off unless Studio turns it on: a game not started from Studio keeps
     // its own sprays and crosshair (#428).
@@ -309,13 +309,14 @@ pub fn install() {
         register(crate::screen_effects::FLASH_NAME, "0"),
         register(crate::screen_effects::SHAKE_NAME, "0"),
     ) {
-        crate::screen_effects::set_cvars(flash, shake);
+        crate::screen_effects::FLASH.set(flash);
+        crate::screen_effects::SHAKE.set(shake);
     }
     if let Some(behind) = register(crate::hlae_window::NAME, "0") {
         crate::hlae_window::set_cvar(behind);
     }
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
-        crate::detail_cache::set_keep_cvar(keep);
+        crate::detail_cache::KEEP.set(keep);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
