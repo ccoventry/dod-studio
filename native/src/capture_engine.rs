@@ -922,7 +922,7 @@ pub fn spawn_capture_engine(
                     ));
                     None
                 }
-                None => match cmd.spawn() {
+                None => match crate::sys::launcher::Launcher::spawn(&mut cmd) {
                     Ok(c) => {
                         log_markdown(&format!("[HLAE] Spawned (PID {})", c.id()));
                         Some(c)
@@ -960,7 +960,7 @@ pub fn spawn_capture_engine(
                 crate::game_handoff::StartState::NotNeeded
             });
 
-            // The HLAE launcher process (`_child` above) injects into `hl.exe` and then
+            // The HLAE launcher process (`child` above) injects into `hl.exe` and then
             // exits on its own under `-noGui -autoStart` — that is expected handoff
             // behaviour, not a crash. The thing that actually matters is whether
             // `hl.exe` itself is still alive, so liveness is tracked separately via
@@ -1100,11 +1100,11 @@ pub fn spawn_capture_engine(
                 }
 
                 if !launcher_exit_logged && let Some(child) = child.as_mut() {
-                    match child.try_wait() {
+                    match child.exit_status(&sys) {
                         Ok(Some(status)) => {
                             launcher_exit_logged = true;
                             log_markdown(&format!(
-                                "[HLAE] Launcher exited after {} (status: {:?}) — expected handoff behaviour, not a crash by itself",
+                                "[HLAE] Launcher exited after {} (status: {}) — expected handoff behaviour, not a crash by itself",
                                 crate::utils::duration_text::duration_text(start_time.elapsed().as_secs_f64()),
                                 status
                             ));
@@ -1205,7 +1205,7 @@ pub fn spawn_capture_engine(
                 // game, the launcher, and the launcher's own injector.
                 if last_dialog_check.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
                     last_dialog_check = Some(std::time::Instant::now());
-                    let launcher_pid = child.as_ref().map(std::process::Child::id);
+                    let launcher_pid = child.as_ref().map(crate::sys::launcher::Launcher::id);
                     let game_pids = crate::sys::process::game_pids_in(&sys);
                     let mut launcher_pids = launcher_pid
                         .map(|pid| crate::sys::process::injector_pids_in(&sys, pid))
@@ -1225,8 +1225,7 @@ pub fn spawn_capture_engine(
                             crate::sys::process::kill_pid(*pid);
                         }
                         if !launcher_exit_logged && let Some(child) = child.as_mut() {
-                            let _ = child.kill();
-                            let _ = child.wait();
+                            child.kill();
                         }
                         kill_hl_exe_and_wait(&mut sys);
                         // A game already exiting when its box came up (the
@@ -1256,8 +1255,7 @@ pub fn spawn_capture_engine(
                     // leaves HLAE open on "AfxHook error, Code: 1" (seen
                     // 2026-09-29, a cancel 1.0s in), so the launcher goes first.
                     if !launcher_exit_logged && let Some(child) = child.as_mut() {
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        child.kill();
                         log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
                     }
                     match reuse_game {

@@ -57,8 +57,7 @@ pub fn plan(
 pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Result<(), String> {
     let before = crate::game_process_manager::running_game_pids();
     let mut cmd = config.build_hlae_process("");
-    let launcher = cmd
-        .spawn()
+    let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
         .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
     native::log_markdown(&format!(
         "[preview] in place: launched the game for \"{arg}\" (no patched copy)"
