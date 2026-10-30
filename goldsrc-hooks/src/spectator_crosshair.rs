@@ -405,6 +405,25 @@ fn red_ready(span: usize) -> Result<([u8; JUMP_LEN], bool), String> {
     Ok((jump, hooked))
 }
 
+/// What `cl_xhair_style 0` draws while matching: [`POV_RED`] and its jump
+/// once [`red_ready`], else the stock rect, the reason logged once. The third
+/// value says whether setting it up wrote anything.
+fn red_or_stock(span: usize) -> (i32, Option<[u8; JUMP_LEN]>, bool) {
+    match red_ready(span) {
+        Ok((jump, hooked)) => (POV_RED, Some(jump), hooked),
+        Err(why) => {
+            if !RED_FAILED.swap(true, Ordering::Relaxed) {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "spectator_crosshair: POV's red crosshair could not be set up, the stock one stays -- {why}"
+                    ))
+                };
+            }
+            (0, None, false)
+        }
+    }
+}
+
 /// DoD's `cl_xhair_style`, truncated and clamped the way the POV path does.
 ///
 /// Only an upper clamp -- `client+0x2ced0` has none at the bottom, so
@@ -457,29 +476,12 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
         ));
     }
 
-    let mut style = if matching { requested_style() } else { 0 };
-    let mut wrote = false;
-    let mut jump = None;
-    // A Players-table crosshair swaps the stock rect (`player_crosshair`),
-    // so it keeps the rect rather than the red crosshair.
-    if matching && style == 0 && !crate::player_crosshair::overriding() {
-        match red_ready(address) {
-            Ok((ready, hooked)) => {
-                style = POV_RED;
-                jump = Some(ready);
-                wrote |= hooked;
-            }
-            Err(why) => {
-                if !RED_FAILED.swap(true, Ordering::Relaxed) {
-                    unsafe {
-                        crate::debug::report(&format!(
-                            "spectator_crosshair: POV's red crosshair could not be set up, the stock one stays -- {why}"
-                        ))
-                    };
-                }
-            }
-        }
-    }
+    let (style, jump, mut wrote) = match if matching { requested_style() } else { 0 } {
+        // A Players-table crosshair swaps the stock rect (`player_crosshair`),
+        // so it keeps the rect rather than the red crosshair.
+        0 if matching && !crate::player_crosshair::overriding() => red_or_stock(address),
+        style => (style, None, false),
+    };
     let Some(want) = wanted(present, style, jump.as_ref()) else {
         return Err(format!(
             "{STYLE_CVAR} resolved to {style}, which is not a tile"
