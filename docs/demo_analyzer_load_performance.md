@@ -102,7 +102,7 @@ work (Tier 4), that's the first thing to instrument.
 ## Verified separately (source-read, not benchmarked)
 
 - **`native/src/patch/scanner.rs::scan_demo_for_highlights`** (called by
-  `studio/src-tauri/src/capture_manager.rs::scan_directory_impl`,
+  `studio/src-tauri/src/scan_manager.rs::scan_directory_impl`,
   i.e. every Capture Studio folder scan) already calls
   `analysis::Analysis::try_from_bytes(&bytes)` — **the exact same full parse**
   `analyze_demo_full` does — for every demo it scans, then discards

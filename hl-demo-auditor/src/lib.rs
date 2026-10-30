@@ -29,7 +29,7 @@ use zips::{list_zips, read_zip_demos};
 /// A demo file's identity: its size plus an FNV-1a hash of its first 64 KB.
 ///
 /// The one definition in the workspace. The Demo Auditor groups duplicates
-/// by it; Studio's scan (`capture_manager::demo_file_key`) uses its text form
+/// by it; Studio's scan (`scan_manager::demo_file_key`) uses its text form
 /// to skip demos already queued and unchanged, and saves that text in project
 /// files, so [`FileKey::to_text`] must never change shape. Reads 64 KB, not
 /// the whole demo, so keying a folder of hundreds costs milliseconds.
