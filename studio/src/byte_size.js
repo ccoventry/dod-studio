@@ -18,6 +18,12 @@ export function gbOrMbText(bytes) {
   return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
 }
 
+/** A size as the number of gigabytes to two places, "12.34", for strings that
+ *  add the "GB" themselves: the Capture tab's space warnings (#1181). */
+export function gigabytes(bytes) {
+  return (bytes / BYTES_PER_GB).toFixed(2);
+}
+
 /** A file's size in the Render tab's words: GB to `gbDecimals` places from a
  *  gigabyte up, whole MB below it. Anything that isn't a number counts as 0. */
 export function renderSizeText(bytes, gbDecimals) {

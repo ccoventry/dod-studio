@@ -34,7 +34,7 @@ import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
-import { BYTES_PER_MB, BYTES_PER_GB } from './byte_size.js';
+import { BYTES_PER_MB, gigabytes } from './byte_size.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
@@ -583,11 +583,11 @@ export async function refreshLaunchGuard(state) {
       warningEl.style.display = 'block';
     } else if (makesRoom) {
       warningEl.style.color = '#ffa726';
-      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
+      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = '#f44336';
-      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
+      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
       warningEl.style.color = '#ffa726';
@@ -612,7 +612,7 @@ export async function refreshLaunchGuard(state) {
 
   const footerRequiredEl = document.querySelector('#footer-required-space');
   if (footerRequiredEl) {
-    const requiredGb = (requiredBytes / BYTES_PER_GB).toFixed(2);
+    const requiredGb = gigabytes(requiredBytes);
     footerRequiredEl.textContent = STRINGS.CAPTURE_CONFIG.footerRequiredSpace(requiredGb);
     footerRequiredEl.style.color = insufficientSpace ? '#f44336' : '#4caf50';
   }
@@ -760,7 +760,7 @@ function renderClearPreviewsResults() {
     tbody.appendChild(tr);
   });
 
-  const totalGb = (totalBytes / BYTES_PER_GB).toFixed(2);
+  const totalGb = gigabytes(totalBytes);
   if (footerEl) footerEl.textContent = STRINGS.CLEAR_PREVIEWS_MODAL.foundReclaimable(currentPreviewScanResults.length, totalGb);
   updateClearPreviewsDeleteButtonState();
 }
@@ -1517,7 +1517,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         } else if (guard.availableBytes === 0) {
           stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {
-          stopWith(STRINGS.CAPTURE.insufficientDiskSpaceToast((guard.requiredBytes / 1e9).toFixed(2), (guard.availableBytes / 1e9).toFixed(2)));
+          stopWith(STRINGS.CAPTURE.insufficientDiskSpaceToast(gigabytes(guard.requiredBytes), gigabytes(guard.availableBytes)));
         }
         return;
       }
