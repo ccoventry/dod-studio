@@ -2778,3 +2778,71 @@ fn block_routes_carry_each_blocks_highlight_bounds_and_drive() {
     routes.sort_unstable();
     assert_eq!(routes, vec![(1000, 1200, 0), (5000, 5300, 0)]);
 }
+
+/// A Scheduled Command whose "after" offset runs past the demo's end is left
+/// out of the schedule with a note naming the offset, not left for the
+/// patcher to blame the highlights for (#1192).
+#[test]
+fn an_after_command_past_the_demo_end_is_left_out_and_explained() {
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-fixtures/ci_fixture.dem"
+    ));
+    let ((_, streaks, ..), _) =
+        crate::patch::scanner::scan_demo_for_highlights_with_analysis(path).expect("fixture scans");
+    let last_frame = streaks[0].total_demo_frames;
+
+    let mut config = mock_config();
+    config.custom_commands = vec![crate::patch::CustomCommand {
+        command: "echo late".to_string(),
+        offset: 40.0,
+        relation: CommandRelation::After,
+    }];
+    let (jobs, _) =
+        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new()).unwrap();
+    let late: Vec<i32> = jobs
+        .iter()
+        .flat_map(|j| &j.scheduled_commands)
+        .filter(|(_, c)| c.contains("echo late") || c.contains("CUSTOM_CMD1_AFTER"))
+        .map(|(t, _)| *t)
+        .collect();
+    let blocks: usize = jobs.iter().map(|j| j.blocks.len()).sum();
+    assert!(
+        late.len() < 2 * blocks,
+        "some command passed the end, so some are dropped"
+    );
+    assert!(
+        late.iter().all(|t| *t <= last_frame),
+        "nothing is scheduled past the last frame: {late:?} vs {last_frame}"
+    );
+
+    // The note for the last highlight names the command, offset, anchor and
+    // the demo's end.
+    let last = streaks.iter().max_by_key(|s| s.end_tick).unwrap();
+    let window = schedule::clip_window(last, &last.frame_times, &config, last.demo_fps);
+    let tick = schedule::custom_command_tick(
+        &config.custom_commands[0],
+        &window,
+        &last.frame_times,
+        last.demo_fps,
+    );
+    let note = schedule::past_demo_end_note(&config.custom_commands[0], tick, &window, last)
+        .expect("40 s after the last highlight is past the end");
+    assert!(
+        note.contains("echo late") && note.contains("40.0s after"),
+        "{note}"
+    );
+    assert!(
+        note.contains(&format!("ends at frame {}", window.last_frame)),
+        "{note}"
+    );
+    assert!(!note.contains("don't match"), "{note}");
+
+    // An offset inside the demo gets no note.
+    let near = crate::patch::CustomCommand {
+        offset: 0.1,
+        ..config.custom_commands[0].clone()
+    };
+    let t = schedule::custom_command_tick(&near, &window, &last.frame_times, last.demo_fps);
+    assert!(schedule::past_demo_end_note(&near, t, &window, last).is_none());
+}

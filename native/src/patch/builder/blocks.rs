@@ -39,8 +39,15 @@ pub(super) fn group_highlights(highlights: &[CaptureStreak]) -> Vec<HighlightGro
     }
 
     let mut sorted_groups: Vec<_> = grouped.into_iter().collect();
-    sorted_groups
-        .sort_by_key(|(_, streaks)| streaks.iter().map(|(_, s)| s.start_tick).min().unwrap_or(0));
+    // The map's order is random per run, so groups whose first highlights
+    // share a tick are told apart by demo and player (#1191).
+    sorted_groups.sort_by_key(|(key, streaks)| {
+        (
+            streaks.iter().map(|(_, s)| s.start_tick).min().unwrap_or(0),
+            key.0,
+            key.1,
+        )
+    });
     sorted_groups
         .into_iter()
         .map(|((source_demo, target_player), mut highlights)| {
