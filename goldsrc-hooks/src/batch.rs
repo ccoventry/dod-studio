@@ -391,6 +391,9 @@ fn skip(guard: &mut Option<Batch>, why: String) {
     batch.skipped.push(line);
     // Whatever this demo was recording is not a clip.
     run("mirv_recordmovie_stop");
+    // A skip inside a fast-forwarded gap (#831) would leave the speed up.
+    // An error means no demo player is running, so nothing is sped up.
+    let _ = crate::demo_seek::set_time_scale(1.0);
     let next = batch.at + 1;
     go_to(guard, next);
 }
@@ -723,6 +726,9 @@ pub unsafe extern "C" fn command() {
             HOLD.store(false, Ordering::Relaxed);
             if lock().take().is_some() {
                 run("mirv_recordmovie_stop");
+                // A batch stopped inside a fast-forwarded gap (#831) would
+                // leave the demo playing sped up.
+                let _ = crate::demo_seek::set_time_scale(1.0);
                 say("stopped");
             } else {
                 say("no batch running");

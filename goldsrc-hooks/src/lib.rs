@@ -234,6 +234,7 @@ mod anim_fix;
 mod batch;
 mod batch_end;
 mod behind_imports;
+mod build_id;
 mod center_text;
 mod clan_text;
 mod cmd_list;
@@ -274,6 +275,7 @@ mod hand_signals;
 mod hide_asset;
 mod hint_panel;
 mod hlae_window;
+mod hltv_fov;
 mod hltv_messages;
 mod hud_sprite_edges;
 mod hud_sprite_lod;
@@ -312,6 +314,7 @@ mod pov_live_bob;
 mod pov_recorder_shots;
 mod remote;
 mod review;
+mod review_keys;
 mod review_lock;
 mod run_in_background;
 mod scan;
@@ -463,6 +466,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
+    unsafe { debug::report(&format!("goldsrc-hooks build {}", build_id::ID)) };
 
     // Matching POV defaults to OFF, so a session where the hooks all install
     // correctly but nothing visibly changes is the expected outcome of simply

@@ -24,6 +24,27 @@ describe('take checks (#1084)', () => {
     expect(findingLine({ check: 'something_new' })).toBeNull();
   });
 
+  it('says a take far off its planned length is a capture problem, with both frame counts', () => {
+    const line = findingLine({ check: 'length', cause: 'capture', warn: true, frames: 1500, planned_frames: 5700, secs: 5 });
+    expect(line.text).toContain('1500 frames (5.0 s) but 5700 were planned');
+    expect(line.cause).toBe('Capturing again helps');
+    expect(line.warn).toBe(true);
+  });
+
+  it('says how many kills are outside the clip and where the first falls', () => {
+    const one = findingLine({ check: 'kill_outside', cause: 'capture', warn: true, count: 1, at_secs: 12, secs: 8 });
+    expect(one.text).toBe('A kill is not in the clip (it falls at 12.0 s of a 8.0 s clip).');
+    const two = findingLine({ check: 'kill_outside', cause: 'capture', warn: true, count: 2, at_secs: -2.5, secs: 8 });
+    expect(two.text).toContain('2 kills are not in the clip (the first falls at -2.5 s');
+  });
+
+  it('shows a take with no plan as OK with a note that its length and kills are unknown', () => {
+    const chip = checkChip({ status: CHECK_STATE.DONE, result: { findings: [{ check: 'no_plan', cause: 'unknown', warn: false }] } });
+    expect(chip.label).toBe('OK');
+    expect(chip.title).toBe("The clip's length and kills weren't checked: this take has no plan recorded (captured before Studio kept one, or from a demo scanned before then).");
+    expect(findingLine({ check: 'no_plan', cause: 'unknown', warn: false }).cause).toBe('');
+  });
+
   it('lists warnings before notes', () => {
     const lines = findingLines({ findings: [HOLDS, BLACK] });
     expect(lines.map((l) => l.warn)).toEqual([true, false]);
@@ -34,7 +55,7 @@ describe('take checks (#1084)', () => {
     expect(ok.label).toBe('OK');
     expect(ok.title).toContain('holds still briefly');
     const clean = checkChip({ status: CHECK_STATE.DONE, result: { findings: [] } });
-    expect(clean.title).toBe('Picture and sound look good.');
+    expect(clean.title).toBe('Picture, sound, length and kills look good.');
     const bad = checkChip({ status: CHECK_STATE.DONE, result: { findings: [BLACK, { check: 'no_sound', cause: 'capture', warn: true }, HOLDS] } });
     expect(bad.label).toBe('⚠ 2');
     expect(bad.cls).toBe('rj-check-warn');

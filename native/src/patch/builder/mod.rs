@@ -2,6 +2,7 @@
 // Batch job construction: `build_batch_queue` and the init commands it adds.
 // The helpers it uses live beside it — `timing` (tick walks, roll floors,
 // block merging), `speed` (the fast-forward and normal-speed aliases),
+// `kill_gaps` (long gaps between kills recorded sped up, #831),
 // `alloc` (drive allocation), `workspace` (junctions and the legacy
 // channel-based worker spawner), `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
@@ -14,6 +15,7 @@ use crate::shared::paths::{CHAIN_DEMO_PREFIX, PRIMER_DEMO_STEM};
 use std::sync::{Arc, atomic::AtomicBool};
 
 mod alloc;
+pub mod kill_gaps;
 mod preview;
 mod speed;
 mod timing;
@@ -523,6 +525,7 @@ pub fn build_batch_queue(
         &final_init_commands(config),
         Some(&crate::patch::cfg_scan::scan_cached(&dod_dir)),
     ));
+    helper_cfg_content.push_str(&ramp_alias_lines(config));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
     // driven off the console-log markers these same stages already echo, so the
@@ -737,12 +740,18 @@ pub fn build_batch_queue(
         let mut merged_streaks: Vec<CaptureStreak> = Vec::new();
         let mut merged_sources: Vec<Vec<usize>> = Vec::new();
         let mut chained_to_previous: Vec<bool> = Vec::new();
+        // Every kill each block records, for the gaps between them (#831).
+        // The merge below keeps only an absorbed highlight's last kill in the
+        // block's own list, which would hide the gaps inside it.
+        let mut merged_kill_frames: Vec<Vec<i32>> = Vec::new();
 
         for (current, payload_idx) in streaks.into_iter().zip(streak_payload_indices) {
+            let current_kills = block_kill_frames(&current);
             if merged_streaks.is_empty() {
                 merged_streaks.push(current);
                 merged_sources.push(vec![payload_idx]);
                 chained_to_previous.push(false);
+                merged_kill_frames.push(current_kills);
                 continue;
             }
 
@@ -775,6 +784,10 @@ pub fn build_batch_queue(
                     last.end_index = last.kills.len() - 1;
                 }
                 merged_sources.last_mut().unwrap().push(payload_idx);
+                let kills = merged_kill_frames.last_mut().unwrap();
+                kills.extend(current_kills);
+                kills.sort_unstable();
+                kills.dedup();
             } else {
                 let rolls_collide = blocks_merge(
                     prev_stop,
@@ -785,6 +798,7 @@ pub fn build_batch_queue(
                 merged_streaks.push(current);
                 merged_sources.push(vec![payload_idx]);
                 chained_to_previous.push(rolls_collide);
+                merged_kill_frames.push(current_kills);
             }
         }
 
@@ -888,6 +902,8 @@ pub fn build_batch_queue(
                 // than duplicating that arithmetic.
                 record_start_tick: 0,
                 record_stop_tick: 0,
+                ramped_gaps: 0,
+                plan: None,
             });
         }
         blocks.sort_by_key(|b| b.block_index);
@@ -1045,9 +1061,48 @@ pub fn build_batch_queue(
             // than indexed with, since allocation may reorder `blocks`.
             // The decal flush is the consumer: it needs the frames that end up
             // in the take, which `start_tick`/`end_tick` are not.
+            // On the clock the hook records on (`viewdemo_clock`), from the
+            // same highlights `runtime_batch` builds it from:
+            // `frame_times_ref` stops at the demo's loading segment and never
+            // reaches a clip's frames.
+            let clock =
+                crate::patch::viewdemo_clock::clock_for(&streak.source_demo, &raw_streaks).ok();
+            // Long gaps between kills, recorded sped up (#831). Inside the
+            // record window by construction: between two of its kills.
+            let ramp_speed = config.kill_gaps.ramp_speed();
+            let ramps = match ramp_speed {
+                Some(_) => kill_gaps::ramps(
+                    &merged_kill_frames[i],
+                    config.kill_gaps.over_seconds,
+                    &kill_gaps::Timeline {
+                        frame_times: frame_times_ref,
+                        fps: demo_fps,
+                        clock: clock.as_ref(),
+                    },
+                    (record_start_tick, r_stop),
+                ),
+                None => Vec::new(),
+            };
             if let Some(block) = blocks.iter_mut().find(|b| b.block_index == i) {
                 block.record_start_tick = record_start_tick;
                 block.record_stop_tick = r_stop;
+                block.ramped_gaps = ramps.len();
+                // Every kill the block records, the merged highlights' too, so
+                // the check finds any of them outside the video. A ramp makes
+                // the video shorter than the window, which the plan carries.
+                block.plan = clock.as_ref().and_then(|clock| {
+                    let mut plan = crate::hlcr::take_plan::plan_for_block(
+                        |tick| clock.seconds(tick),
+                        record_start_tick,
+                        r_stop,
+                        &merged_kill_frames[i],
+                    )?;
+                    let start = clock.seconds(record_start_tick);
+                    plan.sped_up = kill_gaps::sped_up(&ramps, ramp_speed.unwrap_or(1.0), |tick| {
+                        clock.seconds(tick) - start
+                    });
+                    Some(plan)
+                });
             }
 
             // Custom command overrides
@@ -1187,6 +1242,11 @@ pub fn build_batch_queue(
                 &format!("START_RECORD - Tick {}", record_start_tick),
             ) {
                 scheduled_commands.push((t, echo_cmd));
+            }
+
+            for ramp in &ramps {
+                scheduled_commands.push((ramp.on_tick, kill_gaps::RAMP_ON.to_string()));
+                scheduled_commands.push((ramp.off_tick, kill_gaps::RAMP_OFF.to_string()));
             }
 
             // At End Frame (Stage 3)

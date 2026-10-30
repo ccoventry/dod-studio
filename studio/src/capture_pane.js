@@ -26,6 +26,7 @@ import { syncCommandProfileRow, getAllCommandProfiles, getActiveCommandProfile }
 import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
+import { readKillGaps, estimateKillGaps, wireKillGaps } from './kill_gaps_setting.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { createCapturePrecheck } from './capture_precheck.js';
 import { createCaptureProgress, endKind } from './capture_progress.js';
@@ -442,6 +443,8 @@ export async function refreshLaunchGuard(state) {
         numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
       )
       : undefined,
+    // Long gaps between kills recorded sped up write fewer frames (#831).
+    killGaps: estimateKillGaps(readKillGaps(), document.querySelector('#config-hook-runs-batch')?.checked ?? true),
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -1020,6 +1023,7 @@ export function batchSettingsPayload(state) {
     record_stop_trail: recordStopTrailVal,
     initial_delay: initialDelayVal,
     fast_forward_speed: fastForwardSpeedVal,
+    kill_gaps: readKillGaps(),
     auto_clear_logs: autoClearLogsVal,
     auto_clear_previews: autoClearPreviewsVal,
     auto_clear_temp_demos: autoClearTempDemosVal,
@@ -1181,7 +1185,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   document.querySelector('#config-hook-runs-batch')?.addEventListener('change', () => {
     renderTimingDiagram();
     refreshInitCommandWarnings();
+    // A patched batch keeps its gaps (#831), which moves the disk estimate.
+    refreshLaunchGuard();
   });
+  wireKillGaps(() => { refreshLaunchGuard(); notifySettingsChange(); });
   renderTimingDiagram();
   // Checkboxes read by persistAppSettings/buildCapturePayload but with no
   // change listener of their own — same missing-wiring bug as the Timing
@@ -1419,7 +1426,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const sessionId = generateSessionId();
     const settings = batchSettingsPayload(state);
     if (!settings) return null;
-    lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths };
+    // kill_gaps: the take labels name the speed sped-up gaps played at (#831).
+    lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths, kill_gaps: settings.kill_gaps };
     // The finish step (#440) picks its codec by the mode this batch used.
     lastDispatch.captureMode = settings.capture_mode;
     return {
