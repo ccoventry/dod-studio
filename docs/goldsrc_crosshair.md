@@ -230,6 +230,19 @@ level) does not widen it, and neither does a plain fall, which POV's 3D
 velocity would. The easing runs per frame, as in POV, so the arms move at the
 frame rate in both.
 
+**A POV demo never widens it for movement; live play does, and so does this.**
+The velocity the gap reads is the client's own prediction, which does not run
+while a demo plays, so a POV demo keeps the resting gap however fast its
+recorder runs: warchyld's K43 in `wsod25_grp2_h1_warchyld` stayed at 5 px over
+40 s of the first round's rush (377 frames, 5 to 6 px measured), where the
+spectated view of him in `wsod25_grp2_h1_hltv` opened to 25 px whenever he ran.
+The weapon and the deploy terms are recorded and show in both. As for §2's
+hides, the spectated view follows live play.
+
+Measured on both builds with `game_probe.py` clips (5 fps, frame-locked) and
+a scan of each frame for the first red pixel of each arm: resting 5 px, running 25 px, a stick
+grenade the fixed 4 px, a K98 34 px moving, the Colt 9 and 29.
+
 ### When it is hidden
 
 The spectator branch draws its crosshair whenever the camera is in a player's
