@@ -13,7 +13,6 @@ import { renderNoCameraDataBanner } from './camera_data.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
-import { escapeHtml as esc } from './html.js';
 import { analyzerLoadingView, analyzerLoadingHtml } from './analyzer_loading.js';
 import { escapeHtml as esc } from './html.js';
 import { startAnalyzerReport, showReport, setActiveSubTab } from './analyzer_report.js';
