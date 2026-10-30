@@ -7,6 +7,7 @@ mod builtin_profiles;
 mod capture_manager;
 mod capture_room_manager;
 mod combine_manager;
+mod config_checks_cmd;
 mod crash_maps_manager;
 mod dem_open_with;
 mod demo_cache_cmd;
@@ -1112,8 +1113,8 @@ pub fn run() {
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
             map_manager::download_map,
-            map_manager::scan_game_configs,
-            map_manager::roll_floors,
+            config_checks_cmd::scan_game_configs,
+            config_checks_cmd::roll_floors,
             hd_manager::hd_status,
             hd_manager::hd_setup_tools,
             hd_manager::hd_cancel,
