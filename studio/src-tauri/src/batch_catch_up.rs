@@ -15,7 +15,7 @@
 // Studio that closed.
 
 use crate::capture_manager::{
-    CaptureManifest, VerifiedBlock, record_capture_settings, verify_capture_takes_settling,
+    CaptureManifest, CutBy, VerifiedBlock, record_capture_settings, verify_capture_takes_settling,
 };
 use native::log_markdown;
 use serde::Serialize;
@@ -66,11 +66,38 @@ fn catchable_in(dir: &Path) -> Vec<CaptureManifest> {
         .collect()
 }
 
+/// Marks each take HLAE never finished as cut short when the game closed:
+/// not captured, not renderable, left on disk for the user. A watched batch
+/// knows this from its markers (#1124); a batch nobody watched end has only
+/// the take itself (#20). Returns how many it marked.
+fn apply_unfinished_takes(manifest: &CaptureManifest, blocks: &mut [VerifiedBlock]) -> usize {
+    let mut marked = 0;
+    for (v, block) in blocks.iter_mut().zip(&manifest.blocks) {
+        if !v.captured || v.rendered {
+            continue;
+        }
+        if native::hlcr::take_length::is_unfinished_take(&block.take_folder) {
+            v.captured = false;
+            v.renderable = false;
+            v.cut_short = true;
+            v.cut_by = Some(CutBy::GameClosed);
+            log_markdown(&format!(
+                "[batch-catch-up] {} was cut short when the game closed: not counted as captured. Its partial take is left at {}",
+                block.take_key,
+                block.take_folder.display()
+            ));
+            marked += 1;
+        }
+    }
+    marked
+}
+
 /// Checks `manifest`'s takes on disk, records the capture settings beside
 /// them as a watched batch does, and rewrites its manifest as unwatched.
 fn catch_up_one(dir: &Path, manifest: CaptureManifest) -> CaughtUpBatch {
     // The batch ended long ago: no take is still being flushed.
-    let blocks = verify_capture_takes_settling(&manifest, None, &mut |_| {});
+    let mut blocks = verify_capture_takes_settling(&manifest, None, &mut |_| {});
+    apply_unfinished_takes(&manifest, &mut blocks);
     let captured = blocks.iter().filter(|b| b.captured).count();
     log_markdown(&format!(
         "[batch-catch-up] session {} ran while Studio was closed: {}/{} takes on disk",
@@ -211,6 +238,53 @@ mod tests {
 
         // Rewritten as unwatched, so the next start leaves it alone.
         assert!(catch_up_in(&manifests, None).is_empty());
+    }
+
+    #[test]
+    fn a_take_hlae_never_finished_is_not_captured() {
+        let manifests = Scratch::new("catch_up_unfinished");
+        let takes = Scratch::new("catch_up_unfinished_takes");
+        let whole = takes.path().join("b0");
+        let cut = takes.path().join("b1");
+        for (folder, data_size) in [(&whole, 8u32), (&cut, 0u32)] {
+            let take = folder.join("take0000");
+            std::fs::create_dir_all(take.join("all")).unwrap();
+            std::fs::write(take.join("all").join("00000.tga"), b"x").unwrap();
+            std::fs::write(take.join("sound.wav"), wav(data_size, 8)).unwrap();
+        }
+        let m = manifest(
+            "session_a",
+            vec![block(&whole, 0, vec![0]), block(&cut, 1, vec![1])],
+            &["u0", "u1"],
+        );
+        crate::manifest_file::write_in(&manifests, &m, "planned", None).unwrap();
+
+        let batches = catch_up_in(&manifests, None);
+        let b = &batches[0].blocks;
+        assert_eq!(
+            b.iter().map(|v| v.captured).collect::<Vec<_>>(),
+            vec![true, false]
+        );
+        assert!(b[1].cut_short);
+        assert_eq!(b[1].cut_by, Some(CutBy::GameClosed));
+        assert!(cut.join("take0000").join("sound.wav").exists());
+    }
+
+    /// A 16-bit stereo wav header saying `data_size` bytes, followed by
+    /// `bytes` bytes of silence.
+    fn wav(data_size: u32, bytes: usize) -> Vec<u8> {
+        let mut w = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+        w.extend_from_slice(&16u32.to_le_bytes());
+        w.extend_from_slice(&1u16.to_le_bytes());
+        w.extend_from_slice(&2u16.to_le_bytes());
+        w.extend_from_slice(&22050u32.to_le_bytes());
+        w.extend_from_slice(&(22050u32 * 4).to_le_bytes());
+        w.extend_from_slice(&4u16.to_le_bytes());
+        w.extend_from_slice(&16u16.to_le_bytes());
+        w.extend_from_slice(b"data");
+        w.extend_from_slice(&data_size.to_le_bytes());
+        w.resize(w.len() + bytes, 0);
+        w
     }
 
     #[test]
