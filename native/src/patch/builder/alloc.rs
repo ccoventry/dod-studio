@@ -237,6 +237,18 @@ mod one_at_a_time_tests {
 
     const GB: u64 = 1_000_000_000;
 
+    /// A capture folder whose free space can't be read (a relative path) and
+    /// no folder at all both plan as unbounded, as they did when "unknown"
+    /// was `u64::MAX`.
+    #[test]
+    fn unknown_free_space_snapshots_as_an_unbounded_budget() {
+        let unreadable = DriveBudget::snapshot(&[std::path::PathBuf::from("relative/takes")]);
+        assert_eq!(unreadable.free, vec![u64::MAX]);
+        let none = DriveBudget::snapshot(&[]);
+        assert_eq!(none.volume_of_drive, vec![0]);
+        assert_eq!(none.free, vec![u64::MAX]);
+    }
+
     #[test]
     fn blocks_that_fit_alone_go_to_the_first_drive_that_holds_each() {
         let mut active = 0;

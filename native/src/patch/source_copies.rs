@@ -95,12 +95,13 @@ pub fn plan<'a>(
 }
 
 /// Whether `free` bytes on the game's drive take `needed` bytes of copies
-/// and still leave [`COPY_HEADROOM_BYTES`]. `Err` says what's short.
-pub fn space_check(free: u64, needed: u64) -> Result<(), String> {
+/// and still leave [`COPY_HEADROOM_BYTES`]. `Err` says what's short. A drive
+/// whose free space is unknown (`None`) is let through.
+pub fn space_check(free: Option<u64>, needed: u64) -> Result<(), String> {
     let wanted = needed.saturating_add(COPY_HEADROOM_BYTES);
-    if free >= wanted {
+    let Some(free) = free.filter(|&free| free < wanted) else {
         return Ok(());
-    }
+    };
     let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
     Err(format!(
         "the game's drive has {:.1} GB free, and copying the demos there needs {:.1} GB plus {:.0} GB to spare",
@@ -222,10 +223,10 @@ mod tests {
     #[test]
     fn the_space_check_wants_the_copies_plus_the_headroom() {
         let mb = 1024 * 1024;
-        assert!(space_check(COPY_HEADROOM_BYTES + 300 * mb, 300 * mb).is_ok());
-        let e = space_check(COPY_HEADROOM_BYTES + 299 * mb, 300 * mb).unwrap_err();
+        assert!(space_check(Some(COPY_HEADROOM_BYTES + 300 * mb), 300 * mb).is_ok());
+        let e = space_check(Some(COPY_HEADROOM_BYTES + 299 * mb), 300 * mb).unwrap_err();
         assert!(e.contains("GB free"), "{e}");
-        assert!(space_check(u64::MAX, u64::MAX).is_ok());
+        assert!(space_check(None, u64::MAX).is_ok());
     }
 
     #[test]
