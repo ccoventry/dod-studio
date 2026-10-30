@@ -751,6 +751,15 @@ export const STRINGS = {
     EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
     exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
+    // #110: the finished renders as an EDL for VEGAS Pro.
+    EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
+    EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
+    exportEdlNone: (skipped) => skipped > 0
+      ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
+      : 'No finished renders yet, so there is nothing to export.',
+    exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
+    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -1593,10 +1602,26 @@ export const STRINGS = {
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
     projectUpdated: (name) => `Marked them in the project ${name}.`,
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
+    // The game is open, so the batch may still be capturing in it (#20).
+    WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
+    STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
+  },
+
+  // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
+  BATCH_RESUME: {
+    TITLE: 'Capture the rest?',
+    message: (captured, total, left) => (captured === 0
+      ? `A capture batch stopped before the end while DoD Studio was closed, and none of its ${total === 1 ? 'clip is' : `${total} clips are`} on disk.`
+      : `A capture batch stopped before the end while DoD Studio was closed. ${captured} of ${total} clips are on disk and marked Captured; ${left === 1 ? '1 clip was' : `${left} clips were`} not captured.`),
+    inProject: (name) => `Capture them now? Studio opens the project ${name}, ticks just those highlights and starts a capture batch.`,
+    IN_QUEUE: 'Capture them now? Studio ticks just those highlights and starts a capture batch.',
+    CAPTURE_BUTTON: 'Capture them now',
+    NOT_NOW_BUTTON: 'Not now',
+    NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────

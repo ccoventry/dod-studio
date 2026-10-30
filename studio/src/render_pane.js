@@ -40,6 +40,7 @@ import { rowsOf, batchFrames, secondsLeft, renderingLine, scanEndLine, createRen
 import { createClock, hideBar, showBar } from './progress_view.js';
 import { durationTextMs } from './time_format.js';
 import { markerCsv, markerRows } from './marker_list.js';
+import { startVegasEdlExport } from './vegas_edl_export.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { whileDialogOpens } from './dialog_wait.js';
 import { notify } from './os_notifications.js';
@@ -53,6 +54,7 @@ import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
 import { startTakePreview } from './take_preview.js';
 import { startTakeChecks } from './take_checks.js';
+import { renderSizeText } from './byte_size.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -298,10 +300,7 @@ function wireSettingsCell(cell) {
  *  estimate: see TABLE_HEADER_FILE_SIZE_TITLE for why. */
 function formatFileSize(bytes) {
   if (bytes == null) return STRINGS.RENDER.FILE_SIZE_UNKNOWN;
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(2))
-    : STRINGS.RENDER.fileSizeMb((bytes / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 2);
 }
 
 /** Builds one job's `<tr>` fresh — only ever called once per job id. */
@@ -710,6 +709,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const getProjectTeams = takeTracking?.getProjectTeams || (() => null);
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
+  startVegasEdlExport({
+    getJobs: () => jobs,
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();

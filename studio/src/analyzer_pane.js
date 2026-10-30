@@ -12,7 +12,7 @@ import { analyzeDemoFull, getWeaponDisplayNames, loadMapOverview, splitDemoAuto 
 import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { renderDamageBanner } from './analyzer_damage.js';
 import { renderNoCameraDataBanner } from './camera_data.js';
-import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
+import { SHORT_MAP_SECONDS } from './split_pane.js';
 import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { STRINGS } from './strings.js';
@@ -21,6 +21,7 @@ import { clockFloor as formatMMSS, durationText } from './time_format.js';
 import { escapeHtml as esc } from './html.js';
 import { renderFlagsTab } from './analyzer_flags.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
+import { fileNameOf } from './path_display.js';
 import { startAnalyzerBrowser, browserFolder, revealDemo, markDemoSelected, relistFolderOf } from './analyzer_browser.js';
 // demo_folders.js redraws the quick links through the pane's interface.
 export { refreshAnalyzerQuickLinks } from './analyzer_browser.js';
@@ -310,7 +311,7 @@ async function splitAnalyzedDemo(path, update) {
   } finally {
     unlisten();
   }
-  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileName(w.path))), 'success', 6000);
+  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileNameOf(w.path))), 'success', 6000);
   await relistFolderOf(path);
   if (written.length) await loadAnalyzerDemo(written[0].path);
 }

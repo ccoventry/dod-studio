@@ -23,6 +23,7 @@ import {
   FPS_LADDER, CLIP_SECONDS, pct, levelName, ladderStops, recommendedRate, ladderSummary, stepLines, testSessionId,
   gameCell, FRAME_TIMES_ON, FRAME_TIMES_OFF,
 } from './obs_capture_test_logic.js';
+import { fileNameOf } from './path_display.js';
 
 /** How long after the batch's last status line its takes may still arrive. */
 const TAKES_GRACE_MS = 5000;
@@ -297,7 +298,7 @@ export function createObsCaptureTest({ getState, persist }) {
   const demoResetBtn = el('obs-test-demo-reset-btn');
   const showDemo = () => {
     const demo = panel.dataset.demo;
-    if (demoName) demoName.textContent = demo ? demo.split(/[\\/]/).pop() : STRINGS.OBS_TEST.DEMO_BUNDLED;
+    if (demoName) demoName.textContent = demo ? fileNameOf(demo) : STRINGS.OBS_TEST.DEMO_BUNDLED;
     if (demoName) demoName.title = demo || '';
     if (demoResetBtn) demoResetBtn.hidden = !demo;
     // The bundled demo's clip is about a minute already, so "1-minute clips"
