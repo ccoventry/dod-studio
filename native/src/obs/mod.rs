@@ -62,7 +62,7 @@ pub use session::{LateStart, ObsSession, RecordedBlock};
 /// 1.0s of lead against OBS's measured 59-85 ms start latency is a ~14x margin.
 /// A margin is not a guarantee, so with the hook running the batch the game
 /// also waits at this marker until OBS is recording (#1109,
-/// `capture_engine::RecordingGoAhead`).
+/// `capture_engine::markers::RecordingGoAhead`).
 pub const TRIGGER_MARKER: MarkerKind = MarkerKind::AudioSync;
 
 /// Marker that ends a block's recording.
