@@ -292,7 +292,9 @@ mod tests {
     #[test]
     fn an_unanswered_request_fails_when_its_time_is_up() {
         let (sender, receiver) = channel::<ReviewUpdate>();
-        sender.send(ReviewUpdate::Progress("Scanning".into())).unwrap();
+        sender
+            .send(ReviewUpdate::Progress("Scanning".into()))
+            .unwrap();
         let mut out = Vec::new();
         forward(
             &receiver,

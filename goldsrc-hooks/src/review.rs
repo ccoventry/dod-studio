@@ -1314,7 +1314,7 @@ fn start(path: &str) {
         }
     };
     let (queue, options) = queue;
-    let at =match start_index(&queue, options.from) {
+    let at = match start_index(&queue, options.from) {
         Ok(at) => at,
         Err(first) => {
             say("no highlight after where the demo was: starting from the first");
