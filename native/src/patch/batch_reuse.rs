@@ -13,7 +13,7 @@
 //!   nothing to the launch line a batch would not add over the pipe.
 //! - **The install, game folder, resolution and hook DLL** (`launch_settings`,
 //!   #666, #1143): the caller asks about a game started with other ones
-//!   before this. That check compares the hook DLL's path and build; this
+//!   before this. That check compares the hook DLL's build (#1146); this
 //!   one only refuses a game that has none, which Steam started.
 //! - **HLAE is in it** (`AfxHookGoldSrc.dll`, read off the same list): every
 //!   capture mode records through HLAE's `mirv_` commands.

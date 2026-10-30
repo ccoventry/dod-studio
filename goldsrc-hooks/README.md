@@ -23,22 +23,29 @@ switch rather than adding a command:
   pull, the throw, and the catch and wind-up of a primed one. See
   `docs/goldsrc_hltv_animation_fix.md`.
 - **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
-  tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
+  tile `cl_xhair_style` gives the POV view (for style 0, POV's red crosshair,
+  its gap following the watched player), instead of DoD's hardcoded 24x24
   tile of `crosshairs.spr`, and hidden when the player's own would be while
   playing: sprinting, in the air after a jump, going prone or getting up,
   crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt
   rifle, holding a knife, spade or sniper rifle, or a machine gun that is not
   deployed. Loses to `ds_hud_hide_crosshair`, which stubs the whole
   function. See `docs/goldsrc_crosshair.md` section 2.
-- **Prone eye height**: the camera drops to the ground when the spectated
-  player goes prone. The game's in-eye camera has no prone case and leaves it
-  at crouch height. See `docs/goldsrc_spectator_camera.md`.
+- **Eye height**: the camera drops to the ground when the spectated player
+  goes prone. The game's in-eye camera has no prone case and leaves it at
+  crouch height. Into a crouch it eases down over the 0.4 s their own view
+  takes and ends when theirs does, where the game drops it four times faster
+  and 0.4 s later (#1144). Starting with their view takes knowing the crouch
+  is coming, so a thread of its own reads the demo file ahead of playback
+  (`src/lookahead.rs`, #1154). See `docs/goldsrc_spectator_camera.md`.
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
   ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
   while spectating). Same speed as a typical POV recording, whatever the
   capture rate: 55 steps down and 19 back at 200 steps a second, 0.28 s
-  and 0.09 s (#704). See `src/spectator_gun.rs`.
+  and 0.09 s (#704). A sprint let go while running off an edge brings it
+  back up as theirs does, read ahead in the demo file too (#1154). See
+  `src/spectator_gun.rs`.
 
 **Missing gunshots** (`ds_sound_restore_gunshots 1`, on by default; its own
 switch since #1036, because POV demos lose them too): an HLTV demo has no fire
@@ -415,7 +422,10 @@ Per-feature details, and what is live-proven versus established by static
 analysis only, are in each module's `//!` doc and the linked `docs/` pages
 (listed under "The hook DLL" in the [docs index](../docs/README.md)).
 `tools/` holds a verifier per patched site, which checks the Rust constants
-against a real `client.dll` or `hw.dll`.
+against a real `client.dll` or `hw.dll`. `tools/name_client_dll.py` names
+`client.dll`'s functions from the symbols in DoD's Linux `client.so`; start
+new client-side work from its map
+([goldsrc_linux_debug_symbols.md](../docs/goldsrc_linux_debug_symbols.md)).
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites
 (world sprites and the HUD's atlases -- kill feed, weapon icons, scopes, but

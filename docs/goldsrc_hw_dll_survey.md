@@ -543,6 +543,18 @@ CL_UPDATE_MASK     hw+0x13afcc = 63
 That is why the predicate is checkable offline at all, and it is what
 `survey_hw_dll.py entities` re-checks.
 
+### The new frame is sized by the declared count
+
+The new frame's entity array is allocated from the packet's `entity_count`,
+and carried entities are copied into it with no check against that size:
+`hw+0x13453` is a `rep movsd` of 0x55 dwords (one 340-byte `entity_state_t`)
+to `frame[+0x24] + newindex * 0x154`. The `newindex == MAX_PACKET_ENTITIES`
+message just before it only prints. A packet that declares fewer entities than
+the client's carried set overruns the heap: #15's salvaged `m1_h1` faults there
+writing an 11th entry into a block declared for 10, and others corrupt the heap and fault
+later. Any rewrite of packet entities has to state the count the client will
+actually build (`analysis/examples/shared/entity_carry.rs`).
+
 ---
 
 ## 9. The decal ring

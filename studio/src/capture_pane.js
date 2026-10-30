@@ -1,6 +1,5 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, launchObs, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
-import { invoke } from '@tauri-apps/api/core';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, launchObs, obsTestConnection, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { themedConfirm } from './themed_confirm.js';
@@ -35,6 +34,8 @@ import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
+import { BYTES_PER_MB, gigabytes } from './byte_size.js';
+import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -54,6 +55,15 @@ let captureProgress = null;
 /** Whether a capture batch is running right now (#545's close prompt). */
 export function isCaptureRunning() {
   return capturingInFlight;
+}
+
+// Start Capture Batch's click, once initCaptureUI has wired it.
+let startCaptureClick = null;
+
+/** Runs Start Capture Batch as its click does, every check included, for a
+ *  batch Studio offers itself (batch_resume.js, #20). */
+export function startCaptureFromOffer() {
+  return startCaptureClick ? startCaptureClick() : Promise.resolve();
 }
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
@@ -280,7 +290,7 @@ export async function runObsConnectionTest({ auto = false } = {}) {
   status.style.display = '';
   status.textContent = STRINGS.CAPTURE_CONFIG.OBS_TESTING;
   try {
-    const report = await invoke('obs_test_connection', {
+    const report = await obsTestConnection({
       host: document.querySelector('#config-obs-host')?.value?.trim() || '127.0.0.1',
       port: parseInt(document.querySelector('#config-obs-port')?.value, 10) || 4455,
       password: document.querySelector('#config-obs-password')?.value || '',
@@ -573,11 +583,11 @@ export async function refreshLaunchGuard(state) {
       warningEl.style.display = 'block';
     } else if (makesRoom) {
       warningEl.style.color = '#ffa726';
-      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
+      warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
       warningEl.style.color = '#f44336';
-      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning((requiredBytes / 1e9).toFixed(2), (availableBytes / 1e9).toFixed(2));
+      warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
       warningEl.style.color = '#ffa726';
@@ -602,7 +612,7 @@ export async function refreshLaunchGuard(state) {
 
   const footerRequiredEl = document.querySelector('#footer-required-space');
   if (footerRequiredEl) {
-    const requiredGb = (requiredBytes / (1024 * 1024 * 1024)).toFixed(2);
+    const requiredGb = gigabytes(requiredBytes);
     footerRequiredEl.textContent = STRINGS.CAPTURE_CONFIG.footerRequiredSpace(requiredGb);
     footerRequiredEl.style.color = insufficientSpace ? '#f44336' : '#4caf50';
   }
@@ -686,13 +696,13 @@ export function applyCommandsState(lists) {
 // ── Clear Previews audit modal ─────────────────────────────────────────────
 //
 // Audits `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (see the
-// block comment above `patch_bookmark_previews` in capture_manager.rs) left
+// block comment above `patch_bookmark_previews` in demo_preview.rs) left
 // behind across capture sessions, and lets the user purge them.
 
 let currentPreviewScanResults = [];
 
 function formatPreviewSize(bytes) {
-  return STRINGS.CAPTURE.megabytesLabel((bytes / (1024 * 1024)).toFixed(2));
+  return STRINGS.CAPTURE.megabytesLabel((bytes / BYTES_PER_MB).toFixed(2));
 }
 
 function updateClearPreviewsDeleteButtonState() {
@@ -750,7 +760,7 @@ function renderClearPreviewsResults() {
     tbody.appendChild(tr);
   });
 
-  const totalGb = (totalBytes / (1024 * 1024 * 1024)).toFixed(2);
+  const totalGb = gigabytes(totalBytes);
   if (footerEl) footerEl.textContent = STRINGS.CLEAR_PREVIEWS_MODAL.foundReclaimable(currentPreviewScanResults.length, totalGb);
   updateClearPreviewsDeleteButtonState();
 }
@@ -1374,7 +1384,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // batch's end isn't why. The end cuts one clip at most: its `cut_by`.
         const stoppedEarly = blocks.filter((b) => b.short_take).length;
         const cut = blocks.filter((b) => b.cut_short && !b.short_take);
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by)}${marked}`, 'error');
+        // OBS started recording after the clip did (#1109).
+        const startedLate = blocks.filter((b) => b.started_late_ms && !b.cut_short).length;
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate)}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else {
@@ -1442,7 +1454,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   }
 
   if (startBtn) {
-    startBtn.addEventListener('click', async () => {
+    startCaptureClick = async () => {
       if (precheck.isChecking()) return;
       precheck.begin();
       try {
@@ -1451,7 +1463,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // A check that threw, or returned without saying why.
         precheck.stop();
       }
-    });
+    };
+    startBtn.addEventListener('click', startCaptureClick);
 
     // Start Capture Batch's checks, in order, each on the footer line (#953).
     // A check that stops the batch calls precheck.stop() with the reason its
@@ -1463,6 +1476,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         showToast(text, 'error');
         precheck.stop(text);
       };
+
+      // A batch from before Studio closed may still be capturing in the open
+      // game, and a new one would run in that game and stop it (#20).
+      if (isBatchStillRunningInGame()) {
+        stopWith(STRINGS.BATCH_CATCH_UP.STILL_RUNNING_NOT_STARTED);
+        return;
+      }
 
       // OBS mode: verify live, right before committing to a batch, rather
       // than trusting whatever a check found minutes (or a whole session)
@@ -1497,7 +1517,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         } else if (guard.availableBytes === 0) {
           stopWith(STRINGS.CAPTURE.NO_CAPTURE_OUTPUT_DIR_WITH_SPACE);
         } else {
-          stopWith(STRINGS.CAPTURE.insufficientDiskSpaceToast((guard.requiredBytes / 1e9).toFixed(2), (guard.availableBytes / 1e9).toFixed(2)));
+          stopWith(STRINGS.CAPTURE.insufficientDiskSpaceToast(gigabytes(guard.requiredBytes), gigabytes(guard.availableBytes)));
         }
         return;
       }

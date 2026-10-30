@@ -130,7 +130,7 @@ handshake tests live — don't treat the copy here as authoritative.
 | `flush_stage_timing` | How long does the decal flush spend parsing, cleaning and writing one demo (#193)? |
 
 `scan_mem_probe` is what set `SCAN_CONCURRENCY` in
-`capture_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,
+`scan_manager::scan_directory_impl`. It mirrors that loop's Phase 2 exactly,
 so its numbers are the real thing rather than a model, and reads peak working
 set from the OS rather than sampling. Over a 45-demo corpus (3.2GB, 72MB mean):
 one worker peaks at 1529 MB, two at 2414 MB, four at 4574 MB, eight at 9157 MB

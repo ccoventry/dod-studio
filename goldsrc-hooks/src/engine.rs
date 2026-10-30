@@ -695,7 +695,7 @@ impl EngineStudioApiPartial {
 #[repr(C)]
 pub struct ClEngineFuncsPartial {
     _slots_before_get_screen_info: [*mut c_void; 12], // pfnSPR_Load .. pfnFillRGBA
-    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::VidInit` (`client+0x36b32`).
+    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::Think` (`client+0x36b32`).
     pub pfn_get_screen_info: GetScreenInfoFn,
     _slot_set_crosshair: *mut c_void,
     pub pfn_register_variable: RegisterVariableFn,

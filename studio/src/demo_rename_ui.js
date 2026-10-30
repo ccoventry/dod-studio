@@ -19,6 +19,7 @@ import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { setAuditorFooter } from './auditor_footer.js';
+import { fileNameOf } from './path_display.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -331,7 +332,7 @@ function followRenames(renamed) {
   facts = facts.map((f) => {
     const to = byOld.get(f.path);
     if (!to) return f;
-    const fileName = to.split(/[\\/]/).pop();
+    const fileName = fileNameOf(to);
     if (selected.delete(f.path)) selected.add(to);
     return { ...f, path: to, file_name: fileName };
   });
