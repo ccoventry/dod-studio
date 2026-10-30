@@ -9,8 +9,8 @@ use std::path::Path;
 #[tauri::command]
 pub async fn list_demo_links(hl_exe: String) -> Result<Vec<DemoLink>, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let game = demo_links::game_dir_of(Path::new(&hl_exe))
-            .map_err(crate::messages::failed_to_list_demo_links)?;
+        // Unwrapped: the page says "Could not read the linked folders" (`listFailed`).
+        let game = demo_links::game_dir_of(Path::new(&hl_exe))?;
         Ok(demo_links::list(&game))
     }))
     .await

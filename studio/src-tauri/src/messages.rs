@@ -18,7 +18,14 @@
 // too, as `failed_to_<action>(err)` around the lower crate's text (#650).
 // Where the frontend already names the action around the error
 // (`STRINGS.IPC.hdBuildFailed` and the like), the command passes the cause
-// through unwrapped rather than stacking two prefixes.
+// through unwrapped rather than stacking two prefixes: the demo split and its
+// map read (`SPLIT.splitFailed`, `detailsFailed`, `queueSplitFailed`), the
+// menu size (`menuScaleFailed`), HLAE's FFmpeg link
+// (`HLAE_FFMPEG_LINK_FAILED`), the demo links list (`listFailed`), the map
+// download (`downloadFailedToast`), the take checks, previews and deletion
+// (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
+// `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
+// caller before wrapping.
 
 use std::fmt::Display;
 use std::path::Path;
@@ -617,20 +624,14 @@ pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) 
 // first and leaves the lower crate's text as the cause, so the crates keep
 // their wording for `preview_cli`, `dod-studio-cli` and the web analyzer.
 
-/// The error the lower crates use for a stop the user asked for. The frontend
-/// matches it exactly (`'cancelled'`), so it is never given a prefix.
-const CANCELLED: &str = "cancelled";
-
+/// A stop the user asked for comes back as native's cancelled error, which
+/// the frontend matches exactly (`'cancelled'`), so it is never given a prefix.
 fn failed_to(action: &str, err: impl Display) -> String {
     let cause = err.to_string();
-    if cause == CANCELLED {
+    if native::hlcr::take_frames::is_cancelled(&cause) {
         return cause;
     }
     format!("Failed to {action}: {cause}")
-}
-
-pub fn failed_to_list_demo_links(err: impl Display) -> String {
-    failed_to("list the demo folder links", err)
 }
 
 pub fn failed_to_add_demo_link(err: impl Display) -> String {
@@ -645,28 +646,8 @@ pub fn failed_to_forget_crash_map(err: impl Display) -> String {
     failed_to("forget the crashed map", err)
 }
 
-pub fn failed_to_read_demo_maps(err: impl Display) -> String {
-    failed_to("read the maps in the demo", err)
-}
-
-pub fn failed_to_split_demo(err: impl Display) -> String {
-    failed_to("split the demo", err)
-}
-
 pub fn failed_to_set_blender_exe(err: impl Display) -> String {
     failed_to("use that Blender", err)
-}
-
-pub fn failed_to_link_hlae_ffmpeg(err: impl Display) -> String {
-    failed_to("point HLAE at FFmpeg", err)
-}
-
-pub fn failed_to_check_game_folder(err: impl Display) -> String {
-    failed_to("use that game folder", err)
-}
-
-pub fn failed_to_set_menu_size(err: impl Display) -> String {
-    failed_to("change the menu size", err)
 }
 
 pub fn failed_to_check_demo_sources(err: impl Display) -> String {
@@ -675,22 +656,6 @@ pub fn failed_to_check_demo_sources(err: impl Display) -> String {
 
 pub fn failed_to_copy_demos_for_batch(err: impl Display) -> String {
     failed_to("copy the demos for the batch", err)
-}
-
-pub fn failed_to_check_take(err: impl Display) -> String {
-    failed_to("check the take", err)
-}
-
-pub fn failed_to_make_take_preview(err: impl Display) -> String {
-    failed_to("make the take's preview", err)
-}
-
-pub fn failed_to_read_take_frame(err: impl Display) -> String {
-    failed_to("read a take's preview frame", err)
-}
-
-pub fn failed_to_check_take_folders(err: impl Display) -> String {
-    failed_to("check the takes before deleting", err)
 }
 
 pub fn failed_to_read_map_for_flags(err: impl Display) -> String {
@@ -1012,21 +977,21 @@ mod tests {
             "Failed to link the demo folder: not a folder"
         );
         assert_eq!(
-            failed_to_split_demo("no room on D:"),
-            "Failed to split the demo: no room on D:"
+            failed_to_copy_demos_for_batch("no room on D:"),
+            "Failed to copy the demos for the batch: no room on D:"
         );
         assert_eq!(
-            failed_to_check_take("ffmpeg stopped"),
-            "Failed to check the take: ffmpeg stopped"
+            failed_to_set_blender_exe("not found"),
+            "Failed to use that Blender: not found"
         );
     }
 
     #[test]
     fn a_cancellation_is_never_given_an_action_prefix() {
-        // The frontend compares these to the bare word.
-        assert_eq!(failed_to_check_take("cancelled"), "cancelled");
-        assert_eq!(failed_to_make_take_preview("cancelled"), "cancelled");
-        assert_eq!(failed_to_split_demo("cancelled"), "cancelled");
+        // The frontend compares it to the bare word.
+        let cancelled = native::hlcr::take_frames::cancelled_error();
+        assert_eq!(failed_to(".", &cancelled), cancelled);
+        assert_eq!(cancelled, "cancelled");
     }
 
     // Every non-panicking call site's spawn_blocking wrapping was already

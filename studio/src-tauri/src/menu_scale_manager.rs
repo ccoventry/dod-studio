@@ -12,8 +12,7 @@ fn game_dir(game_path: &str, game_folder: &str) -> Result<PathBuf, String> {
     } else {
         game_folder.trim()
     };
-    native::shared::paths::validate_game_folder(folder)
-        .map_err(crate::messages::failed_to_check_game_folder)?;
+    native::shared::paths::validate_game_folder(folder)?;
     Path::new(game_path)
         .parent()
         .filter(|_| !game_path.trim().is_empty())
@@ -45,5 +44,4 @@ pub async fn set_menu_scale(
     tokio::task::spawn_blocking(move || native::menu_scale::set(Path::new(&game_path), &dir, on))
         .await
         .map_err(|e| format!("menu size change stopped: {e}"))?
-        .map_err(crate::messages::failed_to_set_menu_size)
 }

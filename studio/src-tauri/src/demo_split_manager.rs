@@ -85,7 +85,7 @@ pub fn cancel_multi_map_scan(state: tauri::State<'_, DemoSplitManager>) -> Resul
 pub async fn demo_map_segments(path: String) -> Result<Vec<MapSegment>, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         // Frame headers only; a full parse when the walk can't read a frame.
-        quick_demo_segments(Path::new(&path)).map_err(crate::messages::failed_to_read_demo_maps)
+        quick_demo_segments(Path::new(&path))
     }))
     .await
 }
@@ -112,7 +112,6 @@ pub async fn split_demo_maps(
         let stop = || cancel.load(Ordering::Relaxed);
         split_events_cancellable(&app_handle, &path, Keep::These(&keep), &map_dirs, &stop)
             .map(|(written, cancelled)| SplitOutcome { written, cancelled })
-            .map_err(crate::messages::failed_to_split_demo)
     }))
     .await;
     state
@@ -152,7 +151,6 @@ pub async fn split_demo_auto(
     let map_dirs = game_map_dirs(&settings);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         split_with_events(&app_handle, &path, Keep::AtLeast(min_seconds), &map_dirs)
-            .map_err(crate::messages::failed_to_split_demo)
     }))
     .await
 }
