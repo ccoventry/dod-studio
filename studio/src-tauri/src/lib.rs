@@ -125,6 +125,7 @@ async fn save_settings(
         settings_manager::apply_game_folder(&settings);
         players_tab::mirror_table(&settings);
         *guard = settings;
+        native::log_markdown("[settings] saved");
         Ok(())
     }))
     .await
@@ -716,11 +717,14 @@ async fn index_demo_players(
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let mut done = 0;
+        let mut unreadable = 0;
+        let total = paths.len();
         for path in paths {
             if current.load(Ordering::SeqCst) != request_id {
                 break;
             }
             let result = native::player_index::demo_players(std::path::Path::new(&path));
+            unreadable += usize::from(result.is_err());
             let payload = match result {
                 Ok((demo, _)) => serde_json::json!({
                     "lane": lane,
@@ -739,6 +743,9 @@ async fn index_demo_players(
             let _ = app_handle.emit("demo_players", payload);
             done += 1;
         }
+        native::log_markdown(&format!(
+            "[players] read the players of {done} of {total} demo(s) ({lane} lane), {unreadable} unreadable"
+        ));
         Ok(done)
     }))
     .await
@@ -810,7 +817,16 @@ async fn analyze_demo_full(
         };
 
         match native::run_analyzer_cached(&path, progress_cb) {
-            Ok((file_info, analysis, _from_cache)) => {
+            Ok((file_info, analysis, from_cache)) => {
+                native::log_markdown(&format!(
+                    "[analyzer] opened {} ({})",
+                    path.display(),
+                    if from_cache {
+                        "from the cache"
+                    } else {
+                        "parsed"
+                    }
+                ));
                 // Independent metadata lookup (not `file_info.created_at`) to avoid
                 // depending on `web_time::SystemTime`'s exact type identity here.
                 let created_unix_secs = std::fs::metadata(&path)
@@ -835,7 +851,13 @@ async fn analyze_demo_full(
                     state: analysis.state,
                 })
             }
-            Err(e) => Err(messages::analyzer_error(e)),
+            Err(e) => {
+                native::log_markdown(&format!(
+                    "[analyzer] could not read {}: {e}",
+                    path.display()
+                ));
+                Err(messages::analyzer_error(e))
+            }
         }
     }))
     .await

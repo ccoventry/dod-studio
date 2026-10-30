@@ -35,6 +35,41 @@ pub struct ReviewHighlight {
     /// a POV demo.
     #[serde(default)]
     pub spectate: Option<u32>,
+    /// Each kill's victim and weapon, in `kill_times`' order, for the list
+    /// the game shows while the highlight plays (#1140). Empty, or not one
+    /// per kill, sends none.
+    #[serde(default)]
+    pub kills: Vec<ReviewKill>,
+}
+
+/// One kill of a highlight, as Highlight Details lists it.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ReviewKill {
+    #[serde(default)]
+    pub victim: String,
+    #[serde(default)]
+    pub weapon: String,
+}
+
+/// Between two kills in the queue's kill-details field, and between a
+/// kill's victim and weapon. Control characters, so no name can hold one:
+/// [`field`] turns every control character in a name into a space. Must
+/// match `review::KILL_SEP` and `review::PART_SEP`.
+pub const KILL_SEP: char = '\u{1f}';
+pub const PART_SEP: char = '\u{1e}';
+
+/// The tenth field: each kill's victim and weapon, or `None` when there is
+/// not one per kill.
+fn kill_details(h: &ReviewHighlight) -> Option<String> {
+    if h.kills.is_empty() || h.kills.len() != h.kill_times.len() {
+        return None;
+    }
+    let kills: Vec<String> = h
+        .kills
+        .iter()
+        .map(|k| format!("{}{PART_SEP}{}", field(&k.victim), field(&k.weapon)))
+        .collect();
+    Some(kills.join(&KILL_SEP.to_string()))
 }
 
 /// A field as one tab-free line.
@@ -78,9 +113,18 @@ pub fn format_queue(highlights: &[ReviewHighlight], fast_forward_gap: Option<f64
             answered,
             field(&h.note)
         ));
-        // A ninth field only for an HLTV highlight; an older game ignores it.
-        if let Some(n) = h.spectate {
-            out.push_str(&format!("\t{n}"));
+        // A ninth field for an HLTV highlight (`-` for a POV one when a tenth
+        // follows), and a tenth with the kills' details (#1140); an older
+        // game ignores both.
+        let details = kill_details(h);
+        match (h.spectate, &details) {
+            (Some(n), _) => out.push_str(&format!("\t{n}")),
+            (None, Some(_)) => out.push_str("\t-"),
+            (None, None) => {}
+        }
+        if let Some(details) = details {
+            out.push('\t');
+            out.push_str(&details);
         }
         out.push('\n');
     }
@@ -168,7 +212,46 @@ mod tests {
             answered: None,
             note: "nice\tflick\n".to_string(),
             spectate: None,
+            kills: Vec::new(),
         }
+    }
+
+    fn kill(victim: &str, weapon: &str) -> ReviewKill {
+        ReviewKill {
+            victim: victim.to_string(),
+            weapon: weapon.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_highlights_kills_go_in_a_tenth_field_after_a_dash_for_a_pov_demo() {
+        let mut h = highlight();
+        h.note = String::new();
+        h.kills = vec![kill("gskiLL", "K98"), kill("{$T}\tBrain", "Colt")];
+        let line = format_queue(&[h.clone()], None)
+            .lines()
+            .nth(1)
+            .unwrap()
+            .to_string();
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert_eq!(fields.len(), 10);
+        assert_eq!(fields[8], "-");
+        // A tab in a name became a space, so the line still splits right.
+        assert_eq!(
+            fields[9],
+            format!("gskiLL{PART_SEP}K98{KILL_SEP}{{$T}} Brain{PART_SEP}Colt")
+        );
+        h.spectate = Some(4);
+        let line = format_queue(&[h], None).lines().nth(1).unwrap().to_string();
+        assert_eq!(line.split('\t').nth(8), Some("4"));
+    }
+
+    #[test]
+    fn kills_that_are_not_one_per_kill_time_are_left_out() {
+        let mut h = highlight();
+        h.kills = vec![kill("a", "K98")];
+        let line = format_queue(&[h], None).lines().nth(1).unwrap().to_string();
+        assert_eq!(line.split('\t').count(), 8);
     }
 
     #[test]

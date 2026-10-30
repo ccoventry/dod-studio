@@ -1312,7 +1312,9 @@ pub async fn start_capture_batch_impl(
         // A different demo saved under a scanned one's name would take every
         // highlight tick with it and crash the game minutes in (#196). Stop
         // before anything is patched.
-        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks) {
+        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks)
+            .map_err(crate::messages::failed_to_check_demo_sources)
+        {
             log_markdown(&format!("[capture] {}", e));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;

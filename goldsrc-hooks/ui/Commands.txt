@@ -1,6 +1,6 @@
 SPECTATING (HLTV demos)
   ds_spec_match_pov 0/1
-      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone eye height, the gun lowering.
+      Make a spectated first-person view match the player's own recording: gun animations, the crosshair, prone and crouch eye height, the gun lowering.
   ds_spec_lock 0/1
       Keep the camera on the player you are watching when they die.
   ds_spec_deathcam 0/1
@@ -145,7 +145,7 @@ DOD STUDIO WINDOW
   ds_ui_review_keys 0/1
       Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; ESC opens the Review tab. 0: the Review tab opens at each end.
   ds_ui_review_info 0/1
-      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with the answer keys.
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1
