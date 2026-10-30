@@ -271,7 +271,20 @@ mod tests {
         assert_eq!(state.pov_stats.teamkills_committed, 1);
         send(&mut state, death(1, 1, Weapon::Garand));
         assert_eq!(state.pov_stats.suicides, 1);
+        assert_eq!(state.pov_stats.teamkills_suffered, 0);
         assert!(state.pov_stats.weapon_stats.is_empty());
+    }
+
+    #[test]
+    fn players_with_no_team_yet_are_not_teammates() {
+        let mut state = match_in_progress();
+        state.players[0].team = None;
+        state.players[2].team = None;
+        send(&mut state, death(1, 3, Weapon::Garand));
+        assert_eq!(state.pov_stats.teamkills_committed, 0);
+        assert_eq!(state.pov_stats.weapon_stats[&Weapon::Garand].kills, 1);
+        send(&mut state, death(3, 1, Weapon::Garand));
+        assert_eq!(state.pov_stats.teamkills_suffered, 0);
     }
 
     #[test]
