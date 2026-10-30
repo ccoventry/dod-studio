@@ -17,6 +17,7 @@ mod launch;
 mod markers;
 mod obs_capture;
 mod preflight;
+mod processes;
 mod watch;
 mod workspace;
 
@@ -257,6 +258,7 @@ fn run_batch(batch: Batch) {
         },
         feed.obs_session.take(),
         game.child,
+        game::BatchGame::new(game.games_before_launch, game.reuse_game),
         game.handoff,
         game.foreground_lock,
         game.foreground_locked_at,

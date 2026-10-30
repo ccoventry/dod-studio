@@ -5,13 +5,15 @@
 //!
 //! The HLAE launcher process injects into `hl.exe` and then exits on its own
 //! under `-noGui -autoStart` — that is expected handoff behaviour, not a
-//! crash. The thing that actually matters is whether `hl.exe` itself is
-//! still alive, so liveness is tracked separately via process name rather
-//! than via the launcher's own exit status.
+//! crash. The thing that actually matters is whether the batch's own
+//! `hl.exe` is still alive, so liveness is tracked separately in the process
+//! list (`game::BatchGame`, #1213) rather than via the launcher's own exit
+//! status.
 
 use super::EngineEvent;
-use super::game::{end_game, kill_hl_exe_and_wait, wait_for_hl_exe_to_exit};
+use super::game::{BatchGame, end_game, kill_hl_exe_and_wait, wait_for_hl_exe_to_exit};
 use super::markers::{RecordingGoAhead, console_log_len, marker_event};
+use super::processes::Processes;
 use crate::game_handoff::{BatchStart, GameHandoff, StartState};
 use crate::log_markdown;
 use crate::utils::duration_text::duration_text;
@@ -360,7 +362,10 @@ pub(super) struct BatchWatch<'a> {
     complete: CompleteMarkers,
     /// One-shot, so a batch cannot spam the log with it.
     condebug_write_checked: bool,
-    sys: sysinfo::System,
+    /// The process list and kills (`processes::Live` outside tests).
+    procs: Box<dyn Processes>,
+    /// Which hl.exe in it is the batch's.
+    game: BatchGame,
     last_process_check: Option<Instant>,
     last_dialog_check: Option<Instant>,
     /// What the game was last told (#861), and when a send last failed.
@@ -378,6 +383,7 @@ impl<'a> BatchWatch<'a> {
         io: WatchInputs<'a>,
         obs_session: Option<crate::obs::ObsSession>,
         child: Option<crate::sys::launcher::Launcher>,
+        game: BatchGame,
         handoff: Option<GameHandoff>,
         foreground_lock: crate::sys::foreground_lock::ForegroundLock,
         foreground_locked_at: Instant,
@@ -398,7 +404,8 @@ impl<'a> BatchWatch<'a> {
             clock: MarkerClock::default(),
             complete: CompleteMarkers::default(),
             condebug_write_checked: false,
-            sys: crate::sys::process::snapshot(),
+            procs: Box::new(super::processes::Live::new()),
+            game,
             last_process_check: None,
             last_dialog_check: None,
             hold_sent: false,
@@ -476,15 +483,12 @@ impl<'a> BatchWatch<'a> {
         if !self.go_ahead.owed() {
             return;
         }
-        let sent = crate::sys::process::game_pids_in(&self.sys)
-            .into_iter()
-            .next()
-            .map(|pid| {
-                crate::sys::game_remote::send_console_commands(
-                    pid,
-                    &[crate::patch::runtime_batch::RECORDING_GO.to_string()],
-                )
-            });
+        let sent = self.game.pid_in(&*self.procs).map(|pid| {
+            crate::sys::game_remote::send_console_commands(
+                pid,
+                &[crate::patch::runtime_batch::RECORDING_GO.to_string()],
+            )
+        });
         if let Some(Ok(crate::sys::game_remote::Sent::Delivered)) = sent
             && let Some(waited) = self.go_ahead.sent()
         {
@@ -507,15 +511,9 @@ impl<'a> BatchWatch<'a> {
         ) {
             return;
         }
-        let sent = crate::sys::process::game_pids_in(&self.sys)
-            .into_iter()
-            .next()
-            .map(|pid| {
-                crate::sys::game_remote::send_console_commands(
-                    pid,
-                    &[super::hold_command(want_hold)],
-                )
-            });
+        let sent = self.game.pid_in(&*self.procs).map(|pid| {
+            crate::sys::game_remote::send_console_commands(pid, &[super::hold_command(want_hold)])
+        });
         match sent {
             Some(Ok(crate::sys::game_remote::Sent::Delivered)) => {
                 if self.hold_sent && !want_hold {
@@ -542,7 +540,7 @@ impl<'a> BatchWatch<'a> {
         let Some(child) = self.child.as_mut() else {
             return;
         };
-        match child.exit_status(&self.sys) {
+        match self.procs.launcher_status(child) {
             Ok(Some(status)) => {
                 self.launcher_exit_logged = true;
                 log_markdown(&format!(
@@ -556,12 +554,13 @@ impl<'a> BatchWatch<'a> {
         }
     }
 
-    /// Re-reads the process list at most every [`PROCESS_CHECK_EVERY`].
+    /// Re-reads the process list at most every [`PROCESS_CHECK_EVERY`]. Only
+    /// the batch's own game counts as the game being up (#1213).
     fn note_game_alive(&mut self) {
         if is_due(self.last_process_check, PROCESS_CHECK_EVERY) {
             self.last_process_check = Some(Instant::now());
-            crate::sys::process::refresh(&mut self.sys);
-            self.hl_alive_cached = crate::sys::process::is_game_in(&self.sys);
+            self.procs.refresh();
+            self.hl_alive_cached = self.game.pid_in(&*self.procs).is_some();
         }
         self.hl_alive = self.hl_alive_cached;
         if self.hl_alive {
@@ -576,7 +575,8 @@ impl<'a> BatchWatch<'a> {
         let Some(handoff) = self.handoff.as_mut() else {
             return ControlFlow::Continue(());
         };
-        match handoff.poll(&crate::sys::process::game_pids_in(&self.sys)) {
+        let own: Vec<u32> = self.game.pid_in(&*self.procs).into_iter().collect();
+        match handoff.poll(&own) {
             Handoff::Waiting | Handoff::Sent => {}
             Handoff::JustSent(pid) => {
                 self.foreground_lock.release();
@@ -592,7 +592,7 @@ impl<'a> BatchWatch<'a> {
                 self.failure_reason = Some(why);
                 // An open game the batch never reached stays as it was.
                 if self.io.reuse_game.is_none() {
-                    kill_hl_exe_and_wait(&mut self.sys);
+                    kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
                 }
                 return ControlFlow::Break(());
             }
@@ -632,9 +632,9 @@ impl<'a> BatchWatch<'a> {
         }
         self.last_dialog_check = Some(Instant::now());
         let launcher_pid = self.child.as_ref().map(crate::sys::launcher::Launcher::id);
-        let game_pids = crate::sys::process::game_pids_in(&self.sys);
+        let game_pids: Vec<u32> = self.game.pid_in(&*self.procs).into_iter().collect();
         let mut launcher_pids = launcher_pid
-            .map(|pid| crate::sys::process::injector_pids_in(&self.sys, pid))
+            .map(|pid| self.procs.injectors_of(pid))
             .unwrap_or_default();
         if let Some(pid) = launcher_pid.filter(|_| !self.launcher_exit_logged) {
             launcher_pids.push(pid);
@@ -656,14 +656,14 @@ impl<'a> BatchWatch<'a> {
             .iter()
             .filter(|&&pid| Some(pid) != launcher_pid)
         {
-            crate::sys::process::kill_pid(*pid);
+            self.procs.kill_pid(*pid);
         }
         if !self.launcher_exit_logged
             && let Some(child) = self.child.as_mut()
         {
             child.kill();
         }
-        kill_hl_exe_and_wait(&mut self.sys);
+        kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
         // A game already exiting when its box came up (the
         // Anniversary !m_bMounted assert, after the user
         // clicked the Steam box themselves) can't be killed:
@@ -678,7 +678,7 @@ impl<'a> BatchWatch<'a> {
                 ));
                 crate::sys::dialogs::dismiss(dialog);
             }
-            wait_for_hl_exe_to_exit(&mut self.sys);
+            wait_for_hl_exe_to_exit(&mut *self.procs, &self.game);
         }
         ControlFlow::Break(())
     }
@@ -701,7 +701,7 @@ impl<'a> BatchWatch<'a> {
             child.kill();
             log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
         }
-        end_game(self.io.reuse_game, &mut self.sys);
+        end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -718,7 +718,7 @@ impl<'a> BatchWatch<'a> {
         let (line, reason) = stall_texts(stall.since.elapsed(), stall.never_started);
         log_markdown(&line);
         self.failure_reason = Some(reason.into());
-        kill_hl_exe_and_wait(&mut self.sys);
+        kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -742,7 +742,7 @@ impl<'a> BatchWatch<'a> {
             self.failure_reason =
                 Some("lost contact with OBS mid-batch and could not reconnect".into());
         }
-        kill_hl_exe_and_wait(&mut self.sys);
+        kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -767,7 +767,7 @@ impl<'a> BatchWatch<'a> {
                 "taskkilling hl.exe"
             }
         ));
-        end_game(self.io.reuse_game, &mut self.sys);
+        end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -850,6 +850,10 @@ fn console_log_not_written_text(log_path: &Path) -> String {
         duration_text(CONDEBUG_WRITE_GRACE.as_secs_f64()),
     )
 }
+
+#[cfg(test)]
+#[path = "watch_pass_tests.rs"]
+mod pass_tests;
 
 #[cfg(test)]
 mod tests {
