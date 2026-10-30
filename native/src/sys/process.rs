@@ -139,6 +139,9 @@ fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame
                 .iter()
                 .map(|a| a.to_string_lossy().into_owned())
                 .collect(),
+            // Read by `launch_settings::check_running_game`, only when Studio
+            // launches with a hook DLL.
+            hook: Default::default(),
         })
         .collect()
 }

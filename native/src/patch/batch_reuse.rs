@@ -11,12 +11,10 @@
 //! - **Not OBS mode.** OBS mode starts the game with its sound through
 //!   waveOut (`obs::GAME_ARGS`), which only a launch sets. The other modes add
 //!   nothing to the launch line a batch would not add over the pipe.
-//! - **The install, game folder and resolution** (`launch_settings`, #666):
-//!   the caller asks about a game started with other ones before this.
-//! - **The hook DLL Studio is set to**, read off the game's own module list
-//!   (`sys::modules`): HLAE passes it on its own command line and exits, so
-//!   nothing else says which file it was. A game started from Steam has none;
-//!   one started with another build of it might not know `ds_capture_batch`.
+//! - **The install, game folder, resolution and hook DLL** (`launch_settings`,
+//!   #666, #1143): the caller asks about a game started with other ones
+//!   before this. That check compares the hook DLL's path and build; this
+//!   one only refuses a game that has none, which Steam started.
 //! - **HLAE is in it** (`AfxHookGoldSrc.dll`, read off the same list): every
 //!   capture mode records through HLAE's `mirv_` commands.
 //! - **Its command pipe answers**, so the batch can be handed over.
@@ -84,22 +82,15 @@ pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
                 .into(),
         );
     }
-    let Some(wanted) = facts.hook_dll else {
+    if facts.hook_dll.is_none() {
         return Err("Studio has no hook DLL to run the batch with".into());
-    };
+    }
     let Some(modules) = facts.modules else {
         return Err(format!("the game's DLLs (PID {pid}) could not be read"));
     };
-    let loaded = named(modules, HOOK_DLL_NAME);
-    if loaded.is_empty() {
+    // Which hook DLL and build it has is part of `facts.running` (#1143).
+    if named(modules, HOOK_DLL_NAME).is_empty() {
         return Err("the running game has no DoD Studio hook DLL (not started by Studio)".into());
-    }
-    if !loaded.iter().any(|m| same_file(m, wanted)) {
-        return Err(format!(
-            "the running game has the hook DLL {}, and Studio is set to {}",
-            loaded[0].display(),
-            wanted.display()
-        ));
     }
     if named(modules, HLAE_DLL_NAME).is_empty() {
         return Err(
@@ -110,17 +101,6 @@ pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
         return Err("the running game does not take commands from Studio".into());
     }
     Ok(pid)
-}
-
-/// The same file, resolved on disk when both can be, else by case-blind text.
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a
-            .to_string_lossy()
-            .replace('/', "\\")
-            .eq_ignore_ascii_case(&b.to_string_lossy().replace('/', "\\")),
-    }
 }
 
 /// Sent to a reused game ahead of the batch's own early lines: stop whatever
@@ -233,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn a_game_without_the_hook_dll_or_with_another_one_is_not_reused() {
+    fn a_game_without_the_hook_dll_or_hlae_is_not_reused() {
         let running = RunningGameCheck::Match { pid: 42 };
         let none = vec![PathBuf::from(r"C:\Games\Half-Life\hl.exe")];
         assert!(
@@ -241,10 +221,6 @@ mod tests {
                 .unwrap_err()
                 .contains("no DoD Studio hook DLL")
         );
-        let other = vec![PathBuf::from(r"C:\older\dodstudio_goldsrc_hooks.dll")];
-        let e = game_to_reuse(&facts(&running, &other)).unwrap_err();
-        assert!(e.contains(r"C:\older\dodstudio_goldsrc_hooks.dll"), "{e}");
-        assert!(e.contains("Studio is set to"), "{e}");
         // Our hook DLL without HLAE: nothing would record.
         let no_hlae = vec![PathBuf::from(DLL)];
         assert!(
@@ -268,11 +244,14 @@ mod tests {
             width: None,
             height: None,
             game_folder: None,
+            hook_dll: None,
+            hook_label: None,
+            hook_build: None,
         };
         let mismatch = RunningGameCheck::Mismatch {
             pid: 42,
-            running: launch.clone(),
-            wanted: launch,
+            running: Box::new(launch.clone()),
+            wanted: Box::new(launch),
             differs: vec![LaunchDifference::Resolution],
         };
         assert!(

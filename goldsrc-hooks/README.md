@@ -339,6 +339,12 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll`.
 The crate has no binaries: it ships without an injector (#784), because a DLL
 loaded into a running game is too late to do anything (see below).
 
+`build.rs` bakes a build id into the DLL (`src/build_id.rs`): the version and
+git commit, plus `dirty` and the UTC build time when the crates it is built
+from have uncommitted changes. The hook logs it at start (`goldsrc-hooks
+build ...`), and Studio reads it from the file and from a running game's copy
+to tell two builds at one path apart before reusing the game (#1143).
+
 ## Testing manually
 
 > [!WARNING]

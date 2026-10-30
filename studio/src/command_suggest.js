@@ -19,7 +19,8 @@ export const MAX_SUGGESTIONS = 12;
 export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate',
   'r_norefresh', 'ds_capture_batch', 'ds_capture_schedule', 'ds_player_spray'];
 export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
-export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
+export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr',
+  'dem_speed'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'r_norefresh',
   'mirv_agr'];

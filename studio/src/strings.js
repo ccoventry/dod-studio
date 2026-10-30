@@ -511,6 +511,14 @@ export const STRINGS = {
     START_LEAD_HINT: 'Time between capture starting and the first kill.',
     STOP_TRAIL_LABEL: 'Stop Trail (s):',
     STOP_TRAIL_HINT: 'Time between the last kill and capture stopping.',
+    // Gaps between kills inside a clip (#831): kill_gaps_setting.js.
+    KILL_GAPS_LABEL: 'Gaps between kills over',
+    KILL_GAPS_UNIT: 's:',
+    KILL_GAPS_KEEP: 'Keep',
+    KILL_GAPS_FAST_FORWARD: 'Fast-forward',
+    KILL_GAPS_SPEED_UNIT: 'x',
+    KILL_GAPS_HINT:
+      "Fast-forward speeds up a long wait between two kills inside the clip, from 2 s after one to 4 s before the next. It's part of the clip (no undo in the edit), and its sound is choppy. Needs Seek Between Clips.",
     INITIAL_DELAY_LABEL: 'Initial Delay (s):',
     INITIAL_DELAY_HINT: 'Time between the demo loading and the game moving to the first clip.',
     // Timing diagram (#150) — a visual timeline under the fields above,
@@ -1661,6 +1669,8 @@ export const STRINGS = {
       // Only ever reported for Scheduled Commands (it is fine in Initial
       // Commands), like the three below.
       mirv_agr: 'set Capture Mode to AGR in the Output Format tab instead -- it saves one file per clip',
+      // Scheduled only, like mirv_agr (#831).
+      dem_speed: "the app sets the demo's speed itself for Fast-forward gaps between kills -- set that in the Timing tab instead",
       r_drawentities:
         "the engine resets this to 1 by itself, so it does nothing -- and if cheats are on instead, DoD's client closes the game",
       cl_lw: "DoD's client quits the game outright if this is not 1 -- there is no other value",
@@ -2343,6 +2353,8 @@ export const STRINGS = {
     CHECKING: 'Checking the takes on disk…',
     kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
     merged: (n) => `(+${n} more, recorded as one take)`,
+    // A take that recorded its long gaps between kills sped up (#831).
+    rampedGaps: (n, speed) => `(${n === 1 ? 'gap' : `${n} gaps`} at ${speed}x)`,
     STATUS: {
       ok: 'Captured',
       unrenderable: "Captured, can't render yet",
@@ -2524,6 +2536,10 @@ export const STRINGS = {
     CLOSING: 'Closing Day of Defeat…',
     RUNNING_EXE: 'Running now',
     STUDIO_EXE: "DoD Studio's Half-Life Executable",
+    // The hook DLL rows (#1143): path, then its build id when it has one.
+    RUNNING_HOOK: 'Hook DLL in the game',
+    STUDIO_HOOK: 'Hook DLL DoD Studio is set to',
+    hookLine: ({ hook_dll, hook_build }) => `${hook_dll} (${hook_build ? `build ${hook_build}` : 'no build id'})`,
     // Beside Start Capture Batch when the user kept the running game.
     BATCH_NOT_STARTED_STATUS: 'Status: Not started — Day of Defeat is running with other launch settings.',
     /** "DoD is running from X at 1920×1080; DoD Studio is set to Y at
@@ -2534,19 +2550,32 @@ export const STRINGS = {
       // The Game folder setting, `-game` (#402).
       const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
+      // The hook DLL from another path, or another build at its path (#1143).
+      const hookDll = differs.includes('hook_dll');
+      const hookBuild = differs.includes('hook_build');
+      const unreadable = differs.includes('hook_unreadable');
       const size = (s) => `${s.width}×${s.height}`;
       const folderName = (s) => `the "${s.game_folder}" game folder`;
+      const hookFrom = (s) => `the hook DLL from "${s.hook_label}"`;
+      const build = (s) => (s.hook_build ? `hook build ${s.hook_build}` : 'an older hook build with no build id');
       const now = [
         install && `from "${running.install}"`,
         folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
+        hookDll && `with ${hookFrom(running)}`,
+        hookBuild && `with ${build(running)}`,
       ].filter(Boolean).join(' ');
+      const unread = 'DoD Studio could not read which hook DLL the running Day of Defeat has, so it can\'t tell whether it is the one DoD Studio is set to.';
+      if (!now) return `${unread} Close it and start again?`;
       const set = [
         install && `"${wanted.install}"`,
         folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
         resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
+        hookDll && (install || folder || resolution ? `with ${hookFrom(wanted)}` : hookFrom(wanted)),
+        hookBuild && (install || folder || resolution ? `with ${build(wanted)}` : build(wanted)),
       ].filter(Boolean).join(' ');
-      return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
+      const also = unreadable ? ` ${unread}` : '';
+      return `Day of Defeat is running ${now}; DoD Studio is set to ${set}.${also} The game only takes these when it starts. Close it and start again?`;
     },
     // Switching installs in Configuration > Paths while a game runs (#931).
     SWITCH_TITLE: 'Day of Defeat is running',

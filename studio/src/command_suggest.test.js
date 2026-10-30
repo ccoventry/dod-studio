@@ -178,7 +178,8 @@ describe('kept in step with the code', () => {
 });
 
 describe('stock movie cvars (#1087)', () => {
-  const stock = ['hud_saytext_internal', 'cl_hud_objectives', 'cl_hud_objtimer', 'cl_hud_reinforcements', 'hud_deathnotice_time', 'hud_draw'];
+  const stock = ['hud_saytext_internal', 'cl_hud_objectives', 'cl_hud_objtimer', 'cl_hud_reinforcements', 'hud_deathnotice_time', 'hud_draw',
+    'cl_fog', 'cl_fog_start', 'cl_fog_end', 'cl_weatherdis', 'cl_bulletejects', 'cl_dynamiclights', 'cl_corpsestay', 'cl_particlefx', 'room_off'];
 
   it('lists each with a plain one-line hint, in Initial and Scheduled Commands', () => {
     for (const name of stock) {
@@ -203,5 +204,12 @@ describe('stock movie cvars (#1087)', () => {
 
   it('gives other game names no hint', () => {
     expect(suggestions('fps_max')[0].hint).toBe('');
+  });
+
+  it('leaves out the fog colour and density, which change nothing (#1131)', () => {
+    for (const name of ['cl_fog_red', 'cl_fog_green', 'cl_fog_blue', 'cl_fog_density']) {
+      const hit = suggestions(name).find((e) => e.name === name);
+      expect(hit.hint).toBe('');
+    }
   });
 });
