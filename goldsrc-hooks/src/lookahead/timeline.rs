@@ -42,6 +42,10 @@ pub struct Timeline {
     /// snapshot that first shows him in the small hull after a crouch on
     /// the ground, in order.
     pub crouch_downs: Vec<Vec<f32>>,
+    /// For each player slot, every change of his body `sequence`:
+    /// (`svc_time`, new sequence index), in order. Indices, not labels: the
+    /// hook names them from the model it draws him with.
+    pub body_changes: Vec<Vec<(f32, u16)>>,
     /// Network frames read.
     pub frames: usize,
     /// The `svc_time` span read, first to last.
@@ -58,12 +62,34 @@ impl Timeline {
         times.get(i).copied().filter(|t| *t <= until)
     }
 
+    /// Entity `entity`'s body changes after `after` and no later than
+    /// `until`, both `svc_time`.
+    pub fn body_changes(&self, entity: i32, after: f32, until: f32) -> &[(f32, u16)] {
+        let Some(changes) = usize::try_from(entity)
+            .ok()
+            .and_then(|e| e.checked_sub(1))
+            .and_then(|slot| self.body_changes.get(slot))
+        else {
+            return &[];
+        };
+        let from = changes.partition_point(|c| c.0 <= after);
+        let to = changes.partition_point(|c| c.0 <= until);
+        &changes[from..to.max(from)]
+    }
+
     /// Bytes the timeline holds, for the log.
     pub fn bytes(&self) -> usize {
-        self.crouch_downs
+        let downs: usize = self
+            .crouch_downs
             .iter()
             .map(|v| v.capacity() * std::mem::size_of::<f32>())
-            .sum()
+            .sum();
+        let bodies: usize = self
+            .body_changes
+            .iter()
+            .map(|v| v.capacity() * std::mem::size_of::<(f32, u16)>())
+            .sum();
+        downs + bodies
     }
 }
 
@@ -81,6 +107,9 @@ struct Slot {
     present: bool,
     z: f32,
     small_hull: bool,
+    sequence: u16,
+    /// The sequence last recorded in the timeline.
+    recorded_sequence: Option<u16>,
     /// The two snapshots before the current one, newest last.
     older: Option<Snap>,
     newest: Option<Snap>,
@@ -116,6 +145,7 @@ struct Reader {
     aux: dem::types::AuxRefCell,
     slots: [Slot; PLAYERS],
     downs: Vec<Vec<f32>>,
+    bodies: Vec<Vec<(f32, u16)>>,
     svc: Option<f32>,
     first: Option<f32>,
     frames: usize,
@@ -128,6 +158,7 @@ impl Reader {
             aux: Aux::new2(),
             slots: [Slot::default(); PLAYERS],
             downs: vec![Vec::new(); PLAYERS],
+            bodies: vec![Vec::new(); PLAYERS],
             svc: None,
             first: None,
             frames: 0,
@@ -216,6 +247,9 @@ impl Reader {
         if let Some(h) = field(delta, "usehull") {
             slot.small_hull = h == 1;
         }
+        if let Some(s) = field(delta, "sequence") {
+            slot.sequence = u16::try_from(s).unwrap_or(u16::MAX);
+        }
     }
 
     /// Every present player as of this packet: a flip into the small hull on
@@ -227,6 +261,10 @@ impl Reader {
                 slot.older = None;
                 slot.newest = None;
                 continue;
+            }
+            if slot.recorded_sequence != Some(slot.sequence) {
+                slot.recorded_sequence = Some(slot.sequence);
+                self.bodies[k].push((time, slot.sequence));
             }
             let snap = Snap {
                 time,
@@ -251,8 +289,13 @@ impl Reader {
         for v in &mut downs {
             v.shrink_to_fit();
         }
+        let mut bodies = self.bodies;
+        for v in &mut bodies {
+            v.shrink_to_fit();
+        }
         Timeline {
             crouch_downs: downs,
+            body_changes: bodies,
             frames: self.frames,
             span: (self.first.unwrap_or(0.0), self.svc.unwrap_or(0.0)),
         }
@@ -306,12 +349,13 @@ pub fn summary(timeline: &Timeline) -> String {
         .collect();
     let total: usize = per.values().sum();
     format!(
-        "{} network frames, svc {:.1}-{:.1}, {} ground crouches over {} players, {} bytes",
+        "{} network frames, svc {:.1}-{:.1}, {} ground crouches over {} players, {} body changes, {} bytes",
         timeline.frames,
         timeline.span.0,
         timeline.span.1,
         total,
         per.len(),
+        timeline.body_changes.iter().map(Vec::len).sum::<usize>(),
         timeline.bytes()
     )
 }
@@ -384,6 +428,20 @@ mod tests {
     }
 
     #[test]
+    fn body_changes_are_looked_up_inside_the_window() {
+        let mut t = Timeline {
+            body_changes: vec![Vec::new(); PLAYERS],
+            ..Default::default()
+        };
+        t.body_changes[0] = vec![(1.0, 5), (1.05, 6), (1.2, 7)];
+        assert_eq!(t.body_changes(1, 0.99, 1.1), &[(1.0, 5), (1.05, 6)]);
+        assert_eq!(t.body_changes(1, 1.0, 1.1), &[(1.05, 6)]);
+        assert!(t.body_changes(1, 1.2, 9.0).is_empty());
+        assert!(t.body_changes(2, 0.0, 9.0).is_empty());
+        assert!(t.body_changes(0, 0.0, 9.0).is_empty());
+    }
+
+    #[test]
     fn a_real_demo_gives_a_timeline() {
         let bytes = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -395,6 +453,14 @@ mod tests {
         assert!(t.span.1 - t.span.0 > 200.0, "{}", summary(&t));
         for v in &t.crouch_downs {
             assert!(v.windows(2).all(|w| w[0] < w[1]));
+        }
+        assert!(
+            t.body_changes.iter().any(|v| v.len() > 50),
+            "{}",
+            summary(&t)
+        );
+        for v in &t.body_changes {
+            assert!(v.windows(2).all(|w| w[0].0 < w[1].0));
         }
     }
 
