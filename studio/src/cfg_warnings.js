@@ -96,7 +96,7 @@ function cvarOf(command) {
   return String(command).trim().split(/\s+/)[0] ?? '';
 }
 
-/** Where a stated value came from (map_manager.rs's ValueSourceRow). */
+/** Where a stated value came from (native/src/patch/cfg_report.rs's ValueSourceRow). */
 function describeSource(v, cvar) {
   switch (v.kind) {
     case 'config':
