@@ -170,6 +170,7 @@ pub async fn hd_setup_tools(
 ) -> Result<SetupOutcome, String> {
     let scripts = scripts_dir(&app);
     let (running, cancel) = start(&state)?;
+    native::log_markdown("[hd] tool download started");
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
@@ -202,7 +203,40 @@ pub async fn hd_setup_tools(
     .await;
 
     running.store(false, Ordering::SeqCst);
+    native::log_markdown(&setup_end_log(&result));
     result
+}
+
+/// The activity log's line when the tool download ends.
+fn setup_end_log(result: &Result<SetupOutcome, String>) -> String {
+    match result {
+        Ok(o) if o.already_there => "[hd] tools already there, nothing to download".to_string(),
+        Ok(o) => format!("[hd] tool download done: {} file(s)", o.fetched.len()),
+        Err(e) => format!("[hd] tool download stopped: {e}"),
+    }
+}
+
+/// The activity log's line when a build starts.
+fn build_start_log(request: &BuildRequest) -> String {
+    format!(
+        "[hd] build started: styles {}, types {}, up to {} px",
+        request.styles.join(", "),
+        request.types.join(", "),
+        request.cap
+    )
+}
+
+/// The activity log's line when a build ends.
+fn build_end_log(result: &Result<BuildOutcome, String>) -> String {
+    match result {
+        Ok(o) => format!(
+            "[hd] build done: {} step(s) in {} s, details in {}",
+            o.steps,
+            o.elapsed_secs,
+            Path::new(&o.log_path).display()
+        ),
+        Err(e) => format!("[hd] build stopped: {e}"),
+    }
 }
 
 /// Stops a running download or build: a download at its next chunk (what was
@@ -225,6 +259,7 @@ pub async fn hd_build(
     let game = game_exe(&game_path)?;
     let scripts = scripts_dir(&app).ok_or_else(|| crate::messages::HD_NO_SCRIPTS.to_string())?;
     let (running, cancel) = start(&state)?;
+    native::log_markdown(&build_start_log(&request));
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
@@ -248,6 +283,7 @@ pub async fn hd_build(
     .await;
 
     running.store(false, Ordering::SeqCst);
+    native::log_markdown(&build_end_log(&result));
     result
 }
 
@@ -263,9 +299,15 @@ pub async fn hd_set_python(path: Option<String>) -> Result<(), String> {
                 if python::probe(Path::new(path), &[]).is_none() {
                     return Err(crate::messages::hd_not_python(path));
                 }
-                python::set_chosen(&hd_tools, Some(Path::new(path)))
+                python::set_chosen(&hd_tools, Some(Path::new(path))).inspect(|_| {
+                    native::log_markdown(&format!(
+                        "[hd] Python set to {}",
+                        Path::new(path).display()
+                    ));
+                })
             }
-            None => python::set_chosen(&hd_tools, None),
+            None => python::set_chosen(&hd_tools, None)
+                .inspect(|_| native::log_markdown("[hd] Python set back to automatic")),
         }
     }))
     .await
@@ -278,7 +320,13 @@ pub async fn hd_set_upscaler(path: Option<String>) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
         let dir = path.as_deref().map(str::trim).filter(|p| !p.is_empty());
-        upscaler::set_chosen(&hd_tools, dir.map(Path::new))
+        upscaler::set_chosen(&hd_tools, dir.map(Path::new)).inspect(|_| match dir {
+            Some(d) => native::log_markdown(&format!(
+                "[hd] upscaler folder set to {}",
+                Path::new(d).display()
+            )),
+            None => native::log_markdown("[hd] upscaler folder set back to automatic"),
+        })
     }))
     .await
 }
@@ -307,7 +355,9 @@ pub async fn hd_save_style(
         .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        my_styles::save(&root, scripts.as_deref(), &name, &def)
+        my_styles::save(&root, scripts.as_deref(), &name, &def).inspect(|_| {
+            native::log_markdown(&format!("[hd] saved style \"{name}\""));
+        })
     }))
     .await
 }
@@ -323,9 +373,17 @@ pub async fn hd_save_map_list(
     let root = hd::hd_root(&game_exe(&game_path)?)
         .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || match text {
-        Some(text) => map_list::save(&root, &text),
-        None => map_list::use_every_map(&root, scripts.as_deref()),
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let what = if text.is_some() {
+            "[hd] map list saved"
+        } else {
+            "[hd] map list cleared, every map is built"
+        };
+        match text {
+            Some(text) => map_list::save(&root, &text),
+            None => map_list::use_every_map(&root, scripts.as_deref()),
+        }
+        .inspect(|_| native::log_markdown(what))
     }))
     .await
 }
@@ -341,7 +399,9 @@ pub async fn hd_remove_style(
         .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        my_styles::remove(&root, scripts.as_deref(), &name)
+        my_styles::remove(&root, scripts.as_deref(), &name).inspect(|_| {
+            native::log_markdown(&format!("[hd] removed style \"{name}\""));
+        })
     }))
     .await
 }
@@ -379,4 +439,41 @@ pub async fn hd_preview(
     .await;
     previewing.store(false, Ordering::SeqCst);
     result
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn the_hd_log_lines_say_what_ran_and_how_it_ended() {
+        let req = BuildRequest {
+            styles: vec!["ultrasharp".into(), "soft".into()],
+            types: vec!["world".into()],
+            cap: 2048,
+        };
+        assert_eq!(
+            build_start_log(&req),
+            "[hd] build started: styles ultrasharp, soft, types world, up to 2048 px"
+        );
+        let done = Ok(BuildOutcome {
+            steps: 3,
+            elapsed_secs: 90,
+            log_path: "hd/build_all.log".into(),
+        });
+        assert!(build_end_log(&done).starts_with("[hd] build done: 3 step(s) in 90 s"));
+        assert_eq!(
+            build_end_log(&Err("cancelled".into())),
+            "[hd] build stopped: cancelled"
+        );
+        let fetched = Ok(SetupOutcome {
+            dir: "x".into(),
+            fetched: vec!["a".into(), "b".into()],
+            already_there: false,
+        });
+        assert_eq!(
+            setup_end_log(&fetched),
+            "[hd] tool download done: 2 file(s)"
+        );
+    }
 }
