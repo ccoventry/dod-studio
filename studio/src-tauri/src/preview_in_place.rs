@@ -55,7 +55,7 @@ pub fn plan(
 /// ("Half-Life", "dod-studio", most demo names). Over the pipe, the line is
 /// the console's own, where a quoted argument keeps its dashes.
 pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Result<(), String> {
-    let before = crate::capture_manager::running_game_pids();
+    let before = crate::game_process_manager::running_game_pids();
     let mut cmd = config.build_hlae_process("");
     let launcher = cmd
         .spawn()
@@ -63,7 +63,7 @@ pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Resul
     native::log_markdown(&format!(
         "[preview] in place: launched the game for \"{arg}\" (no patched copy)"
     ));
-    crate::capture_manager::watch_for_error_dialogs(app, launcher);
+    crate::game_process_manager::watch_for_error_dialogs(app, launcher);
     let lines = preview_lines(arg);
     std::thread::spawn(move || {
         if let Some(pid) = send_when_ready(&before, &lines) {
@@ -112,7 +112,7 @@ pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
     let started = Instant::now();
     while started.elapsed() < PIPE_WAIT {
         std::thread::sleep(Duration::from_millis(500));
-        let fresh: Vec<u32> = crate::capture_manager::running_game_pids()
+        let fresh: Vec<u32> = crate::game_process_manager::running_game_pids()
             .into_iter()
             .filter(|pid| !before.contains(pid))
             .collect();

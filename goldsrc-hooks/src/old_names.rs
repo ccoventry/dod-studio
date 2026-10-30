@@ -15,7 +15,8 @@
 //! of its own.
 
 /// (old name, new name), sorted by old name. Frozen: a name added since #555
-/// never had an old one.
+/// never had an old one. A name since retired leaves the table with it:
+/// `dodstudio_hide_hudelement` went with `ds_hud_hide_element` (#342).
 pub const OLD_NAMES: &[(&str, &str)] = &[
     ("dodstudio_allow_shaders", "ds_map_allow_shaders"),
     ("dodstudio_batch", "ds_capture_batch"),
@@ -70,7 +71,6 @@ pub const OLD_NAMES: &[(&str, &str)] = &[
         "ds_view_hide_headshot_red_screen",
     ),
     ("dodstudio_hide_hltv_messages", "ds_spec_hide_hltv_messages"),
-    ("dodstudio_hide_hudelement", "ds_hud_hide_element"),
     ("dodstudio_hide_map_text", "ds_hud_hide_map_text"),
     ("dodstudio_hide_scoreboard", "ds_hud_hide_scoreboard"),
     ("dodstudio_hide_screen_shake", "ds_view_hide_screen_shake"),

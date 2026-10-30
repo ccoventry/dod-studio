@@ -625,6 +625,18 @@ found through slot 60's thunk (`call FontManager; mov ecx, eax; call ...`,
 `FontManager()` being `mov eax, imm32; ret` on both builds), and
 `verify_killfeed_font_offsets.py` checks the layout on both.
 
+**Backup faces come before Tahoma (#1079).** `fallback <face>...` makes one
+more handle per face, at the font's size, weight and effects, widened the
+same way (a backup's own upper range is Tahoma's too), and reads its
+coverage. A character the face lacks goes to the first backup that has it,
+and Tahoma gets only what none has; each run is measured in its own handle,
+so the width stays what the draw advances past. A backup named `Tahoma`
+shares the fallback's handle. A face Windows does not have is left out with a
+note rather than silently swapped (`GetTextFaceA` on the font Windows made
+names the substitute): unquoted, `fallback Segoe UI` asks for `Segoe` and `UI`.
+The compatibility forms still win over a backup, so `⅞` stays `7/8` in the
+chosen face.
+
 The engine's own string draw (`EngineFont`; PRE `hw+0x6be0`) goes through the
 same manager, so it has the same split, and it also turns every character
 `iswprint` rejects into a space.

@@ -407,7 +407,7 @@ fn default_render_max_concurrent() -> i32 {
     2
 }
 fn default_scan_workers() -> i32 {
-    crate::capture_manager::SCAN_CONCURRENCY as i32
+    crate::scan_manager::SCAN_CONCURRENCY as i32
 }
 fn default_analyzer_explorer_width() -> i32 {
     260
@@ -824,7 +824,7 @@ mod tests {
         // Settings saved before #246 get today's worker count.
         assert_eq!(
             settings.scan_workers,
-            crate::capture_manager::SCAN_CONCURRENCY as i32
+            crate::scan_manager::SCAN_CONCURRENCY as i32
         );
         // Settings saved before #599 still open Setup when a path is missing.
         assert!(!settings.setup_dismissed);
