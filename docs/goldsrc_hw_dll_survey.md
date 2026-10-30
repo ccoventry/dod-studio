@@ -459,7 +459,7 @@ both builds by `tools/verify_engine_text_offsets.py`:
   `"HudText"` **by name** (`+0x1a7c0` / `+0x1a9260`). Unlike the by-number
   dispatcher every server message uses, the by-name one calls every record
   with that name, so a `pfnHookUserMsg` hook cannot drop these:
-  `client.dll`'s own record runs after it. `server_hud_text.rs` points the
+  `client.dll`'s own record runs after it. `plugin_text.rs` points the
   `CL_HudMessage` call (`+0x23da4` / `+0x1b0a0d`) at a filter instead.
 - The user-message list itself is freed only where the engine unloads
   `client.dll` (`+0xbda0`: `HUD_Shutdown`, then `FreeLibrary`), and

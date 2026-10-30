@@ -14,7 +14,7 @@ rest of #677's later rows rely on, against real binaries.
   5. `pop ecx; ret` follows, so five `nop`s leave the stack as it was, and
      the replacement in the Rust is five `nop`s.
 
-`server_hud_text.rs` (`ds_hud_hide_server_text`), for each `hw.dll`:
+`plugin_text.rs` (`ds_hud_hide_plugin_text`), for each `hw.dll`:
 
   6. Exactly one of its `BUILDS` matches, exactly once.
   7. The table its first instruction indexes holds the four
@@ -245,7 +245,7 @@ def check_center_print(image, check):
 
 
 def check_hud_message(image, check):
-    rust = SRC / "server_hud_text.rs"
+    rust = SRC / "plugin_text.rs"
     found = one_build(image, rust_builds(rust), check, "TE_TEXTMESSAGE")
     if not found:
         return None
