@@ -445,6 +445,70 @@ mod tests {
         assert_eq!(err, TrimError::Cancelled);
     }
 
+    /// End to end through `check`: the fixture's first full packet gets an
+    /// entry basing on one four entries back, with entries left out between
+    /// the two and before the base (so both move), and the copy must still
+    /// name the same base.
+    #[test]
+    fn an_offset_across_dropped_entries_reads_back_naming_its_base() {
+        let bytes = fixture();
+        let mut demo = dem::open_demo_from_bytes(&bytes).unwrap();
+        let mut dropping = HashSet::new();
+        let mut entry_and_base = None;
+        'found: for entry in demo.directory.entries.iter_mut() {
+            for frame in entry.frames.iter_mut() {
+                let FrameData::NetworkMessage(bt) = &mut frame.frame_data else {
+                    continue;
+                };
+                let dem::types::MessageData::Parsed(msgs) = bt.1.messages_mut() else {
+                    continue;
+                };
+                for m in msgs.iter_mut() {
+                    let dem::types::NetMessage::EngineMessage(em) = m else {
+                        continue;
+                    };
+                    let EngineMessage::SvcPacketEntities(pe) = &mut **em else {
+                        continue;
+                    };
+                    let n = pe.entity_states.len();
+                    assert!(
+                        pe.entity_states[n - 6].entity_index > 32,
+                        "six map entities"
+                    );
+                    let last = &mut pe.entity_states[n - 1];
+                    last.has_baseline_index = true;
+                    last.baseline_index = Some(dem::nbit_num!(4, 6));
+                    for at in [n - 2, n - 3, n - 6] {
+                        dropping.insert(pe.entity_states[at].entity_index);
+                    }
+                    entry_and_base = Some((
+                        pe.entity_states[n - 1].entity_index,
+                        pe.entity_states[n - 5].entity_index,
+                    ));
+                    break 'found;
+                }
+            }
+        }
+        let want = entry_and_base.expect("the fixture has a full snapshot");
+        let before = rewrite::measure(&mut demo, &HashSet::new());
+        assert!(before.offset_bases.contains(&want));
+        let frames = frame_order(&demo);
+        rewrite::apply(&mut demo, &dropping);
+        let out = demo
+            .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
+            .unwrap();
+        let after = check(
+            &out,
+            &dropping,
+            &frames,
+            &before,
+            before.peak_before,
+            &mut |_| {},
+        )
+        .expect("the copy names the same base");
+        assert!(after.offset_bases.contains(&want));
+    }
+
     #[test]
     fn the_check_rejects_an_entry_basing_on_another_entity_than_before() {
         let dropped = HashSet::from([40]);

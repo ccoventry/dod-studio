@@ -220,7 +220,11 @@ fn save_copy(path: &Path, bytes: &[u8]) -> Result<(), TrimError> {
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    std::fs::write(&partial, bytes).map_err(fail)?;
+    // A write that fails partway (a full disk) leaves no partial file behind.
+    if let Err(e) = std::fs::write(&partial, bytes) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(fail(e));
+    }
     match std::fs::rename(&partial, path) {
         Ok(()) => Ok(()),
         Err(e) => {
