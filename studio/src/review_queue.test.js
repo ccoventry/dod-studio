@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS, REVIEW_ORDER } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS, REVIEW_ORDER, reviewKills } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -120,6 +120,13 @@ describe('Review highlights queue (#623)', () => {
     const [h] = buildReviewQueue([demo('a.dem', [s])], ['a.dem']).highlights;
     expect(h).toMatchObject({ from: 2, to: 3, note: 'flick', answered: 'no', kill_times: [40.5, 42.5, 45.5] });
     expect(h.key).toBe(streakUid('a.dem', s));
+  });
+
+  it("carries each kill's victim and weapon for the game's kill list (#1140)", () => {
+    const s = streak({ kills: [[10, 1, 'K98'], [20, 2, 'Colt']], viewdemo_times: [5, 6], victims: ['gskiLL'] });
+    const [h] = buildReviewQueue([demo('a.dem', [s])], ['a.dem']).highlights;
+    expect(h.kills).toEqual([{ victim: 'gskiLL', weapon: 'K98' }, { victim: '', weapon: 'Colt' }]);
+    expect(reviewKills({})).toEqual([]);
   });
 
   it('leaves out highlights with no demo-player times', () => {
