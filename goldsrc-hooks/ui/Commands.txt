@@ -110,6 +110,8 @@ DEMO PLAYBACK
       Play the last demo again.
   ds_demo_review yes|maybe|no|replay|next|back|stop
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
+  ds_demo_review form
+      The kill range and note form over the demo, as E opens it during a review highlight.
   ds_demo_review ask start|here
       With no review running, ask DoD Studio to review the demo playing, from its first highlight or from the next one from here (the Review tab's From the start and From here).
   ds_demo_ex_interp_max <ms>

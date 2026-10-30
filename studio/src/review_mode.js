@@ -10,7 +10,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, applyReviewEdit, fastForwardGap, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -81,6 +81,12 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
       } else {
         console.warn('[review] answer for a highlight no longer in the queue:', e);
       }
+    } else if (e.kind === 'edit') {
+      // The game's kill range and note form (#1139): the row's Kill Range
+      // and Notes, its mark untouched; onChanged saves it to the review
+      // library too.
+      if (applyReviewEdit(getDemos(), e)) onChanged();
+      else console.warn('[review] kill range and note for a highlight no longer in the queue:', e);
     } else if (e.kind === 'ended' && running) {
       running = false;
       showToast(STRINGS.REVIEW.endedToast(e.reason, answers), 'info', 8000);

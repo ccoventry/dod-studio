@@ -237,7 +237,7 @@
 		"enabled"		"1"
 		"labelText"		"While a highlight plays or at its end: Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop."
 		"textAlignment"		"west"
-		"helptext"		"The keys answer on the game screen while a highlight plays or waits at its end, after a second's pause at each start so a double press can't answer the next one, and never while typing in a box. ds_ui_review_keys 0 turns them off."
+		"helptext"		"The keys answer on the game screen while a highlight plays or waits at its end, after a second's pause at each start so a double press can't answer the next one, and never while typing in a box. E opens a small form over the demo for the kill range and note, without this menu. ds_ui_review_keys 0 turns them off."
 	}
 	"FromStartButton"
 	{

@@ -322,6 +322,7 @@ mod pov_recorder_shots;
 mod remote;
 mod review;
 mod review_ask;
+mod review_form;
 mod review_keys;
 mod review_lock;
 mod run_in_background;

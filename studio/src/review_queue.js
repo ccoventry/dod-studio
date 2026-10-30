@@ -8,6 +8,8 @@
 //    a second review picks up where the first left off.
 //  - Kill Range: the from/to kills given in game
 //  - Notes: the note typed in game
+// The game's kill range and note form (#1139) sends those two on their own,
+// before any answer; they change only the Kill Range and Notes.
 //  - Ticked for capture: only when the user turned on "tick Yes" (people who
 //    only time demos don't want rows ticked), and never for Maybe. Skip always
 //    unticks.
@@ -191,21 +193,34 @@ export function buildReviewQueue(demos, checkedPaths, covers = REVIEW_COVERS.ALL
 }
 
 /**
+ * Puts a kill range and note from the game on its row (`{ demo, key, from,
+ * to, note }`, kills from 1, held to the highlight's): what the game's form
+ * saves without an answer (#1139), and the first half of every answer. The
+ * Review mark and the tick are left alone. Returns the streak changed, or
+ * null when the demo or highlight is no longer in the queue.
+ */
+export function applyReviewEdit(demos, edit) {
+  const demo = (demos || []).find((d) => d.path === edit.demo);
+  if (!demo) return null;
+  const streak = (demo.streaks || []).find((s) => streakUid(demo.path, s) === edit.key);
+  if (!streak) return null;
+  const last = Math.max((streak.kills || []).length - 1, 0);
+  const start = Math.min(Math.max((edit.from || 1) - 1, 0), last);
+  const end = Math.min(Math.max((edit.to || 1) - 1, start), last);
+  streak.start_index = start;
+  streak.end_index = end;
+  streak.notes = edit.note || '';
+  return streak;
+}
+
+/**
  * Puts one answer on its row; `tickYes` also ticks a Yes row for capture.
  * Returns the streak changed, or null when the demo or highlight is no longer
  * in the queue.
  */
 export function applyReviewAnswer(demos, answer, { tickYes = false } = {}) {
-  const demo = (demos || []).find((d) => d.path === answer.demo);
-  if (!demo) return null;
-  const streak = (demo.streaks || []).find((s) => streakUid(demo.path, s) === answer.key);
+  const streak = applyReviewEdit(demos, answer);
   if (!streak) return null;
-  const last = Math.max((streak.kills || []).length - 1, 0);
-  const start = Math.min(Math.max((answer.from || 1) - 1, 0), last);
-  const end = Math.min(Math.max((answer.to || 1) - 1, start), last);
-  streak.start_index = start;
-  streak.end_index = end;
-  streak.notes = answer.note || '';
   const mark = MARK_FOR_ANSWER[answer.verdict] ?? CURATION.SKIP;
   setCuration(streak, mark);
   if (mark === CURATION.KEEP && tickYes) streak.selected = true;

@@ -48,7 +48,9 @@
 //! `<game>\dod_addon\dodstudio_ui\` (or `dod\dodstudio_ui\` without
 //! `-addons`, or while only that one exists: [`res_dir`]): `DodStudio.res` for the window, then one per
 //! tab in [`PAGES`] (`Playback.res`, `Demos.res`, `Highlights.res`,
-//! `Console.res`, `Settings.res`, `Commands.res`, `Studio.res`). Our own folder beside
+//! `Console.res`, `Settings.res`, `Commands.res`, `Studio.res`), and
+//! `ReviewForm.res` for the review's kill range and note form (#1139, its own
+//! small window over the demo, `hook::review_form`). Our own folder beside
 //! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
 //! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time; a
 //! later DLL with a changed default replaces a file only while it is still
@@ -86,6 +88,12 @@ const WINDOW_RES: (&CStr, &str, &str) = (
     c"dodstudio_ui/DodStudio.res",
     "DodStudio.res",
     include_str!("../ui/DodStudio.res"),
+);
+/// The review's kill range and note form (#1139), a window of its own.
+const FORM_RES: (&CStr, &str, &str) = (
+    c"dodstudio_ui/ReviewForm.res",
+    "ReviewForm.res",
+    include_str!("../ui/ReviewForm.res"),
 );
 
 /// One tab: its panel name, its title on the tab strip, and its layout file
@@ -1824,7 +1832,10 @@ fn ensure_res(reset: bool) -> Result<Option<String>, String> {
         })
         .collect();
     let mut written = Vec::new();
-    for (_, file, default) in std::iter::once(WINDOW_RES).chain(PAGES.iter().map(|p| p.res)) {
+    let layouts = [WINDOW_RES, FORM_RES]
+        .into_iter()
+        .chain(PAGES.iter().map(|p| p.res));
+    for (_, file, default) in layouts {
         let path = dir.join(file);
         let on_disk = std::fs::read_to_string(&path).ok();
         let before = stamps.iter().find(|(f, _)| f == file).map(|(_, h)| *h);
@@ -1876,6 +1887,8 @@ mod hook {
     pub(super) mod lock_controls;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
+    /// The review's kill range and note form over the demo (#1139).
+    mod review_form;
     /// The Review tab (#623).
     pub(super) mod review_tab;
     /// The sort arrow in the lists' headings (#611).
@@ -4378,6 +4391,9 @@ mod hook {
         // first ESC used to seek to the demo's start (#663).
         if let Ok(vgui) = Vgui::get() {
             unsafe { vcr_sync::update(&vgui) };
+            // The review's form is a window of its own, over the demo with
+            // the menu closed: it needs no window of ours either (#1139).
+            unsafe { review_form::update(&vgui) };
         }
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
