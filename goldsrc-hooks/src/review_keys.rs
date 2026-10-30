@@ -59,8 +59,8 @@
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
-use crate::demo_list_folders::Setting;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 /// `ds_ui_review_keys 1` (default): while a highlight plays and at its end,
 /// Y, M, N, R, B, Space or S answer it on the game screen, E opens the kill

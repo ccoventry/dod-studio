@@ -21,8 +21,8 @@
 // Only the 32-bit build has the bar; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use crate::demo_list_folders::Setting;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("demo_show_load_progress");
 

@@ -59,17 +59,18 @@
 //! this), and 0.9 with it on; the roll p95 1.1 degrees against 0.
 
 use std::ffi::{CString, c_char, c_void};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial, UserMsgHookFn};
+use crate::engine::{self, UserMsgHookFn};
 use crate::names::console_name;
 use crate::pov_live_bob::View;
+use crate::setting::Cvar;
 
 pub const FLASH_NAME: &str = console_name!("view_hide_headshot_red_screen");
 pub const SHAKE_NAME: &str = console_name!("view_hide_screen_shake");
 
-static FLASH: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static SHAKE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static FLASH: Cvar = Cvar::new();
+pub static SHAKE: Cvar = Cvar::new();
 
 /// The engine's handlers; 0 before a look, 1 when one couldn't be found.
 static FADE_HANDLER: AtomicUsize = AtomicUsize::new(0);
@@ -78,19 +79,8 @@ static SHAKE_HANDLER: AtomicUsize = AtomicUsize::new(0);
 /// (forwarding everything while the cvars are 0).
 static WANTED: AtomicBool = AtomicBool::new(false);
 
-pub fn set_cvars(flash: *mut CvarSPartial, shake: *mut CvarSPartial) {
-    FLASH.store(flash, Ordering::Release);
-    SHAKE.store(shake, Ordering::Release);
-}
-
-fn on(cvar: &AtomicPtr<CvarSPartial>) -> bool {
-    let cvar = cvar.load(Ordering::Acquire);
-    // Safety: the engine owns the cvar for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
-}
-
 pub fn shake_on() -> bool {
-    on(&SHAKE)
+    SHAKE.on()
 }
 
 /// The first 4 bytes (amplitude, duration) of the last `ScreenShake` dropped
@@ -270,7 +260,7 @@ fn correction(
 /// just put in place (`pov_live_bob::after_override`). `live` is the view as
 /// the live `V_CalcRefdef` left it, before the override.
 pub(crate) fn unshake(live: &View, view: &mut View, gun: &mut [f32; 3]) {
-    if !on(&SHAKE) {
+    if !SHAKE.on() {
         return;
     }
     let now = live.time;
@@ -385,7 +375,7 @@ fn handler(slot: &AtomicUsize, message: &[u8]) -> Option<UserMsgHookFn> {
 }
 
 unsafe extern "C" fn hooked_fade(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
-    if on(&FLASH) && size >= 10 && !buf.is_null() {
+    if FLASH.on() && size >= 10 && !buf.is_null() {
         // Safety: the engine hands over `size` bytes of payload.
         let payload = unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) };
         if is_head_hit_flash(payload) {
@@ -400,7 +390,7 @@ unsafe extern "C" fn hooked_fade(name: *const c_char, size: i32, buf: *mut c_voi
 }
 
 unsafe extern "C" fn hooked_shake(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
-    if on(&SHAKE) {
+    if SHAKE.on() {
         if size >= 4 && !buf.is_null() {
             // Safety: the engine hands over `size` bytes of payload.
             let head = unsafe { std::ptr::read_unaligned(buf as *const [u8; 4]) };
@@ -418,7 +408,7 @@ unsafe extern "C" fn hooked_shake(name: *const c_char, size: i32, buf: *mut c_vo
 /// Every frame: hooks both messages once either setting has been on.
 pub fn poll() {
     if !WANTED.load(Ordering::Relaxed) {
-        if !on(&FLASH) && !on(&SHAKE) {
+        if !FLASH.on() && !SHAKE.on() {
             return;
         }
         WANTED.store(true, Ordering::Relaxed);

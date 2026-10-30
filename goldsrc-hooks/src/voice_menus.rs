@@ -69,11 +69,12 @@
 //! screen, and puts back one it hid when its cvar goes to 0.
 
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_voice_menus");
 
@@ -119,7 +120,7 @@ const JE_AT: usize = 8;
 const JE: u8 = 0x74;
 const JMP: u8 = 0xEB;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar as [`poll`] last read it: what the message hook reads.
 static WANTED: AtomicBool = AtomicBool::new(false);
 
@@ -148,11 +149,6 @@ static RESOLVED_BASE: AtomicUsize = AtomicUsize::new(0);
 static COMMAND_MENU_BLOCKED: AtomicBool = AtomicBool::new(false);
 /// So a failure is reported once, not every frame.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-/// Called by `commands/install.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 // ── Pure decisions ───────────────────────────────────────────────────────────
 
@@ -386,11 +382,9 @@ unsafe extern "C" fn hooked(name: *const c_char, size: i32, buf: *mut c_void) ->
 /// `ShowMenu` hook prepended once a level is loaded (the timing `clan_text`
 /// uses, for the same reason), and re-applies both halves.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         COMPLAINED.store(false, Ordering::Relaxed);
         unsafe {
@@ -432,11 +426,7 @@ pub fn poll() {
 
 /// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return None;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = CVAR.try_on()?;
     let hidden = HIDDEN.load(Ordering::Relaxed);
     let plugin_hidden = PLUGIN_HIDDEN.load(Ordering::Relaxed);
     if !wanted && hidden == 0 && plugin_hidden == 0 {
