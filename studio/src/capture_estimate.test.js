@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { streakSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
+import { streakSeconds, streakKillSeconds, rampSavedSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME, bytesPerFrameFor, obsBytesPerSecond } from './capture_estimate.js';
 
 const opts = {
   preRollSeconds: 2, postRollSeconds: 0.6,
@@ -88,5 +88,44 @@ describe('an OBS take is billed by quality and length (#1096)', () => {
 
   it('bills an unknown quality as Standard', () => {
     expect(obsBytesPerSecond('', 2560, 1440, 120)).toBe(obsBytesPerSecond('standard', 2560, 1440, 120));
+  });
+});
+
+describe('fast-forwarded gaps between kills (#831)', () => {
+  const gaps = { overSeconds: 8, speed: 4 };
+
+  it('saves three quarters of the stretch between the margins at 4x', () => {
+    // Kills 20 s apart: 2 s after to 4 s before leaves 14 s, recorded in 3.5.
+    expect(rampSavedSeconds([10, 30], gaps)).toBeCloseTo(10.5);
+  });
+
+  it('saves nothing with gaps kept, a short gap, or nothing between the margins', () => {
+    expect(rampSavedSeconds([10, 30], null)).toBe(0);
+    expect(rampSavedSeconds([10, 18], gaps)).toBe(0);
+    expect(rampSavedSeconds([10, 15], { overSeconds: 3, speed: 4 })).toBe(0);
+  });
+
+  it("takes the highlight's selected kills", () => {
+    const s = { kills: [[1, 10, 'a'], [2, 20, 'b'], [3, 30, 'c']], start_index: 1, end_index: 2 };
+    expect(streakKillSeconds(s)).toEqual([20, 30]);
+    expect(streakKillSeconds({ kills: [] })).toEqual([]);
+  });
+
+  it('bills a take less its sped-up gaps', () => {
+    const demos = [{ streaks: [{ selected: true, kills: [[0, 10, 'x'], [0, 30, 'y']] }] }];
+    // 20 s take, less 10.5 s saved: 9.5 s -> 10 frames at 1 fps, 3 bytes each.
+    expect(computeRequiredCaptureBytes(demos, { ...opts, killGaps: gaps })).toBe(30);
+    expect(computeRequiredCaptureBytes(demos, opts)).toBe(60);
+  });
+
+  it('finds the gap between two highlights merged into one take', () => {
+    const demos = [{ streaks: [
+      { selected: true, kills: [[0, 10, 'x']] },
+      { selected: true, kills: [[0, 25, 'y']] },
+    ] }];
+    const rolls = { ...opts, preRollSeconds: 10, postRollSeconds: 10 };
+    // One 15 s take; its 15 s gap saves 9 s x 3/4: 8.25 s -> 9 frames.
+    expect(computeRequiredCaptureBytes(demos, { ...rolls, killGaps: gaps })).toBe(27);
+    expect(computeRequiredCaptureBytes(demos, rolls)).toBe(45);
   });
 });
