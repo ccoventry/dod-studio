@@ -245,23 +245,7 @@ pub(super) fn note_snapshot(time: f64, origin: [f32; 3], body: &str, movetype: i
 /// Whether the demo file says the body is about to leave `sprint_*`; read
 /// by the next [`note_snapshot`]. False without a timeline.
 pub(super) fn note_body_ahead(leaving_sprint: bool) {
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        if leaving_sprint
-            && !s.leaving_sprint
-            && super::LOG_HELD_MODELS.load(std::sync::atomic::Ordering::Relaxed)
-        {
-            // Safety: `report` only appends to the hook log.
-            unsafe {
-                crate::debug::report(&format!(
-                    "lookahead: the file has the body leaving sprint_ within {LET_GO_LOOK_AHEAD_SECONDS} s (newest snapshot {:.3}, {:?})",
-                    s.last.map_or(0.0, |l| l.time),
-                    s.fall
-                ))
-            };
-        }
-        s.leaving_sprint = leaving_sprint;
-    });
+    STATE.with(|s| s.borrow_mut().leaving_sprint = leaving_sprint);
 }
 
 /// [`SnapshotMotion::in_the_air`] on the engine thread's state.

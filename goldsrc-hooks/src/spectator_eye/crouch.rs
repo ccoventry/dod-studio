@@ -80,6 +80,18 @@ pub(crate) const LOOK_AHEAD_SECONDS: f32 = 0.6;
 /// A flip looked ahead to that hasn't arrived this long after it was due
 /// isn't coming (the file and the playback disagree): the camera goes back up.
 const LATE_SECONDS: f64 = 0.15;
+/// A looked-ahead flip still at least this far off that the file no longer
+/// puts within this of where it did isn't coming: the clock difference
+/// `crate::lookahead` reads every 0.1 s moved under it (a seek), and the
+/// camera goes back up at once rather than wait out [`LATE_SECONDS`].
+/// Re-reading the difference moves a flip by about 0.01 s.
+const WITHDRAWN_SECONDS: f64 = 0.1;
+/// A looked-ahead ease first seen more than this after it should have
+/// started is left to the flip: starting it there would drop the camera
+/// part of the way at once. A flip enters the look-ahead window at least
+/// 0.19 s before its ease starts, so only a timeline landing, a seek or a
+/// hitch gets here.
+const MISSED_START_SECONDS: f64 = 0.1;
 
 /// One frame's look at the watched player.
 #[derive(Clone, Copy, Debug)]
@@ -315,12 +327,17 @@ impl CrouchEase {
 
     /// Starts the ease into a ground crouch the demo file says is coming, so
     /// it ends as the flip arrives (POV's ease ends at the flip), and backs
-    /// out of one whose flip didn't come. Only from standing still, with
-    /// nothing in flight, and only for an ease this view was there to see
-    /// start: after a seek into the middle of one, the flip is waited for.
+    /// out of one whose flip didn't come or that the file stops promising.
+    /// Only from standing still, with nothing in flight, and only for an
+    /// ease this view was there to see start: after a seek into the middle
+    /// of one, or a timeline that lands mid-crouch, the flip is waited for.
     fn look_ahead(&mut self, frame: &Frame, now: f64) {
         if let Some(flip) = self.pre_eased {
-            if now > flip + LATE_SECONDS {
+            let withdrawn = now < flip - WITHDRAWN_SECONDS
+                && frame
+                    .upcoming_down
+                    .is_none_or(|next| (next - flip).abs() > WITHDRAWN_SECONDS);
+            if withdrawn || now > flip + LATE_SECONDS {
                 self.pre_eased = None;
                 self.depth = self.depth_at(now);
                 self.ease = Ease::Up {
@@ -336,7 +353,8 @@ impl CrouchEase {
         let standing =
             !frame.snapshot.small_hull && self.steps[0].is_none() && self.depth_at(now) <= 0.0;
         let start = flip - LEAD_SECONDS;
-        if standing && now >= start && start >= self.started_at {
+        let on_time = (start..=start + MISSED_START_SECONDS).contains(&now);
+        if standing && on_time && start >= self.started_at {
             self.pre_eased = Some(flip);
             self.ease = Ease::Down {
                 since: start,
@@ -784,5 +802,42 @@ mod tests {
         assert!(lowest < 45.0, "the ease never started: {lowest}");
         let (_, end) = frames.last().unwrap();
         assert!((end - 58.0).abs() < 1e-3, "still down at the end: {end}");
+    }
+
+    #[test]
+    fn a_looked_ahead_flip_the_file_stops_promising_lets_the_camera_up_at_once() {
+        // Half-way down into a crouch due at 1.0, a seek moves the clock
+        // difference and the file has no crouch coming any more: the camera
+        // is back up in POV's stand-up time, not after the flip was due.
+        let mut sim = crouch(100.0, 100.0, 3.0);
+        sim.timeline = vec![1.0];
+        let before = run(&mut sim, 0.2, 0.75, 120.0);
+        let (_, at_seek) = before.last().unwrap();
+        assert!(*at_seek < 52.0, "the ease never started: {at_seek}");
+        sim.timeline.clear();
+        let after = run(&mut sim, 0.76, 0.9, 120.0);
+        let (_, end) = after.last().unwrap();
+        assert!((end - 58.0).abs() < 1e-3, "still down at 0.9: {end}");
+    }
+
+    #[test]
+    fn a_looked_ahead_ease_first_seen_late_waits_for_the_flip() {
+        // The timeline lands 0.16 s after this crouch's ease should have
+        // started: starting it there would drop the camera 8 units at once.
+        let mut sim = crouch(1.0, 10.0, 3.0);
+        let flip = sim
+            .snapshots
+            .iter()
+            .find(|s| s.small_hull)
+            .unwrap()
+            .msg_time;
+        let start = flip - LEAD_SECONDS as f32;
+        run(&mut sim, 0.2, start + 0.15, 120.0);
+        sim.timeline = vec![flip];
+        let frames = run(&mut sim, start + 0.16, flip - 0.01, 120.0);
+        assert!(
+            frames.iter().all(|(_, cam)| (cam - 58.0).abs() < 1e-3),
+            "{frames:?}"
+        );
     }
 }

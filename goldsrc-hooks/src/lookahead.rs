@@ -1,5 +1,5 @@
-//! Look-ahead (issue #1154, R&D): what the watched player is about to do,
-//! read out of the demo file before playback gets there.
+//! Look-ahead (issue #1154): what the watched player is about to do, read
+//! out of the demo file before playback gets there.
 //!
 //! An HLTV demo shows some changes late against the player's own view. The
 //! clearest is a crouch: POV eases the camera down over 0.4 s from the key,
@@ -7,14 +7,19 @@
 //! when that ease ends. The game holds nothing newer than the snapshot it
 //! last read (it draws 0.1 s behind that, `ex_interp`, but the hull flip is
 //! already in the newest snapshot when it arrives), so the only way to start
-//! the camera's ease with POV's is to know the flip is coming.
+//! the camera's ease with POV's is to know the flip is coming. The other
+//! user is the sprint let-go in a fall off an edge (#704): the body leaving
+//! `sprint_*` says the key was let go, and the file says it first.
 //!
 //! So when an HLTV demo plays with `ds_spec_match_pov` on, a thread of its
-//! own at below-normal priority reads the `.dem` once ([`timeline::read`])
-//! and publishes a [`Timeline`]. Until it answers, and for any demo it can't
+//! own at below-normal priority reads the `.dem` once ([`timeline::read`],
+//! about 1 s for a 40 MB half, holding about 1 MB of the file at a time) and
+//! publishes a [`Timeline`]. Until it answers, and for any demo it can't
 //! read, everything works as without it. The engine thread only ever looks
-//! the answer up: [`timeline`] costs an atomic load a frame, and a
-//! non-blocking `try_read` the one frame a new timeline lands.
+//! the answer up: [`timeline`] costs an atomic load a frame, a non-blocking
+//! `try_read` the one frame a new timeline lands, and a read of the demo
+//! player's clock every [`OFFSET_SECONDS`] (about 1 µs a frame in all,
+//! measured on PRE and POST).
 //!
 //! ## Two clocks
 //!
@@ -25,11 +30,14 @@
 //! it (measured on PRE: `msg_time` 49.93 against a world clock near 1064).
 //! So the lookup goes through the difference between the two, read off the
 //! demo player ([`crate::demo_seek::clock`]) every [`OFFSET_SECONDS`]: a seek
-//! leaves it stale for at most that long.
+//! leaves it stale for at most that long, and the crouch ease lets go of a
+//! looked-ahead flip the file stops promising (`spectator_eye::crouch`).
 
+mod frames;
 pub mod timeline;
 
 use std::cell::RefCell;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -40,6 +48,13 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// The newest timeline and the demo it is for. Written by the reading
 /// thread; read by the engine thread with `try_read` only.
 static PUBLISHED: RwLock<Option<(String, Arc<Timeline>)>> = RwLock::new(None);
+/// The newest read asked for. A reading thread whose ticket is older stops,
+/// so a demo changed mid-read doesn't leave a read running for nothing or
+/// publish over the newer one.
+static LATEST_READ: AtomicU64 = AtomicU64::new(0);
+/// What the newest read did, for `ds_debug_status`. Written by the reading
+/// threads only, so the engine thread's per-frame path never waits on it.
+static STATUS: RwLock<String> = RwLock::new(String::new());
 
 /// How often (demo seconds) the engine thread checks which demo is playing.
 const CHECK_SECONDS: f64 = 0.5;
@@ -94,12 +109,6 @@ impl View {
         let svc = (f64::from(newest) + self.svc_offset) as f32;
         self.timeline.body_changes(entity, svc, svc + ahead)
     }
-
-    /// For the log: the next ground crouch at all, on the file's clock.
-    fn next_crouch_svc(&self, entity: i32, newest: f32) -> Option<f32> {
-        let svc = (f64::from(newest) + self.svc_offset) as f32;
-        self.timeline.next_crouch_down(entity, svc, f32::MAX)
-    }
 }
 
 /// The playing demo's timeline, once read and while the demo player's clock
@@ -151,123 +160,97 @@ pub fn timeline(time: f64) -> Option<View> {
     })
 }
 
-/// Reads `name` (as `viewdemo` was given it) on a thread of its own.
+/// One line for `ds_debug_status`: which demo the look-ahead has read, or
+/// why it has none.
+pub fn status() -> String {
+    match STATUS.read() {
+        Ok(status) if !status.is_empty() => status.clone(),
+        Ok(_) => "no HLTV demo watched in first person yet".to_string(),
+        Err(_) => "unknown".to_string(),
+    }
+}
+
+/// How a read ended.
+enum Outcome {
+    Read(Timeline),
+    Failed(String),
+    /// Another demo was asked for meanwhile; its read owns the status.
+    Superseded,
+}
+
+/// Reads `name` (as `viewdemo` was given it) on a thread of its own, and
+/// publishes its timeline unless another demo was asked for meanwhile.
 fn start_read(name: String) {
+    let ticket = LATEST_READ.fetch_add(1, Ordering::AcqRel) + 1;
     let path = crate::streaks::demo_path(&crate::texture_hires::game_dir(), &name);
     let spawned = std::thread::Builder::new()
         .name("ds_lookahead".into())
         .spawn(move || {
             lower_priority();
+            set_status(ticket, format!("reading {}", path.display()));
             let start = std::time::Instant::now();
-            let bytes = match std::fs::read(&path) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    report(&format!("can't read {}: {e}", path.display()));
-                    return;
+            match read_demo(&path, ticket) {
+                Outcome::Read(found) => {
+                    let line = format!(
+                        "{}: {}, read in {:.1} s",
+                        path.display(),
+                        found.summary(),
+                        start.elapsed().as_secs_f64()
+                    );
+                    if publish(ticket, name, found) {
+                        set_status(ticket, line.clone());
+                        report(&line);
+                    }
                 }
-            };
-            let read_ms = start.elapsed().as_millis();
-            let size = bytes.len();
-            let found = timeline::read(&bytes);
-            drop(bytes);
-            let Some(found) = found else {
-                report(&format!("{} isn't a demo it can read", path.display()));
-                return;
-            };
-            report(&format!(
-                "{}: {} ({} MB file read in {read_ms} ms, parsed in {} ms in all)",
-                path.display(),
-                timeline::summary(&found),
-                size >> 20,
-                start.elapsed().as_millis()
-            ));
-            let mut published = PUBLISHED.write().unwrap_or_else(|e| e.into_inner());
-            *published = Some((name, Arc::new(found)));
-            GENERATION.fetch_add(1, Ordering::Release);
+                Outcome::Failed(why) => {
+                    set_status(ticket, why.clone());
+                    report(&why);
+                }
+                Outcome::Superseded => {}
+            }
         });
     if let Err(e) = spawned {
+        // Not in the status: the engine thread leaves that lock alone.
         report(&format!("couldn't start the reading thread: {e}"));
     }
 }
 
-/// The per-frame cost and the flips' arrival, for the R&D log
-/// (`ds_debug_log_weapon_model 1`): every [`COST_FRAMES`] frames the mean
-/// and the worst time the look-ahead took, and each looked-ahead flip's
-/// `msg_time` against the demo clock when it arrived.
-pub fn note_frame(
-    cost: std::time::Duration,
-    timeline: Option<&View>,
-    target: i32,
-    time: f64,
-    newest: f32,
-    small_hull: bool,
-    upcoming: Option<f64>,
-) {
-    if !crate::anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed) {
-        return;
+/// Reads the demo at `path` into a timeline, giving up once `ticket` is no
+/// longer the newest read.
+fn read_demo(path: &Path, ticket: u64) -> Outcome {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) => return Outcome::Failed(format!("can't open {}: {e}", path.display())),
+    };
+    let superseded = || LATEST_READ.load(Ordering::Acquire) != ticket;
+    match timeline::read(file, &superseded) {
+        Ok(found) => Outcome::Read(found),
+        Err(timeline::ReadError::NotADemo) => {
+            Outcome::Failed(format!("{} has no demo directory to read", path.display()))
+        }
+        Err(timeline::ReadError::Superseded) => Outcome::Superseded,
     }
-    STATS.with(|stats| {
-        let mut st = stats.borrow_mut();
-        let ns = u64::try_from(cost.as_nanos()).unwrap_or(u64::MAX);
-        st.frames += 1;
-        st.total_ns += ns;
-        st.worst_ns = st.worst_ns.max(ns);
-        if st.frames >= COST_FRAMES {
-            report(&format!(
-                "per frame over {} frames: mean {} ns, worst {} ns; target {target}, newest msg_time {newest:.3}, clock {time:.3}, {}",
-                st.frames,
-                st.total_ns / st.frames,
-                st.worst_ns,
-                match timeline {
-                    None => "no timeline yet".to_string(),
-                    Some(t) => format!(
-                        "world clock - game clock {:.3}, his next ground crouch in the file at {:?}",
-                        t.svc_offset,
-                        t.next_crouch_svc(target, newest)
-                    ),
-                }
-            ));
-            st.frames = 0;
-            st.total_ns = 0;
-            st.worst_ns = 0;
-        }
-        // The flip is the frame his newest snapshot turns small-hull.
-        if let Some(flip) = st.waiting
-            && small_hull
-            && !st.small_hull
-        {
-            report(&format!(
-                "flip due at {flip:.4} arrived at demo clock {time:.4} ({:+.4} s): newest msg_time {newest:.4}",
-                time - flip
-            ));
-            st.waiting = None;
-            st.reported = Some(flip);
-        }
-        st.small_hull = small_hull;
-        // The same flip comes back a little moved as the clock difference
-        // is read again; once reported it isn't waited for twice.
-        if let Some(next) = upcoming
-            && st.reported.is_none_or(|r| (next - r).abs() > 0.2)
-        {
-            st.waiting = Some(next);
-        }
-    });
 }
 
-const COST_FRAMES: u64 = 3000;
-
-#[derive(Default)]
-struct Stats {
-    frames: u64,
-    total_ns: u64,
-    worst_ns: u64,
-    waiting: Option<f64>,
-    reported: Option<f64>,
-    small_hull: bool,
+/// Makes `found` the published timeline, if `ticket` is still the newest
+/// read. Checked under the write lock, so a read that finishes late can't
+/// publish over a newer one.
+fn publish(ticket: u64, name: String, found: Timeline) -> bool {
+    let mut published = PUBLISHED.write().unwrap_or_else(|e| e.into_inner());
+    if LATEST_READ.load(Ordering::Acquire) != ticket {
+        return false;
+    }
+    *published = Some((name, Arc::new(found)));
+    GENERATION.fetch_add(1, Ordering::Release);
+    true
 }
 
-thread_local! {
-    static STATS: RefCell<Stats> = RefCell::new(Stats::default());
+/// Sets the status line, unless a newer read than `ticket` owns it.
+fn set_status(ticket: u64, line: String) {
+    let mut status = STATUS.write().unwrap_or_else(|e| e.into_inner());
+    if LATEST_READ.load(Ordering::Acquire) == ticket {
+        *status = line;
+    }
 }
 
 fn report(message: &str) {

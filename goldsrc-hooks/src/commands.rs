@@ -764,6 +764,10 @@ fn status_text() -> String {
             spectator_crosshair::status()
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
+        lines.push(format!(
+            "look-ahead (crouch ease, sprint let-go): {}",
+            crate::lookahead::status()
+        ));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
     lines.push(format!(

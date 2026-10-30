@@ -1,23 +1,21 @@
 //! The per-player state changes a demo holds, read straight out of the
 //! `.dem` ahead of playback (issue #1154).
 //!
-//! One pass over the file, frame by frame through `dem-patch`'s own frame
-//! parser, keeping only what the look-ahead uses and dropping each frame as
-//! soon as it is read: the memory it needs is the file's bytes and the
-//! result, not the whole parsed demo (a full `open_demo_from_bytes` of a
-//! 42 MB HLTV demo peaks above 800 MB, too much for a 32-bit game).
+//! One pass over the file, a frame at a time through `dem-patch`'s own
+//! frame parser ([`Frames`]), keeping only what the look-ahead uses and
+//! dropping each frame as soon as it is read: the memory it needs is about
+//! 1 MB of the file and the result (about 155 KB for a 33-minute HLTV half),
+//! not the file or the whole parsed demo.
 //!
-//! Times are `svc_time`, the server clock every network frame opens with:
-//! the clock an entity state's `msg_time` carries, so the hook can compare
-//! them directly whatever the demo player's own clock does (seeks, and the
-//! HLTV clock's millisecond step-backs, #927).
+//! Times are `svc_time`, the server clock every network frame opens with,
+//! which is the demo player's world clock (`crate::demo_seek::clock`). The
+//! game's own clock is not: `crate::lookahead` maps between the two.
 
-use std::collections::HashMap;
+use std::io::{Read, Seek};
 
-use dem::demo_parser::{parse_frame, parse_header};
-use dem::types::{
-    Aux, Delta, EngineMessage, FrameData, MessageData, MessageDataParseMode, NetMessage,
-};
+use dem::types::{Aux, Delta, EngineMessage, FrameData, MessageData, NetMessage};
+
+use super::frames::Frames;
 
 /// The players' entity slots.
 const PLAYERS: usize = 32;
@@ -30,10 +28,9 @@ const STEP_TOLERANCE: f32 = 3.5;
 /// Two snapshots further apart than this don't say what the motion between
 /// them was.
 const SNAPSHOT_GAP_SECONDS: f32 = 0.1;
-/// The directory's entries (`demoentry_t`) and the frame offset in one.
-const ENTRY_SIZE: usize = 92;
-const OFFSET_AT: usize = 84;
-const MAX_ENTRIES: i32 = 1024;
+/// `svc_time` going back more than this is a new map, not the HLTV clock's
+/// millisecond step-backs (#927).
+const TURNED_BACK_SECONDS: f32 = 1.0;
 
 /// What the look-ahead knows about the whole demo.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -77,7 +74,7 @@ impl Timeline {
         &changes[from..to.max(from)]
     }
 
-    /// Bytes the timeline holds, for the log.
+    /// The bytes the timeline holds.
     pub fn bytes(&self) -> usize {
         let downs: usize = self
             .crouch_downs
@@ -91,6 +88,70 @@ impl Timeline {
             .sum();
         downs + bodies
     }
+
+    /// One line on what it holds, for the hook log and `ds_debug_status`.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} ground crouches and {} body changes over {:.0} s of demo ({} network frames), {} KB",
+            self.crouch_downs.iter().map(Vec::len).sum::<usize>(),
+            self.body_changes.iter().map(Vec::len).sum::<usize>(),
+            self.span.1 - self.span.0,
+            self.frames,
+            self.bytes() >> 10
+        )
+    }
+}
+
+/// Why a read gave no timeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadError {
+    /// The file isn't a demo, or has no directory to find its frames by.
+    NotADemo,
+    /// `superseded` said another demo is wanted now.
+    Superseded,
+}
+
+/// Reads the demo in `file` into a [`Timeline`], a frame at a time
+/// ([`Frames`]: about 1 MB of the file held at once). Stops at the first
+/// frame it can't read, or where `svc_time` turns back (a map change:
+/// viewdemo plays only the first map), keeping what it had. Asks
+/// `superseded` every network frame and gives up once it says yes.
+pub fn read<R: Read + Seek>(
+    mut file: R,
+    superseded: &dyn Fn() -> bool,
+) -> Result<Timeline, ReadError> {
+    let directory = crate::demo_file::read_directory(&mut file).ok_or(ReadError::NotADemo)?;
+    read_frames(&directory, Frames::new(file), superseded)
+}
+
+/// [`read`] once the directory is in, through `frames`.
+fn read_frames<R: Read + Seek>(
+    directory: &[u8],
+    mut frames: Frames<R>,
+    superseded: &dyn Fn() -> bool,
+) -> Result<Timeline, ReadError> {
+    let mut reader = Reader::new();
+    for (offset, _) in crate::demo_file::segments(directory) {
+        if frames.seek(offset).is_err() {
+            break;
+        }
+        match reader.segment(&mut frames, superseded) {
+            Segment::Ended => {}
+            Segment::Stopped => break,
+            Segment::Superseded => return Err(ReadError::Superseded),
+        }
+    }
+    Ok(reader.finish())
+}
+
+/// How reading one directory entry's frames ended.
+enum Segment {
+    /// At its end: on to the next.
+    Ended,
+    /// At a frame it can't read, or the clock turning back: the timeline is
+    /// what has been read.
+    Stopped,
+    Superseded,
 }
 
 /// One player's state as of a snapshot.
@@ -115,32 +176,6 @@ struct Slot {
     newest: Option<Snap>,
 }
 
-/// Reads `bytes` (a whole `.dem` file) into a [`Timeline`]. Stops at the
-/// first frame it can't read, or where `svc_time` turns back (a map change:
-/// viewdemo plays only the first map), keeping what it had. `None` when the
-/// file isn't a demo.
-pub fn read(bytes: &[u8]) -> Option<Timeline> {
-    let (_, header) = parse_header(bytes).ok()?;
-    let directory = usize::try_from(header.directory_offset).ok()?;
-    let count = i32::from_le_bytes(bytes.get(directory..directory + 4)?.try_into().ok()?);
-    if !(1..=MAX_ENTRIES).contains(&count) {
-        return None;
-    }
-    let mut reader = Reader::new();
-    for k in 0..count as usize {
-        let at = directory + 4 + k * ENTRY_SIZE;
-        let entry = bytes.get(at..at + ENTRY_SIZE)?;
-        let offset = i32::from_le_bytes(entry[OFFSET_AT..OFFSET_AT + 4].try_into().ok()?);
-        let Ok(offset) = usize::try_from(offset) else {
-            break;
-        };
-        if offset >= bytes.len() || !reader.entry(&bytes[offset..]) {
-            break;
-        }
-    }
-    Some(reader.finish())
-}
-
 struct Reader {
     aux: dem::types::AuxRefCell,
     slots: [Slot; PLAYERS],
@@ -149,7 +184,6 @@ struct Reader {
     svc: Option<f32>,
     first: Option<f32>,
     frames: usize,
-    turned_back: bool,
 }
 
 impl Reader {
@@ -162,29 +196,32 @@ impl Reader {
             svc: None,
             first: None,
             frames: 0,
-            turned_back: false,
         }
     }
 
-    /// Reads one directory entry's frames; false once reading should stop.
-    fn entry(&mut self, mut input: &[u8]) -> bool {
+    /// Reads one directory entry's frames, from where `frames` was put.
+    fn segment<R: Read + Seek>(
+        &mut self,
+        frames: &mut Frames<R>,
+        superseded: &dyn Fn() -> bool,
+    ) -> Segment {
         loop {
-            let Ok((rest, frame)) =
-                parse_frame(input, MessageDataParseMode::Parse, self.aux.clone())
-            else {
-                return false;
+            let Some(frame) = frames.next_frame(&self.aux) else {
+                return Segment::Stopped;
             };
-            input = rest;
             match frame.frame_data {
-                FrameData::NextSection => return true,
+                FrameData::NextSection => return Segment::Ended,
                 FrameData::NetworkMessage(message) => {
+                    if superseded() {
+                        return Segment::Superseded;
+                    }
                     if let MessageData::Parsed(messages) = &message.1.messages {
                         self.frames += 1;
                         for m in messages {
                             if let NetMessage::EngineMessage(em) = m
                                 && !self.message(em)
                             {
-                                return false;
+                                return Segment::Stopped;
                             }
                         }
                     }
@@ -202,8 +239,7 @@ impl Reader {
                 if !t.is_finite() {
                     return true;
                 }
-                if self.svc.is_some_and(|last| t < last - 1.0) {
-                    self.turned_back = true;
+                if self.svc.is_some_and(|last| t < last - TURNED_BACK_SECONDS) {
                     return false;
                 }
                 self.first.get_or_insert(t);
@@ -338,28 +374,6 @@ fn field(delta: &Delta, name: &str) -> Option<u32> {
     Some(u32::from_le_bytes(b))
 }
 
-/// For the log: how many ground crouches each present slot has.
-pub fn summary(timeline: &Timeline) -> String {
-    let per: HashMap<usize, usize> = timeline
-        .crouch_downs
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| !v.is_empty())
-        .map(|(k, v)| (k + 1, v.len()))
-        .collect();
-    let total: usize = per.values().sum();
-    format!(
-        "{} network frames, svc {:.1}-{:.1}, {} ground crouches over {} players, {} body changes, {} bytes",
-        timeline.frames,
-        timeline.span.0,
-        timeline.span.1,
-        total,
-        per.len(),
-        timeline.body_changes.iter().map(Vec::len).sum::<usize>(),
-        timeline.bytes()
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +384,14 @@ mod tests {
             z,
             small_hull,
         }
+    }
+
+    fn fixture() -> std::fs::File {
+        std::fs::File::open(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -443,25 +465,49 @@ mod tests {
 
     #[test]
     fn a_real_demo_gives_a_timeline() {
-        let bytes = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../test-fixtures/ci_fixture.dem"
-        ))
-        .unwrap();
-        let t = read(&bytes).unwrap();
-        assert!(t.frames > 1000, "{}", summary(&t));
-        assert!(t.span.1 - t.span.0 > 200.0, "{}", summary(&t));
+        let t = read(fixture(), &|| false).unwrap();
+        assert!(t.frames > 1000, "{}", t.summary());
+        assert!(t.span.1 - t.span.0 > 200.0, "{}", t.summary());
         for v in &t.crouch_downs {
             assert!(v.windows(2).all(|w| w[0] < w[1]));
         }
         assert!(
             t.body_changes.iter().any(|v| v.len() > 50),
             "{}",
-            summary(&t)
+            t.summary()
         );
         for v in &t.body_changes {
             assert!(v.windows(2).all(|w| w[0].0 < w[1].0));
         }
+    }
+
+    #[test]
+    fn a_small_window_reads_the_same_timeline() {
+        // The fixture is 10 MB: a 160 KB window refills it ~130 times, with
+        // frames split across every refill.
+        let whole = read(fixture(), &|| false).unwrap();
+        let mut file = fixture();
+        let directory = crate::demo_file::read_directory(&mut file).unwrap();
+        let frames = Frames::with_window(file, 160 << 10, 80 << 10);
+        let small = read_frames(&directory, frames, &|| false).unwrap();
+        assert_eq!(small, whole);
+    }
+
+    #[test]
+    fn a_read_stops_once_superseded() {
+        let asked = std::cell::Cell::new(0);
+        let superseded = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 100
+        };
+        assert_eq!(read(fixture(), &superseded), Err(ReadError::Superseded));
+        assert_eq!(asked.get(), 101);
+    }
+
+    #[test]
+    fn a_file_that_isnt_a_demo_says_so() {
+        let not_a_demo = std::io::Cursor::new(vec![0u8; 4096]);
+        assert_eq!(read(not_a_demo, &|| false), Err(ReadError::NotADemo));
     }
 
     /// The survey demo, when it's there: `DOD_LOOKAHEAD_DEMO` or the PRE
@@ -472,10 +518,10 @@ mod tests {
         let path = std::env::var("DOD_LOOKAHEAD_DEMO").unwrap_or_else(|_| {
             r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod\wsod25_grp2_h1_hltv.dem".to_string()
         });
-        let bytes = std::fs::read(&path).expect("no survey demo: set DOD_LOOKAHEAD_DEMO");
+        let file = std::fs::File::open(&path).expect("no survey demo: set DOD_LOOKAHEAD_DEMO");
         let start = std::time::Instant::now();
-        let t = read(&bytes).unwrap();
-        eprintln!("{} in {:?}", summary(&t), start.elapsed());
+        let t = read(file, &|| false).unwrap();
+        eprintln!("{} in {:?}", t.summary(), start.elapsed());
         assert!(t.crouch_downs.iter().map(Vec::len).sum::<usize>() > 100);
     }
 }
