@@ -31,7 +31,9 @@ There's also a stale standalone copy in a local Downloads folder (`ktp-demo-stat
 
 - **9 of 13 HLStatsX scoreboard columns are demo-derivable**: player identity, kills,
   deaths, K/D, teamkills, suicides, objective points, flag-capture credits, flag-capture
-  breaks. **4 are not, ever**: assists, damage, headshots, headshot%. GoldSrc/DoD 1.3
+  breaks. **4 were not found at the time**: assists, damage, headshots, headshot%. Headshots are
+  in fact there (#1128): the `events/effects/helmet.sc` event fires on the kill's frame
+  (`analysis/src/headshot.rs`); the rest is still absent. GoldSrc/DoD 1.3
   never sends per-hit data to spectators — `DeathMsg` was exactly 3 bytes (killer,
   victim, weapon) in all 211,335 instances across the corpus. No hit group exists.
 - HLTV demos are strictly better than POV for scoreboard purposes — everything broadcasts
