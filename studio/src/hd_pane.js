@@ -20,6 +20,7 @@ import {
   mostPerType, styleGaps, gapsSentence, mapCoverage, coverageSentence, uncoveredChosen, mapListWarning,
 } from './hd_coverage.js';
 import { glMaxSizeLine } from './hd_gl_max_size.js';
+import { renderOutdated } from './hd_outdated.js';
 import {
   formatSize, setupStartView, setupView, buildStartView, buildView, coverageView,
 } from './hd_progress.js';
@@ -36,6 +37,7 @@ export function initHdPane() {
   const styleSelect = document.querySelector('#hd-style-select');
   const cfgLines = document.querySelector('#hd-cfg-lines');
   const glMaxSize = document.querySelector('#hd-gl-max-size');
+  const outdatedBox = document.querySelector('#hd-outdated');
   const copyBtn = document.querySelector('#hd-copy-cfg-btn');
   const toolsText = document.querySelector('#hd-tools-text');
   const upscalerPickBtn = document.querySelector('#hd-upscaler-pick-btn');
@@ -489,6 +491,7 @@ export function initHdPane() {
     }
     cvars = { enabled: status.enabled_cvar, style: status.style_cvar };
     lastStatus = status;
+    renderOutdated(outdatedBox, status.outdated);
     statusText.textContent = [
       status.hd_root_exists ? STRINGS.HD.hdRootFound(status.hd_root) : STRINGS.HD.hdRootMissing(status.hd_root),
       status.built_styles.length ? STRINGS.HD.stylesBuilt(status.built_styles) : STRINGS.HD.NO_STYLES_BUILT,

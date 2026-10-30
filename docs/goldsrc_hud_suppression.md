@@ -9,7 +9,7 @@ per-frame re-apply loop; the other topics have their own docs:
 |---|---|---|
 | scoreboard | `ds_hud_hide_scoreboard` | `docs/goldsrc_scoreboard.md` |
 | crosshair, and the spectator crosshair under `spec_match_pov` | `ds_hud_hide_crosshair`, `ds_spec_match_pov` | `docs/goldsrc_crosshair.md` |
-| any HUD element by name, and the notes on the `CHudDoD*` elements that are not offered | `ds_hud_hide_element` | `docs/goldsrc_hud_elements.md` |
+| a HUD element's `Draw` (the teammate name and health line), the notes on the `CHudDoD*` elements, and the stock cvars that replaced `ds_hud_hide_element` (#342) | `ds_hud_hide_teammate_info` | `docs/goldsrc_hud_elements.md` |
 | the spectator bars (VGUI2 panel) | `ds_spec_hide_bars` | `docs/goldsrc_spectator_bars.md` |
 | objective icons and timer position | `ds_hud_objectives` | `docs/goldsrc_objective_icons.md` |
 
