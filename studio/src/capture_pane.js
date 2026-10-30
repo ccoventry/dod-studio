@@ -35,6 +35,7 @@ import { refreshAfterTyping } from './input_refresh.js';
 import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
+import { BYTES_PER_MB, BYTES_PER_GB } from './byte_size.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -602,7 +603,7 @@ export async function refreshLaunchGuard(state) {
 
   const footerRequiredEl = document.querySelector('#footer-required-space');
   if (footerRequiredEl) {
-    const requiredGb = (requiredBytes / (1024 * 1024 * 1024)).toFixed(2);
+    const requiredGb = (requiredBytes / BYTES_PER_GB).toFixed(2);
     footerRequiredEl.textContent = STRINGS.CAPTURE_CONFIG.footerRequiredSpace(requiredGb);
     footerRequiredEl.style.color = insufficientSpace ? '#f44336' : '#4caf50';
   }
@@ -692,7 +693,7 @@ export function applyCommandsState(lists) {
 let currentPreviewScanResults = [];
 
 function formatPreviewSize(bytes) {
-  return STRINGS.CAPTURE.megabytesLabel((bytes / (1024 * 1024)).toFixed(2));
+  return STRINGS.CAPTURE.megabytesLabel((bytes / BYTES_PER_MB).toFixed(2));
 }
 
 function updateClearPreviewsDeleteButtonState() {
@@ -750,7 +751,7 @@ function renderClearPreviewsResults() {
     tbody.appendChild(tr);
   });
 
-  const totalGb = (totalBytes / (1024 * 1024 * 1024)).toFixed(2);
+  const totalGb = (totalBytes / BYTES_PER_GB).toFixed(2);
   if (footerEl) footerEl.textContent = STRINGS.CLEAR_PREVIEWS_MODAL.foundReclaimable(currentPreviewScanResults.length, totalGb);
   updateClearPreviewsDeleteButtonState();
 }

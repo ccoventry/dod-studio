@@ -11,6 +11,7 @@ import { refreshLaunchGuard } from './capture_pane.js';
 import { refreshRenderButtons } from './render_pane.js';
 import { refreshSameDriveWarning } from './config_wiring.js';
 import { STRINGS } from './strings.js';
+import { BYTES_PER_GB } from './byte_size.js';
 
 /**
  * @param {object} app  What this needs from main.js: getDemos() the queue,
@@ -49,7 +50,7 @@ export function createFolderPools({ getDemos, persist, refreshSetup }) {
     }
     try {
       const bytes = await calculateExportPoolSpace(targetDrives);
-      const gb = bytes / (1024 * 1024 * 1024);
+      const gb = bytes / BYTES_PER_GB;
       indicator.textContent = STRINGS.MAIN.exportPoolFree(gb.toFixed(1));
     } catch (err) {
       console.error("Error calculating export pool space:", err);

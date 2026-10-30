@@ -21,6 +21,7 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { projectSaveDialogOptions, PROJECT_OPEN_FILTERS } from './project_file_type.js';
 import { createProjectOpenProgress } from './project_open_progress.js';
+import { fileNameOf } from './path_display.js';
 
 /**
  * @param {object} app  What this needs from main.js:
@@ -100,7 +101,7 @@ export function createProjectSession({
     if (!el) return;
     const dirtySuffix = hasUnsavedChanges ? ' • unsaved' : '';
     if (currentSessionPath) {
-      const filename = currentSessionPath.split(/[\\/]/).pop() || currentSessionPath;
+      const filename = fileNameOf(currentSessionPath) || currentSessionPath;
       el.textContent = filename + dirtySuffix;
       el.title = currentSessionPath;
     } else {

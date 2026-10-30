@@ -53,6 +53,7 @@ import { createRenderJobsRestore } from './render_jobs_restore.js';
 import { startCodecHint } from './codec_hint.js';
 import { startTakePreview } from './take_preview.js';
 import { startTakeChecks } from './take_checks.js';
+import { renderSizeText } from './byte_size.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -298,10 +299,7 @@ function wireSettingsCell(cell) {
  *  estimate: see TABLE_HEADER_FILE_SIZE_TITLE for why. */
 function formatFileSize(bytes) {
   if (bytes == null) return STRINGS.RENDER.FILE_SIZE_UNKNOWN;
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 1
-    ? STRINGS.RENDER.fileSizeGb(gb.toFixed(2))
-    : STRINGS.RENDER.fileSizeMb((bytes / (1024 * 1024)).toFixed(0));
+  return renderSizeText(bytes, 2);
 }
 
 /** Builds one job's `<tr>` fresh — only ever called once per job id. */

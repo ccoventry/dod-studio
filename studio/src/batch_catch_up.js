@@ -18,6 +18,7 @@ import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { fileNameOf } from './path_display.js';
 
 /** The event the backend sends once a running game has closed. */
 export const CATCH_UP_EVENT = 'batch_catch_up';
@@ -72,10 +73,6 @@ function toastKind(result) {
   return result.captured < result.total ? 'info' : 'success';
 }
 
-function fileName(path) {
-  return path.split(/[\\/]/).pop() || path;
-}
-
 const defaultIo = {
   catchUp: catchUpUnwatchedBatches,
   readProject: readProjectFile,
@@ -98,11 +95,11 @@ export function createBatchCatchUp({ getDemos, getTakeIndex, getSessionPath, onS
       data.takeIndex = data.takeIndex || {};
       const result = applyCaughtUpBatch(batch, data.demos || [], data.takeIndex);
       if (result.changed) await io.writeProject(path, JSON.stringify(data, null, 2));
-      return { result, note: result.changed ? ` ${STRINGS.BATCH_CATCH_UP.projectUpdated(fileName(path))}` : '' };
+      return { result, note: result.changed ? ` ${STRINGS.BATCH_CATCH_UP.projectUpdated(fileNameOf(path) || path)}` : '' };
     } catch (err) {
       return {
         result: applyCaughtUpBatch(batch, [], {}),
-        note: ` ${STRINGS.BATCH_CATCH_UP.projectNotUpdated(fileName(path), err)}`,
+        note: ` ${STRINGS.BATCH_CATCH_UP.projectNotUpdated(fileNameOf(path) || path, err)}`,
         failed: true,
       };
     }
