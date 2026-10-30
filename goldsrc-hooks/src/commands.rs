@@ -1,10 +1,9 @@
 //! The `ds_*` console surface: its cvars and commands. `install`
 //! (`commands/install.rs`) registers them all, `poll` (`commands/poll.rs`)
 //! is the per-frame work that copies the cvars into the flags the crate
-//! reads, `commands/status.rs` is `ds_debug_status`'s report, and
-//! `commands/fallback.rs` holds the plain commands that stand in when a cvar
-//! cannot be registered. This file keeps what they share: the names, the
-//! cvar pointers, `register` and `add_command(s)`, and `console_print`.
+//! reads, and `commands/status.rs` is `ds_debug_status`'s report. This file
+//! keeps what they share: the names, the cvar pointers, `register` and
+//! `add_command(s)`, and `console_print`.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -63,7 +62,6 @@
 //! and `pfnAddCommand` live on that same table.
 
 use std::ffi::CString;
-use std::sync::atomic::AtomicBool;
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
@@ -72,7 +70,6 @@ use crate::{
     crosshair, decals, ex_interp, hand_signals, overview_map, scoreboard, texture_hires, voice,
 };
 
-mod fallback;
 mod install;
 mod poll;
 mod status;
@@ -112,10 +109,6 @@ static CVAR_CROSSHAIR: Cvar = Cvar::new();
 static CVAR_HAND_SIGNALS: Cvar = Cvar::new();
 static CVAR_EX_INTERP: Cvar = Cvar::new();
 static CVAR_TEXTURE_HIRES_LOG: Cvar = Cvar::new();
-
-/// Set when registration succeeded, so `poll` does nothing at all on the
-/// command fallback path rather than reading null pointers every frame.
-static CVARS_LIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn console_print(text: &str) {
     let Some(engfuncs) = engine::engfuncs() else {
@@ -162,7 +155,9 @@ fn console_pieces(text: &str, max: usize) -> Vec<&str> {
 /// The name check is the whole point: it costs one `strcmp` at startup and it
 /// is the only evidence available at runtime that `CvarSPartial`'s layout and
 /// the engine's agree. A wrong layout would otherwise show up as a toggle that
-/// silently does nothing.
+/// silently does nothing. On `None` the caller leaves the setting
+/// unregistered (no stand-in command, #1208), and the line logged here says
+/// which name failed and why, so a user's hook log explains a missing setting.
 fn register(name: &str, default: &str) -> Option<*mut CvarSPartial> {
     let engfuncs = engine::engfuncs()?;
     let c_name = CString::new(name).ok()?;
@@ -187,7 +182,7 @@ fn register(name: &str, default: &str) -> Option<*mut CvarSPartial> {
         other => {
             unsafe {
                 crate::debug::report(&format!(
-                    "commands: registered {name} but the cvar came back named {:?} -- cvar_s layout is wrong, falling back to commands",
+                    "commands: registered {name} but the cvar came back named {:?} -- cvar_s layout is wrong, leaving it unregistered",
                     other.as_deref()
                 ))
             };
