@@ -55,6 +55,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `verify_decal_pipeline` | Does a flushed demo come out with frame ordinals intact? |
 | `validate_bsp` | Does the BSP reader agree with coordinates the engine accepted? |
 | `map_entity_trim` | Which entities can a map lose to get under `MAX_PACKET_ENTITIES`? |
+| `capture_area_kills_probe` | Who stood in a capture area at each kill, from kill positions and the map's `dod_capture_area` brushes? (#1132) |
 
 `map_entity_trim` is the one here that writes a file rather than only reporting.
 It rewrites a `.bsp`'s entity lump to drop entities that never reach the wire,
