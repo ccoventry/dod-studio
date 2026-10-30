@@ -23,7 +23,8 @@ switch rather than adding a command:
   pull, the throw, and the catch and wind-up of a primed one. See
   `docs/goldsrc_hltv_animation_fix.md`.
 - **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
-  tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
+  tile `cl_xhair_style` gives the POV view (for style 0, POV's red crosshair,
+  its gap following the watched player), instead of DoD's hardcoded 24x24
   tile of `crosshairs.spr`, and hidden when the player's own would be while
   playing: sprinting, in the air after a jump, going prone or getting up,
   crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt

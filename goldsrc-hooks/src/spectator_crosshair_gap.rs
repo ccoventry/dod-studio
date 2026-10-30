@@ -153,6 +153,13 @@ impl Target {
             Target::Toward(code)
         }
     }
+
+    fn describe(self) -> String {
+        match self {
+            Target::Fixed => format!("fixed {FIXED_GAP} px"),
+            Target::Toward(gap) => format!("{gap} px"),
+        }
+    }
 }
 
 /// Addresses found by the scans, 0 before them. `client.dll` does not reload
@@ -215,10 +222,26 @@ pub fn note_watched(watched: &Watched) {
     } else {
         Target::Fixed
     };
-    TARGET.store(target.code(), Ordering::Relaxed);
-    WEAPON_ID.store(weapon.map_or(0, |(id, _)| id), Ordering::Relaxed);
+    let id = weapon.map_or(0, |(id, _)| id);
+    let changed = TARGET.swap(target.code(), Ordering::Relaxed) != target.code();
+    WEAPON_ID.store(id, Ordering::Relaxed);
     DEPLOYED.store(watched.deployed, Ordering::Relaxed);
     SPEED.store(speed.to_bits(), Ordering::Relaxed);
+    // Beside the held-model and body-sequence trail it reads off, behind
+    // the same switch: it changes many times a minute.
+    if changed && crate::anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed) {
+        unsafe {
+            crate::debug::report(&format!(
+                "spectator_crosshair_gap: target {} (weapon id {id}, {}, {speed:.0} u/s)",
+                target.describe(),
+                if watched.deployed {
+                    "deployed"
+                } else {
+                    "not deployed"
+                }
+            ))
+        };
+    }
 }
 
 /// No player in view this frame: the fixed gap, and no speed history.
@@ -549,10 +572,7 @@ pub fn status() -> String {
     } else {
         format!("{shown} px")
     };
-    let target = match Target::from_code(TARGET.load(Ordering::Relaxed)) {
-        Target::Fixed => format!("fixed {FIXED_GAP} px"),
-        Target::Toward(gap) => format!("{gap} px"),
-    };
+    let target = Target::from_code(TARGET.load(Ordering::Relaxed)).describe();
     let weapon = match WEAPON_ID.load(Ordering::Relaxed) {
         0 => "no known weapon".to_string(),
         id => format!("weapon id {id}"),
