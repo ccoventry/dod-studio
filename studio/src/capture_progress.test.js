@@ -19,6 +19,9 @@ describe('captureStepView (#952)', () => {
     // The decal pass reports none: the block slides over that demo's share.
     expect(captureStepView({ stage: 'preparing', index: 2, total: 5, measured: false }))
       .toEqual({ fill: 7, slideTo: 8 });
+    // A trimmed copy being made (#207): the block slides, the line counts.
+    expect(captureStepView({ stage: 'trimming', index: 1, total: 2, measured: false }))
+      .toEqual({ fill: 0, slideTo: CAPTURE_SHARES.preparing[1] });
   });
 
   it('counts clips on the rest, with the next clip sliding', () => {
