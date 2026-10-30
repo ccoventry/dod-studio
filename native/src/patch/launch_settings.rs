@@ -13,7 +13,9 @@
 //!
 //! The hook DLL is the exception: HLAE passes it on its own command line and
 //! exits, so the game's module list says which file it was and the id baked
-//! into the DLL says which build (`sys::hook_build`, #1143).
+//! into the DLL says which build (`sys::hook_build`, #1143). The game loads a
+//! copy (`sys::hook_copy`, #1146), so the file beside the copy names the one
+//! the user picked, and builds are compared by id rather than by path.
 
 use serde::Serialize;
 use std::path::PathBuf;
@@ -32,7 +34,8 @@ pub struct LaunchSettings {
     pub height: i32,
     /// HLAE's `AfxHookGoldSrc.dll`, passed as `-hookDllPath`.
     pub afx_hook_dll: PathBuf,
-    /// DoD Studio's hook DLL, a second `-hookDllPath` when one is found.
+    /// DoD Studio's hook DLL, when one is found: the file Studio ships or the
+    /// user picked. The second `-hookDllPath` is a copy of it (#1146).
     pub goldsrc_hooks_dll: Option<PathBuf>,
 }
 
@@ -163,7 +166,11 @@ pub fn check_running_game(want: &LaunchSettings) -> RunningGameCheck {
                     g.pid,
                     crate::patch::batch_reuse::HOOK_DLL_NAME,
                 ) {
-                    LoadedHook::Loaded(dll) => LoadedHook::Loaded(canonical_hook(dll)),
+                    // A launch copy is named by the file it was copied from.
+                    LoadedHook::Loaded(dll) => LoadedHook::Loaded(canonical_hook(HookDll {
+                        path: crate::sys::hook_copy::source_of(&dll.path).unwrap_or(dll.path),
+                        ..dll
+                    })),
                     other => other,
                 },
                 None => LoadedHook::default(),
@@ -293,13 +300,16 @@ pub fn compare(
 }
 
 /// How the game's hook DLL differs from the one Studio launches with, if it
-/// does. Two builds from before ids (both `None`) count as the same: nothing
-/// but the path tells them apart.
+/// does. One build id is the same DLL, whichever folder each came from
+/// (#1146: the game runs a copy, and two test folders may hold one build).
+/// Builds from before ids are told apart by path alone, so two of them at
+/// one path count as the same.
 fn hook_difference(want: Option<&HookDll>, loaded: &LoadedHook) -> Option<LaunchDifference> {
     let want = want?;
     match loaded {
         LoadedHook::Absent => None,
         LoadedHook::Unreadable => Some(LaunchDifference::HookUnreadable),
+        LoadedHook::Loaded(dll) if dll.build.is_some() && dll.build == want.build => None,
         LoadedHook::Loaded(dll) => {
             let same_path = normalise_path(&dll.path.to_string_lossy())
                 == normalise_path(&want.path.to_string_lossy());
@@ -759,8 +769,29 @@ mod tests {
         assert_eq!(wanted.hook_build.as_deref(), Some("0.10.0+bbb"));
     }
 
-    /// The file was renamed away and a new build put at its path while the
-    /// game ran (Windows allows that for a loaded DLL, not an overwrite).
+    /// One build in two folders (a test DLL copied to another folder, or the
+    /// game's launch copy named by its source) is the same DLL (#1146).
+    #[test]
+    fn the_same_build_from_another_folder_is_reused() {
+        let loaded = LoadedHook::Loaded(hook(HOOK_A, Some("0.10.0+abc")));
+        assert_eq!(
+            compare(
+                &want(PRE, 1920, 1080),
+                Some(&hook(HOOK_B, Some("0.10.0+abc"))),
+                &game_with_hook(loaded)
+            ),
+            RunningGameCheck::Match { pid: 7 }
+        );
+        // Without ids, only the path can tell them apart.
+        let old = LoadedHook::Loaded(hook(HOOK_A, None));
+        assert_eq!(
+            differs_with_hook(&hook(HOOK_B, None), old),
+            vec![LaunchDifference::HookDll]
+        );
+    }
+
+    /// The file was rebuilt in place (#1146) or renamed away and a new build
+    /// put at its path (#1143) while the game ran.
     #[test]
     fn another_build_at_the_same_path_is_a_mismatch() {
         let loaded = LoadedHook::Loaded(hook(HOOK_A, Some("0.10.0+aaa")));

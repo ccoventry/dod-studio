@@ -1,10 +1,11 @@
 # The spectator camera under `spec_match_pov`: following one player, the in-eye height, and the death cam
 
-Three fixes to where the camera sits while watching a player from an HLTV
+Four fixes to where the camera sits while watching a player from an HLTV
 demo, all part of the `ds_spec_match_pov` / `spec_lock` / `spec_target`
 family in the hook DLL: which player the camera is on (#206, first section),
-how high the in-eye camera is when that player goes prone (#329, second), and
-what it shows when he dies (#709, third). The first two were
+how high the in-eye camera is when that player goes prone (#329, second) and
+as he crouches (#1144, third), and what it shows when he dies (#709,
+fourth). The first two were
 `goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`. A fourth,
 always on, makes the chase cameras draw the players around them (#918, last
 section).
@@ -179,6 +180,106 @@ wall at about 9:15, recorded with the switch on and off, on both builds. On:
 the camera is at ground level and the wall fills the view. Off: the camera
 looks over the wall from crouch height.
 `ds_debug_log_weapon_model 1` logs each change of stance it sees.
+
+---
+
+## The in-eye camera through a crouch (#1144)
+
+Watching a player crouch in first person from an HLTV demo, the camera drops
+about four times faster than his own view does. `ds_spec_match_pov 1` eases
+it at his own view's speed. The code is
+`goldsrc-hooks/src/spectator_eye/crouch.rs`.
+
+### The survey
+
+`analysis/examples/crouch_eye_probe.rs` prints each frame's camera and origin
+from a POV demo and every player's origin and `usehull` from each snapshot.
+Pairs: `wsod25_grp2_h1_*` (5 POVs) and `wsod25_grp4_h1_*` (6 POVs) against
+their halves' HLTV demos, 6 players; 12 more `solifotw-*` POVs from 12 other
+players for the POV curve alone. On-ground crouches with the key held 0.7 s:
+
+| | camera starts | half-way | 95% |
+| --- | --- | --- | --- |
+| going down, POV, from the key | +0.03 s | +0.20 s | +0.35 s |
+| going down, HLTV in-eye | +0.41 s | +0.49 s | +0.51 s |
+| getting up, POV | at once | +0.04 s | +0.11 s |
+| getting up, HLTV in-eye | at once | +0.09 s | +0.11 s |
+
+(254 paired crouches and 498 stand-ups; 606 and 915 more POV-only.)
+
+- **POV going down** eases the camera all 22 units (58 to 36 above the feet)
+  over 0.4 s while the player is still in the standing hull:
+  `22 x smoothstep(t / 0.4)`, the same in all 18 players. The server flips
+  `usehull`, and the gait to `dod_crouch_idle`/`dod_crawl`, when the ease
+  ends. That flip is the first thing an HLTV demo shows, so the in-eye camera
+  cannot start before it.
+- **HLTV going down** then drops 4 at once (22 to 18) and 18 more as the
+  interpolated origin falls into the small hull, over the interpolation
+  time.
+- **Getting up** both rise in about 0.11 s.
+- **In the air** (57% of the flips in `wsod25_grp2_h1_hltv`: crouch-jumps)
+  the origin doesn't move at the flip and both views drop 4 at once.
+  On the ground the snapshot origin jumps 18 at the flip, against the motion
+  before it, which tells the two apart.
+
+### What the fix does
+
+The camera follows POV's curve on the demo clock, at POV's speed. With the
+look-ahead below it starts 0.41 s before the flip arrives and ends with it,
+as POV's does; without it (the first second or so of a demo, a file it can't
+read) it starts at the flip and ends 0.4 s after POV's (the game's own drop
+ends about 0.1 s after). Getting up, it rises at POV's rate from wherever
+the ease had got to, so a crouch let go half-way down comes straight back up.
+
+`V_GetInEyePos` adds 18 or 22 to the interpolated origin. Both `fadd`
+operands (`+0x50d5b`, `+0x50d65`) read floats in the hook, set each frame
+just before `V_CalcRefdef` to `22 + shown - depth`, where `depth` is the
+eased drop (0 to 22) and `shown` is how much of the 18-unit origin step the
+interpolated origin already shows, read off the origin between the last
+standing snapshot and the first crouched one. So the camera moves only as
+`depth` does, at any `ex_interp`, update rate or capture frame rate.
+
+It settles at the game's heights, with no ease, on a seek, a switch of player,
+a teleport, an in-air flip, while prone (#329's height wins), and when the
+switch is off or a POV demo plays.
+
+Not covered: a duck tapped for under 0.4 s never flips `usehull`, so an HLTV
+demo shows nothing of it; and POV's eye sometimes sinks from 18 to 0 for
+about 0.2 s on a duck-jump landing, which HLTV has no trace of.
+
+### Look-ahead: starting with POV (#1154)
+
+Nothing the game holds says a crouch is coming before its flip: the watched
+player's newest snapshot lands within 0.02 s of the game's clock, and the
+flip comes when POV's ease is already over. But a ground flip only ever comes
+0.40 s after the key (p10 0.394 s, p90 0.406 s over 267 crouches of 5
+players), so the flip dates the key, and the demo file has every flip ahead
+of playback.
+
+So when an HLTV demo plays, `goldsrc-hooks/src/lookahead.rs` reads the `.dem`
+once on a thread of its own at below-normal priority, a frame at a time
+through `dem-patch`'s parser with about 1 MB of the file held at once, and
+keeps each player's ground flips (and body sequence changes, for the gun's
+sprint let-go, #704) by `svc_time`: about 1 s and 155 KB for a 40 MB,
+33-minute half. The crouch ease asks it each frame for the watched player's
+next flip and starts 0.41 s before it is due. The game's clock (and every
+`msg_time`) is not `svc_time` under `viewdemo`, and a seek doesn't move it,
+so the lookup goes through the demo player's world clock minus the game's,
+read every 0.1 s; a looked-ahead flip arrived a mean 0.001 s after it was due
+(sd 0.010 s) on PRE and POST. About 1 µs a frame on the engine thread.
+
+| `wsod25_grp2_h1_hltv` vs its 5 players' POVs | camera within 2 units of POV |
+| --- | --- |
+| the game | 51.7% |
+| ease from the flip | 42.5% |
+| ease from the look-ahead | 82.3% (81.2% with the live timing error added) |
+
+Guards: no ease starts that this view didn't see start on time (after a seek,
+a switch of player, or a timeline that lands mid-crouch, the flip is waited
+for), a looked-ahead flip that hasn't come 0.15 s after it was due lets the
+camera back up, and so does one the file stops promising while it is still
+0.1 s off (a seek moved the world clock). `ds_debug_status` says which demo
+the look-ahead has read, or why it has none.
 
 ---
 

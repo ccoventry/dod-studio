@@ -20,7 +20,9 @@
 //!     static. Full design write-up in `docs/goldsrc_hltv_animation_fix.md`.
 //!   - `spectator_crosshair`: draw the spectator crosshair from the same
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
-//!     are drawn by different code paths and do not otherwise share a look.
+//!     are drawn by different code paths and do not otherwise share a look;
+//!     for style 0, POV's red crosshair, with `spectator_crosshair_gap`
+//!     giving it the spectated player's gap.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
@@ -288,6 +290,7 @@ mod hull_trace_guard;
 mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
+mod lookahead;
 mod map_sounds;
 mod map_text;
 mod map_weather;
@@ -331,6 +334,7 @@ mod spectator_bars;
 mod spectator_buttons;
 mod spectator_chase_pvs;
 mod spectator_crosshair;
+mod spectator_crosshair_gap;
 mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;

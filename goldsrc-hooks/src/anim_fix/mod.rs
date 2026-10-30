@@ -139,6 +139,30 @@ pub fn pov_demo_playing() -> bool {
     engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
+/// Look-ahead (#1154): whether the demo file has the spectated player's
+/// body leaving `sprint_*` within `snapshot_motion`'s look-ahead of his
+/// newest snapshot, while it is `sprint_*` now. False without a timeline.
+fn body_leaves_sprint_soon(spectated: &ClEntityS, body: &str) -> bool {
+    if !body.starts_with("sprint_") || spectated.model.is_null() {
+        return false;
+    }
+    let newest = spectated.curstate.msg_time;
+    let Some(timeline) = crate::lookahead::timeline(f64::from(newest)) else {
+        return false;
+    };
+    timeline
+        .body_changes(
+            spectated.index,
+            newest,
+            snapshot_motion::LET_GO_LOOK_AHEAD_SECONDS,
+        )
+        .iter()
+        .any(|&(_, sequence)| {
+            sequence_label(spectated.model, usize::from(sequence))
+                .is_some_and(|label| !label.starts_with("sprint_"))
+        })
+}
+
 /// A demo is playing and the engine is not connected as a spectator.
 /// `IsSpectateOnly()` is true through an HLTV demo and false for the whole of
 /// a POV one: the hook log of the #613 session shows it false from that
@@ -521,6 +545,7 @@ pub fn apply() {
     let no_view = || {
         forget_published_view();
         crate::spectator_crosshair::set_pov_hides(None);
+        crate::spectator_crosshair_gap::forget();
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
     };
@@ -546,6 +571,7 @@ pub fn apply() {
             }
         });
         crate::spectator_crosshair::set_pov_hides(reason);
+        crate::spectator_crosshair_gap::forget();
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
     };
@@ -867,6 +893,10 @@ pub fn apply() {
         spectated.curstate.origin.x,
         spectated.curstate.origin.y,
     );
+    snapshot_motion::note_body_ahead(body_leaves_sprint_soon(
+        spectated,
+        body_label.as_deref().unwrap_or(""),
+    ));
     snapshot_motion::note_snapshot(
         f64::from(spectated.curstate.msg_time),
         [
@@ -884,6 +914,18 @@ pub fn apply() {
         held_stem: model_stem(&held_name),
     };
     crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(&pov_view, now));
+    // The gap POV's red crosshair would have (#308).
+    crate::spectator_crosshair_gap::note_watched(&crate::spectator_crosshair_gap::Watched {
+        entity: viewmodel_index,
+        viewmodel: &viewmodel_name,
+        deployed: crosshair_rule::is_deployed(pov_view.body),
+        time: f64::from(spectated.curstate.msg_time),
+        origin: [
+            spectated.curstate.origin.x,
+            spectated.curstate.origin.y,
+            spectated.curstate.origin.z,
+        ],
+    });
     // After hidden_because, which keeps the prone timer current.
     let lowered = crosshair_rule::gun_lowered_code(&pov_view, now);
     crate::spectator_gun::set_lowered(lowered != 0);
