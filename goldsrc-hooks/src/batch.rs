@@ -15,7 +15,10 @@
 //! runs the `end` commands.
 //!
 //! The game then runs the batch on its own: Studio only watches the markers
-//! the commands `echo` and can end the game.
+//! the commands `echo` and can end the game. Two waits are the exceptions:
+//! `hold` stops between clips while renders free space (#861), and in OBS
+//! mode each clip's lead-in pauses at [`WAIT_FOR_RECORDING_LINE`] until
+//! Studio says OBS is recording (#1109).
 //!
 //! ## The batch file
 //!
@@ -47,7 +50,8 @@ pub const NAME: &str = console_name!("capture_batch");
 /// The batch file's first line.
 pub(crate) const HEADER: &str = "dodstudio-batch 1";
 
-const USAGE: &str = "start \"<batch file>\" | away | hold | go | stop (bare: where it is)";
+const USAGE: &str =
+    "start \"<batch file>\" | away | hold | go | recording | stop (bare: where it is)";
 
 /// How long a demo may take to load before the batch skips it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
@@ -276,6 +280,57 @@ enum Phase {
         beat: Instant,
         gone_since: Option<Instant>,
     },
+    /// Paused at a clip's lead-in until Studio says OBS is recording
+    /// (`recording`, #1109); `since` is when the wait began, `gone_since`
+    /// when Studio was first seen gone from the events pipe.
+    WaitingForRecording {
+        cursor: Cursor,
+        then: Then,
+        since: Instant,
+        gone_since: Option<Instant>,
+    },
+}
+
+/// The batch file line that pauses the demo until Studio says OBS is
+/// recording (#1109). Studio puts it at each clip's `AUDIO_SYNC` in OBS mode,
+/// a second of demo time before the clip's first frame, so a recording that
+/// starts slowly can never miss the clip's start. A hook DLL without the wait
+/// runs it as a console command, which only prints the usage.
+pub(crate) const WAIT_FOR_RECORDING_LINE: &str =
+    concat!(console_name!("capture_batch"), " wait_for_recording");
+
+/// Studio's go-ahead line once OBS reports the recording started.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// Longest a clip waits for Studio's go-ahead with Studio still there. OBS
+/// starts in 59-85 ms (measured, `docs/obs_alternate_capture.md`), and
+/// Studio's own start, with its one retry, gives up after about 16 s; past
+/// 20 s the answer is lost, so the clip plays on and Studio's late-start
+/// check marks its take if OBS started after the clip did.
+const RECORDING_WAIT_MAX: Duration = Duration::from_secs(20);
+
+/// What a clip waiting for its recording does this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordingWait {
+    Wait,
+    /// Studio says OBS is recording.
+    Go,
+    /// No go-ahead in [`RECORDING_WAIT_MAX`]: play on.
+    TimedOut,
+    /// Studio is gone: nothing will start or stop OBS any more.
+    StudioGone,
+}
+
+pub(crate) fn recording_wait(go: bool, studio_gone: bool, waited: Duration) -> RecordingWait {
+    if go {
+        RecordingWait::Go
+    } else if studio_gone {
+        RecordingWait::StudioGone
+    } else if waited >= RECORDING_WAIT_MAX {
+        RecordingWait::TimedOut
+    } else {
+        RecordingWait::Wait
+    }
 }
 
 /// How often a held batch repeats `BATCH_HELD`, so a Studio that connects
@@ -482,8 +537,13 @@ pub fn poll() {
             let entries = &batch.plan.demos[batch.at].entries;
             let (lines, then) = cursor.due(entries, c.now);
             let left = entries.len() - cursor.next;
+            let mut wait_for_recording = false;
             for line in &lines {
-                run(line);
+                if line == WAIT_FOR_RECORDING_LINE {
+                    wait_for_recording = true;
+                } else {
+                    run(line);
+                }
             }
             let beat = if beat.elapsed() >= HEARTBEAT {
                 trace(&format!(
@@ -526,7 +586,97 @@ pub fn poll() {
                 };
                 return;
             }
+            if wait_for_recording {
+                // Paused in the same frame the clip's AUDIO_SYNC echo was
+                // queued, so Studio can't have answered this wait yet: a
+                // go-ahead left from an earlier clip doesn't count.
+                RECORDING.store(false, Ordering::Relaxed);
+                let _ = crate::demo_seek::set_paused(true);
+                trace(&format!(
+                    "demo {}: waiting at clock {:.3} for OBS to record",
+                    batch.at + 1,
+                    c.now
+                ));
+                crate::events::send("BATCH_WAITING_FOR_RECORDING");
+                batch.phase = Phase::WaitingForRecording {
+                    cursor,
+                    then,
+                    since: Instant::now(),
+                    gone_since: None,
+                };
+                return;
+            }
             act(&mut guard, cursor, beat, then, &c, left);
+        }
+        Phase::WaitingForRecording {
+            cursor,
+            then,
+            since,
+            gone_since,
+        } => {
+            let gone_since = if crate::events::studio_connected() {
+                None
+            } else {
+                gone_since.or(Some(Instant::now()))
+            };
+            let outcome = recording_wait(
+                RECORDING.swap(false, Ordering::Relaxed),
+                studio_gone(
+                    crate::events::pipe_in_use(),
+                    gone_since.map(|t| t.elapsed()),
+                ),
+                since.elapsed(),
+            );
+            match outcome {
+                RecordingWait::Wait => {
+                    batch.phase = Phase::WaitingForRecording {
+                        cursor,
+                        then,
+                        since,
+                        gone_since,
+                    };
+                    return;
+                }
+                RecordingWait::StudioGone => {
+                    // Without Studio nothing starts or stops OBS, so the
+                    // rest of the clips can't be recorded: end the batch,
+                    // keeping what it recorded, and let the game quit as
+                    // after a batch Studio stopped watching.
+                    let _ = crate::demo_seek::set_paused(false);
+                    say(
+                        "Studio is gone while a clip waited for OBS to record: ending the batch here; the clips recorded so far are kept",
+                    );
+                    finish(&mut guard);
+                    crate::batch_end::batch_ended();
+                    return;
+                }
+                RecordingWait::TimedOut => {
+                    let _ = crate::demo_seek::set_paused(false);
+                    say(&format!(
+                        "no word from Studio that OBS is recording after {} s: playing on (demo {})",
+                        RECORDING_WAIT_MAX.as_secs(),
+                        batch.at + 1
+                    ));
+                }
+                RecordingWait::Go => {
+                    let _ = crate::demo_seek::set_paused(false);
+                    trace(&format!(
+                        "demo {}: OBS is recording after {} ms; playing on from clock {:.3}",
+                        batch.at + 1,
+                        since.elapsed().as_millis(),
+                        crate::demo_seek::clock().map_or(f64::NAN, |c| c.now)
+                    ));
+                }
+            }
+            let Some(c) = crate::demo_seek::clock().filter(|c| c.active && !c.loading) else {
+                skip(
+                    &mut guard,
+                    "the demo stopped playing while it waited for OBS".into(),
+                );
+                return;
+            };
+            let left = batch.plan.demos[batch.at].entries.len() - cursor.next;
+            act(&mut guard, cursor, Instant::now(), then, &c, left);
         }
         Phase::Held {
             cursor,
@@ -687,6 +837,10 @@ pub unsafe extern "C" fn command() {
                 let what = match &b.phase {
                     Phase::Loading { .. } => "loading".to_string(),
                     Phase::Held { .. } => "held between clips".to_string(),
+                    Phase::WaitingForRecording { since, .. } => format!(
+                        "waiting {:.1} s for OBS to record",
+                        since.elapsed().as_secs_f64()
+                    ),
                     Phase::Playing { cursor, .. } => format!(
                         "{} of {} timed line(s) run",
                         cursor.next,
@@ -722,6 +876,12 @@ pub unsafe extern "C" fn command() {
             HOLD.store(false, Ordering::Relaxed);
             say("not holding");
         }
+        // Studio's go-ahead once OBS is recording (#1109). Quiet: it comes
+        // once a clip, and the hook log has the wait's length.
+        Some("recording") => RECORDING.store(true, Ordering::Relaxed),
+        // The batch handles this line itself; typed or run from anywhere
+        // else there is no clip to hold.
+        Some("wait_for_recording") => {}
         Some("stop") => {
             HOLD.store(false, Ordering::Relaxed);
             if lock().take().is_some() {
@@ -877,6 +1037,40 @@ mod tests {
         // them, after the first one's recording stopped.
         let ff = vec!["sys_fast_forward".to_string()];
         assert!(holds_at(&Then::Play, &ff, true));
+    }
+
+    #[test]
+    fn a_clip_waits_for_its_recording_until_studio_answers_leaves_or_times_out() {
+        let a_moment = Duration::from_millis(80);
+        assert_eq!(recording_wait(false, false, a_moment), RecordingWait::Wait);
+        assert_eq!(recording_wait(true, false, a_moment), RecordingWait::Go);
+        assert_eq!(
+            recording_wait(true, true, RECORDING_WAIT_MAX),
+            RecordingWait::Go,
+            "a go-ahead that made it counts"
+        );
+        assert_eq!(
+            recording_wait(false, true, a_moment),
+            RecordingWait::StudioGone
+        );
+        assert_eq!(
+            recording_wait(false, false, RECORDING_WAIT_MAX),
+            RecordingWait::TimedOut
+        );
+    }
+
+    #[test]
+    fn the_wait_line_is_the_batch_command_studio_writes() {
+        assert_eq!(
+            WAIT_FOR_RECORDING_LINE,
+            "ds_capture_batch wait_for_recording"
+        );
+        let wait = format!("at\t4\t{WAIT_FOR_RECORDING_LINE}");
+        let e = entries(&["at\t4\techo a", wait.as_str()]);
+        let mut cursor = Cursor { next: 0 };
+        let (lines, then) = cursor.due(&e, 4.0);
+        assert_eq!(then, Then::Play);
+        assert_eq!(lines, ["echo a", WAIT_FOR_RECORDING_LINE]);
     }
 
     #[test]

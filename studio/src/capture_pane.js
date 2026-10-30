@@ -1374,7 +1374,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         // batch's end isn't why. The end cuts one clip at most: its `cut_by`.
         const stoppedEarly = blocks.filter((b) => b.short_take).length;
         const cut = blocks.filter((b) => b.cut_short && !b.short_take);
-        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by)}${marked}`, 'error');
+        // OBS started recording after the clip did (#1109).
+        const startedLate = blocks.filter((b) => b.started_late_ms && !b.cut_short).length;
+        showToast(`${STRINGS.CAPTURE.takesFoundMissing(captured, total, cut.length, stoppedEarly, cut[0]?.cut_by, startedLate)}${marked}`, 'error');
       } else if (renderable < total) {
         showToast(`${STRINGS.CAPTURE.takesRenderStudioMiss(captured, total, total - renderable)}${marked}`, 'info');
       } else {

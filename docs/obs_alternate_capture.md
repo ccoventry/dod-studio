@@ -501,6 +501,29 @@ The cost is that the recording contains the pre-roll and post-roll as head and t
 "Does Render Studio still run" below — the user can simply trim it in their editor, which is why the
 render pass stays *optional* here rather than becoming a requirement.
 
+### The game waits for the recording (#1109)
+
+The lead is a margin, not a guarantee: a slow OBS, a retried `StartRecord` or a clamped lead could
+still start the file after the clip's first frame. So with the hook running the batch (Seek Between
+Clips), the batch file has a `ds_capture_batch wait_for_recording` line at every `AUDIO_SYNC`
+(`runtime_batch`): the hook pauses the demo there and says `BATCH_WAITING_FOR_RECORDING` on the
+events pipe, Studio starts OBS on the `AUDIO_SYNC` marker as before, and once `OUTPUT_STARTED` is in
+it sends `ds_capture_batch recording` and the demo plays on. The lead-in then plays its full second
+with OBS already recording, however slow the start was. The pause sits at the head of the file as a
+still frame, inside the lead-in.
+
+- **No go-ahead in 20 s** with Studio still there: the clip plays on (Studio's own start gives up
+  after about 16 s, so the answer was lost). **Studio gone** from the events pipe for 10 s: the
+  batch ends, keeping its clips, as the space hold does (#885): without Studio nothing starts or
+  stops OBS.
+- **The safety net.** Studio holds the arrival of `OUTPUT_STARTED` against the arrival of the
+  clip's `START_RECORD` marker, both stamped when read. A recording that started after the clip did
+  (a hook DLL without the wait, a patched batch, a wait that timed out) is missing the clip's
+  opening: the take is not counted as captured, Render While Capturing skips it, and Last Batch says
+  by how many ms.
+
+Measured (#1109): see the PR for the live numbers on PRE and POST.
+
 ## The output, and the recommendation that keeps the rest of the pipeline
 
 OBS writes one file wherever its profile points, named by its own filename formatting. `StopRecord`

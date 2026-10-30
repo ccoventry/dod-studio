@@ -56,6 +56,9 @@ pub enum EngineEvent {
     Held,
     /// The hook's batch went on after `go`.
     Going,
+    /// OBS mode: OBS started recording a clip after the clip's first frame
+    /// (#1109), so its take is missing the opening and isn't captured.
+    ObsStartedLate(crate::obs::LateStart),
     /// hl.exe went away by itself mid-batch: closed (quit, ALT+F4, End
     /// Process) or crashed. Sent just before the `Error` that ends the batch,
     /// so the clip it cut short says the game closed.
@@ -105,6 +108,47 @@ fn late_markers(
         late.push(marker);
     }
     late
+}
+
+/// The hook's word that a clip's lead-in is paused until OBS records (#1109).
+const WAITING_FOR_RECORDING: &str = "BATCH_WAITING_FOR_RECORDING";
+
+/// OBS mode's go-ahead to the hook's batch (#1109): each clip's lead-in
+/// waits at its `AUDIO_SYNC` (`BATCH_WAITING_FOR_RECORDING`) until Studio
+/// has started OBS on that same marker. Counted rather than paired by clip,
+/// since the hook's word can come before or after the marker: a go-ahead is
+/// owed for every clip that has both. A hook DLL without the wait never asks,
+/// so it never gets one.
+#[derive(Debug, Default)]
+struct RecordingGoAhead {
+    waits: usize,
+    starts: usize,
+    sent: usize,
+    /// When the game said it waits, for the activity log's per-clip cost.
+    waiting_since: Option<std::time::Instant>,
+}
+
+impl RecordingGoAhead {
+    fn on_marker(&mut self, marker: &crate::obs::Marker) {
+        if marker.kind == crate::obs::TRIGGER_MARKER {
+            self.starts += 1;
+        } else if marker.kind == crate::obs::MarkerKind::Other
+            && marker.label == WAITING_FOR_RECORDING
+        {
+            self.waits += 1;
+            self.waiting_since.get_or_insert(marker.at);
+        }
+    }
+
+    fn owed(&self) -> bool {
+        self.sent < self.waits.min(self.starts)
+    }
+
+    /// One go-ahead went out; how long the game waited for it.
+    fn sent(&mut self) -> Option<std::time::Duration> {
+        self.sent += 1;
+        self.waiting_since.take().map(|t| t.elapsed())
+    }
 }
 
 /// The hook batch command that asks for `hold` (true) or `go` (false), #861.
@@ -964,6 +1008,7 @@ pub fn spawn_capture_engine(
             // What the game was last told (#861), and when a send last failed.
             let mut hold_sent = false;
             let mut hold_retry_at: Option<std::time::Instant> = None;
+            let mut go_ahead = RecordingGoAhead::default();
             // hl.exe went away by itself mid-batch (closed or crashed).
             let mut game_closed = false;
             loop {
@@ -984,7 +1029,10 @@ pub fn spawn_capture_engine(
                     }
                     last_marker_at = Some(now);
                     if let Some(session) = obs_session.as_mut() {
-                        session.on_marker(&marker);
+                        if let Some(late) = session.on_marker(&marker) {
+                            let _ = tx.send(EngineEvent::ObsStartedLate(late));
+                        }
+                        go_ahead.on_marker(&marker);
                     }
                     if obs_mode && marker.kind == crate::obs::MarkerKind::BatchComplete {
                         obs_batch_complete_seen = true;
@@ -994,6 +1042,28 @@ pub fn spawn_capture_engine(
                     }
                     if let Some(event) = marker_event(&marker) {
                         let _ = tx.send(event);
+                    }
+                }
+
+                // OBS is recording the clip the game waits on (#1109): let it
+                // play. A failed send tries again on the next pass.
+                if go_ahead.owed() {
+                    let sent = crate::sys::process::game_pids_in(&sys)
+                        .into_iter()
+                        .next()
+                        .map(|pid| {
+                            crate::sys::game_remote::send_console_commands(
+                                pid,
+                                &[crate::patch::runtime_batch::RECORDING_GO.to_string()],
+                            )
+                        });
+                    if let Some(Ok(crate::sys::game_remote::Sent::Delivered)) = sent
+                        && let Some(waited) = go_ahead.sent()
+                    {
+                        log_markdown(&format!(
+                            "[OBS] Recording; the game waited {} ms for it and plays on",
+                            waited.as_millis()
+                        ));
                     }
                 }
 
@@ -1358,7 +1428,9 @@ pub fn spawn_capture_engine(
                 tail_cancel.store(true, Ordering::Relaxed);
                 let rest: Vec<_> = marker_rx.try_iter().collect();
                 for marker in late.iter().chain(&rest) {
-                    session.on_marker(marker);
+                    if let Some(late) = session.on_marker(marker) {
+                        let _ = tx.send(EngineEvent::ObsStartedLate(late));
+                    }
                 }
                 session.finish();
                 // Before the batch reports it ended, so the last clip's
@@ -1466,7 +1538,9 @@ fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{EngineEvent, completion_source, hold_command, late_markers, marker_event};
+    use super::{
+        EngineEvent, RecordingGoAhead, completion_source, hold_command, late_markers, marker_event,
+    };
     use crate::obs::log_tail::parse_marker;
 
     fn event(line: &str) -> Option<EngineEvent> {
@@ -1515,6 +1589,33 @@ mod tests {
                 EngineEvent::ClipRecorded(Some(2))
             ]
         ));
+    }
+
+    #[test]
+    fn a_clip_gets_its_go_ahead_once_obs_started_and_the_game_waits() {
+        let marker = |line: &str| parse_marker(line).unwrap();
+        let wait = marker("[dod-studio] BATCH_WAITING_FOR_RECORDING");
+        let sync = marker("[dod-studio] AUDIO_SYNC - Tick 900");
+        let mut go = RecordingGoAhead::default();
+        go.on_marker(&wait);
+        assert!(!go.owed(), "OBS isn't recording yet");
+        go.on_marker(&sync);
+        assert!(go.owed());
+        assert!(go.sent().is_some());
+        assert!(!go.owed(), "one go-ahead a clip");
+
+        // The game's word after the marker, on the next clip.
+        go.on_marker(&marker("[dod-studio] START_RECORD - Tick 1000"));
+        go.on_marker(&sync);
+        assert!(!go.owed(), "the game hasn't said it waits");
+        go.on_marker(&wait);
+        assert!(go.owed());
+
+        // A hook DLL without the wait never says it waits: no go-ahead.
+        let mut old = RecordingGoAhead::default();
+        old.on_marker(&sync);
+        old.on_marker(&sync);
+        assert!(!old.owed());
     }
 
     #[test]
