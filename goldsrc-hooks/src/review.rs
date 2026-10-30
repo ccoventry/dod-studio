@@ -10,7 +10,9 @@
 //! first kill, and plays at normal speed until [`TAIL`] seconds after the
 //! last. There it pauses and waits for an answer: on the game screen, from
 //! the answer keys (`review_keys`, #660), or with `ds_ui_review_keys 0` on
-//! the DoD Studio window's Review tab, which it opens.
+//! the DoD Studio window's Review tab, which it opens. The keys answer while
+//! the highlight plays too, ending it early (#1141), but not for [`LOCKOUT`]
+//! after it starts.
 //!
 //! `yes`, `maybe` (#661) or `no` sends the answer -- with the kill range and note from the
 //! Review tab's boxes -- to Studio as a `[dod-studio] REVIEW` line on the
@@ -57,6 +59,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::names::console_name;
+use crate::review_keys::KeyMode;
 
 pub const NAME: &str = console_name!("demo_review");
 
@@ -76,6 +79,11 @@ const SETTLE_FRAMES: u32 = 30;
 const UNSEEN_LOAD_FRAMES: u32 = 300;
 /// The longest note sent to Studio, in characters.
 const NOTE_MAX: usize = 500;
+/// How long the answer keys do nothing once a highlight starts playing
+/// (#1141): long enough that a double press on one answer, or a key held a
+/// beat long, can't answer the next highlight unseen; short enough that a
+/// clip the user already knows is a No can be answered at once.
+pub(crate) const LOCKOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Verdict {
@@ -414,6 +422,8 @@ struct Review {
     phase: Phase,
     /// The demo the review last loaded.
     loaded: Option<String>,
+    /// When the answer keys come on for the highlight playing ([`LOCKOUT`]).
+    keys_from: Instant,
 }
 
 static REVIEW: Mutex<Option<Review>> = Mutex::new(None);
@@ -561,6 +571,7 @@ fn play(review: &mut Review) {
                 spans,
                 fast: false,
             };
+            review.keys_from = Instant::now() + LOCKOUT;
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -624,6 +635,10 @@ fn advance(guard: &mut Option<Review>) {
         say(&format!(
             "that was the last highlight -- {answered} of {total} answered"
         ));
+        // Answered mid-highlight (#1141): the demo plays on at normal speed.
+        if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+            let _ = crate::demo_seek::set_time_scale(1.0);
+        }
         crate::events::send("REVIEW_END\tdone");
         *guard = None;
         crate::spectator_follow::hold_for_review(false);
@@ -640,13 +655,13 @@ pub fn poll() {
     }
     let mut guard = lock();
     step(&mut guard);
-    let (panel, awaiting) = match guard.as_ref() {
-        Some(review) => panel_view(review),
-        None => (None, false),
+    let (panel, mode) = match guard.as_ref() {
+        Some(review) => panel_view(review, Instant::now()),
+        None => (None, KeyMode::Off),
     };
     drop(guard);
-    crate::review_keys::publish(panel, awaiting);
-    watch_menu(awaiting);
+    crate::review_keys::publish(panel, mode);
+    watch_menu(mode);
 }
 
 /// "Highlight 3 of 12 | m00cat | 4 kills".
@@ -666,38 +681,58 @@ fn panel_title(queue: &[Highlight], at: usize) -> String {
     parts.join(" | ")
 }
 
-/// What the on-screen panel shows for the review as it stands, and whether
-/// the answer keys are live.
-fn panel_view(review: &Review) -> (Option<crate::review_keys::Panel>, bool) {
-    let keys = crate::review_keys::KEYS.on();
-    let info = crate::review_keys::INFO.on();
-    let Some(_) = review.queue.get(review.at) else {
-        return (None, false);
-    };
-    let title = panel_title(&review.queue, review.at);
-    let panel = |status: &str, keys: bool| crate::review_keys::Panel {
-        title: title.clone(),
-        status: status.to_string(),
-        keys,
-        can_go_back: review.at > 0,
-    };
+/// What the answer keys do in the review as it stands at `now`, with
+/// `ds_ui_review_keys` at `keys_on`: taken from the moment a highlight loads,
+/// answering once [`LOCKOUT`] has passed since it started playing (#1141).
+fn key_mode(review: &Review, keys_on: bool, now: Instant) -> KeyMode {
+    if !keys_on {
+        return KeyMode::Off;
+    }
     match review.phase {
-        Phase::Waiting if keys => (Some(panel("", true)), true),
-        // The Review tab is open for the answer, or for why this one failed.
-        Phase::Waiting | Phase::Failed(_) => (None, false),
-        Phase::Loading { .. } if info => (Some(panel("Loading the demo...", false)), false),
-        Phase::Playing { .. } if info => (Some(panel("", false)), false),
-        Phase::Loading { .. } | Phase::Playing { .. } => (None, false),
+        Phase::Loading { .. } => KeyMode::Locked,
+        Phase::Playing { .. } | Phase::Waiting if now < review.keys_from => KeyMode::Locked,
+        Phase::Playing { .. } | Phase::Waiting => KeyMode::Live,
+        // The Review tab is open for why this one failed.
+        Phase::Failed(_) => KeyMode::Off,
     }
 }
 
-/// What an answer key asks for, if the review is still waiting for an
-/// answer: the key may have come in after the Review tab's buttons moved it
-/// on.
+/// What the on-screen panel shows for the review as it stands at `now`, and
+/// what the answer keys do.
+fn panel_view(review: &Review, now: Instant) -> (Option<crate::review_keys::Panel>, KeyMode) {
+    let keys = crate::review_keys::KEYS.on();
+    let info = crate::review_keys::INFO.on();
+    let Some(_) = review.queue.get(review.at) else {
+        return (None, KeyMode::Off);
+    };
+    let mode = key_mode(review, keys, now);
+    let title = panel_title(&review.queue, review.at);
+    let panel = |status: &str| crate::review_keys::Panel {
+        title: title.clone(),
+        status: status.to_string(),
+        keys,
+        live: mode == KeyMode::Live,
+        can_go_back: review.at > 0,
+    };
+    let shown = match review.phase {
+        // With the keys off, the Review tab is open for the answer.
+        Phase::Waiting => keys.then(|| panel("")),
+        // The Review tab is open for why this one failed.
+        Phase::Failed(_) => None,
+        Phase::Loading { .. } => info.then(|| panel("Loading the demo...")),
+        Phase::Playing { .. } => info.then(|| panel("")),
+    };
+    (shown, mode)
+}
+
+/// What an answer key asks for, if the keys still answer: the key may have
+/// come in after the Review tab's buttons moved the review on.
 fn key_action(action: crate::review_keys::Action) {
     use crate::review_keys::Action;
-    let waiting = lock().as_ref().is_some_and(|r| r.phase == Phase::Waiting);
-    if !waiting {
+    let live = lock().as_ref().is_some_and(|r| {
+        key_mode(r, crate::review_keys::KEYS.on(), Instant::now()) == KeyMode::Live
+    });
+    if !live {
         return;
     }
     trace(&format!("key: {action:?}"));
@@ -721,15 +756,16 @@ fn menu_opens_tab(was_up: bool, (menu, window, console): (bool, bool, bool)) -> 
     menu && !was_up && !window && !console
 }
 
-/// While the review waits on screen for an answer, ESC's menu comes up with
-/// the Review tab in it, for the kill range and the note (#660).
-fn watch_menu(waiting_on_keys: bool) {
+/// While the answer keys are the review's, ESC's menu comes up with the
+/// Review tab in it, for the kill range and the note (#660): the box says
+/// so whenever it lists the keys, while a highlight plays too (#1141).
+fn watch_menu(mode: KeyMode) {
     let Some(state) = crate::studio_panel::menu_state() else {
         return;
     };
     let was_up = MENU_WAS_UP.swap(state.0, Ordering::Relaxed);
-    if waiting_on_keys && menu_opens_tab(was_up, state) {
-        trace("the menu came up while waiting for an answer: opening the Review tab");
+    if mode != KeyMode::Off && menu_opens_tab(was_up, state) {
+        trace("the menu came up during a highlight: opening the Review tab");
         open_tab();
     }
 }
@@ -737,6 +773,11 @@ fn watch_menu(waiting_on_keys: bool) {
 /// The review's step for this frame.
 fn step(guard: &mut Option<Review>) {
     let Some(review) = guard.as_mut() else { return };
+    // A stepped seek still landing: the clip hasn't started for the eye, so
+    // neither has the lockout (#1141).
+    if matches!(review.phase, Phase::Playing { .. }) && crate::demo_seek::seeking() {
+        review.keys_from = Instant::now() + LOCKOUT;
+    }
     match review.phase.clone() {
         Phase::Loading {
             since,
@@ -1054,6 +1095,7 @@ fn start(path: &str) {
         at,
         phase: Phase::Waiting,
         loaded: None,
+        keys_from: Instant::now(),
     });
     go_to(review, at);
 }
@@ -1343,47 +1385,97 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_keys_are_live_only_while_the_review_waits_for_an_answer() {
-        // The settings' defaults (both on): no cvar in a host build.
-        let mut review = Review {
-            queue: vec![highlight("a", None)],
+    fn review_of(queue: Vec<Highlight>, phase: Phase) -> Review {
+        Review {
+            queue,
             options: Options::default(),
             at: 0,
-            phase: Phase::Waiting,
+            phase,
             loaded: Some("a".to_string()),
-        };
-        let (panel, awaiting) = panel_view(&review);
-        assert!(awaiting);
-        assert!(panel.is_some_and(|p| p.keys));
-        review.phase = Phase::Loading {
-            since: Instant::now(),
-            frames: 0,
-            seen_loading: false,
-        };
-        let (panel, awaiting) = panel_view(&review);
-        assert!(!awaiting);
-        assert_eq!(panel.map(|p| p.status), Some("Loading the demo...".into()));
+            keys_from: Instant::now(),
+        }
+    }
+
+    fn playing() -> Phase {
+        Phase::Playing {
+            until: 20.0,
+            last: 6.0,
+            beat: Instant::now(),
+            spans: Vec::new(),
+            fast: false,
+        }
+    }
+
+    #[test]
+    fn the_keys_answer_while_a_highlight_plays_and_at_its_end() {
+        // The settings' defaults (both on): no cvar in a host build.
+        let mut review = review_of(vec![highlight("a", None)], Phase::Waiting);
+        let now = review.keys_from;
+        let (panel, mode) = panel_view(&review, now);
+        assert_eq!(mode, KeyMode::Live);
+        assert!(panel.is_some_and(|p| p.keys && p.live));
+        review.phase = playing();
+        let (panel, mode) = panel_view(&review, now);
+        assert_eq!(mode, KeyMode::Live);
+        assert!(panel.is_some_and(|p| p.keys && p.live && p.status.is_empty()));
+    }
+
+    #[test]
+    fn the_keys_are_locked_while_loading_and_off_on_a_failed_highlight() {
+        let mut review = review_of(
+            vec![highlight("a", None)],
+            Phase::Loading {
+                since: Instant::now(),
+                frames: 0,
+                seen_loading: false,
+            },
+        );
+        let now = review.keys_from;
+        let (panel, mode) = panel_view(&review, now);
+        assert_eq!(mode, KeyMode::Locked);
+        let panel = panel.expect("a panel");
+        assert_eq!(panel.status, "Loading the demo...");
+        assert!(panel.keys && !panel.live);
         // A failed highlight has the Review tab open instead.
         review.phase = Phase::Failed("gone".into());
-        assert_eq!(panel_view(&review), (None, false));
+        assert_eq!(panel_view(&review, now), (None, KeyMode::Off));
+    }
+
+    #[test]
+    fn the_keys_do_nothing_for_the_lockout_after_a_highlight_starts() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let started = Instant::now();
+        review.keys_from = started + LOCKOUT;
+        let (panel, mode) = panel_view(&review, started);
+        assert_eq!(mode, KeyMode::Locked);
+        assert!(panel.is_some_and(|p| p.keys && !p.live));
+        let half = started + LOCKOUT / 2;
+        assert_eq!(key_mode(&review, true, half), KeyMode::Locked);
+        assert_eq!(key_mode(&review, true, started + LOCKOUT), KeyMode::Live);
+    }
+
+    #[test]
+    fn with_the_keys_off_they_are_the_games_throughout() {
+        let mut review = review_of(vec![highlight("a", None)], playing());
+        let now = review.keys_from;
+        assert_eq!(key_mode(&review, false, now), KeyMode::Off);
+        review.phase = Phase::Waiting;
+        assert_eq!(key_mode(&review, false, now), KeyMode::Off);
     }
 
     #[test]
     fn back_is_greyed_on_the_first_highlight_only() {
         use crate::review_keys::Action;
-        let mut review = Review {
-            queue: vec![highlight("a", None), highlight("a", None)],
-            options: Options::default(),
-            at: 0,
-            phase: Phase::Waiting,
-            loaded: Some("a".to_string()),
-        };
-        let first = panel_view(&review).0.expect("a panel");
+        let mut review = review_of(
+            vec![highlight("a", None), highlight("a", None)],
+            Phase::Waiting,
+        );
+        let now = review.keys_from;
+        let first = panel_view(&review, now).0.expect("a panel");
         assert!(!first.key_live(Action::Back));
         assert!(first.key_live(Action::Next));
         review.at = 1;
-        let second = panel_view(&review).0.expect("a panel");
+        let second = panel_view(&review, now).0.expect("a panel");
         assert!(second.key_live(Action::Back));
     }
 
