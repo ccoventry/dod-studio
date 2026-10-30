@@ -793,9 +793,13 @@ impl PatcherConfig {
         // env vars (GOLDSRC_HOOKS_*) are set, which nothing here sets yet --
         // see the crate's README for what it needs to do anything.
         //
-        // Resolution order: see `goldsrc_hooks_dll`.
-        let goldsrc_hooks_dll_str =
-            goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
+        // Resolution order: see `goldsrc_hooks_dll`. The game loads a copy
+        // of that file, never the file itself (#1146).
+        let goldsrc_hooks_dll_str = goldsrc_hooks_dll.map(|p| {
+            crate::sys::hook_copy::for_launch(&p)
+                .to_string_lossy()
+                .replace("/", "\\\\")
+        });
 
         let program_path_str = hl_exe.replace("/", "\\\\");
 
