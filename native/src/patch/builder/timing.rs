@@ -98,8 +98,8 @@ pub const MIN_TAKE_SEPARATION_SECONDS: f32 = 0.5;
 /// `MIN_TAKE_SEPARATION_SECONDS` above is HLAE's. The OBS figure is measured
 /// separately, and is larger, so the mode has to choose.
 ///
-/// Public so `find_overlaps` and the tests ask the same question the merge loop
-/// does, rather than re-deriving it and drifting.
+/// Public so `find_overlaps` and the tests ask the same question
+/// `blocks::cut_blocks` does, rather than re-deriving it and drifting.
 pub fn take_separation_seconds(config: &PatcherConfig) -> f32 {
     match config.capture_mode {
         crate::patch::CaptureMode::Obs => crate::patch::types::OBS_TAKE_SEPARATION_SECONDS,
@@ -279,6 +279,36 @@ pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
     }
 }
 
+/// Logs a warning for each roll shorter than its [`roll_floors`] floor.
+///
+/// The rolls are load-bearing — the audio resync, the sound flush, the decal
+/// sweep's lead and any Scheduled Command's offset all measure against them —
+/// so say when one is too short rather than leaving it to be found in a
+/// capture that looks almost right.
+pub(super) fn warn_short_rolls(config: &PatcherConfig) {
+    let floors = roll_floors(config);
+    if config.pre_roll_seconds < floors.pre_roll {
+        crate::log_markdown(&format!(
+            "⚠️ **Pre-roll is shorter than this capture needs** — {:.1}s, against a {:.1}s floor \
+             set by {}. Playback returns to real time {:.1}s before recording, which is not enough \
+             for it: the engine's audio buffers are left unflushed by the fast-forward. Raise the \
+             pre-roll to at least {:.1}s.",
+            config.pre_roll_seconds,
+            floors.pre_roll,
+            floors.pre_roll_binding,
+            config.pre_roll_seconds,
+            floors.pre_roll
+        ));
+    }
+    if config.post_roll_seconds < floors.post_roll {
+        crate::log_markdown(&format!(
+            "⚠️ **Post-roll is shorter than this capture needs** — {:.1}s, against a {:.1}s floor \
+             set by {}. Anything past the post-roll fires while playback is fast-forwarding again.",
+            config.post_roll_seconds, floors.post_roll, floors.post_roll_binding
+        ));
+    }
+}
+
 /// Whether a scheduled command lands while playback is still fast-forwarding.
 ///
 /// A block runs at `host_framerate 0.05` until the pre-roll drops it back to
@@ -307,7 +337,7 @@ pub fn runs_during_fast_forward(
 /// given padding is applied to each side.
 ///
 /// Called twice per highlight pair, with different padding, to answer two
-/// different questions (see `build_batch_queue`'s merge loop):
+/// different questions (see `blocks::cut_blocks`):
 ///
 /// - with start-lead/stop-trail: do the **recordings** overlap? If so the two
 ///   highlights physically cannot be separate takes and must be merged.
