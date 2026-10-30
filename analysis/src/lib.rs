@@ -72,7 +72,7 @@ pub use crate::{
         AttemptOutcome, BREAK_WINDOW, CancelCause, CaptureAttempt, Flag, FlagCapture, Objectives,
         cancel_cause,
     },
-    player::{Connection, Player, PlayerGlobalId, SteamId},
+    player::{Connection, Player, PlayerGlobalId, SteamId, steam_id_of},
     position::{KillPosition, PlayerPose},
     round::Round,
     team_tag::{TeamTag, detect_team_tag, team_tags},
