@@ -144,7 +144,7 @@ fn range_hint(kills: usize) -> String {
 }
 
 /// The line under the boxes: how to use the form.
-pub(crate) const KEYS_HINT: &str = "Tab next box    Enter save    Esc cancel";
+pub(crate) const KEYS_HINT: &str = "Tab next box   Enter save   Esc cancel";
 
 /// "of 4 kills" beside the To box.
 pub(crate) fn kill_count_text(kills: usize) -> String {
