@@ -315,7 +315,7 @@ Four fixes have no console name and are on by default: the **temp-entity crash f
 
 ### 5.3 Offline verification
 
-`goldsrc-hooks/tools/verify_*.py` re-derive every patched address from the DLL on disk with `pefile` and `capstone`. `survey_client_dll.py` and `survey_hw_dll.py` regenerate the survey docs. `crash_report.py` groups crashes from the hook logs against known causes. They default to the PRE install's paths.
+`goldsrc-hooks/tools/verify_*.py` re-derive every patched address from the DLL on disk with `pefile` and `capstone`. `survey_client_dll.py` and `survey_hw_dll.py` regenerate the survey docs. `linux_so.py`, `name_client_dll.py` and `user_message_layouts.py` read the symbols in DoD's Linux builds: Valve's names for `client.dll`'s functions and the layout of every user message (`docs/goldsrc_linux_debug_symbols.md`). `crash_report.py` groups crashes from the hook logs against known causes. They default to the PRE install's paths.
 
 ---
 

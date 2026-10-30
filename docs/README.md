@@ -28,6 +28,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_client_dll_survey.md](goldsrc_client_dll_survey.md) — what in `client.dll` can be controlled.
 - [goldsrc_hw_dll_survey.md](goldsrc_hw_dll_survey.md) — what in `hw.dll` HLAE already owns, how the engine reads a `playdemo` demo, and what is left.
 - [goldsrc_viewdemo.md](goldsrc_viewdemo.md) — how `viewdemo` plays and seeks a demo.
+- [goldsrc_linux_debug_symbols.md](goldsrc_linux_debug_symbols.md) — Valve's own names from DoD's unstripped Linux builds: the `client.dll` name map, user message layouts, and how far to trust them (#1127).
 
 ### Per feature
 - [goldsrc_death_notices.md](goldsrc_death_notices.md) — the kill feed (`ds_hud_deathmsg`).
