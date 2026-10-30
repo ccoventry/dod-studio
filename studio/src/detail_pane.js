@@ -486,7 +486,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
     // Set by capture_pane.js's capture_takes_verified handler when this
     // highlight's take was an overlap merge covering more than one highlight
-    // (builder.rs's merge loop) — surfaced so it's obvious at a glance why
+    // (builder/blocks.rs's cut_blocks) — surfaced so it's obvious at a glance why
     // two rows flipped to Captured together instead of independently.
     const mergedBadge = streak.mergedTakeKey
       ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
