@@ -739,7 +739,7 @@ fn schedule_clips(
             block.plan = take_plan(&timeline, &window, &cut.kill_frames[i], &ramps, ramp_speed);
         }
 
-        schedule.push_custom_commands(&window, frame_times);
+        schedule.push_custom_commands(&window, frame_times, streak);
         schedule.push_clip_stages(i, &window, &cut.chained_to_previous, &ramps);
     }
 
