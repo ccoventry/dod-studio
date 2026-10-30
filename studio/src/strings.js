@@ -1589,7 +1589,6 @@ export const STRINGS = {
   BATCH_CLOSE_MODAL: {
     TITLE: 'Capture batch running',
     MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own. Studio checks the takes and marks them Captured the next time it opens. To stop the batch instead, use Cancel Batch first.',
-    LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
     CLOSE_BUTTON: 'Close DoD Studio',
     KEEP_OPEN_BUTTON: 'Keep Studio open',
     // The batch's start has not reached the game yet (#545): Studio waits for

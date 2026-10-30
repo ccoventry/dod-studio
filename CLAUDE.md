@@ -67,7 +67,7 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 ### Build traps
 
 - **Build the hook DLL first in a fresh checkout or worktree.** `studio`'s build script checks that `target\i686-pc-windows-msvc\release\dodstudio_goldsrc_hooks.dll` exists (a Tauri bundle resource); without it the whole workspace fails to build, far from any code. The path is the checkout's own `target\` (`tauri.conf.json`'s resource), whatever `CARGO_TARGET_DIR` says, so a worktree with its own `CARGO_TARGET_DIR` copies the built DLL into its own `target\i686-pc-windows-msvc\release\` too. Give each worktree its own `CARGO_TARGET_DIR`: a shared one silently reuses another worktree's artifacts.
-- **`npm run tauri dev` watches the workspace.** Any file write in that checkout restarts Studio, and every child process (Steam, HLAE, `hl.exe`) dies with it, because they run inside cargo's kill-on-close job object. While the app is running from a checkout, edit in a separate worktree.
+- **`npm run tauri dev` watches the workspace.** Any file write in that checkout restarts Studio, and every process Studio started inside cargo's kill-on-close job object dies with it (OBS, FFmpeg). Steam (#544) and the game (HLAE and `hl.exe`, started through WMI by `native::sys::launcher`, #545) are started outside the job and survive, but the restarted Studio only catches up on a running batch once it ends. While the app is running from a checkout, edit in a separate worktree.
 - **JS unit tests:** `npm run test:unit` (Vitest, `studio/src/*.test.js`) runs in CI alongside the Playwright e2e suite.
 
 ---

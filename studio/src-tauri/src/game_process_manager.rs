@@ -16,7 +16,10 @@ use tauri::{Emitter, Manager};
 /// `external_error` event, each box once. Report only, unlike a batch: the
 /// user is at the game, so the box stays for them to close. Stops once the
 /// launcher has exited and no game has been running for 5 seconds.
-pub(crate) fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
+pub(crate) fn watch_for_error_dialogs(
+    app: tauri::AppHandle,
+    mut launcher: native::sys::launcher::Launcher,
+) {
     std::thread::spawn(move || {
         let launcher_pid = launcher.id();
         let mut launcher_running = true;
@@ -25,10 +28,10 @@ pub(crate) fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::
         let mut sys = native::sys::process::snapshot();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
-            if launcher_running && !matches!(launcher.try_wait(), Ok(None)) {
+            native::sys::process::refresh(&mut sys);
+            if launcher_running && !matches!(launcher.exit_status(&sys), Ok(None)) {
                 launcher_running = false;
             }
-            native::sys::process::refresh(&mut sys);
             let game_pids = native::sys::process::game_pids_in(&sys);
             let mut launcher_pids = native::sys::process::injector_pids_in(&sys, launcher_pid);
             if launcher_running {
@@ -97,8 +100,7 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
 
         let patcher_config = launch_config(&settings, &LaunchRequest::default());
         let mut cmd = patcher_config.build_hlae_process("");
-        let launcher = cmd
-            .spawn()
+        let launcher = native::sys::launcher::Launcher::spawn(&mut cmd)
             .map_err(crate::messages::failed_to_launch_hlae)?;
         watch_for_error_dialogs(app, launcher);
         // Configuration > Players' box (#428), once the game takes commands.
