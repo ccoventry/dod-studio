@@ -206,6 +206,25 @@ fn a_direct_batch_with_a_marker_or_no_console_log_is_not_ended() {
     assert!(procs.m().killed.is_empty());
 }
 
+/// A stalled batch in an open game it borrowed (#725) leaves that game open,
+/// as Cancel does: it isn't the batch's to close (#1214).
+#[test]
+fn a_stalled_batch_in_a_borrowed_game_leaves_it_open() {
+    let rig = Rig::new("watch_pass_stall_borrowed");
+    std::fs::write(&rig.log_path, b"the game's startup lines").unwrap();
+    let procs = FakeProcesses::default();
+    procs.set(&[OURS]);
+    let mut watch = rig.watch(false, &procs);
+    watch.io.reuse_game = Some(OURS.pid);
+    watch.game = BatchGame::new(Vec::new(), Some(OURS.pid));
+    watch.hl_first_seen = Some(Instant::now() - FIRST_MARKER_DEADLINE - Duration::from_secs(1));
+    assert!(watch.pass().is_break());
+    let reason = watch.failure_reason.clone().unwrap_or_default();
+    assert!(reason.starts_with("the demo never started"), "{reason}");
+    assert!(procs.m().killed.is_empty(), "the borrowed game was closed");
+    assert_eq!(procs.m().games, [OURS]);
+}
+
 /// Cancel is checked on every pass, and ends only the batch's own game: the
 /// one open before the launch and one opened since are left (M1).
 #[test]
