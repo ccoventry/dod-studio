@@ -1,6 +1,13 @@
-//! `ds_hud_hide_server_text`: hide the coloured HUD messages a server
-//! plugin puts on screen (`set_hudmessage` / `show_hudmessage`: match, stats
-//! and advert lines), and nothing else (#677).
+//! `ds_hud_hide_plugin_text`: hide what a server plugin puts on screen --
+//! its coloured HUD messages (`set_hudmessage` / `show_hudmessage`: match,
+//! stats and advert lines, #677) and its menus (AMX Mod X menus and votes,
+//! #342) -- and nothing else. It was `ds_hud_hide_server_text` before #342
+//! (never in a release).
+//!
+//! This file is the HUD-message half. The menus are `ShowMenu` text menus,
+//! which `voice_menus.rs` already hooks for the voice menus: it hides every
+//! other `ShowMenu` menu while [`wanted`] is true. `dod.dll` itself sends no
+//! `ShowMenu` but the nine voice menus, so any other one comes from a plugin.
 //!
 //! ## What carries them
 //!
@@ -75,7 +82,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::hw_call_site::{Build, CALL_LEN, CallSite, call_bytes};
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hud_hide_server_text");
+pub const NAME: &str = console_name!("hud_hide_plugin_text");
 
 /// From the channel-name table read to the call and the `add esp, 0x10`
 /// after it; only the patched call's `rel32` is pinned.
@@ -126,7 +133,8 @@ pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
 
-/// Whether the cvar is on: `map_text` reads the map's strings for it then.
+/// Whether the cvar is on: `map_text` reads the map's strings for it then,
+/// and `voice_menus` hides plugin menus.
 pub(crate) fn wanted() -> bool {
     WANTED.load(Ordering::Relaxed)
 }
@@ -180,7 +188,7 @@ fn hide(name: *const c_char) -> bool {
     if count <= LOGGED_MAX {
         unsafe {
             crate::debug::report(&format!(
-                "server_hud_text: hid \"{}\"{}",
+                "plugin_text: hid \"{}\"{}",
                 String::from_utf8_lossy(&text).trim().replace('\n', " / "),
                 if count == LOGGED_MAX {
                     " (the rest are only counted)"
@@ -217,9 +225,9 @@ pub fn poll() {
     if wanted != WANTED.swap(wanted, Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
-                "server_hud_text: {NAME} = {}",
+                "plugin_text: {NAME} = {}",
                 if wanted {
-                    "1 (server HUD messages hidden)"
+                    "1 (server plugin HUD messages and menus hidden)"
                 } else {
                     "0 (normal)"
                 }
@@ -246,7 +254,7 @@ pub fn poll() {
             if wrote {
                 unsafe {
                     crate::debug::report(&format!(
-                        "server_hud_text: TE_TEXTMESSAGE {} ({} hw.dll)",
+                        "plugin_text: TE_TEXTMESSAGE {} ({} hw.dll)",
                         if wanted {
                             "now goes through the filter"
                         } else {
@@ -261,7 +269,7 @@ pub fn poll() {
             REDIRECTED.store(false, Ordering::Relaxed);
             if wanted && !COMPLAINED.swap(true, Ordering::Relaxed) {
                 unsafe {
-                    crate::debug::report(&format!("server_hud_text: {NAME} not applied -- {why}"))
+                    crate::debug::report(&format!("plugin_text: {NAME} not applied -- {why}"))
                 };
             }
         }
@@ -281,7 +289,7 @@ pub fn status_line() -> Option<String> {
         ""
     };
     Some(format!(
-        "{NAME} = {}{state} -- {hidden} server HUD message(s) hidden this session",
+        "{NAME} = {}{state} -- {hidden} plugin HUD message(s) hidden this session",
         u8::from(wanted)
     ))
 }

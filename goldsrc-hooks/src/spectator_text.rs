@@ -3,10 +3,10 @@
 //! just above the bottom bar ("Locked Chase Cam", "Free Look", ...), and the
 //! green "Press DUCK for Spectator Menu" written out above it.
 //!
-//! Neither has a narrow switch of its own. `ds_hud_hide_element
-//! vgui2print 1` takes the mode name with every other centre-print, and
-//! `message 1` takes the green line with map text, clan prompts and HLTV
-//! director text.
+//! Neither had a narrow switch of its own before this: the retired (#342)
+//! `ds_hud_hide_element vgui2print 1` took the mode name with every other
+//! centre-print, and `message 1` the green line with map text, clan prompts
+//! and HLTV director text.
 //!
 //! ## The camera mode name
 //!

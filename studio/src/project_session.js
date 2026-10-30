@@ -8,7 +8,10 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { pickPath } from './pick_path.js';
 import { whileDialogOpens } from './dialog_wait.js';
 import { invoke } from '@tauri-apps/api/core';
-import { defaultProjectsDir } from './ipc_bridge.js';
+import { defaultProjectsDir, logFrontendEvent } from './ipc_bridge.js';
+import {
+  projectSavedLine, projectOpenedLine, projectFailedLine, NEW_SESSION_LINE,
+} from './project_log.js';
 import { updateStreakVisuals } from './detail_pane.js';
 import { clearCheckedPaths } from './master_pane.js';
 import { switchNavTab } from './nav.js';
@@ -168,6 +171,7 @@ export function createProjectSession({
       currentSessionPath = filePath;
       hasUnsavedChanges = false;
       updateSessionFileIndicator();
+      logFrontendEvent(projectSavedLine(filePath, getDemos().length));
       if (!quiet) {
         showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
         onProjectFile(filePath);
@@ -175,6 +179,7 @@ export function createProjectSession({
       return true;
     } catch (err) {
       console.error("Save project error:", err);
+      logFrontendEvent(projectFailedLine('save the project', currentSessionPath, err));
       if (!quiet) showToast(STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
       return false;
     }
@@ -296,6 +301,7 @@ export function createProjectSession({
         data.demos.forEach(dropOtherPlayersSavedStreaks);
         // Before the demos load: the grouping they start takes the line.
         openProgress.opened(STRINGS.MAIN.projectOpenedLine(data.demos.length));
+        logFrontendEvent(projectOpenedLine(selected, data.demos.length));
         loadDemos(data.demos);
         if (!quiet) {
           showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
@@ -310,6 +316,7 @@ export function createProjectSession({
       refreshTeamsPane();
     } catch (err) {
       console.error("Load project error:", err);
+      logFrontendEvent(projectFailedLine('open the project', selected, err));
       if (!quiet) showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
       return false;
     } finally {
@@ -355,6 +362,7 @@ export function createProjectSession({
     hasUnsavedChanges = false;
     updateSessionFileIndicator();
     if (quiet) return;
+    logFrontendEvent(NEW_SESSION_LINE);
     switchNavTab('workspace');
     showToast(STRINGS.MAIN.NEW_SESSION_TOAST, 'success');
   }

@@ -171,23 +171,45 @@ pub async fn demo_rename_apply(
     renames: Vec<RenamePair>,
 ) -> Result<RenameOutcome, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(demo_rename::apply_reporting(
-            &renames,
-            &log_dir(),
-            &mut rename_counter(&app_handle),
-        ))
+        let outcome =
+            demo_rename::apply_reporting(&renames, &log_dir(), &mut rename_counter(&app_handle));
+        native::log_markdown(&outcome_log("renamed", renames.len(), &outcome));
+        Ok(outcome)
     }))
     .await
+}
+
+/// The activity log's line for a rename batch or its undo: how many were
+/// asked for, how many went through, and where the undo log is.
+fn outcome_log(what: &str, asked: usize, outcome: &RenameOutcome) -> String {
+    let mut line = format!(
+        "[rename] {what} {} of {asked} demo(s)",
+        outcome.renamed.len()
+    );
+    if !outcome.failed.is_empty() {
+        line.push_str(&format!(", {} failed", outcome.failed.len()));
+    }
+    if let Some(log) = &outcome.log {
+        line.push_str(&format!(
+            ", undo log {}",
+            std::path::Path::new(log).display()
+        ));
+    }
+    line
 }
 
 /// Puts the newest batch back.
 #[tauri::command]
 pub async fn demo_rename_undo(app_handle: AppHandle) -> Result<RenameOutcome, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        Ok(demo_rename::undo_last_reporting(
-            &log_dir(),
-            &mut rename_counter(&app_handle),
-        ))
+        let outcome =
+            demo_rename::undo_last_reporting(&log_dir(), &mut rename_counter(&app_handle));
+        native::log_markdown(&outcome_log(
+            "undid the rename of",
+            outcome.renamed.len() + outcome.failed.len(),
+            &outcome,
+        ));
+        Ok(outcome)
     }))
     .await
 }
@@ -206,6 +228,19 @@ pub async fn demo_rename_undoable() -> Result<Option<UndoableBatch>, String> {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn the_rename_line_counts_what_went_through() {
+        let outcome = RenameOutcome {
+            renamed: vec![],
+            failed: vec![],
+            log: Some("logs/1.json".into()),
+        };
+        assert_eq!(
+            outcome_log("renamed", 0, &outcome),
+            "[rename] renamed 0 of 0 demo(s), undo log logs/1.json"
+        );
+    }
 
     #[test]
     fn rename_counts_are_throttled_but_the_first_and_last_always_go() {

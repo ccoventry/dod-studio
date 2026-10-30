@@ -1,7 +1,9 @@
 //! The review's on-screen panel and answer keys (#660): while
 //! `ds_demo_review` plays a highlight, a small box on the game screen says
-//! which one it is, and when the highlight ends the box lists the keys that
-//! answer it, so an answer doesn't need the ESC menu.
+//! which one it is and lists the keys that answer it, so an answer doesn't
+//! need the ESC menu, nor waiting for the highlight to end (#1141). Under
+//! its title the box lists the highlight's kills, time, victim and weapon,
+//! with the next one to come in the key colour behind a `>` (#1140).
 //!
 //! ## The keys
 //!
@@ -12,11 +14,18 @@
 //! menu as always, and the review opens the DoD Studio window on its Review
 //! tab with it, for the kill range and the note: vgui2 takes ESC before any
 //! client hook sees it (seen live on PRE), so the review watches the menu
-//! come up instead (`review::poll`). The keys are taken only while the
-//! review is paused at a highlight's end waiting for an answer
-//! ([`AWAITING`]) and `ds_ui_review_keys` is on; at any other time every key
-//! goes to the game as before. A taken key never reaches its bind (Y is
+//! come up instead (`review::poll`). The keys are taken while the review
+//! has a highlight loading, playing or waiting at its end for an answer
+//! ([`MODE`]) and `ds_ui_review_keys` is on; at any other time every key goes
+//! to the game as before. A taken key never reaches its bind (Y is
 //! `messagemode`, Space `+jump` and S `+moveback` in DoD's default config).
+//!
+//! For [`review::LOCKOUT`](crate::review) after a highlight starts playing
+//! (after an answer, Replay, Back or Next too, since each starts one) the
+//! keys are taken but do nothing, and the box greys them ([`KeyMode::Locked`]):
+//! a double press on the last highlight's answer can't answer the next one
+//! before it's been seen (#1141). Taken, not passed on, so that second press
+//! doesn't open chat or jump either.
 //!
 //! The keys come through `client.dll`'s `HUD_Key_Event` (slot 34 of its
 //! `cldll_func_t` table), which returns 0 to swallow a key. The engine's
@@ -45,23 +54,26 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use crate::demo_list_folders::Setting;
 use crate::names::console_name;
 
-/// `ds_ui_review_keys 1` (default): at a highlight's end the review waits
-/// on the game screen for Y, M, N, R, B, Space or S instead of opening the Review
-/// tab, which ESC opens. `0` opens the tab, as before #660.
+/// `ds_ui_review_keys 1` (default): while a highlight plays and at its end,
+/// Y, M, N, R, B, Space or S answer it on the game screen, and at its end the
+/// review waits there instead of opening the Review tab, which ESC opens.
+/// `0` opens the tab at each end, as before #660.
 pub static KEYS: Setting = Setting::new(console_name!("ui_review_keys"), true);
 /// `ds_ui_review_info 1` (default): while a highlight loads and plays, the
-/// box on screen says which one it is. The answer keys' box shows at a
-/// highlight's end either way, while `ds_ui_review_keys` is on.
+/// box on screen says which one it is, with the answer keys while
+/// `ds_ui_review_keys` is on. The answer keys' box shows at a highlight's end
+/// either way; with this off, the keys still answer while a highlight plays,
+/// only unseen.
 pub static INFO: Setting = Setting::new(console_name!("ui_review_info"), true);
 
 pub fn keys_status() -> String {
     if KEYS.on() {
-        "at a highlight's end, Y M N R B Space S answer it on screen, ESC opens the Review tab"
+        "while a highlight plays and at its end, Y M N R B Space S answer it on screen, ESC opens the Review tab"
             .to_string()
     } else {
         "at a highlight's end, the Review tab opens for the answer".to_string()
@@ -70,7 +82,8 @@ pub fn keys_status() -> String {
 
 pub fn info_status() -> String {
     if INFO.on() {
-        "while a highlight plays, a box on screen says which one it is".to_string()
+        "while a highlight plays, a box on screen says which one it is, with the answer keys"
+            .to_string()
     } else {
         "nothing on screen while a highlight plays".to_string()
     }
@@ -140,19 +153,45 @@ fn action_for(key: i32) -> Option<(usize, Action)> {
         .map(|i| (i, KEYS_LIST[i].action))
 }
 
-/// Set by the review's poll while it waits for an answer with
-/// `ds_ui_review_keys` on.
-static AWAITING: AtomicBool = AtomicBool::new(false);
+/// Whether the answer keys are the review's now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyMode {
+    /// Every key is the game's: no review highlight on, or
+    /// `ds_ui_review_keys 0`.
+    Off,
+    /// The keys are taken but do nothing: a highlight is loading, or has only
+    /// just started (#1141's lockout).
+    Locked,
+    /// A key answers.
+    Live,
+}
+
+impl KeyMode {
+    fn code(self) -> u8 {
+        self as u8
+    }
+
+    fn from_code(code: u8) -> KeyMode {
+        match code {
+            1 => KeyMode::Locked,
+            2 => KeyMode::Live,
+            _ => KeyMode::Off,
+        }
+    }
+}
+
+/// The [`KeyMode`], set by the review's poll every frame.
+static MODE: AtomicU8 = AtomicU8::new(0);
 /// The action a key asked for, for the next poll; 0 for none.
 static PENDING: AtomicU32 = AtomicU32::new(0);
 /// One bit per key in [`KEYS_LIST`] whose press was taken and not yet
 /// released.
 static HELD: AtomicU32 = AtomicU32::new(0);
 
-/// What happens to one key event, given whether the review waits for an
-/// answer and which taken keys are still down. Returns whether the key is
-/// swallowed, the action to run, and the new held set.
-fn decide(down: bool, key: i32, awaiting: bool, held: u32) -> (bool, Option<Action>, u32) {
+/// What happens to one key event, given the [`KeyMode`] and which taken keys
+/// are still down. Returns whether the key is swallowed, the action to run,
+/// and the new held set.
+fn decide(down: bool, key: i32, mode: KeyMode, held: u32) -> (bool, Option<Action>, u32) {
     let Some((index, action)) = action_for(key) else {
         return (false, None, held);
     };
@@ -162,10 +201,11 @@ fn decide(down: bool, key: i32, awaiting: bool, held: u32) -> (bool, Option<Acti
         let held = if down { held } else { held & !bit };
         return (true, None, held);
     }
-    if down && awaiting {
-        return (true, Some(action), held | bit);
+    match mode {
+        KeyMode::Live if down => (true, Some(action), held | bit),
+        KeyMode::Locked if down => (true, None, held | bit),
+        _ => (false, None, held),
     }
-    (false, None, held)
 }
 
 /// `HUD_Key_Event`'s check: `true` swallows the key. One atomic load for a
@@ -175,7 +215,8 @@ pub fn key_event(down: i32, key: i32) -> bool {
         return false;
     }
     let held = HELD.load(Ordering::Relaxed);
-    let (swallow, action, held) = decide(down != 0, key, AWAITING.load(Ordering::Relaxed), held);
+    let mode = KeyMode::from_code(MODE.load(Ordering::Relaxed));
+    let (swallow, action, held) = decide(down != 0, key, mode, held);
     HELD.store(held, Ordering::Relaxed);
     if let Some(action) = action {
         PENDING.store(action.code(), Ordering::Release);
@@ -197,25 +238,48 @@ pub(crate) struct Panel {
     pub status: String,
     /// The answer keys' lines.
     pub keys: bool,
+    /// Whether the keys answer now; `false` greys them all, during the
+    /// lockout after a highlight starts (#1141).
+    pub live: bool,
     /// Whether there is a highlight before this one; B Back is greyed when
     /// not, since it does nothing on the first.
     pub can_go_back: bool,
+    /// The highlight's kills, one line each (#1140); empty lists none.
+    pub kills: Vec<KillLine>,
+}
+
+/// Where a kill is against the demo clock, which sets how its line is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KillState {
+    /// Already played: dimmed.
+    Past,
+    /// The next one to come: stood out.
+    Next,
+    /// Still to come after the next one.
+    Later,
+}
+
+/// One kill on the box: `2  5:56  gskiLL  K98`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct KillLine {
+    pub text: String,
+    pub state: KillState,
 }
 
 impl Panel {
     /// Whether a key does something now, so the box draws it in full colour.
     pub(crate) fn key_live(&self, action: Action) -> bool {
-        action != Action::Back || self.can_go_back
+        self.live && (action != Action::Back || self.can_go_back)
     }
 }
 
 static PANEL: RwLock<Option<Panel>> = RwLock::new(None);
 
 /// Called by the review's poll every frame with what the box should show
-/// (`None` hides it) and whether keys answer now.
-pub(crate) fn publish(panel: Option<Panel>, awaiting: bool) {
-    AWAITING.store(awaiting, Ordering::Relaxed);
-    if !awaiting {
+/// (`None` hides it) and what the keys do now.
+pub(crate) fn publish(panel: Option<Panel>, mode: KeyMode) {
+    MODE.store(mode.code(), Ordering::Relaxed);
+    if mode != KeyMode::Live {
         // A key pressed after the review moved on is dropped.
         PENDING.store(0, Ordering::Relaxed);
     }
@@ -247,7 +311,7 @@ pub unsafe fn draw() {
 mod draw {
     use std::ffi::CString;
 
-    use super::{ESC_LINE, KEYS_LIST, Panel};
+    use super::{ESC_LINE, KEYS_LIST, KillState, Panel};
 
     const WHITE: (f32, f32, f32) = (1.0, 1.0, 1.0);
     const GREY: (f32, f32, f32) = (0.75, 0.75, 0.75);
@@ -256,6 +320,12 @@ mod draw {
     /// A key that does nothing now, and its word (B Back on the first
     /// highlight): greyed rather than hidden, so the keys keep their places.
     const DIM: (f32, f32, f32) = (0.4, 0.4, 0.4);
+    /// A kill already played (#1140): readable, but quieter than the rest.
+    const PAST: (f32, f32, f32) = (0.55, 0.55, 0.55);
+    /// The mark in front of the next kill, and the gap that keeps the other
+    /// lines in step with it.
+    const NEXT_MARK: &str = "> ";
+    const NO_MARK: &str = "   ";
     const PADDING: i32 = 8;
     const GAP: i32 = 4;
 
@@ -274,6 +344,20 @@ mod draw {
         lines.push(run(&panel.title, WHITE).into_iter().collect());
         if !panel.status.is_empty() {
             lines.push(run(&panel.status, GREY).into_iter().collect());
+        }
+        // The console font has one size and no bold, so the next kill stands
+        // out by colour and a mark (#1140).
+        for kill in &panel.kills {
+            let (mark, colour) = match kill.state {
+                KillState::Next => (NEXT_MARK, KEY),
+                KillState::Later => (NO_MARK, WHITE),
+                KillState::Past => (NO_MARK, PAST),
+            };
+            lines.push(
+                run(&format!("{mark}{}", kill.text), colour)
+                    .into_iter()
+                    .collect(),
+            );
         }
         if panel.keys {
             let mut keys = Vec::new();
@@ -371,35 +455,86 @@ mod tests {
     const Y: i32 = b'y' as i32;
 
     #[test]
-    fn the_keys_answer_only_while_the_review_waits() {
-        assert_eq!(decide(true, Y, false, 0), (false, None, 0));
-        assert_eq!(decide(true, Y, true, 0), (true, Some(Action::Yes), 1));
+    fn the_keys_answer_only_while_live() {
+        assert_eq!(decide(true, Y, KeyMode::Off, 0), (false, None, 0));
         assert_eq!(
-            decide(true, b'b' as i32, true, 0),
+            decide(true, Y, KeyMode::Live, 0),
+            (true, Some(Action::Yes), 1)
+        );
+        assert_eq!(
+            decide(true, b'b' as i32, KeyMode::Live, 0),
             (true, Some(Action::Back), 1 << 4)
         );
-        // Any other key goes to the game, waiting or not; ESC included,
+        // Any other key goes to the game, live or not; ESC included,
         // which vgui2 takes before this hook anyway.
-        assert_eq!(decide(true, 27, true, 0), (false, None, 0));
-        assert_eq!(decide(true, b'w' as i32, true, 0), (false, None, 0));
-        assert_eq!(decide(true, b'e' as i32, true, 0), (false, None, 0));
+        assert_eq!(decide(true, 27, KeyMode::Live, 0), (false, None, 0));
+        assert_eq!(
+            decide(true, b'w' as i32, KeyMode::Live, 0),
+            (false, None, 0)
+        );
+        assert_eq!(
+            decide(true, b'e' as i32, KeyMode::Live, 0),
+            (false, None, 0)
+        );
     }
 
     #[test]
     fn a_taken_press_stays_taken_until_its_release() {
-        // Y answered; the review moved on (not waiting), but Y is still
+        // Y answered the last highlight and the review ended, but Y is still
         // down: its autorepeat and its release must not reach `messagemode`.
-        let (_, _, held) = decide(true, Y, true, 0);
-        assert_eq!(decide(true, Y, false, held), (true, None, held));
-        assert_eq!(decide(false, Y, false, held), (true, None, 0));
-        // The next press, with the review playing, is the game's again.
-        assert_eq!(decide(true, Y, false, 0), (false, None, 0));
+        let (_, _, held) = decide(true, Y, KeyMode::Live, 0);
+        assert_eq!(decide(true, Y, KeyMode::Off, held), (true, None, held));
+        assert_eq!(decide(false, Y, KeyMode::Off, held), (true, None, 0));
+        // The next press, with no review on, is the game's again.
+        assert_eq!(decide(true, Y, KeyMode::Off, 0), (false, None, 0));
+    }
+
+    #[test]
+    fn a_press_during_the_lockout_is_taken_but_does_nothing() {
+        // The second press of a double Y: neither an answer nor chat.
+        let (swallow, action, held) = decide(true, Y, KeyMode::Locked, 0);
+        assert!(swallow);
+        assert_eq!(action, None);
+        // Still down when the lockout ends: its autorepeat doesn't answer,
+        // its release is taken, and only a fresh press answers.
+        assert_eq!(decide(true, Y, KeyMode::Live, held), (true, None, held));
+        assert_eq!(decide(false, Y, KeyMode::Live, held), (true, None, 0));
+        assert_eq!(
+            decide(true, Y, KeyMode::Live, 0),
+            (true, Some(Action::Yes), 1)
+        );
+        // Any other key is the game's during the lockout too.
+        assert_eq!(
+            decide(true, b'w' as i32, KeyMode::Locked, 0),
+            (false, None, 0)
+        );
+    }
+
+    #[test]
+    fn a_key_mode_survives_its_atomic() {
+        for mode in [KeyMode::Off, KeyMode::Locked, KeyMode::Live] {
+            assert_eq!(KeyMode::from_code(mode.code()), mode);
+        }
+    }
+
+    #[test]
+    fn the_lockout_greys_every_key() {
+        let panel = Panel {
+            title: "t".into(),
+            keys: true,
+            live: false,
+            can_go_back: true,
+            ..Panel::default()
+        };
+        for k in &KEYS_LIST {
+            assert!(!panel.key_live(k.action));
+        }
     }
 
     #[test]
     fn a_release_alone_is_never_taken() {
-        // Pressed before the review waited, released while it waits.
-        assert_eq!(decide(false, Y, true, 0), (false, None, 0));
+        // Pressed before the review took the keys, released after.
+        assert_eq!(decide(false, Y, KeyMode::Live, 0), (false, None, 0));
     }
 
     #[test]
@@ -429,19 +564,22 @@ mod tests {
     }
 
     #[test]
-    fn next_and_stop_are_taken_only_while_the_review_waits() {
+    fn next_and_stop_are_taken_only_during_a_review_highlight() {
         let space = b' ' as i32;
         let s = b's' as i32;
-        // Space is +jump and S +moveback while a highlight plays.
-        assert_eq!(decide(true, space, false, 0), (false, None, 0));
-        assert_eq!(decide(true, s, false, 0), (false, None, 0));
+        // Space is +jump and S +moveback with no review highlight on.
+        assert_eq!(decide(true, space, KeyMode::Off, 0), (false, None, 0));
+        assert_eq!(decide(true, s, KeyMode::Off, 0), (false, None, 0));
         assert_eq!(
-            decide(true, space, true, 0),
+            decide(true, space, KeyMode::Live, 0),
             (true, Some(Action::Next), 1 << 5)
         );
-        assert_eq!(decide(true, s, true, 0), (true, Some(Action::Stop), 1 << 6));
+        assert_eq!(
+            decide(true, s, KeyMode::Live, 0),
+            (true, Some(Action::Stop), 1 << 6)
+        );
         // Next held past the move on: its release is taken, not +jump's.
-        assert_eq!(decide(false, space, false, 1 << 5), (true, None, 0));
+        assert_eq!(decide(false, space, KeyMode::Off, 1 << 5), (true, None, 0));
     }
 
     #[test]
