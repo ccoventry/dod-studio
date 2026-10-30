@@ -55,6 +55,9 @@ const STAND_UNITS_PER_SECOND: f32 = 160.0;
 /// before it, is the hull changing on the ground. In the survey the on-ground
 /// flips were 16-19 and the in-air ones within about 10 of 0.
 const STEP_TOLERANCE: f32 = 3.5;
+/// The drawn origin this close to the last snapshot before a flip has
+/// reached the step.
+const REACHED_UNITS: f32 = 1.0;
 /// A step not crossed after this long is taken as crossed: the interpolation
 /// is at most 0.1 s behind, so only a missed snapshot gets here.
 const STEP_GIVE_UP_SECONDS: f64 = 0.35;
@@ -106,6 +109,12 @@ struct Step {
     arrived: f64,
     /// How far across the drawn origin has got, 0 to 1; never goes back.
     crossed: f32,
+    /// Whether the drawn origin has reached `from_z`. Until it does it is
+    /// still in an earlier snapshot interval and shows none of the step.
+    reached: bool,
+    /// The drawn origin's height above `from_z` on the last frame, to see
+    /// it pass `from_z` between two frames.
+    last_offset: Option<f32>,
 }
 
 /// Where `depth` is heading.
@@ -251,6 +260,8 @@ impl CrouchEase {
             into_small_hull: snapshot.small_hull,
             arrived: now,
             crossed: 0.0,
+            reached: false,
+            last_offset: None,
         };
         match self.steps.iter_mut().find(|s| s.is_none()) {
             Some(free) => *free = Some(new_step),
@@ -302,6 +313,19 @@ impl CrouchEase {
             let Some(step) = self.steps[0].as_mut() else {
                 return self.settled_shown;
             };
+            // Climbing (or dropping) into the flip, the drawn origin can be
+            // between the two snapshots' heights while still in an earlier
+            // interval: a crouch at the top of a stair climb read 16 of 18
+            // crossed before this. It has reached the step once it is at
+            // `from_z` or has passed it.
+            let timed_out = now - step.arrived >= STEP_GIVE_UP_SECONDS;
+            let offset = drawn_z - step.from_z;
+            step.reached |= offset.abs() <= REACHED_UNITS
+                || step.last_offset.is_some_and(|last| last * offset < 0.0);
+            step.last_offset = Some(offset);
+            if !step.reached && !timed_out {
+                return self.settled_shown;
+            }
             let span = step.to_z - step.from_z;
             let along = if span.abs() > f32::EPSILON {
                 ((drawn_z - step.from_z) / span).clamp(0.0, 1.0)
@@ -311,7 +335,7 @@ impl CrouchEase {
             step.crossed = step.crossed.max(along);
             let into_small_hull = step.into_small_hull;
             let crossed = step.crossed;
-            if crossed < 1.0 && now - step.arrived < STEP_GIVE_UP_SECONDS {
+            if crossed < 1.0 && !timed_out {
                 return if into_small_hull {
                     HULL_STEP * crossed
                 } else {
@@ -530,6 +554,31 @@ mod tests {
         run(&mut sim, 0.5, 1.1, 120.0);
         // Jump ahead to 5.0, crouched: straight to crouch height.
         assert!((sim.camera(5.0) - 36.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_crouch_at_the_top_of_a_climb_waits_for_the_drawn_origin() {
+        // Rising 16 units a snapshot up to z 180, then crouching there: the
+        // drawn origin is still well below 180 when the flip arrives.
+        let mut sim = Sim::new();
+        for i in 0..90 {
+            let t = i as f32 * SNAP;
+            let (z, small) = match i {
+                0..30 => (100.0, false),
+                30..35 => (100.0 + 16.0 * (i - 29) as f32, false),
+                35 => (180.0, false),
+                _ => (162.0, true),
+            };
+            sim.snap(t, z, small);
+        }
+        let frames = run(&mut sim, 0.8, 2.5, 300.0);
+        // The climb moves the drawn origin 1.6 units a frame at 300 fps; the
+        // ease far less. The hull's 18-unit step must not show as a jump.
+        for w in frames.windows(2) {
+            assert!((w[1].1 - w[0].1).abs() < 2.0, "{w:?}");
+        }
+        let last = frames.last().unwrap().1;
+        assert!((last - (162.0 + 18.0 - 64.0)).abs() < 1e-3, "{last}");
     }
 
     #[test]
