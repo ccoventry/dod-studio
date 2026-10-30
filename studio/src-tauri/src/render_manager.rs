@@ -1857,7 +1857,7 @@ pub fn discard_render_autosave() -> Result<(), String> {
     match std::fs::remove_file(autosave_path()) {
         Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(crate::messages::failed_to_discard_render_autosave(e)),
     }
 }
 
