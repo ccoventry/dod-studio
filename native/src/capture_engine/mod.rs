@@ -158,10 +158,25 @@ pub fn spawn_capture_engine(
         batch_start,
         hold,
     };
-    std::thread::Builder::new()
-        .name("capture_engine".into())
-        .spawn(move || run_batch(batch))
-        .unwrap();
+    let tx = batch.tx.clone();
+    start_engine_thread(
+        std::thread::Builder::new().name("capture_engine".into()),
+        &tx,
+        move || run_batch(batch),
+    );
+}
+
+/// Runs `body` on the batch's own thread. A thread that can't start (out of
+/// memory or handles) ends the batch with an `Error` like any other failure,
+/// rather than a panic, which aborts Studio in a release build.
+fn start_engine_thread(
+    builder: std::thread::Builder,
+    tx: &Sender<EngineEvent>,
+    body: impl FnOnce() + Send + 'static,
+) {
+    if let Err(e) = builder.spawn(body) {
+        abort(tx, &format!("Could not start the capture thread: {e}"));
+    }
 }
 
 /// The batch's stages in order; each returns at the first failure, which it
@@ -421,6 +436,46 @@ mod tests {
     fn hold_and_go_use_the_hooks_batch_command() {
         assert_eq!(hold_command(true), "ds_capture_batch hold");
         assert_eq!(hold_command(false), "ds_capture_batch go");
+    }
+
+    /// A batch whose thread can't start sends one `Error` and runs nothing.
+    /// A stack no machine can reserve makes the spawn fail.
+    #[cfg(windows)]
+    #[test]
+    fn a_thread_that_cant_start_is_reported_not_a_panic() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_in_thread = Arc::clone(&ran);
+        start_engine_thread(
+            std::thread::Builder::new().stack_size(usize::MAX / 2),
+            &tx,
+            move || ran_in_thread.store(true, Ordering::Relaxed),
+        );
+        drop(tx);
+        let events: Vec<_> = rx.iter().collect();
+        assert!(
+            matches!(
+                events.as_slice(),
+                [EngineEvent::Error(msg)]
+                    if msg.starts_with("Capture Engine Aborted — Could not start the capture thread: ")
+            ),
+            "{events:?}"
+        );
+        assert!(!ran.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_thread_that_starts_runs_the_batch_and_sends_nothing_itself() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        start_engine_thread(std::thread::Builder::new(), &tx, move || {
+            done_tx.send(()).unwrap()
+        });
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the body ran");
+        drop(tx);
+        assert_eq!(rx.iter().count(), 0);
     }
 
     #[test]
