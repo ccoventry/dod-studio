@@ -353,6 +353,12 @@ at each clip's `AUDIO_SYNC`: the batch pauses the demo there with a
 Studio sends `recording` once OBS has started (#1109). With no `recording`
 after 20 s it plays on anyway; with Studio gone from the events pipe for
 10 s it ends the batch as the space hold does.
+Whenever a clip's recording stops, in this batch or a patched demo's, the
+hook sends one `CLIP_SUMMARY` line on the events pipe (and writes it to its
+own log): the clip's number, its demo time at record start and stop, the
+frames drawn while recording and which of its markers arrived; a clip cut
+short (a skipped demo, `stop`) gets one without its stop. Studio writes
+it to the activity log as one line per clip (#1221; `goldsrc-hooks/src/clip_log.rs`).
 `stop` ends the batch; bare says where it is. With
 `ds_capture_stay_behind` on when it starts, the game steps aside behind
 the other windows (minimised if it had the foreground, which then parks it
