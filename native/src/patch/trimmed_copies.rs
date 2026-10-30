@@ -129,6 +129,12 @@ pub fn prepare_playable(
         )));
     };
     if path.is_file() {
+        // A copy made while the original had no current cache entry gets one
+        // now, if the original has one since.
+        let cache = crate::analyzer_cache_root();
+        if !analysis::cache::is_fresh(&cache, &path) {
+            seed_analysis(&cache, demo, &path, None);
+        }
         mark_used(&path);
         crate::log_markdown(&format!(
             "✂️ **Trimmed copy** — `{}` has more entities in one snapshot than the {} engine takes ({}); \
@@ -159,7 +165,12 @@ pub fn prepare_playable(
         Outcome::Trimmed(t) => t,
     };
     save_copy(&path, &trimmed.bytes)?;
-    seed_analysis(demo, &path, trimmed.peak_after);
+    seed_analysis(
+        &crate::analyzer_cache_root(),
+        demo,
+        &path,
+        Some(trimmed.peak_after),
+    );
     mark_used(&path);
     prune(&root, KEEP_COPIES);
     crate::log_markdown(&made_message(demo, engine, &trimmed, &path));
@@ -209,15 +220,15 @@ fn save_copy(path: &Path, bytes: &[u8]) -> Result<(), TrimError> {
     })
 }
 
-/// Gives the copy the original's analyzer cache entry (see the module doc).
-/// Best-effort: without it, the game asks Studio to read the copy.
-fn seed_analysis(original: &Path, copy: &Path, peak_after: u32) {
-    let root = crate::analyzer_cache_root();
-    let Some((file_info, mut analysis)) = analysis::cache::load(&root, original) else {
+/// Gives the copy the original's analyzer cache entry under `root` (see the
+/// module doc), with the copy's own peak when it is known. Best-effort:
+/// without it, the game asks Studio to read the copy.
+fn seed_analysis(root: &Path, original: &Path, copy: &Path, peak_after: Option<u32>) {
+    let Some((file_info, mut analysis)) = analysis::cache::load(root, original) else {
         return;
     };
-    analysis.demo_info.peak_packet_entities = Some(peak_after);
-    let _ = analysis::cache::store(&root, copy, &file_info, &analysis);
+    analysis.demo_info.peak_packet_entities = peak_after;
+    let _ = analysis::cache::store(root, copy, &file_info, &analysis);
 }
 
 /// Stamps the copy's folder as just used. Best-effort: a copy whose stamp
@@ -321,6 +332,40 @@ mod tests {
         assert_eq!(prune(&dir, 2), 1);
         assert!(!dir.join("old").exists());
         assert!(dir.join("middle").exists() && dir.join("new").exists());
+    }
+
+    #[test]
+    fn a_copy_gets_the_originals_cache_entry_under_the_originals_name() {
+        let dir = Scratch::new("trimmed_copy_seed");
+        let root = dir.join("cache");
+        let original = dir.join("lennon2_hltv.dem");
+        let copy = dir.join("lennon2_hltv_trimmed.dem");
+        std::fs::write(&original, b"HLDEMO\0\0 original").unwrap();
+        std::fs::write(&copy, b"HLDEMO\0\0 copy").unwrap();
+        let mut analysis = analysis::Analysis::default();
+        analysis.demo_info.peak_packet_entities = Some(300);
+        let info = analysis::cache::FileInfo::of(&original).unwrap();
+        analysis::cache::store(&root, &original, &info, &analysis).unwrap();
+
+        seed_analysis(&root, &original, &copy, Some(246));
+
+        let (seeded_info, seeded) = analysis::cache::load(&root, &copy).expect("seeded");
+        assert_eq!(seeded.demo_info.peak_packet_entities, Some(246));
+        assert_eq!(seeded_info.path, info.path, "listed once, by the original");
+    }
+
+    #[test]
+    fn a_copy_of_a_demo_with_no_cache_entry_gets_none() {
+        let dir = Scratch::new("trimmed_copy_seed_none");
+        let copy = dir.join("copy.dem");
+        std::fs::write(&copy, b"HLDEMO").unwrap();
+        seed_analysis(
+            &dir.join("cache"),
+            &dir.join("missing.dem"),
+            &copy,
+            Some(246),
+        );
+        assert!(analysis::cache::load(&dir.join("cache"), &copy).is_none());
     }
 
     #[test]
