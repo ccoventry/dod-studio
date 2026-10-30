@@ -101,10 +101,11 @@ export const STRINGS = {
     PLAYER_FILTER_ALL: 'All players',
     PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
     // #54: the Master Queue's quick filters.
-    KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
+    KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, no highlight of two or more kills, or no headshot. A demo scanned before headshots were read shows none until it is scanned again.',
     KILLS_FILTER_ALL: 'All demos',
     KILLS_FILTER_WITH_KILLS: 'With kills',
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
+    KILLS_FILTER_HEADSHOT: 'With a headshot',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
     // #127: the demos with the bookmark badge (isDemoTracked).
@@ -214,6 +215,8 @@ export const STRINGS = {
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
     COL_KILLS: 'Kills',
+    COL_HEADSHOTS: 'HS',
+    COL_HEADSHOTS_TITLE: 'Headshots among the kills in the Kill Range, from the helmet that flies off in the demo. A + ? means some kills could not be told: two kills on one frame, a British victim, whose helmet may not pop, or in an HLTV demo any kill with no helmet seen, since HLTV demos lose about half of them. A dash: scan the demo again.',
     // #247: an HLTV demo lists every player's highlights; a capture follows that player.
     COL_PLAYER: 'Player',
     COL_PLAYER_TITLE: 'Whose highlight. An HLTV demo lists every player\'s, and its capture keeps the camera on that player.',
@@ -683,13 +686,15 @@ export const STRINGS = {
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel') => {
-      const missing = total - captured - cutShort - stoppedEarly;
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly - startedLate;
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
+      // OBS started recording after the clip's first frame (#1109).
+      if (startedLate > 0) parts.push(`${startedLate} OBS started recording late (missing the clip's opening, not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -748,6 +753,15 @@ export const STRINGS = {
     EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
     exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
+    // #110: the finished renders as an EDL for VEGAS Pro.
+    EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
+    EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
+    exportEdlNone: (skipped) => skipped > 0
+      ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
+      : 'No finished renders yet, so there is nothing to export.',
+    exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
+    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -1608,10 +1622,26 @@ export const STRINGS = {
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
     projectUpdated: (name) => `Marked them in the project ${name}.`,
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
+    // The game is open, so the batch may still be capturing in it (#20).
+    WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
+    STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
+  },
+
+  // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
+  BATCH_RESUME: {
+    TITLE: 'Capture the rest?',
+    message: (captured, total, left) => (captured === 0
+      ? `A capture batch stopped before the end while DoD Studio was closed, and none of its ${total === 1 ? 'clip is' : `${total} clips are`} on disk.`
+      : `A capture batch stopped before the end while DoD Studio was closed. ${captured} of ${total} clips are on disk and marked Captured; ${left === 1 ? '1 clip was' : `${left} clips were`} not captured.`),
+    inProject: (name) => `Capture them now? Studio opens the project ${name}, ticks just those highlights and starts a capture batch.`,
+    IN_QUEUE: 'Capture them now? Studio ticks just those highlights and starts a capture batch.',
+    CAPTURE_BUTTON: 'Capture them now',
+    NOT_NOW_BUTTON: 'Not now',
+    NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -2227,6 +2257,9 @@ export const STRINGS = {
     glMaxSizeLow: (value, source, px, cap, fix) => `This install runs with gl_max_size ${value} (${source}), so HD textures show at ${px} px at most, smaller than the ${cap} they are built at. ${fix}`,
     GL_MAX_SIZE_FIX_CFG: 'Copy the gl_max_size line above into movie.cfg, then restart the game.',
     GL_MAX_SIZE_FIX_INITIAL: 'Raise it in Initial Commands (Configuration), or take that line out and set it in movie.cfg.',
+    // #1155: a style built with an older version of the app's scripts (native::hd::outdated).
+    outdatedSteps: { killfeed_icons: 'the new kill-feed icons (about 5 minutes)' },
+    outdatedStyle: (style, what) => `${style} was built with an older version: build it again to get ${what}.`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
@@ -2379,6 +2412,7 @@ export const STRINGS = {
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
       short: 'Video stops early (partial take, not captured)',
+      late: 'OBS started late (missing the opening, not captured)',
     },
     // A clip the batch's end cut short, by what ended it (#1081).
     cutShortBy: (cutBy) => ({
@@ -2387,6 +2421,8 @@ export const STRINGS = {
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
+    // A take OBS started recording after its clip's first frame (#1109).
+    startedLate: (ms) => `OBS started ${ms} ms late: missing the clip's opening (not captured)`,
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,
@@ -2789,6 +2825,14 @@ export const STRINGS = {
     NOTHING_TO_REVIEW: 'The Master Demo Queue shows no demos to review: add some, or clear its search and filters.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
+    NOT_STARTED: 'The review was not started.',
+    // #1142: the in-game Review tab asked for a review of the demo it has loaded.
+    FROM_GAME_SCANNING: 'Scanning the demo in DoD Studio...',
+    FROM_GAME_STARTING: 'Starting the review...',
+    FROM_GAME_BUSY: 'DoD Studio is scanning other demos: try again when that scan is done.',
+    fromGameAddingToast: (name) => `The game asked to review ${name}: adding it to the Master Demo Queue and scanning it.`,
+    fromGameNotAdded: (name) => `DoD Studio scanned ${name} but it isn't in the Master Demo Queue (an identical copy of a demo already there, or unreadable), so there is nothing to review.`,
+    fromGameNoHighlights: (name) => `${name} has no highlights to review.`,
     startedToast: (count, launched, skipped) =>
       `Reviewing ${count} highlight${count === 1 ? '' : 's'} in Day of Defeat${launched ? ' (starting the game)' : ''}.`
       + (skipped > 0 ? ` ${skipped} older highlight${skipped === 1 ? ' needs' : 's need'} a rescan first.` : ''),
@@ -3173,6 +3217,7 @@ export const STRINGS = {
       faction: 'Their side: Allies, British, Axis',
       enemy_faction: 'The side of the players they killed',
       kills: "Kills in the chosen Kill Range (Rename Demos' {kills} is the player's kills in the whole demo instead)",
+      headshots: 'Headshots in the chosen Kill Range, from the helmet that flies off in the demo. A kill the demo cannot tell (a British victim, whose helmet may not pop, or in an HLTV demo, which loses about half of them, a kill with no helmet seen) is not counted; with none known it gives unknown',
       weapons: 'Each weapon used, joined with -',
       first_weapon: 'The weapon of the first kill',
       victims: 'The players killed, joined with -',

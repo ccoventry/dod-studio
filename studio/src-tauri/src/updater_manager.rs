@@ -61,7 +61,16 @@ pub async fn check_for_update(
         .build()
         .map_err(crate::messages::failed_to_build_updater)?;
 
-    let update = updater.check().await.map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| {
+        native::log_markdown(&format!("[update] check on {channel} failed: {e}"));
+        e.to_string()
+    })?;
+    native::log_markdown(&check_log(
+        &channel,
+        update
+            .as_ref()
+            .map(|u| (u.current_version.as_str(), u.version.as_str())),
+    ));
 
     match update {
         Some(update) => {
@@ -82,6 +91,17 @@ pub async fn check_for_update(
             *guard = None;
             Ok(None)
         }
+    }
+}
+
+/// The activity log's line for a finished update check: the versions when
+/// one was found.
+fn check_log(channel: &str, found: Option<(&str, &str)>) -> String {
+    match found {
+        Some((current, new)) => {
+            format!("[update] {channel} channel: {new} is available (running {current})")
+        }
+        None => format!("[update] {channel} channel: up to date"),
     }
 }
 
@@ -110,6 +130,7 @@ pub async fn download_and_install_update(
     // download-finished callback fires before the signature check and the
     // install, too early for "Installing" or "Ready" (#957).
     let mut meter = DownloadMeter::default();
+    native::log_markdown(&format!("[update] downloading {}", update.version));
     let bytes = update
         .download(
             |chunk_length, content_length| {
@@ -120,13 +141,20 @@ pub async fn download_and_install_update(
             || {},
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            native::log_markdown(&format!("[update] download failed: {e}"));
+            e.to_string()
+        })?;
     // The throttle may have held back the last chunk: the bar ends full.
     let _ = app.emit("update_download_progress", meter.progress());
     let _ = app.emit("update_installing", ());
     // On Windows this starts the installer and quits Studio, so nothing after
     // it runs there.
-    update.install(bytes).map_err(|e| e.to_string())?;
+    native::log_markdown("[update] downloaded, installing");
+    update.install(bytes).map_err(|e| {
+        native::log_markdown(&format!("[update] install failed: {e}"));
+        e.to_string()
+    })?;
     let _ = app.emit("update_ready", ());
 
     Ok(())
@@ -303,6 +331,23 @@ mod git_branch_tests {
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
+}
+
+#[cfg(test)]
+mod check_log_tests {
+    use super::check_log;
+
+    #[test]
+    fn the_check_line_names_the_channel_and_the_versions() {
+        assert_eq!(
+            check_log("stable", Some(("1.0.0", "1.1.0"))),
+            "[update] stable channel: 1.1.0 is available (running 1.0.0)"
+        );
+        assert_eq!(
+            check_log("experimental", None),
+            "[update] experimental channel: up to date"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -74,6 +74,7 @@ use crate::names::console_name;
 use crate::scan;
 
 mod backdrop;
+mod butt;
 mod clear;
 mod colour;
 mod even;
@@ -1038,7 +1039,12 @@ fn original_thunk() -> Option<engine::UserMsgHookFn> {
 /// one goes over as a copy: the engine's buffer is left as it was read.
 unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
     let victim = (size >= 3 && !buf.is_null()).then(|| unsafe { *(buf as *const u8).add(1) });
-    let handled = unsafe { forward_death_msg(name, size, buf) };
+    let (handled, shown) = unsafe { forward_death_msg(name, size, buf) };
+    // The line the game just added, as shown: a butt stroke's icon depends
+    // on who held what (#1088).
+    if let Some([killer, victim, butt::BUTT_WEAPON]) = shown {
+        note_butt(i32::from(killer), i32::from(victim));
+    }
     // After the game has added the line, so `clear_on death` takes it too.
     // The death happened whatever `replace` or `block` showed of it.
     if let Some(victim) = victim {
@@ -1047,9 +1053,16 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     handled
 }
 
-/// [`hooked_death_msg`]'s filtering and forwarding.
-unsafe fn forward_death_msg(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
+/// [`hooked_death_msg`]'s filtering and forwarding: what the game's handler
+/// returned, and the three bytes it was handed (`None` when the message was
+/// hidden, blocked or too short to read).
+unsafe fn forward_death_msg(
+    name: *const c_char,
+    size: i32,
+    buf: *mut c_void,
+) -> (i32, Option<[u8; 3]>) {
     let mut rewritten = None;
+    let mut forwarded = None;
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
         let original = [bytes[0], bytes[1], bytes[2]];
@@ -1062,7 +1075,7 @@ unsafe fn forward_death_msg(name: *const c_char, size: i32, buf: *mut c_void) ->
         } else {
             match replace::apply(rules, original) {
                 // 1 is what the engine's own dispatcher treats as handled.
-                replace::Outcome::Hide(_) => return 1,
+                replace::Outcome::Hide(_) => return (1, None),
                 replace::Outcome::Rewrite(_, out) => {
                     rewritten = Some(out);
                     out
@@ -1076,13 +1089,14 @@ unsafe fn forward_death_msg(name: *const c_char, size: i32, buf: *mut c_void) ->
             .map(|list| list.blocks_slots(shown[0] as i32, shown[1] as i32))
             .unwrap_or(false);
         if blocked {
-            return 1;
+            return (1, None);
         }
+        forwarded = Some(shown);
     }
     let Some(original) = original_thunk() else {
-        return 1;
+        return (1, None);
     };
-    match rewritten {
+    let handled = match rewritten {
         Some(out) => {
             let mut copy =
                 unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }.to_vec();
@@ -1090,7 +1104,19 @@ unsafe fn forward_death_msg(name: *const c_char, size: i32, buf: *mut c_void) ->
             unsafe { original(name, size, copy.as_mut_ptr() as *mut c_void) }
         }
         None => unsafe { original(name, size, buf) },
+    };
+    (handled, forwarded)
+}
+
+/// Notes a butt stroke's line for the even layout's per-line icon
+/// ([`butt`]), only while that layout is asked for.
+fn note_butt(killer: i32, victim: i32) {
+    #[cfg(target_arch = "x86")]
+    if even::wanted() {
+        butt::note(killer, victim);
     }
+    #[cfg(not(target_arch = "x86"))]
+    let _ = (killer, victim); // only the 32-bit game has a feed
 }
 
 /// Installs (or re-installs) our handler.
@@ -1114,10 +1140,12 @@ fn install_hook() {
 /// Called once per frame from [`crate::commands::poll`].
 pub fn poll() {
     // `spec_deathcam` needs every kill noted, so the handler is kept
-    // installed while that switch is on too, with an empty block list.
+    // installed while that switch is on too, with an empty block list; so
+    // does the even layout, for the butt stroke's per-line icon (#1088).
     if HOOK_WANTED.load(Ordering::Relaxed)
         || crate::spectator_deathcam::enabled()
         || clear::wants_death_msg()
+        || even::wanted()
     {
         install_hook();
     }
@@ -1273,6 +1301,10 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     if let Some(base) = engine::client_module_base() {
         restamp_display_time(base);
     }
+    // After the line is in the array: the note reads its names from there.
+    if weapon == i32::from(butt::BUTT_WEAPON) {
+        note_butt(killer, victim);
+    }
     Ok(())
 }
 
@@ -1307,6 +1339,11 @@ fn usage() -> String {
          \x20                               draw the names in that font (size {}..{} px), live;\n\
          \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
          \x20 {COMMAND} font default       the game's own font again\n\
+         \x20 {COMMAND} fallback <face> [<face> ...]\n\
+         \x20                               up to {} faces to try, in order, for a character\n\
+         \x20                               the font lacks, before Tahoma (quote a face with\n\
+         \x20                               a space: fallback \"Segoe UI\" Tahoma)\n\
+         \x20 {COMMAND} fallback default   Tahoma only again (the default)\n\
          \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
          \x20                               lines spaced and right-aligned to match (default 1)\n\
          \x20 {COMMAND} scale default      the game's own size again\n\
@@ -1339,6 +1376,7 @@ fn usage() -> String {
          \x20 {COMMAND} clear_on default   neither (the default)\n",
         font::MIN_TALL,
         font::MAX_TALL,
+        font::MAX_BACKUP_FACES,
         scale::MIN_SCALE,
         scale::MAX_SCALE,
         even::MAX_GAP,
@@ -1511,6 +1549,19 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} font: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} font: {why}\n"),
+            }
+        }
+        "fallback" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", font::describe_fallback(), usage());
+            }
+            match font::parse_fallback_args(rest) {
+                Ok(faces) => match font::set_fallback(faces) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} fallback: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} fallback: {why}\n"),
             }
         }
         "scale" => {

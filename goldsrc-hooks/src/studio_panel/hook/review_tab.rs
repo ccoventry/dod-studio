@@ -3,7 +3,10 @@
 //!
 //! The labels follow [`crate::review::tab_view`] every frame the tab shows.
 //! The boxes are filled once per highlight (the review's generation), so what
-//! the user types stays until the review moves on.
+//! the user types stays until the review moves on. With no review running,
+//! From the start and From here ask DoD Studio for a review of the demo
+//! playing (#1142), greyed while that can't happen, and the second line says
+//! why or how the request is going ([`crate::review::IdleFacts`]).
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -27,7 +30,9 @@ fn page() -> Vpanel {
     unsafe { vpanel_of(PAGE_OBJECTS[REVIEW_PAGE].load(Ordering::Acquire) as *mut c_void) }
 }
 
-unsafe fn set(vgui: &Vgui, page: Vpanel, name: &str, slot_index: usize, text: &str) {
+/// Sets the text of the control `name` on `page` through its `slot_index`
+/// (a label's or a text box's `SetText`); nothing when the layout has none.
+pub(super) unsafe fn set(vgui: &Vgui, page: Vpanel, name: &str, slot_index: usize, text: &str) {
     unsafe {
         let Some(object) = vgui
             .child_named(page, name)
@@ -51,15 +56,17 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             return;
         }
         let view = crate::review::tab_view();
-        let labels = match &view {
-            Some(v) => [
+        // Only looked at with no review running: it may look up the pipe.
+        let idle = view.is_none().then(crate::review::IdleFacts::now);
+        let labels = match (&view, &idle) {
+            (Some(v), _) => [
                 v.heading.clone(),
                 v.detail.clone(),
                 format!("of {}", v.kills),
             ],
-            None => [
+            (None, facts) => [
                 crate::review::IDLE_HEADING.to_string(),
-                crate::review::IDLE_DETAIL.to_string(),
+                facts.as_ref().map(|f| f.detail()).unwrap_or_default(),
                 String::new(),
             ],
         };
@@ -72,6 +79,8 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         }
         drop(shown);
         enable_review_only(vgui, page, view.is_some());
+        let can_ask = idle.as_ref().is_some_and(|f| f.can_ask());
+        enable(vgui, page, &crate::review::START_BUTTONS, can_ask);
         if let Some(v) = view
             && FILLED.swap(v.generation, Ordering::AcqRel) != v.generation
         {
@@ -95,8 +104,14 @@ type IsEnabledFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
 /// whose state differs is touched, so a frame with nothing to change costs
 /// ten `IsEnabled` calls.
 unsafe fn enable_review_only(vgui: &Vgui, page: Vpanel, on: bool) {
+    unsafe { enable(vgui, page, crate::review_lock::REVIEW_ONLY, on) }
+}
+
+/// Enables or greys each named control, touching only those whose state
+/// differs.
+unsafe fn enable(vgui: &Vgui, page: Vpanel, names: &[&str], on: bool) {
     unsafe {
-        for name in crate::review_lock::REVIEW_ONLY {
+        for name in names {
             let Some(object) = vgui
                 .child_named(page, name)
                 .map(|vp| vgui.object(vp))
@@ -114,7 +129,7 @@ unsafe fn enable_review_only(vgui: &Vgui, page: Vpanel, on: bool) {
 }
 
 /// A text box's text, however long.
-unsafe fn long_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
+pub(super) unsafe fn long_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
     unsafe {
         let Some(entry) = vgui
             .child_named(page, name)

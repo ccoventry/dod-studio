@@ -16,6 +16,8 @@ import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
 import { playersOf, matchesPlayer } from './detail_player_filter.js';
+import { headshotsCell } from './headshots.js';
+import { fileNameOf } from './path_display.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -61,7 +63,7 @@ export function initDetailPane(_getAllDemos, onSelectionChange, onDirty, { getPr
 let pendingLaunch = null;
 
 function demoStemFromPath(path) {
-  const base = String(path || '').split(/[\\/]/).pop() || '';
+  const base = fileNameOf(path) || '';
   return base.replace(/\.dem$/i, '');
 }
 
@@ -417,6 +419,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_SEL} <input type="checkbox" id="detail-select-all-cb" title="${STRINGS.HIGHLIGHTS.SELECT_ALL_CB_TITLE}" /></th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILL_RANGE}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILLS}</th>
+        <th title="${STRINGS.HIGHLIGHTS.COL_HEADSHOTS_TITLE}">${STRINGS.HIGHLIGHTS.COL_HEADSHOTS}</th>
         ${showPlayer ? `<th title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
@@ -509,6 +512,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </div>
       </td>
       <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
+      <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
       ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
       <td style="padding: 8px;">${durationText(durSecs)}</td>

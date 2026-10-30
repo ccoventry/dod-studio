@@ -31,7 +31,7 @@ pub mod migrations;
 /// silently deserializing with new fields missing/defaulted. When the new
 /// fields can be worked out from an old entry, add a step to
 /// [`migrations::MIGRATIONS`] too, and old entries are upgraded instead.
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 14;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -96,7 +96,9 @@ fn version_dir(root: &Path, version: u32) -> PathBuf {
 /// The file name of `demo_path`'s entry, the same in every `v<N>` folder.
 fn entry_name(demo_path: &Path) -> Option<String> {
     let canonical = std::fs::canonicalize(demo_path).ok()?;
-    let hash = fnv1a(canonical.to_string_lossy().as_bytes());
+    // The same hash `hl_demo_auditor` named every entry with before this
+    // module existed (`native` tests that the names stay).
+    let hash = crate::fnv1a::fnv1a_hash(canonical.to_string_lossy().as_bytes());
     Some(format!("{hash:016x}.json"))
 }
 
@@ -613,17 +615,6 @@ pub fn fill_missing_players(root: &Path) -> usize {
     written
 }
 
-/// The same FNV-1a as `hl_demo_auditor::fnv1a_hash`, which named every entry
-/// written before this module existed (`native` tests that the two agree).
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,6 +691,7 @@ mod tests {
 
     #[test]
     fn a_miss_upgrades_an_older_entry_and_leaves_the_old_one() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("upgrade");
         let demo = dir.join("x.dem");
         std::fs::write(&demo, b"not really a demo").unwrap();
@@ -726,6 +718,7 @@ mod tests {
 
     #[test]
     fn an_older_entry_that_cannot_be_upgraded_is_a_miss() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("no_upgrade");
         let demo = dir.join("x.dem");
         std::fs::write(&demo, b"not really a demo").unwrap();
@@ -799,6 +792,7 @@ mod tests {
 
     #[test]
     fn a_rescan_estimate_sorts_demos_by_what_the_cache_holds() {
+        let _steps = migrations::use_steps(migrations::V7_UPGRADES);
         let dir = scratch("estimate");
         let root = dir.join("cache");
         let [current, older, changed, never, unreadable_upgrade] =
@@ -891,11 +885,5 @@ mod tests {
         let entry: PlayersEntry = serde_json::from_str(json).unwrap();
         assert!(entry.demo.players[0].recorder);
         assert_eq!(serde_json::to_string(&entry).unwrap(), json);
-    }
-
-    #[test]
-    fn fnv1a_matches_the_published_test_vectors() {
-        assert_eq!(fnv1a(b""), 0xcbf29ce484222325);
-        assert_eq!(fnv1a(b"a"), 0xaf63dc4c8601ec8c);
     }
 }

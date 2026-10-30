@@ -25,6 +25,10 @@
 //! The pipe takes local clients only, and a request only ever reads a `.dem`
 //! file and writes its cache entry.
 //!
+//! A line starting `review ` is the in-game Review tab asking Studio to
+//! review the demo it has loaded instead (#1142); `game_review_requests`
+//! answers it on the same connection.
+//!
 //! The hook DLL's side is `goldsrc-hooks/src/streaks.rs`; [`PIPE_NAME`](crate::sys::analysis_server::PIPE_NAME) must
 //! match its `STUDIO_PIPE` to the character.
 
@@ -110,6 +114,12 @@ fn handle_client(pipe: std::fs::File) {
         .read_line(&mut line)
         .is_err()
     {
+        return;
+    }
+    if super::game_review_requests::is_review_request(&line) {
+        super::game_review_requests::serve(&line, &mut writer);
+        // Safety: the pipe's own handle, as below.
+        unsafe { FlushFileBuffers(std::os::windows::io::AsRawHandle::as_raw_handle(&writer)) };
         return;
     }
     let reply =

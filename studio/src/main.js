@@ -6,7 +6,7 @@ import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, startCaptureFromOffer } from './capture_pane.js';
 import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
@@ -61,6 +61,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { startReviewFromGame } from './review_from_game.js';
 import { createReviewLibrary } from './review_library.js';
 import { createHltvPicker } from './review_hltv_picker.js';
 import { createSetup } from './setup_wiring.js';
@@ -351,7 +352,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     queue.redrawSelected();
   };
 
-  initReviewMode({
+  const reviewMode = initReviewMode({
     getDemos: queue.getDemos,
     getCheckedPaths: getCheckedDemoPaths,
     getShownPaths: () => getVisibleDemos().map((d) => d.path),
@@ -360,6 +361,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChanged: onHighlightStatusChange,
     hltvPick,
   });
+  // The in-game Review tab's From the start / From here (#1142).
+  startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
+    scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });
 
   initCaptureUI(() => ({
     scanPaths: demoFolders.pinned(),
@@ -415,9 +419,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   checkObsOrphanOnStartup();
 
-  // A batch that ran while Studio was closed (#545): mark its finished clips.
+  // A batch that ran while Studio was closed (#545): mark its finished clips,
+  // and offer to capture the ones it never got to (#20).
   createBatchCatchUp({ getDemos: queue.getDemos, getTakeIndex: () => takeIndex,
-    getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange }).start();
+    getSessionPath: projectSession.currentPath, onStatusChange: onHighlightStatusChange,
+    openProject, startCapture: startCaptureFromOffer }).start();
 
   // Window close and page reload with a batch running or unsaved work: close_guard.js.
   startCloseGuard({ needsSavePrompt, requestUnsavedChangesConfirmation,

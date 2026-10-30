@@ -20,7 +20,9 @@
 //!     static. Full design write-up in `docs/goldsrc_hltv_animation_fix.md`.
 //!   - `spectator_crosshair`: draw the spectator crosshair from the same
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
-//!     are drawn by different code paths and do not otherwise share a look.
+//!     are drawn by different code paths and do not otherwise share a look;
+//!     for style 0, POV's red crosshair, with `spectator_crosshair_gap`
+//!     giving it the spectated player's gap.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
@@ -82,10 +84,16 @@
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
 //! - `voice_menus`: the `ds_hud_hide_voice_menus` cvar -- hide the
 //!   numbered voice-command menus and the hand-signal command menu a POV
-//!   demo's player opened.
+//!   demo's player opened; and the menu half of `ds_hud_hide_plugin_text`,
+//!   every other `ShowMenu` menu (#342).
 //! - `hint_panel`: the `ds_hud_hide_hints` cvar (on by default) -- keep
 //!   DoD's auto-help hint panel shut, which a POV demo recorded with `_ah 1`
 //!   opens and the viewer's own `_ah` can't stop (#286).
+//! - `mg_reload_hint`: the machine gun's "Deploy your machine gun to
+//!   Reload!" prompt, under the same `ds_hud_hide_hints` (#342).
+//! - `teammate_info`: the `ds_hud_hide_teammate_info` cvar -- hide the
+//!   teammate name and health line under a POV demo's crosshair, through
+//!   `hudelement`'s vftable stub (#342).
 //! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
 //!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
@@ -177,6 +185,9 @@
 //! - `world_shaders`: the `ds_map_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
+//!   or none, by pointing the weather updater's type read at our own value
+//!   (#1129).
 //! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
@@ -190,12 +201,13 @@
 //!   the view becomes a spectator camera (#677).
 //! - `engine_center_print`: the `hw.dll` half of `ds_hud_hide_center_text`
 //!   -- the engine's own `svc_centerprint`, per engine build (#677).
-//! - `server_hud_text`: the `ds_hud_hide_server_text` cvar -- hide
+//! - `plugin_text`: the `ds_hud_hide_plugin_text` cvar -- hide
 //!   server plugins' coloured HUD messages (`TE_TEXTMESSAGE`) by pointing one
-//!   `hw.dll` call at a filter, per engine build (#677).
+//!   `hw.dll` call at a filter, per engine build (#677); `voice_menus` hides
+//!   their menus under the same cvar (#342).
 //! - `hw_call_site`: one `call rel32` in `hw.dll` found per engine build and
 //!   rewritten while a setting is on (`engine_center_print`,
-//!   `server_hud_text`).
+//!   `plugin_text`).
 //! - `hltv_messages`: the `ds_spec_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -278,8 +290,11 @@ mod hull_trace_guard;
 mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
+mod lookahead;
 mod map_sounds;
 mod map_text;
+mod map_weather;
+mod mg_reload_hint;
 mod missing_shots;
 mod msglog;
 mod names;
@@ -299,12 +314,15 @@ mod player_crosshair;
 mod player_names;
 mod player_overrides;
 mod player_table;
+mod plugin_text;
 mod pmove_guard;
 mod position;
 mod pov_live_bob;
 mod pov_recorder_shots;
 mod remote;
 mod review;
+mod review_ask;
+mod review_form;
 mod review_keys;
 mod review_lock;
 mod run_in_background;
@@ -312,12 +330,13 @@ mod scan;
 mod schedule;
 mod scoreboard;
 mod screen_effects;
-mod server_hud_text;
 mod server_query;
+mod settings_tab;
 mod spectator_bars;
 mod spectator_buttons;
 mod spectator_chase_pvs;
 mod spectator_crosshair;
+mod spectator_crosshair_gap;
 mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;
@@ -331,6 +350,7 @@ mod sprite_blend;
 mod strafe_twitch;
 mod streaks;
 mod studio_panel;
+mod teammate_info;
 mod tempent_fix;
 mod texture_hires;
 mod voice;

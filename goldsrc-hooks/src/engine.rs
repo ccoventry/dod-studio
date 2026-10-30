@@ -206,7 +206,7 @@ pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: 
 /// engine makes up itself go that way -- the `HudText` that `TE_TEXTMESSAGE`
 /// turns into (`CL_HudMessage`) is the one that matters -- so a hook cannot
 /// drop those: `client.dll`'s own record runs after it anyway (#677,
-/// `server_hud_text.rs`).
+/// `plugin_text.rs`).
 /// `gEngfuncs.GetLocalPlayer` (slot 51). Returns the local player's
 /// `cl_entity_t`. Confirmed by the call site at `client.dll+0x20520`, a
 /// three-instruction thunk that calls this slot and immediately
@@ -695,7 +695,7 @@ impl EngineStudioApiPartial {
 #[repr(C)]
 pub struct ClEngineFuncsPartial {
     _slots_before_get_screen_info: [*mut c_void; 12], // pfnSPR_Load .. pfnFillRGBA
-    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::VidInit` (`client+0x36b32`).
+    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::Think` (`client+0x36b32`).
     pub pfn_get_screen_info: GetScreenInfoFn,
     _slot_set_crosshair: *mut c_void,
     pub pfn_register_variable: RegisterVariableFn,
@@ -1450,7 +1450,8 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
     result
 }
 
-/// Runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's
+/// Sets the in-eye camera's crouch height for the frame (`spectator_eye`),
+/// runs `client.dll`'s own `V_CalcRefdef`, then puts a chase camera's
 /// position where the engine culls an HLTV demo's entities from
 /// (`spectator_chase_pvs`), lets the spectated view
 /// replace the camera for a dead player (`spectator_deathcam`, before the
@@ -1464,6 +1465,8 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
     let main_view = unsafe { crate::spectator_chase_pvs::is_main_view(pparams) };
+    // Before: `V_GetInEyePos` reads the height inside `V_CalcRefdef`.
+    unsafe { crate::spectator_eye::before_calc_refdef(pparams) };
     unsafe { real(pparams) };
     unsafe { crate::spectator_chase_pvs::after_calc_refdef(pparams, main_view) };
     unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };

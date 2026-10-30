@@ -408,3 +408,25 @@ mod damaged {
         }
     }
 }
+
+#[test]
+fn headshots_are_told_from_the_helmet_events() {
+    let kills = &analysis().state.kill_positions;
+    let count = |wanted| kills.iter().filter(|k| k.headshot == wanted).count();
+    // 18 deaths, seven with a helmet pop on their frame; no British victim
+    // and no double kill on a frame the position can't settle.
+    assert_eq!(kills.len(), 18);
+    assert_eq!(count(Headshot::Yes), 7);
+    assert_eq!(count(Headshot::No), 11);
+    assert_eq!(count(Headshot::Unknown), 0);
+}
+
+#[test]
+fn a_highlight_counts_its_headshots() {
+    let highlights = highlights::highlights(analysis());
+    let total: usize = highlights.all.iter().map(|h| h.headshot_counts().0).sum();
+    let kills: usize = highlights.all.iter().map(|h| h.kills.len()).sum();
+    // Every kill a player scored (no teamkills in this demo) carries its verdict.
+    assert!(total > 0 && total <= kills);
+    assert!(highlights.all.iter().all(|h| h.headshot_counts().1 == 0));
+}

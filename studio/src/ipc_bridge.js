@@ -503,13 +503,33 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 
 /** Review highlights (#623): sends the highlights to the running game, or
  *  starts one. `fastForwardGap`: seconds between kills above which a gap
- *  plays fast, or null (#665). Resolves to `{ pid, launched, count }`. */
-export async function startHighlightReview(highlights, fastForwardGap = null) {
-  return invoke("start_highlight_review", { highlights, fastForwardGap })
+ *  plays fast, or null (#665). `startFrom`: the game starts at the first
+ *  highlight at or after this demo time, or null for the first (#1142).
+ *  Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights, fastForwardGap = null, startFrom = null) {
+  return invoke("start_highlight_review", { highlights, fastForwardGap, startFrom })
     .catch((err) => {
       console.error("IPC Execution Error (start_highlight_review):", err);
       showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
       throw err;
+    });
+}
+
+/** Tells the game what Studio is doing about its review request `id`
+ *  (#1142): `text` shows on its Review tab. */
+export async function gameReviewProgress(id, text) {
+  return invoke("game_review_progress", { id, text })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_review_progress):", err);
+    });
+}
+
+/** Tells the game its review request `id` has started (`error` null) or
+ *  why not (#1142). */
+export async function gameReviewFinished(id, error = null) {
+  return invoke("game_review_finished", { id, error })
+    .catch((err) => {
+      console.error("IPC Execution Error (game_review_finished):", err);
     });
 }
 
@@ -642,6 +662,39 @@ export async function launchObs() {
   return invoke("launch_obs")
     .catch((err) => {
       console.error("IPC Execution Error (launch_obs):", err);
+      throw err;
+    });
+}
+
+/** Configuration's Test OBS Connection (#147): connects with `settings`
+ *  (`{ host, port, password, gameWidth, gameHeight, obsCaptureFps,
+ *  obsRecordingQuality }`) and resolves the report. Rejects with the
+ *  backend's reason, which the panel shows. */
+export async function obsTestConnection(settings) {
+  return invoke("obs_test_connection", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_test_connection):", err);
+      throw err;
+    });
+}
+
+/** Whether OBS is still recording a batch nobody is watching (Studio crashed
+ *  mid-batch): `{ reachable, recording, directory, ours }` for `{ host, port,
+ *  password }`. Rejects only when the check itself failed. */
+export async function obsCheckOrphan(settings) {
+  return invoke("obs_check_orphan", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_check_orphan):", err);
+      throw err;
+    });
+}
+
+/** Stops that orphaned recording and moves its file into the take folder.
+ *  Resolves the video's path, or "" when OBS had nothing left to stop. */
+export async function obsRecoverOrphan(settings) {
+  return invoke("obs_recover_orphan", settings)
+    .catch((err) => {
+      console.error("IPC Execution Error (obs_recover_orphan):", err);
       throw err;
     });
 }

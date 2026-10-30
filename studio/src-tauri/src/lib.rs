@@ -7,15 +7,18 @@ mod builtin_profiles;
 mod capture_manager;
 mod capture_room_manager;
 mod combine_manager;
+mod config_checks_cmd;
 mod crash_maps_manager;
 mod dem_open_with;
 mod demo_cache_cmd;
 mod demo_links_manager;
+mod demo_preview;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
 mod download_progress;
 mod drop_paths;
+mod game_process_manager;
 mod hd_manager;
 mod hook_batch;
 mod hook_dll_list;
@@ -26,6 +29,7 @@ mod match_group_cmd;
 mod menu_scale_manager;
 mod messages;
 mod movie_copy_manager;
+mod obs_manager;
 mod obs_test_manager;
 mod open_files;
 mod overview_manager;
@@ -37,6 +41,7 @@ mod project_convert;
 mod render_manager;
 mod review_library;
 mod review_manager;
+mod scan_manager;
 mod settings_manager;
 mod take_checks_manager;
 mod take_cleanup_manager;
@@ -50,12 +55,15 @@ mod updater_manager;
 mod test_support;
 
 use audit_manager::{AuditManager, AuditOutcome, DeleteOutcome};
-use capture_manager::{
-    CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
-    kill_engine_processes, launch_demo_preview, launch_obs, launch_standalone_game,
-    read_cfg_commands, scan_orphaned_previews, send_preview_to_running_game, start_steam,
-    steam_state,
+use capture_manager::{CaptureManager, CapturePayload, read_cfg_commands};
+use demo_preview::{
+    delete_orphaned_previews, launch_demo_preview, scan_orphaned_previews,
+    send_preview_to_running_game,
 };
+use game_process_manager::{
+    check_engine_processes, kill_engine_processes, launch_standalone_game, start_steam, steam_state,
+};
+use obs_manager::launch_obs;
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
     check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
@@ -118,6 +126,7 @@ async fn save_settings(
         settings_manager::apply_game_folder(&settings);
         players_tab::mirror_table(&settings);
         *guard = settings;
+        native::log_markdown("[settings] saved");
         Ok(())
     }))
     .await
@@ -168,14 +177,14 @@ async fn default_projects_dir() -> Result<String, String> {
 #[tauri::command]
 async fn locate_missing_demos(
     app_handle: tauri::AppHandle,
-    demos: Vec<capture_manager::KnownDemo>,
+    demos: Vec<scan_manager::KnownDemo>,
     search_dirs: Vec<String>,
-) -> Result<Vec<capture_manager::MissingDemo>, String> {
+) -> Result<Vec<scan_manager::MissingDemo>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let dirs: Vec<std::path::PathBuf> =
             search_dirs.iter().map(std::path::PathBuf::from).collect();
-        Ok(capture_manager::locate_missing_demos(
+        Ok(scan_manager::locate_missing_demos(
             &demos,
             &dirs,
             &mut |missing| {
@@ -195,17 +204,17 @@ async fn locate_missing_demos(
 #[tauri::command]
 async fn changed_demos(
     app_handle: tauri::AppHandle,
-    demos: Vec<capture_manager::KnownDemo>,
+    demos: Vec<scan_manager::KnownDemo>,
 ) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let started = std::time::Instant::now();
         let last_emit = std::sync::atomic::AtomicU32::new(u32::MAX);
-        Ok(capture_manager::changed_demos_with_progress(
+        Ok(scan_manager::changed_demos_with_progress(
             &demos,
             |done, total| {
                 let now_ms = started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
-                if capture_manager::changed_progress_due(&last_emit, now_ms, done, total) {
+                if scan_manager::changed_progress_due(&last_emit, now_ms, done, total) {
                     let _ = app_handle.emit(
                         "changed_demos_progress",
                         serde_json::json!({ "done": done, "total": total }),
@@ -377,17 +386,17 @@ async fn scan_directory(
     app_handle: tauri::AppHandle,
     scan_state: tauri::State<'_, ScanManager>,
     paths: Vec<String>,
-    known: Option<Vec<capture_manager::KnownDemo>>,
+    known: Option<Vec<scan_manager::KnownDemo>>,
     workers: Option<usize>,
     include_subfolders: Option<bool>,
-) -> Result<capture_manager::ScanOutcome, String> {
-    capture_manager::scan_directory_impl(
+) -> Result<scan_manager::ScanOutcome, String> {
+    scan_manager::scan_directory_impl(
         app_handle,
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
         known.unwrap_or_default(),
-        workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
+        workers.unwrap_or(scan_manager::SCAN_CONCURRENCY),
         // Missing: today's walk into every subfolder (#531).
         include_subfolders.unwrap_or(true),
     )
@@ -709,11 +718,14 @@ async fn index_demo_players(
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
         let mut done = 0;
+        let mut unreadable = 0;
+        let total = paths.len();
         for path in paths {
             if current.load(Ordering::SeqCst) != request_id {
                 break;
             }
             let result = native::player_index::demo_players(std::path::Path::new(&path));
+            unreadable += usize::from(result.is_err());
             let payload = match result {
                 Ok((demo, _)) => serde_json::json!({
                     "lane": lane,
@@ -732,6 +744,9 @@ async fn index_demo_players(
             let _ = app_handle.emit("demo_players", payload);
             done += 1;
         }
+        native::log_markdown(&format!(
+            "[players] read the players of {done} of {total} demo(s) ({lane} lane), {unreadable} unreadable"
+        ));
         Ok(done)
     }))
     .await
@@ -803,7 +818,16 @@ async fn analyze_demo_full(
         };
 
         match native::run_analyzer_cached(&path, progress_cb) {
-            Ok((file_info, analysis, _from_cache)) => {
+            Ok((file_info, analysis, from_cache)) => {
+                native::log_markdown(&format!(
+                    "[analyzer] opened {} ({})",
+                    path.display(),
+                    if from_cache {
+                        "from the cache"
+                    } else {
+                        "parsed"
+                    }
+                ));
                 // Independent metadata lookup (not `file_info.created_at`) to avoid
                 // depending on `web_time::SystemTime`'s exact type identity here.
                 let created_unix_secs = std::fs::metadata(&path)
@@ -828,7 +852,13 @@ async fn analyze_demo_full(
                     state: analysis.state,
                 })
             }
-            Err(e) => Err(messages::analyzer_error(e)),
+            Err(e) => {
+                native::log_markdown(&format!(
+                    "[analyzer] could not read {}: {e}",
+                    path.display()
+                ));
+                Err(messages::analyzer_error(e))
+            }
         }
     }))
     .await
@@ -958,6 +988,8 @@ pub fn run() {
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
+            // ...and its Review tab to review the demo it has loaded (#1142).
+            review_manager::serve_game_requests(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then
             // the page is told and the window comes to the front.
             #[cfg(windows)]
@@ -1000,9 +1032,9 @@ pub fn run() {
             load_map_overview,
             start_capture_batch,
             launch_demo_preview,
-            capture_manager::obs_test_connection,
-            capture_manager::obs_check_orphan,
-            capture_manager::obs_recover_orphan,
+            obs_manager::obs_test_connection,
+            obs_manager::obs_check_orphan,
+            obs_manager::obs_recover_orphan,
             obs_test_manager::obs_test_clip,
             obs_test_manager::obs_test_watch_start,
             obs_test_manager::obs_test_analyze,
@@ -1015,14 +1047,16 @@ pub fn run() {
             batch_catch_up::catch_up_unwatched_batches,
             batch_close::wait_for_batch_start,
             kill_engine_processes,
-            capture_manager::check_running_game,
-            capture_manager::running_game_for_batch,
-            capture_manager::close_running_game,
+            game_process_manager::check_running_game,
+            game_process_manager::running_game_for_batch,
+            game_process_manager::close_running_game,
             steam_state,
             start_steam,
             send_preview_to_running_game,
             review_manager::start_highlight_review,
             review_manager::stop_highlight_review,
+            review_manager::game_review_progress,
+            review_manager::game_review_finished,
             review_library::review_library_get,
             review_library::review_library_update,
             scan_orphaned_previews,
@@ -1112,8 +1146,8 @@ pub fn run() {
             dir_browser::scan_demo_folders,
             map_manager::check_demo_maps,
             map_manager::download_map,
-            map_manager::scan_game_configs,
-            map_manager::roll_floors,
+            config_checks_cmd::scan_game_configs,
+            config_checks_cmd::roll_floors,
             hd_manager::hd_status,
             hd_manager::hd_setup_tools,
             hd_manager::hd_cancel,

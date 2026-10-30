@@ -54,8 +54,8 @@ Issue #265's idea — write `CHudBase::Draw`'s address into vftable slot 3 — i
 one dword and cheaper. It also needs the vftable's address at runtime, which
 means resolving RTTI in the loaded module or signature-matching the constructor
 that stores it. Patching the function needs neither. The general
-`dodstudio_hudelement` command in #265 (shipped as `ds_hud_hide_element`, see `docs/goldsrc_hud_elements.md`) is still worth having; this is not it and
-does not block it.
+`dodstudio_hudelement` command in #265 (shipped as `ds_hud_hide_element`, retired in #342, see `docs/goldsrc_hud_elements.md`) was a separate thing; this is not it and
+did not block it.
 
 ### Both the POV and the spectator crosshair
 
@@ -155,8 +155,93 @@ than inventing a layout, so the spectator view gets the *same* tile the player
 sees, whatever they set.
 
 `cl_xhair_style 0` is not tile 0: zero sends the POV path to a different
-function entirely, so there is no custom crosshair to match and this leaves the
-stock rect alone rather than guessing.
+function entirely, the red crosshair below.
+
+### `cl_xhair_style 0`: POV's red crosshair (#308)
+
+`client+0x2cda0` draws POV's default crosshair: five `SPR_DrawHoles` blits (a
+dot and four arms) out of `dodcross.spr`, through `hud.txt`'s
+`cross_style_2_dot`, `_horiz` and `_vert` rects, with a gap between the dot
+and the arms that it asks `client+0x2cfb0` for once a frame. The red is the
+sprite's own; the tint is white.
+
+The spectator branch never reaches it, so for style 0 the span's first eight
+bytes become a tail call into it:
+
+```asm
+client+0x2d205  add esp, 0x10        ; undo the spectator draw's sub esp
+client+0x2d208  jmp client+0x2cda0   ; its ret returns to Draw
+```
+
+`ecx` still holds the HUD object there, which is all the draw takes, and the
+gate before the span runs first, so the zoom skip and the hide above work for
+it unchanged. The rest of the span keeps its stock bytes. A Players-table
+crosshair for the player on screen (§3) wins: the span keeps the stock rect
+for `player_crosshair` to swap.
+
+**The gap follows the spectated player.** `client+0x2cfb0` (matched against
+dod13-client's `GetCrossHairWidth`):
+
+```text
+cl_dynamic_xhair < 1                       -> 4, fixed
+weapon 13-16 (grenades), 29-31 (rockets)   -> 4, fixed
+spread = deployed ? alt : base             (IsInMGDeploy: bipod or sandbag)
+speed > 105 u/s: spread += moving
+target = 2 + trunc(200 * spread)
+[this+0x98] steps toward target by at most 3 px a frame
+```
+
+`base`, `moving` and `alt` are the weapon's row of `P_WpnInfo` (`.data+0xca210`,
+0x15c bytes a row; the row's viewmodel path is at +0x20 of the row, the floats
+at +0x150). All three inputs are things a spectator sees, so this is not
+prediction-only state: `spectator_crosshair_gap.rs` points the draw's gap call
+(`client+0x2cda9`) at a hook that works the gap out for the watched player,
+and calls the original in POV, so live play and POV demos are untouched.
+
+| input | POV | spectated, from |
+| --- | --- | --- |
+| weapon | the local weapon id | the viewmodel, matched to the table row's own viewmodel path |
+| deployed | `g_iUser3 == 2` (prone with the bipod down) or the sandbag flag | body `bipod_*` / `sandbag_*` |
+| speed | the local predicted velocity, 3D | horizontal origin change over the newest 0.3 s of snapshots |
+
+**Deployed is not prone.** A prone rifleman keeps his standing gap; only the
+bipod and the sandbag swap `base` for `alt`.
+
+The gaps, worked from the table (`2 + trunc(200 * spread)`):
+
+| weapon | resting | moving | deployed |
+| --- | --- | --- | --- |
+| Garand, M1 Carbine, K43 | 5 | 25 | - |
+| Thompson, MP40, STG44, Grease gun, Sten | 7 | 27 | - |
+| Colt, Luger, Webley | 9 | 29 | - |
+| K98, Enfield | 4 | 34 | - |
+| BAR, FG42, Bren | 7 | 27 | 5 or 6 |
+| MG42 | 42 | 62 | 7 |
+| MG34, .30 cal | 42 | 62 | 5 or 6 |
+
+"5 or 6": 0.02 as a float is 0.0199999995, so `200 * 0.02` truncates to 3 at
+the x87's double precision and rounds to 4.0 at single. The hook reads the
+x87 control word on the HUD's thread and works it out at the game's precision;
+`ds_debug_status` says which.
+
+Where it can differ from POV: the speed is the horizontal origin change, so a
+stair step (18 units up in one snapshot, while the game's own velocity stays
+level) does not widen it, and neither does a plain fall, which POV's 3D
+velocity would. The easing runs per frame, as in POV, so the arms move at the
+frame rate in both.
+
+**A POV demo never widens it for movement; live play does, and so does this.**
+The velocity the gap reads is the client's own prediction, which does not run
+while a demo plays, so a POV demo keeps the resting gap however fast its
+recorder runs: warchyld's K43 in `wsod25_grp2_h1_warchyld` stayed at 5 px over
+40 s of the first round's rush (377 frames, 5 to 6 px measured), where the
+spectated view of him in `wsod25_grp2_h1_hltv` opened to 25 px whenever he ran.
+The weapon and the deploy terms are recorded and show in both. As for §2's
+hides, the spectated view follows live play.
+
+Measured on both builds with `game_probe.py` clips (5 fps, frame-locked) and
+a scan of each frame for the first red pixel of each arm: resting 5 px, running 25 px, a stick
+grenade the fixed 4 px, a K98 34 px moving, the Colt 9 and 29.
 
 ### When it is hidden
 
@@ -247,8 +332,9 @@ wins with no interlock written anywhere.
 #219 asks why the POV and HLTV first-person crosshairs differ. §1 found half of
 it — the spectator branch never reads the `crosshair` cvar. This is the other
 half: it never reads `cl_xhair_style` either. The third was *when* it draws,
-answered above. Still open: accuracy spread, which the POV crosshair shows and
-a spectator cannot know (it comes from the player's own prediction).
+answered above. The accuracy spread the red crosshair shows turned out to be
+weapon, deployed and speed only, all of which a spectator sees (#308, above);
+the one input it approximates is the speed.
 
 ---
 
