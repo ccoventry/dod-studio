@@ -7,7 +7,7 @@
 // credits, cap breaks (enemy captures they stopped) and objective points.
 //
 // The summary is pure (flagSummary) so it can be tested on its own; the tab
-// takes analyzer_pane.js's own helpers rather than importing them.
+// takes analyzer_report.js's own helpers rather than importing them.
 
 import { STRINGS } from './strings.js';
 
@@ -97,7 +97,7 @@ export function flagSummary(state, map = null) {
 }
 
 /**
- * Draws the tab into `container`. `h` is analyzer_pane.js's helpers:
+ * Draws the tab into `container`. `h` is analyzer_report.js's helpers:
  * `{ esc, teamColor, teamLabel, durSecs, formatMMSS }`.
  */
 export function renderFlagsTab(container, report, h) {

@@ -1,6 +1,6 @@
 // strings.js — subset of studio/src/strings.js's STRINGS.ANALYZER,
 // copied verbatim so render.js can be a faithful, low-diff port of
-// analyzer_pane.js's render functions. Keep in sync by hand; there is no
+// analyzer_report.js's render functions. Keep in sync by hand; there is no
 // shared build step between this static site and the desktop app.
 // studio/src/web_analyzer_copy.test.js fails when the two disagree (#238).
 export const STRINGS = {

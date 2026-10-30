@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -6,6 +5,7 @@ use std::sync::mpsc::Sender;
 
 pub mod archive;
 pub mod backup;
+mod duplicates;
 mod key_cache;
 mod keys;
 mod lanes;
@@ -22,9 +22,8 @@ pub use walk::{
     scan_dir, scan_roots, scan_roots_and_zips, shown_path, windows_folder,
 };
 
-use keys::head_hash;
-use lanes::{Readers, drive_of};
-use zips::{list_zips, read_zip_demos};
+use duplicates::find_duplicates_with;
+use lanes::Readers;
 
 /// A demo file's identity: its size plus an FNV-1a hash of its first 64 KB.
 ///
@@ -197,14 +196,6 @@ fn par_map<T: Sync, R: Send>(
     out
 }
 
-/// A group of its own for a file that can't be read, as when keying fails.
-fn unreadable_key(path: &Path) -> FileKey {
-    FileKey {
-        size: 0,
-        header_hash: fnv1a_hash(path.to_string_lossy().as_bytes()),
-    }
-}
-
 /// Identifies duplicates within a list of file paths.
 /// Returns unique files, structured duplicate groups, total duplicates count, and total wasted space in bytes.
 pub fn find_duplicates(
@@ -237,33 +228,6 @@ pub fn find_duplicates_cached(
     find_duplicates_in(files, Vec::new(), cancel, progress, cache)
 }
 
-/// Paths resolved to their canonical form with their stamps, each once,
-/// sorted.
-fn resolve_paths(
-    paths: &[PathBuf],
-    readers: &Readers,
-    cancel: &AtomicBool,
-) -> Vec<(PathBuf, Option<Stamp>)> {
-    // Canonicalizing opens each file, so it runs in parallel.
-    let resolved = readers.map(
-        paths,
-        |p| drive_of(p),
-        cancel,
-        |path| {
-            let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-            let stamp = stamp(&canonical);
-            (canonical, stamp)
-        },
-    );
-    let mut by_path: HashMap<PathBuf, Option<Stamp>> = HashMap::new();
-    for (path, stamp) in resolved.into_iter().flatten() {
-        by_path.entry(path).or_insert(stamp);
-    }
-    let mut out: Vec<(PathBuf, Option<Stamp>)> = by_path.into_iter().collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
 /// [`find_duplicates_cached`] that also looks inside `zips` (`.zip`, `.7z`,
 /// `.rar`; #929). An archive is a backup: its demos never join a duplicate
 /// group, so the groups are the ones the loose demos alone make. Each loose
@@ -283,371 +247,12 @@ pub fn find_duplicates_in(
     find_duplicates_with(files, zips, &Readers::system(), cancel, progress, cache)
 }
 
-/// [`find_duplicates_in`] reading as `readers` says: every read below, the
-/// first and last 64 KiB and the archives, one at a time on a hard disk.
-fn find_duplicates_with(
-    files: Vec<PathBuf>,
-    zips: Vec<PathBuf>,
-    readers: &Readers,
-    cancel: &AtomicBool,
-    progress: &Option<Sender<AuditProgress>>,
-    cache: &mut KeyCache,
-) -> Audit {
-    let mut reads = Reads::default();
-    let mut skipped = Vec::new();
-    let send = |msg: AuditProgress| {
-        if let Some(tx) = progress {
-            let _ = tx.send(msg);
-        }
-    };
-    let hashing = |path: &Path| send(AuditProgress::Hashing(path.to_string_lossy().into_owned()));
-
-    // Canonicalize and deduplicate paths to prevent counting/grouping a file
-    // with itself.
-    let files = resolve_paths(&files, readers, cancel);
-    let zips = resolve_paths(&zips, readers, cancel);
-    if cancel.load(Ordering::Relaxed) {
-        return Audit::default();
-    }
-    for (path, _) in files.iter().chain(&zips) {
-        cache.mark_seen(path);
-    }
-    let mut zip_demos = Vec::new();
-    if !zips.is_empty() {
-        send(AuditProgress::Archives(zips.len()));
-        zip_demos = list_zips(
-            &zips,
-            readers,
-            cancel,
-            progress,
-            cache,
-            &mut reads,
-            &mut skipped,
-        );
-        if cancel.load(Ordering::Relaxed) {
-            return Audit::default();
-        }
-    }
-    send(AuditProgress::Keying(files.len() + zip_demos.len()));
-
-    let mut loose_sizes: HashMap<u64, usize> = HashMap::new();
-    for (_, stamp) in &files {
-        if let Some(s) = stamp {
-            *loose_sizes.entry(s.size).or_default() += 1;
-        }
-    }
-    let archived_sizes: HashSet<u64> = zip_demos.iter().map(|z| z.entry.size).collect();
-    // A loose demo is opened only when another loose demo, or a demo in an
-    // archive, has its size: otherwise it can't be a copy or backed up.
-    let worth_keying = |size: u64| {
-        loose_sizes.get(&size).copied().unwrap_or(0) >= 2 || archived_sizes.contains(&size)
-    };
-    let mut keys: Vec<Option<FileKey>> = vec![None; files.len()];
-    let mut to_read = Vec::new();
-    for (i, (path, stamp)) in files.iter().enumerate() {
-        match stamp {
-            None => {
-                keys[i] = Some(unreadable_key(path));
-                hashing(path);
-            }
-            Some(s) if !worth_keying(s.size) => hashing(path),
-            Some(s) => match cache.entry(path, *s) {
-                Some(entry) => {
-                    keys[i] = Some(FileKey {
-                        size: s.size,
-                        header_hash: entry.head,
-                    });
-                    hashing(path);
-                }
-                None => to_read.push(i),
-            },
-        }
-    }
-    let heads = readers.map(
-        &to_read,
-        |&i| drive_of(&files[i].0),
-        cancel,
-        |&i| {
-            let (path, stamp) = &files[i];
-            hashing(path);
-            head_hash(path, stamp.map_or(0, |s| s.size))
-        },
-    );
-    for (&i, head) in to_read.iter().zip(heads) {
-        let Some(head) = head else { continue };
-        reads.heads += 1;
-        let (path, stamp) = &files[i];
-        let Some(stamp) = *stamp else { continue };
-        keys[i] = Some(match head {
-            Ok(head) => {
-                cache.put(path, stamp, head);
-                FileKey {
-                    size: stamp.size,
-                    header_hash: head,
-                }
-            }
-            Err(_) => unreadable_key(path),
-        });
-    }
-
-    // A demo in an archive is read in full or not at all: deflate, LZMA and
-    // RAR can't seek to its last 64 KiB. Only an entry a loose demo shares a
-    // size with is read, and each such entry is read itself, so every
-    // archive holding a demo is listed: a size and CRC-32 in a header say
-    // nothing about the data behind them, and a damaged archive listing the
-    // same header must not show as a backup.
-    let mut needed = Vec::new();
-    for (j, z) in zip_demos.iter().enumerate() {
-        if z.entry.hashes.is_some() || !loose_sizes.contains_key(&z.entry.size) {
-            send(AuditProgress::Hashing(z.at(&zips).display()));
-        } else {
-            needed.push(j);
-        }
-    }
-    if !needed.is_empty() && !cancel.load(Ordering::Relaxed) {
-        for (j, read) in read_zip_demos(&needed, &zip_demos, &zips, readers, cancel, progress) {
-            reads.zip_demos += 1;
-            let (path, stamp) = &zips[zip_demos[j].zip];
-            if let Some(stamp) = stamp {
-                cache.set_archive_hashes(path, *stamp, &zip_demos[j].entry.name, read.clone());
-            }
-            match read {
-                Ok(h) => zip_demos[j].entry.hashes = Some(h),
-                Err(e) => {
-                    skipped.push(format!("{}: {e}", zip_demos[j].at(&zips).shown()));
-                    zip_demos[j].entry.error = Some(e);
-                }
-            }
-        }
-    }
-    let index = BackupIndex::new(zip_demos.iter().filter_map(|z| {
-        let hashes = z.entry.hashes.filter(|_| z.entry.error.is_none())?;
-        Some(ArchivedCopy {
-            at: z.at(&zips),
-            hashes,
-        })
-    }));
-
-    let mut groups: HashMap<FileKey, Vec<usize>> = HashMap::new();
-    let mut singles: Vec<usize> = Vec::new();
-    for (i, key) in keys.iter().enumerate() {
-        match key {
-            Some(key) => groups.entry(key.clone()).or_default().push(i),
-            None => singles.push(i),
-        }
-    }
-
-    // The key reads only the start, so two cuts of one recording can share
-    // it. Files that end differently are different demos: split each group
-    // by its last bytes too. Only grouped files, and files an archive holds
-    // a demo with the same key, pay the extra read. The key itself stays as
-    // it is, since project files save its text.
-    let mut tails: Vec<Option<u64>> = vec![None; files.len()];
-    let mut tail_reads = Vec::new();
-    for (key, members) in &groups {
-        if members.len() < 2 && !index.has_key(key) {
-            continue;
-        }
-        for &i in members {
-            let (path, stamp) = &files[i];
-            match stamp
-                .and_then(|s| cache.entry(path, s))
-                .and_then(|e| e.tail)
-            {
-                Some(tail) => tails[i] = Some(tail),
-                None => tail_reads.push((i, key.size)),
-            }
-        }
-    }
-    let drive = |&(i, _): &(usize, u64)| drive_of(&files[i].0);
-    let read_tails = readers.map(&tail_reads, drive, cancel, |&(i, size)| {
-        tail_hash(&files[i].0, size)
-    });
-    for (&(i, _), tail) in tail_reads.iter().zip(read_tails) {
-        let Some(tail) = tail else { continue };
-        reads.tails += 1;
-        let (path, stamp) = &files[i];
-        // Unreadable here: a group of its own, as when keying fails.
-        tails[i] = Some(match tail {
-            Ok(tail) => {
-                if let Some(s) = stamp {
-                    cache.set_tail(path, *s, tail);
-                }
-                tail
-            }
-            Err(_) => fnv1a_hash(path.to_string_lossy().as_bytes()),
-        });
-    }
-
-    let mut backups = Vec::new();
-    if !index.is_empty() {
-        for (i, key) in keys.iter().enumerate() {
-            let (Some(key), Some(tail)) = (key, tails[i]) else {
-                continue;
-            };
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            let (path, stamp) = &files[i];
-            // Read in full once, then remembered while its size and
-            // modified time hold.
-            let known = stamp
-                .and_then(|s| cache.entry(path, s))
-                .and_then(|e| e.full);
-            let copies = index.copies_of(key, tail, || {
-                known.or_else(|| read_full(path, *stamp, cache, &mut reads))
-            });
-            if !copies.is_empty() {
-                backups.push(Backup {
-                    demo: path.clone(),
-                    copies,
-                });
-            }
-        }
-    }
-
-    let mut split: Vec<(FileKey, Vec<usize>)> = Vec::new();
-    for (key, members) in groups {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        if members.len() < 2 {
-            split.push((key, members));
-            continue;
-        }
-        let mut by_tail: HashMap<u64, Vec<usize>> = HashMap::new();
-        for i in members {
-            if let Some(tail) = tails[i] {
-                by_tail.entry(tail).or_default().push(i);
-            }
-        }
-        for (_, same_tail) in by_tail {
-            for part in split_by_full_hash(same_tail, &files, cache, &mut reads) {
-                split.push((key.clone(), part));
-            }
-        }
-    }
-    for i in singles {
-        split.push((
-            FileKey {
-                size: files[i].1.map_or(0, |s| s.size),
-                header_hash: 0,
-            },
-            vec![i],
-        ));
-    }
-
-    let mut listings: Vec<ArchiveListing> = zips
-        .iter()
-        .map(|(path, _)| ArchiveListing {
-            archive: path.clone(),
-            demos: Vec::new(),
-        })
-        .collect();
-    for z in &zip_demos {
-        if z.entry.error.is_none() {
-            listings[z.zip].demos.push(z.entry.clone());
-        }
-    }
-    let mut audit = Audit {
-        reads,
-        backups,
-        archives: listings,
-        zips: zips.len(),
-        zip_demos: zip_demos.len(),
-        skipped,
-        ..Audit::default()
-    };
-    for (key, members) in split {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        // Sorted, so original vs duplicate selection is stable.
-        let mut paths: Vec<PathBuf> = members.iter().map(|&i| files[i].0.clone()).collect();
-        paths.sort();
-        if let Some(first) = paths.first() {
-            audit.unique_files.push(first.clone());
-        }
-        if paths.len() > 1 {
-            let group = DuplicateGroup { key, files: paths };
-            audit.copies += group.copies();
-            audit.wasted_bytes += group.wasted_bytes();
-            audit.groups.push(group);
-        }
-    }
-    // Sort unique files alphabetically so traversal is deterministic
-    audit.unique_files.sort();
-    // Most wasted space first; then by path, so the order is stable.
-    audit.groups.sort_by(|a, b| {
-        b.wasted_bytes()
-            .cmp(&a.wasted_bytes())
-            .then_with(|| a.first_name().cmp(&b.first_name()))
-    });
-    audit
-}
-
-/// `path`'s whole-file hash, read now and remembered in `cache` while its
-/// size holds; `None` when it can't be read.
-fn read_full(
-    path: &Path,
-    stamp: Option<Stamp>,
-    cache: &mut KeyCache,
-    reads: &mut Reads,
-) -> Option<u64> {
-    reads.fulls += 1;
-    let hashes = content_hashes(path).ok()?;
-    if let Some(s) = stamp
-        && s.size == hashes.size
-    {
-        cache.remember_contents(path, s, hashes);
-    }
-    Some(hashes.full)
-}
-
-/// One group (same key and tail) split by whole-file hash, but only when the
-/// cache already proves two of its files differ: two remembered full hashes
-/// that don't match. Its other files are then read in full to see which side
-/// they belong to; a file that can't be read goes on its own. Without that
-/// proof the group stays whole, as it was before the cache.
-fn split_by_full_hash(
-    members: Vec<usize>,
-    files: &[(PathBuf, Option<Stamp>)],
-    cache: &mut KeyCache,
-    reads: &mut Reads,
-) -> Vec<Vec<usize>> {
-    if members.len() < 2 {
-        return vec![members];
-    }
-    let known: Vec<Option<u64>> = members
-        .iter()
-        .map(|&i| {
-            let (path, stamp) = &files[i];
-            stamp
-                .and_then(|s| cache.entry(path, s))
-                .and_then(|e| e.full)
-        })
-        .collect();
-    let distinct: HashSet<u64> = known.iter().flatten().copied().collect();
-    if distinct.len() < 2 {
-        return vec![members];
-    }
-    let mut parts: HashMap<u64, Vec<usize>> = HashMap::new();
-    let mut alone = Vec::new();
-    for (&i, full) in members.iter().zip(known) {
-        let (path, stamp) = &files[i];
-        match full.or_else(|| read_full(path, *stamp, cache, reads)) {
-            Some(full) => parts.entry(full).or_default().push(i),
-            None => alone.push(vec![i]),
-        }
-    }
-    parts.into_values().chain(alone).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lanes::{Lane, plan_lanes, seek_penalty};
+    use crate::lanes::{Lane, drive_of, plan_lanes, seek_penalty};
     use crate::walk::{scan_roots_with, walk_roots};
+    use std::collections::HashMap;
     use std::sync::Mutex;
     use std::time::Duration;
 
@@ -1180,6 +785,150 @@ mod tests {
         let audit = key_pass(&[a, b], &mut cache);
         assert_eq!(group_names(&audit), [["a.dem", "b.dem"]]);
         assert_eq!(audit.reads.fulls, 0);
+    }
+
+    #[test]
+    fn groups_come_biggest_waste_first_then_by_path_and_the_first_path_is_kept() {
+        let d = Demos::new("order");
+        // Wasted space: big 2 x 262144, mid 1 x 5, tiny pair 1 x 3 and 1 x 3.
+        let files = [
+            d.file("z_big.dem", &long_demo(1)),
+            d.file("y_big.dem", &long_demo(1)),
+            d.file("x_big.dem", &long_demo(1)),
+            d.file("b_mid.dem", b"12345"),
+            d.file("a_mid.dem", b"12345"),
+            d.file("d_tiny.dem", b"abc"),
+            d.file("c_tiny.dem", b"abc"),
+            d.file("solo.dem", b"nobody else"),
+        ];
+        let audit = key_pass(&files, &mut KeyCache::default());
+        let names: Vec<Vec<String>> = audit
+            .groups
+            .iter()
+            .map(|g| {
+                g.files
+                    .iter()
+                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                vec!["x_big.dem", "y_big.dem", "z_big.dem"],
+                vec!["a_mid.dem", "b_mid.dem"],
+                vec!["c_tiny.dem", "d_tiny.dem"],
+            ]
+        );
+        assert_eq!(audit.copies, 4);
+        assert_eq!(audit.wasted_bytes, 2 * 4 * KEY_BYTES + 5 + 3);
+        // One path per demo, the first of its group, sorted.
+        let kept: Vec<_> = audit
+            .unique_files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(kept, ["a_mid.dem", "c_tiny.dem", "solo.dem", "x_big.dem"]);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_a_demo_of_its_own_and_still_counted() {
+        let d = Demos::new("unreadable");
+        let a = d.file("a.dem", b"same size A");
+        let b = d.file("b.dem", b"same size A");
+        let gone = d.0.join("gone.dem");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let audit = find_duplicates_cached(
+            vec![a, b, gone.clone()],
+            &AtomicBool::new(false),
+            &Some(tx),
+            &mut KeyCache::default(),
+        );
+        assert_eq!(group_names(&audit), [["a.dem", "b.dem"]]);
+        assert_eq!(audit.unique_files.len(), 2);
+        assert!(
+            audit
+                .unique_files
+                .iter()
+                .any(|p| p.file_name().is_some_and(|n| n == "gone.dem"))
+        );
+        let messages: Vec<_> = rx.try_iter().collect();
+        assert!(matches!(messages.first(), Some(AuditProgress::Keying(3))));
+        let hashed = messages
+            .iter()
+            .filter(|m| matches!(m, AuditProgress::Hashing(_)))
+            .count();
+        assert_eq!(hashed, 3, "{messages:?}");
+    }
+
+    #[test]
+    fn a_cancel_before_the_pass_returns_nothing_and_says_nothing() {
+        let d = Demos::new("cancel_first");
+        let files = [d.file("a.dem", b"same"), d.file("b.dem", b"same")];
+        let (tx, rx) = std::sync::mpsc::channel();
+        let audit = find_duplicates_cached(
+            files.to_vec(),
+            &AtomicBool::new(true),
+            &Some(tx),
+            &mut KeyCache::default(),
+        );
+        assert!(audit.groups.is_empty() && audit.unique_files.is_empty());
+        assert_eq!(audit.reads, Reads::default());
+        assert_eq!(rx.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn the_key_pass_reports_in_a_fixed_order_on_one_reader() {
+        let d = Demos::new("events");
+        let files = [
+            d.file("a.dem", b"same size A"),
+            d.file("b.dem", b"same size A"),
+            d.file("lone.dem", b"a size of its own"),
+        ];
+        let one = Readers {
+            threads: 1,
+            seeks: &|_| false,
+        };
+        let run = |cache: &mut KeyCache| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            find_duplicates_with(
+                files.to_vec(),
+                vec![],
+                &one,
+                &AtomicBool::new(false),
+                &Some(tx),
+                cache,
+            );
+            rx.try_iter()
+                .map(|m| match m {
+                    AuditProgress::Keying(n) => format!("keying {n}"),
+                    AuditProgress::Hashing(p) => format!(
+                        "hashing {}",
+                        Path::new(&p).file_name().unwrap().to_string_lossy()
+                    ),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut cache = KeyCache::default();
+        // The lone size needs no key and reports first; the two to read follow.
+        let expected = [
+            "keying 3",
+            "hashing lone.dem",
+            "hashing a.dem",
+            "hashing b.dem",
+        ];
+        assert_eq!(run(&mut cache), expected);
+        // Remembered keys report ahead of reads, in file order.
+        assert_eq!(
+            run(&mut cache),
+            [
+                "keying 3",
+                "hashing a.dem",
+                "hashing b.dem",
+                "hashing lone.dem"
+            ]
+        );
     }
 
     #[test]
