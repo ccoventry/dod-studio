@@ -15,6 +15,7 @@ import { revealInExplorer } from './ipc_bridge.js';
 import { highlightStartSeconds } from './highlight_time.js';
 import { clockFloor } from './time_format.js';
 import { STRINGS } from './strings.js';
+import { gbOrMbText } from './byte_size.js';
 
 let state = null; // { endedAt, kind, text, rows, totals } once a batch ends
 let obsClips = []; // OBS mode: each clip's closing drop-rate report, in order
@@ -36,12 +37,6 @@ export function obsForRows(rows, clips) {
 
 function panel() {
   return document.querySelector('#batch-results');
-}
-
-/** Bytes as MB or GB. */
-export function formatBytes(bytes) {
-  const gb = bytes / 1024 ** 3;
-  return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
 /** What a take covered: the first highlight's demo, player, kills and time,
@@ -119,7 +114,7 @@ function render() {
   summary.className = `batch-results-summary batch-results-${state.kind}`;
   const outcome = state.kind ? S.outcome(state.kind, state.text) : '';
   const totals = state.totals
-    ? S.totals(state.totals.captured, state.totals.takes, formatBytes(state.totals.bytes), state.totals.captured - state.totals.renderable)
+    ? S.totals(state.totals.captured, state.totals.takes, gbOrMbText(state.totals.bytes), state.totals.captured - state.totals.renderable)
     : S.CHECKING;
   const obs = obsForRows(state.rows || [], obsClips);
   const obsMeasured = obs.filter(Boolean);
@@ -146,7 +141,7 @@ function render() {
       const label = document.createElement('td');
       label.textContent = row.label;
       const size = document.createElement('td');
-      size.textContent = row.status === 'missing' ? '—' : formatBytes(row.bytes);
+      size.textContent = row.status === 'missing' ? '—' : gbOrMbText(row.bytes);
       const open = document.createElement('td');
       if (row.status !== 'missing' && row.folder) {
         const btn = document.createElement('button');

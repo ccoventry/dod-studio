@@ -91,7 +91,8 @@ pub fn prepare(
             dod_dir.display()
         ));
     }
-    let copies = native::patch::source_copies::plan(&dod_dir, demos.iter().copied(), other_drives)?;
+    let copies = native::patch::source_copies::plan(&dod_dir, demos.iter().copied(), other_drives)
+        .map_err(crate::messages::failed_to_copy_demos_for_batch)?;
     // Demos on another drive the hook opens by their full path.
     let mut in_place: Vec<&str> = Vec::new();
     if other_drives {
@@ -121,8 +122,10 @@ pub fn prepare(
     if !copies.is_empty() {
         let needed: u64 = copies.iter().map(|c| c.bytes).sum();
         let free = native::sys::disk::get_available_bytes(&dod_dir);
-        native::patch::source_copies::space_check(free, needed)?;
-        native::patch::source_copies::copy_all(&copies)?;
+        native::patch::source_copies::space_check(free, needed)
+            .map_err(crate::messages::failed_to_copy_demos_for_batch)?;
+        native::patch::source_copies::copy_all(&copies)
+            .map_err(crate::messages::failed_to_copy_demos_for_batch)?;
     }
     let path = batch_file_path();
     if let Err(e) = std::fs::write(&path, text) {

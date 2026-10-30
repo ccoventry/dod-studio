@@ -11,7 +11,7 @@
   - `hd/`: the app's side of HD textures — what is built, fetching the upscaler, a private Python, running the build scripts.
   - `sys/`: OS helpers, including the game pipes: `game_remote.rs` sends console commands to a game Studio launched, and `analysis_server.rs` analyses demos for the in-game window. Both talk to the hook DLL.
 - `goldsrc-hooks/`: the 32-bit DLL injected into `hl.exe` beside HLAE's (see `docs/features.md` section 5).
-- `studio/src-tauri/`: Tauri backend — Rust command handlers bridging the frontend to `native`/`analysis`/`hl-demo-auditor`, one manager per area (`capture_manager`, `render_manager`, `map_manager`, `hd_manager`, `settings_manager`, `updater_manager`, `audit_manager`, `dir_browser`).
+- `studio/src-tauri/`: Tauri backend — Rust command handlers bridging the frontend to `native`/`analysis`/`hl-demo-auditor`, one manager per area (`capture_manager`, `scan_manager`, `game_process_manager`, `demo_preview`, `obs_manager`, `render_manager`, `map_manager`, `hd_manager`, `settings_manager`, `updater_manager`, `audit_manager`, `dir_browser`).
 - `studio/src/`: Vite/JS frontend modules (one file per pane, e.g. `capture_pane.js`/`render_pane.js`). No native threading or direct `std::fs` — everything crosses the Tauri IPC boundary.
 
 ## State, Memory, & Concurrency Rules

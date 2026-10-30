@@ -1,10 +1,11 @@
 # The spectator camera under `spec_match_pov`: following one player, the in-eye height, and the death cam
 
-Three fixes to where the camera sits while watching a player from an HLTV
+Four fixes to where the camera sits while watching a player from an HLTV
 demo, all part of the `ds_spec_match_pov` / `spec_lock` / `spec_target`
 family in the hook DLL: which player the camera is on (#206, first section),
-how high the in-eye camera is when that player goes prone (#329, second), and
-what it shows when he dies (#709, third). The first two were
+how high the in-eye camera is when that player goes prone (#329, second) and
+as he crouches (#1144, third), and what it shows when he dies (#709,
+fourth). The first two were
 `goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`. A fourth,
 always on, makes the chase cameras draw the players around them (#918, last
 section).
@@ -179,6 +180,70 @@ wall at about 9:15, recorded with the switch on and off, on both builds. On:
 the camera is at ground level and the wall fills the view. Off: the camera
 looks over the wall from crouch height.
 `ds_debug_log_weapon_model 1` logs each change of stance it sees.
+
+---
+
+## The in-eye camera through a crouch (#1144)
+
+Watching a player crouch in first person from an HLTV demo, the camera drops
+about four times faster than his own view does. `ds_spec_match_pov 1` eases
+it at his own view's speed. The code is
+`goldsrc-hooks/src/spectator_eye/crouch.rs`.
+
+### The survey
+
+`analysis/examples/crouch_eye_probe.rs` prints each frame's camera and origin
+from a POV demo and every player's origin and `usehull` from each snapshot.
+Pairs: `wsod25_grp2_h1_*` (5 POVs) and `wsod25_grp4_h1_*` (6 POVs) against
+their halves' HLTV demos, 6 players; 12 more `solifotw-*` POVs from 12 other
+players for the POV curve alone. On-ground crouches with the key held 0.7 s:
+
+| | camera starts | half-way | 95% |
+| --- | --- | --- | --- |
+| going down, POV, from the key | +0.03 s | +0.20 s | +0.35 s |
+| going down, HLTV in-eye | +0.41 s | +0.49 s | +0.51 s |
+| getting up, POV | at once | +0.04 s | +0.11 s |
+| getting up, HLTV in-eye | at once | +0.09 s | +0.11 s |
+
+(254 paired crouches and 498 stand-ups; 606 and 915 more POV-only.)
+
+- **POV going down** eases the camera all 22 units (58 to 36 above the feet)
+  over 0.4 s while the player is still in the standing hull:
+  `22 x smoothstep(t / 0.4)`, the same in all 18 players. The server flips
+  `usehull`, and the gait to `dod_crouch_idle`/`dod_crawl`, when the ease
+  ends. That flip is the first thing an HLTV demo shows, so the in-eye camera
+  cannot start before it.
+- **HLTV going down** then drops 4 at once (22 to 18) and 18 more as the
+  interpolated origin falls into the small hull, over the interpolation
+  time.
+- **Getting up** both rise in about 0.11 s.
+- **In the air** (57% of the flips in `wsod25_grp2_h1_hltv`: crouch-jumps)
+  the origin doesn't move at the flip and both views drop 4 at once.
+  On the ground the snapshot origin jumps 18 at the flip, against the motion
+  before it, which tells the two apart.
+
+### What the fix does
+
+From an on-ground flip, the camera follows POV's curve on the demo clock: the
+same speed as POV, finishing 0.4 s after POV does (the game's own drop
+finishes about 0.1 s after). Getting up, it rises at POV's rate from wherever
+the ease had got to, so a crouch let go half-way down comes straight back up.
+
+`V_GetInEyePos` adds 18 or 22 to the interpolated origin. Both `fadd`
+operands (`+0x50d5b`, `+0x50d65`) read floats in the hook, set each frame
+just before `V_CalcRefdef` to `22 + shown - depth`, where `depth` is the
+eased drop (0 to 22) and `shown` is how much of the 18-unit origin step the
+interpolated origin already shows, read off the origin between the last
+standing snapshot and the first crouched one. So the camera moves only as
+`depth` does, at any `ex_interp`, update rate or capture frame rate.
+
+It settles at the game's heights, with no ease, on a seek, a switch of player,
+a teleport, an in-air flip, while prone (#329's height wins), and when the
+switch is off or a POV demo plays.
+
+Not covered: a duck tapped for under 0.4 s never flips `usehull`, so an HLTV
+demo shows nothing of it; and POV's eye sometimes sinks from 18 to 0 for
+about 0.2 s on a duck-jump landing, which HLTV has no trace of.
 
 ---
 

@@ -2572,6 +2572,7 @@ tr.keyboard-selected {
 }
 
 .hd-style-coverage,
+.hd-outdated,
 .hd-gl-max-size-low {
   color: #ffb74d;
 }

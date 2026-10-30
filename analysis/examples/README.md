@@ -105,6 +105,7 @@ that panics the parser cannot take down the run:
 | `gait_probe` | Which movement states are replicated for other players; can sprint be told apart? |
 | `sprint_viewmodel_probe` | What DoD does to the first-person viewmodel while a player sprints. |
 | `crosshair_pov_probe` | What the recording player was doing, as far as the crosshair rule cares (#310). |
+| `crouch_eye_probe` | Camera and origin heights through a crouch: the POV recorder's per frame, every player's `usehull` and gait per snapshot (#1144). |
 | `hltv_sound_probe` | Are weapon-fire events present in an HLTV demo's raw stream? |
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
 | `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |
