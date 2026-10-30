@@ -1896,4 +1896,108 @@ mod tests {
         );
         assert_eq!(files_in(&export_dir), vec!["bmp_take.mp4"]);
     }
+
+    /// FFmpeg failing after it has started writing (a broken frame halfway,
+    /// `-xerror`): `Error` with its log, and the half-written file removed.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    async fn an_ffmpeg_failure_partway_removes_the_half_written_file() {
+        let ffmpeg = real_ffmpeg();
+        let root = scratch("ffmpeg_fail_partway");
+        let (take_folder, export_dir) = take_dirs(&root);
+        make_bmp_take(&ffmpeg, &take_folder);
+        std::fs::write(take_folder.join("all").join("00005.bmp"), b"not a bmp").unwrap();
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        clip.frame_count = 10;
+        let config = RenderConfig {
+            ffmpeg_path: ffmpeg.to_string_lossy().into_owned(),
+            target_codec: RenderCodec::Custom,
+            custom_codec_args: "-c:v ffv1 -xerror".to_string(),
+            fps: 30,
+            ..source_copy_config(&export_dir)
+        };
+        let text = describe(&run(clip, config, false).await);
+        assert_eq!(text.first().map(String::as_str), Some("7 status Rendering"));
+        assert_eq!(text[text.len() - 2], "7 status Error", "{text:?}");
+        assert!(
+            text[text.len() - 1].starts_with("7 finished false FFmpeg failed with exit code: "),
+            "{text:?}"
+        );
+        assert!(files_in(&export_dir).is_empty());
+    }
+
+    /// Cancel partway through a render: the export drive stays reserved
+    /// while FFmpeg writes, the half-written file is removed, and the
+    /// reservation is released once the job ends.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    async fn an_ffmpeg_render_cancelled_partway_keeps_its_reservation_till_it_ends() {
+        let ffmpeg = real_ffmpeg();
+        let root = scratch("ffmpeg_cancel_partway");
+        let (take_folder, export_dir) = take_dirs(&root);
+        make_bmp_take(&ffmpeg, &take_folder);
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        clip.frame_count = 10;
+        // `realtime` slows the 10 frames to several seconds, so the job is
+        // still running when it is looked at and cancelled.
+        let config = RenderConfig {
+            ffmpeg_path: ffmpeg.to_string_lossy().into_owned(),
+            target_codec: RenderCodec::Custom,
+            custom_codec_args: "-c:v ffv1 -vf realtime=speed=0.05".to_string(),
+            fps: 30,
+            ..source_copy_config(&export_dir)
+        };
+        let reserved = |ledger: &Arc<Mutex<HashMap<PathBuf, u64>>>| -> u64 {
+            ledger.lock().unwrap().values().sum()
+        };
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let ledger = Arc::new(Mutex::new(HashMap::new()));
+        let job = tokio::spawn(run_render_job(
+            "7".to_string(),
+            clip,
+            config,
+            tx,
+            cancel.clone(),
+            ledger.clone(),
+        ));
+
+        let mut updates = Vec::new();
+        let started = std::time::Instant::now();
+        while files_in(&export_dir).is_empty() {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(20),
+                "FFmpeg never wrote its output: {:?}",
+                describe(&updates)
+            );
+            assert!(!job.is_finished(), "{:?}", describe(&drain(&rx)));
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            updates.extend(drain(&rx));
+        }
+        assert!(reserved(&ledger) > 0, "nothing reserved while rendering");
+        cancel.store(true, Ordering::Relaxed);
+        tokio::time::timeout(std::time::Duration::from_secs(10), job)
+            .await
+            .expect("the job did not stop on Cancel")
+            .unwrap();
+        updates.extend(drain(&rx));
+
+        let text = describe(&updates);
+        assert_eq!(text.first().map(String::as_str), Some("7 status Rendering"));
+        assert_eq!(
+            text[text.len() - 2..],
+            ["7 status Cancelled", "7 finished false Cancelled by user"],
+            "{text:?}"
+        );
+        assert!(
+            text[1..text.len() - 2]
+                .iter()
+                .all(|l| l.starts_with("7 progress ") || l.starts_with("7 speed ")),
+            "{text:?}"
+        );
+        assert!(files_in(&export_dir).is_empty());
+        assert_eq!(reserved(&ledger), 0);
+    }
 }
