@@ -571,6 +571,9 @@ fn describe_backups(faces: &[String]) -> String {
         return format!("fallback = {FALLBACK_FACE} (the game's)");
     }
     let listed: Vec<String> = faces.iter().map(|f| format!("\"{f}\"")).collect();
+    if faces.iter().any(|f| f.eq_ignore_ascii_case(FALLBACK_FACE)) {
+        return format!("fallback = {}", listed.join(", "));
+    }
     format!("fallback = {}, then {FALLBACK_FACE}", listed.join(", "))
 }
 
@@ -1483,10 +1486,12 @@ mod hook {
                 Err(why) => said.push(format!("\"{face}\" left out: {why}")),
             }
         }
-        let reply = format!(
-            " Backup faces, in order: {}; then {FALLBACK_FACE}.",
-            said.join(", ")
-        );
+        let then = if faces.iter().any(|f| f.eq_ignore_ascii_case(FALLBACK_FACE)) {
+            String::new()
+        } else {
+            format!("; then {FALLBACK_FACE}")
+        };
+        let reply = format!(" Backup faces, in order: {}{then}.", said.join(", "));
         (made, reply)
     }
 
@@ -2245,6 +2250,11 @@ mod tests {
         assert_eq!(
             describe_backups(&argv(&["Segoe UI", "Arial"])),
             "fallback = \"Segoe UI\", \"Arial\", then Tahoma"
+        );
+        assert_eq!(
+            describe_backups(&argv(&["Segoe UI", "tahoma"])),
+            "fallback = \"Segoe UI\", \"tahoma\"",
+            "Tahoma named: not twice"
         );
     }
 
