@@ -88,7 +88,6 @@ const STATUS_NAME: &str = console_name!("debug_status");
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
-const HUDELEMENT_NAME: &str = hudelement::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
 const EX_INTERP_NAME: &str = ex_interp::NAME;
@@ -429,10 +428,11 @@ fn poll_overviewmap() {
     }
 }
 
-/// `ds_hud_hide_element` keeps its own state -- a bitmask, not a cvar --
-/// so it cannot go through `poll_code_patch`. Everything else about it is the
-/// same: applied every frame, reported only when it writes, and complaining
-/// once rather than sixty times a second while `client.dll` is not loaded.
+/// `hudelement` keeps its own state -- a bitmask the settings that use it
+/// set (`ds_hud_hide_teammate_info`), not a cvar -- so it cannot go through
+/// `poll_code_patch`. Everything else about it is the same: applied every
+/// frame, reported only when it writes, and complaining once rather than
+/// sixty times a second while `client.dll` is not loaded.
 fn poll_hudelements() {
     match hudelement::apply() {
         Ok(0) => HUDELEMENT_COMPLAINED.store(false, Ordering::Relaxed),
@@ -440,7 +440,7 @@ fn poll_hudelements() {
             HUDELEMENT_COMPLAINED.store(false, Ordering::Relaxed);
             unsafe {
                 crate::debug::report(&format!(
-                    "commands: {HUDELEMENT_NAME} wrote {written} vftable slot(s) -- {}",
+                    "commands: hudelement wrote {written} vftable slot(s) -- {}",
                     hudelement::status()
                 ))
             };
@@ -454,9 +454,7 @@ fn poll_hudelements() {
             }
             if !HUDELEMENT_COMPLAINED.swap(true, Ordering::Relaxed) {
                 unsafe {
-                    crate::debug::report(&format!(
-                        "commands: {HUDELEMENT_NAME} not applied yet -- {why}"
-                    ))
+                    crate::debug::report(&format!("commands: hudelement not applied yet -- {why}"))
                 };
             }
         }
@@ -556,6 +554,9 @@ pub fn poll() {
     }
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
+    // ds_hud_hide_teammate_info sets hudelement's bit, which the next line
+    // writes.
+    crate::teammate_info::poll();
     poll_hudelements();
     // ds_hud_overview_layout keeps its own state -- held rects, not a cvar --
     // so it belongs here alongside hudelement rather than in the gated block
@@ -585,10 +586,11 @@ pub fn poll() {
     crate::center_text::poll();
     // ds_spec_hide_text: two code patches, byte-checked each frame.
     crate::spectator_text::poll();
-    // ds_hud_hide_server_text: one hw.dll call, byte-checked each frame.
-    crate::server_hud_text::poll();
+    // ds_hud_hide_plugin_text: one hw.dll call, byte-checked each frame.
+    crate::plugin_text::poll();
     // Keeps the ShowMenu handler prepended and the voice and command menus
-    // hidden while ds_hud_hide_voice_menus is on.
+    // hidden while ds_hud_hide_voice_menus is on, and every other menu while
+    // ds_hud_hide_plugin_text is (after plugin_text::poll, which it reads).
     crate::voice_menus::poll();
     // ds_hud_hide_hints: one code patch, byte-checked each frame.
     crate::hint_panel::poll();
@@ -805,9 +807,8 @@ fn status_text() -> String {
     if let Some(hide_asset) = crate::hide_asset::status_line() {
         lines.push(hide_asset);
     }
-    // The one setting the console's own type-ahead cannot report, because it
-    // is a command rather than a cvar -- which is the reason the rest are left
-    // out of here and this is not.
+    // What ds_hud_hide_teammate_info actually wrote, which its cvar's value
+    // alone does not say.
     if hudelement::hidden_count() > 0 {
         lines.push(format!("HUD elements: {}", hudelement::status()));
     }
@@ -928,8 +929,8 @@ fn status_text() -> String {
     if let Some(hints) = crate::hint_panel::status_line() {
         lines.push(hints);
     }
-    if let Some(server_hud_text) = crate::server_hud_text::status_line() {
-        lines.push(server_hud_text);
+    if let Some(plugin_text) = crate::plugin_text::status_line() {
+        lines.push(plugin_text);
     }
     if let Some(voice_menus) = crate::voice_menus::status_line() {
         lines.push(voice_menus);
@@ -1192,115 +1193,6 @@ unsafe extern "C" fn cmd_crosshair() {
         crosshair::hidden,
         crosshair::status,
     );
-}
-
-/// `ds_hud_hide_element [<name> <0|1>]`.
-///
-/// A command rather than a cvar: it takes two arguments, which a cvar's single
-/// value cannot carry, and there is one per element -- a cvar for each would
-/// bury everything else in the console's type-ahead.
-unsafe extern "C" fn cmd_hudelement() {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return;
-    };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-
-    let argv = |n: i32| -> Option<String> {
-        let raw = unsafe { (engfuncs.cmd_argv)(n) };
-        (!raw.is_null()).then(|| {
-            unsafe { CStr::from_ptr(raw as *const c_char) }
-                .to_string_lossy()
-                .trim()
-                .to_owned()
-        })
-    };
-
-    if argc < 2 {
-        console_print(&format!(
-            "usage: {HUDELEMENT_NAME} <element> <0|1>   (1 hides it)\n       {HUDELEMENT_NAME} all 0        (show everything again)\n{}",
-            hudelement::listing()
-        ));
-        return;
-    }
-
-    let Some(name) = argv(1) else { return };
-
-    // Checked before the argument count, so a bad name is reported as a bad
-    // name whether or not a 0/1 followed it -- "expected <0|1>" would
-    // otherwise lead someone to believe the name was fine and only the
-    // second argument was missing.
-    let is_all = name.eq_ignore_ascii_case("all");
-    let index = if is_all {
-        None
-    } else {
-        match hudelement::find(&name) {
-            Some(i) => Some(i),
-            None => {
-                console_print(&format!(
-                    "{HUDELEMENT_NAME}: no element called \"{name}\"\n{}",
-                    hudelement::listing()
-                ));
-                return;
-            }
-        }
-    };
-
-    if argc < 3 {
-        console_print(&format!(
-            "{HUDELEMENT_NAME}: expected {HUDELEMENT_NAME} {name} <0|1>\n"
-        ));
-        return;
-    }
-    let Some(raw) = argv(2) else { return };
-    let on = match raw.as_str() {
-        "0" => false,
-        "1" => true,
-        other => {
-            console_print(&format!(
-                "{HUDELEMENT_NAME}: expected 0 or 1, got \"{other}\"\n"
-            ));
-            return;
-        }
-    };
-
-    if is_all {
-        if on {
-            // Deliberately refused. Hiding every element at once includes the
-            // text menus (`menu`: voice commands and server votes; the team
-            // and class menus are VGUI and not on this list), and a capture
-            // session that cannot see a vote is a support question, not a
-            // feature.
-            console_print(&format!(
-                "{HUDELEMENT_NAME}: `all 1` would hide every text menu too -- name the elements you want gone\n"
-            ));
-            return;
-        }
-        hudelement::show_all();
-        console_print(&format!("{HUDELEMENT_NAME}: every element shown again\n"));
-        unsafe { crate::debug::report(&format!("commands: {HUDELEMENT_NAME} all 0")) };
-        return;
-    }
-
-    let index =
-        index.expect("validated above: not `all`, so `find` succeeded or we already returned");
-    hudelement::set_hidden(index, on);
-    let bit = if on { "1" } else { "0" };
-    // Applied here as well as in `poll`, so the console reports the real
-    // outcome rather than "set" for something that could not be written.
-    match hudelement::apply() {
-        Ok(_) => {
-            console_print(&format!("{HUDELEMENT_NAME} {name} = {bit}\n"));
-            unsafe { crate::debug::report(&format!("commands: {HUDELEMENT_NAME} {name} = {bit}")) };
-        }
-        Err(why) => {
-            console_print(&format!("{HUDELEMENT_NAME}: {why}\n"));
-            unsafe {
-                crate::debug::report(&format!(
-                    "commands: {HUDELEMENT_NAME} {name} failed -- {why}"
-                ))
-            };
-        }
-    }
 }
 
 /// `ds_map_clear_decals` -- takes no arguments and holds no state, so a
@@ -1674,7 +1566,6 @@ pub fn install() {
         texture_hires::MISSES_COMMAND_NAMES,
         texture_hires::misses_command,
     );
-    add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(crate::demo_reload::NAME, crate::demo_reload::command);
     crate::demo_reload::install();
@@ -1844,8 +1735,11 @@ pub fn install() {
     if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
         crate::spectator_text::set_cvar(spectator_text);
     }
-    if let Some(server_hud_text) = register(crate::server_hud_text::NAME, "0") {
-        crate::server_hud_text::set_cvar(server_hud_text);
+    if let Some(plugin_text) = register(crate::plugin_text::NAME, "0") {
+        crate::plugin_text::set_cvar(plugin_text);
+    }
+    if let Some(teammate_info) = register(crate::teammate_info::NAME, "0") {
+        crate::teammate_info::set_cvar(teammate_info);
     }
     // On by default: the hint panel is the recorder's own tutorial and
     // covers a corner of the shot (#286).
@@ -2075,12 +1969,11 @@ mod tests {
             assert!(on.contains(part), "{part} missing while on:\n{on}");
         }
 
-        // A command has no type-ahead value to read, so this is the only
-        // place that says which elements are hidden.
+        // What hudelement wrote is only said here.
         hudelement::show_all();
         assert!(!status_text().contains("HUD elements"), "{}", status_text());
-        hudelement::set_hidden(hudelement::find("saytext").unwrap(), true);
-        assert!(status_text().contains("saytext"), "{}", status_text());
+        hudelement::set_hidden(hudelement::find("statusbar").unwrap(), true);
+        assert!(status_text().contains("statusbar"), "{}", status_text());
         hudelement::show_all();
 
         anim_fix::LEVEL.store(anim, Ordering::Relaxed);
@@ -2099,7 +1992,6 @@ mod tests {
             SCOREBOARD_NAME,
             VOICE_NAME,
             CROSSHAIR_NAME,
-            HUDELEMENT_NAME,
             CLEAR_DECALS_NAME,
             HAND_SIGNALS_NAME,
             EX_INTERP_NAME,
@@ -2115,7 +2007,7 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
-            crate::server_hud_text::NAME,
+            crate::plugin_text::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::frame_times::NAME,
@@ -2147,7 +2039,8 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
-            crate::server_hud_text::NAME,
+            crate::plugin_text::NAME,
+            crate::teammate_info::NAME,
             crate::hint_panel::NAME,
             crate::strafe_twitch::NAME,
             missing_shots::NAME,

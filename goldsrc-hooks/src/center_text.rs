@@ -15,8 +15,9 @@
 //! 4 s after the post. Destinations 1 (notify), 2 (console) and 3 (chat) go
 //! elsewhere and are left alone, so joins, leaves and chat lines still show.
 //!
-//! The only narrower-than-this switch before was `ds_hud_hide_element
-//! vgui2print 1`, which also takes the machine gun's "Deploy to reload" hint.
+//! Before this the only switch was `ds_hud_hide_element vgui2print 1`
+//! (retired in #342), which also took the machine gun's "Deploy to reload"
+//! prompt; that is `ds_hud_hide_hints`' now (`mg_reload_hint.rs`).
 //!
 //! ## What it doesn't reach
 //!
