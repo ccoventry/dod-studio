@@ -1183,6 +1183,150 @@ mod tests {
     }
 
     #[test]
+    fn groups_come_biggest_waste_first_then_by_path_and_the_first_path_is_kept() {
+        let d = Demos::new("order");
+        // Wasted space: big 2 x 262144, mid 1 x 5, tiny pair 1 x 3 and 1 x 3.
+        let files = [
+            d.file("z_big.dem", &long_demo(1)),
+            d.file("y_big.dem", &long_demo(1)),
+            d.file("x_big.dem", &long_demo(1)),
+            d.file("b_mid.dem", b"12345"),
+            d.file("a_mid.dem", b"12345"),
+            d.file("d_tiny.dem", b"abc"),
+            d.file("c_tiny.dem", b"abc"),
+            d.file("solo.dem", b"nobody else"),
+        ];
+        let audit = key_pass(&files, &mut KeyCache::default());
+        let names: Vec<Vec<String>> = audit
+            .groups
+            .iter()
+            .map(|g| {
+                g.files
+                    .iter()
+                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                vec!["x_big.dem", "y_big.dem", "z_big.dem"],
+                vec!["a_mid.dem", "b_mid.dem"],
+                vec!["c_tiny.dem", "d_tiny.dem"],
+            ]
+        );
+        assert_eq!(audit.copies, 4);
+        assert_eq!(audit.wasted_bytes, 2 * 4 * KEY_BYTES + 5 + 3);
+        // One path per demo, the first of its group, sorted.
+        let kept: Vec<_> = audit
+            .unique_files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(kept, ["a_mid.dem", "c_tiny.dem", "solo.dem", "x_big.dem"]);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_a_demo_of_its_own_and_still_counted() {
+        let d = Demos::new("unreadable");
+        let a = d.file("a.dem", b"same size A");
+        let b = d.file("b.dem", b"same size A");
+        let gone = d.0.join("gone.dem");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let audit = find_duplicates_cached(
+            vec![a, b, gone.clone()],
+            &AtomicBool::new(false),
+            &Some(tx),
+            &mut KeyCache::default(),
+        );
+        assert_eq!(group_names(&audit), [["a.dem", "b.dem"]]);
+        assert_eq!(audit.unique_files.len(), 2);
+        assert!(
+            audit
+                .unique_files
+                .iter()
+                .any(|p| p.file_name().is_some_and(|n| n == "gone.dem"))
+        );
+        let messages: Vec<_> = rx.try_iter().collect();
+        assert!(matches!(messages.first(), Some(AuditProgress::Keying(3))));
+        let hashed = messages
+            .iter()
+            .filter(|m| matches!(m, AuditProgress::Hashing(_)))
+            .count();
+        assert_eq!(hashed, 3, "{messages:?}");
+    }
+
+    #[test]
+    fn a_cancel_before_the_pass_returns_nothing_and_says_nothing() {
+        let d = Demos::new("cancel_first");
+        let files = [d.file("a.dem", b"same"), d.file("b.dem", b"same")];
+        let (tx, rx) = std::sync::mpsc::channel();
+        let audit = find_duplicates_cached(
+            files.to_vec(),
+            &AtomicBool::new(true),
+            &Some(tx),
+            &mut KeyCache::default(),
+        );
+        assert!(audit.groups.is_empty() && audit.unique_files.is_empty());
+        assert_eq!(audit.reads, Reads::default());
+        assert_eq!(rx.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn the_key_pass_reports_in_a_fixed_order_on_one_reader() {
+        let d = Demos::new("events");
+        let files = [
+            d.file("a.dem", b"same size A"),
+            d.file("b.dem", b"same size A"),
+            d.file("lone.dem", b"a size of its own"),
+        ];
+        let one = Readers {
+            threads: 1,
+            seeks: &|_| false,
+        };
+        let run = |cache: &mut KeyCache| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            find_duplicates_with(
+                files.to_vec(),
+                vec![],
+                &one,
+                &AtomicBool::new(false),
+                &Some(tx),
+                cache,
+            );
+            rx.try_iter()
+                .map(|m| match m {
+                    AuditProgress::Keying(n) => format!("keying {n}"),
+                    AuditProgress::Hashing(p) => format!(
+                        "hashing {}",
+                        Path::new(&p).file_name().unwrap().to_string_lossy()
+                    ),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut cache = KeyCache::default();
+        // The lone size needs no key and reports first; the two to read follow.
+        let expected = [
+            "keying 3",
+            "hashing lone.dem",
+            "hashing a.dem",
+            "hashing b.dem",
+        ];
+        assert_eq!(run(&mut cache), expected);
+        // Remembered keys report ahead of reads, in file order.
+        assert_eq!(
+            run(&mut cache),
+            [
+                "keying 3",
+                "hashing a.dem",
+                "hashing b.dem",
+                "hashing lone.dem"
+            ]
+        );
+    }
+
+    #[test]
     fn content_hashes_match_the_key_and_the_tail() {
         let d = Demos::new("content");
         let mut bytes: Vec<u8> = (0..(3 * KEY_BYTES as usize + 123))
