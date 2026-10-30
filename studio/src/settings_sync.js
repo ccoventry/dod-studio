@@ -5,7 +5,8 @@
 // (pinned folders, capture drives, ...) and hands them over through getState().
 
 import { saveSettings } from './ipc_bridge.js';
-import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
+import { getCommandsState, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
+import { renderTimingDiagram } from './timing_diagram.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
 import { readKillGaps, applyKillGaps } from './kill_gaps_setting.js';
 import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
