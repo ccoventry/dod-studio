@@ -149,7 +149,7 @@ static COMMAND_MENU_BLOCKED: AtomicBool = AtomicBool::new(false);
 /// So a failure is reported once, not every frame.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

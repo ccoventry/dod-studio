@@ -78,7 +78,7 @@ pub static REMEMBER: AtomicBool = AtomicBool::new(true);
 static RESIZABLE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static REMEMBER_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once the two cvars are registered.
+/// Called by `commands/install.rs` once the two cvars are registered.
 pub fn set_cvars(resizable: *mut CvarSPartial, remember: *mut CvarSPartial) {
     RESIZABLE_CVAR.store(resizable, Ordering::Release);
     REMEMBER_CVAR.store(remember, Ordering::Release);

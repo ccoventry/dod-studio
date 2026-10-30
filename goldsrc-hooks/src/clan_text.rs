@@ -105,7 +105,7 @@ struct Last {
     game_rules: Option<Vec<u8>>,
 }
 
-/// Called by `commands.rs` once `ds_hud_hide_clan_text` is registered.
+/// Called by `commands/install.rs` once `ds_hud_hide_clan_text` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

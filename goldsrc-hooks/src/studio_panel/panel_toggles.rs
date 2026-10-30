@@ -122,7 +122,7 @@ unsafe extern "C" fn wrapped_toggleconsole() {
     unsafe { crate::cmd_list::call_real(&REAL_TOGGLECONSOLE) };
 }
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_viewdemo_cvar(cvar: *mut crate::engine::CvarSPartial) {
     VIEWDEMO_CVAR.store(cvar, Ordering::Release);
 }
