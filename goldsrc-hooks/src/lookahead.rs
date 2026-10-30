@@ -103,9 +103,14 @@ impl View {
 }
 
 /// The playing demo's timeline, once read and while the demo player's clock
-/// can be read. Engine thread, every frame the look-ahead could be used
-/// (`time` is `ref_params_s::time`); starts the read the first time a demo
-/// is seen.
+/// can be read. Engine thread, every frame the look-ahead could be used;
+/// starts the read the first time a demo is seen.
+///
+/// `time` must be on the `msg_time` clock, and the same one for every
+/// caller, since the clock difference is cached for them all: callers pass
+/// the watched player's newest `msg_time`. (The hook's `client_time` runs on
+/// its own, about 0.35 s from it; one caller using it put the other's
+/// lookups that far off.)
 pub fn timeline(time: f64) -> Option<View> {
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();

@@ -72,9 +72,11 @@ const GAP_SECONDS: f64 = 0.5;
 const MOVETYPE_FLY: i32 = 5;
 /// Look-ahead (#1154): how far past the newest snapshot the demo file is
 /// asked whether the body leaves `sprint_*`. The body shows a let-go a
-/// median 0.13 s after the key; taking it 0.10 s early scored best on the
-/// walk-off frames of 5 players (71.5% -> 79.0% against the drawn POV gun).
-pub(super) const LET_GO_LOOK_AHEAD_SECONDS: f32 = 0.10;
+/// median 0.13 s after the key (p90 0.30 s). Against the drawn POV gun on
+/// the walk-off frames of 5 players: 71.5% without, 79.1% at 0.10 s, 83.3%
+/// at 0.20 s (held-to-the-ground falls 93.4% -> 92.1%), 83.4% at 0.30 s
+/// (held 86.5%).
+pub(super) const LET_GO_LOOK_AHEAD_SECONDS: f32 = 0.20;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Snapshot {
@@ -243,7 +245,23 @@ pub(super) fn note_snapshot(time: f64, origin: [f32; 3], body: &str, movetype: i
 /// Whether the demo file says the body is about to leave `sprint_*`; read
 /// by the next [`note_snapshot`]. False without a timeline.
 pub(super) fn note_body_ahead(leaving_sprint: bool) {
-    STATE.with(|s| s.borrow_mut().leaving_sprint = leaving_sprint);
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if leaving_sprint
+            && !s.leaving_sprint
+            && super::LOG_HELD_MODELS.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            // Safety: `report` only appends to the hook log.
+            unsafe {
+                crate::debug::report(&format!(
+                    "lookahead: the file has the body leaving sprint_ within {LET_GO_LOOK_AHEAD_SECONDS} s (newest snapshot {:.3}, {:?})",
+                    s.last.map_or(0.0, |l| l.time),
+                    s.fall
+                ))
+            };
+        }
+        s.leaving_sprint = leaving_sprint;
+    });
 }
 
 /// [`SnapshotMotion::in_the_air`] on the engine thread's state.

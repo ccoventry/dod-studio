@@ -361,7 +361,7 @@ fn watched_frame(time: f64, target: i32) -> Option<crouch::Frame> {
     };
     let newest = player.curstate.msg_time;
     let started = std::time::Instant::now();
-    let timeline = crate::lookahead::timeline(time);
+    let timeline = crate::lookahead::timeline(f64::from(newest));
     let upcoming_down = timeline
         .as_ref()
         .and_then(|t| t.next_crouch_down(target, newest, crouch::LOOK_AHEAD_SECONDS));

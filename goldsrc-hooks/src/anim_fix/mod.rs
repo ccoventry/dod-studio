@@ -139,21 +139,17 @@ pub fn pov_demo_playing() -> bool {
     engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
-/// A demo is playing and the engine is not connected as a spectator.
-/// `IsSpectateOnly()` is true through an HLTV demo and false for the whole of
-/// a POV one: the hook log of the #613 session shows it false from that
-/// demo's first frame, and `apply()` has always gated on it.
 /// Look-ahead (#1154): whether the demo file has the spectated player's
 /// body leaving `sprint_*` within `snapshot_motion`'s look-ahead of his
 /// newest snapshot, while it is `sprint_*` now. False without a timeline.
-fn body_leaves_sprint_soon(now: f64, spectated: &ClEntityS, body: &str) -> bool {
+fn body_leaves_sprint_soon(spectated: &ClEntityS, body: &str) -> bool {
     if !body.starts_with("sprint_") || spectated.model.is_null() {
         return false;
     }
-    let Some(timeline) = crate::lookahead::timeline(now) else {
+    let newest = spectated.curstate.msg_time;
+    let Some(timeline) = crate::lookahead::timeline(f64::from(newest)) else {
         return false;
     };
-    let newest = spectated.curstate.msg_time;
     timeline
         .body_changes(
             spectated.index,
@@ -167,6 +163,10 @@ fn body_leaves_sprint_soon(now: f64, spectated: &ClEntityS, body: &str) -> bool 
         })
 }
 
+/// A demo is playing and the engine is not connected as a spectator.
+/// `IsSpectateOnly()` is true through an HLTV demo and false for the whole of
+/// a POV one: the hook log of the #613 session shows it false from that
+/// demo's first frame, and `apply()` has always gated on it.
 fn playing_pov_demo(engfuncs: &engine::ClEngineFuncsPartial) -> bool {
     let api = engfuncs.p_demo_api;
     let playing_back = !api.is_null() && unsafe { ((*api).is_playingback)() } != 0;
@@ -892,7 +892,6 @@ pub fn apply() {
         spectated.curstate.origin.y,
     );
     snapshot_motion::note_body_ahead(body_leaves_sprint_soon(
-        now,
         spectated,
         body_label.as_deref().unwrap_or(""),
     ));
