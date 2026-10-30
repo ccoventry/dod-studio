@@ -1637,4 +1637,182 @@ mod tests {
             r.conflicts
         );
     }
+
+    // ── Row order and wording, list by list ──────────────────────────────────
+    //
+    // Pinned before `cfg_report` was split into stages (#1177), so each stage
+    // is held to the rows it produced as one function.
+
+    #[test]
+    fn unseen_rows_name_each_config_setting_with_its_file_and_line() {
+        // Flush off: nothing pins r_decals. mirv_fov is read from the config
+        // directly, mirv_movie_fps is pinned by the app, and the pipeline
+        // never reads hud_deathnotice_time, so it is not "unseen" either.
+        let (_dir, game) = fake_game("unseen_rows");
+        let r = report_for(game, Vec::new(), Vec::new(), Some(120), Some(false), None);
+
+        let rows: Vec<(&str, &str, &str, usize)> = r
+            .unseen
+            .iter()
+            .map(|u| (u.cvar.as_str(), u.value.as_str(), u.file.as_str(), u.line))
+            .collect();
+        assert_eq!(rows, [("r_decals", "0", "movie.cfg", 1)]);
+    }
+
+    #[test]
+    fn unseen_rows_follow_the_watched_cvars_order_not_the_configs() {
+        // An Initial Command stating the fov makes a config's other fov cvar
+        // unseen. The config states default_fov first; the rows still list
+        // r_decals first (`cfg_scan::WATCHED_CVARS`). Flush off, so nothing
+        // pins r_decals.
+        let root = Scratch::new("cfgrep_unseen_order_off");
+        let dod = root.join("dod");
+        std::fs::create_dir_all(&dod).unwrap();
+        std::fs::write(dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
+        std::fs::write(
+            dod.join("movie.cfg"),
+            "default_fov \"90\"\nr_decals \"0\"\n",
+        )
+        .unwrap();
+        let exe = root.join("hl.exe");
+        std::fs::write(&exe, b"").unwrap();
+        let r = report_for(
+            exe.to_string_lossy().to_string(),
+            vec!["mirv_fov 100".to_string()],
+            Vec::new(),
+            Some(120),
+            Some(false),
+            None,
+        );
+
+        let rows: Vec<(&str, &str, usize)> = r
+            .unseen
+            .iter()
+            .map(|u| (u.cvar.as_str(), u.value.as_str(), u.line))
+            .collect();
+        assert_eq!(rows, [("r_decals", "0", 2), ("default_fov", "90", 1)]);
+    }
+
+    #[test]
+    fn noop_rows_list_initial_commands_before_the_configs() {
+        let (_dir, game) = fake_game_with_mirv_movie_filename("noop_order");
+        let r = report_for(
+            game,
+            vec!["mirv_movie_filename take".to_string()],
+            Vec::new(),
+            Some(120),
+            Some(true),
+            None,
+        );
+
+        let rows: Vec<(&str, &str, &str)> = r
+            .noop_init
+            .iter()
+            .map(|n| (n.cvar.as_str(), n.command.as_str(), n.source.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "mirv_movie_filename",
+                    "mirv_movie_filename take",
+                    "Initial Commands"
+                ),
+                (
+                    "mirv_movie_filename",
+                    "mirv_movie_filename clip",
+                    "movie.cfg, line 1"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn banned_scheduled_lists_banned_commands_before_the_decal_flush_ones() {
+        let r = report(
+            "banned_order",
+            &[],
+            &["r_decals 128", "host_framerate 0.05"],
+            120,
+        );
+
+        let rows: Vec<(&str, &str)> = r
+            .banned_scheduled
+            .iter()
+            .map(|b| (b.cvar.as_str(), b.command.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("host_framerate", "host_framerate 0.05"),
+                ("r_decals", "r_decals 128"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_banned_scheduled_command_sets_no_value_in_the_value_rules() {
+        // Initial 1 against Scheduled 2 would be a conflict, but the
+        // scheduled one is refused and has its own, louder row.
+        let r = report("banned_no_value", &["dem_speed 1"], &["dem_speed 2"], 120);
+
+        assert!(
+            r.banned_scheduled.iter().any(|b| b.cvar == "dem_speed"),
+            "{:?}",
+            r.banned_scheduled
+        );
+        assert!(conflict(&r, "dem_speed").is_none(), "{:?}", r.conflicts);
+    }
+
+    #[test]
+    fn a_hazard_row_names_the_command_and_nothing_it_displaces() {
+        let r = report("hazard_row", &[], &["gl_widescreenfov 1"], 120);
+
+        let rows: Vec<(&str, &str, &str, &str, &str)> = r
+            .custom
+            .iter()
+            .map(|c| {
+                (
+                    c.command.as_str(),
+                    c.cvar.as_str(),
+                    c.kind.as_str(),
+                    c.replaced_value.as_str(),
+                    c.source.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [("gl_widescreenfov 1", "gl_widescreenfov", "hazard", "", "")]
+        );
+    }
+
+    #[test]
+    fn renamed_names_list_the_configs_then_initial_then_scheduled_commands() {
+        let r = report_with_files(
+            "renamed_order",
+            &[(
+                "dod/config.cfg",
+                "exec movie.cfg\ndodstudio_hide_scoreboard \"1\"\n",
+            )],
+            &["dodstudio_hide_scoreboard 0"],
+            vec![scheduled("dodstudio_hide_scoreboard 1", "Before", 2.0)],
+            None,
+        );
+
+        let rows: Vec<(&str, &str, &str)> = r
+            .renamed
+            .iter()
+            .map(|n| (n.old.as_str(), n.new.as_str(), n.source.as_str()))
+            .collect();
+        let (old, new) = ("dodstudio_hide_scoreboard", "ds_hud_hide_scoreboard");
+        assert_eq!(
+            rows,
+            [
+                (old, new, "config.cfg, line 2"),
+                (old, new, "Initial Commands"),
+                (old, new, "Scheduled Commands"),
+            ]
+        );
+    }
 }
