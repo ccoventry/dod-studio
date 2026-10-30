@@ -200,8 +200,9 @@ fn is_machine_gun(held_stem: &str) -> bool {
 }
 
 /// Deployed on a ledge or on the bipod, read from the body: `sandbag_*` and
-/// `bipod_*`, in their aim, shoot and reload forms alike.
-fn is_deployed(body: &str) -> bool {
+/// `bipod_*`, in their aim, shoot and reload forms alike. Also what the red
+/// crosshair's gap calls deployed (`IsInMGDeploy`).
+pub(super) fn is_deployed(body: &str) -> bool {
     body.starts_with("sandbag_") || body.starts_with("bipod_")
 }
 

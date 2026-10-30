@@ -3,6 +3,7 @@
 // count, and one line per attempt. Pure, so it can be tested on its own.
 
 import { STRINGS } from './strings.js';
+import { fileNameOf } from './path_display.js';
 
 /**
  * What an attempt came to, as HISTORY_OUTCOME keys it. An attempt is written
@@ -43,9 +44,6 @@ function when(unixMs) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function fileName(path) {
-  return String(path || '').split(/[\\/]/).pop();
-}
 
 /**
  * One line per attempt, newest first: when, settings, and what came of it.
@@ -59,8 +57,8 @@ export function historyLines(history, formatSize, currentAttempt = null) {
     let result;
     if (h.outcome === 'finished') {
       result = h.output_exists
-        ? `${fileName(h.output_path)}, ${formatSize(h.output_size_bytes)}`
-        : STRINGS.RENDER.historyFileNotFound(fileName(h.output_path));
+        ? `${fileNameOf(h.output_path)}, ${formatSize(h.output_size_bytes)}`
+        : STRINGS.RENDER.historyFileNotFound(fileNameOf(h.output_path));
     } else {
       const key = outcomeOf(h, currentAttempt);
       const outcome = STRINGS.RENDER.HISTORY_OUTCOME[key] || key;

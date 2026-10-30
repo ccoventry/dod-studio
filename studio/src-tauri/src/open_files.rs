@@ -16,6 +16,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
+use analysis::fnv1a::fnv1a_hash;
+
 /// Emitted to the page when the running copy is handed files: it then calls
 /// `take_open_files`.
 pub const OPEN_FILES_EVENT: &str = "open_files_pending";
@@ -89,13 +91,10 @@ pub fn take_open_files(pending: tauri::State<'_, PendingOpenFiles>) -> Vec<Strin
 /// The pipe the copy of Studio at `exe` serves: one per exe path and user.
 pub fn pipe_name(exe: &Path, user: &str) -> String {
     let key = format!("{}|{}", exe.to_string_lossy().to_lowercase(), user);
-    format!(r"\\.\pipe\dodstudio-open-{:016x}", fnv1a(key.as_bytes()))
-}
-
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| {
-        (hash ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
+    format!(
+        r"\\.\pipe\dodstudio-open-{:016x}",
+        fnv1a_hash(key.as_bytes())
+    )
 }
 
 /// This exe's pipe, or `None` when the exe path can't be read.

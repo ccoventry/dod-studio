@@ -554,6 +554,18 @@ const REVIEW_PAGE: usize = 7;
 /// `<name>`: it shows the cvar's value and sets it when clicked. Any tab
 /// layout can add more in build mode.
 const CVAR_BOX_PREFIX: &str = "cvar_";
+/// The HD styles the Settings tab's style dropdown was filled with, in its
+/// row order (#899).
+static SETTINGS_STYLES: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+/// Scrolling asked for on the Settings tab since the last frame: lines (the
+/// mouse wheel, 3 a notch, as a list scrolls) and pages (its buttons).
+static SETTINGS_SCROLL_LINES: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static SETTINGS_SCROLL_PAGES: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// `Panel::OnMouseWheeled(int delta)`. A control's own passes the wheel up
+/// to its parent (`CallParentFunction` with "MouseWheeled", which the
+/// parent's `InternalMouseWheeled`, slot 125, hands to this slot), so the
+/// Settings tab hears the wheel over any of its boxes.
+const PANEL_SLOT_ON_MOUSE_WHEELED: usize = 99;
 /// `Button::SetSelected(bool)` (CheckButton's override posts
 /// `CheckButtonChecked`) and `Button::IsSelected()`.
 const BUTTON_SLOT_SET_SELECTED: usize = 173;
@@ -998,7 +1010,7 @@ fn folder_settings() -> u8 {
 
 /// Whether a folder setting's Settings-tab box shows: Show folders' demo
 /// counts only while folders are listed, and the two boxes that need the
-/// counts (Hide empty folders, Include subfolders) only while those are on too
+/// counts (Hide empty folders, Counts include subfolders) only while those are on too
 /// (#787). `None` for every other box, which always shows.
 fn folder_box_shown(cvar: &str, folders: bool, counts: bool) -> Option<bool> {
     use crate::demo_list_folders as f;
@@ -1100,14 +1112,21 @@ fn parse_time(text: &str) -> Result<f64, String> {
 }
 
 /// One line of the saved settings file: `name value`, `name` a plain cvar
-/// name and `value` a number, so the file can never run anything else. A
+/// name and `value` a number or one plain word (an HD style, #899), so the
+/// file can never run anything else. A
 /// name a DLL from before #555 saved (`dodstudio_...`) reads as the name
 /// that replaced it: the file is ours, so it moves to the new names rather than losing
 /// the user's settings.
 fn settings_line(line: &str) -> Option<(std::borrow::Cow<'_, str>, &str)> {
     let (name, value) = line.trim().split_once(' ')?;
     let value = value.trim();
-    (bound_cvar(&format!("{CVAR_BOX_PREFIX}{name}")).is_some() && value.parse::<f64>().is_ok())
+    let word = !value.is_empty()
+        && value.len() <= 32
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    (bound_cvar(&format!("{CVAR_BOX_PREFIX}{name}")).is_some()
+        && (value.parse::<f64>().is_ok() || word))
         .then(|| (crate::names::current_name(name), value))
 }
 
@@ -1136,6 +1155,19 @@ fn migrated_settings(text: &str) -> Option<String> {
                 .map(|(n, v)| format!("{n} {v}\n"))
                 .collect()
         })
+}
+
+/// How far down the Settings tab is scrolled after `lines` (the wheel) and
+/// `pages` (its buttons): a page is the view less one line, so a line stays
+/// in sight across it, and the scroll stays between the top and where the
+/// last row is just in view.
+fn settings_scroll(scroll: i32, lines: i32, pages: i32, line: i32, view: i32, content: i32) -> i32 {
+    let page = (view - line).max(line);
+    let most = (content - view).max(0);
+    scroll
+        .saturating_add(lines.saturating_mul(line))
+        .saturating_add(pages.saturating_mul(page))
+        .clamp(0, most)
 }
 
 /// The cvar a Settings check box is bound to, from its name.
@@ -1431,6 +1463,8 @@ enum Action<'a> {
     Goto,
     /// Put every setting saved from the Settings tab back to its default.
     ResetSettings,
+    /// The Settings tab's scroll buttons: a page up (-1) or down (1).
+    ScrollSettings(i32),
     /// Forget the players picked on the Demos tab.
     ClearPlayers,
     /// The Demos tab's Back, Forward and Up buttons (#779).
@@ -1459,6 +1493,12 @@ fn action(command: &str) -> Action<'_> {
     }
     if command.eq_ignore_ascii_case("reset_settings") {
         return Action::ResetSettings;
+    }
+    if command.eq_ignore_ascii_case(crate::settings_tab::SCROLL_UP_COMMAND) {
+        return Action::ScrollSettings(-1);
+    }
+    if command.eq_ignore_ascii_case(crate::settings_tab::SCROLL_DOWN_COMMAND) {
+        return Action::ScrollSettings(1);
     }
     if command.eq_ignore_ascii_case("clear_players") {
         return Action::ClearPlayers;
@@ -1669,9 +1709,10 @@ fn apply_saved_settings() {
         let Ok(c_name) = std::ffi::CString::new(name.as_ref()) else {
             continue;
         };
-        let before = unsafe { (engfuncs.pfn_get_cvar_float)(c_name.as_ptr()) };
-        if !defaults.iter().any(|(n, _)| *n == name) {
-            defaults.push((name.to_string(), format!("{before}")));
+        if !defaults.iter().any(|(n, _)| *n == name)
+            && let Some(before) = cvar_text(&c_name)
+        {
+            defaults.push((name.to_string(), before));
         }
         if let Ok(line) = std::ffi::CString::new(format!("{name} {value}\n")) {
             crate::engine::client_cmd(&line);
@@ -1689,22 +1730,47 @@ fn apply_saved_settings() {
     }
 }
 
-/// Remembers a Settings-tab change for the next launch.
-fn save_setting(name: &str, value: &str, default_before: f32) {
-    {
+/// A cvar's value as text (an HD style is a word, not a number), or `None`
+/// while it doesn't exist or isn't one [`settings_line`] would keep.
+fn cvar_text(name: &CStr) -> Option<String> {
+    let engfuncs = crate::engine::engfuncs()?;
+    // Safety: the engine's own cvar record, kept for the session; its
+    // `string` is a valid C string while the cvar exists.
+    let text = unsafe {
+        let cvar = (engfuncs.pfn_get_cvar_pointer)(name.as_ptr());
+        if cvar.is_null() || (*cvar).string.is_null() {
+            return None;
+        }
+        CStr::from_ptr((*cvar).string)
+            .to_string_lossy()
+            .trim()
+            .to_string()
+    };
+    settings_line(&format!("{} {text}", name.to_string_lossy()))
+        .is_some()
+        .then_some(text)
+}
+
+/// Remembers a Settings-tab change for the next launch. `default_before` is
+/// the value before DoD Studio first changed it, for Reset.
+fn save_setting(name: &str, value: &str, default_before: Option<String>) {
+    if let Some(before) = default_before {
         let mut defaults = DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
         if !defaults.iter().any(|(n, _)| n == name) {
-            defaults.push((name.to_string(), format!("{default_before}")));
+            defaults.push((name.to_string(), before));
         }
     }
     let path = settings_path();
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let _ = std::fs::create_dir_all(res_dir());
-    if std::fs::write(&path, settings_with(&text, name, value)).is_err() {
-        unsafe {
-            crate::debug::report(&format!("studio_panel: could not save {}", path.display()))
-        };
-    }
+    let saved = std::fs::write(&path, settings_with(&text, name, value)).is_ok();
+    unsafe {
+        crate::debug::report(&format!(
+            "studio_panel: Settings tab set {name} {value}, {} {}",
+            if saved { "saved to" } else { "could not save" },
+            path.display()
+        ))
+    };
 }
 
 /// Puts every saved setting back to its value before DoD Studio changed it,
@@ -1943,6 +2009,7 @@ mod hook {
     static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
+    static PAGE_ON_WHEEL: AtomicUsize = AtomicUsize::new(0);
     /// Frames left to put the focus back on the Console tab's input line
     /// after Up or Down (#786).
     static CONSOLE_REFOCUS: AtomicUsize = AtomicUsize::new(0);
@@ -3014,6 +3081,11 @@ mod hook {
         /// Each bound check box's state as last seen, so a click is told
         /// apart from the cvar changing under it.
         boxes: Vec<(Vpanel, bool)>,
+        /// Each bound dropdown's text as last set or seen, the same way.
+        /// The frames left to wait for one to show what it was given.
+        choices: Vec<(Vpanel, String, u8)>,
+        /// How far the Settings tab is scrolled down, in pixels.
+        settings_scroll: i32,
         /// Each tab's size and its controls' places as its `.res` laid them
         /// out, read the first time the tab has a size.
         designs: Vec<PageDesign>,
@@ -3044,6 +3116,8 @@ mod hook {
                 list_offset: None,
                 list_set: None,
                 boxes: Vec::new(),
+                choices: Vec::new(),
+                settings_scroll: 0,
                 help_shown: None,
                 designs: Vec::new(),
             })
@@ -3203,11 +3277,16 @@ mod hook {
                             PANEL_SLOT_ON_KEY_CODE_PRESSED,
                             page_on_key_pressed as *const () as usize,
                         ),
+                        (
+                            PANEL_SLOT_ON_MOUSE_WHEELED,
+                            page_on_wheel as *const () as usize,
+                        ),
                     ],
                 );
                 PAGE_ON_COMMAND.store(own[0], Ordering::Release);
                 PAGE_ON_KEY.store(own[1], Ordering::Release);
                 PAGE_ON_KEY_PRESSED.store(own[2], Ordering::Release);
+                PAGE_ON_WHEEL.store(own[3], Ordering::Release);
                 load(object, page.res.0.as_ptr(), std::ptr::null());
                 // Where the .res put each control, before anything resizes it.
                 let page_vp = vpanel_of(object);
@@ -3273,6 +3352,8 @@ mod hook {
             }
             // The Go to dropdown: the heading, then the places (#779).
             fill_place_box(&vgui, base, build);
+            // The Settings tab's dropdowns: each row's choices (#899).
+            fill_settings_choices(&vgui, base, build);
 
             // Our own Load Demo window, never shown: the Demos tab borrows its
             // list and Load button. It fills its list as it is built.
@@ -3544,6 +3625,28 @@ mod hook {
                 let sheet = vpanel_of(SHEET.load(Ordering::Acquire) as *mut c_void);
                 let window_now = window(vgui).map(|(_, vp)| vgui.rect(vp));
                 let window_design = *WINDOW_DESIGN.lock().unwrap_or_else(|e| e.into_inner());
+                let settings_page =
+                    vpanel_of(PAGE_OBJECTS[SETTINGS_PAGE].load(Ordering::Acquire) as *mut c_void);
+                if page == settings_page {
+                    let scroll = lent.settings_scroll;
+                    let Some(design) = lent.designs.iter_mut().find(|d| d.page == page) else {
+                        continue;
+                    };
+                    let (scroll, content) = place_settings(vgui, &design.controls, scroll, w, h);
+                    if design.logged != Some((w, h)) {
+                        design.logged = Some((w, h));
+                        crate::debug::report(&format!(
+                            "studio_panel: tab Settings is {w}x{h}, its rows {content} tall ({})",
+                            if content > h - load_strip::inset() {
+                                "it scrolls"
+                            } else {
+                                "all in view"
+                            }
+                        ));
+                    }
+                    lent.settings_scroll = scroll;
+                    continue;
+                }
                 let Some(design) = lent.designs.iter_mut().find(|d| d.page == page) else {
                     continue;
                 };
@@ -3590,6 +3693,154 @@ mod hook {
                         crate::window_layout::fit_rect(at, fit_design, fit_now)
                     };
                     vgui.place(control, (want.0, want.1 + inset, want.2, want.3));
+                }
+            }
+        }
+    }
+
+    /// A control's place: x, y, width, height.
+    type Rect = (i32, i32, i32, i32);
+
+    /// Lays the Settings tab out scrolled (#899): its rows are taller than the
+    /// tab, so each control keeps its `.res` place less `scroll`, and only
+    /// those wholly in view show. The scroll buttons stay at the tab's right
+    /// edge, top and bottom, greyed out at either end and hidden while every
+    /// row fits. The folder boxes that need another one on also stay hidden
+    /// (#787). Returns the scroll, after this frame's wheel and buttons, and
+    /// how tall the rows are.
+    unsafe fn place_settings(
+        vgui: &Vgui,
+        controls: &[(Vpanel, Rect)],
+        scroll: i32,
+        w: i32,
+        h: i32,
+    ) -> (i32, i32) {
+        use crate::settings_tab::{SCROLL_DOWN, SCROLL_UP};
+        let inset = load_strip::inset();
+        let named: Vec<(String, Vpanel, Rect)> = controls
+            .iter()
+            .map(|&(c, at)| (unsafe { vgui.name(c) }, c, at))
+            .collect();
+        let button = |name: &str| {
+            named
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .map(|&(_, c, at)| (c, at))
+        };
+        let rows = || {
+            named
+                .iter()
+                .filter(|(n, _, _)| n != SCROLL_UP && n != SCROLL_DOWN)
+        };
+        let line = button(SCROLL_UP).map_or(22, |(_, at)| at.3.max(1));
+        let top = rows().map(|(_, _, at)| at.1).min().unwrap_or(0);
+        let content = rows().map(|(_, _, at)| at.1 + at.3).max().unwrap_or(0) + top;
+        let view = (h - inset).max(1);
+        let scroll = settings_scroll(
+            scroll,
+            SETTINGS_SCROLL_LINES.swap(0, Ordering::AcqRel),
+            SETTINGS_SCROLL_PAGES.swap(0, Ordering::AcqRel),
+            line,
+            view,
+            content,
+        );
+        let most = (content - view).max(0);
+        let folders = crate::demo_list_folders::enabled();
+        let counts = crate::demo_list_folders::SHOW_COUNTS.on();
+        unsafe {
+            for (name, control, at) in rows() {
+                let y = at.1 - scroll + inset;
+                let in_view = y >= inset && y + at.3 <= h;
+                let shown = bound_cvar(name)
+                    .and_then(|cvar| {
+                        folder_box_shown(&crate::names::current_name(cvar), folders, counts)
+                    })
+                    .unwrap_or(true);
+                vgui.place(*control, (at.0, y, at.2, at.3));
+                if vgui.visible(*control) != (in_view && shown) {
+                    vgui.set_visible(*control, in_view && shown);
+                }
+            }
+            for (name, at_top, enabled) in [
+                (SCROLL_UP, true, scroll > 0),
+                (SCROLL_DOWN, false, scroll < most),
+            ] {
+                let Some((control, at)) = button(name) else {
+                    continue;
+                };
+                let y = if at_top { inset + 4 } else { h - at.3 - 4 };
+                vgui.place(control, (w - at.2 - 8, y, at.2, at.3));
+                if vgui.visible(control) != (most > 0) {
+                    vgui.set_visible(control, most > 0);
+                }
+                let object = vgui.object(control);
+                if !object.is_null() {
+                    let is_enabled: IsSelectedFn = slot(object, PANEL_SLOT_IS_ENABLED);
+                    if (is_enabled(object) & 0xff != 0) != enabled {
+                        let set_enabled: ListIntVoidFn = slot(object, PANEL_SLOT_SET_ENABLED);
+                        set_enabled(object, enabled as i32);
+                    }
+                }
+            }
+        }
+        (scroll, content)
+    }
+
+    /// Each page's `OnMouseWheeled`: on the Settings tab the wheel scrolls
+    /// its rows, 3 lines a notch as a list scrolls; any other tab passes it on.
+    unsafe extern "thiscall" fn page_on_wheel(this: *mut c_void, delta: i32) {
+        let settings = PAGE_OBJECTS[SETTINGS_PAGE].load(Ordering::Acquire) as *mut c_void;
+        if this == settings {
+            SETTINGS_SCROLL_LINES.fetch_add(delta.saturating_mul(-3), Ordering::AcqRel);
+            return;
+        }
+        let original = PAGE_ON_WHEEL.load(Ordering::Acquire);
+        if original != 0 {
+            // Safety: the class's own OnMouseWheeled, from its vftable.
+            let original: KeyFn = unsafe { std::mem::transmute(original) };
+            unsafe { original(this, delta) };
+        }
+    }
+
+    /// Fills the Settings tab's dropdowns: each row's choices, or the HD
+    /// styles built on disk (#899). `sync_settings` then shows each cvar's
+    /// value.
+    unsafe fn fill_settings_choices(vgui: &Vgui, base: usize, build: &Build) {
+        use crate::settings_tab::Kind;
+        unsafe {
+            let page =
+                vpanel_of(PAGE_OBJECTS[SETTINGS_PAGE].load(Ordering::Acquire) as *mut c_void);
+            for control in vgui.child_list(page) {
+                let name = vgui.name(control);
+                let Some(row) = bound_cvar(&name)
+                    .and_then(|cvar| crate::settings_tab::row(&crate::names::current_name(cvar)))
+                else {
+                    continue;
+                };
+                let object = vgui.object(control);
+                if object.is_null() || *(object as *const usize) != base + build.combo_box_vftable {
+                    continue;
+                }
+                let items: Vec<String> = match row.kind {
+                    Kind::Choice(choices) => choices.iter().map(|(_, t)| t.to_string()).collect(),
+                    Kind::Styles => {
+                        let styles = crate::settings_tab::style_choices(
+                            &crate::texture_hires::built_styles(),
+                            &crate::texture_hires::current_style(),
+                            crate::texture_hires::DEFAULT_STYLE,
+                        );
+                        if let Ok(mut kept) = SETTINGS_STYLES.write() {
+                            kept.clone_from(&styles);
+                        }
+                        styles
+                    }
+                    Kind::Check => continue,
+                };
+                let add_item: ComboAddItemFn = slot(object, COMBO_SLOT_ADD_ITEM);
+                for item in items {
+                    if let Ok(item) = std::ffi::CString::new(item) {
+                        add_item(object, item.as_ptr(), std::ptr::null());
+                    }
                 }
             }
         }
@@ -3700,9 +3951,10 @@ mod hook {
         }
     }
 
-    /// Keeps every `cvar_<name>` check box on the Settings tab and its cvar
-    /// in step: a click sets the cvar, and a cvar set elsewhere (the console,
-    /// a config) moves the box.
+    /// Keeps every `cvar_<name>` control on the Settings tab and its cvar in
+    /// step: a click or a pick sets the cvar and saves it, and a cvar set
+    /// elsewhere (the console, a config) moves the control. A check box is
+    /// on/off; a dropdown shows its row's choices (#899).
     unsafe fn sync_settings(vgui: &Vgui, lent: &mut Lent) {
         let Ok((base, build)) = gameui() else { return };
         let Some(engfuncs) = crate::engine::engfuncs() else {
@@ -3723,26 +3975,23 @@ mod hook {
                 // pre-#555 cvars; the layout is ours, so the box still works.
                 let current = crate::names::current_name(cvar);
                 let cvar: &str = &current;
-                if let Some(want) = folder_box_shown(
-                    cvar,
-                    crate::demo_list_folders::enabled(),
-                    crate::demo_list_folders::SHOW_COUNTS.on(),
-                ) && vgui.visible(control) != want
-                {
-                    vgui.set_visible(control, want);
-                }
                 let object = vgui.object(control);
-                if object.is_null()
-                    || *(object as *const usize) != base + build.check_button_vftable
-                {
+                let Ok(c_name) = std::ffi::CString::new(cvar) else {
+                    continue;
+                };
+                if object.is_null() {
+                    continue;
+                }
+                if *(object as *const usize) == base + build.combo_box_vftable {
+                    sync_choice(lent, control, object, cvar, &c_name);
+                    continue;
+                }
+                if *(object as *const usize) != base + build.check_button_vftable {
                     continue;
                 }
                 let is_selected: IsSelectedFn = slot(object, BUTTON_SLOT_IS_SELECTED);
                 let set_selected: SetSelectedFn = slot(object, BUTTON_SLOT_SET_SELECTED);
                 let checked = is_selected(object) & 0xff != 0;
-                let Ok(c_name) = std::ffi::CString::new(cvar) else {
-                    continue;
-                };
                 let cvar_on = (engfuncs.pfn_get_cvar_float)(c_name.as_ptr()) != 0.0;
                 let last = lent
                     .boxes
@@ -3752,12 +4001,12 @@ mod hook {
                 let (set, redraw) = settle(checked, last, cvar_on);
                 let now = match set {
                     Some(value) => {
+                        let before = cvar_text(&c_name);
                         if let Ok(line) =
                             std::ffi::CString::new(format!("{cvar} {}\n", value as u8))
                         {
                             crate::engine::client_cmd(&line);
                         }
-                        let before = (engfuncs.pfn_get_cvar_float)(c_name.as_ptr());
                         save_setting(cvar, if value { "1" } else { "0" }, before);
                         value
                     }
@@ -3772,6 +4021,93 @@ mod hook {
                     None => lent.boxes.push((control, now)),
                 }
             }
+        }
+    }
+
+    /// One bound dropdown: its choices are its row's in
+    /// [`crate::settings_tab::AREAS`], or the HD styles it was filled with.
+    unsafe fn sync_choice(
+        lent: &mut Lent,
+        control: Vpanel,
+        object: *mut c_void,
+        cvar: &str,
+        c_name: &CStr,
+    ) {
+        use crate::settings_tab::{ChoiceStep, Kind};
+        let Some(row) = crate::settings_tab::row(cvar) else {
+            return;
+        };
+        let styles = SETTINGS_STYLES
+            .read()
+            .map(|s| s.clone())
+            .unwrap_or_default();
+        let owned: Vec<(&str, &str)>;
+        let choices: &[(&str, &str)] = match row.kind {
+            Kind::Choice(choices) => choices,
+            Kind::Styles => {
+                owned = styles.iter().map(|s| (s.as_str(), s.as_str())).collect();
+                &owned
+            }
+            Kind::Check => return,
+        };
+        let Some(value) = cvar_text(c_name) else {
+            return;
+        };
+        let want = crate::settings_tab::choice_text(choices, &value);
+        let shown = unsafe {
+            let get_text: GetTextFn = slot(object, TEXT_ENTRY_SLOT_GET_TEXT);
+            let mut buf = [0u8; 128];
+            get_text(object, buf.as_mut_ptr() as *mut c_char, buf.len() as i32);
+            CStr::from_bytes_until_nul(&buf)
+                .map(|c| c.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        let (last, wait) = lent
+            .choices
+            .iter()
+            .find(|(c, _, _)| *c == control)
+            .map_or((None, 0), |(_, t, w)| (Some(t.clone()), *w));
+        let (step, wait) = crate::settings_tab::settle_choice(&shown, last.as_deref(), &want, wait);
+        let now = match step {
+            ChoiceStep::Wait => last.unwrap_or_default(),
+            ChoiceStep::Picked => {
+                // Text that is none of the choices is a value set elsewhere,
+                // shown as itself: nothing to set.
+                if let Some(picked) = crate::settings_tab::choice_value(choices, &shown) {
+                    let before = cvar_text(c_name);
+                    if let Ok(line) = std::ffi::CString::new(format!("{cvar} {picked}\n")) {
+                        crate::engine::client_cmd(&line);
+                    }
+                    save_setting(cvar, picked, before);
+                }
+                shown
+            }
+            ChoiceStep::Show => {
+                unsafe {
+                    match choices.iter().position(|(_, text)| *text == want) {
+                        Some(row) => {
+                            let activate_row: ListIntVoidFn =
+                                slot(object, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
+                            activate_row(object, row as i32);
+                        }
+                        None => {
+                            if let Ok(text) = std::ffi::CString::new(want.clone()) {
+                                let set_text: SetTextFn = slot(object, TEXT_ENTRY_SLOT_SET_TEXT);
+                                set_text(object, text.as_ptr());
+                            }
+                        }
+                    }
+                    crate::debug::report(&format!(
+                        "studio_panel: Settings tab shows {cvar} {value} as \"{want}\""
+                    ));
+                }
+                want
+            }
+            ChoiceStep::Nothing => shown,
+        };
+        match lent.choices.iter_mut().find(|(c, _, _)| *c == control) {
+            Some(entry) => (entry.1, entry.2) = (now, wait),
+            None => lent.choices.push((control, now, wait)),
         }
     }
 
@@ -4253,6 +4589,10 @@ mod hook {
             Action::DemoUp => unsafe { navigate(crate::demo_list_folders::go_up) },
             Action::ResetSettings => {
                 crate::commands::console_print(&format!("{NAME}: {}\n", reset_settings()));
+                Ok(())
+            }
+            Action::ScrollSettings(pages) => {
+                SETTINGS_SCROLL_PAGES.fetch_add(pages, Ordering::AcqRel);
                 Ok(())
             }
             Action::Engine(line) => {
@@ -5360,6 +5700,20 @@ mod tests {
         assert_eq!(action("Demo_Forward"), Action::DemoForward);
         assert_eq!(action("demo_up"), Action::DemoUp);
         assert_eq!(action("reset_settings"), Action::ResetSettings);
+        assert_eq!(action("settings_up"), Action::ScrollSettings(-1));
+        assert_eq!(action("settings_down"), Action::ScrollSettings(1));
+    }
+
+    #[test]
+    fn the_settings_tab_scrolls_between_its_top_and_its_last_row() {
+        // 22-pixel lines, a 244-pixel view of 800 pixels of rows.
+        assert_eq!(settings_scroll(0, 3, 0, 22, 244, 800), 66);
+        assert_eq!(settings_scroll(0, -3, 0, 22, 244, 800), 0);
+        assert_eq!(settings_scroll(0, 0, 1, 22, 244, 800), 222);
+        assert_eq!(settings_scroll(500, 0, 1, 22, 244, 800), 556);
+        assert_eq!(settings_scroll(556, 3, 0, 22, 244, 800), 556);
+        // A window tall enough for every row doesn't scroll.
+        assert_eq!(settings_scroll(100, 3, 1, 22, 900, 800), 0);
     }
 
     /// Every Playback tab button that moves the demo is refused during a

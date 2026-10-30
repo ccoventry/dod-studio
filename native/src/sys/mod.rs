@@ -25,6 +25,10 @@ pub mod game_review_requests;
 /// (#1143).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hook_build;
+/// The game launches from a per-build copy of the hook DLL, so the file
+/// Studio ships or a test build is never locked by it (#1146).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hook_copy;
 /// The Half-Life installs on this PC and their engine builds (#931).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod installs;

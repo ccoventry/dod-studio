@@ -8,6 +8,8 @@ mod clan_match;
 /// The clock offset between two recordings of one half (#708).
 mod clock_offset;
 pub mod entity_replay;
+/// The 64-bit FNV-1a every crate hashes demo keys and file names with.
+pub mod fnv1a;
 mod headshot;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;

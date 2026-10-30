@@ -463,7 +463,7 @@ fn poll_hudelements() {
 
 fn describe_spectator_eye(on: bool) -> &'static str {
     if on {
-        "on: the in-eye camera drops to the ground for a prone player"
+        "on: the in-eye camera drops to the ground for a prone player and eases through a crouch"
     } else {
         "off: the in-eye camera uses the game's own heights"
     }
@@ -749,7 +749,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, the spectator crosshair, the prone and crouch eye height and the gun lowering, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -768,6 +768,10 @@ fn status_text() -> String {
             spectator_crosshair::status()
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
+        lines.push(format!(
+            "look-ahead (crouch ease, sprint let-go): {}",
+            crate::lookahead::status()
+        ));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
     lines.push(format!(

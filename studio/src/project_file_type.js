@@ -8,6 +8,7 @@
 // defaults to `.dodstudio`.
 
 import { STRINGS } from './strings.js';
+import { fileNameOf } from './path_display.js';
 
 export const PROJECT_EXTENSION = 'dodstudio';
 export const DEFAULT_PROJECT_NAME = `dod_project.${PROJECT_EXTENSION}`;
@@ -31,7 +32,7 @@ export const PROJECT_OPEN_FILTERS = [
 ];
 
 function extensionOf(path) {
-  const name = String(path || '').split(/[\\/]/).pop() || '';
+  const name = fileNameOf(path) || '';
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
