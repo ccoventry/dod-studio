@@ -1,3 +1,4 @@
+mod british;
 /// The on-disk analysis cache Studio and the hook DLL share (#565).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cache;
@@ -7,7 +8,9 @@ mod chat;
 mod clan_match;
 /// The clock offset between two recordings of one half (#708).
 mod clock_offset;
+mod demo_info;
 pub mod entity_replay;
+mod finalization;
 /// The 64-bit FNV-1a every crate hashes demo keys and file names with.
 pub mod fnv1a;
 mod headshot;
@@ -23,8 +26,10 @@ mod mortality;
 mod objective;
 mod player;
 mod position;
+mod pov_stats;
 mod round;
 mod scoreboard;
+mod segment;
 mod team_tag;
 #[cfg(test)]
 mod tests_fixture;
@@ -36,8 +41,10 @@ mod wire_index;
 
 use crate::wire_index::wire_slot;
 use crate::{
+    british::check_and_promote_british,
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
+    finalization::use_general_finalization,
     headshot::use_headshot_updates,
     kill::{
         use_kill_streak_updates, use_teamkill_and_suicide_updates, use_weapon_breakdown_updates,
@@ -46,17 +53,17 @@ use crate::{
     objective::use_objective_updates,
     player::use_player_updates,
     position::use_position_updates,
+    pov_stats::use_pov_stats_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
+    segment::{use_segment_boundary, use_signon_maps},
     time::{GameTime, use_timing_updates},
 };
-use dem::{
-    bit::BitSliceCast,
-    types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
-};
+use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
 use dod::UserMessage;
 use std::time::Duration;
 
+pub(crate) use crate::demo_info::{is_hltv_demo, is_hltv_message};
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
@@ -79,6 +86,11 @@ pub use crate::{
     round::Round,
     team_tag::{TeamTag, detect_team_tag, team_tags},
 };
+pub use crate::{
+    demo_info::{DemoDamage, DemoInfo},
+    finalization::use_time_left_updates,
+    pov_stats::{PovStats, WeaponPovStats},
+};
 pub use dod::{Team, Weapon};
 
 #[derive(Debug)]
@@ -89,32 +101,6 @@ pub enum AnalyzerEvent<'a> {
     Frame(&'a Frame),
     EngineMessage(&'a EngineMessage),
     UserMessage(UserMessage),
-}
-
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct WeaponPovStats {
-    pub bullets_fired: u32,
-    pub reloads: u32,
-    pub kills: u32,
-    pub noscopes: u32,
-    pub scoped_kills: u32,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PovStats {
-    pub is_scoped: bool,
-    pub hits_taken: u32,
-    pub total_damage_taken: u32,
-    pub suicides: u32,
-    pub teamkills_committed: u32,
-    pub teamkills_suffered: u32,
-    pub weapon_stats: std::collections::HashMap<Weapon, WeaponPovStats>,
-
-    // Tracking state
-    pub current_weapon: Option<Weapon>,
-    pub prev_clip_ammo: u32,
-    pub prev_health: u32,
-    pub has_received_health: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -168,258 +154,6 @@ pub struct AnalyzerState {
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
-}
-
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-pub struct DemoInfo {
-    /// Version of the demo protocol used to encode the demo.
-    pub demo_protocol: i32,
-
-    /// Name of the map the demo was recorded on.
-    pub map_name: String,
-
-    /// Version of the network protocol used during the game.
-    pub network_protocol: i32,
-
-    /// Playback time of the demo in seconds.
-    pub playback_time: f32,
-
-    /// Total frames in the demo playback.
-    pub playback_frames: i32,
-
-    /// Game directory / mod name.
-    pub game_directory: String,
-
-    /// Type of demo: "HLTV" or "POV"
-    pub demo_type: String,
-
-    /// Map checksum / CRC.
-    pub map_checksum: u32,
-
-    /// The most entities any one snapshot carries (`svc_packetentities` or
-    /// `svc_deltapacketentities`). The pre-Anniversary engine closes to the
-    /// desktop at the first snapshot over 256 (#207), so this says before a
-    /// capture whether a demo can play there. `None` in an analysis cached
-    /// before it was counted.
-    #[serde(default)]
-    pub peak_packet_entities: Option<u32>,
-
-    /// Where the demo stopped being read, when a frame partway through does
-    /// not parse (#811): the analysis covers everything before it. `None` for
-    /// a demo that reads to the end, and in an analysis cached before this
-    /// was noted (a damaged demo had no analysis then).
-    #[serde(default)]
-    pub damage: Option<DemoDamage>,
-
-    /// No playback frame carries a view (#920): a file rebuilt from server
-    /// traffic, whose kill feed and scoreboard play while the camera stays
-    /// frozen at the map origin. See [`camera_data`].
-    #[serde(default)]
-    pub no_camera_data: bool,
-}
-
-/// Where a damaged demo stopped being read, and why (#811).
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct DemoDamage {
-    /// The `viewdemo` clock (the last `SvcTime`) at the last frame read, in
-    /// seconds: the analysis covers the demo up to here.
-    pub read_up_to_secs: f32,
-    /// Index of the first frame that does not parse, counting every frame of
-    /// every directory entry from 0.
-    pub frame_index: usize,
-    /// Where that frame starts in the file.
-    pub byte_offset: u64,
-    /// What was not read, from there to the end of the frames.
-    pub bytes_unread: u64,
-    /// Why the frame does not parse, in words.
-    pub reason: String,
-}
-
-impl DemoDamage {
-    fn new(demo: &Demo, damage: dem::demo_parser::ParseDamage) -> Self {
-        Self {
-            read_up_to_secs: last_svc_time(demo)
-                .or(damage.last_frame_time)
-                .filter(|t| t.is_finite() && *t >= 0.0)
-                .unwrap_or(0.0),
-            frame_index: damage.frame_index,
-            byte_offset: damage.byte_offset as u64,
-            bytes_unread: damage.bytes_unread as u64,
-            reason: damage.reason,
-        }
-    }
-
-    /// "read up to 2:05", on the `viewdemo` clock.
-    pub fn read_up_to_text(&self) -> String {
-        format!("read up to {}", integrity::clock(self.read_up_to_secs))
-    }
-
-    /// One line for a person: "Damaged demo: read up to 2:05, the rest
-    /// (14.2 MB) does not parse."
-    pub fn summary(&self) -> String {
-        format!(
-            "Damaged demo: {}, the rest ({}) does not parse.",
-            self.read_up_to_text(),
-            size_text(self.bytes_unread)
-        )
-    }
-}
-
-/// A byte count as "14.2 MB" or "312 KB".
-fn size_text(bytes: u64) -> String {
-    if bytes >= 1 << 20 {
-        format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64)
-    } else {
-        format!("{} KB", bytes.div_ceil(1 << 10))
-    }
-}
-
-/// The last `SvcTime` in the demo: the `viewdemo` clock where it ends.
-fn last_svc_time(demo: &Demo) -> Option<f32> {
-    let frames = demo
-        .directory
-        .entries
-        .iter()
-        .rev()
-        .flat_map(|e| e.frames.iter().rev());
-    for frame in frames {
-        let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
-            continue;
-        };
-        let MessageData::Parsed(msgs) = &box_type.1.messages else {
-            continue;
-        };
-        let time = msgs.iter().rev().find_map(|m| match m {
-            NetMessage::EngineMessage(e) => match &**e {
-                EngineMessage::SvcTime(t) => Some(t.time),
-                _ => None,
-            },
-            _ => None,
-        });
-        if time.is_some() {
-            return time;
-        }
-    }
-    None
-}
-
-/// The most entities in any one snapshot of `demo` (#207).
-fn peak_packet_entities(demo: &Demo) -> u32 {
-    let mut peak = 0;
-    for entry in &demo.directory.entries {
-        for frame in &entry.frames {
-            let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
-                continue;
-            };
-            let MessageData::Parsed(msgs) = &box_type.1.messages else {
-                continue;
-            };
-            for msg in msgs {
-                let NetMessage::EngineMessage(eng_msg) = msg else {
-                    continue;
-                };
-                let count = match &**eng_msg {
-                    EngineMessage::SvcPacketEntities(pe) => pe.entity_count.to_u32(),
-                    EngineMessage::SvcDeltaPacketEntities(pe) => pe.entity_count.to_u32(),
-                    _ => continue,
-                };
-                peak = peak.max(count);
-            }
-        }
-    }
-    peak
-}
-
-impl From<&Demo> for DemoInfo {
-    fn from(value: &Demo) -> Self {
-        let map_name = value
-            .header
-            .map_name
-            .to_str()
-            .map(|s| s.trim_end_matches('\x00'))
-            .unwrap_or("unknown")
-            .to_string();
-
-        let game_directory = value
-            .header
-            .game_directory
-            .to_str()
-            .map(|s| s.trim_end_matches('\x00'))
-            .unwrap_or("unknown")
-            .to_string();
-
-        let playback_time = value
-            .directory
-            .entries
-            .iter()
-            .map(|e| e.track_time)
-            .sum::<f32>();
-
-        let playback_frames = value
-            .directory
-            .entries
-            .iter()
-            .map(|e| e.frames.len() as i32)
-            .sum::<i32>();
-
-        let demo_type = if is_hltv_demo(value) {
-            "HLTV".to_string()
-        } else {
-            "POV".to_string()
-        };
-
-        Self {
-            demo_protocol: value.header.demo_protocol,
-            map_name,
-            network_protocol: value.header.network_protocol,
-            playback_time,
-            playback_frames,
-            game_directory,
-            demo_type,
-            map_checksum: value.header.map_checksum,
-            peak_packet_entities: Some(peak_packet_entities(value)),
-            damage: None,
-            no_camera_data: camera_data::camera_frames(value).is_missing(),
-        }
-    }
-}
-
-/// Whether `demo` is an HLTV proxy's recording: it carries a message only
-/// one has ([`is_hltv_message`]).
-fn is_hltv_demo(demo: &Demo) -> bool {
-    demo.directory.entries.iter().any(|entry| {
-        entry.frames.iter().any(|frame| {
-            let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
-                return false;
-            };
-            let MessageData::Parsed(msgs) = &box_type.1.messages else {
-                return false;
-            };
-            msgs.iter().any(
-                |msg| matches!(msg, NetMessage::EngineMessage(eng_msg) if is_hltv_message(eng_msg)),
-            )
-        })
-    })
-}
-
-/// A message only an HLTV proxy's recording carries: `svc_hltv`, or a
-/// director command that drives the auto-director's camera.
-///
-/// Not *any* `svc_director` (#351): DoD Studio injects its own into every
-/// patched preview of a POV demo, and those read as HLTV. Its injections are
-/// only DRC_CMD_MESSAGE (0x06) and DRC_CMD_STUFFTEXT (0x0A) -- bookmarks and
-/// console commands -- and neither moves a camera, so they don't count. The
-/// same rule was worked out in `examples/hltv_shot_gap_probe.rs` (3f3663e).
-fn is_hltv_message(message: &EngineMessage) -> bool {
-    const DRC_CMD_MESSAGE: u8 = 0x06;
-    const DRC_CMD_STUFFTEXT: u8 = 0x0A;
-    match message {
-        EngineMessage::SvcHltv(_) => true,
-        EngineMessage::SvcDirector(d) => {
-            d.command != DRC_CMD_MESSAGE && d.command != DRC_CMD_STUFFTEXT
-        }
-        _ => false,
-    }
 }
 
 /// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
@@ -480,346 +214,6 @@ fn is_relevant_message(name_bytes: &[u8]) -> bool {
             | b"StartProgF"
             | b"CancelProg"
     )
-}
-
-pub fn use_time_left_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
-    if let AnalyzerEvent::UserMessage(dod::UserMessage::TimeLeft(time_left)) = event {
-        let duration = time_left.0;
-        if state.first_time_left.is_none() {
-            state.first_time_left = Some(duration);
-        }
-        state.last_time_left = Some(duration);
-    }
-}
-
-fn is_close_to_match_end(duration: Duration) -> bool {
-    let secs = duration.as_secs();
-    let targets = [900u64, 1200, 1500, 1800, 2400, 2700];
-    for &target in &targets {
-        if secs >= target.saturating_sub(10) && secs <= target + 30 {
-            return true;
-        }
-    }
-    false
-}
-
-fn extract_ip_port(s: &str) -> Option<String> {
-    let bytes = s.as_bytes();
-    let n = bytes.len();
-    for i in 0..n {
-        if bytes[i] == b':' {
-            // Read digits to the right (port)
-            let mut j = i + 1;
-            while j < n && bytes[j].is_ascii_digit() {
-                j += 1;
-            }
-            let port_len = j - (i + 1);
-            if port_len > 0 {
-                // Read valid domain/ip characters to the left
-                let mut k = i;
-                while k > 0 {
-                    let c = bytes[k - 1];
-                    if c.is_ascii_alphanumeric() || c == b'.' || c == b'-' {
-                        k -= 1;
-                    } else {
-                        break;
-                    }
-                }
-                let host_str = &s[k..i];
-                // Must contain at least one dot to be a valid domain or IP
-                if host_str.contains('.') && !host_str.starts_with('.') && !host_str.ends_with('.')
-                {
-                    let port_str = &s[i + 1..j];
-                    return Some(format!("{}:{}", host_str, port_str));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Records every signon's map in `signon_maps`, before the segment gate, so
-/// the ones after the match are listed too.
-pub fn use_signon_maps(state: &mut AnalyzerState, event: &AnalyzerEvent) {
-    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
-        let file = String::from_utf8_lossy(&msg.map_file_name);
-        let map = file
-            .trim_end_matches('\0')
-            .trim_start_matches("maps/")
-            .trim_end_matches(".bsp")
-            .to_string();
-        state.signon_maps.push(map);
-    }
-}
-
-/// Ends the analysed demo at a second signon (#217).
-///
-/// `SvcServerInfo` starts every signon. A second one means the server changed
-/// level and the demo kept recording: to another map, or to the *same* map,
-/// as when both halves of a match are played back to back. Everything after
-/// it re-sends teams, classes and the clock from scratch, so letting it
-/// through resets every player to Unassigned and restarts the demo clock.
-///
-/// The first map is the one analysed, gameplay or not, and nothing after the
-/// boundary is. The game's `viewdemo` stops at that same boundary, so the
-/// analysis (and every highlight built from it) covers exactly what the game
-/// can play. A demo with more than one map is split instead
-/// (`signon_maps`, the Demo Analyzer's and the Master Queue's Split).
-///
-/// Runs before every other hook, so none of them sees the new signon: the
-/// POV hook would otherwise take the new connection's player slot.
-pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
-    let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event else {
-        return;
-    };
-    if state.initial_map_name.is_some() {
-        state.map_changed = true;
-        return;
-    }
-    let map_name = String::from_utf8_lossy(&msg.map_file_name)
-        .trim_end_matches('\0')
-        .to_string();
-    state.initial_map_name = Some(
-        map_name
-            .trim_start_matches("maps/")
-            .trim_end_matches(".bsp")
-            .to_string(),
-    );
-}
-
-pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
-    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
-        let hostname = String::from_utf8_lossy(&msg.hostname)
-            .trim_end_matches('\0')
-            .to_string();
-        state.server_name = Some(hostname.clone());
-        if let Some(addr) = extract_ip_port(&hostname) {
-            state.server_address = Some(addr);
-        }
-    }
-
-    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcStuffText(msg)) = event {
-        let cmd = String::from_utf8_lossy(msg.command.as_slice());
-        if let Some(addr) = extract_ip_port(&cmd) {
-            state.server_address = Some(addr);
-        }
-    }
-
-    if let AnalyzerEvent::Frame(frame) = event
-        && let FrameData::ConsoleCommand(cmd) = &frame.frame_data
-    {
-        let cmd_str = String::from_utf8_lossy(cmd.command.as_slice());
-        if let Some(addr) = extract_ip_port(&cmd_str) {
-            state.server_address = Some(addr);
-        }
-    }
-
-    use_time_left_updates(state, event);
-
-    if let AnalyzerEvent::Finalization = event {
-        if state.is_clan_match() {
-            state.started_late = !state.match_start_witnessed;
-        } else {
-            state.started_late = state.players.iter().any(|p| p.has_pre_demo_activity);
-        }
-
-        let match_duration = if let Some(first_round) = state.rounds.first() {
-            let start = match first_round {
-                Round::Active { start_time, .. } => start_time.real_offset,
-                Round::Completed { start_time, .. } => start_time.real_offset,
-            };
-            state.current_time.real_offset.saturating_sub(start)
-        } else {
-            Duration::ZERO
-        };
-
-        let is_natural_end = state.map_changed
-            || state
-                .last_time_left
-                .is_some_and(|tl| tl <= Duration::from_secs(10))
-            || is_close_to_match_end(match_duration);
-
-        state.ended_early = if is_natural_end {
-            false
-        } else if let Some(last_round) = state.rounds.last() {
-            match last_round {
-                Round::Completed { winner_stats, .. } => winner_stats.is_none(),
-                _ => true,
-            }
-        } else {
-            false
-        };
-    }
-}
-
-pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
-    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
-        state.pov_player_index = Some(msg.player_index);
-    }
-
-    if let AnalyzerEvent::UserMessage(user_msg) = event {
-        match user_msg {
-            UserMessage::Scope(_) => {
-                state.pov_stats.is_scoped = !state.pov_stats.is_scoped;
-            }
-            UserMessage::CurWeapon(msg) => {
-                if let Some(ref prev_weapon) = state.pov_stats.current_weapon {
-                    if prev_weapon == &msg.weapon {
-                        if (msg.clip_ammo as u32) < state.pov_stats.prev_clip_ammo {
-                            let entry = state
-                                .pov_stats
-                                .weapon_stats
-                                .entry(msg.weapon.clone())
-                                .or_default();
-                            entry.bullets_fired += 1;
-                        }
-                    } else {
-                        state.pov_stats.is_scoped = false;
-                    }
-                } else {
-                    state.pov_stats.is_scoped = false;
-                }
-                state.pov_stats.current_weapon = Some(msg.weapon.clone());
-                state.pov_stats.prev_clip_ammo = msg.clip_ammo as u32;
-            }
-            UserMessage::ReloadDone(_) => {
-                if let Some(ref active_weapon) = state.pov_stats.current_weapon {
-                    let entry = state
-                        .pov_stats
-                        .weapon_stats
-                        .entry(active_weapon.clone())
-                        .or_default();
-                    entry.reloads += 1;
-                }
-                state.pov_stats.is_scoped = false;
-            }
-            UserMessage::ResetHUD(_) => {
-                state.pov_stats.is_scoped = false;
-                state.pov_stats.has_received_health = false;
-            }
-            UserMessage::Health(msg) => {
-                let health_val = msg.0 as u32;
-                if state.pov_stats.has_received_health && health_val < state.pov_stats.prev_health {
-                    state.pov_stats.hits_taken += 1;
-                    state.pov_stats.total_damage_taken += state.pov_stats.prev_health - health_val;
-                }
-                state.pov_stats.prev_health = health_val;
-                state.pov_stats.has_received_health = true;
-            }
-            UserMessage::DeathMsg(msg) => {
-                if let Some(pov_idx) = state.pov_player_index {
-                    let is_killer_pov = wire_slot(msg.killer_client_index) == Some(pov_idx);
-                    let is_victim_pov = wire_slot(msg.victim_client_index) == Some(pov_idx);
-
-                    if is_killer_pov {
-                        if msg.killer_client_index == msg.victim_client_index {
-                            state.pov_stats.suicides += 1;
-                        } else {
-                            let killer_team = state
-                                .find_player_by_wire_index(msg.killer_client_index)
-                                .and_then(|p| p.team.clone());
-                            let victim_team = state
-                                .find_player_by_wire_index(msg.victim_client_index)
-                                .and_then(|p| p.team.clone());
-                            if killer_team.is_some()
-                                && victim_team.is_some()
-                                && killer_team == victim_team
-                            {
-                                state.pov_stats.teamkills_committed += 1;
-                            } else {
-                                let entry = state
-                                    .pov_stats
-                                    .weapon_stats
-                                    .entry(msg.weapon.clone())
-                                    .or_default();
-                                entry.kills += 1;
-                                if matches!(
-                                    msg.weapon,
-                                    Weapon::Springfield
-                                        | Weapon::ScopedK98
-                                        | Weapon::ScopedFg42
-                                        | Weapon::ScopedLeeEnfield
-                                ) {
-                                    if state.pov_stats.is_scoped {
-                                        entry.scoped_kills += 1;
-                                    } else {
-                                        entry.noscopes += 1;
-                                    }
-                                }
-                            }
-                        }
-                    } else if msg.killer_client_index == 0 && is_victim_pov {
-                        state.pov_stats.suicides += 1;
-                    }
-
-                    if is_victim_pov {
-                        state.pov_stats.is_scoped = false;
-                        if msg.killer_client_index > 0 && !is_killer_pov {
-                            let killer_team = state
-                                .find_player_by_wire_index(msg.killer_client_index)
-                                .and_then(|p| p.team.clone());
-                            let victim_team = state
-                                .find_player_by_wire_index(msg.victim_client_index)
-                                .and_then(|p| p.team.clone());
-                            if killer_team.is_some()
-                                && victim_team.is_some()
-                                && killer_team == victim_team
-                            {
-                                state.pov_stats.teamkills_suffered += 1;
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-fn check_and_promote_british(state: &mut AnalyzerState) {
-    if state.allies_are_british {
-        for player in &mut state.players {
-            if player.team == Some(Team::Allies) {
-                player.team = Some(Team::British);
-            }
-        }
-    } else {
-        let any_british = state
-            .players
-            .iter()
-            .any(|p| p.class.as_ref().map(|c| c.is_british()).unwrap_or(false));
-        if any_british {
-            state.allies_are_british = true;
-            for player in &mut state.players {
-                if player.team == Some(Team::Allies) {
-                    player.team = Some(Team::British);
-                }
-            }
-            state.team_scores.convert_allies_to_british();
-            state.objectives.convert_allies_to_british();
-            for round in &mut state.rounds {
-                if let Round::Completed {
-                    winner_stats: Some((winner_team, _)),
-                    ..
-                } = round
-                    && *winner_team == Team::Allies
-                {
-                    *winner_team = Team::British;
-                }
-            }
-            for chat in &mut state.chat_messages {
-                if chat.sender_team == Some(Team::Allies) {
-                    chat.sender_team = Some(Team::British);
-                }
-            }
-            for kill in &mut state.kill_positions {
-                for team in [&mut kill.killer_team, &mut kill.victim_team] {
-                    if *team == Some(Team::Allies) {
-                        *team = Some(Team::British);
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Feeds one event through every analyzer, in order. Shared with the
