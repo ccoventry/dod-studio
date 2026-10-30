@@ -7,6 +7,7 @@
 import { saveSettings } from './ipc_bridge.js';
 import { getCommandsState, renderTimingDiagram, getFastForwardStep, setFastForwardStep } from './capture_pane.js';
 import { readReviewSettings, applyReviewSettings } from './review_settings.js';
+import { readKillGaps, applyKillGaps } from './kill_gaps_setting.js';
 import { scanRateSettings, applyScanRateSettings } from './rescan_estimate.js';
 import { rescanOfferSettings, applyRescanOfferSettings } from './rescan_recent.js';
 import { getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
@@ -157,6 +158,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
       fast_forward_speed: fastForwardSpeed,
+      kill_gaps: readKillGaps(),
       target_drives: state.targetDrives,
       init_commands,
       custom_commands,
@@ -372,6 +374,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   // values in the Timings tab's visual timeline (#150).
   renderTimingDiagram();
   setFastForwardStep(settings.fast_forward_speed);
+  applyKillGaps(settings.kill_gaps);
   const saveLocalPatchedEl = document.querySelector('#config-save-local-patched');
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
