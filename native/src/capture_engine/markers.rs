@@ -2,15 +2,25 @@
 //! console log, then the hook's events pipe), what the listener is told
 //! about each, and OBS mode's go-ahead to the hook's batch.
 
+mod clip_summary;
+
 use super::EngineEvent;
 use crate::log_markdown;
 use std::path::Path;
 use std::sync::{Arc, atomic::AtomicBool, mpsc::Sender};
 
 /// The listener's event for one console marker, if it has one: progress,
-/// clip recordings, holds.
+/// clip recordings, holds. The hook's per-clip summary (#1221) has none: it
+/// goes straight to the activity log, here, since every marker the batch
+/// reads, late ones too, passes through.
 pub(super) fn marker_event(marker: &crate::obs::Marker) -> Option<EngineEvent> {
     use crate::obs::MarkerKind;
+    if marker.kind == MarkerKind::Other
+        && let Some(clip) = clip_summary::parse(&marker.label)
+    {
+        log_markdown(&clip.log_line());
+        return None;
+    }
     match marker.kind {
         MarkerKind::DemoStart => marker
             .demo_progress
