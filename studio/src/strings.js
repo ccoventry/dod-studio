@@ -751,6 +751,14 @@ export const STRINGS = {
     EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
     exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
+    // #110: the finished renders as an EDL for VEGAS Pro.
+    EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
+    EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
+    exportEdlNone: (skipped) => skipped > 0
+      ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: the length of a copied or captured video isn't known here.`
+      : 'No finished renders yet, so there is nothing to export.',
+    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: length unknown` : ''})`,
+    exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
