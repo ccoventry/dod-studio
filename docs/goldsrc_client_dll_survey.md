@@ -16,7 +16,7 @@ original "suggested task" wording):
 
 | Candidate | Built? | Command / module | Issue / PR |
 | --- | --- | --- | --- |
-| Hide or wrap any HUD element (§1) | yes | `ds_hud_hide_element`, `hudelement.rs` | #265, PR #296 |
+| Hide or wrap any HUD element (§1) | yes, then retired to stock cvars and named settings | `ds_hud_hide_element` (retired), `hudelement.rs` (`ds_hud_hide_teammate_info`) | #265, PR #296, #342 |
 | Chat line cap, `SayText` (§3) | no | — | — |
 | Dump chosen user messages (§4) | yes | `ds_debug_msglog`, `msglog.rs` | #267 |
 | Move and size the overview map (§5) | yes | `ds_hud_overview_layout`, `overview_map.rs` | PR #303 |
@@ -151,7 +151,7 @@ sound: walk the list from `gHUD+0`, and for each node compare `*(void**)element`
 against `module + <vftable RVA>` from the table above. That is an exact match on
 a value the compiler emitted, not a heuristic.
 
-> **Suggested task (built as `ds_hud_hide_element`, #265, PR #296):** a
+> **Suggested task (built as `ds_hud_hide_element`, #265, PR #296; retired in #342):** a
 > `dodstudio_hudelement <name> <0|1>` command backed by the
 > table above. It subsumes several separate feature requests (hide the ammo
 > counter, hide the status bar, hide the crosshair) into one mechanism, and it

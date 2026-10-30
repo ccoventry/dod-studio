@@ -112,6 +112,7 @@ from studiomodel import STUDIO_NF_MASKED, MdlError, StudioModel  # noqa: E402
 SS = 4  # supersampling per HD pixel
 # Bump when the look changes: sheets painted by an older version are
 # painted again from their .bak.
+# Studio's HD page reads VERSION and EVEN_VERSION from these lines (native::hd::outdated, #1155): keep them one `NAME = <integer>` per line.
 VERSION = 14  # 14: the skull, bayonets and butt stroke composed, the mortars rendered (#1088); 13: guards from the v_ models (v_part); 12: the MP40 skin's guard; 11: wires as 1 px lines
 RECORD = "killfeed_icons.json"
 

@@ -84,6 +84,7 @@ that panics the parser cannot take down the run:
 | --- | --- |
 | `snapshot_inject` | Rebuilds the client's entity table at a join with a synthetic full snapshot. |
 | `snapshot_check` | Does an injected snapshot hold as many entities as the stream expects? |
+| `entity_count_fix` | Restates each packet's `entity_count` as the set the engine really builds (#15's crash at a join). |
 | `entset_probe` | How many entities does a snapshot describe, and how does the set evolve? |
 | `entity0_encoding` | How a real `svc_packetentities` encodes entity 0 (world). |
 | `index_encoding_survey` | Every entity-index encoding used across a demo's packets. |
@@ -95,6 +96,10 @@ that panics the parser cannot take down the run:
 | `writer_fidelity` | Does dem's writer reproduce GoldSrc's real bytes? |
 | `packet_entity_probe` | Peak packet-entity count against the engine limit that crashes playback. |
 | `map_entity_probe` | Names the entities an HLTV demo puts on the wire, for trimming a map. |
+| `packet_entity_trim` | Drops static entities from every snapshot so an HLTV demo fits the pre-Anniversary limit (#207). |
+
+`shared/entity_carry.rs` is not a probe: it carries each snapshot's entity set
+forward as the engine does, for `packet_entity_trim` and `entity_count_fix`.
 
 ### HLTV, spectating and weapons
 
@@ -105,6 +110,7 @@ that panics the parser cannot take down the run:
 | `gait_probe` | Which movement states are replicated for other players; can sprint be told apart? |
 | `sprint_viewmodel_probe` | What DoD does to the first-person viewmodel while a player sprints. |
 | `crosshair_pov_probe` | What the recording player was doing, as far as the crosshair rule cares (#310). |
+| `crouch_eye_probe` | Camera and origin heights through a crouch: the POV recorder's per frame, every player's `usehull` and gait per snapshot (#1144). |
 | `hltv_sound_probe` | Are weapon-fire events present in an HLTV demo's raw stream? |
 | `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
 | `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |

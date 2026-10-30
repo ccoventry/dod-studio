@@ -37,6 +37,8 @@
 
 use std::path::{Path, PathBuf};
 
+use analysis::fnv1a::fnv1a_hash;
+
 /// The `Label` the hook writes `n%` into.
 pub const PERCENT_LABEL: &str = "StudioLoadPercent";
 /// The `ProgressBar` the hook sets.
@@ -235,13 +237,6 @@ fn text_as_bytes(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// 64-bit FNV-1a: a stable hash for [`MARKER`], the same on every build.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| {
-        (hash ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
-}
-
 /// `body` behind the [`MARKER`] line that says Studio wrote it, in the
 /// body's own line ending.
 fn marked(body: &[u8]) -> Vec<u8> {
@@ -253,7 +248,7 @@ fn marked(body: &[u8]) -> Vec<u8> {
     let mut out = format!(
         "{MARKER} at every launch (marker {:016x}). An edit saved here is kept; \
          delete the file to go back to the game's own.{eol}",
-        fnv1a(body)
+        fnv1a_hash(body)
     )
     .into_bytes();
     out.extend_from_slice(body);
@@ -273,7 +268,7 @@ fn written_by_studio(bytes: &[u8]) -> bool {
             .nth(1)
             .and_then(|after| after.get(..16))
             .and_then(|hex| u64::from_str_radix(hex, 16).ok())
-            == Some(fnv1a(rest))
+            == Some(fnv1a_hash(rest))
 }
 
 /// A UTF-16 file: ASCII blocks spliced into it would break the whole layout.

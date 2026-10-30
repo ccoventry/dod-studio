@@ -660,6 +660,27 @@ fn style_label() -> String {
         .unwrap_or_else(|| "not chosen yet".to_string())
 }
 
+/// The styles built on disk: every folder name under each kind's folder in
+/// `dodstudio_hd` (`world/ultrasharp`, `detail/remacri`, ...) that a style
+/// name may be, `overrides` included; the Settings tab's style list (#899).
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn built_styles() -> Vec<String> {
+    let root = hd_base().join("dodstudio_hd");
+    let kinds = std::fs::read_dir(&root).into_iter().flatten().flatten();
+    kinds
+        .filter(|k| k.path().is_dir())
+        .flat_map(|k| std::fs::read_dir(k.path()).into_iter().flatten().flatten())
+        .filter(|s| s.path().is_dir())
+        .filter_map(|s| clean_style(&s.file_name().to_string_lossy()))
+        .collect()
+}
+
+/// The style in use now, as the cvar asks for it.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn current_style() -> String {
+    chosen_style()
+}
+
 /// `<type>/<active style>` and `<type>/overrides`, in that order -- later wins.
 fn style_dirs(type_dir: &str) -> [String; 2] {
     [
