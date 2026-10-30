@@ -198,7 +198,7 @@ pub fn install() {
     // Outside the all-or-nothing tuple for the same reason as the HD switch:
     // it is independent of every other setting here.
     if let Some(gun_log) = register(crate::gun_log::NAME, "0") {
-        crate::gun_log::set_cvar(gun_log);
+        crate::gun_log::CVAR.set(gun_log);
     }
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::CVAR.set(shaders);
@@ -272,13 +272,13 @@ pub fn install() {
         crate::demo_scope::CVAR.set(scope);
     }
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
-        crate::run_in_background::set_cvar(background);
+        crate::run_in_background::CVAR.set(background);
     }
     if let Some(times) = register(crate::frame_times::NAME, "0") {
-        crate::frame_times::set_cvar(times);
+        crate::frame_times::CVAR.set(times);
     }
     if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
-        crate::hlae_window::set_cloak_cvar(cloak);
+        crate::hlae_window::CLOAK_CVAR.set(cloak);
     }
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
         crate::pov_live_bob::CVAR.set(bob);
@@ -303,7 +303,7 @@ pub fn install() {
     // Off unless Studio turns it on: a game not started from Studio keeps
     // its own sprays and crosshair (#428).
     if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
-        crate::player_overrides::set_cvar(overrides);
+        crate::player_overrides::CVAR.set(overrides);
     }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),
@@ -313,7 +313,7 @@ pub fn install() {
         crate::screen_effects::SHAKE.set(shake);
     }
     if let Some(behind) = register(crate::hlae_window::NAME, "0") {
-        crate::hlae_window::set_cvar(behind);
+        crate::hlae_window::CVAR.set(behind);
     }
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
         crate::detail_cache::KEEP.set(keep);
@@ -349,15 +349,15 @@ pub fn install() {
         return;
     };
 
-    CVAR_SPEC_MATCH_POV.store(spec_match_pov, Ordering::Relaxed);
-    CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
-    CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
-    CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
-    CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
-    CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
-    CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
-    CVAR_EX_INTERP.store(ex_interp_cvar, Ordering::Relaxed);
-    CVAR_TEXTURE_HIRES_LOG.store(texture_hires_log_cvar, Ordering::Relaxed);
+    CVAR_SPEC_MATCH_POV.set(spec_match_pov);
+    CVAR_HELD_MODELS.set(held_models);
+    CVAR_SPECTATOR_TARGET_LOG.set(spectator_target_log);
+    CVAR_SCOREBOARD.set(scoreboard_cvar);
+    CVAR_VOICE.set(voice_cvar);
+    CVAR_CROSSHAIR.set(crosshair_cvar);
+    CVAR_HAND_SIGNALS.set(hand_signals_cvar);
+    CVAR_EX_INTERP.set(ex_interp_cvar);
+    CVAR_TEXTURE_HIRES_LOG.set(texture_hires_log_cvar);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
