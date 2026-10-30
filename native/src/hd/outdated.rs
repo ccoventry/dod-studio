@@ -175,6 +175,27 @@ mod tests {
         assert_eq!(int_constant("VERSION = x", "VERSION"), None);
     }
 
+    /// The repo's own scripts, in the shape this module reads: a reformat of
+    /// `VERSION = 14` (an annotation, say) would otherwise switch the check
+    /// off with every other test still green.
+    #[test]
+    fn the_repo_scripts_hold_the_lines_this_reads() {
+        let dir = crate::hd::build::dev_scripts_dir();
+        let icons = std::fs::read_to_string(dir.join("killfeed_icons.py")).unwrap();
+        assert!(int_constant(&icons, "VERSION").is_some());
+        assert!(int_constant(&icons, "EVEN_VERSION").is_some());
+        let sprites = std::fs::read_to_string(dir.join("sprites_hd.py")).unwrap();
+        for line in sprites
+            .lines()
+            .filter(|l| l.starts_with("HOLD_KILLFEED_ICONS"))
+        {
+            assert!(
+                line == "HOLD_KILLFEED_ICONS = True" || line == "HOLD_KILLFEED_ICONS = False",
+                "killfeed_held reads `HOLD_KILLFEED_ICONS = True|False`, found {line:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_sheet_or_atlas_stamped_older_is_reported_per_style() {
         let root = Scratch::new("hd_outdated_old");
