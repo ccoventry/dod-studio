@@ -229,6 +229,8 @@ While the game runs, the app reads its markers and turns them into status lines 
 
 On failure or cancel the copied demos, junctions and scratch files are removed. Takes are never deleted.
 
+**When Studio closes or crashes mid-batch** (#545, #20), the game keeps capturing and quits itself at the end when no Studio reads its events pipe. The batch's manifest (section 9) stays at `planned`, and that is the recovery record: it holds each highlight's id, its source demo and the project file. On the next start Studio checks each planned batch's takes on disk and marks the found ones Captured, in the project file or the open queue. While a game is open, the check waits for it to close, a toast says the batch may still be capturing, and Start Capture Batch refuses until then (a new batch would run in that open game and stop the old one). When some clips have no take (the game closed or crashed too), Studio asks **Capture the rest?**: **Capture them now** opens the batch's project, ticks just those highlights and runs Start Capture Batch with its usual checks.
+
 ### 3.6 Command tiers
 
 Commands you type into Initial or Scheduled Commands are checked twice: once for the warning banner, and again when the batch starts. The lists live in `native/src/patch/cfg_scan.rs`; read it rather than trusting this summary. `docs/command_tiers.md` explains each tier.
@@ -404,7 +406,7 @@ A highlight is one life's kills by one player, at least one kill, for every conn
 | Hook DLL log | `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, 30 days kept |
 | Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v11\` (the number is the cache schema version; an entry an older version left is upgraded into the current folder when it can be, `analysis::cache::migrations`; older version folders that can't be upgraded from are deleted once a week old; entries within a version are never evicted) |
 | Render lockfile | `%APPDATA%\dod-studio\.render_autosave.json` |
-| Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
+| Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete`, `cancelled` or `error` with each block's verdict, or `unwatched` once a batch that ran while Studio was closed has been caught up on (section 3.5). The newest 50 are kept. |
 | Players table for the hook DLL | `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`, rewritten from Configuration > Players |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
 | Blender | `%APPDATA%\dod-studio\blender\` (the chosen `blender.exe`); each take's work folder beside its `.agr` |
@@ -451,7 +453,6 @@ Each of these is true on `dev` today. Items with an issue number are tracked; th
 
 **Dead code**
 
-- `.autosave.json` is deleted after a batch but never written (#20).
 - `DOD_BATCH_DONE` is removed before each batch but nothing creates or reads it.
 - `dod_quit.cfg` is written but never executed.
 - The WASM gates in `native/` guard nothing, since no WASM build uses `native`.
