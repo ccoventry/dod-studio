@@ -9,7 +9,8 @@ use std::path::Path;
 #[tauri::command]
 pub async fn list_demo_links(hl_exe: String) -> Result<Vec<DemoLink>, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let game = demo_links::game_dir_of(Path::new(&hl_exe))?;
+        let game = demo_links::game_dir_of(Path::new(&hl_exe))
+            .map_err(crate::messages::failed_to_list_demo_links)?;
         Ok(demo_links::list(&game))
     }))
     .await
@@ -19,8 +20,9 @@ pub async fn list_demo_links(hl_exe: String) -> Result<Vec<DemoLink>, String> {
 #[tauri::command]
 pub async fn add_demo_link(hl_exe: String, folder: String) -> Result<DemoLink, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let game = demo_links::game_dir_of(Path::new(&hl_exe))?;
-        demo_links::add(&game, Path::new(&folder))
+        let game = demo_links::game_dir_of(Path::new(&hl_exe))
+            .map_err(crate::messages::failed_to_add_demo_link)?;
+        demo_links::add(&game, Path::new(&folder)).map_err(crate::messages::failed_to_add_demo_link)
     }))
     .await
 }
@@ -29,8 +31,9 @@ pub async fn add_demo_link(hl_exe: String, folder: String) -> Result<DemoLink, S
 #[tauri::command]
 pub async fn remove_demo_link(hl_exe: String, name: String) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let game = demo_links::game_dir_of(Path::new(&hl_exe))?;
-        demo_links::remove(&game, &name)
+        let game = demo_links::game_dir_of(Path::new(&hl_exe))
+            .map_err(crate::messages::failed_to_remove_demo_link)?;
+        demo_links::remove(&game, &name).map_err(crate::messages::failed_to_remove_demo_link)
     }))
     .await
 }

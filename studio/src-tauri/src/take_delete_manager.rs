@@ -151,7 +151,8 @@ pub async fn measure_take_folders(
         let mut sizes = Vec::with_capacity(folders.len());
         for (i, folder) in folders.iter().enumerate() {
             progress.report(i);
-            let plan = plan_take_deletion(Path::new(folder), &dirs)?;
+            let plan = plan_take_deletion(Path::new(folder), &dirs)
+                .map_err(crate::messages::failed_to_check_take_folders)?;
             sizes.push(TakeSize::of(folder, &plan));
         }
         progress.report(folders.len());
@@ -182,7 +183,11 @@ pub async fn delete_take_folders(
             move || {
                 folders
                     .into_iter()
-                    .map(|f| plan_take_deletion(Path::new(&f), &dirs).map(|p| (f, p)))
+                    .map(|f| {
+                        plan_take_deletion(Path::new(&f), &dirs)
+                            .map(|p| (f, p))
+                            .map_err(crate::messages::failed_to_check_take_folders)
+                    })
                     .collect::<Result<Vec<_>, String>>()
             }
         }))

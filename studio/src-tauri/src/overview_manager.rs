@@ -77,7 +77,8 @@ pub async fn overview_flag_icons(
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let install = Path::new(&install);
         let bsp = native::overview::files::bsp_path(install, &map);
-        let level = native::overview::level::Level::from_file(&bsp)?;
+        let level = native::overview::level::Level::from_file(&bsp)
+            .map_err(crate::messages::failed_to_read_map_for_flags)?;
         Ok(native::overview::flag_icons::flag_icons(install, &level))
     }))
     .await

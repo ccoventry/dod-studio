@@ -69,7 +69,8 @@ pub async fn take_checks(
             );
         },
     )
-    .await?;
+    .await
+    .map_err(crate::messages::failed_to_check_take)?;
     Ok(result)
 }
 

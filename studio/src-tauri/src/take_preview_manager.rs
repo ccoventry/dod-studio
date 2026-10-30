@@ -104,6 +104,7 @@ async fn sheet_for(
         },
     )
     .await
+    .map_err(crate::messages::failed_to_make_take_preview)
 }
 
 /// Makes (or reads back) a take's frames and returns the middle one.
@@ -133,7 +134,8 @@ pub async fn take_preview_thumb(
         .ok_or_else(|| crate::messages::take_preview_empty(&take_folder))?;
     let dir = take_frames::cache_dir(Path::new(&take_folder), &stream);
     Ok(TakeThumb {
-        uri: take_frames::frame_data_uri(&dir.join(&middle.file))?,
+        uri: take_frames::frame_data_uri(&dir.join(&middle.file))
+            .map_err(crate::messages::failed_to_read_take_frame)?,
         cached,
     })
 }
@@ -169,7 +171,8 @@ pub async fn take_preview_sheet(
         .iter()
         .map(|f| {
             Ok(SheetFrameView {
-                uri: take_frames::frame_data_uri(&dir.join(&f.file))?,
+                uri: take_frames::frame_data_uri(&dir.join(&f.file))
+                    .map_err(crate::messages::failed_to_read_take_frame)?,
                 frame: f.frame,
                 secs: f.secs,
             })

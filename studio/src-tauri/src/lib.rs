@@ -661,7 +661,7 @@ async fn link_hlae_ffmpeg(
             "needs_elevation": true,
             "ini": ini.to_string_lossy(),
         })),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(messages::failed_to_link_hlae_ffmpeg(e)),
     }
 }
 

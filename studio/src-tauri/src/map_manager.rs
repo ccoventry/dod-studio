@@ -877,6 +877,7 @@ pub async fn download_map(
     })
     .await
     .map_err(crate::messages::map_download_failed)?
+    .map_err(crate::messages::map_download_failed)
 }
 
 #[cfg(test)]
