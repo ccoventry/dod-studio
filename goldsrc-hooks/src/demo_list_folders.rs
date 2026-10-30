@@ -75,7 +75,7 @@ pub const NAME: &str = console_name!("ui_demo_list_folders");
 pub static ENABLED: AtomicBool = AtomicBool::new(true);
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once `ds_ui_demo_list_folders` is registered.
+/// Called by `commands/install.rs` once `ds_ui_demo_list_folders` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
@@ -107,7 +107,7 @@ impl Setting {
         }
     }
 
-    /// Called by `commands.rs` once the cvar is registered.
+    /// Called by `commands/install.rs` once the cvar is registered.
     pub fn set_cvar(&self, cvar: *mut CvarSPartial) {
         self.cvar.store(cvar, Ordering::Release);
     }

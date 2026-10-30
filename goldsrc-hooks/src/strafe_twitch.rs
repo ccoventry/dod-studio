@@ -62,7 +62,7 @@ pub const NAME: &str = console_name!("player_fix_model_flicker");
 pub static FIX_MODEL_FLICKER: AtomicBool = AtomicBool::new(true);
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
