@@ -579,7 +579,7 @@ impl IdleFacts {
         use crate::review_ask::Status;
         match &self.ask {
             Status::Asking(text) => return text.clone(),
-            Status::Sent => return "DoD Studio sent the review: it starts in a moment.".into(),
+            Status::Sent(_) => return "DoD Studio sent the review: it starts in a moment.".into(),
             Status::Failed(why) if self.studio => {
                 return format!("DoD Studio couldn't start it: {why}");
             }
@@ -1299,6 +1299,9 @@ fn start(path: &str) {
         say(&format!("usage: {NAME} start \"<queue file>\""));
         return;
     }
+    // A request from the Review tab ends here, started or not: a queue that
+    // fails to read must not leave the tab waiting for it (#1142).
+    crate::review_ask::review_started();
     let queue = match std::fs::read_to_string(path)
         .map_err(|e| format!("could not read {path}: {e}"))
         .and_then(|text| parse_queue(&text))
@@ -1311,8 +1314,7 @@ fn start(path: &str) {
         }
     };
     let (queue, options) = queue;
-    crate::review_ask::review_started();
-    let at = match start_index(&queue, options.from) {
+    let at =match start_index(&queue, options.from) {
         Ok(at) => at,
         Err(first) => {
             say("no highlight after where the demo was: starting from the first");
@@ -1550,7 +1552,7 @@ mod tests {
         assert!(!facts(false, true, Status::Idle).can_ask());
         assert!(!facts(true, false, Status::Idle).can_ask());
         assert!(!facts(true, true, Status::Asking("Scanning".into())).can_ask());
-        assert!(!facts(true, true, Status::Sent).can_ask());
+        assert!(!facts(true, true, Status::Sent(std::time::Instant::now())).can_ask());
     }
 
     #[test]

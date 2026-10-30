@@ -21,7 +21,8 @@
 //!
 //! The work is the frontend's: Tauri registers a [`set_review_handler`] that
 //! hands each request to the page, which answers through [`report`] with the
-//! request's id. A request nobody answers within [`ANSWER_TIMEOUT`] fails.
+//! request's id. A request fails when the page says nothing within
+//! [`FIRST_ANSWER_TIMEOUT`], or hasn't finished within [`ANSWER_TIMEOUT`].
 //!
 //! The hook DLL's side is `goldsrc-hooks/src/review_ask.rs`.
 
@@ -66,6 +67,12 @@ pub enum ReviewUpdate {
 /// How long a request waits for the frontend's answer: a scan of one demo
 /// takes seconds, a game DoD Studio has to start up to two minutes.
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// How long a request waits for the page's first word. The page answers at
+/// once (a step, or why not), so silence means no page heard it: one still
+/// loading, or reloaded mid-request. Without this the in-game tab would wait
+/// out [`ANSWER_TIMEOUT`] with its buttons greyed.
+pub const FIRST_ANSWER_TIMEOUT: Duration = Duration::from_secs(30);
 
 type Handler = Box<dyn Fn(ReviewRequest) + Send + Sync>;
 
@@ -180,20 +187,35 @@ pub fn serve(line: &str, writer: &mut impl Write) {
         demo.display()
     ));
     handler(ReviewRequest { id, demo, start });
-    forward(&receiver, writer, ANSWER_TIMEOUT);
+    forward(&receiver, writer, FIRST_ANSWER_TIMEOUT, ANSWER_TIMEOUT);
     if let Some(map) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         map.remove(&id);
     }
 }
 
-/// Writes each update from `receiver` until the last one, `timeout`, or a
-/// failed write.
-fn forward(receiver: &Receiver<ReviewUpdate>, writer: &mut impl Write, timeout: Duration) {
+/// Writes each update from `receiver` until the last one, a failed write, no
+/// first update within `first`, or no last one by `timeout`.
+fn forward(
+    receiver: &Receiver<ReviewUpdate>,
+    writer: &mut impl Write,
+    first: Duration,
+    timeout: Duration,
+) {
     let deadline = Instant::now() + timeout;
+    let mut heard = false;
     loop {
-        let left = deadline.saturating_duration_since(Instant::now());
+        let mut left = deadline.saturating_duration_since(Instant::now());
+        if !heard {
+            left = left.min(first);
+        }
         let update = match receiver.recv_timeout(left) {
-            Ok(update) => update,
+            Ok(update) => {
+                heard = true;
+                update
+            }
+            Err(RecvTimeoutError::Timeout) if !heard => ReviewUpdate::Failed(
+                "DoD Studio's window didn't answer: try again in a moment".to_string(),
+            ),
             Err(RecvTimeoutError::Timeout) => {
                 ReviewUpdate::Failed("DoD Studio took too long to start the review".to_string())
             }
@@ -255,7 +277,12 @@ mod tests {
             .send(ReviewUpdate::Progress("never sent".into()))
             .unwrap();
         let mut out = Vec::new();
-        forward(&receiver, &mut out, Duration::from_secs(5));
+        forward(
+            &receiver,
+            &mut out,
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        );
         assert_eq!(
             String::from_utf8(out).unwrap(),
             "progress Scanning the demo\ndone\n"
@@ -264,10 +291,33 @@ mod tests {
 
     #[test]
     fn an_unanswered_request_fails_when_its_time_is_up() {
+        let (sender, receiver) = channel::<ReviewUpdate>();
+        sender.send(ReviewUpdate::Progress("Scanning".into())).unwrap();
+        let mut out = Vec::new();
+        forward(
+            &receiver,
+            &mut out,
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+        );
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.ends_with("failed DoD Studio took too long to start the review\n"));
+    }
+
+    #[test]
+    fn a_request_no_page_heard_fails_soon() {
         let (_sender, receiver) = channel::<ReviewUpdate>();
         let mut out = Vec::new();
-        forward(&receiver, &mut out, Duration::from_millis(10));
-        assert!(String::from_utf8(out).unwrap().starts_with("failed "));
+        forward(
+            &receiver,
+            &mut out,
+            Duration::from_millis(10),
+            Duration::from_secs(600),
+        );
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "failed DoD Studio's window didn't answer: try again in a moment\n"
+        );
     }
 
     #[test]

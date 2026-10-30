@@ -23,7 +23,7 @@
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Where the review starts.
@@ -71,16 +71,36 @@ pub(crate) enum Status {
     Idle,
     /// Asked; Studio's latest word on it.
     Asking(String),
-    /// Studio sent the review; the game starts it in a moment.
-    Sent,
+    /// Studio sent the review, at this time; the game starts it in a moment.
+    Sent(Instant),
     Failed(String),
 }
 
 static STATUS: RwLock<Status> = RwLock::new(Status::Idle);
 
+/// Bumped by every `ds_demo_review start`. Studio's `done` can reach the
+/// request's thread after the game has already run the `start` it announced
+/// (the command pipe and this one race), so a request that ends after a start
+/// ends idle instead of saying the review is on its way ([`settled`]).
+static STARTS: AtomicU32 = AtomicU32::new(0);
+
+/// How long a sent review keeps the buttons greyed: the game runs Studio's
+/// `start` within a frame or two, so one that hasn't come by then was lost,
+/// and the buttons may ask again.
+const SENT_GRACE: Duration = Duration::from_secs(10);
+
 /// What the Review tab says about the last request.
 pub(crate) fn status() -> Status {
-    STATUS.try_read().map_or(Status::Idle, |s| s.clone())
+    shown(STATUS.try_read().map_or(Status::Idle, |s| s.clone()))
+}
+
+/// `status` as the tab shows it: a sent review that never started, past
+/// [`SENT_GRACE`], is idle again.
+fn shown(status: Status) -> Status {
+    match status {
+        Status::Sent(at) if at.elapsed() >= SENT_GRACE => Status::Idle,
+        other => other,
+    }
 }
 
 fn set_status(status: Status) {
@@ -89,9 +109,27 @@ fn set_status(status: Status) {
     }
 }
 
-/// The review started: whatever the last request said is done with.
+/// The review started (or a queue failed to): whatever the last request said
+/// is done with.
 pub(crate) fn review_started() {
-    set_status(Status::Idle);
+    if let Ok(mut s) = STATUS.write() {
+        STARTS.fetch_add(1, Ordering::Relaxed);
+        *s = Status::Idle;
+    }
+}
+
+/// The status a request ends on: idle when a review started while it was on
+/// its way (`started`), since its `done` then announces one already running.
+fn settled(end: Status, started: bool) -> Status {
+    if started { Status::Idle } else { end }
+}
+
+/// Sets the request's last status, against the [`STARTS`] it saw when sent;
+/// under the status lock, so a start can't slip between the check and the set.
+fn set_end(end: Status, starts_then: u32) {
+    if let Ok(mut s) = STATUS.write() {
+        *s = settled(end, STARTS.load(Ordering::Relaxed) != starts_then);
+    }
 }
 
 /// Whether a request is on its way, so a second click doesn't send another.
@@ -170,12 +208,13 @@ pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
     }
     set_status(Status::Asking("Asking DoD Studio...".to_string()));
     let line = request_line(&demo, start);
+    let starts_then = STARTS.load(Ordering::Relaxed);
     let spawned = std::thread::Builder::new()
         .name("review-ask".into())
         .spawn(move || {
             let end = ask(&line);
             log(&format!("{end:?}"));
-            set_status(end);
+            set_end(end, starts_then);
             IN_FLIGHT.store(false, Ordering::Release);
         });
     if let Err(e) = spawned {
@@ -213,7 +252,7 @@ fn ask(line: &str) -> Status {
                 log(&format!("DoD Studio: {text}"));
                 set_status(Status::Asking(text));
             }
-            Reply::Done => return Status::Sent,
+            Reply::Done => return Status::Sent(Instant::now()),
             Reply::Failed(why) => return Status::Failed(why),
             Reply::Other => {}
         }
@@ -260,6 +299,22 @@ mod tests {
         assert_eq!(parse_reply("done"), Reply::Done);
         assert_eq!(parse_reply("failed nope"), Reply::Failed("nope".into()));
         assert_eq!(parse_reply("cache v14"), Reply::Other);
+    }
+
+    #[test]
+    fn a_done_that_comes_after_its_review_started_ends_idle() {
+        let sent = Status::Sent(Instant::now());
+        assert_eq!(settled(sent.clone(), false), sent);
+        assert_eq!(settled(sent, true), Status::Idle);
+    }
+
+    #[test]
+    fn a_sent_review_that_never_starts_frees_the_buttons() {
+        let fresh = Status::Sent(Instant::now());
+        assert_eq!(shown(fresh.clone()), fresh);
+        if let Some(old) = Instant::now().checked_sub(SENT_GRACE) {
+            assert_eq!(shown(Status::Sent(old)), Status::Idle);
+        }
     }
 
     #[test]
