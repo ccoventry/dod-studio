@@ -268,7 +268,7 @@ fn rewound(last_frame_time: f64, from: f64) -> bool {
 pub static SKIP_BETWEEN: AtomicBool = AtomicBool::new(false);
 static SKIP_BETWEEN_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Called by `commands.rs` once `ds_demo_seek_skip_between` is registered.
+/// Called by `commands/install.rs` once `ds_demo_seek_skip_between` is registered.
 pub fn set_skip_between_cvar(cvar: *mut CvarSPartial) {
     SKIP_BETWEEN_CVAR.store(cvar, Ordering::Release);
 }

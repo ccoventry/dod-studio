@@ -84,7 +84,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The cvar name. Registered in `commands.rs`.
+/// The cvar name. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("demo_ex_interp_max");
 
 /// One engine build's clamp.

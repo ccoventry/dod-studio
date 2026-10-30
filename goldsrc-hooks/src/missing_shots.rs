@@ -107,7 +107,7 @@ use crate::engine::{
 use crate::names::console_name;
 
 /// The one switch for every path (see the module docs). Registered in
-/// `commands.rs`; `pov_recorder_shots` reads it through [`level`].
+/// `commands/install.rs`; `pov_recorder_shots` reads it through [`level`].
 pub const NAME: &str = console_name!("sound_restore_gunshots");
 
 /// How long before its restart a real shot can be heard and still be that
@@ -442,7 +442,7 @@ static PLAYED: AtomicU32 = AtomicU32::new(0);
 static HAD_EVENT: AtomicU32 = AtomicU32::new(0);
 static UNKNOWN_WEAPON: AtomicU32 = AtomicU32::new(0);
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

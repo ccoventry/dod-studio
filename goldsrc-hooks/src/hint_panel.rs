@@ -109,7 +109,7 @@ static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// hint on screen only when there can be one.
 static COULD_SHOW: AtomicBool = AtomicBool::new(false);
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
