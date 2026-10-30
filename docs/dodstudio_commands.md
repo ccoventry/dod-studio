@@ -347,6 +347,12 @@ renders free space for the next clip (#861). A held batch repeats
 `BATCH_HELD` every 5 s; when Studio has been gone from the events pipe for
 10 s, the batch ends there, keeping its clips, and the game quits as after a
 batch Studio stopped watching.
+In OBS mode Studio puts an `at` line running `ds_capture_batch wait_for_recording`
+at each clip's `AUDIO_SYNC`: the batch pauses the demo there with a
+`BATCH_WAITING_FOR_RECORDING` line on the events pipe, and plays on when
+Studio sends `recording` once OBS has started (#1109). With no `recording`
+after 20 s it plays on anyway; with Studio gone from the events pipe for
+10 s it ends the batch as the space hold does.
 `stop` ends the batch; bare says where it is. With
 `ds_capture_stay_behind` on when it starts, the game steps aside behind
 the other windows (minimised if it had the foreground, which then parks it
