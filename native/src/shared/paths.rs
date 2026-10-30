@@ -55,6 +55,19 @@ fn appdata_base() -> PathBuf {
     dirs::config_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }
 
+/// `%LOCALAPPDATA%\dod-studio`, created if absent: files that belong to this
+/// PC and have no reason to travel with a roaming Windows profile, such as
+/// the hook DLL copies the game launches from (#1146).
+pub fn get_local_appdata_dir() -> PathBuf {
+    let path = local_appdata_base().join(APPDATA_DIR_NAME);
+    let _ = std::fs::create_dir_all(&path);
+    path
+}
+
+fn local_appdata_base() -> PathBuf {
+    dirs::data_local_dir().unwrap_or_else(appdata_base)
+}
+
 /// What a migration run did, for the caller to log.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AppDataMigration {
