@@ -171,8 +171,8 @@ pub fn remove_unused(root: &Path, keep: &[PathBuf], now: SystemTime) -> usize {
         let last_use = std::fs::metadata(dir.join(SOURCE_FILE))
             .or_else(|_| std::fs::metadata(&dir))
             .and_then(|m| m.modified());
-        let recent = last_use
-            .is_ok_and(|t| now.duration_since(t).unwrap_or_default() < KEEP_AFTER_LAST_USE);
+        let recent =
+            last_use.is_ok_and(|t| now.duration_since(t).unwrap_or_default() < KEEP_AFTER_LAST_USE);
         if recent || !dlls_deleted(&dir) {
             continue;
         }
@@ -228,9 +228,17 @@ mod tests {
         let (root, source) = setup("copy", b"MZ DSHOOKBUILD:0.10.0+abc123\0 code");
         let copy = launch_copy_in(&root, &source).unwrap();
         assert_eq!(copy.file_name().unwrap(), DLL_NAME);
-        assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(&source).unwrap());
+        assert_eq!(
+            std::fs::read(&copy).unwrap(),
+            std::fs::read(&source).unwrap()
+        );
         assert_eq!(source_of(&copy), Some(source.clone()));
-        let folder = copy.parent().unwrap().file_name().unwrap().to_string_lossy();
+        let folder = copy
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
         assert!(folder.starts_with("0.10.0+abc123_"), "{folder}");
         // The same file again: the same copy, nothing new made.
         assert_eq!(launch_copy_in(&root, &source).unwrap(), copy);
@@ -255,7 +263,10 @@ mod tests {
         std::fs::write(&source, b"MZ DSHOOKBUILD:0.10.0+bbb\0 two").unwrap();
         let second = launch_copy_in(&root, &source).unwrap();
         assert_ne!(first, second);
-        assert_eq!(std::fs::read(&second).unwrap(), b"MZ DSHOOKBUILD:0.10.0+bbb\0 two");
+        assert_eq!(
+            std::fs::read(&second).unwrap(),
+            b"MZ DSHOOKBUILD:0.10.0+bbb\0 two"
+        );
         // Long after both launches, only the held copy survives a clean-up.
         let later = SystemTime::now() + KEEP_AFTER_LAST_USE * 2;
         assert_eq!(remove_unused(&root, &[], later), 1);
