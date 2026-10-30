@@ -37,10 +37,10 @@
 //!
 //! Default 0, like every other `ds_` switch.
 
-use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("spec_hide_hltv_messages");
 
@@ -53,19 +53,12 @@ const DRC_CMD_MESSAGE: u8 = 6;
 /// `native::patch::build_director_message` writes.
 const TEXT_OFFSET: usize = 30;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// How many messages have been dropped this session.
 static DROPPED: AtomicU32 = AtomicU32::new(0);
 
-/// Called by `commands/install.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    // Safety: a cvar the engine registered for us, alive for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    CVAR.on()
 }
 
 /// Whether a director message buffer, as `HUD_DirectorMessage` receives it,

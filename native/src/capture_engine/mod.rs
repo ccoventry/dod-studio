@@ -115,6 +115,8 @@ struct Batch {
     hold: Arc<AtomicBool>,
 }
 
+// One-call seam where every argument is independent; a params struct would exist only to satisfy the lint.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_capture_engine(
     jobs: Vec<CaptureJob>,
     hl_path: Arc<PathBuf>,

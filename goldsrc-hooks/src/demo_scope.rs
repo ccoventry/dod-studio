@@ -123,11 +123,12 @@ mod fill;
 
 pub use fill::with_black_fill;
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_show_scope");
 
@@ -208,15 +209,11 @@ const KEPT: u64 = 1 << 48;
 static ORIGIN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static ORIGIN_SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 static ON: AtomicBool = AtomicBool::new(false);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The scope id for a third-person weapon model, or `None` for one without
 /// a scope. See the module doc for why the FG42 maps to 6.
@@ -554,11 +551,9 @@ fn describe(on: bool) -> &'static str {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     fill::poll(wanted && playing_demo());
     let was = ON.load(Ordering::Relaxed);
     match set_on(wanted) {

@@ -50,11 +50,12 @@
 //! HLTV, carry everybody.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_overview_players");
 
@@ -85,7 +86,7 @@ pub const ENEMIES: i32 = 2;
 pub const WATCHED: i32 = 3;
 pub const NOBODY: i32 = 4;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The setting [`keep_icon`] follows.
 static MODE: AtomicI32 = AtomicI32::new(GAME);
 /// The `client.dll` base the detour went into, 0 before.
@@ -94,11 +95,6 @@ static INSTALLED_BASE: AtomicUsize = AtomicUsize::new(0);
 static TEAM_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// Whether a failure to install has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-
-/// Called once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// What one setting shows.
 pub fn describe(mode: i32) -> &'static str {
@@ -224,11 +220,9 @@ fn install() -> Result<bool, String> {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(raw) = CVAR.value() else {
         return;
-    }
-    let raw = unsafe { (*cvar).value };
+    };
     let wanted = if raw.is_finite() { raw as i32 } else { GAME };
     let wanted = if (GAME..=NOBODY).contains(&wanted) {
         wanted

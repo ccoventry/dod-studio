@@ -19,8 +19,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("debug_record_frame_times");
 
@@ -31,7 +31,7 @@ const CAPACITY: usize = 1 << 18;
 /// The file Studio reads, under `%APPDATA%\dod-studio`.
 pub const FILE_NAME: &str = "frame_times.txt";
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 static RECORDING: AtomicBool = AtomicBool::new(false);
 static COUNT: AtomicUsize = AtomicUsize::new(0);
 /// Microseconds since `EPOCH` at the last frame, 0 before the first.
@@ -40,10 +40,6 @@ static BUFFER: OnceLock<Box<[AtomicU32]>> = OnceLock::new();
 static EPOCH: OnceLock<Instant> = OnceLock::new();
 /// The writer thread's summary line, for the engine thread to print.
 static SUMMARY: AtomicPtr<String> = AtomicPtr::new(std::ptr::null_mut());
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 fn now_us() -> u64 {
     // +1 so a real reading is never the "none yet" 0.
@@ -60,11 +56,9 @@ pub fn poll() {
         crate::commands::console_print(&line);
         unsafe { crate::debug::report(line.trim_end()) };
     }
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     let recording = RECORDING.load(Ordering::Relaxed);
     if wanted && !recording {
         start();

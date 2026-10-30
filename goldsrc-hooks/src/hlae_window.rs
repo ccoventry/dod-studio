@@ -56,32 +56,26 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::ffi::c_void;
-use std::sync::atomic::{
-    AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicU32, AtomicUsize, Ordering,
-};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 /// Debug: a minimised game is DWM-cloaked instead of parked off-screen, to
 /// compare the two (#723).
 pub const CLOAK_NAME: &str = console_name!("debug_cloak_instead");
-static CLOAK_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CLOAK_CVAR: Cvar = Cvar::new();
 
 pub const NAME: &str = console_name!("capture_stay_behind");
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
+pub static CVAR: Cvar = Cvar::new();
 
 /// Whether the setting is on now. Off once the client has shut down: the
 /// engine has freed the cvar by the time SDL's window teardown calls
 /// `behind_imports`' detours with it (#1080).
 pub fn wanted() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    !cvar.is_null() && !crate::engine::client_shut_down() && unsafe { (*cvar).value } != 0.0
+    // The shut-down check comes first, so a freed cvar is never read.
+    !crate::engine::client_shut_down() && CVAR.on()
 }
 
 /// The start of HLAE's "make the window a popup" function. The exit function
@@ -320,13 +314,8 @@ fn window() -> Option<*mut c_void> {
     (!found.is_null()).then_some(found)
 }
 
-pub fn set_cloak_cvar(cvar: *mut CvarSPartial) {
-    CLOAK_CVAR.store(cvar, Ordering::Release);
-}
-
 fn cloak_wanted() -> bool {
-    let cvar = CLOAK_CVAR.load(Ordering::Acquire);
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    CLOAK_CVAR.on()
 }
 
 /// The left edge that puts a window `width` wide wholly left of a virtual

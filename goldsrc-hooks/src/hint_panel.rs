@@ -55,11 +55,12 @@
 //! Reload!" prompt (#342), for the same reason: `mg_reload_hint.rs`, a patch
 //! of its own that [`poll`] drives.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("hud_hide_hints");
 
@@ -89,7 +90,7 @@ const HINT_PANEL_OFFSET: usize = 0x14;
 #[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 const SET_VISIBLE_SLOT: usize = 0x74 / 4;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// `ShowHint`'s address, 0 before a successful scan.
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// The module base [`ADDRESS`] belongs to.
@@ -108,11 +109,6 @@ static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// Set while hints could open (the stub was off), so switching on closes a
 /// hint on screen only when there can be one.
 static COULD_SHOW: AtomicBool = AtomicBool::new(false);
-
-/// Called by `commands/install.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 fn pack(bytes: [u8; 3]) -> u32 {
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0])
@@ -228,11 +224,9 @@ fn close_open_hint(base: usize) -> Result<bool, String> {
 
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(wanted) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    };
     crate::mg_reload_hint::poll(wanted);
     if wanted {
         TOUCHED.store(true, Ordering::Relaxed);

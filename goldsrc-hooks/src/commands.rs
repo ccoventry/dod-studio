@@ -63,10 +63,11 @@
 //! and `pfnAddCommand` live on that same table.
 
 use std::ffi::CString;
-use std::sync::atomic::{AtomicBool, AtomicPtr};
+use std::sync::atomic::AtomicBool;
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
+use crate::setting::Cvar;
 use crate::{
     crosshair, decals, ex_interp, hand_signals, overview_map, scoreboard, texture_hires, voice,
 };
@@ -102,15 +103,15 @@ const TEXTURE_HIRES_LOG_NAME: &str = texture_hires::NAME;
 const CVAR_FLAGS: i32 = 0;
 
 /// The cvars the engine handed back, read once per frame by `poll`.
-static CVAR_SPEC_MATCH_POV: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_SPECTATOR_TARGET_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_HAND_SIGNALS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_EX_INTERP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_TEXTURE_HIRES_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_SPEC_MATCH_POV: Cvar = Cvar::new();
+static CVAR_HELD_MODELS: Cvar = Cvar::new();
+static CVAR_SPECTATOR_TARGET_LOG: Cvar = Cvar::new();
+static CVAR_SCOREBOARD: Cvar = Cvar::new();
+static CVAR_VOICE: Cvar = Cvar::new();
+static CVAR_CROSSHAIR: Cvar = Cvar::new();
+static CVAR_HAND_SIGNALS: Cvar = Cvar::new();
+static CVAR_EX_INTERP: Cvar = Cvar::new();
+static CVAR_TEXTURE_HIRES_LOG: Cvar = Cvar::new();
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.

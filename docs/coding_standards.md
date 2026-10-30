@@ -88,9 +88,21 @@ CLAUDE.md has the rules: comments say why, in the present tense; cite the issue,
 
 ## Checked by tools
 
-Today: `cargo fmt --check`, Clippy with `-D warnings`, and `main_js_budget.test.js` (a guideline: CLAUDE.md). Candidates, not yet turned on (lint rules change only with the owner's OK), each enabled by name rather than as a group, since Clippy's `pedantic` group is known for false positives:
-- Clippy `too_many_arguments` (on by default at 7; lower it), `cognitive_complexity`, `fn_params_excessive_bools`, `unwrap_used` / `expect_used` (off by default; allow in tests), set as warnings first to see what they flag.
-- An ESLint pass with `max-params` (default 3), `no-unused-vars`, `no-magic-numbers` with the usual 0, 1, -1 and array-index exceptions. Not `max-lines-per-function`: length is the weak signal (section 2).
+Today, all in CI (#1179):
+- `cargo fmt --check` and Clippy with `-D warnings`, which includes `too_many_arguments` at threshold 7 (`clippy.toml`). A function that still needs more carries `#[allow(clippy::too_many_arguments)]` with a one-line reason above it; there is no workspace-wide allow.
+- `native/tests/test_attribute_scan.rs` (CLAUDE.md, #743): a `fn` in a `#[cfg(test)] mod` with no `#[test]` that nothing calls fails the build. The heuristic is written at the top of the file.
+- Guideline tests for file size, like `main_js_budget.test.js`: `native/tests/file_ceilings.rs` and `studio/src/file_ceilings.test.js` hold a non-test line ceiling per hot file. A prompt to look, not a limit: raise a number with a reason in the PR.
+- ESLint on `studio/src` (`npm run lint`, CI job "Frontend lint"): `no-unused-vars` is an error, `max-params` (5) a warning. A leading underscore marks a name taken only to be left out.
+
+Measured, not gated (a warning would fail `-D warnings`): `cognitive_complexity` at Clippy's default threshold of 25 (`clippy.toml`). Run it when touching a long function, or before a refactor PR:
+
+    rustup run 1.98.1 cargo clippy --workspace --all-targets -- -A clippy::all -W clippy::cognitive_complexity
+
+On the day it was added it flagged 23 functions (12 outside `examples/`). Lower `cognitive-complexity-threshold` in `clippy.toml` to see more (15 flagged 81). Turn it on as a CI gate only once the list is short.
+
+Candidates, not yet turned on (lint rules change only with the owner's OK), each enabled by name rather than as a group, since Clippy's `pedantic` group is known for false positives:
+- Clippy `fn_params_excessive_bools`, and `unwrap_used` / `expect_used` (off by default; allow in tests; waits on the mutex-lock answer, #1180), set as warnings first to see what they flag.
+- More ESLint rules: `max-params` as an error once its eight warnings are gone, `no-magic-numbers` with the usual 0, 1, -1 and array-index exceptions. Not `max-lines-per-function`: length is the weak signal (section 2).
 
 Everything else here is for review: the person writing the code checks it, and a reviewer (or a review agent) checks it again. Rules that a tool can check should move to the tool over time: a 2026 study of agent instruction files found they help with the conventions an agent can't guess from the code and cost context for everything else, which is why this doc is separate from CLAUDE.md and CLAUDE.md only points here.
 

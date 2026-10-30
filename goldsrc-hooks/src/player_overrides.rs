@@ -9,26 +9,17 @@
 //! already on a wall keeps the texture it was drawn with (reload the demo to
 //! compare).
 
-use std::sync::atomic::{AtomicPtr, Ordering};
-
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("player_overrides");
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// The registered cvar, from `commands/install.rs`.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
+pub static CVAR: Cvar = Cvar::new();
 
 /// Whether the table applies now. One atomic load and a float read, so the
 /// per-frame and per-spray paths can ask freely.
 pub fn on() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    // Safety: registered by us, kept by the engine for the session.
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+    CVAR.on()
 }
 
 /// The `ds_debug_status` line.

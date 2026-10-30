@@ -8,7 +8,7 @@ import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus,
 import { STRINGS } from './strings.js';
 import { automaticClipName } from './clip_name.js';
 import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
-import { confirmOverLimit } from './packet_entity_limit.js';
+import { watchPreviewTrim } from './preview_trim_status.js';
 import { confirmNoCameraData } from './camera_data.js';
 import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
 import { clockFloor, clockRound, durationText } from './time_format.js';
@@ -203,12 +203,16 @@ window.addEventListener("DOMContentLoaded", () => {
     const originalLabel = btnLaunchPreview.textContent;
     btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    // A demo over the engine's entity limit plays a trimmed copy (#207),
+    // made first: the button shows its steps.
+    const stopTrimStatus = await watchPreviewTrim(btnLaunchPreview);
     try {
       await launchDemoPreview(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
       showToast(STRINGS.HIGHLIGHTS.PREVIEW_LAUNCHING_TOAST, 'info');
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js.
     } finally {
+      stopTrimStatus();
       btnLaunchPreview.textContent = originalLabel;
       updatePreviewButtonStates();
     }
@@ -222,6 +226,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const originalLabel = btnLaunchPreview.textContent;
     btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    const stopTrimStatus = await watchPreviewTrim(btnLaunchPreview);
     try {
       const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
       if (sent) {
@@ -229,10 +234,11 @@ window.addEventListener("DOMContentLoaded", () => {
         return true;
       }
       return false;
-    } catch (err) {
+    } catch {
       // Already toasted by ipc_bridge.js; the prompt still offers a way on.
       return false;
     } finally {
+      stopTrimStatus();
       btnLaunchPreview.textContent = originalLabel;
       updatePreviewButtonStates();
     }
@@ -248,8 +254,6 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       if (!currentDemo || !currentDemo.streaks) return;
       const highlights = allPreviewableStreaks(currentDemo);
-      // The game closes on a demo over its entity limit (#207).
-      if (!(await confirmOverLimit([currentDemo], hlPath, { preview: true }))) return;
       // A demo with no camera data plays as a frozen view (#920).
       if (!(await confirmNoCameraData([currentDemo], { preview: true }))) return;
       // A game started with other launch settings is never sent the preview
@@ -261,7 +265,7 @@ window.addEventListener("DOMContentLoaded", () => {
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js — fail open rather than blocking
         // a legitimate launch just because the detector itself errored.
       }
@@ -288,7 +292,7 @@ window.addEventListener("DOMContentLoaded", () => {
       processModalForceRelaunchBtn.disabled = true;
       try {
         await killEngineProcesses();
-      } catch (err) {
+      } catch {
         // Already toasted by ipc_bridge.js.
       }
       await new Promise(resolve => setTimeout(resolve, 500));

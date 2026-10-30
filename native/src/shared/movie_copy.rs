@@ -241,9 +241,10 @@ fn add_language_files(plan: &mut CopyPlan, name: &str) {
 }
 
 /// Whether `bytes` fit in `free` with [`FREE_SPACE_HEADROOM_BYTES`] to
-/// spare. `u64::MAX` is what the disk query answers when it can't tell.
-pub fn fits(bytes: u64, free: u64) -> bool {
-    free == u64::MAX || bytes.saturating_add(FREE_SPACE_HEADROOM_BYTES) <= free
+/// spare. `None` is what the disk query answers when it can't tell, and
+/// doesn't block.
+pub fn fits(bytes: u64, free: Option<u64>) -> bool {
+    free.is_none_or(|free| bytes.saturating_add(FREE_SPACE_HEADROOM_BYTES) <= free)
 }
 
 /// How far the copy is.
@@ -295,7 +296,7 @@ pub fn copy_with_free_space(
     game_root: &Path,
     name: &str,
     include_demos: bool,
-    free_bytes: u64,
+    free_bytes: Option<u64>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&CopyProgress),
 ) -> Result<CopyOutcome, String> {
@@ -317,7 +318,8 @@ pub fn copy_with_free_space(
             "The copy needs {} and the drive holding {} has {} free (DoD Studio leaves 1 GB spare)",
             gb(total_bytes),
             game_root.display(),
-            gb(free_bytes)
+            // Only reached for a known figure: an unknown one always fits.
+            gb(free_bytes.unwrap_or_default())
         ));
     }
     let target = game_root.join(name);
@@ -511,7 +513,7 @@ mod tests {
             root,
             name,
             demos,
-            u64::MAX,
+            None,
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -650,19 +652,16 @@ mod tests {
             &root,
             "dod_movies",
             false,
-            FREE_SPACE_HEADROOM_BYTES,
+            Some(FREE_SPACE_HEADROOM_BYTES),
             &AtomicBool::new(false),
             &mut |_| {},
         )
         .unwrap_err();
         assert!(err.contains("free"), "{err}");
         assert!(!root.join("dod_movies").exists());
-        assert!(fits(10, 10 + FREE_SPACE_HEADROOM_BYTES));
-        assert!(!fits(11, 10 + FREE_SPACE_HEADROOM_BYTES));
-        assert!(
-            fits(u64::MAX, u64::MAX),
-            "an unknown free space doesn't block"
-        );
+        assert!(fits(10, Some(10 + FREE_SPACE_HEADROOM_BYTES)));
+        assert!(!fits(11, Some(10 + FREE_SPACE_HEADROOM_BYTES)));
+        assert!(fits(u64::MAX, None), "an unknown free space doesn't block");
     }
 
     #[test]
@@ -671,15 +670,14 @@ mod tests {
         let before = files_under(&root);
         let cancel = AtomicBool::new(false);
         let mut heard = 0u64;
-        let outcome =
-            copy_with_free_space(&root, "dod_movies", true, u64::MAX, &cancel, &mut |p| {
-                heard = p.done_bytes;
-                // Partway into the big demo.
-                if p.done_bytes >= 2 * CHUNK_BYTES as u64 {
-                    cancel.store(true, Ordering::Relaxed);
-                }
-            })
-            .unwrap();
+        let outcome = copy_with_free_space(&root, "dod_movies", true, None, &cancel, &mut |p| {
+            heard = p.done_bytes;
+            // Partway into the big demo.
+            if p.done_bytes >= 2 * CHUNK_BYTES as u64 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        })
+        .unwrap();
         assert_eq!(outcome, CopyOutcome::Cancelled);
         assert!(heard >= 2 * CHUNK_BYTES as u64);
         assert!(!root.join("dod_movies").exists());
@@ -695,7 +693,7 @@ mod tests {
             &root,
             "dod_movies",
             false,
-            u64::MAX,
+            None,
             &AtomicBool::new(false),
             &mut |p| {
                 // Something else writes the map just before the copy gets to it.
@@ -724,7 +722,7 @@ mod tests {
             &root,
             "dod_movies",
             true,
-            u64::MAX,
+            None,
             &AtomicBool::new(false),
             &mut |p| last = Some(p.clone()),
         )

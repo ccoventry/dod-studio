@@ -63,12 +63,13 @@
 //! `ds_hud_deathmsg players` lists.
 
 use std::ffi::{CStr, c_char};
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::commands::console_print;
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 /// The cvar: 1 keeps the camera on a player through his death.
 pub const LOCK_NAME: &str = console_name!("spec_lock");
@@ -90,7 +91,7 @@ const JMP: u8 = 0xEB;
 /// The highest player number the game has.
 const MAX_PLAYERS: i32 = 32;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// Resolved address of the pattern, or 0 before the first successful scan.
 static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// The module base it was resolved against (see `scoreboard::SCANNED_BASE`).
@@ -113,11 +114,6 @@ pub fn hold_for_review(on: bool) {
 /// spectator buttons for as long (#826).
 pub fn review_holds() -> bool {
     REVIEW_HOLD.load(Ordering::Relaxed)
-}
-
-/// Called once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
 }
 
 fn span_address() -> Result<usize, String> {
@@ -166,11 +162,10 @@ pub fn set_locked(locked: bool) -> Result<bool, String> {
 /// Follows the cvar, or a review's hold. Called every frame from
 /// `commands::poll`.
 pub fn poll() {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
+    let Some(on) = CVAR.try_on() else {
         return;
-    }
-    let wanted = unsafe { (*cvar).value } != 0.0 || REVIEW_HOLD.load(Ordering::Relaxed);
+    };
+    let wanted = on || REVIEW_HOLD.load(Ordering::Relaxed);
     match set_locked(wanted) {
         Ok(false) => COMPLAINED.store(false, Ordering::Relaxed),
         Ok(true) => {

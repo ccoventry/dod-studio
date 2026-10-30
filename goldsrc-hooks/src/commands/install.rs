@@ -65,7 +65,7 @@ pub fn install() {
     // so it needs no poll, and a failed registration costs only this one
     // setting's type-ahead -- a plain toggle stands in for it.
     match register(demo_seek::SKIP_BETWEEN_NAME, "0") {
-        Some(cvar) => demo_seek::set_skip_between_cvar(cvar),
+        Some(cvar) => demo_seek::SKIP_BETWEEN.set_cvar(cvar),
         None => add_command(demo_seek::SKIP_BETWEEN_NAME, cmd_seek_skip_between),
     }
     add_command(
@@ -79,12 +79,12 @@ pub fn install() {
     // registration costs only this one setting's type-ahead -- a plain toggle
     // stands in for it.
     match register(demo_list_folders::NAME, "1") {
-        Some(cvar) => demo_list_folders::set_cvar(cvar),
+        Some(cvar) => demo_list_folders::FOLDERS.set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
     }
     // Read by the file system's Open hook on a `D:/...` name (#776).
     match register(demo_other_drives::NAME, "1") {
-        Some(cvar) => demo_other_drives::set_cvar(cvar),
+        Some(cvar) => demo_other_drives::SETTING.set_cvar(cvar),
         None => add_command(demo_other_drives::NAME, cmd_demo_other_drives),
     }
     // The three below default off (0.2.0): each lists more by reading every
@@ -102,7 +102,7 @@ pub fn install() {
     }
     // On by default (#798); read by fast_load::poll each frame.
     match register(crate::fast_load::NAME, "1") {
-        Some(cvar) => crate::fast_load::set_cvar(cvar),
+        Some(cvar) => crate::fast_load::SETTING.set_cvar(cvar),
         None => add_command(crate::fast_load::NAME, cmd_demo_fast_load),
     }
     match register(demo_list_folders::SHOW_COUNTS.name, "0") {
@@ -122,7 +122,10 @@ pub fn install() {
         register(window_layout::RESIZABLE_NAME, "1"),
         register(window_layout::REMEMBER_NAME, "1"),
     ) {
-        (Some(resizable), Some(remember)) => window_layout::set_cvars(resizable, remember),
+        (Some(resizable), Some(remember)) => {
+            window_layout::RESIZABLE.set_cvar(resizable);
+            window_layout::REMEMBER.set_cvar(remember);
+        }
         _ => {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
@@ -132,11 +135,11 @@ pub fn install() {
     // Both on by default: the window is how DoD
     // Studio's console and playback controls are reached.
     match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
-        Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
+        Some(cvar) => crate::studio_panel::VIEWDEMO_IN_PANEL.set_cvar(cvar),
         None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
     }
     match register(crate::studio_panel::CONSOLE_NAME, "1") {
-        Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
+        Some(cvar) => crate::studio_panel::CONSOLE_IN_PANEL.set_cvar(cvar),
         None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
     // On by default too: it only shows anything on the layout Studio's own
@@ -185,134 +188,135 @@ pub fn install() {
     // all-or-nothing tuple, since the HD textures fall back to their default
     // style without it.
     if let Some(style) = register(texture_hires::STYLE_NAME, texture_hires::DEFAULT_STYLE) {
-        texture_hires::set_style_cvar(style);
+        texture_hires::STYLE_CVAR.set(style);
     }
     // Same for the HD switch; texture_hires::poll_hd follows it, and installs
     // the hook if it's turned on in a session that started without it.
     if let Some(hd) = register(texture_hires::HD_NAME, bit(texture_hires::enabled())) {
-        texture_hires::set_hd_cvar(hd);
+        texture_hires::HD_CVAR.set(hd);
     }
     // Outside the all-or-nothing tuple for the same reason as the HD switch:
     // it is independent of every other setting here.
     if let Some(gun_log) = register(crate::gun_log::NAME, "0") {
-        crate::gun_log::set_cvar(gun_log);
+        crate::gun_log::CVAR.set(gun_log);
     }
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
-        crate::world_shaders::set_cvar(shaders);
+        crate::world_shaders::CVAR.set(shaders);
     }
     // Same: independent of every other setting, so outside the tuple.
     if let Some(map_text) = register(crate::map_text::NAME, "0") {
-        crate::map_text::set_cvar(map_text);
+        crate::map_text::CVAR.set(map_text);
     }
     if let Some(clan_text) = register(crate::clan_text::NAME, "0") {
-        crate::clan_text::set_cvar(clan_text);
+        crate::clan_text::CVAR.set(clan_text);
     }
     if let Some(center_text) = register(crate::center_text::NAME, "0") {
-        crate::center_text::set_cvar(center_text);
+        crate::center_text::CVAR.set(center_text);
     }
     if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
-        crate::spectator_text::set_cvar(spectator_text);
+        crate::spectator_text::CVAR.set(spectator_text);
     }
     if let Some(plugin_text) = register(crate::plugin_text::NAME, "0") {
-        crate::plugin_text::set_cvar(plugin_text);
+        crate::plugin_text::CVAR.set(plugin_text);
     }
     if let Some(teammate_info) = register(crate::teammate_info::NAME, "0") {
-        crate::teammate_info::set_cvar(teammate_info);
+        crate::teammate_info::CVAR.set(teammate_info);
     }
     // On by default: the hint panel is the recorder's own tutorial and
     // covers a corner of the shot (#286).
     if let Some(hints) = register(crate::hint_panel::NAME, "1") {
-        crate::hint_panel::set_cvar(hints);
+        crate::hint_panel::CVAR.set(hints);
     }
     if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
-        crate::voice_menus::set_cvar(voice_menus);
+        crate::voice_menus::CVAR.set(voice_menus);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
-        crate::hltv_messages::set_cvar(hltv_messages);
+        crate::hltv_messages::CVAR.set(hltv_messages);
     }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
-        crate::spectator_bars::set_cvar(bars);
+        crate::spectator_bars::CVAR.set(bars);
     }
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
-        crate::spectator_follow::set_cvar(lock);
+        crate::spectator_follow::CVAR.set(lock);
     }
     if let Some(deathcam) = register(crate::spectator_deathcam::NAME, "0") {
-        crate::spectator_deathcam::set_cvar(deathcam);
+        crate::spectator_deathcam::CVAR.set(deathcam);
     }
     if let Some(icons) = register(crate::overview_players::NAME, "0") {
-        crate::overview_players::set_cvar(icons);
+        crate::overview_players::CVAR.set(icons);
     }
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
-        crate::overview_marker::set_cvar(marker);
+        crate::overview_marker::CVAR.set(marker);
     }
     if let Some(speaker) = register(crate::overview_speaker::NAME, "0") {
-        crate::overview_speaker::set_cvar(speaker);
+        crate::overview_speaker::CVAR.set(speaker);
     }
     // On by default: a model turned round for a frame is wrong in any demo
     // (#927). A failed registration falls back to a plain toggle.
     match register(crate::strafe_twitch::NAME, "1") {
-        Some(flicker) => crate::strafe_twitch::set_cvar(flicker),
+        Some(flicker) => crate::strafe_twitch::FIX_MODEL_FLICKER.set_cvar(flicker),
         None => add_command(crate::strafe_twitch::NAME, cmd_fix_model_flicker),
     }
     // On by default: a round fired in view should be heard (#1036). One
     // switch for every gunshot path, read by `missing_shots::poll` and
     // `pov_recorder_shots::poll` themselves; `2` also logs every round.
     match register(missing_shots::NAME, "1") {
-        Some(restore) => missing_shots::set_cvar(restore),
+        Some(restore) => missing_shots::SETTING.set_cvar(restore),
         None => add_command(missing_shots::NAME, cmd_restore_gunshots),
     }
     // On by default: a demo then shows the sniper scope the player saw.
     if let Some(scope) = register(crate::demo_scope::NAME, "1") {
-        crate::demo_scope::set_cvar(scope);
+        crate::demo_scope::CVAR.set(scope);
     }
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
-        crate::run_in_background::set_cvar(background);
+        crate::run_in_background::CVAR.set(background);
     }
     if let Some(times) = register(crate::frame_times::NAME, "0") {
-        crate::frame_times::set_cvar(times);
+        crate::frame_times::CVAR.set(times);
     }
     if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
-        crate::hlae_window::set_cloak_cvar(cloak);
+        crate::hlae_window::CLOAK_CVAR.set(cloak);
     }
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
-        crate::pov_live_bob::set_cvar(bob);
+        crate::pov_live_bob::CVAR.set(bob);
     }
     if let Some(log) = register(crate::pov_live_bob::LOG_NAME, "0") {
-        crate::pov_live_bob::set_log_cvar(log);
+        crate::pov_live_bob::LOG_CVAR.set(log);
     }
     if let Some(blood) = register(crate::own_blood::NAME, "0") {
-        crate::own_blood::set_cvar(blood);
+        crate::own_blood::CVAR.set(blood);
     }
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
-        crate::map_weather::set_cvar(weather);
+        crate::map_weather::CVAR.set(weather);
     }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
-            family.set_cvar(mute);
+            family.cvar().set(mute);
         }
     }
     if let Some(log) = register(crate::map_sounds::LOG_NAME, "0") {
-        crate::map_sounds::set_log_cvar(log);
+        crate::map_sounds::LOG_CVAR.set(log);
     }
     // Off unless Studio turns it on: a game not started from Studio keeps
     // its own sprays and crosshair (#428).
     if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
-        crate::player_overrides::set_cvar(overrides);
+        crate::player_overrides::CVAR.set(overrides);
     }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),
         register(crate::screen_effects::SHAKE_NAME, "0"),
     ) {
-        crate::screen_effects::set_cvars(flash, shake);
+        crate::screen_effects::FLASH.set(flash);
+        crate::screen_effects::SHAKE.set(shake);
     }
     if let Some(behind) = register(crate::hlae_window::NAME, "0") {
-        crate::hlae_window::set_cvar(behind);
+        crate::hlae_window::CVAR.set(behind);
     }
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
-        crate::detail_cache::set_keep_cvar(keep);
+        crate::detail_cache::KEEP.set(keep);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
@@ -345,15 +349,15 @@ pub fn install() {
         return;
     };
 
-    CVAR_SPEC_MATCH_POV.store(spec_match_pov, Ordering::Relaxed);
-    CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
-    CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
-    CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
-    CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
-    CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
-    CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
-    CVAR_EX_INTERP.store(ex_interp_cvar, Ordering::Relaxed);
-    CVAR_TEXTURE_HIRES_LOG.store(texture_hires_log_cvar, Ordering::Relaxed);
+    CVAR_SPEC_MATCH_POV.set(spec_match_pov);
+    CVAR_HELD_MODELS.set(held_models);
+    CVAR_SPECTATOR_TARGET_LOG.set(spectator_target_log);
+    CVAR_SCOREBOARD.set(scoreboard_cvar);
+    CVAR_VOICE.set(voice_cvar);
+    CVAR_CROSSHAIR.set(crosshair_cvar);
+    CVAR_HAND_SIGNALS.set(hand_signals_cvar);
+    CVAR_EX_INTERP.set(ex_interp_cvar);
+    CVAR_TEXTURE_HIRES_LOG.set(texture_hires_log_cvar);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
