@@ -154,3 +154,155 @@ pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Player, Team};
+
+    fn send(state: &mut AnalyzerState, message: UserMessage) {
+        use_pov_stats_updates(state, &AnalyzerEvent::UserMessage(message));
+    }
+
+    fn cur_weapon(weapon: Weapon, clip_ammo: u8) -> UserMessage {
+        UserMessage::CurWeapon(dod::CurWeapon {
+            is_active: true,
+            weapon,
+            clip_ammo,
+        })
+    }
+
+    fn death(killer: u8, victim: u8, weapon: Weapon) -> UserMessage {
+        UserMessage::DeathMsg(dod::DeathMsg {
+            killer_client_index: killer,
+            victim_client_index: victim,
+            weapon,
+        })
+    }
+
+    /// The recorder is wire index 1 (Allies); 2 is a teammate, 3 an enemy.
+    fn match_in_progress() -> AnalyzerState {
+        let mut state = AnalyzerState {
+            pov_player_index: Some(0),
+            ..Default::default()
+        };
+        for (slot, name, team) in [
+            (0, "pov", Team::Allies),
+            (1, "mate", Team::Allies),
+            (2, "enemy", Team::Axis),
+        ] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        state
+    }
+
+    #[test]
+    fn a_falling_clip_is_a_bullet_fired_and_a_new_weapon_clears_the_scope() {
+        let mut state = match_in_progress();
+        send(&mut state, cur_weapon(Weapon::Springfield, 5));
+        send(&mut state, UserMessage::Scope(dod::Scope {}));
+        assert!(state.pov_stats.is_scoped);
+        send(&mut state, cur_weapon(Weapon::Springfield, 4));
+        send(&mut state, cur_weapon(Weapon::Springfield, 4));
+        let fired = &state.pov_stats.weapon_stats[&Weapon::Springfield];
+        assert_eq!(fired.bullets_fired, 1);
+        assert!(state.pov_stats.is_scoped);
+
+        send(&mut state, cur_weapon(Weapon::Kabar, 0));
+        assert!(!state.pov_stats.is_scoped);
+        assert_eq!(state.pov_stats.current_weapon, Some(Weapon::Kabar));
+    }
+
+    #[test]
+    fn a_reload_counts_for_the_held_weapon_and_clears_the_scope() {
+        let mut state = match_in_progress();
+        send(&mut state, UserMessage::ReloadDone(dod::ReloadDone {}));
+        assert!(state.pov_stats.weapon_stats.is_empty());
+        send(&mut state, cur_weapon(Weapon::K98, 5));
+        send(&mut state, UserMessage::Scope(dod::Scope {}));
+        send(&mut state, UserMessage::ReloadDone(dod::ReloadDone {}));
+        assert_eq!(state.pov_stats.weapon_stats[&Weapon::K98].reloads, 1);
+        assert!(!state.pov_stats.is_scoped);
+    }
+
+    #[test]
+    fn health_that_drops_is_a_hit_but_the_first_reading_and_a_respawn_are_not() {
+        let mut state = match_in_progress();
+        send(&mut state, UserMessage::Health(dod::Health(100)));
+        send(&mut state, UserMessage::Health(dod::Health(70)));
+        send(&mut state, UserMessage::Health(dod::Health(80)));
+        send(&mut state, UserMessage::Health(dod::Health(75)));
+        assert_eq!(state.pov_stats.hits_taken, 2);
+        assert_eq!(state.pov_stats.total_damage_taken, 35);
+
+        send(&mut state, UserMessage::ResetHUD(dod::ResetHUD {}));
+        send(&mut state, UserMessage::Health(dod::Health(100)));
+        assert_eq!(state.pov_stats.hits_taken, 2);
+        assert!(!state.pov_stats.is_scoped);
+    }
+
+    #[test]
+    fn a_kill_of_an_enemy_counts_for_the_weapon_scoped_or_not() {
+        let mut state = match_in_progress();
+        send(&mut state, death(1, 3, Weapon::Springfield));
+        let stats = &state.pov_stats.weapon_stats[&Weapon::Springfield];
+        assert_eq!((stats.kills, stats.noscopes, stats.scoped_kills), (1, 1, 0));
+
+        send(&mut state, UserMessage::Scope(dod::Scope {}));
+        send(&mut state, death(1, 3, Weapon::Springfield));
+        send(&mut state, death(1, 3, Weapon::Garand));
+        let stats = &state.pov_stats.weapon_stats[&Weapon::Springfield];
+        assert_eq!((stats.kills, stats.noscopes, stats.scoped_kills), (2, 1, 1));
+        let garand = &state.pov_stats.weapon_stats[&Weapon::Garand];
+        assert_eq!(
+            (garand.kills, garand.noscopes, garand.scoped_kills),
+            (1, 0, 0)
+        );
+    }
+
+    #[test]
+    fn killing_a_teammate_or_oneself_is_not_a_kill() {
+        let mut state = match_in_progress();
+        send(&mut state, death(1, 2, Weapon::Garand));
+        assert_eq!(state.pov_stats.teamkills_committed, 1);
+        send(&mut state, death(1, 1, Weapon::Garand));
+        assert_eq!(state.pov_stats.suicides, 1);
+        assert!(state.pov_stats.weapon_stats.is_empty());
+    }
+
+    #[test]
+    fn a_world_death_of_the_recorder_is_a_suicide() {
+        let mut state = match_in_progress();
+        send(&mut state, UserMessage::Scope(dod::Scope {}));
+        send(&mut state, death(0, 1, Weapon::Unknown));
+        assert_eq!(state.pov_stats.suicides, 1);
+        assert!(!state.pov_stats.is_scoped);
+        send(&mut state, death(0, 3, Weapon::Unknown));
+        assert_eq!(state.pov_stats.suicides, 1);
+    }
+
+    #[test]
+    fn dying_to_a_teammate_is_suffered_and_to_an_enemy_is_not() {
+        let mut state = match_in_progress();
+        send(&mut state, UserMessage::Scope(dod::Scope {}));
+        send(&mut state, death(3, 1, Weapon::Garand));
+        assert_eq!(state.pov_stats.teamkills_suffered, 0);
+        assert!(!state.pov_stats.is_scoped);
+        send(&mut state, death(2, 1, Weapon::Garand));
+        assert_eq!(state.pov_stats.teamkills_suffered, 1);
+        // Other players' deaths change nothing.
+        send(&mut state, death(2, 3, Weapon::Garand));
+        assert_eq!(state.pov_stats.teamkills_suffered, 1);
+        assert_eq!(state.pov_stats.teamkills_committed, 0);
+    }
+
+    #[test]
+    fn deaths_before_the_recorder_is_known_are_ignored() {
+        let mut state = match_in_progress();
+        state.pov_player_index = None;
+        send(&mut state, death(1, 3, Weapon::Garand));
+        assert!(state.pov_stats.weapon_stats.is_empty());
+    }
+}
