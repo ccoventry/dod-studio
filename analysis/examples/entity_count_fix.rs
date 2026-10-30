@@ -48,7 +48,8 @@ fn carried_count(em: &EngineMessage, seq: i32, carry: &mut Carry) -> Option<(usi
                 .iter()
                 .map(|e| (e.entity_index, e.remove_entity))
                 .collect();
-            let set = carry.delta(seq, dpe.delta_sequence.to_u8(), &entries);
+            // A packet the engine throws away keeps its count: it is never used.
+            let set = carry.delta(seq, dpe.delta_sequence.to_u8(), &entries)?;
             Some((dpe.entity_count.to_u32() as usize, set.len()))
         }
         _ => None,
@@ -75,7 +76,7 @@ fn walk(
     demo: &mut Demo,
     fix: bool,
     trace: Option<std::ops::Range<f32>>,
-) -> (Vec<Fixed>, usize, usize) {
+) -> (Vec<Fixed>, usize, usize, usize) {
     let mut carry = Carry::default();
     let mut fixed = Vec::new();
     let mut packets = 0;
@@ -139,7 +140,7 @@ fn walk(
             }
         }
     }
-    (fixed, packets, carry.missing_base)
+    (fixed, packets, carry.missing_base, carry.flushed)
 }
 
 /// Prints the disagreements as runs: where each starts, how long it lasts and
@@ -186,16 +187,16 @@ fn main() {
     }
     let bytes = std::fs::read(&input).expect("read demo");
     let mut demo = open_demo_from_bytes(&bytes).expect("parse demo");
-    let (fixed, packets, missing) = walk(&mut demo, true, trace);
+    let (fixed, packets, missing, flushed) = walk(&mut demo, true, trace);
     println!(
-        "{input}: {packets} packet-entity messages, {} with a count the carried set disagrees with, {missing} with no base",
+        "{input}: {packets} packet-entity messages, {} with a count the carried set disagrees with, {missing} with no base, {flushed} the engine throws away",
         fixed.len()
     );
     report(&fixed);
     let out = demo.write_to_bytes();
     std::fs::write(&output, &out).expect("write output");
     let mut again = open_demo_from_bytes(&out).expect("output re-parses");
-    let (left, packets, _) = walk(&mut again, false, None);
+    let (left, packets, _, _) = walk(&mut again, false, None);
     println!(
         "wrote {output}; check: {packets} packets, {} still disagree",
         left.len()

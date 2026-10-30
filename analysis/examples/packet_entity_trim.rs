@@ -395,12 +395,15 @@ fn trim_message(
                 .iter()
                 .map(|e| (e.entity_index, e.remove_entity))
                 .collect();
-            let set = carry.delta(seq, from, &entries);
-            let carried = set.len();
+            let (carried, present) = match carry.delta(seq, from, &entries) {
+                Some(set) => (set.len(), set.iter().filter(|i| drop.contains(i)).count()),
+                // The engine throws this packet away, so its count is never used.
+                None => (declared, 0),
+            };
             // The declared count less the dropped entities in this snapshot:
             // equal to the carried set's size wherever the original agreed
             // with it, and leaves any original disagreement as it was.
-            let after = declared.saturating_sub(set.iter().filter(|i| drop.contains(i)).count());
+            let after = declared.saturating_sub(present);
             let before_len = dpe.entity_states.len();
             dpe.entity_states
                 .retain(|e| !drop.contains(&e.entity_index));
