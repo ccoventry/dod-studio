@@ -17,6 +17,7 @@
 //! Meaningless for a POV demo, which is already one player's, so it is refused
 //! there rather than silently ignored.
 
+use native::messages;
 use std::io::{self, Write};
 
 fn main() {
@@ -27,9 +28,9 @@ fn main() {
 
     if args.len() <= 1 {
         is_interactive = true;
-        println!("Drag and drop demo files or directories into this window and press Enter.");
-        println!("(To exit without processing, leave blank and press Enter)");
-        print!("> ");
+        println!("{}", messages::PREVIEW_DROP_PROMPT);
+        println!("{}", messages::PREVIEW_BLANK_TO_EXIT);
+        print!("{}", messages::PREVIEW_INPUT_PROMPT);
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
@@ -88,18 +89,17 @@ fn main() {
             let output_dir = path.join("previews");
             if let Err(e) = std::fs::create_dir_all(&output_dir) {
                 eprintln!(
-                    "Failed to create output directory {}: {}",
-                    output_dir.display(),
-                    e
+                    "{}",
+                    messages::preview_create_dir_failed(output_dir.display(), e)
                 );
                 continue;
             }
-            println!("Output directory: {}", output_dir.display());
+            println!("{}", messages::preview_output_dir(output_dir.display()));
 
             let entries = match std::fs::read_dir(&path) {
                 Ok(e) => e,
                 Err(e) => {
-                    eprintln!("Failed to read directory {}: {}", path.display(), e);
+                    eprintln!("{}", messages::preview_read_dir_failed(path.display(), e));
                     continue;
                 }
             };
@@ -127,7 +127,7 @@ fn main() {
             // ── Individual file input ────────────────────────────────────────
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if ext.to_lowercase() != "dem" {
-                eprintln!("Skipped: {} — not a .dem file", path.display());
+                eprintln!("{}", messages::preview_skipped_not_dem(path.display()));
                 skipped += 1;
                 continue;
             }
@@ -139,14 +139,13 @@ fn main() {
 
             if let Err(e) = std::fs::create_dir_all(&output_dir) {
                 eprintln!(
-                    "Failed to create output directory {}: {}",
-                    output_dir.display(),
-                    e
+                    "{}",
+                    messages::preview_create_dir_failed(output_dir.display(), e)
                 );
                 skipped += 1;
                 continue;
             }
-            println!("Output directory: {}", output_dir.display());
+            println!("{}", messages::preview_output_dir(output_dir.display()));
 
             process_demo(
                 &path,
@@ -158,18 +157,15 @@ fn main() {
                 &mut skipped,
             );
         } else {
-            eprintln!("Skipped: {} — not found or not accessible", path.display());
+            eprintln!("{}", messages::preview_skipped_not_found(path.display()));
             skipped += 1;
         }
     }
 
-    println!(
-        "\nBatch Complete\n  Processed: {}  |  Skipped: {}",
-        processed, skipped
-    );
+    println!("{}", messages::preview_batch_complete(processed, skipped));
 
     if is_interactive {
-        println!("\nPress Enter to exit...");
+        println!("{}", messages::PREVIEW_PRESS_ENTER_TO_EXIT);
         let _ = std::io::stdin().read_line(&mut String::new());
     }
 }
@@ -227,7 +223,7 @@ fn print_roster(streaks: &[native::patch::CaptureStreak]) {
             (
                 s.target_player
                     .clone()
-                    .unwrap_or_else(|| "<unnamed>".into()),
+                    .unwrap_or_else(|| messages::PREVIEW_UNNAMED_PLAYER.into()),
                 0,
                 0,
             )
@@ -238,9 +234,12 @@ fn print_roster(streaks: &[native::patch::CaptureStreak]) {
     let mut rows: Vec<_> = by_player.into_iter().collect();
     rows.sort_by_key(|(_, (_, _, kills))| std::cmp::Reverse(*kills));
 
-    println!("  players with highlights (pass one to --player, by name or index):");
+    println!("{}", messages::PREVIEW_ROSTER_HEADER);
     for (index, (name, streaks, kills)) in rows {
-        println!("    {index:>3}  {kills:>3} kills in {streaks:>2} streaks   {name}");
+        println!(
+            "{}",
+            messages::preview_roster_row(index, kills, streaks, name)
+        );
     }
 }
 
@@ -257,7 +256,7 @@ fn process_demo(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    println!("Processing: {}", original_filename);
+    println!("{}", messages::preview_processing(&original_filename));
 
     let (
         _tickrate,
@@ -271,8 +270,8 @@ fn process_demo(
         Ok(r) => r,
         Err(e) => {
             eprintln!(
-                "  Skipped: {} — could not read it as a demo: {}",
-                original_filename, e
+                "{}",
+                messages::preview_skipped_unreadable(&original_filename, e)
             );
             *skipped += 1;
             return;
@@ -287,7 +286,8 @@ fn process_demo(
         streaks.retain(|s| Some(s.player_index) == local_player_idx);
         if requested_player.is_some() {
             println!(
-                "  Note: {original_filename} is a POV demo — --player ignored (its camera is already one player's)"
+                "{}",
+                messages::preview_player_ignored_for_pov(&original_filename)
             );
         }
         None
@@ -296,7 +296,10 @@ fn process_demo(
     };
 
     if streaks.is_empty() {
-        println!("  Skipped: {} — no highlights found", original_filename);
+        println!(
+            "{}",
+            messages::preview_skipped_no_highlights(&original_filename)
+        );
         *skipped += 1;
         return;
     }
@@ -306,7 +309,8 @@ fn process_demo(
         streaks.retain(|s| streak_matches_player(s, want));
         if streaks.is_empty() {
             println!(
-                "  Skipped: {original_filename} — no highlights for a player matching \"{want}\""
+                "{}",
+                messages::preview_skipped_no_player_match(&original_filename, want)
             );
             print_roster(&roster);
             *skipped += 1;
@@ -316,7 +320,7 @@ fn process_demo(
         // Not an error -- the all-players preview is still what most runs want.
         // But an HLTV preview bookmarks kills the auto-director may never have
         // been pointed at, so it is worth knowing the option exists.
-        println!("  HLTV demo: bookmarking all players. Re-run with --player to narrow it to one.");
+        println!("{}", messages::PREVIEW_ALL_PLAYERS_HINT);
         print_roster(&streaks);
     }
 
@@ -348,9 +352,7 @@ fn process_demo(
             let safe = native::patch::playdemo_safe_stem(&format!("{stem}_{index}"));
             job.output_demo = output_dir.join(format!("{safe}_preview.dem"));
         }
-        println!(
-            "  Bookmarking only {name} (index {index}) — the camera stays with the auto-director"
-        );
+        println!("{}", messages::preview_bookmarking_only(name, index));
     }
 
     for job in &jobs {
@@ -363,11 +365,11 @@ fn process_demo(
         let patcher = native::patch::StreamPatcher::new(&job.source_demo, &job.output_demo);
         match patcher.patch(job, patcher_config, cancel_token) {
             Ok(()) => {
-                println!("  Saved: {}", new_filename);
+                println!("{}", messages::preview_saved(&new_filename));
                 *processed += 1;
             }
             Err(e) => {
-                eprintln!("  Failed to write {}: {}", new_filename, e);
+                eprintln!("{}", messages::preview_write_failed(&new_filename, e));
                 *skipped += 1;
             }
         }
