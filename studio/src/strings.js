@@ -1593,10 +1593,24 @@ export const STRINGS = {
 
   // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
   BATCH_CATCH_UP: {
-    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    caughtUp: (captured, total, marked) => `A capture batch ran while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
     projectUpdated: (name) => `Marked them in the project ${name}.`,
     projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
     checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
+    // The game is open, so the batch may still be capturing in it (#20).
+    WAITING_FOR_GAME: 'The game may still be capturing a batch from before DoD Studio closed. Studio checks its clips and marks them Captured once the game closes.',
+    STILL_RUNNING_NOT_STARTED: 'Not started: the game may still be capturing a batch from before DoD Studio closed. Wait for the game to close, or close it, and start again.',
+  },
+
+  // ── Clips a batch never got to, offered after catching up (batch_resume.js, #20) ──
+  BATCH_RESUME: {
+    TITLE: 'Capture the rest?',
+    message: (captured, total, left) => `A capture batch stopped before the end while DoD Studio was closed. ${captured} of ${total} clips are on disk and marked Captured; ${left === 1 ? '1 clip was' : `${left} clips were`} not captured.`,
+    inProject: (name) => `Capture them now? Studio opens the project ${name}, ticks just those highlights and starts a capture batch.`,
+    IN_QUEUE: 'Capture them now? Studio ticks just those highlights and starts a capture batch.',
+    CAPTURE_BUTTON: 'Capture them now',
+    NOT_NOW_BUTTON: 'Not now',
+    NONE_FOUND: 'Could not find those highlights in the project, so no batch was started.',
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────

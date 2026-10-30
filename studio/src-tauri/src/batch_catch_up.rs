@@ -30,7 +30,8 @@ const OUTCOME_UNWATCHED: &str = "unwatched";
 /// process staying alive is watched, so it need not be quick.
 const GAME_POLL: Duration = Duration::from_millis(2000);
 
-/// The event the deferred check sends once the game has closed.
+/// The event the deferred check sends once the game has closed, with the
+/// batches it caught up on (possibly none).
 pub const CATCH_UP_EVENT: &str = "batch_catch_up";
 
 /// One caught-up batch, for the frontend to map back to highlights.
@@ -131,8 +132,12 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
                 std::thread::sleep(GAME_POLL);
             }
             let batches = catch_up_in(&dir, Some(&ids));
-            if !batches.is_empty() {
-                let _ = app.emit(CATCH_UP_EVENT, &batches);
+            // Sent even when empty: it also tells the frontend the wait is
+            // over, so Start Capture Batch stops refusing (#20).
+            if let Err(e) = app.emit(CATCH_UP_EVENT, &batches) {
+                log_markdown(&format!(
+                    "[batch-catch-up] Could not tell the window the batch's clips were checked: {e}"
+                ));
             }
         });
         Ok(CatchUpStart {
