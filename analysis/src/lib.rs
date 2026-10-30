@@ -32,7 +32,9 @@ mod time;
 #[cfg(not(target_arch = "wasm32"))]
 mod utf16;
 mod weapon_names;
+mod wire_index;
 
+use crate::wire_index::wire_slot;
 use crate::{
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
@@ -706,20 +708,18 @@ pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
             }
             UserMessage::DeathMsg(msg) => {
                 if let Some(pov_idx) = state.pov_player_index {
-                    let is_killer_pov =
-                        msg.killer_client_index > 0 && msg.killer_client_index - 1 == pov_idx;
-                    let is_victim_pov =
-                        msg.victim_client_index > 0 && msg.victim_client_index - 1 == pov_idx;
+                    let is_killer_pov = wire_slot(msg.killer_client_index) == Some(pov_idx);
+                    let is_victim_pov = wire_slot(msg.victim_client_index) == Some(pov_idx);
 
                     if is_killer_pov {
                         if msg.killer_client_index == msg.victim_client_index {
                             state.pov_stats.suicides += 1;
                         } else {
                             let killer_team = state
-                                .find_player_by_client_index(msg.killer_client_index - 1)
+                                .find_player_by_wire_index(msg.killer_client_index)
                                 .and_then(|p| p.team.clone());
                             let victim_team = state
-                                .find_player_by_client_index(msg.victim_client_index - 1)
+                                .find_player_by_wire_index(msg.victim_client_index)
                                 .and_then(|p| p.team.clone());
                             if killer_team.is_some()
                                 && victim_team.is_some()
@@ -756,10 +756,10 @@ pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
                         state.pov_stats.is_scoped = false;
                         if msg.killer_client_index > 0 && !is_killer_pov {
                             let killer_team = state
-                                .find_player_by_client_index(msg.killer_client_index - 1)
+                                .find_player_by_wire_index(msg.killer_client_index)
                                 .and_then(|p| p.team.clone());
                             let victim_team = state
-                                .find_player_by_client_index(msg.victim_client_index - 1)
+                                .find_player_by_wire_index(msg.victim_client_index)
                                 .and_then(|p| p.team.clone());
                             if killer_team.is_some()
                                 && victim_team.is_some()
@@ -977,6 +977,19 @@ impl<'a> From<&'a [u8]> for Analysis {
     }
 }
 
+/// The id a death in the fingerprint names its player by: the player's id when
+/// known, else `slot_N`. An index with no slot (0) keeps the `slot_255` name
+/// release builds always gave it, so fingerprints saved before this stay valid.
+fn fingerprint_id(ids: &std::collections::HashMap<u8, String>, client_index: u8) -> String {
+    match wire_slot(client_index) {
+        Some(slot) => ids
+            .get(&slot)
+            .cloned()
+            .unwrap_or_else(|| format!("slot_{slot}")),
+        None => "slot_255".to_string(),
+    }
+}
+
 impl AnalyzerState {
     pub fn is_clan_match(&self) -> bool {
         self.clan_match_detected
@@ -996,6 +1009,15 @@ impl AnalyzerState {
                 Connection::Connected { client_id } => client_id == client_index,
                 _ => false,
             })
+    }
+
+    /// Looks a player up by the 1-based client index a message carries.
+    fn find_player_by_wire_index(&self, client_index: u8) -> Option<&Player> {
+        self.find_player_by_client_index(wire_slot(client_index)?)
+    }
+
+    fn find_player_by_wire_index_mut(&mut self, client_index: u8) -> Option<&mut Player> {
+        self.find_player_by_client_index_mut(wire_slot(client_index)?)
     }
 
     fn find_player_by_id(&self, id: &PlayerGlobalId) -> Option<&Player> {
@@ -1155,25 +1177,15 @@ pub fn parse_fingerprint(
                                             let killer_id = if death.killer_client_index == 0 {
                                                 "world".to_string()
                                             } else {
-                                                client_id_to_player_id
-                                                    .get(&(death.killer_client_index - 1))
-                                                    .cloned()
-                                                    .unwrap_or_else(|| {
-                                                        format!(
-                                                            "slot_{}",
-                                                            death.killer_client_index - 1
-                                                        )
-                                                    })
+                                                fingerprint_id(
+                                                    &client_id_to_player_id,
+                                                    death.killer_client_index,
+                                                )
                                             };
-                                            let victim_id = client_id_to_player_id
-                                                .get(&(death.victim_client_index - 1))
-                                                .cloned()
-                                                .unwrap_or_else(|| {
-                                                    format!(
-                                                        "slot_{}",
-                                                        death.victim_client_index - 1
-                                                    )
-                                                });
+                                            let victim_id = fingerprint_id(
+                                                &client_id_to_player_id,
+                                                death.victim_client_index,
+                                            );
 
                                             let event_str = format!(
                                                 "{}>{}:{:?}",
