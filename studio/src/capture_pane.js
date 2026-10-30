@@ -686,7 +686,7 @@ export function applyCommandsState(lists) {
 // ── Clear Previews audit modal ─────────────────────────────────────────────
 //
 // Audits `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (see the
-// block comment above `patch_bookmark_previews` in capture_manager.rs) left
+// block comment above `patch_bookmark_previews` in demo_preview.rs) left
 // behind across capture sessions, and lets the user purge them.
 
 let currentPreviewScanResults = [];

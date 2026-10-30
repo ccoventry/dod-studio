@@ -106,7 +106,7 @@ fn catch_up_in(dir: &Path, only: Option<&[String]>) -> Vec<CaughtUpBatch> {
 pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUpStart, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let dir = crate::manifest_file::manifests_dir();
-        if crate::capture_manager::running_game_pids().is_empty() {
+        if crate::game_process_manager::running_game_pids().is_empty() {
             return Ok(CatchUpStart {
                 batches: catch_up_in(&dir, None),
                 waiting_for_game: false,
@@ -127,7 +127,7 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
             ids.len()
         ));
         std::thread::spawn(move || {
-            while !crate::capture_manager::running_game_pids().is_empty() {
+            while !crate::game_process_manager::running_game_pids().is_empty() {
                 std::thread::sleep(GAME_POLL);
             }
             let batches = catch_up_in(&dir, Some(&ids));
