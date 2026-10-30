@@ -1,6 +1,5 @@
 import { ensureSteamReady } from './steam_guard.js';
-import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, launchObs, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
-import { invoke } from '@tauri-apps/api/core';
+import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, runningGameForBatch, launchStandaloneGame, launchObs, obsTestConnection, readCfgCommands, logFrontendEvent } from './ipc_bridge.js';
 import { listen } from '@tauri-apps/api/event';
 import { pickPath } from './pick_path.js';
 import { themedConfirm } from './themed_confirm.js';
@@ -290,7 +289,7 @@ export async function runObsConnectionTest({ auto = false } = {}) {
   status.style.display = '';
   status.textContent = STRINGS.CAPTURE_CONFIG.OBS_TESTING;
   try {
-    const report = await invoke('obs_test_connection', {
+    const report = await obsTestConnection({
       host: document.querySelector('#config-obs-host')?.value?.trim() || '127.0.0.1',
       port: parseInt(document.querySelector('#config-obs-port')?.value, 10) || 4455,
       password: document.querySelector('#config-obs-password')?.value || '',
