@@ -114,7 +114,7 @@ DEMO PLAYBACK
       Raise the engine's 100 ms ceiling on ex_interp.
 
 CAPTURE
-  ds_capture_batch start "<file>"|away|hold|go|stop
+  ds_capture_batch start "<file>"|away|hold|go|recording|stop
       Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
   ds_capture_schedule load "<file>"|clear
       Run the commands in a schedule file at their demo times, from the hook (#434, R&D).

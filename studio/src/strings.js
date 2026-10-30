@@ -686,13 +686,15 @@ export const STRINGS = {
     // A clip the batch's end cut short (#1081) left a partial take: it isn't
     // missing. `cutBy` says what ended it: Cancel, the game closing, or an error.
     // A take whose video stopped early (#1105) is partial too: not missing either.
-    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel') => {
-      const missing = total - captured - cutShort - stoppedEarly;
+    takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
+      const missing = total - captured - cutShort - stoppedEarly - startedLate;
       const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
       if (stoppedEarly > 0) parts.push(`${stoppedEarly} with video that stops early (partial take, not captured)`);
+      // OBS started recording after the clip's first frame (#1109).
+      if (startedLate > 0) parts.push(`${startedLate} OBS started recording late (missing the clip's opening, not captured)`);
       return `${captured}/${total} takes found on disk — ${parts.join(', ')}.`;
     },
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
@@ -2392,6 +2394,7 @@ export const STRINGS = {
       missing: 'Missing',
       cut_short: 'Cut short by Cancel (partial take, not captured)',
       short: 'Video stops early (partial take, not captured)',
+      late: 'OBS started late (missing the opening, not captured)',
     },
     // A clip the batch's end cut short, by what ended it (#1081).
     cutShortBy: (cutBy) => ({
@@ -2400,6 +2403,8 @@ export const STRINGS = {
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
+    // A take OBS started recording after its clip's first frame (#1109).
+    startedLate: (ms) => `OBS started ${ms} ms late: missing the clip's opening (not captured)`,
     OPEN_FOLDER: 'Open folder',
     // OBS mode's per-take frame loss (#172).
     obsCell: (skippedPct, missedPct) => `OBS: ${skippedPct}% skipped${missedPct >= 0.1 ? `, ${missedPct}% missed` : ''}`,
