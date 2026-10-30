@@ -1523,6 +1523,9 @@ fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool
     }
 }
 
+#[cfg(all(test, windows))]
+mod batch_tests;
+
 #[cfg(test)]
 mod tests {
     use super::{
