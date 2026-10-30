@@ -586,7 +586,10 @@ pub fn poll() {
                 };
                 return;
             }
-            if wait_for_recording {
+            // Without the events pipe (`GOLDSRC_HOOKS_EVENTS=0`) Studio can't
+            // hear the wait, so it never answers: the lead-in plays on as
+            // before, and Studio's late-start check stays the net.
+            if wait_for_recording && crate::events::pipe_in_use() {
                 // Paused in the same frame the clip's AUDIO_SYNC echo was
                 // queued, so Studio can't have answered this wait yet: a
                 // go-ahead left from an earlier clip doesn't count.
