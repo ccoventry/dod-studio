@@ -20,6 +20,7 @@
   <script type="module">
     import { initDetailPane, renderDetailView } from '/src/detail_pane.js';
     import { streakUid } from '/src/take_index.js';
+    import { recordCapture } from '/src/take_record.js';
 
     const streak = (t, player) => ({
       kill_count: 2, start_index: 0, end_index: 1, selected: false, status: 'Rendered', notes: '', player_index: 1, target_player: player,
@@ -28,11 +29,17 @@
     const demo = { name: 'test.dem', path: 'C:/demos/test.dem', is_pov: false, tickrate: 100, streaks: [streak(60, 'Ann'), streak(120, 'Bob')] };
     const [first, second] = demo.streaks.map((s) => streakUid(demo.path, s));
 
+    // takeIndex is bare uid lists, as in every project file; how each take was
+    // captured sits beside it (take_record.js).
+    // takeIndex is bare uid lists, as in every project file; how each take was
+    // captured sits beside it (take_record.js).
     const takeIndex = {
       'old_session/chain_00_b0': [first],
-      'gone_session/chain_00_b0': { uids: [first], session_id: 'gone_session', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/gone_session/chain_00_b0' },
-      'live_session/chain_01_b1': { uids: [first, second], session_id: 'live_session', captured_at: 1_700_100_000_000, capture_mode: 'direct_to_video', capture_fps: 120, take_folder: 'D:/caps/live_session/chain_01_b1' },
+      'gone_session/chain_00_b0': [first],
+      'live_session/chain_01_b1': [first, second],
     };
+    recordCapture(takeIndex, 'gone_session/chain_00_b0', { session_id: 'gone_session', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/gone_session/chain_00_b0' });
+    recordCapture(takeIndex, 'live_session/chain_01_b1', { session_id: 'live_session', captured_at: 1_700_100_000_000, capture_mode: 'direct_to_video', capture_fps: 120, take_folder: 'D:/caps/live_session/chain_01_b1' });
     window.__demo = demo;
     window.__revealed = [];
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { capturedTakes, applyCaughtUpBatch, createBatchCatchUp, isBatchStillRunningInGame } from './batch_catch_up.js';
 import { streakUid } from './take_index.js';
+import { captureOf } from './take_record.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 
 const streak = (player, first, last, extra = {}) => ({
@@ -208,7 +209,7 @@ describe('a caught-up batch keeps how it was captured (#439)', () => {
     const b = batch(d, { session_id: 'session_x', capture_mode: 'agr', capture_fps: 300, agr_fps: 120 });
     b.blocks[0].take_folder = 'D:/caps/session_x/chain_01_b0';
     applyCaughtUpBatch(b, d, takeIndex);
-    const record = takeIndex['session_x/chain_01_b0'];
+    const record = captureOf(takeIndex, 'session_x/chain_01_b0');
     expect(record).toMatchObject({ session_id: 'session_x', capture_mode: 'agr', capture_fps: 120, take_folder: 'D:/caps/session_x/chain_01_b0' });
     expect(record.captured_at).toBeUndefined();
   });

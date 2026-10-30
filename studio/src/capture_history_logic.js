@@ -6,7 +6,7 @@
 // on their own (capture_history_logic.test.js); capture_history.js draws them.
 
 import { STRINGS } from './strings.js';
-import { uidsOf } from './take_record.js';
+import { captureOf } from './take_record.js';
 import { formatWhen, historyLines } from './render_history.js';
 
 const MODE_LABELS = () => ({
@@ -18,16 +18,14 @@ const MODE_LABELS = () => ({
 
 /**
  * Every take `uid` was captured into, newest first, each as
- * `{ takeKey, record }`. A record from before #439 is just its uids: it sorts
- * last (no date) and its other fields are absent.
+ * `{ takeKey, uids, record }`: `uids` from the take index, `record` the
+ * capture facts beside it (take_record.js), empty for a take recorded before
+ * #439. Such a take sorts last (no date).
  */
 export function capturesOf(takeIndex, uid) {
   const captures = Object.entries(takeIndex || {})
-    .filter(([, entry]) => uidsOf(entry).includes(uid))
-    .map(([takeKey, entry]) => ({
-      takeKey,
-      record: Array.isArray(entry) ? { uids: entry } : entry,
-    }));
+    .filter(([, uids]) => uids.includes(uid))
+    .map(([takeKey, uids]) => ({ takeKey, uids, record: captureOf(takeIndex, takeKey) || {} }));
   return captures.sort((a, b) =>
     (b.record.captured_at || 0) - (a.record.captured_at || 0) || b.takeKey.localeCompare(a.takeKey));
 }
@@ -71,7 +69,7 @@ function rendersOf(state, formatSize) {
  * when it is no longer in the queue.
  */
 export function describeCapture(capture, uid, state, { labelOfUid, formatSize }) {
-  const { takeKey, record } = capture;
+  const { takeKey, uids, record } = capture;
   return {
     takeKey,
     when: record.captured_at ? formatWhen(record.captured_at) : STRINGS.CAPTURE_HISTORY.NO_DATE,
@@ -79,7 +77,7 @@ export function describeCapture(capture, uid, state, { labelOfUid, formatSize })
     takeName: takeKey.split('/').pop(),
     folder: record.take_folder || null,
     status: takeStatus(record, state),
-    shared: uidsOf(record).filter((other) => other !== uid)
+    shared: uids.filter((other) => other !== uid)
       .map((other) => labelOfUid(other) || STRINGS.CAPTURE_HISTORY.UNKNOWN_HIGHLIGHT),
     renders: rendersOf(state, formatSize),
   };

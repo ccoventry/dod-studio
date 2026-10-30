@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { recordCapture } from './take_record.js';
 import { capturesOf, folderList, describeCapture } from './capture_history_logic.js';
 
 const ME = 'd.dem#1#10#20';
@@ -9,18 +10,21 @@ const context = { labelOfUid, formatSize };
 
 const index = {
   'old/chain_00_b0': [ME],
-  'new1/chain_00_b0': { uids: [ME], session_id: 'new1', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/new1/chain_00_b0' },
-  'new2/chain_01_b1': { uids: [ME, OTHER, 'gone#1#1#1'], session_id: 'new2', captured_at: 1_700_100_000_000, capture_mode: 'obs', capture_fps: 120, take_folder: 'D:/caps/new2/chain_01_b1' },
-  'unrelated/chain_00_b0': { uids: [OTHER], captured_at: 1_700_200_000_000 },
+  'new1/chain_00_b0': [ME],
+  'new2/chain_01_b1': [ME, OTHER, 'gone#1#1#1'],
+  'unrelated/chain_00_b0': [OTHER],
 };
+recordCapture(index, 'new1/chain_00_b0', { session_id: 'new1', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/new1/chain_00_b0' });
+recordCapture(index, 'new2/chain_01_b1', { session_id: 'new2', captured_at: 1_700_100_000_000, capture_mode: 'obs', capture_fps: 120, take_folder: 'D:/caps/new2/chain_01_b1' });
+recordCapture(index, 'unrelated/chain_00_b0', { captured_at: 1_700_200_000_000 });
 
 describe('capturesOf', () => {
   it('lists the takes holding the highlight, newest first, undated old ones last', () => {
     expect(capturesOf(index, ME).map((c) => c.takeKey)).toEqual(['new2/chain_01_b1', 'new1/chain_00_b0', 'old/chain_00_b0']);
   });
 
-  it('an old bare list reads as a record with only its uids', () => {
-    expect(capturesOf(index, ME).at(-1).record).toEqual({ uids: [ME] });
+  it('a take recorded before #439 has no capture facts', () => {
+    expect(capturesOf(index, ME).at(-1)).toMatchObject({ uids: [ME], record: {} });
   });
 
   it('nothing for a highlight never captured, or no index', () => {

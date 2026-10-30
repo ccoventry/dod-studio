@@ -1,91 +1,129 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { pruneTakeIndex, markBlockCaptured, recordTake, resolveTake, renameDemoInTakeIndex } from './take_index.js';
 import {
-  recordTake, resolveTake, pruneTakeIndex, renameDemoInTakeIndex, renameUidsInTakeIndex, markBlockCaptured, streakUid,
-} from './take_index.js';
-import { uidsOf, mapUids, recordInto, captureRateOf } from './take_record.js';
-import { markerRows } from './marker_list.js';
+  captureOf, recordCapture, attachCaptures, capturesToSave, carryCaptures, captureRateOf,
+} from './take_record.js';
+import * as before439 from './test_fixtures/take_index_before_439.js';
 
 // A project saved before #439: every take is a bare uid list.
 const oldProject = () => JSON.parse(readFileSync(new URL('./test_fixtures/project_before_439.json', import.meta.url), 'utf8'));
 const FIRST = 'C:/demos/fotw.dem#3#100#400';
 const SECOND = 'C:/demos/fotw.dem#4#300#700';
 
-describe('take record shapes (#439)', () => {
-  it('reads the uids of either shape', () => {
-    expect(uidsOf([FIRST])).toEqual([FIRST]);
-    expect(uidsOf({ uids: [FIRST], capture_fps: 300 })).toEqual([FIRST]);
-    expect(uidsOf(undefined)).toEqual([]);
+/** What project_session.js writes and reads back, in the parts #439 touches. */
+function saveProject(takeIndex, knownUids) {
+  const pruned = pruneTakeIndex(takeIndex, knownUids);
+  return JSON.stringify({ takeIndex: pruned, takeCaptures: capturesToSave(pruned) });
+}
+function loadProject(json) {
+  const data = JSON.parse(json);
+  const takeIndex = data.takeIndex || {};
+  attachCaptures(takeIndex, data.takeCaptures);
+  return takeIndex;
+}
+
+describe('an old project (before #439)', () => {
+  it('loads and saves unchanged: no takeCaptures key appears, takeIndex is as it was', () => {
+    const project = oldProject();
+    const saved = JSON.parse(saveProject(loadProject(JSON.stringify(project)), [FIRST, SECOND, 'C:/demos/removed.dem#1#10#20']));
+    expect(saved.takeIndex).toEqual(project.takeIndex);
+    expect('takeCaptures' in saved).toBe(false);
   });
 
-  it('recordInto unions uids and writes only the capture facts it was given', () => {
-    const record = recordInto([FIRST], [SECOND], { capture_fps: 300, capture_mode: undefined, take_folder: '' });
-    expect(record).toEqual({ uids: [FIRST, SECOND], capture_fps: 300 });
+  it('a take with no capture facts reads as unknown, and its uids still resolve', () => {
+    const takeIndex = loadProject(JSON.stringify(oldProject()));
+    expect(captureOf(takeIndex, 'session_a/chain_01_b1')).toBeUndefined();
+    expect(resolveTake(takeIndex, 'session_a/chain_01_b1')).toEqual([FIRST, SECOND]);
   });
 
-  it('a newer capture into the same key overwrites the older facts', () => {
-    const first = recordInto(undefined, [FIRST], { captured_at: 1, capture_fps: 120, session_id: 's' });
-    expect(recordInto(first, [FIRST], { captured_at: 2, capture_fps: 300 })).toEqual({
-      uids: [FIRST], captured_at: 2, capture_fps: 300, session_id: 's',
-    });
-  });
-
-  it('mapUids keeps the shape it was given', () => {
-    expect(mapUids([FIRST], (u) => u)).toEqual([FIRST]);
-    expect(mapUids({ uids: [FIRST], capture_fps: 300 }, () => [])).toEqual({ uids: [], capture_fps: 300 });
+  it('renames keep working', () => {
+    const takeIndex = loadProject(JSON.stringify(oldProject()));
+    renameDemoInTakeIndex(takeIndex, 'C:/demos/fotw.dem', 'D:/new/fotw.dem');
+    expect(takeIndex['session_a/chain_00_b0']).toEqual(['D:/new/fotw.dem#3#100#400']);
   });
 });
 
-describe('an old project (bare uid lists)', () => {
-  it('still resolves its takes and lists its markers', () => {
-    const { takeIndex, demos } = oldProject();
-    expect(resolveTake(takeIndex, 'session_a/chain_01_b1')).toEqual([FIRST, SECOND]);
-    expect(markerRows(demos, takeIndex).map((row) => row[10])).toEqual(['session_a/chain_00_b0', 'session_a/chain_01_b1']);
-  });
-
-  it('saving it back loses nothing: pruning keeps the shape and drops only dead uids', () => {
-    const { takeIndex } = oldProject();
-    const pruned = pruneTakeIndex(takeIndex, [FIRST, SECOND]);
-    expect(pruned).toEqual({
-      'session_a/chain_00_b0': [FIRST],
-      'session_a/chain_01_b1': [FIRST, SECOND],
-    });
-    expect(JSON.parse(JSON.stringify(pruned))).toEqual(pruned);
-  });
-
-  it('renames follow a moved or split demo without changing the shape', () => {
-    const { takeIndex } = oldProject();
-    renameDemoInTakeIndex(takeIndex, 'C:/demos/fotw.dem', 'D:/new/fotw.dem');
-    expect(takeIndex['session_a/chain_00_b0']).toEqual(['D:/new/fotw.dem#3#100#400']);
-    renameUidsInTakeIndex(takeIndex, new Map([['D:/new/fotw.dem#3#100#400', 'x#1#1#1']]));
-    expect(takeIndex['session_a/chain_00_b0']).toEqual(['x#1#1#1']);
-  });
-
-  it('a new capture of a highlight leaves the old takes as they were and adds a record', () => {
-    const { takeIndex, demos } = oldProject();
-    const before = JSON.stringify(takeIndex);
-    const streaks = demos[0].streaks;
-    const dispatch = { sessionId: 'session_b', streaks, demoPaths: [demos[0].path, demos[0].path], captureMode: 'direct_to_video' };
+describe('a project saved by this build', () => {
+  function capturedProject() {
+    const project = oldProject();
+    const takeIndex = loadProject(JSON.stringify(project));
+    const streaks = project.demos[0].streaks;
+    const dispatch = { sessionId: 'session_b', streaks, demoPaths: [project.demos[0].path, project.demos[0].path], captureMode: 'direct_to_video', captureFps: 240 };
     markBlockCaptured(
-      { take_key: 'session_b/chain_00_b0', take_folder: 'D:/captures/session_b/chain_00_b0', source_streak_indices: [0] },
-      dispatch, takeIndex, 240,
+      { take_key: 'session_b/chain_00_b0', take_folder: 'D:/caps/session_b/chain_00_b0', source_streak_indices: [0, 1] },
+      dispatch, takeIndex,
     );
-    expect(streakUid(demos[0].path, streaks[0])).toBe(FIRST);
-    const record = takeIndex['session_b/chain_00_b0'];
-    expect(record).toMatchObject({
-      uids: [FIRST], session_id: 'session_b', capture_mode: 'direct_to_video', capture_fps: 240,
-      take_folder: 'D:/captures/session_b/chain_00_b0',
+    return takeIndex;
+  }
+
+  it('keeps takeIndex as bare uid lists and puts the facts in takeCaptures', () => {
+    const saved = JSON.parse(saveProject(capturedProject(), [FIRST, SECOND]));
+    Object.values(saved.takeIndex).forEach((entry) => expect(Array.isArray(entry)).toBe(true));
+    expect(saved.takeIndex['session_b/chain_00_b0']).toEqual([FIRST, SECOND]);
+    expect(saved.takeCaptures['session_b/chain_00_b0']).toMatchObject({
+      session_id: 'session_b', capture_mode: 'direct_to_video', capture_fps: 240, take_folder: 'D:/caps/session_b/chain_00_b0',
     });
-    expect(typeof record.captured_at).toBe('number');
-    const { 'session_b/chain_00_b0': _added, ...rest } = takeIndex;
-    expect(JSON.stringify(rest)).toBe(before);
+    expect(typeof saved.takeCaptures['session_b/chain_00_b0'].captured_at).toBe('number');
   });
 
-  it('recording into an old key upgrades just that entry to a record', () => {
-    const { takeIndex } = oldProject();
-    recordTake(takeIndex, 'session_a/chain_00_b0', [FIRST], { captured_at: 5 });
-    expect(takeIndex['session_a/chain_00_b0']).toEqual({ uids: [FIRST], captured_at: 5 });
-    expect(Array.isArray(takeIndex['session_a/chain_01_b1'])).toBe(true);
+  it('survives a save and load', () => {
+    const reloaded = loadProject(saveProject(capturedProject(), [FIRST, SECOND]));
+    expect(captureOf(reloaded, 'session_b/chain_00_b0').capture_fps).toBe(240);
+  });
+
+  it("works with the code an older build runs (origin/dev's take_index.js)", () => {
+    const data = JSON.parse(saveProject(capturedProject(), [FIRST, SECOND]));
+    // An older build loads takeIndex as is, resolves, renames, prunes and saves it.
+    expect(before439.resolveTake(data.takeIndex, 'session_b/chain_00_b0')).toEqual([FIRST, SECOND]);
+    before439.renameDemoInTakeIndex(data.takeIndex, 'C:/demos/fotw.dem', 'D:/new/fotw.dem');
+    before439.renameUidsInTakeIndex(data.takeIndex, new Map([['D:/new/fotw.dem#3#100#400', 'x#1#1#1']]));
+    const pruned = before439.pruneTakeIndex(data.takeIndex, ['x#1#1#1', 'D:/new/fotw.dem#4#300#700']);
+    expect(pruned['session_b/chain_00_b0']).toEqual(['x#1#1#1', 'D:/new/fotw.dem#4#300#700']);
+    const recorded = {};
+    before439.recordTake(recorded, 'k', ['u']);
+    expect(recorded).toEqual({ k: ['u'] });
+  });
+
+  it('this build reads what an older build saved back (it drops takeCaptures)', () => {
+    const data = JSON.parse(saveProject(capturedProject(), [FIRST, SECOND]));
+    delete data.takeCaptures;
+    const reloaded = loadProject(JSON.stringify(data));
+    expect(resolveTake(reloaded, 'session_b/chain_00_b0')).toEqual([FIRST, SECOND]);
+    expect(captureOf(reloaded, 'session_b/chain_00_b0')).toBeUndefined();
+  });
+});
+
+describe('capture facts', () => {
+  it('a newer capture into the same key overwrites older facts, an unknown one leaves them', () => {
+    const index = {};
+    recordCapture(index, 's/b0', { captured_at: 1, capture_fps: 120, session_id: 's' });
+    recordCapture(index, 's/b0', { captured_at: 2, capture_fps: undefined, take_folder: '' });
+    expect(captureOf(index, 's/b0')).toEqual({ captured_at: 2, capture_fps: 120, session_id: 's' });
+  });
+
+  it('are not part of the index when it is serialised or listed', () => {
+    const index = { k: ['u'] };
+    recordTake(index, 'k', ['u'], { captured_at: 1 });
+    expect(JSON.stringify(index)).toBe('{"k":["u"]}');
+    expect(Object.keys(index)).toEqual(['k']);
+  });
+
+  it('pruning carries the facts of the takes it keeps', () => {
+    const index = { keep: ['u'], drop: ['gone'] };
+    recordCapture(index, 'keep', { captured_at: 1 });
+    recordCapture(index, 'drop', { captured_at: 2 });
+    expect(capturesToSave(pruneTakeIndex(index, ['u']))).toEqual({ keep: { captured_at: 1 } });
+    const to = {};
+    carryCaptures(index, to);
+    expect(capturesToSave(to)).toBeUndefined();
+  });
+
+  it('a bad takeCaptures in a project file is ignored', () => {
+    const index = {};
+    attachCaptures(index, 'nope');
+    attachCaptures(index, [1]);
+    expect(capturesToSave(index)).toBeUndefined();
   });
 });
 
@@ -100,13 +138,13 @@ describe('captureRateOf (#439)', () => {
     expect(captureRateOf('direct_to_video', settings)).toBe(300);
   });
 
-  it('a dispatch\'s own rate wins over the clip payload\'s capture_fps', () => {
+  it("a dispatch's own rate wins over the clip payload's capture_fps", () => {
     const takeIndex = {};
     const streaks = [{ player_index: 1, start_tick: 1, end_tick: 2 }];
     markBlockCaptured(
       { take_key: 's/b0', capture_fps: 300, source_streak_indices: [0] },
       { streaks, demoPaths: ['d.dem'], captureMode: 'obs', captureFps: 120 }, takeIndex,
     );
-    expect(takeIndex['s/b0'].capture_fps).toBe(120);
+    expect(captureOf(takeIndex, 's/b0').capture_fps).toBe(120);
   });
 });

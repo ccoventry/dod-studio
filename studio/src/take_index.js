@@ -10,7 +10,7 @@
 // across range edits.
 
 import { HIGHLIGHT_STATUS } from './status_colors.js';
-import { uidsOf, mapUids, recordInto } from './take_record.js';
+import { recordCapture, carryCaptures } from './take_record.js';
 
 /**
  * Content-addressed id for one highlight, stable across re-scans, project
@@ -96,8 +96,7 @@ export function setVerifiedStatus(streak, status) {
 
 // ── Durable take index ──────────────────────────────────────────────────────
 //
-// take_key -> take record (take_record.js: the uids, and when and how the take
-// was captured; old projects hold a bare uid[]). Recorded when a capture batch verifies a block on disk
+// take_key -> uid[]. Recorded when a capture batch verifies a block on disk
 // (capture_pane.js) so a render finishing later — possibly after a restart,
 // re-scan, or project reload that produced entirely new streak objects — can
 // still resolve which highlights to flip to Rendered. Plain object (not a
@@ -113,7 +112,10 @@ export function setVerifiedStatus(streak, status) {
  */
 export function recordTake(takeIndex, takeKey, uids, meta) {
   if (!takeIndex || !takeKey || !uids || uids.length === 0) return;
-  takeIndex[takeKey] = recordInto(takeIndex[takeKey], uids, meta);
+  const existing = takeIndex[takeKey] || [];
+  takeIndex[takeKey] = Array.from(new Set([...existing, ...uids]));
+  // How it was captured goes beside the index, never into it (take_record.js).
+  recordCapture(takeIndex, takeKey, meta);
 }
 
 /**
@@ -121,9 +123,9 @@ export function recordTake(takeIndex, takeKey, uids, meta) {
  * in the take index, so a render of it resolves back to them. Shared by the
  * post-batch verification and Render While Capturing (#861), which renders
  * (and may delete) a take before the batch ends. `{ advanced, markCleared }`.
- * The record keeps when and how the take was captured (#439): `block` is a
+ * It also records when and how the take was captured (#439): `block` is a
  * verified block or a `capture_clip_ready` payload (which carries its own
- * rate), the dispatch's own rate (what the mode really records at) wins, then
+ * rate); the dispatch's own rate (what the mode really records at) wins, then
  * `captureFps` for a block that carries none.
  */
 export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
@@ -179,9 +181,9 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
   if (!takeIndex) return;
   const oldPrefix = `${oldPath}#`;
   Object.keys(takeIndex).forEach((key) => {
-    takeIndex[key] = mapUids(takeIndex[key], (uids) => uids.map((uid) =>
+    takeIndex[key] = takeIndex[key].map((uid) =>
       uid.startsWith(oldPrefix) ? `${newPath}#${uid.slice(oldPrefix.length)}` : uid
-    ));
+    );
   });
 }
 
@@ -193,7 +195,7 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
 export function renameUidsInTakeIndex(takeIndex, renames) {
   if (!takeIndex || !renames || renames.size === 0) return;
   Object.keys(takeIndex).forEach((key) => {
-    takeIndex[key] = mapUids(takeIndex[key], (uids) => Array.from(new Set(uids.map((uid) => renames.get(uid) ?? uid))));
+    takeIndex[key] = Array.from(new Set(takeIndex[key].map((uid) => renames.get(uid) ?? uid)));
   });
 }
 
@@ -204,7 +206,7 @@ export function renameUidsInTakeIndex(takeIndex, renames) {
  */
 export function resolveTake(takeIndex, takeKey) {
   if (!takeIndex || !takeKey) return [];
-  return uidsOf(takeIndex[takeKey]);
+  return takeIndex[takeKey] || [];
 }
 
 /**
@@ -216,10 +218,11 @@ export function resolveTake(takeIndex, takeKey) {
 export function pruneTakeIndex(takeIndex, knownUids) {
   const known = new Set(knownUids);
   const pruned = {};
-  for (const [key, entry] of Object.entries(takeIndex || {})) {
-    const kept = uidsOf(entry).filter(uid => known.has(uid));
-    if (kept.length > 0) pruned[key] = mapUids(entry, () => kept);
+  for (const [key, uids] of Object.entries(takeIndex || {})) {
+    const kept = uids.filter(uid => known.has(uid));
+    if (kept.length > 0) pruned[key] = kept;
   }
+  carryCaptures(takeIndex, pruned);
   return pruned;
 }
 

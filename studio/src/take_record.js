@@ -1,40 +1,71 @@
 // take_record.js
 //
-// One entry of the project's take index (#439). Projects saved before it hold
-// a bare uid array per take key; a take recorded since holds
-// `{ uids, session_id, captured_at, capture_mode, capture_fps, take_folder }`.
-// Both shapes are read everywhere, and an entry keeps the shape it has until
-// a capture records into it, so opening and saving an old project loses
-// nothing and rewrites nothing.
+// How and when each take was captured (#439), kept apart from the take index.
+//
+// The project file's `takeIndex` stays what it always was, `take_key -> uid[]`,
+// because older Studio builds read it as exactly that and an object there
+// breaks them (the owner moves between release, dev and test builds on one
+// project). The capture facts live in a sibling `takeCaptures` key,
+// `take_key -> { session_id, captured_at, capture_mode, capture_fps,
+// take_folder }`, which older builds ignore (and drop when they save).
+//
+// In memory the map rides on the take index object as a non-enumerable
+// property, so every module that already passes the index around reaches it
+// without new plumbing, and JSON.stringify of the index never includes it.
 
-/** The capture facts a record keeps beside its uids. */
+const CAPTURES = 'takeCaptures';
+
+/** The capture facts a record keeps. */
 const CAPTURE_FIELDS = ['session_id', 'captured_at', 'capture_mode', 'capture_fps', 'take_folder'];
 
-/** The highlight uids of an entry in either shape. */
-export function uidsOf(entry) {
-  if (Array.isArray(entry)) return entry;
-  return Array.isArray(entry?.uids) ? entry.uids : [];
+/** The index's capture map, made on first use. */
+export function captureMapOf(takeIndex) {
+  if (!Object.prototype.hasOwnProperty.call(takeIndex, CAPTURES)) {
+    Object.defineProperty(takeIndex, CAPTURES, { value: {}, enumerable: false, writable: true, configurable: true });
+  }
+  return takeIndex[CAPTURES];
 }
 
-/** The same entry with `change` applied to its uids, in the shape it had. */
-export function mapUids(entry, change) {
-  if (Array.isArray(entry)) return change(entry);
-  return { ...entry, uids: change(uidsOf(entry)) };
+/** What is known of how `takeKey` was captured, or undefined. */
+export function captureOf(takeIndex, takeKey) {
+  return takeIndex?.[CAPTURES]?.[takeKey];
 }
 
 /**
- * The entry after a capture records `uids` into it: uids unioned, and each
- * capture fact in `meta` that is known written over the old one (a re-capture
- * into the same key is the newer capture). Always a record.
+ * Records the capture facts in `meta` for `takeKey`. A fact that is known
+ * overwrites the old one (a re-capture into the same key is the newer
+ * capture); an unknown one leaves it.
  */
-export function recordInto(entry, uids, meta) {
-  const record = Array.isArray(entry) || !entry ? {} : { ...entry };
-  record.uids = Array.from(new Set([...uidsOf(entry), ...uids]));
+export function recordCapture(takeIndex, takeKey, meta) {
+  if (!takeIndex || !takeKey || !meta) return;
+  const record = { ...captureOf(takeIndex, takeKey) };
   CAPTURE_FIELDS.forEach((field) => {
-    const value = meta?.[field];
+    const value = meta[field];
     if (value !== undefined && value !== null && value !== '') record[field] = value;
   });
-  return record;
+  if (Object.keys(record).length > 0) captureMapOf(takeIndex)[takeKey] = record;
+}
+
+/** Puts a loaded project's `takeCaptures` onto its take index. */
+export function attachCaptures(takeIndex, saved) {
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
+  Object.assign(captureMapOf(takeIndex), saved);
+}
+
+/** Carries `from`'s captures for the takes `to` still holds. */
+export function carryCaptures(from, to) {
+  const saved = from?.[CAPTURES];
+  if (!saved) return;
+  Object.keys(saved).forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(to, key)) captureMapOf(to)[key] = saved[key];
+  });
+}
+
+/** The map to write as the project's `takeCaptures`: left out (undefined)
+ *  while empty, so a project that never recorded one is saved as it was. */
+export function capturesToSave(takeIndex) {
+  const saved = takeIndex?.[CAPTURES];
+  return saved && Object.keys(saved).length > 0 ? saved : undefined;
 }
 
 /**

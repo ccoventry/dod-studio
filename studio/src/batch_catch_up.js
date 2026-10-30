@@ -16,7 +16,7 @@ import { listen } from '@tauri-apps/api/event';
 import { catchUpUnwatchedBatches, readProjectFile, writeTextFile } from './ipc_bridge.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
-import { captureRateOf } from './take_record.js';
+import { captureRateOf, attachCaptures, capturesToSave } from './take_record.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { fileNameOf } from './path_display.js';
@@ -114,7 +114,9 @@ export function createBatchCatchUp({
     try {
       const data = JSON.parse(await io.readProject(path));
       data.takeIndex = data.takeIndex || {};
+      attachCaptures(data.takeIndex, data.takeCaptures);
       const result = applyCaughtUpBatch(batch, data.demos || [], data.takeIndex);
+      if (result.changed) data.takeCaptures = capturesToSave(data.takeIndex);
       if (result.changed) await io.writeProject(path, JSON.stringify(data, null, 2));
       return { result, note: result.changed ? ` ${STRINGS.BATCH_CATCH_UP.projectUpdated(fileNameOf(path) || path)}` : '' };
     } catch (err) {
