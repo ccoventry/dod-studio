@@ -79,6 +79,8 @@ MAP
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_map_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
+  ds_map_weather 0-3
+      Rain or snow on any map, or none: 0 the map's own, 1 rain, 2 snow, 3 none. Needs cl_particlefx 2.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
