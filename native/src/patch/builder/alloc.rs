@@ -104,6 +104,9 @@ impl DriveBudget {
         drives: impl IntoIterator<Item = usize>,
         capture_directories: &[std::path::PathBuf],
     ) -> Vec<crate::patch::types::DriveHeadroom> {
+        // In drive order, so the list is the same for the same batch (#1191).
+        let mut drives: Vec<usize> = drives.into_iter().collect();
+        drives.sort_unstable();
         drives
             .into_iter()
             .filter_map(|idx| {
