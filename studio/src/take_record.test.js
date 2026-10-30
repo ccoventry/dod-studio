@@ -85,6 +85,31 @@ describe('a project saved by this build', () => {
     expect(recorded).toEqual({ k: ['u'] });
   });
 
+  it('a catch-up plus a rename still leaves every old reader working', async () => {
+    const { applyCaughtUpBatch } = await import('./batch_catch_up.js');
+    const { markerRows } = await import('./marker_list.js');
+    const { renameUidsInTakeIndex } = await import('./take_index.js');
+    const project = oldProject();
+    const takeIndex = loadProject(JSON.stringify(project));
+    const streaks = project.demos[0].streaks;
+    const uids = streaks.map((s) => `${project.demos[0].path}#${s.player_index}#${s.start_tick}#${s.end_tick}`);
+    applyCaughtUpBatch({
+      session_id: 'session_c', capture_mode: 'obs', obs_capture_fps: 90, streak_uids: uids,
+      blocks: [{ take_key: 'session_c/chain_00_b0', captured: true, take_folder: 'D:/caps/c', source_streak_indices: [0] }],
+    }, project.demos, takeIndex);
+    renameDemoInTakeIndex(takeIndex, 'C:/demos/fotw.dem', 'D:/new/fotw.dem');
+    renameUidsInTakeIndex(takeIndex, new Map([['D:/new/fotw.dem#3#100#400', 'D:/new/fotw.dem#3#101#400']]));
+    expect(captureOf(takeIndex, 'session_c/chain_00_b0')).toMatchObject({ capture_mode: 'obs', capture_fps: 90 });
+    expect(captureOf(takeIndex, 'session_c/chain_00_b0').captured_at).toBeUndefined();
+
+    const data = JSON.parse(saveProject(takeIndex, ['D:/new/fotw.dem#3#101#400', 'D:/new/fotw.dem#4#300#700']));
+    Object.values(data.takeIndex).forEach((entry) => expect(Array.isArray(entry)).toBe(true));
+    // The readers an older build runs, on what this build saved.
+    expect(() => markerRows(project.demos, data.takeIndex)).not.toThrow();
+    expect(before439.resolveTake(data.takeIndex, 'session_c/chain_00_b0')).toEqual(['D:/new/fotw.dem#3#101#400']);
+    expect(() => before439.pruneTakeIndex(data.takeIndex, [])).not.toThrow();
+  });
+
   it('this build reads what an older build saved back (it drops takeCaptures)', () => {
     const data = JSON.parse(saveProject(capturedProject(), [FIRST, SECOND]));
     delete data.takeCaptures;
