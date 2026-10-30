@@ -385,6 +385,16 @@ pub const AREAS: &[Area] = &[
                 "Counts include subfolders",
                 "a folder's demo count includes the demos in its subfolders.",
             ),
+            check(
+                console_name!("ui_review_keys"),
+                "Review answers on the game screen",
+                "Review highlights pauses at each highlight's end for Y, M, N, R, B, Space or S. Off: it opens the Review tab instead.",
+            ),
+            check(
+                console_name!("ui_review_info"),
+                "Review shows which highlight",
+                "Review highlights: a box says which highlight is playing, whose and how many kills.",
+            ),
         ],
     },
     Area {

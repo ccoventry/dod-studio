@@ -18,6 +18,10 @@ pub mod folder_walk;
 pub mod foreground_lock;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod game_remote;
+/// Which hook DLL and build a running game has, against the file on disk
+/// (#1143).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hook_build;
 /// The Half-Life installs on this PC and their engine builds (#931).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod installs;

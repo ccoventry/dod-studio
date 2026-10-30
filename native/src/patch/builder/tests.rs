@@ -649,7 +649,11 @@ fn workspace_guard_drop_actually_removes_chain_demos_when_auto_clear_is_on() {
     let _ = std::fs::remove_dir_all(&dod_dir);
 }
 
-fn streak_with_kills(start_tick: i32, end_tick: i32, kill_frames: &[i32]) -> CaptureStreak {
+pub(super) fn streak_with_kills(
+    start_tick: i32,
+    end_tick: i32,
+    kill_frames: &[i32],
+) -> CaptureStreak {
     CaptureStreak {
         start_tick,
         end_tick,
@@ -1334,6 +1338,84 @@ fn test_blocks_carry_the_record_bounds_the_decal_flush_keys_off() {
             b.record_stop_tick
         );
     }
+}
+
+/// A highlight as a real scan hands it over: `frame_times` stop at the end of
+/// the demo's loading segment (31 frames here), the kills sit ~100k frames
+/// in at ~468 frames a second, and each kill has its `viewdemo` time.
+/// Numbers from `wsod25_grp5_h1_m00cat.dem`'s 3k on dod_harrington.
+fn scanned_streak() -> CaptureStreak {
+    let mut streak = streak_with_kills(104_320, 108_292, &[104_320, 108_292]);
+    streak.total_demo_frames = 586_462;
+    streak.demo_fps = 468.2;
+    streak.viewdemo_times = vec![760.0, 769.33];
+    streak.frame_times = std::sync::Arc::new((0..31).map(|i| 38.0 + i as f32 / 15.0).collect());
+    streak
+}
+
+#[test]
+fn test_blocks_carry_a_plan_of_the_recording_and_its_kills() {
+    // The take checks (#1084) hold a captured video to this: how long the
+    // recording should be, and where each kill falls in it, in seconds on
+    // the clock the hook records on. A take of this block measured 19.33 s
+    // (5799 frames at 300 fps): 5 s lead + 9.33 s of kills + 5 s trail.
+    let mut config = mock_config();
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let streak = scanned_streak();
+    let mut arrays = std::collections::HashMap::new();
+    arrays.insert(
+        std::path::PathBuf::from("demo1.dem"),
+        streak.frame_times.clone(),
+    );
+
+    let (jobs, _) = build_batch_queue(vec![streak], &config, &arrays).unwrap();
+    let block = &jobs[1].blocks[0];
+    let plan = block
+        .plan
+        .as_ref()
+        .expect("a highlight with viewdemo times has a plan");
+
+    assert!((plan.length_secs - 19.33).abs() < 0.01, "{plan:?}");
+    assert_eq!(plan.kill_offsets_secs.len(), 2, "{plan:?}");
+    assert!((plan.kill_offsets_secs[0] - 5.0).abs() < 0.01, "{plan:?}");
+    assert!((plan.kill_offsets_secs[1] - 14.33).abs() < 0.01, "{plan:?}");
+}
+
+#[test]
+fn test_a_plan_is_the_window_the_hook_batch_records() {
+    // The plan and the hook's batch file read one clock, so the plan's
+    // length is the time between the batch's own record start and stop.
+    let mut config = mock_config();
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let streak = scanned_streak();
+    let streaks = vec![streak.clone()];
+    let (jobs, _) =
+        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new()).unwrap();
+    let plan = jobs[1].blocks[0].plan.clone().expect("a plan");
+    let text = crate::patch::runtime_batch::batch_file(&jobs, &streaks, false).unwrap();
+    let at = |command: &str| -> f64 {
+        text.lines()
+            .find(|l| l.ends_with(command))
+            .and_then(|l| l.split('\t').nth(1))
+            .and_then(|t| t.parse().ok())
+            .unwrap_or_else(|| panic!("no {command} in {text}"))
+    };
+    let scheduled = at("sys_record_stop") - at("sys_record_start");
+    assert!(
+        (plan.length_secs - scheduled).abs() < 0.002,
+        "plan {plan:?}, batch {scheduled}"
+    );
+}
+
+#[test]
+fn test_a_highlight_without_viewdemo_times_has_blocks_without_a_plan() {
+    let config = mock_config();
+    let streak = streak_with_kills(1000, 1200, &[1000, 1200]);
+    let (jobs, _) =
+        build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
+    assert!(jobs[1].blocks[0].plan.is_none());
 }
 
 #[test]
@@ -2147,4 +2229,168 @@ fn an_obs_take_is_billed_by_its_quality_setting_not_as_raw_frames() {
     );
     config.obs.recording_quality = Q::Max;
     assert!(block_byte_estimate(&config, &streak, 100.0) > billed);
+}
+
+// ── Fast-forwarded gaps between kills (#831) ─────────────────────────────
+
+fn fast_forward_gaps(config: &mut PatcherConfig) {
+    config.kill_gaps.mode = crate::patch::types::KillGapMode::FastForward;
+    config.kill_gaps.over_seconds = 8.0;
+    config.kill_gaps.speed = 4.0;
+}
+
+fn ramp_commands(job: &PatchJob) -> Vec<(i32, &str)> {
+    job.scheduled_commands
+        .iter()
+        .filter(|(_, c)| c == kill_gaps::RAMP_ON || c == kill_gaps::RAMP_OFF)
+        .map(|(t, c)| (*t, c.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_long_gap_inside_a_clip_is_scheduled_as_a_ramp_when_gaps_fast_forward() {
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    // Kills at 10 s and 30 s (100 fps, no frame times).
+    let streaks = vec![streak_with_kills(1000, 3000, &[1000, 3000])];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert_eq!(
+        ramp_commands(job),
+        vec![(1200, "sys_ramp_on"), (2600, "sys_ramp_off")]
+    );
+    assert_eq!(job.blocks[0].ramped_gaps, 1);
+    let helper = std::fs::read_to_string(
+        std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod")
+            .join("dodstudio_helper.cfg"),
+    )
+    .unwrap();
+    assert!(
+        helper.contains("alias sys_ramp_on \"dem_speed 4\""),
+        "{helper}"
+    );
+}
+
+#[test]
+fn gaps_are_kept_by_default() {
+    let config = mock_config();
+    let streaks = vec![streak_with_kills(1000, 3000, &[1000, 3000])];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert!(ramp_commands(job).is_empty());
+    assert_eq!(job.blocks[0].ramped_gaps, 0);
+}
+
+#[test]
+fn the_gap_between_two_highlights_merged_into_one_take_ramps_too() {
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    // 10 s apart: the two takes' 5 s lead and trail overlap, so one take.
+    let streaks = vec![
+        streak_with_kills(1000, 1000, &[1000]),
+        streak_with_kills(2000, 2000, &[2000]),
+    ];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert_eq!(job.blocks.len(), 1);
+    assert_eq!(
+        ramp_commands(job),
+        vec![(1200, "sys_ramp_on"), (1600, "sys_ramp_off")]
+    );
+}
+
+#[test]
+fn a_fast_forwarded_take_is_planned_as_long_as_its_video_and_its_kills_where_they_land() {
+    // The take checks (#1084) hold the video to its plan: with the gap at 4x
+    // the video is shorter than the record window, and the second kill
+    // earlier in it. scanned_streak's kills are 9.33 s apart, so the ramp
+    // runs 2 s after the first to 4 s before the second: 3.33 s that play in
+    // 0.83 s, 2.5 s saved.
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let (jobs, _) = build_batch_queue(
+        vec![scanned_streak()],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let block = &jobs[1].blocks[0];
+    assert_eq!(block.ramped_gaps, 1);
+    let plan = block.plan.as_ref().expect("a plan");
+    assert!((plan.length_secs - 19.33).abs() < 0.01, "{plan:?}");
+    assert!((plan.video_length_secs() - 16.83).abs() < 0.01, "{plan:?}");
+    let second_kill = plan.video_secs(plan.kill_offsets_secs[1]);
+    assert!((second_kill - 11.83).abs() < 0.01, "{plan:?}");
+}
+
+#[test]
+fn a_fast_forwarded_takes_plan_speeds_up_what_the_hook_batch_schedules() {
+    // The plan's sped-up stretch and the batch file's ramp read one clock.
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let streaks = vec![scanned_streak()];
+    let (jobs, _) =
+        build_batch_queue(streaks.clone(), &config, &std::collections::HashMap::new()).unwrap();
+    let plan = jobs[1].blocks[0].plan.clone().expect("a plan");
+    let text = crate::patch::runtime_batch::batch_file(&jobs, &streaks, false).unwrap();
+    let at = |command: &str| -> f64 {
+        text.lines()
+            .find(|l| l.ends_with(command))
+            .and_then(|l| l.split('\t').nth(1))
+            .and_then(|t| t.parse().ok())
+            .unwrap_or_else(|| panic!("no {command} in {text}"))
+    };
+    let start = at("sys_record_start");
+    let stretch = plan.sped_up[0];
+    assert!((stretch.from_secs - (at("sys_ramp_on") - start)).abs() < 0.002);
+    assert!((stretch.to_secs - (at("sys_ramp_off") - start)).abs() < 0.002);
+    assert_eq!(stretch.speed, 4.0);
+}
+
+#[test]
+fn a_patched_batch_plans_its_takes_at_real_time() {
+    let mut config = mock_config();
+    fast_forward_gaps(&mut config);
+    let (mut jobs, _) = build_batch_queue(
+        vec![scanned_streak()],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    assert_eq!(kill_gaps::keep_gaps(&mut jobs), 1);
+    let plan = jobs[1].blocks[0].plan.as_ref().expect("a plan");
+    assert!(plan.sped_up.is_empty());
+    assert!((plan.video_length_secs() - plan.length_secs).abs() < 1e-9);
+}
+
+#[test]
+fn a_take_of_merged_highlights_plans_every_kill_it_records() {
+    // The merge keeps only an absorbed highlight's last kill in the block's
+    // own list; the plan checks the kills before it too.
+    let mut config = mock_config();
+    config.record_start_lead = 5.0;
+    config.record_stop_trail = 5.0;
+    let mut first = streak_with_kills(1000, 1000, &[1000]);
+    first.viewdemo_times = vec![110.0];
+    let mut second = streak_with_kills(1500, 2000, &[1500, 1800, 2000]);
+    second.viewdemo_times = vec![115.0, 118.0, 120.0];
+    let (jobs, _) = build_batch_queue(
+        vec![first, second],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert_eq!(job.blocks.len(), 1);
+    let plan = job.blocks[0].plan.as_ref().expect("a plan");
+    assert_eq!(plan.kill_offsets_secs.len(), 4, "{plan:?}");
 }
