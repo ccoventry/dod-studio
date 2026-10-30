@@ -94,6 +94,8 @@ struct State {
     /// Partial takes (#1105), with what they hold: kept for the user and
     /// never deleted from here, so a hold never counts on their space.
     partial: Vec<(usize, u64)>,
+    /// Take folders OBS started recording late (#1109): partial takes too.
+    started_late: Vec<PathBuf>,
     /// The block recording now, if any.
     recording: Option<usize>,
     /// A watcher is running.
@@ -417,8 +419,9 @@ impl CaptureRoom {
             let short = settled.and_then(|_| {
                 native::hlcr::take_length::short_take(&block.folder, room.capture_fps)
             });
+            let started_late = room.lock().started_late.contains(&block.folder);
             room.lock()
-                .take_settled(index, block.ticks, settled, short.is_some());
+                .take_settled(index, block.ticks, settled, short.is_some() || started_late);
             let Some(bytes) = settled else {
                 // Nothing there, still changing, or the batch was cancelled:
                 // the finish step after the batch sees it, as without this
@@ -431,6 +434,14 @@ impl CaptureRoom {
                 ));
                 return;
             };
+            if started_late {
+                log_markdown(&format!(
+                    "[render-while-capturing] Clip {} at {}: OBS started recording after the clip did; not rendering a take missing its opening",
+                    index + 1,
+                    block.folder.display()
+                ));
+                return;
+            }
             if let Some(short) = short {
                 log_markdown(&format!(
                     "[render-while-capturing] Clip {} at {} stopped writing video early ({:.2} s of video, {:.2} s of audio); not rendering a partial take",
@@ -459,6 +470,13 @@ impl CaptureRoom {
                 }),
             );
         });
+    }
+
+    /// OBS started recording the clip at `folder` after its first frame
+    /// (#1109): its take is partial, so it is never rendered from here.
+    /// Comes at the clip's `START_RECORD`, before its take settles.
+    pub(crate) fn clip_started_late(&self, folder: &Path) {
+        self.lock().started_late.push(folder.to_path_buf());
     }
 
     /// The game held (`BATCH_HELD`) or went on (`BATCH_GOING`). The hook
