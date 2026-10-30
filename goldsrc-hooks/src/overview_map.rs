@@ -71,8 +71,10 @@
 //! the engine's own coupling, not something introduced here, but it is worth
 //! knowing before rather than after.
 
+use std::ffi::{CStr, c_char};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
+use crate::commands::console_print;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
@@ -467,6 +469,94 @@ pub fn status() -> String {
         "holding the {} overview rect(s) against VidInit -- note the kill feed and objective icons take their y from the full map's bounds",
         held.join(" and ")
     )
+}
+
+/// `ds_hud_overview_layout [full|mini <x> <y> <w> <h>] [default]`.
+///
+/// A command rather than a cvar: four numbers and a name do not fit in one
+/// value, and two cvars per rectangle would be eight names in the type-ahead
+/// for something set once.
+pub(crate) unsafe extern "C" fn command() {
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let argc = unsafe { (engfuncs.cmd_argc)() };
+    let argv = |n: i32| -> Option<String> {
+        let raw = unsafe { (engfuncs.cmd_argv)(n) };
+        (!raw.is_null()).then(|| {
+            unsafe { CStr::from_ptr(raw as *const c_char) }
+                .to_string_lossy()
+                .trim()
+                .to_owned()
+        })
+    };
+
+    if argc < 2 {
+        console_print(&format!(
+            "usage: {NAME} <full|mini> <x> <y> <w> <h>\n       {NAME} default   (let the game place them again)\n{}",
+            listing()
+        ));
+        return;
+    }
+
+    let Some(first) = argv(1) else { return };
+    if first.eq_ignore_ascii_case("default") {
+        release();
+        console_print(&format!(
+            "{NAME}: released; the next resolution change or level load recomputes them\n"
+        ));
+        unsafe { crate::debug::report(&format!("commands: {NAME} default")) };
+        return;
+    }
+
+    let Some(which) = Which::parse(&first) else {
+        console_print(&format!(
+            "{NAME}: no rect called \"{first}\" -- try full, mini or default\n"
+        ));
+        return;
+    };
+    if argc < 6 {
+        console_print(&format!(
+            "{NAME}: {} needs four numbers -- x y w h\n",
+            which.name()
+        ));
+        return;
+    }
+
+    let mut fields = [0_i32; 4];
+    for (index, slot) in fields.iter_mut().enumerate() {
+        let Some(raw) = argv(2 + index as i32) else {
+            return;
+        };
+        match raw.parse::<i32>() {
+            Ok(value) => *slot = value,
+            Err(_) => {
+                console_print(&format!("{NAME}: \"{raw}\" is not a number\n"));
+                return;
+            }
+        }
+    }
+    let rect = Rect {
+        x: fields[0],
+        y: fields[1],
+        w: fields[2],
+        h: fields[3],
+    };
+
+    match hold(which, rect).and_then(|()| apply()) {
+        Ok(_) => {
+            console_print(&format!(
+                "{NAME} {} = {rect}   (shown while _cl_minimap is {})\n",
+                which.name(),
+                which.mode()
+            ));
+            unsafe { crate::debug::report(&format!("commands: {NAME} {} = {rect}", which.name())) };
+        }
+        Err(why) => {
+            console_print(&format!("{NAME}: {why}\n"));
+            unsafe { crate::debug::report(&format!("commands: {NAME} failed -- {why}")) };
+        }
+    }
 }
 
 #[cfg(test)]
