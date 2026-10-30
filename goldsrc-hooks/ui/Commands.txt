@@ -22,17 +22,17 @@ HUD
   ds_hud_hide_voice_menus 0/1
       Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   ds_hud_hide_hints 0/1
-      Hide the auto-help hint box in the top-left corner (on by default).
-  ds_hud_hide_element <name> 0/1
-      Hide one HUD element; the bare command lists them.
+      Hide the auto-help hint box in the top-left corner and the machine gun's 'Deploy... to Reload!' prompt (on by default).
+  ds_hud_hide_teammate_info 0/1
+      Hide the teammate's name and health under the crosshair in POV demos.
   ds_hud_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
   ds_hud_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
   ds_hud_hide_center_text 0/1
       Hide the text the server prints in the middle of the screen (plugin countdowns and notices), the engine's own centre print too.
-  ds_hud_hide_server_text 0/1
-      Hide server plugins' coloured HUD messages (match status, ready lists, banners); the map's own text stays.
+  ds_hud_hide_plugin_text 0/1
+      Hide what server plugins put on screen: coloured HUD messages (match status, ready lists, banners) and their menus and votes; the map's own text stays.
   ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_hud_deathmsg
@@ -79,6 +79,8 @@ MAP
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_map_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
+  ds_map_weather 0-3
+      Rain or snow on any map, or none: 0 the map's own, 1 rain, 2 snow, 3 none. Needs cl_particlefx 2.
 
 SOUND
   ds_sound_mute_voice_commands 0/1
@@ -141,9 +143,9 @@ DOD STUDIO WINDOW
   ds_ui_demo_list_show_counts 0/1
       Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
   ds_ui_review_keys 0/1
-      Review highlights: at each highlight's end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; ESC opens the Review tab. 0: the Review tab opens.
+      Review highlights: while a highlight plays or at its end, answer on the game screen with Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop; ESC opens the Review tab. 0: the Review tab opens at each end.
   ds_ui_review_info 0/1
-      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills.
+      Review highlights: while a highlight plays, a box on screen says which one it is, whose and how many kills, with its kills listed (the next one in amber) and the answer keys.
 
 HD TEXTURES
   ds_hd_enabled 0/1

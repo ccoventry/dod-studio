@@ -57,6 +57,15 @@ describe('matchesQuickFilters', () => {
     expect(matchesQuickFilters(noKills, f)).toBe(false);
   });
 
+  it('headshot needs a highlight with a headshot among its kills, and not an unknown one', () => {
+    const f = { kills: KILLS_FILTER.HEADSHOT };
+    const withHeadshot = { local_player_index: 2, streaks: [{ ...streak(2, 2), headshots: ['no', 'yes'] }] };
+    const onlyUnknown = { local_player_index: 2, streaks: [{ ...streak(2, 1), headshots: ['unknown'] }] };
+    expect(matchesQuickFilters(withHeadshot, f)).toBe(true);
+    expect(matchesQuickFilters(onlyUnknown, f)).toBe(false);
+    expect(matchesQuickFilters(singles, f)).toBe(false);
+  });
+
   it('recorder-only hides demos with no resolvable recording player', () => {
     expect(matchesQuickFilters(ownerless, { ownerOnly: true })).toBe(false);
     expect(matchesQuickFilters(multi, { ownerOnly: true })).toBe(true);

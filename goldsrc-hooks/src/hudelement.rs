@@ -1,4 +1,13 @@
-//! `ds_hud_hide_element`: hide any one of DoD's HUD elements, by name.
+//! Hide one of DoD's HUD elements by stubbing its `Draw` in its vftable.
+//! `ds_hud_hide_teammate_info` (`teammate_info.rs`) hides `statusbar` this
+//! way; nothing else is hidden here today.
+//!
+//! This was the `ds_hud_hide_element <name>` command until #342 retired it:
+//! where a stock cvar already did the job the docs point at that instead
+//! (`hud_saytext_internal 0` for chat, `cl_hud_objectives 0` and friends,
+//! `hud_deathnotice_time 0`), and the rest went to a setting named after what
+//! it hides. The table below still lists every element that overrides `Draw`:
+//! `voice_menus.rs` checks `CHudMenu` against it, and the tools read it.
 //!
 //! ## One dword, not a code patch
 //!
@@ -62,9 +71,7 @@
 //! pair in the function -- ammo counter and weapon-select menu alike -- lands
 //! after one of its four `CHud::ShouldDraw(3)` calls; nothing draws before the
 //! first one. So the stock `cl_hud_ammo` cvar already hides all of it, with no
-//! forced-reset trap the way `crosshair`/`r_drawentities`/`cl_lw` have -- unlike
-//! `objectives` and `icons` below, which both draw something *before* their own
-//! `ShouldDraw` gate and so keep genuine reach a stock cvar does not have.
+//! forced-reset trap the way `crosshair`/`r_drawentities`/`cl_lw` have.
 //!
 //! Five more overrode `Draw` and registered themselves, so they too need
 //! `KNOWN_EXCLUDED` entries -- but for a different reason than `CHudAmmo`: each
@@ -118,38 +125,8 @@
 //! nothing to test against, not because it is proven dead -- unlike the five
 //! above, this one could turn out to work the moment the right demo turns up.
 //!
-//! ## `vgui2print` is narrower than its name suggests
-//!
-//! `CHudVGUI2Print` has two queueing methods and a drawing method, and only
-//! the queued text goes through the vtable slot this element hides:
-//!
-//! - `CHudDoDCommon` (`client+0x3c007`, key `Dod_mg_reload` -- "Deploy your
-//!   machine gun to Reload!") calls a *queueing* method (`client+0x3a990`)
-//!   that only writes text/position/color/expiry into `CHudVGUI2Print`'s own
-//!   fields. The pixels are drawn later, when `CHudVGUI2Print::Draw` itself
-//!   runs and reads that state -- the vtable-dispatched path this element's
-//!   hide actually intercepts. Live-confirmed.
-//! - The second queueing method (`client+0x3a830`, the same fields) takes
-//!   every centre-print: `MsgFunc_TextMsg`'s `HUD_PRINTCENTER` branch
-//!   (`client+0x4c3e9`), and through it the spectator camera mode's name, and
-//!   the clan countdown (`client+0x2d3f7`). `Draw` (`client+0x3aa10`) shows
-//!   them until the time at `+0x14`, so hiding `vgui2print` should take all
-//!   centre text too -- offline (#677), not checked in the game.
-//! - `CObjectiveIcons` (`client+0x300f4`, key `clan_warmup_mode` -- "Warmup
-//!   Mode") calls a *drawing* method (`client+0x3a3f0`) that renders
-//!   immediately by calling a shared low-level helper (`client+0x3a4b0`) at
-//!   a fixed address -- never touching `CHudVGUI2Print::Draw` or its vtable
-//!   slot. Hiding `vgui2print` does not hide this banner.
-//! - `CHudMenu::Draw` (`client+0x3dee0`) calls the same low-level helper
-//!   directly too, for its own rich-text menu list (parsing `\`-prefixed
-//!   color/newline escape codes, word-wrapping, one call per word). Also
-//!   untouched by hiding `vgui2print` -- `menu`'s own vftable hide is what
-//!   stops this, by not letting `CHudMenu::Draw` run at all.
-//!
-//! So `vgui2print` only ever hides queued, timed prompts -- the MG-reload
-//! message and centre text -- and anything drawn immediately through the
-//! shared helper is a different code path this element's vtable slot cannot
-//! see.
+//! What each listed element draws, and what took over hiding it when
+//! `ds_hud_hide_element` went (#342), is in `docs/goldsrc_hud_elements.md`.
 //!
 //! ## Re-applied every frame
 //!
@@ -165,10 +142,6 @@
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine;
-use crate::names::console_name;
-
-/// The command name. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("hud_hide_element");
 
 /// `Draw` is the fourth virtual: destructor, `Init`, `VidInit`, `Draw`.
 const DRAW_SLOT: usize = 3;
@@ -184,77 +157,67 @@ const BASE_DRAW_DONOR: Element = Element {
     name: "weather",
     class: ".?AVCWeatherManager@@",
     vftable_rva: 0xac2c0,
-    what: "",
 };
 
 /// One HUD element on `CHud`'s draw list.
 pub struct Element {
-    /// What to type. Short, lowercase, and not the C++ class name: nobody
-    /// wants to type `CHudDoDCrossHair` into a console.
+    /// What the code and the tools call it. Short and lowercase, not the C++
+    /// class name.
     pub name: &'static str,
     /// The decorated RTTI name, checked against the loaded module.
     pub class: &'static str,
     pub vftable_rva: usize,
-    /// What disappears, in the words someone would use to ask for it.
-    pub what: &'static str,
 }
 
 /// Every element that overrides `Draw`, so every element there is any point
 /// hiding. Derived by `goldsrc-hooks/tools/survey_client_dll.py elements`.
+/// All are checked by RTTI at the first resolve; only the ones a setting asks
+/// for are written.
 pub const ELEMENTS: &[Element] = &[
     Element {
         name: "deathnotice",
         class: ".?AVCHudDeathNotice@@",
         vftable_rva: 0xac1c4,
-        what: "the kill feed",
     },
     Element {
         name: "icons",
         class: ".?AVCHudDodIcons@@",
         vftable_rva: 0xac350,
-        what: "the MG-deploy icon, the capture-area icon, blood and bandage",
     },
     Element {
         name: "menu",
         class: ".?AVCHudMenu@@",
         vftable_rva: 0xac1a0,
-        what: "the voice-command menus and server plugin menus (ShowMenu)",
     },
     Element {
         name: "message",
         class: ".?AVCHudMessage@@",
         vftable_rva: 0xac20c,
-        what: "map text and the round result (HudText)",
     },
     Element {
         name: "objectives",
         class: ".?AVCObjectiveIcons@@",
         vftable_rva: 0xac32c,
-        what: "the objective icons and capture progress bar",
     },
     Element {
         name: "saytext",
         class: ".?AVCHudSayText@@",
         vftable_rva: 0xac278,
-        what: "chat",
     },
     Element {
         name: "statusbar",
         class: ".?AVCHudStatusBar@@",
         vftable_rva: 0xac1e8,
-        what: "the name and health readout under the crosshair",
     },
     Element {
         name: "train",
         class: ".?AVCHudTrain@@",
         vftable_rva: 0xac230,
-        what: "the tram controls",
     },
     Element {
         name: "vgui2print",
         class: ".?AVCHudVGUI2Print@@",
         vftable_rva: 0xac3e0,
-        what: "queued timed text prompts: the MG \"Deploy...to Reload!\" message and centre text (see module docs)",
     },
 ];
 
@@ -360,7 +323,7 @@ fn resolve() -> Result<usize, String> {
     Ok(base)
 }
 
-/// Whether `name` is an element this can hide.
+/// Where `name` is in [`ELEMENTS`].
 pub fn find(name: &str) -> Option<usize> {
     ELEMENTS
         .iter()
@@ -368,7 +331,7 @@ pub fn find(name: &str) -> Option<usize> {
 }
 
 /// Records that `index` should be hidden or shown. The write itself happens in
-/// [`poll`], which is also what re-applies it after a demo change.
+/// [`apply`], which `commands::poll` calls every frame.
 pub fn set_hidden(index: usize, hidden: bool) {
     let bit = 1u32 << index;
     if hidden {
@@ -379,6 +342,7 @@ pub fn set_hidden(index: usize, hidden: bool) {
 }
 
 /// Shows every element again.
+#[cfg(test)]
 pub fn show_all() {
     HIDDEN.store(0, Ordering::Relaxed);
 }
@@ -434,20 +398,6 @@ pub fn apply() -> Result<usize, String> {
     Ok(written)
 }
 
-/// One line per element, for the bare command.
-pub fn listing() -> String {
-    let mut out = String::new();
-    for (index, element) in ELEMENTS.iter().enumerate() {
-        out.push_str(&format!(
-            "  {:<12} {}  {}\n",
-            element.name,
-            if is_hidden(index) { "1" } else { "0" },
-            element.what
-        ));
-    }
-    out
-}
-
 /// One line for `ds_debug_status`.
 pub fn status() -> String {
     let hidden: Vec<&str> = ELEMENTS
@@ -457,7 +407,7 @@ pub fn status() -> String {
         .map(|(_, element)| element.name)
         .collect();
     if hidden.is_empty() {
-        return format!("every HUD element draws normally ({NAME} lists them)");
+        return "every HUD element draws normally".to_string();
     }
     format!(
         "{} HUD element(s) stubbed at the vftable: {}",
@@ -497,7 +447,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn names_are_unique_and_typeable() {
+    fn names_are_unique_and_lowercase() {
         let mut seen = HashSet::new();
         for element in ELEMENTS {
             assert!(
@@ -511,7 +461,7 @@ pub(crate) mod tests {
                     .name
                     .chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
-                "{:?} should be lowercase and digits only -- it gets typed into a console",
+                "{:?} should be lowercase and digits only",
                 element.name
             );
         }
@@ -607,32 +557,6 @@ pub(crate) mod tests {
         set_hidden(train, false);
         set_hidden(train, false);
         assert!(!is_hidden(train));
-        show_all();
-    }
-
-    #[test]
-    fn the_listing_names_every_element_and_its_state() {
-        let _statics = lock_hidden();
-        show_all();
-        set_hidden(find("saytext").unwrap(), true);
-        let listing = listing();
-        for element in ELEMENTS {
-            assert!(
-                listing.contains(element.name),
-                "{} is missing",
-                element.name
-            );
-        }
-        assert!(
-            listing
-                .lines()
-                .any(|l| l.contains("saytext") && l.contains(" 1 "))
-        );
-        assert!(
-            listing
-                .lines()
-                .any(|l| l.contains("crosshair") && l.contains(" 0 "))
-        );
         show_all();
     }
 

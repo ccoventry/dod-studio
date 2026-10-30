@@ -40,10 +40,10 @@
 //! | deploy | the viewmodel settling on a new weapon |
 //! | reload | the body sequence reading `*_reload` |
 //! | bolt-rifle shot | a shot (body animation or fire sound) while holding one |
-//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`) |
+//! | sprint | gait `dod_sprint` -- actual motion, where POV tests the keys; held through a turn's gait flicker (`sprint_turn`); in a fall off an edge, only while the body stays `sprint_*` (`snapshot_motion`) |
 //! | prone transition | 1.5s from the body entering `get_down` / `get_up` |
-//! | crawl | gait `prone_forward` (`dod_crawl` is the crouched walk) |
-//! | jump | body `jump`, from take-off until landing |
+//! | crawl | gait `prone_forward` while the origin moves (`dod_crawl` is the crouched walk; `snapshot_motion`) |
+//! | jump | body `jump`, from take-off until landing; a crouched take-off from the origin (`snapshot_motion`) |
 //! | ladder | `movetype` 5 |
 //! | weapon | the third-person model held |
 //! | MG deployed | body `sandbag_*` / `bipod_*` |
@@ -148,6 +148,7 @@ pub(super) fn forget() {
     PRONE_TRANSITION_AT.store(0, Ordering::Relaxed);
     IN_TRANSITION.store(0, Ordering::Relaxed);
     super::sprint_turn::forget();
+    super::snapshot_motion::forget();
 }
 
 /// Starts the prone timer on the frame the body enters `get_down` or
@@ -330,16 +331,21 @@ fn lowered_because(view: &View, now: f64) -> Option<Hidden> {
         ..
     } = *view;
     if !is_deployed(body) {
-        if super::sprint_turn::lowered(gait == "dod_sprint", now) {
+        // The server keeps the sprint gait through a fall off an edge; the
+        // body says when he let go of the key.
+        if super::snapshot_motion::let_go_of_sprint() {
+            super::sprint_turn::let_go();
+        } else if super::sprint_turn::lowered(gait == "dod_sprint", now) {
             return Some(Hidden::Sprinting);
         }
         if since(&PRONE_TRANSITION_AT, now).is_some_and(|s| s < PRONE_TRANSITION_SECONDS) {
             return Some(Hidden::ProneTransition);
         }
-        if gait == "prone_forward" {
+        // The server keeps the crawl gait up to 0.6 s after he stops.
+        if gait == "prone_forward" && !super::snapshot_motion::still() {
             return Some(Hidden::Crawling);
         }
-        if body == "jump" {
+        if body == "jump" || super::snapshot_motion::in_the_air() {
             return Some(Hidden::InTheAir);
         }
         if movetype == MOVETYPE_FLY {
@@ -586,6 +592,78 @@ mod tests {
             &view("bipod_mg_aim", "prone_forward", "mg42bd"),
             10.0
         ));
+    }
+
+    #[test]
+    fn the_snapshots_end_a_crawl_and_catch_a_crouched_jump() {
+        let _statics = lock_statics();
+        forget();
+        let crawl = view("prone_rifle_aim", "prone_forward", "garand");
+        // Crawling: the origin moves, so the gait's word stands.
+        for i in 0..4 {
+            super::super::snapshot_motion::note_snapshot(
+                10.0 + f64::from(i) * 0.035,
+                [f32::from(i as u8) * 1.5, 0.0, 0.0],
+                "prone_rifle_aim",
+                3,
+            );
+        }
+        assert_eq!(hidden_because(&crawl, 10.11), Some(Hidden::Crawling));
+        // Stopped for over 0.1 s: up, though the gait still says crawl.
+        for i in 4..8 {
+            super::super::snapshot_motion::note_snapshot(
+                10.0 + f64::from(i) * 0.035,
+                [4.5, 0.0, 0.0],
+                "prone_rifle_aim",
+                3,
+            );
+        }
+        assert_eq!(hidden_because(&crawl, 10.25), None);
+
+        forget();
+        // A crouched take-off the body never shows as `jump`.
+        let crouched = view("crouch_bolt_aim", "dod_crawl", "k98");
+        for (i, z) in [0.0, 0.0, 0.0, 8.0, 16.0].into_iter().enumerate() {
+            super::super::snapshot_motion::note_snapshot(
+                20.0 + i as f64 * 0.035,
+                [0.0, 0.0, z],
+                "crouch_bolt_aim",
+                3,
+            );
+        }
+        assert_eq!(hidden_because(&crouched, 20.15), Some(Hidden::InTheAir));
+        forget();
+    }
+
+    #[test]
+    fn a_sprint_let_go_off_an_edge_raises_the_gun_until_he_lands() {
+        let _statics = lock_statics();
+        forget();
+        // Sprinting off an edge at 10.0, the body leaving sprint at 10.2;
+        // the gait reads sprint all the way down and after.
+        let body = |t: f64| {
+            if t < 10.2 {
+                "sprint_bolt_aim"
+            } else {
+                "stand_bolt_aim"
+            }
+        };
+        let mut seen = Vec::new();
+        for i in 0..24 {
+            let t = 9.86 + f64::from(i) * 0.035;
+            let a = (t - 10.0).max(0.0) as f32;
+            let z = (-400.0 * a * a).max(-100.0);
+            super::super::snapshot_motion::note_snapshot(t, [t as f32 * 270.0, 0.0, z], body(t), 3);
+            let down = gun_lowered(&view(body(t), "dod_sprint", "k98"), t);
+            seen.push((t, z, down));
+        }
+        // He reaches the floor on the snapshot at 10.525; the fall ends on
+        // the next one, which no longer falls.
+        for (t, z, down) in seen {
+            let falling_after_let_go = t > 10.2 && t < 10.53;
+            assert_eq!(down, !falling_after_let_go, "at {t:.3} (z {z:.1})");
+        }
+        forget();
     }
 
     #[test]

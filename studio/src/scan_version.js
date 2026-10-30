@@ -15,7 +15,7 @@ export const HIGHLIGHTS_VERSION = 2;
  * True when `demo` was scanned by this version of highlight detection and
  * has every field a scan now fills: file_key, map_name (#441), teams (#445),
  * signon_maps (#217), no_camera_data (#920), and per highlight `spectated`
- * (#247) and `viewdemo_times` (#434).
+ * (#247), `viewdemo_times` (#434) and `headshots` (#1128).
  */
 export function scanIsCurrent(demo) {
   if (!demo) return false;
@@ -25,7 +25,7 @@ export function scanIsCurrent(demo) {
     && demo.signon_maps !== undefined
     && demo.no_camera_data !== undefined
     && (demo.highlights_version ?? 0) >= HIGHLIGHTS_VERSION
-    && (demo.streaks || []).every((s) => s.spectated !== undefined && s.viewdemo_times !== undefined);
+    && (demo.streaks || []).every((s) => s.spectated !== undefined && s.viewdemo_times !== undefined && s.headshots !== undefined);
 }
 
 /** The demos a rescan would bring up to date; a missing file can't be read. */
