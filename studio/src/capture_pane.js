@@ -1016,7 +1016,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
-        const marked = markBlockCaptured(block, lastDispatch, takeIndex);
+        const marked = markBlockCaptured(block, lastDispatch, takeIndex, payload.capture_fps);
         advanced += marked.advanced;
         markCleared ||= marked.markCleared;
       });

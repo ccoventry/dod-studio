@@ -10,6 +10,7 @@
 // across range edits.
 
 import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { uidsOf, mapUids, recordInto } from './take_record.js';
 
 /**
  * Content-addressed id for one highlight, stable across re-scans, project
@@ -95,7 +96,8 @@ export function setVerifiedStatus(streak, status) {
 
 // ── Durable take index ──────────────────────────────────────────────────────
 //
-// take_key -> uid[]. Recorded when a capture batch verifies a block on disk
+// take_key -> take record (take_record.js: the uids, and when and how the take
+// was captured; old projects hold a bare uid[]). Recorded when a capture batch verifies a block on disk
 // (capture_pane.js) so a render finishing later — possibly after a restart,
 // re-scan, or project reload that produced entirely new streak objects — can
 // still resolve which highlights to flip to Rendered. Plain object (not a
@@ -109,10 +111,9 @@ export function setVerifiedStatus(streak, status) {
  * the same key again (e.g. a re-capture) just unions the uid sets rather
  * than dropping the earlier ones.
  */
-export function recordTake(takeIndex, takeKey, uids) {
+export function recordTake(takeIndex, takeKey, uids, meta) {
   if (!takeIndex || !takeKey || !uids || uids.length === 0) return;
-  const existing = takeIndex[takeKey] || [];
-  takeIndex[takeKey] = Array.from(new Set([...existing, ...uids]));
+  takeIndex[takeKey] = recordInto(takeIndex[takeKey], uids, meta);
 }
 
 /**
@@ -120,8 +121,11 @@ export function recordTake(takeIndex, takeKey, uids) {
  * in the take index, so a render of it resolves back to them. Shared by the
  * post-batch verification and Render While Capturing (#861), which renders
  * (and may delete) a take before the batch ends. `{ advanced, markCleared }`.
+ * The record keeps when and how the take was captured (#439): `block` is a
+ * verified block or a `capture_clip_ready` payload (which carries its own
+ * rate), `captureFps` the batch's rate for a block that doesn't.
  */
-export function markBlockCaptured(block, dispatch, takeIndex) {
+export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
   let advanced = 0;
   let markCleared = false;
   // A block can cover several highlights — overlapping ones are recorded
@@ -154,7 +158,13 @@ export function markBlockCaptured(block, dispatch, takeIndex) {
   // still needs to resolve this take_key back to these highlights once
   // it succeeds, and the index outlives this dispatch's in-memory state.
   if (takeIndex && block.take_key) {
-    recordTake(takeIndex, block.take_key, uids);
+    recordTake(takeIndex, block.take_key, uids, {
+      session_id: block.session_id ?? dispatch?.sessionId,
+      captured_at: Date.now(),
+      capture_mode: block.capture_mode ?? dispatch?.captureMode,
+      capture_fps: block.capture_fps ?? captureFps,
+      take_folder: block.take_folder,
+    });
   }
   return { advanced, markCleared };
 }
@@ -168,9 +178,9 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
   if (!takeIndex) return;
   const oldPrefix = `${oldPath}#`;
   Object.keys(takeIndex).forEach((key) => {
-    takeIndex[key] = takeIndex[key].map((uid) =>
+    takeIndex[key] = mapUids(takeIndex[key], (uids) => uids.map((uid) =>
       uid.startsWith(oldPrefix) ? `${newPath}#${uid.slice(oldPrefix.length)}` : uid
-    );
+    ));
   });
 }
 
@@ -182,7 +192,7 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
 export function renameUidsInTakeIndex(takeIndex, renames) {
   if (!takeIndex || !renames || renames.size === 0) return;
   Object.keys(takeIndex).forEach((key) => {
-    takeIndex[key] = Array.from(new Set(takeIndex[key].map((uid) => renames.get(uid) ?? uid)));
+    takeIndex[key] = mapUids(takeIndex[key], (uids) => Array.from(new Set(uids.map((uid) => renames.get(uid) ?? uid))));
   });
 }
 
@@ -193,7 +203,7 @@ export function renameUidsInTakeIndex(takeIndex, renames) {
  */
 export function resolveTake(takeIndex, takeKey) {
   if (!takeIndex || !takeKey) return [];
-  return takeIndex[takeKey] || [];
+  return uidsOf(takeIndex[takeKey]);
 }
 
 /**
@@ -205,9 +215,9 @@ export function resolveTake(takeIndex, takeKey) {
 export function pruneTakeIndex(takeIndex, knownUids) {
   const known = new Set(knownUids);
   const pruned = {};
-  for (const [key, uids] of Object.entries(takeIndex || {})) {
-    const kept = uids.filter(uid => known.has(uid));
-    if (kept.length > 0) pruned[key] = kept;
+  for (const [key, entry] of Object.entries(takeIndex || {})) {
+    const kept = uidsOf(entry).filter(uid => known.has(uid));
+    if (kept.length > 0) pruned[key] = mapUids(entry, () => kept);
   }
   return pruned;
 }

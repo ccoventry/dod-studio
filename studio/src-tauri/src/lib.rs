@@ -4,6 +4,7 @@ mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
+mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
 mod combine_manager;
@@ -1080,6 +1081,7 @@ pub fn run() {
             reset_render_jobs,
             remove_render_jobs,
             clear_render_queue,
+            capture_history_manager::take_capture_states,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             take_preview_manager::take_preview_thumb,

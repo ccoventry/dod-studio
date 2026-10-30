@@ -191,6 +191,30 @@ export const STRINGS = {
     EMPTY_DASH: '—',
   },
 
+  // ── Highlight Details: every capture of a highlight (#439) ───────────────
+  CAPTURE_HISTORY: {
+    TOGGLE_TITLE: 'Show or hide every time this highlight was captured, with its take and its renders',
+    CHECKING: 'Checking the takes…',
+    CHECK_FAILED: 'Could not look at the takes on disk.',
+    NO_DATE: 'Captured earlier (date not recorded)',
+    NO_SETTINGS: 'settings not recorded',
+    take: (name) => `Take ${name}`,
+    TAKE_GONE: 'take deleted',
+    TAKE_GONE_TITLE: 'The take folder is not there any more. This line stays as the record of the capture.',
+    TAKE_FOLDER_UNKNOWN: 'folder not recorded',
+    TAKE_FOLDER_UNKNOWN_TITLE: 'This capture was recorded before Studio kept the take folder, so it cannot be checked.',
+    OPEN_FOLDER: 'Open Folder',
+    OPEN_FOLDER_TITLE: 'Show the take folder in Explorer',
+    OPEN_VIDEO: 'Show video',
+    OPEN_VIDEO_TITLE: 'Show the rendered video in Explorer',
+    sharedWith: (labels) => `Shared with ${labels.join(', ')}`,
+    SHARED_TITLE: 'Recorded together in one take',
+    otherHighlight: (time, player) => (player ? `${player} at ${time}` : `highlight at ${time}`),
+    UNKNOWN_HIGHLIGHT: 'a highlight no longer in the queue',
+    NO_RENDERS: 'not rendered',
+    REVEAL_FAILED: 'Could not show that in Explorer.',
+  },
+
   // ── Highlight Details (detail_pane.js) + Advanced Diagnostics ───────────
   HIGHLIGHTS: {
     // #441: the name the finished file gets.

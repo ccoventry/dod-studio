@@ -4,6 +4,7 @@
 // in an editor. Pure, so it can be tested on its own.
 
 import { streakUid } from './take_index.js';
+import { uidsOf } from './take_record.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 
 /** Seconds as `h:mm:ss.ss` (hours only when there are some). */
@@ -40,8 +41,8 @@ function killSeconds(streak, index) {
  */
 export function markerRows(demos, takeIndex) {
   const takeByUid = new Map();
-  Object.entries(takeIndex || {}).forEach(([key, uids]) => {
-    (uids || []).forEach((uid) => { if (!takeByUid.has(uid)) takeByUid.set(uid, key); });
+  Object.entries(takeIndex || {}).forEach(([key, entry]) => {
+    uidsOf(entry).forEach((uid) => { if (!takeByUid.has(uid)) takeByUid.set(uid, key); });
   });
   const rows = [];
   (demos || []).forEach((demo) => {
