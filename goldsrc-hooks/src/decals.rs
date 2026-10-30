@@ -80,7 +80,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The command name. Registered in `commands.rs`.
+/// The command name. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("map_clear_decals");
 
 /// `hw+0x4a000`, the engine's remove-every-decal-with-this-flag loop. The

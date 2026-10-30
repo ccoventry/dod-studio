@@ -73,7 +73,7 @@ static OURS: AtomicBool = AtomicBool::new(false);
 /// How many times the engine's 0 was raised -- roughly once per demo load.
 static RAISES: AtomicU32 = AtomicU32::new(0);
 
-/// Called by `commands.rs` once `ds_map_allow_shaders` is registered.
+/// Called by `commands/install.rs` once `ds_map_allow_shaders` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

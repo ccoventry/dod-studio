@@ -145,7 +145,7 @@ const HUD_PRINTCENTER: u8 = 4;
 /// The start of the mode names' `titles.txt` keys.
 const MODE_KEY: &[u8] = b"#Spec_Mode";
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

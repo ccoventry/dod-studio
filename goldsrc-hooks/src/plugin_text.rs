@@ -128,7 +128,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 type HudMessageFn = unsafe extern "C" fn(name: *const c_char);
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

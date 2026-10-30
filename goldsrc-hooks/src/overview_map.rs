@@ -79,7 +79,7 @@ use crate::engine;
 use crate::names::console_name;
 use crate::scan;
 
-/// The command name. Registered in `commands.rs`.
+/// The command name. Registered in `commands/install.rs`.
 pub const NAME: &str = console_name!("hud_overview_layout");
 
 /// `mov ecx, gHUD; call CHud::ComputeOverviewMapRects` at the end of

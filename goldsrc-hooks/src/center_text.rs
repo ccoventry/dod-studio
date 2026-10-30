@@ -69,7 +69,7 @@ static ENGINE_HIDDEN: AtomicBool = AtomicBool::new(false);
 /// Whether the `hw.dll` patch's failure has been reported, so it is said once.
 static ENGINE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
-/// Called by `commands.rs` once the cvar is registered.
+/// Called by `commands/install.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }

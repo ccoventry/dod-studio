@@ -256,7 +256,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The command name that toggles verbose per-load logging. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = console_name!("debug_log_texture_loads");
 
 /// `GL_LoadTexture2`'s tail, from the optional upload callback through both
@@ -569,12 +569,12 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 /// on screen was loaded the other way until the game restarts.
 static CHANGED_MID_SESSION: AtomicBool = AtomicBool::new(false);
 
-/// Called by `commands.rs` once `ds_hd_style` is registered.
+/// Called by `commands/install.rs` once `ds_hd_style` is registered.
 pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
     STYLE_CVAR.store(cvar, Ordering::Release);
 }
 
-/// Called by `commands.rs` once `ds_hd_enabled` is registered.
+/// Called by `commands/install.rs` once `ds_hd_enabled` is registered.
 pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
     HD_CVAR.store(cvar, Ordering::Release);
 }
@@ -814,7 +814,7 @@ struct LastReplaced {
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
 /// `ds_debug_hd_misses`: lists every texture that kept its original this
-/// session, and why. Registered in `commands.rs`.
+/// session, and why. Registered in `commands/install.rs`.
 pub const MISSES_NAME: &str = console_name!("debug_hd_misses");
 pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
 

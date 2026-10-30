@@ -85,7 +85,7 @@ const FS_SLOT_OPEN: usize = 10;
 /// (`GAME`, `GAMECONFIG`, ...) skips them; the demo opens name none.
 const PATH_ID: &std::ffi::CStr = c"DODSTUDIO";
 
-/// Called by `commands.rs` once `ds_demo_other_drives` is registered.
+/// Called by `commands/install.rs` once `ds_demo_other_drives` is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
