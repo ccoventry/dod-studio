@@ -70,6 +70,16 @@ const TELEPORT_UNITS: f32 = 64.0;
 /// Two snapshots further apart than this don't say what the motion between
 /// them was.
 const SNAPSHOT_GAP_SECONDS: f32 = 0.1;
+/// Look-ahead (#1154): a ground crouch known from the demo file starts its
+/// ease this long before its flip arrives, so it ends where POV's does. The
+/// flip comes 0.40 s after the key; 0.41 against arrival scored best over
+/// 267 crouches of 5 players (0.38-0.43 within 7 points of it).
+const LEAD_SECONDS: f64 = 0.41;
+/// How far ahead of the newest snapshot the caller looks for a flip.
+pub(crate) const LOOK_AHEAD_SECONDS: f32 = 0.6;
+/// A flip looked ahead to that hasn't arrived this long after it was due
+/// isn't coming (the file and the playback disagree): the camera goes back up.
+const LATE_SECONDS: f64 = 0.15;
 
 /// One frame's look at the watched player.
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +95,10 @@ pub(crate) struct Frame {
     /// The newest snapshot's predecessor, so a frame that two snapshots
     /// arrived in still sees the flip between them.
     pub previous: Snapshot,
+    /// The `msg_time` of his next ground crouch's flip, when the demo file
+    /// says one comes within [`LOOK_AHEAD_SECONDS`] of the newest snapshot
+    /// (`crate::lookahead`); `None` without a timeline.
+    pub upcoming_down: Option<f32>,
 }
 
 /// What one snapshot says about the player.
@@ -144,6 +158,14 @@ pub(crate) struct CrouchEase {
     settled_shown: f32,
     depth: f32,
     ease: Ease,
+    /// `msg_time - time` when the newest snapshot arrived: turns a flip's
+    /// `msg_time` into when it will arrive on this clock.
+    arrival_offset: Option<f64>,
+    /// When this ease started watching (a new player or a seek): a
+    /// look-ahead ease that would have begun before it isn't started.
+    started_at: f64,
+    /// The flip a look-ahead ease is running for, until it arrives.
+    pre_eased: Option<f32>,
 }
 
 impl Default for CrouchEase {
@@ -175,15 +197,21 @@ impl CrouchEase {
             settled_shown: 0.0,
             depth: 0.0,
             ease: Ease::Still,
+            arrival_offset: None,
+            started_at: f64::NEG_INFINITY,
+            pre_eased: None,
         }
     }
 
     /// Forgets everything: the camera goes where the game puts it for
     /// `small_hull`, at once.
     pub(crate) fn settle(&mut self, small_hull: bool) {
-        let target = self.target;
+        let (target, arrival_offset, started_at) =
+            (self.target, self.arrival_offset, self.started_at);
         *self = Self::new();
         self.target = target;
+        self.arrival_offset = arrival_offset;
+        self.started_at = started_at;
         self.settled_shown = if small_hull { HULL_STEP } else { 0.0 };
         self.depth = if small_hull { FULL_DEPTH } else { 0.0 };
     }
@@ -195,6 +223,7 @@ impl CrouchEase {
             self.settle(frame.snapshot.small_hull);
             self.target = frame.target;
             self.snapshots = [Some(frame.previous), Some(frame.snapshot)];
+            self.started_at = frame.time;
             frame.time
         } else {
             // An HLTV demo's clock steps back a few milliseconds several
@@ -207,6 +236,7 @@ impl CrouchEase {
         };
         self.last_time = now;
         self.last_drawn_z = frame.drawn_z;
+        self.look_ahead(frame, now);
         self.depth = self.depth_at(now);
         STAND_EYE + self.shown(frame.drawn_z, now) - self.depth
     }
@@ -232,6 +262,7 @@ impl CrouchEase {
             return;
         }
         self.snapshots = [Some(newest), Some(snapshot)];
+        self.arrival_offset = Some(f64::from(snapshot.msg_time) - now);
         if snapshot.small_hull == newest.small_hull {
             return;
         }
@@ -274,6 +305,7 @@ impl CrouchEase {
             }
         }
         self.depth = self.depth_at(now);
+        self.pre_eased = None;
         self.ease = if snapshot.small_hull {
             Ease::Down {
                 since: now,
@@ -285,6 +317,41 @@ impl CrouchEase {
                 from: self.depth,
             }
         };
+    }
+
+    /// Starts the ease into a ground crouch the demo file says is coming, so
+    /// it ends as the flip arrives (POV's ease ends at the flip), and backs
+    /// out of one whose flip didn't come. Only from standing still, with
+    /// nothing in flight, and only for an ease this view was there to see
+    /// start: after a seek into the middle of one, the flip is waited for.
+    fn look_ahead(&mut self, frame: &Frame, now: f64) {
+        let Some(offset) = self.arrival_offset else {
+            return;
+        };
+        if let Some(flip) = self.pre_eased {
+            if now > f64::from(flip) - offset + LATE_SECONDS {
+                self.pre_eased = None;
+                self.depth = self.depth_at(now);
+                self.ease = Ease::Up {
+                    since: now,
+                    from: self.depth,
+                };
+            }
+            return;
+        }
+        let Some(flip) = frame.upcoming_down else {
+            return;
+        };
+        let standing =
+            !frame.snapshot.small_hull && self.steps[0].is_none() && self.depth_at(now) <= 0.0;
+        let start = f64::from(flip) - offset - LEAD_SECONDS;
+        if standing && now >= start && start >= self.started_at {
+            self.pre_eased = Some(flip);
+            self.ease = Ease::Down {
+                since: start,
+                phase: 0.0,
+            };
+        }
     }
 
     fn depth_at(&self, now: f64) -> f32 {
@@ -359,6 +426,9 @@ mod tests {
         ease: CrouchEase,
         /// (msg_time, z, small_hull)
         snapshots: Vec<Snapshot>,
+        /// What the demo file says about ground crouches: their flips'
+        /// `msg_time`s (look-ahead, #1154). Empty: no timeline.
+        timeline: Vec<f32>,
     }
 
     const SNAP: f32 = 1.0 / 30.0;
@@ -369,6 +439,7 @@ mod tests {
             Self {
                 ease: CrouchEase::new(),
                 snapshots: vec![],
+                timeline: vec![],
             }
         }
 
@@ -406,12 +477,17 @@ mod tests {
             let snapshot = self.snapshots[n];
             let previous = self.snapshots[n.saturating_sub(1)];
             let drawn_z = self.drawn(t);
+            let upcoming_down =
+                self.timeline.iter().copied().find(|f| {
+                    *f > snapshot.msg_time && *f <= snapshot.msg_time + LOOK_AHEAD_SECONDS
+                });
             let frame = Frame {
                 time: f64::from(t),
                 target: 3,
                 drawn_z,
                 snapshot,
                 previous,
+                upcoming_down,
             };
             drawn_z + self.ease.eye_height(&frame) - 64.0
         }
@@ -639,6 +715,7 @@ mod tests {
                 z: 82.0,
                 small_hull: true,
             },
+            upcoming_down: None,
         };
         assert_eq!(sim.ease.eye_height(&frame), 18.0);
         frame.time += 0.01;
@@ -657,5 +734,61 @@ mod tests {
             let frame_h = sim.camera(t) - (sim.drawn(t) - 64.0);
             assert!((frame_h - 18.0).abs() < 1e-3, "{t}: {frame_h}");
         }
+    }
+
+    /// The crouch from `crouch(down, ..)` as the demo file has it: the flip
+    /// is the first small-hull snapshot.
+    fn with_timeline(mut sim: Sim, down: f32) -> Sim {
+        let flip = sim
+            .snapshots
+            .iter()
+            .find(|s| s.msg_time >= down)
+            .unwrap()
+            .msg_time;
+        sim.timeline = vec![flip];
+        sim
+    }
+
+    #[test]
+    fn looking_ahead_the_ease_ends_as_the_flip_arrives() {
+        for fps in [60.0, 120.0, 300.0] {
+            let mut sim = with_timeline(crouch(1.0, 10.0, 3.0), 1.0);
+            let flip = sim.timeline[0];
+            let frames = run(&mut sim, 0.2, 2.0, fps);
+            let start = f64::from(flip) - LEAD_SECONDS;
+            for (t, cam) in frames {
+                // POV's curve, ending at the flip (within a frame either way).
+                let want = 58.0 - 22.0 * smoothstep((f64::from(t) - start) / DUCK_SECONDS) as f32;
+                assert!(
+                    (cam - want).abs() < 22.0 * 1.5 / 0.4 / fps + 0.6,
+                    "{fps} fps at {t:.3}: camera {cam:.2}, POV's curve {want:.2}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn looking_ahead_doesnt_start_an_ease_it_missed_the_start_of() {
+        // Starts watching 0.2 s before the flip, half-way through where the
+        // look-ahead ease would be: it waits for the flip, as without one.
+        let mut sim = with_timeline(crouch(1.0, 10.0, 3.0), 1.0);
+        let flip = sim.timeline[0];
+        let frames = run(&mut sim, flip - 0.2, flip - 0.01, 120.0);
+        assert!(
+            frames.iter().all(|(_, cam)| (cam - 58.0).abs() < 1e-3),
+            "{frames:?}"
+        );
+    }
+
+    #[test]
+    fn a_looked_ahead_flip_that_never_comes_lets_the_camera_back_up() {
+        // The file says he crouches at 1.0; the playback has him stand.
+        let mut sim = crouch(100.0, 100.0, 3.0);
+        sim.timeline = vec![1.0];
+        let frames = run(&mut sim, 0.2, 2.0, 120.0);
+        let lowest = frames.iter().map(|f| f.1).fold(f32::MAX, f32::min);
+        assert!(lowest < 45.0, "the ease never started: {lowest}");
+        let (_, end) = frames.last().unwrap();
+        assert!((end - 58.0).abs() < 1e-3, "still down at the end: {end}");
     }
 }
