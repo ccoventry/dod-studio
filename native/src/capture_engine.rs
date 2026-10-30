@@ -1429,16 +1429,6 @@ pub fn spawn_capture_engine(
             }
 
             let _ = tx.send(EngineEvent::Finished("Batch Queue".into()));
-
-            let autosave_path = crate::shared::paths::get_appdata_dir().join(".autosave.json");
-            // Nothing writes `.autosave.json` yet (#20), so a file found here
-            // is a stray, not recovery state: removed quietly (#352).
-            if let Err(e) = std::fs::remove_file(&autosave_path)
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                log_markdown(&format!("[autosave] Failed to remove .autosave.json: {}", e));
-            }
-
             let _ = tx.send(EngineEvent::AllCompleted);
         })
         .unwrap();
