@@ -1908,4 +1908,416 @@ mod tests {
         assert!(earlier.exists(), "a file from before the job must stay");
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    // ── Whole-job behaviour, pinned before #1177 split `run_render_job` ──────
+
+    /// A take folder `<root>/demo/take0000` with an `all` stream folder, and
+    /// an export folder beside it.
+    fn take_dirs(root: &Path) -> (PathBuf, PathBuf) {
+        let take_folder = root.join("demo").join("take0000");
+        std::fs::create_dir_all(take_folder.join("all")).unwrap();
+        let export_dir = root.join("export");
+        std::fs::create_dir_all(&export_dir).unwrap();
+        (take_folder, export_dir)
+    }
+
+    fn take_clip(take_folder: &Path) -> ClipData {
+        ClipData {
+            clip_name: None,
+            take_folder: take_folder.to_string_lossy().into_owned(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "t".to_string(),
+            frame_count: 0,
+            width: 0,
+            height: 0,
+            date: "-".to_string(),
+            video_file: None,
+            alpha_folder: None,
+        }
+    }
+
+    async fn run(clip: ClipData, config: RenderConfig, cancel: bool) -> Vec<RenderUpdate> {
+        let (tx, rx) = mpsc::channel();
+        run_render_job(
+            "7".to_string(),
+            clip,
+            config,
+            tx,
+            Arc::new(AtomicBool::new(cancel)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
+        drain(&rx)
+    }
+
+    /// The updates as plain text, so a sequence compares in one assert.
+    fn describe(updates: &[RenderUpdate]) -> Vec<String> {
+        updates
+            .iter()
+            .map(|u| match u {
+                RenderUpdate::Progress(id, p) => format!("{id} progress {p}"),
+                RenderUpdate::Speed(id, s) => format!("{id} speed {s}"),
+                RenderUpdate::Status(id, s) => format!("{id} status {s}"),
+                RenderUpdate::OutputPath(id, _) => format!("{id} output"),
+                RenderUpdate::Finished(id, ok, err) => {
+                    format!("{id} finished {ok} {}", err.as_deref().unwrap_or("-"))
+                }
+            })
+            .collect()
+    }
+
+    fn only_refusal(updates: &[RenderUpdate], text: &str) {
+        assert_eq!(
+            describe(updates),
+            vec![format!("7 finished false {text}")],
+            "{updates:?}"
+        );
+    }
+
+    fn files_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Each refusal before any work is one `Finished` with its own text, in
+    /// this order: FFmpeg, take folder, wav, HUD without a wav, no audio, Skip
+    /// not allowed.
+    #[tokio::test]
+    async fn refusals_before_any_work_send_one_finished_with_their_text() {
+        let root = scratch("refusals");
+        let (take_folder, export_dir) = take_dirs(&root);
+        let h264 = |ffmpeg: &str| RenderConfig {
+            ffmpeg_path: ffmpeg.to_string(),
+            target_codec: RenderCodec::H264Software,
+            ..source_copy_config(&export_dir)
+        };
+        let missing_ffmpeg = root.join("nope").join("ffmpeg.exe");
+
+        let mut with_wav = take_clip(&take_folder);
+        with_wav.wav_file = Some("sound.wav".to_string());
+        let updates = run(
+            with_wav.clone(),
+            h264(&missing_ffmpeg.to_string_lossy()),
+            false,
+        )
+        .await;
+        only_refusal(
+            &updates,
+            &format!("FFmpeg not found at: {}", missing_ffmpeg.display()),
+        );
+
+        // Skip never runs FFmpeg, so a bad path doesn't stop it; the missing
+        // take folder does.
+        let gone = root.join("demo").join("take9999");
+        let mut skip_cfg = source_copy_config(&export_dir);
+        skip_cfg.ffmpeg_path = missing_ffmpeg.to_string_lossy().into_owned();
+        let updates = run(take_clip(&gone), skip_cfg, false).await;
+        only_refusal(
+            &updates,
+            &format!("Take folder not found: {}", gone.display()),
+        );
+
+        let updates = run(with_wav.clone(), h264("ffmpeg"), false).await;
+        only_refusal(
+            &updates,
+            &format!(
+                "Audio file not found: {}",
+                take_folder.join("sound.wav").display()
+            ),
+        );
+
+        let mut hud = take_clip(&take_folder);
+        hud.clip_type = "hud_only".to_string();
+        hud.video_file = Some("video.avi".to_string());
+        let updates = run(hud, h264("ffmpeg"), false).await;
+        only_refusal(
+            &updates,
+            "HUD/alpha clips need a separate audio track (sound.wav), but this take has none.",
+        );
+
+        let updates = run(take_clip(&take_folder), h264("ffmpeg"), false).await;
+        only_refusal(
+            &updates,
+            "No audio source for this take: no sound.wav and no audio-bearing video.",
+        );
+
+        std::fs::write(take_folder.join("sound.wav"), b"wav").unwrap();
+        let mut hud = with_wav.clone();
+        hud.clip_type = "hud_only".to_string();
+        hud.video_file = Some("video.avi".to_string());
+        let updates = run(hud, source_copy_config(&export_dir), false).await;
+        only_refusal(
+            &updates,
+            "Skip (keep original) isn't available for HUD/alpha clips — pick a codec to render them.",
+        );
+        let mut wav_and_video = with_wav.clone();
+        wav_and_video.video_file = Some("video.avi".to_string());
+        let updates = run(wav_and_video, source_copy_config(&export_dir), false).await;
+        only_refusal(
+            &updates,
+            "Skip (keep original) isn't available for a take with its own separate audio track — pick a codec to render it.",
+        );
+        assert!(files_in(&export_dir).is_empty());
+    }
+
+    /// No export folder with room for the job: refused with the space it
+    /// needed, before anything is written.
+    #[tokio::test]
+    async fn a_job_too_big_for_every_export_folder_is_refused_with_the_space_it_needs() {
+        let root = scratch("no_room");
+        let (take_folder, export_dir) = take_dirs(&root);
+        std::fs::write(take_folder.join("sound.wav"), b"wav").unwrap();
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        // A frame size no other test uses, since learned rates are session-wide.
+        (clip.width, clip.height, clip.frame_count) = (100_003, 100_000, 1_000_000);
+        let config = RenderConfig {
+            target_codec: RenderCodec::H264Software,
+            ..source_copy_config(&export_dir)
+        };
+        let needed = 100_003u64 * 100_000 * 3 * 1_000_000 + EXPORT_SAFETY_MARGIN_BYTES;
+        let updates = run(clip, config, false).await;
+        only_refusal(
+            &updates,
+            &format!(
+                "Not rendered: every export folder (1) has less than {:.1} GB free once the other renders running now are counted. Free some space or add another export folder in Configuration → Render Settings.",
+                needed as f64 / (1024.0 * 1024.0 * 1024.0)
+            ),
+        );
+    }
+
+    /// Custom with no arguments is refused after the export folder is
+    /// picked, with nothing written into it.
+    #[tokio::test]
+    async fn custom_without_arguments_is_refused() {
+        let root = scratch("custom_empty");
+        let (take_folder, export_dir) = take_dirs(&root);
+        std::fs::write(take_folder.join("sound.wav"), b"wav").unwrap();
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        let config = RenderConfig {
+            target_codec: RenderCodec::Custom,
+            custom_codec_args: "   ".to_string(),
+            ..source_copy_config(&export_dir)
+        };
+        let updates = run(clip, config, false).await;
+        only_refusal(
+            &updates,
+            "Custom codec selected but no FFmpeg arguments were entered.",
+        );
+        assert!(files_in(&export_dir).is_empty());
+    }
+
+    /// An FFmpeg path that names a file which isn't a program: `Rendering`,
+    /// then the spawn error.
+    #[tokio::test]
+    async fn an_ffmpeg_that_cannot_start_reports_the_spawn_error() {
+        let root = scratch("spawn_fail");
+        let (take_folder, export_dir) = take_dirs(&root);
+        std::fs::write(take_folder.join("sound.wav"), b"wav").unwrap();
+        let not_a_program = root.join("ffmpeg.txt");
+        std::fs::write(&not_a_program, b"not a program").unwrap();
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        let config = RenderConfig {
+            ffmpeg_path: not_a_program.to_string_lossy().into_owned(),
+            target_codec: RenderCodec::H264Software,
+            ..source_copy_config(&export_dir)
+        };
+        let updates = run(clip, config, false).await;
+        let text = describe(&updates);
+        assert_eq!(text.len(), 2, "{text:?}");
+        assert_eq!(text[0], "7 status Rendering");
+        assert!(
+            text[1].starts_with("7 finished false Failed to spawn FFmpeg process: "),
+            "{text:?}"
+        );
+    }
+
+    /// A Skip job's whole update sequence, and the file name it gets without
+    /// a clip name: `<demo>_<take>_all_<4 hex digits>.<source extension>`.
+    #[tokio::test]
+    async fn skip_sends_its_updates_in_order_and_names_the_file_after_the_take() {
+        let root = scratch("skip_sequence");
+        let (take_folder, export_dir) = take_dirs(&root);
+        std::fs::write(take_folder.join("all").join("video.mkv"), b"v").unwrap();
+        let mut clip = take_clip(&take_folder);
+        clip.video_file = Some("video.mkv".to_string());
+        let updates = run(clip, source_copy_config(&export_dir), false).await;
+        assert_eq!(
+            describe(&updates),
+            vec![
+                "7 status Rendering",
+                "7 status Finished",
+                "7 progress 100",
+                "7 output",
+                "7 finished true -",
+            ]
+        );
+        let names = files_in(&export_dir);
+        assert_eq!(names.len(), 1);
+        let name = &names[0];
+        let hash = name
+            .strip_prefix("demo_take0000_all_")
+            .and_then(|rest| rest.strip_suffix(".mkv"))
+            .unwrap_or_else(|| panic!("{name}"));
+        assert!(
+            hash.len() == 4 && hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "{name}"
+        );
+        let output = updates.iter().find_map(|u| match u {
+            RenderUpdate::OutputPath(_, p) => Some(PathBuf::from(p)),
+            _ => None,
+        });
+        assert_eq!(output, Some(export_dir.join(name)));
+    }
+
+    /// Cancel set before a Skip job starts: `Cancelled`, nothing copied.
+    #[tokio::test]
+    async fn skip_cancelled_before_it_starts_copies_nothing() {
+        let root = scratch("skip_cancel_first");
+        let (take_folder, export_dir) = take_dirs(&root);
+        std::fs::write(take_folder.join("all").join("video.mp4"), b"v").unwrap();
+        let mut clip = take_clip(&take_folder);
+        clip.video_file = Some("video.mp4".to_string());
+        let updates = run(clip, source_copy_config(&export_dir), true).await;
+        assert_eq!(
+            describe(&updates),
+            vec!["7 status Cancelled", "7 finished false Cancelled by user"]
+        );
+        assert!(files_in(&export_dir).is_empty());
+    }
+
+    fn real_ffmpeg() -> PathBuf {
+        let ffmpeg = PathBuf::from(
+            std::env::var("DOD_FFMPEG").expect("DOD_FFMPEG must name ffmpeg.exe for this test"),
+        );
+        assert!(ffmpeg.is_file(), "no FFmpeg at {}", ffmpeg.display());
+        ffmpeg
+    }
+
+    /// A 10-frame BMP take with a sound.wav, made by FFmpeg.
+    fn make_bmp_take(ffmpeg: &Path, take_folder: &Path) {
+        let made = std::process::Command::new(ffmpeg)
+            .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+            .args(["-i", "testsrc2=size=64x48:rate=30:duration=0.334"])
+            .args(["-frames:v", "10", "-start_number", "0"])
+            .arg(take_folder.join("all").join("%05d.bmp"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let made = std::process::Command::new(ffmpeg)
+            .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+            .args(["-i", "sine=frequency=440:duration=0.334"])
+            .arg(take_folder.join("sound.wav"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+    }
+
+    /// Cancel set before FFmpeg's first progress line: killed on the first
+    /// poll, its partial file removed.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    async fn an_ffmpeg_render_cancelled_at_once_leaves_no_file() {
+        let ffmpeg = real_ffmpeg();
+        let root = scratch("ffmpeg_cancel");
+        let (take_folder, export_dir) = take_dirs(&root);
+        make_bmp_take(&ffmpeg, &take_folder);
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        clip.frame_count = 10;
+        let config = RenderConfig {
+            ffmpeg_path: ffmpeg.to_string_lossy().into_owned(),
+            target_codec: RenderCodec::H264Software,
+            ..source_copy_config(&export_dir)
+        };
+        let updates = run(clip, config, true).await;
+        assert_eq!(
+            describe(&updates),
+            vec![
+                "7 status Rendering",
+                "7 status Cancelled",
+                "7 finished false Cancelled by user",
+            ]
+        );
+        assert!(files_in(&export_dir).is_empty());
+    }
+
+    /// FFmpeg exiting with an error: `Error`, its exit code and log in the
+    /// message, its partial file removed.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    async fn an_ffmpeg_failure_reports_its_exit_code_and_log() {
+        let ffmpeg = real_ffmpeg();
+        let root = scratch("ffmpeg_fail");
+        let (take_folder, export_dir) = take_dirs(&root);
+        make_bmp_take(&ffmpeg, &take_folder);
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        clip.frame_count = 10;
+        let config = RenderConfig {
+            ffmpeg_path: ffmpeg.to_string_lossy().into_owned(),
+            target_codec: RenderCodec::Custom,
+            custom_codec_args: "-c:v no_such_codec".to_string(),
+            ..source_copy_config(&export_dir)
+        };
+        let text = describe(&run(clip, config, false).await);
+        assert_eq!(text.len(), 3, "{text:?}");
+        assert_eq!(text[0], "7 status Rendering");
+        assert_eq!(text[1], "7 status Error");
+        assert!(
+            text[2].starts_with("7 finished false FFmpeg failed with exit code: ")
+                && text[2].contains("no_such_codec"),
+            "{text:?}"
+        );
+        assert!(files_in(&export_dir).is_empty());
+    }
+
+    /// A finished BMP render: `Rendering`, progress and speed lines while
+    /// FFmpeg reports, then `Finished`, 100, the output path, success.
+    #[tokio::test]
+    #[ignore = "needs FFmpeg: set DOD_FFMPEG to ffmpeg.exe's path"]
+    async fn an_ffmpeg_render_reports_progress_then_finishes() {
+        let ffmpeg = real_ffmpeg();
+        let root = scratch("ffmpeg_ok");
+        let (take_folder, export_dir) = take_dirs(&root);
+        make_bmp_take(&ffmpeg, &take_folder);
+        let mut clip = take_clip(&take_folder);
+        clip.wav_file = Some("sound.wav".to_string());
+        clip.frame_count = 10;
+        clip.clip_name = Some("bmp_take".to_string());
+        let config = RenderConfig {
+            ffmpeg_path: ffmpeg.to_string_lossy().into_owned(),
+            target_codec: RenderCodec::H264Software,
+            fps: 30,
+            ..source_copy_config(&export_dir)
+        };
+        let text = describe(&run(clip, config, false).await);
+        assert_eq!(text.first().map(String::as_str), Some("7 status Rendering"));
+        assert_eq!(
+            text[text.len() - 4..],
+            [
+                "7 status Finished",
+                "7 progress 100",
+                "7 output",
+                "7 finished true -"
+            ]
+        );
+        let middle = &text[1..text.len() - 4];
+        assert!(middle.contains(&"7 progress 100".to_string()), "{text:?}");
+        assert!(
+            middle
+                .iter()
+                .all(|l| l.starts_with("7 progress ") || l.starts_with("7 speed ")),
+            "{text:?}"
+        );
+        assert_eq!(files_in(&export_dir), vec!["bmp_take.mp4"]);
+    }
 }
