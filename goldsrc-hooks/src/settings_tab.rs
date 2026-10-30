@@ -114,6 +114,12 @@ const EX_INTERP_MAX: &[(&str, &str)] = &[
     ("500", "500 ms"),
     ("1000", "1000 ms"),
 ];
+const WEATHER: &[(&str, &str)] = &[
+    ("0", "The map's own"),
+    ("1", "Rain"),
+    ("2", "Snow"),
+    ("3", "None"),
+];
 
 /// The tab, top to bottom, in the order of `ui/Commands.txt`.
 pub const AREAS: &[Area] = &[
@@ -172,8 +178,13 @@ pub const AREAS: &[Area] = &[
             ),
             check(
                 console_name!("hud_hide_hints"),
-                "Hide the hint box",
-                "hide the auto-help hint box in the top-left corner.",
+                "Hide the hints and MG prompt",
+                "hide the auto-help hint box in the top-left corner and the machine gun's 'Deploy... to Reload!' prompt.",
+            ),
+            check(
+                console_name!("hud_hide_teammate_info"),
+                "Hide teammates' name and health",
+                "hide the teammate's name and health under the crosshair in POV demos.",
             ),
             check(
                 console_name!("hud_hide_map_text"),
@@ -191,9 +202,9 @@ pub const AREAS: &[Area] = &[
                 "hide what the server prints in the middle of the screen.",
             ),
             check(
-                console_name!("hud_hide_server_text"),
+                console_name!("hud_hide_plugin_text"),
                 "Hide server plugins' messages",
-                "hide server plugins' coloured HUD messages; the map's own text stays.",
+                "hide what server plugins put on screen: coloured HUD messages, menus and votes; the map's own text stays.",
             ),
             check(
                 console_name!("hud_show_scope"),
@@ -273,11 +284,19 @@ pub const AREAS: &[Area] = &[
         key: "Map",
         title: "MAP",
         pair: false,
-        rows: &[check(
-            console_name!("map_allow_shaders"),
-            "Allow map shaders",
-            "25th Anniversary only: allow the engine's map-surface shaders during playback.",
-        )],
+        rows: &[
+            check(
+                console_name!("map_allow_shaders"),
+                "Allow map shaders",
+                "25th Anniversary only: allow the engine's map-surface shaders during playback.",
+            ),
+            choice(
+                console_name!("map_weather"),
+                "Weather",
+                "rain or snow on any map, or none. Needs cl_particlefx 2.",
+                WEATHER,
+            ),
+        ],
     },
     Area {
         key: "Sound",

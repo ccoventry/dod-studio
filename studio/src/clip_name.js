@@ -13,6 +13,7 @@ import {
   placeholderNames, CLIP_ALIASES, MODIFIERS, WITH_FALLBACK,
 } from './placeholder_catalogue.js';
 import { nameWithoutTag, sideTag, sideTeams, teamsForHighlight } from './project_teams.js';
+import { headshotsPlaceholder } from './headshots.js';
 import { STRINGS } from './strings.js';
 
 export { MODIFIERS, WITH_FALLBACK };
@@ -188,6 +189,7 @@ export function highlightValues(demo, streak, context = {}) {
     enemy_faction: mostCommon(victimSides),
     map,
     kills: String(range.length || streak?.kill_count || 0),
+    headshots: headshotsPlaceholder(streak),
     weapons: distinct(range.map((k) => weaponWord(k[2]))).join('-') || null,
     first_weapon: weaponWord(range[0]?.[2]) || null,
     victims: distinct(victims).join('-') || null,
