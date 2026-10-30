@@ -1367,6 +1367,35 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_scheduled_command_never_conflicts_with_a_config() {
+        // The test above drops both sides; here a config states the value,
+        // and configs are never filtered, so only the scheduled side's
+        // filter keeps this from being a conflict.
+        let config = ("dod/config.cfg", "exec movie.cfg\ncl_killsound \"0\"\n");
+        let custom = || vec![scheduled("cl_killsound 1", "Before", 2.0)];
+        let patched = report_with_files("dropped_vs_config", &[config], &[], custom(), Some(false));
+        assert_eq!(
+            patched.filtered_scheduled.len(),
+            1,
+            "{:?}",
+            patched.filtered_scheduled
+        );
+        assert!(
+            conflict(&patched, "cl_killsound").is_none(),
+            "{:?}",
+            patched.conflicts
+        );
+
+        // Seek Between Clips: nothing is filtered, so the two do conflict.
+        let seek = report_with_files("kept_vs_config", &[config], &[], custom(), Some(true));
+        assert!(
+            conflict(&seek, "cl_killsound").is_some(),
+            "{:?}",
+            seek.conflicts
+        );
+    }
+
+    #[test]
     fn with_seek_between_clips_on_nothing_is_reported_as_dropped() {
         // The hook DLL runs both lists through ClientCmd, past the filter.
         let r = report(
