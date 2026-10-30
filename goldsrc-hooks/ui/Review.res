@@ -133,7 +133,7 @@
 		"labelText"		"Yes"
 		"textAlignment"		"center"
 		"Command"		"engine ds_demo_review yes"
-		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight. Key: Y at a highlight's end."
+		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight. Key: Y, while it plays or at its end."
 	}
 	"MaybeButton"
 	{
@@ -235,8 +235,8 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"At a highlight's end: Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop."
+		"labelText"		"While a highlight plays or at its end: Y Yes, M Maybe, N No, R Replay, B Back, Space Next, S Stop."
 		"textAlignment"		"west"
-		"helptext"		"The keys answer on the game screen while the review waits at a highlight's end, never while typing in a box. ds_ui_review_keys 0 turns them off."
+		"helptext"		"The keys answer on the game screen while a highlight plays or waits at its end, after a second's pause at each start so a double press can't answer the next one, and never while typing in a box. ds_ui_review_keys 0 turns them off."
 	}
 }
