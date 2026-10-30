@@ -88,20 +88,31 @@ fn resolve_preview_env(
 /// full job list (every source demo, patched or reused — callers need the
 /// resolved output path either way) alongside how many were freshly patched
 /// this call, for a caller that wants to report "N generated" accurately.
+///
+/// `trimmed` is the demo's trimmed copy, when it is over the engine's entity
+/// limit (#207): the preview is patched from it, after the original is
+/// checked, and named for it, so a preview patched from the original earlier
+/// is never reused for it.
 fn patch_bookmark_previews(
     streaks: Vec<SerializedStreak>,
     dod_dir: &Path,
     patcher_config: &PatcherConfig,
+    trimmed: Option<&Path>,
 ) -> Result<(Vec<PatchJob>, usize), String> {
     if streaks.is_empty() {
         return Err(crate::messages::NO_HIGHLIGHTS_TO_PREVIEW.to_string());
     }
-    let capture_streaks: Vec<CaptureStreak> =
+    let mut capture_streaks: Vec<CaptureStreak> =
         streaks.into_iter().map(CaptureStreak::from).collect();
     // Same check as a capture batch (#196): a preview patched from a
     // different file crashes the game the same way. Unwrapped: the toast says
     // "Preview failed" (`STRINGS.IPC.previewFailed`).
     native::patch::check_sources_unchanged(&capture_streaks)?;
+    if let Some(copy) = trimmed {
+        for streak in &mut capture_streaks {
+            streak.source_demo = copy.to_string_lossy().into_owned();
+        }
+    }
     let jobs = build_preview_patch_jobs(capture_streaks, Some(dod_dir));
     if jobs.is_empty() {
         return Err(crate::messages::FAILED_TO_BUILD_PREVIEW_JOBS.to_string());
@@ -160,11 +171,23 @@ pub async fn launch_demo_preview(
             patcher_config.resolution_width,
             patcher_config.resolution_height,
         ) = resolution;
-        // The original demo, untouched, when the game can play it in place (#434).
-        if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
+        // Over the engine's entity limit: a trimmed copy plays (#207).
+        let first = streaks.first().map(|s| PathBuf::from(&s.source_demo));
+        let trimmed = match &first {
+            Some(demo) => crate::trimmed_demos::for_preview(&app, demo, &game_path)?,
+            None => None,
+        };
+        // The original demo (or its trimmed copy), untouched, when the game
+        // can play it in place (#434).
+        if let Some(arg) = trimmed
+            .as_deref()
+            .or(first.as_deref())
+            .and_then(|demo| crate::preview_in_place::plan(&patcher_config, &dod_dir, demo))
+        {
             return crate::preview_in_place::launch(app, &patcher_config, &arg);
         }
-        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
+        let (jobs, _generated) =
+            patch_bookmark_previews(streaks, &dod_dir, &patcher_config, trimmed.as_deref())?;
         let job = jobs
             .first()
             .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
@@ -238,10 +261,20 @@ pub async fn send_preview_to_running_game(
             };
         let (patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
-        if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
+        let first = streaks.first().map(|s| PathBuf::from(&s.source_demo));
+        let trimmed = match &first {
+            Some(demo) => crate::trimmed_demos::for_preview(&app, demo, &game_path)?,
+            None => None,
+        };
+        if let Some(arg) = trimmed
+            .as_deref()
+            .or(first.as_deref())
+            .and_then(|demo| crate::preview_in_place::plan(&patcher_config, &dod_dir, demo))
+        {
             return crate::preview_in_place::send_to_running(&pids, &arg);
         }
-        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
+        let (jobs, _generated) =
+            patch_bookmark_previews(streaks, &dod_dir, &patcher_config, trimmed.as_deref())?;
         let job = jobs
             .first()
             .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;

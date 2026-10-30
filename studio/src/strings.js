@@ -2451,18 +2451,11 @@ export const STRINGS = {
     listFailed: (reason) => `Could not read the linked folders: ${reason}`,
   },
 
-  // ── packet_entity_limit.js: demos the engine can't play (#207) ─────────
+  // ── packet_entity_limit.js: demos over the engine's limit (#207) ───────
   ENTITY_LIMIT: {
-    BADGE: "won't play",
-    badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so it can't play this demo: a capture or preview of it fails at that point.`,
-    batchTitle: (count) => `${count} demo${count === 1 ? '' : 's'} won't play in this game`,
-    batchMessage: (count, limit) => `${count === 1 ? 'This demo has' : 'These demos have'} more than ${limit} entities in one snapshot, and the game closes when it gets there. Start the batch anyway?`,
-    PREVIEW_TITLE: "This demo won't play in this game",
-    previewMessage: (limit) => `It has more than ${limit} entities in one snapshot, and the game closes when it gets there. Launch it anyway?`,
-    peakDetail: (peak) => `Up to ${peak} entities in one snapshot`,
-    ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024: set its hl.exe in Configuration → Paths for these.',
-    START_ANYWAY: 'Start anyway',
-    PREVIEW_ANYWAY: 'Launch anyway',
+    BADGE: 'trimmed copy',
+    badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so captures and previews play a trimmed copy: fog, invisible collision hulls and a few far decorations are left out of every snapshot. The original file is unchanged.`,
+    ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024 and plays the original: set its hl.exe in Configuration → Paths for these.',
   },
 
   // ── camera_data.js: demos with no camera data (#920) ───────────────────
