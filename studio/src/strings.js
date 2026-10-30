@@ -755,9 +755,10 @@ export const STRINGS = {
     EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
     EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
     exportEdlNone: (skipped) => skipped > 0
-      ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: the length of a copied or captured video isn't known here.`
+      ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
-    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: length unknown` : ''})`,
+    exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
+    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',

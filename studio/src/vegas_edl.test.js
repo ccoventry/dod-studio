@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { edlFrames, edlTimecode, jobFps, edlClips, vegasEdl } from './vegas_edl.js';
+import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
 
 describe('timecodes', () => {
   it('counts 30 frames a second, as VEGAS reads them', () => {
@@ -29,6 +29,28 @@ describe('edlClips', () => {
     ]);
     expect(clips).toEqual([{ name: 'a', path: 'D:\\r\\a.mov', seconds: 2 }]);
     expect(skipped).toBe(1);
+  });
+
+  it('names only the finished renders with no fps in their settings line to probe', () => {
+    const jobs = [
+      job(), job({ name: 'b', status: 'Queued', settings_summary: 'Source copy' }),
+      job({ name: 'd', output_path: 'D:\\r\\d.mp4', settings_summary: 'Source copy' }),
+    ];
+    expect(pathsToProbe(jobs)).toEqual(['D:\\r\\d.mp4']);
+  });
+
+  it('places a copied or captured video at its probed length, in list order', () => {
+    const jobs = [
+      job({ name: 'd', output_path: 'D:\\r\\d.mp4', settings_summary: 'Source copy' }),
+      job(),
+      job({ name: 'e', output_path: 'D:\\r\\e.mp4', settings_summary: 'Source copy' }),
+    ];
+    const { clips, skipped } = edlClips(jobs, 'Finished', new Map([['D:\\r\\d.mp4', 4.25]]));
+    expect(clips).toEqual([
+      { name: 'd', path: 'D:\\r\\d.mp4', seconds: 4.25 },
+      { name: 'a', path: 'D:\\r\\a.mov', seconds: 2 },
+    ]);
+    expect(skipped).toBe(1); // e: its file could not be read
   });
 });
 

@@ -36,18 +36,38 @@ export function jobFps(job) {
   return m ? Number(m[1]) : null;
 }
 
+/** A job's length from its frames and settings line, or null when that
+ *  can't tell it (a copy, a captured video: their file is probed instead). */
+function lengthFromSettings(job) {
+  const fps = jobFps(job);
+  return fps && job.frames > 0 ? job.frames / fps : null;
+}
+
+const finishedJobs = (jobs, finishedStatus) =>
+  (jobs || []).filter((j) => j.status === finishedStatus && j.output_path);
+
+/** The output files of the finished renders whose length only the file
+ *  itself can tell, for the caller to probe. */
+export function pathsToProbe(jobs, finishedStatus = 'Finished') {
+  return finishedJobs(jobs, finishedStatus)
+    .filter((job) => lengthFromSettings(job) === null)
+    .map((job) => job.output_path);
+}
+
 /**
  * The clips to put on the timeline: every finished render with a file and a
- * known length, in the order the Render tab lists them. `skipped` counts the
- * finished ones whose length can't be told, so the toast can say so.
+ * known length, in the order the Render tab lists them. `probed` maps an
+ * output path to the length read from the file, in seconds, for the ones
+ * `pathsToProbe` named. `skipped` counts the finished ones whose length
+ * still can't be told, so the toast can say so.
  */
-export function edlClips(jobs, finishedStatus = 'Finished') {
+export function edlClips(jobs, finishedStatus = 'Finished', probed = new Map()) {
   const clips = [];
   let skipped = 0;
-  (jobs || []).filter((j) => j.status === finishedStatus && j.output_path).forEach((job) => {
-    const fps = jobFps(job);
-    if (!fps || !(job.frames > 0)) { skipped += 1; return; }
-    clips.push({ name: job.name, path: job.output_path, seconds: job.frames / fps });
+  finishedJobs(jobs, finishedStatus).forEach((job) => {
+    const seconds = lengthFromSettings(job) ?? probed.get(job.output_path);
+    if (!(seconds > 0)) { skipped += 1; return; }
+    clips.push({ name: job.name, path: job.output_path, seconds });
   });
   return { clips, skipped };
 }

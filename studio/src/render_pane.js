@@ -711,7 +711,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const getProjectTeams = takeTracking?.getProjectTeams || (() => null);
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
-  startVegasEdlExport({ getJobs: () => jobs });
+  startVegasEdlExport({
+    getJobs: () => jobs,
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();
