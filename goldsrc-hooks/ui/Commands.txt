@@ -36,7 +36,7 @@ HUD
   ds_map_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   ds_hud_deathmsg
-      Kill feed: max lines, offset, block players, fake a kill, replace (change or hide one kill line), font <face> <size> [bold] [shadow], scale <1..8>, layout even|default, gap <0..64>|default (px between each name and the icon, with layout even), outline <0..4> [colour], background <alpha> [colour]|team <alpha>, clear (empty it now), clear_on restart|death <0|1> [delay] (empty it at each new round, or when the watched player dies) (all live; a colour is r g b or #rrggbb). The bare command shows the options.
+      Kill feed: max lines, offset, block players, fake a kill, replace (change or hide one kill line), font <face> <size> [bold] [shadow], fallback <face>...|default (faces to try for characters the font lacks, before Tahoma), scale <1..8>, layout even|default, gap <0..64>|default (px between each name and the icon, with layout even), outline <0..4> [colour], background <alpha> [colour]|team <alpha>, clear (empty it now), clear_on restart|death <0|1> [delay] (empty it at each new round, or when the watched player dies) (all live; a colour is r g b or #rrggbb). The bare command shows the options.
   ds_hud_objectives
       Move the objective icons and the objective timer, or draw them bigger: scale <1..8>, and count_scale <1..8> for the player count under a flag. The bare command shows the options.
   ds_hud_overview_layout
