@@ -45,10 +45,11 @@ static PUBLISHED: RwLock<Option<(String, Arc<Timeline>)>> = RwLock::new(None);
 const CHECK_SECONDS: f64 = 0.5;
 /// How often it reads the world clock against the game's.
 const OFFSET_SECONDS: f64 = 0.1;
-/// A snapshot arrives this long after the world clock passes its
-/// `svc_time`, on average: 0 or about 0.02 s by where the frame falls (10
-/// flips on PRE, mean 0.009 s).
-const ARRIVAL_LAG_SECONDS: f64 = 0.01;
+/// A snapshot arrives this long after the world clock (as read every
+/// [`OFFSET_SECONDS`]) passes its `svc_time`: negative, it arrives first.
+/// Measured on m00cat's looked-ahead crouches: PRE -0.035 s (14 flips, sd
+/// 0.011), POST -0.031 s (15, sd 0.010).
+const ARRIVAL_LAG_SECONDS: f64 = -0.033;
 
 #[derive(Default)]
 struct Cache {
@@ -225,18 +226,25 @@ pub fn note_frame(
             st.total_ns = 0;
             st.worst_ns = 0;
         }
+        // The flip is the frame his newest snapshot turns small-hull.
         if let Some(flip) = st.waiting
             && small_hull
-            && f64::from(newest) >= flip - 0.1
+            && !st.small_hull
         {
             report(&format!(
                 "flip due at {flip:.4} arrived at demo clock {time:.4} ({:+.4} s): newest msg_time {newest:.4}",
                 time - flip
             ));
             st.waiting = None;
+            st.reported = Some(flip);
         }
-        if upcoming.is_some() && st.waiting != upcoming {
-            st.waiting = upcoming;
+        st.small_hull = small_hull;
+        // The same flip comes back a little moved as the clock difference
+        // is read again; once reported it isn't waited for twice.
+        if let Some(next) = upcoming
+            && st.reported.is_none_or(|r| (next - r).abs() > 0.2)
+        {
+            st.waiting = Some(next);
         }
     });
 }
@@ -249,6 +257,8 @@ struct Stats {
     total_ns: u64,
     worst_ns: u64,
     waiting: Option<f64>,
+    reported: Option<f64>,
+    small_hull: bool,
 }
 
 thread_local! {
