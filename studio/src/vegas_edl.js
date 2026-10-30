@@ -67,7 +67,8 @@ export function edlClips(jobs, finishedStatus = 'Finished', probed = new Map()) 
   finishedJobs(jobs, finishedStatus).forEach((job) => {
     const seconds = lengthFromSettings(job) ?? probed.get(job.output_path);
     if (!(seconds > 0)) { skipped += 1; return; }
-    clips.push({ name: job.name, path: job.output_path, seconds });
+    // take_key: whose highlight it is, for the clip manifest (#429).
+    clips.push({ name: job.name, path: job.output_path, seconds, take_key: job.take_key || '' });
   });
   return { clips, skipped };
 }

@@ -208,6 +208,11 @@ pub struct RenderJobView {
     /// this job has rendered, so "reveal in Explorer" works pre- and
     /// post-render.
     pub take_folder: String,
+    /// The take's key in the project's take index (`session/block`, as
+    /// `render_take_finished` sends it), so the frontend can tell whose
+    /// highlight a clip is (#429's nameplates). Empty for a take outside a
+    /// session folder.
+    pub take_key: String,
     /// This job's codec as a `RenderCodec::to_str_id()` value — what
     /// `set_render_job_codec` expects back, and what the frontend checks
     /// against `"source_copy"` to show the Skip toggle as checked.
@@ -274,6 +279,7 @@ impl RenderJobRuntime {
             output_path: self.output_path.clone(),
             output_size_bytes: self.output_size_bytes,
             take_folder: self.clip.take_folder.clone(),
+            take_key: take_key(std::path::Path::new(&self.clip.take_folder)).unwrap_or_default(),
             codec_id: self.codec.to_str_id().to_string(),
             custom_codec_args: self.custom_codec_args.clone(),
             skip_available: clip_is_skip_eligible(&self.clip),

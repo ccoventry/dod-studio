@@ -27,8 +27,13 @@ describe('edlClips', () => {
       job(), job({ name: 'b', status: 'Queued' }), job({ name: 'c', output_path: '' }),
       job({ name: 'd', settings_summary: 'Source copy' }),
     ]);
-    expect(clips).toEqual([{ name: 'a', path: 'D:\\r\\a.mov', seconds: 2 }]);
+    expect(clips).toEqual([{ name: 'a', path: 'D:\\r\\a.mov', seconds: 2, take_key: '' }]);
     expect(skipped).toBe(1);
+  });
+
+  it("carries each job's take key, for whose highlight it is (#429)", () => {
+    const { clips } = edlClips([job({ take_key: 'session_1/chain_01_b0' })]);
+    expect(clips[0].take_key).toBe('session_1/chain_01_b0');
   });
 
   it('names only the finished renders with no fps in their settings line to probe', () => {
@@ -47,8 +52,8 @@ describe('edlClips', () => {
     ];
     const { clips, skipped } = edlClips(jobs, 'Finished', new Map([['D:\\r\\d.mp4', 4.25]]));
     expect(clips).toEqual([
-      { name: 'd', path: 'D:\\r\\d.mp4', seconds: 4.25 },
-      { name: 'a', path: 'D:\\r\\a.mov', seconds: 2 },
+      { name: 'd', path: 'D:\\r\\d.mp4', seconds: 4.25, take_key: '' },
+      { name: 'a', path: 'D:\\r\\a.mov', seconds: 2, take_key: '' },
     ]);
     expect(skipped).toBe(1); // e: its file could not be read
   });

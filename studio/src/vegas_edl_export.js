@@ -1,6 +1,7 @@
 // vegas_edl_export.js
 // The "Export VEGAS EDL" button on the Render tab (#110): saves the finished
-// renders as an EDL (`vegas_edl.js`) that VEGAS Pro imports.
+// renders as an EDL (`vegas_edl.js`) that VEGAS Pro imports, and beside it
+// the clip manifest (`clip_manifest.js`, #429) the nameplate script reads.
 
 import { save } from '@tauri-apps/plugin-dialog';
 import { combinePlan, writeTextFile } from './ipc_bridge.js';
@@ -9,6 +10,9 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { JOB_STATUS } from './render_jobs.js';
 import { edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
+import { clipManifest, manifestPathFor, nameplateCount } from './clip_manifest.js';
+import { useAsName, nameplatePath } from './player_alias.js';
+import { fileNameOf } from './path_display.js';
 
 /**
  * The length of each file in `paths` as FFmpeg reads it (the Combine Clips
@@ -30,20 +34,23 @@ async function probeLengths(paths, ffmpegPath) {
 }
 
 /** Wires the button; `getJobs` returns the Render tab's latest job list,
- *  `ffmpegPath()` the FFmpeg override, if any. */
-export function startVegasEdlExport({ getJobs, ffmpegPath = () => null }) {
+ *  `ffmpegPath()` the FFmpeg override, if any, `getTakeIndex()` and
+ *  `getAllDemos()` the project's, for whose highlight each clip is. */
+export function startVegasEdlExport({
+  getJobs, ffmpegPath = () => null, getTakeIndex = () => ({}), getAllDemos = () => [],
+}) {
   const button = document.querySelector('#export-vegas-edl-btn');
   button?.addEventListener('click', async () => {
     button.disabled = true;
     try {
-      await exportEdl(getJobs(), ffmpegPath());
+      await exportEdl(getJobs(), ffmpegPath(), { takeIndex: getTakeIndex() || {}, demos: getAllDemos() || [] });
     } finally {
       button.disabled = false;
     }
   });
 }
 
-async function exportEdl(jobs, ffmpegPath) {
+async function exportEdl(jobs, ffmpegPath, project) {
   // A copied or captured video's length isn't in its settings line: its file
   // says it (#110).
   const toProbe = pathsToProbe(jobs, JOB_STATUS.FINISHED);
@@ -64,8 +71,17 @@ async function exportEdl(jobs, ffmpegPath) {
   if (!path) return;
   try {
     await writeTextFile(path, vegasEdl(clips));
-    showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped), 'success');
   } catch (err) {
     showToast(STRINGS.RENDER.exportEdlFailed(err), 'error');
+    return;
   }
+  const manifest = clipManifest(clips, {
+    edlName: fileNameOf(path), ...project, useAsName, nameplatePath,
+  });
+  try {
+    await writeTextFile(manifestPathFor(path), `${JSON.stringify(manifest, null, 2)}\n`);
+  } catch (err) {
+    showToast(STRINGS.RENDER.exportManifestFailed(err), 'error');
+  }
+  showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, nameplateCount(manifest)), 'success');
 }

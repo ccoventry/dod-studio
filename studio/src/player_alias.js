@@ -3,6 +3,9 @@
 // clip or demo name, set on the Players tab and keyed by SteamID64 so a player
 // who changes names keeps one alias.
 //
+// The nameplate picture (#429) sits beside it, keyed the same way: the clip
+// manifest asks `nameplatePath(steamId)`.
+//
 // Every template site asks `useAsName(steamId)` and nothing else. The answer
 // comes from the table `setUseAsTable` was last given (the app's Players
 // table); when projects get tables of their own (#1085) they sit in front of
@@ -13,14 +16,30 @@ export function cleanUseAs(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-/** `steamId`'s Use as in `table` (a Players table), or null when unset or
- *  when the player has no SteamID. Rows without a SteamID are matched by name
- *  in the game, but an alias follows the SteamID only. */
-export function useAsFromTable(table, steamId) {
+/** A saved nameplate path, trimmed; empty means none. */
+export function cleanNameplate(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/** `steamId`'s row in `table`, or undefined. Rows without a SteamID are
+ *  matched by name in the game, but an alias or a nameplate follows the
+ *  SteamID only. */
+function rowFor(table, steamId) {
   const id = String(steamId ?? '').trim();
-  if (!id) return null;
-  const row = (table?.players || []).find((p) => p.steam_id === id);
-  return cleanUseAs(row?.use_as) || null;
+  if (!id) return undefined;
+  return (table?.players || []).find((p) => p.steam_id === id);
+}
+
+/** `steamId`'s Use as in `table` (a Players table), or null when unset or
+ *  when the player has no SteamID. */
+export function useAsFromTable(table, steamId) {
+  return cleanUseAs(rowFor(table, steamId)?.use_as) || null;
+}
+
+/** `steamId`'s nameplate PNG path in `table`, or null when unset or when the
+ *  player has no SteamID. */
+export function nameplateFromTable(table, steamId) {
+  return cleanNameplate(rowFor(table, steamId)?.nameplate) || null;
 }
 
 let source = null;
@@ -36,6 +55,12 @@ export function setUseAsTable(table) {
 /** The Use as name for `steamId`, or null. The one lookup templates use. */
 export function useAsName(steamId) {
   return useAsFromTable(source, steamId);
+}
+
+/** The nameplate PNG path for `steamId`, or null. The one lookup the clip
+ *  manifest uses. */
+export function nameplatePath(steamId) {
+  return nameplateFromTable(source, steamId);
 }
 
 /** Calls `fn` whenever the table changes. */

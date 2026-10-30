@@ -70,7 +70,7 @@ test('adds a queue player, gives them a spray and a crosshair tile, and removes 
   await cells.nth(6).click();
   await expect(page.locator('.players-picker')).toHaveCount(0);
   expect(await page.evaluate(() => window.__players().players)).toEqual([
-    { steam_id: M00CAT, name: 'dicE[: :]m00cat :D', png: 'chris_teamwork.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 7, use_as: '' },
+    { steam_id: M00CAT, name: 'dicE[: :]m00cat :D', png: 'chris_teamwork.png', crosshair_sprite: 'customXHair.spr', crosshair_tile: 7, use_as: '', nameplate: '' },
   ]);
   await expect(row.locator('.players-tile')).toContainText('Tile 7');
 

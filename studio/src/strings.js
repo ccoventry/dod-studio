@@ -755,13 +755,15 @@ export const STRINGS = {
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     // #110: the finished renders as an EDL for VEGAS Pro.
     EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
-    EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
+    EXPORT_EDL_TITLE: "Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there. A .dodstudio.json file beside it lists each clip's player and nameplate, for the VEGAS nameplate script.",
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
-    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlDone: (count, skipped, nameplates = 0) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
+    // #429: the clip manifest beside the EDL, for the nameplate script.
+    exportManifestFailed: (err) => `The EDL is saved, but the clip list for the nameplate script isn't: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -3233,6 +3235,18 @@ export const STRINGS = {
     USE_AS_PLACEHOLDER: 'In-game name',
     USE_AS_NEEDS_STEAMID: 'A name is only swapped for a player with a SteamID: a player added by name has none.',
     useAsAria: (who) => `Use as name for ${who}`,
+    // #429: a picture per player that the VEGAS nameplate script puts above their clips.
+    COLUMN_NAMEPLATE: 'Nameplate',
+    NAMEPLATE_TITLE: "A PNG put on its own track above each of this player's clips by the VEGAS nameplate script (Render > Export VEGAS EDL… saves the list it reads).",
+    NAMEPLATE_PICK: 'Pick a PNG…',
+    NAMEPLATE_PICK_TITLE: 'Pick a nameplate picture',
+    NAMEPLATE_FILTER: 'PNG picture',
+    NAMEPLATE_NEEDS_STEAMID: 'A nameplate follows a SteamID: a player added by name has none.',
+    nameplateMissing: (name) => `${name} (missing)`,
+    nameplateMissingTitle: (path) => `${path}\nThis file isn't there any more: pick it again, or put it back.`,
+    nameplateAria: (who) => `Nameplate for ${who}`,
+    nameplateClearAria: (who) => `Remove the nameplate for ${who}`,
+    NAMEPLATE_CLEAR_TITLE: 'No nameplate for this player (the file itself stays)',
     COLUMN_SPRAY: 'Spray',
     COLUMN_CROSSHAIR: 'Crosshair',
     PICK_PNG: 'Pick a PNG…',

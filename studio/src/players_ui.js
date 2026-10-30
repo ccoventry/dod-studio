@@ -15,11 +15,13 @@ import {
   crosshairSpriteImage,
   setPlayerOverrides,
   indexDemoPlayers,
+  filesExist,
 } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 import { showBar, hideBar } from './progress_view.js';
 import { createCrosshairImport } from './crosshair_import_ui.js';
 import { setUseAsTable } from './player_alias.js';
+import { createNameplateCheck, nameplateCell } from './nameplate_cell.js';
 import {
   normalizePlayers,
   playerOptions as groupOptions,
@@ -54,6 +56,9 @@ let openPicker = null;
 // by file name, for this hl.exe and game folder.
 const spriteImages = new Map();
 let imagesFor = '';
+
+// Which nameplate files are gone, asked once per set of paths (#429).
+const nameplates = createNameplateCheck({ exists: (paths) => filesExist(paths), onChange: () => renderRows() });
 
 const $ = (sel) => document.querySelector(sel);
 const S = () => STRINGS.PLAYERS;
@@ -222,8 +227,8 @@ function renderRows() {
   const head = document.createElement('div');
   head.className = 'players-row players-head';
   const columns = [
-    [S().COLUMN_PLAYER], [S().COLUMN_USE_AS, S().USE_AS_TITLE], [S().COLUMN_SPRAY],
-    [S().COLUMN_CROSSHAIR], [''],
+    [S().COLUMN_PLAYER], [S().COLUMN_USE_AS, S().USE_AS_TITLE], [S().COLUMN_NAMEPLATE, S().NAMEPLATE_TITLE],
+    [S().COLUMN_SPRAY], [S().COLUMN_CROSSHAIR], [''],
   ];
   for (const [text, title] of columns) {
     const cell = document.createElement('span');
@@ -251,6 +256,11 @@ function renderRows() {
     useAs.addEventListener('change', () => {
       edit(updatePlayer(current, i, { use_as: useAs.value }));
     });
+    const nameplate = nameplateCell(
+      { nameplate: row.nameplate, steam_id: row.steam_id, who: playerLabel(row) },
+      { missing: nameplates.isMissing(row.nameplate) },
+      (path) => edit(updatePlayer(current, i, { nameplate: path })),
+    );
     const spray = fileSelect(pngs, row.png, S().FALLBACK_SPRAY_OPTION, S().pngMissingOption, (png) => {
       edit(updatePlayer(current, i, { png }));
     }, [{ value: OWN_SPRAY, label: S().FROM_DEMO_OPTION, title: S().FROM_DEMO_TITLE }]);
@@ -268,7 +278,7 @@ function renderRows() {
       openPicker = null;
       edit(removePlayer(current, i));
     });
-    item.append(who, useAs, spray, crosshair, remove);
+    item.append(who, useAs, nameplate, spray, crosshair, remove);
     rows.push(item);
     if (openPicker === i && row.crosshair_sprite) {
       rows.push(tilePicker(row.crosshair_sprite, row.crosshair_tile, (t) => {
@@ -278,6 +288,7 @@ function renderRows() {
     }
   });
   list.replaceChildren(...rows);
+  nameplates.watch(current.players.map((p) => p.nameplate));
 }
 
 function renderSprayFallback(kind) {
@@ -421,6 +432,7 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
     pngs = Array.isArray(listed[0]) ? listed[0] : [];
     sprites = Array.isArray(listed[1]) ? listed[1] : [];
     spriteImages.clear();
+    nameplates.reset();
     render();
     crosshairImport.refresh();
   }

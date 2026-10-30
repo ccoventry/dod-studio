@@ -3810,7 +3810,7 @@ button.setup-skip:hover:not(:disabled) {
 
 .players-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(120px, 1fr) minmax(200px, 1.4fr) 24px;
+  grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(110px, 0.9fr) minmax(120px, 1fr) minmax(200px, 1.4fr) 24px;
   align-items: center;
   gap: 8px;
   padding: 2px 4px 2px 10px;
@@ -3824,6 +3824,29 @@ button.setup-skip:hover:not(:disabled) {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
+}
+
+.players-nameplate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.players-nameplate-pick {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+}
+
+.players-nameplate-pick.missing {
+  color: #e0a040;
+}
+
+.players-nameplate-clear {
+  padding: 0 4px;
 }
 
 .players-head {
