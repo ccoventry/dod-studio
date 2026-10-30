@@ -501,6 +501,42 @@ The cost is that the recording contains the pre-roll and post-roll as head and t
 "Does Render Studio still run" below — the user can simply trim it in their editor, which is why the
 render pass stays *optional* here rather than becoming a requirement.
 
+### The game waits for the recording (#1109)
+
+The lead is a margin, not a guarantee: a slow OBS, a retried `StartRecord` or a clamped lead could
+still start the file after the clip's first frame. So with the hook running the batch (Seek Between
+Clips), the batch file has a `ds_capture_batch wait_for_recording` line at every `AUDIO_SYNC`
+(`runtime_batch`): the hook pauses the demo there and says `BATCH_WAITING_FOR_RECORDING` on the
+events pipe, Studio starts OBS on the `AUDIO_SYNC` marker as before, and once `OUTPUT_STARTED` is in
+it sends `ds_capture_batch recording` and the demo plays on. The lead-in then plays its full second
+with OBS already recording, however slow the start was. The pause sits at the head of the file as a
+still frame, inside the lead-in.
+
+- **No go-ahead in 20 s** with Studio still there: the clip plays on (Studio's own start gives up
+  after about 16 s, so the answer was lost). **Studio gone** from the events pipe for 10 s: the
+  batch ends, keeping its clips, as the space hold does (#885): without Studio nothing starts or
+  stops OBS.
+- **The safety net.** Studio holds the arrival of `OUTPUT_STARTED` against the arrival of the
+  clip's `START_RECORD` marker, both stamped when read. A recording that started after the clip did
+  (a hook DLL without the wait, a patched batch, a wait that timed out) is missing the clip's
+  opening: the take is not counted as captured, Render While Capturing skips it, and Last Batch says
+  by how many ms.
+
+**Measured (#1109, 2026-10-30, POST and PRE, 120 fps, 1280x720, one m00cat demo, 27 clips in 10 batches):**
+
+- **Cost:** the game waited 68-112 ms per clip (hook log; 79-87 ms on PRE), OBS's own start.
+- **Demo clock:** the demo player's clock reads the same at the pause and at the resume (783.644 and
+  783.644), and the takes are the same length with and without the wait (20.358 s both), so nothing
+  is skipped or replayed.
+- **Still frame:** none at the head of any take: OBS's first frame comes with the go-ahead, a few ms
+  after `OUTPUT_STARTED`, so the file starts on the moving lead-in, a second ahead of the clip.
+- **Sound:** the same four clips recorded with and without the wait line up within the run-to-run
+  spread (picture against sound, take against take: -15 to -12 ms on POST, +8 to +19 ms on PRE;
+  two runs both with the wait differ by up to ±14 ms), so the pause moves neither against the other.
+- **Slow start:** with OBS's start held back 1.5 s, the game waited 1573-1584 ms and both takes
+  were whole. Without the wait, the same start left both takes 589-605 ms late, and Last Batch
+  marked them. Held back 25 s, the wait gave up at 20 s and the take was marked 4066 ms late.
+
 ## The output, and the recommendation that keeps the rest of the pipeline
 
 OBS writes one file wherever its profile points, named by its own filename formatting. `StopRecord`

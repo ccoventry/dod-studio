@@ -66,8 +66,10 @@ export function resultsOf(payload, dispatch) {
     // cut_short: a partial take the batch's end left on disk (#1081), not a
     // clip, with what ended it (`cut_by`); short: one FFmpeg stopped writing
     // mid-clip (#1105).
-    status: b.short_take ? 'short' : b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
+    // late: OBS started recording after the clip did (#1109).
+    status: b.started_late_ms ? 'late' : b.short_take ? 'short' : b.cut_short ? 'cut_short' : !b.captured ? 'missing' : b.renderable ? 'ok' : 'unrenderable',
     short: b.short_take || null,
+    lateMs: b.started_late_ms || null,
     cutBy: b.cut_by || null,
     bytes: b.bytes || 0,
     folder: b.take_folder,
@@ -131,7 +133,9 @@ function render() {
       const tr = document.createElement('tr');
       tr.className = `batch-results-row-${row.status}`;
       const status = document.createElement('td');
-      status.textContent = row.short
+      status.textContent = row.lateMs
+        ? S.startedLate(row.lateMs)
+        : row.short
         ? S.shortTake(row.short.video_secs, row.short.audio_secs)
         : row.status === 'cut_short' ? S.cutShortBy(row.cutBy) : S.STATUS[row.status];
       const label = document.createElement('td');

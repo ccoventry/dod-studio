@@ -359,12 +359,16 @@ fn watched_frame(time: f64, target: i32) -> Option<crouch::Frame> {
         z: state.origin.z,
         small_hull: state.usehull == 1,
     };
+    let newest = player.curstate.msg_time;
+    let upcoming_down = crate::lookahead::timeline(f64::from(newest))
+        .and_then(|t| t.next_crouch_down(target, newest, crouch::LOOK_AHEAD_SECONDS));
     Some(crouch::Frame {
         time,
         target,
         drawn_z: player.origin.z,
         snapshot: snapshot(&player.curstate),
         previous: snapshot(&player.prevstate),
+        upcoming_down,
     })
 }
 

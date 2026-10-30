@@ -102,6 +102,13 @@ describe('takesFoundMissing (#1081)', () => {
     expect(STRINGS.BATCH_RESULTS.cutShortBy('game_closed')).toBe('Cut short: the game closed (partial take, not captured)');
     expect(STRINGS.BATCH_RESULTS.cutShortBy(null)).toBe(STRINGS.BATCH_RESULTS.STATUS.cut_short);
   });
+
+  it('says a take OBS started late is missing its opening, not missing (#1109)', () => {
+    expect(STRINGS.CAPTURE.takesFoundMissing(2, 3, 0, 0, undefined, 1)).toBe(
+      "2/3 takes found on disk — 1 OBS started recording late (missing the clip's opening, not captured).",
+    );
+    expect(STRINGS.BATCH_RESULTS.startedLate(240)).toBe("OBS started 240 ms late: missing the clip's opening (not captured)");
+  });
 });
 
 describe('finish step (#440)', () => {

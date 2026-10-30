@@ -139,6 +139,30 @@ pub fn pov_demo_playing() -> bool {
     engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
+/// Look-ahead (#1154): whether the demo file has the spectated player's
+/// body leaving `sprint_*` within `snapshot_motion`'s look-ahead of his
+/// newest snapshot, while it is `sprint_*` now. False without a timeline.
+fn body_leaves_sprint_soon(spectated: &ClEntityS, body: &str) -> bool {
+    if !body.starts_with("sprint_") || spectated.model.is_null() {
+        return false;
+    }
+    let newest = spectated.curstate.msg_time;
+    let Some(timeline) = crate::lookahead::timeline(f64::from(newest)) else {
+        return false;
+    };
+    timeline
+        .body_changes(
+            spectated.index,
+            newest,
+            snapshot_motion::LET_GO_LOOK_AHEAD_SECONDS,
+        )
+        .iter()
+        .any(|&(_, sequence)| {
+            sequence_label(spectated.model, usize::from(sequence))
+                .is_some_and(|label| !label.starts_with("sprint_"))
+        })
+}
+
 /// A demo is playing and the engine is not connected as a spectator.
 /// `IsSpectateOnly()` is true through an HLTV demo and false for the whole of
 /// a POV one: the hook log of the #613 session shows it false from that
@@ -869,6 +893,10 @@ pub fn apply() {
         spectated.curstate.origin.x,
         spectated.curstate.origin.y,
     );
+    snapshot_motion::note_body_ahead(body_leaves_sprint_soon(
+        spectated,
+        body_label.as_deref().unwrap_or(""),
+    ));
     snapshot_motion::note_snapshot(
         f64::from(spectated.curstate.msg_time),
         [

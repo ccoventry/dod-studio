@@ -587,6 +587,10 @@ pub struct VerifiedBlock {
     /// stopped writing mid-clip. A partial take like a Cancel's, with both
     /// lengths.
     pub short_take: Option<native::hlcr::take_length::ShortTake>,
+    /// OBS started recording this many ms after the clip's first frame
+    /// (#1109): the take is missing the clip's opening, so it counts as
+    /// neither captured nor renderable, and is left for the user to delete.
+    pub started_late_ms: Option<u64>,
     /// How many gaps between kills the take recorded sped up (#831), for its
     /// label in the batch results panel.
     pub ramped_gaps: usize,
@@ -737,9 +741,12 @@ struct BatchEnd<'a> {
     /// The clip recordings the markers reported, for [`mark_cut_short`].
     records: Records,
     cut_by: CutBy,
+    /// The clips OBS started recording late (#1109), for
+    /// [`mark_started_late`].
+    late_starts: Vec<native::obs::LateStart>,
 }
 
-impl BatchEnd<'_> {
+impl<'a> BatchEnd<'a> {
     fn complete() -> Self {
         BatchEnd {
             status: "Complete",
@@ -747,6 +754,7 @@ impl BatchEnd<'_> {
             error: false,
             records: Records::default(),
             cut_by: CutBy::Cancel,
+            late_starts: Vec::new(),
         }
     }
 
@@ -757,6 +765,14 @@ impl BatchEnd<'_> {
             error: false,
             records,
             cut_by: CutBy::Cancel,
+            late_starts: Vec::new(),
+        }
+    }
+
+    fn with_late_starts(self, late_starts: Vec<native::obs::LateStart>) -> BatchEnd<'a> {
+        BatchEnd {
+            late_starts,
+            ..self
         }
     }
 
@@ -773,7 +789,25 @@ impl BatchEnd<'_> {
             } else {
                 CutBy::Stopped
             },
+            late_starts: Vec::new(),
         }
+    }
+}
+
+/// Marks each take OBS started recording after its clip's first frame
+/// (#1109) as missing its opening: not captured, not renderable, so the
+/// highlights stay to capture again and the clean-up leaves it alone.
+fn mark_started_late(verified: &mut [VerifiedBlock], late_starts: &[native::obs::LateStart]) {
+    for late in late_starts {
+        let Some(block) = verified
+            .iter_mut()
+            .find(|b| Path::new(&b.take_folder) == late.take_folder)
+        else {
+            continue;
+        };
+        block.started_late_ms = Some(late.late.as_millis() as u64);
+        block.captured = false;
+        block.renderable = false;
     }
 }
 
@@ -918,6 +952,7 @@ pub(crate) fn verify_capture_takes_settling(
                 cut_short: false,
                 cut_by: None,
                 short_take: None,
+                started_late_ms: None,
                 ramped_gaps: block.ramped_gaps,
             }
         })
@@ -1052,6 +1087,16 @@ fn check_takes(
         }
     });
     mark_cut_short(&manifest, &mut blocks, end.records, end.cut_by);
+    mark_started_late(&mut blocks, &end.late_starts);
+    for block in &blocks {
+        if let Some(ms) = block.started_late_ms {
+            log_markdown(&format!(
+                "[take-verify] {}: OBS started recording {ms} ms after the clip's first frame, so \
+                 the take is missing its opening: not counted as captured. It is left at {}.",
+                block.take_key, block.take_folder
+            ));
+        }
+    }
     for block in blocks.iter().filter(|b| b.cut_short) {
         let why = match block.short_take {
             Some(s) => format!(
@@ -1782,6 +1827,8 @@ pub async fn start_capture_batch_impl(
                 let mut records = Records::default();
                 // The game went away by itself before the batch's end.
                 let mut game_closed = false;
+                // Clips OBS started recording late (#1109).
+                let mut late_starts: Vec<native::obs::LateStart> = Vec::new();
                 // A demo by DEMO_START's 1-based index, for the line (#952).
                 let demo_name = |job_idx: u32| {
                     (job_idx as usize)
@@ -1926,6 +1973,12 @@ pub async fn start_capture_batch_impl(
                         EngineEvent::GameClosed => {
                             game_closed = true;
                         }
+                        EngineEvent::ObsStartedLate(late) => {
+                            if let Some(room) = &room {
+                                room.clip_started_late(&late.take_folder);
+                            }
+                            late_starts.push(late);
+                        }
                         // A batch that played a demo before it failed has
                         // takes to check, like a cancelled one: the finished
                         // ones are real, and the clip recording when it
@@ -1937,7 +1990,8 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                BatchEnd::failed(&msg, records, game_closed),
+                                BatchEnd::failed(&msg, records, game_closed)
+                                    .with_late_starts(std::mem::take(&mut late_starts)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -1961,7 +2015,8 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                BatchEnd::complete(),
+                                BatchEnd::complete()
+                                    .with_late_starts(std::mem::take(&mut late_starts)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -1974,7 +2029,8 @@ pub async fn start_capture_batch_impl(
                                 &app_emitter,
                                 &is_running_clone,
                                 &manifest_for_listener,
-                                BatchEnd::cancelled(records),
+                                BatchEnd::cancelled(records)
+                                    .with_late_starts(std::mem::take(&mut late_starts)),
                                 rendered_while_capturing,
                             );
                             break;
@@ -2738,9 +2794,36 @@ mod tests {
                 cut_short: false,
                 cut_by: None,
                 short_take: None,
+                started_late_ms: None,
                 ramped_gaps: 0,
             })
             .collect()
+    }
+
+    /// #1109: a take OBS started after its clip did is missing the opening.
+    #[test]
+    fn a_take_obs_started_late_is_not_captured_and_says_by_how_much() {
+        let manifest = cut_short_manifest(&[("a", 0), ("a", 1), ("b", 0)]);
+        let mut blocks = on_disk(&manifest);
+        let late = native::obs::LateStart {
+            take_folder: std::path::PathBuf::from("a_b1"),
+            late: std::time::Duration::from_millis(240),
+        };
+        mark_started_late(&mut blocks, &[late]);
+        let got: Vec<_> = blocks
+            .iter()
+            .map(|b| (b.captured, b.renderable, b.started_late_ms))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (true, true, None),
+                (false, false, Some(240)),
+                (true, true, None)
+            ]
+        );
+        // Not a clip the batch's end cut short.
+        assert!(blocks.iter().all(|b| !b.cut_short));
     }
 
     /// Marker counts with no ticks (a marker that names none).

@@ -1745,6 +1745,7 @@ name = "goldsrc-hooks"
 version = "0.10.0"
 dependencies = [
  "analysis",
+ "dem",
  "dod",
  "png 0.18.1",
  "serde_json",

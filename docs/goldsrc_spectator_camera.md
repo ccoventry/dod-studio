@@ -224,9 +224,11 @@ players for the POV curve alone. On-ground crouches with the key held 0.7 s:
 
 ### What the fix does
 
-From an on-ground flip, the camera follows POV's curve on the demo clock: the
-same speed as POV, finishing 0.4 s after POV does (the game's own drop
-finishes about 0.1 s after). Getting up, it rises at POV's rate from wherever
+The camera follows POV's curve on the demo clock, at POV's speed. With the
+look-ahead below it starts 0.41 s before the flip arrives and ends with it,
+as POV's does; without it (the first second or so of a demo, a file it can't
+read) it starts at the flip and ends 0.4 s after POV's (the game's own drop
+ends about 0.1 s after). Getting up, it rises at POV's rate from wherever
 the ease had got to, so a crouch let go half-way down comes straight back up.
 
 `V_GetInEyePos` adds 18 or 22 to the interpolated origin. Both `fadd`
@@ -244,6 +246,40 @@ switch is off or a POV demo plays.
 Not covered: a duck tapped for under 0.4 s never flips `usehull`, so an HLTV
 demo shows nothing of it; and POV's eye sometimes sinks from 18 to 0 for
 about 0.2 s on a duck-jump landing, which HLTV has no trace of.
+
+### Look-ahead: starting with POV (#1154)
+
+Nothing the game holds says a crouch is coming before its flip: the watched
+player's newest snapshot lands within 0.02 s of the game's clock, and the
+flip comes when POV's ease is already over. But a ground flip only ever comes
+0.40 s after the key (p10 0.394 s, p90 0.406 s over 267 crouches of 5
+players), so the flip dates the key, and the demo file has every flip ahead
+of playback.
+
+So when an HLTV demo plays, `goldsrc-hooks/src/lookahead.rs` reads the `.dem`
+once on a thread of its own at below-normal priority, a frame at a time
+through `dem-patch`'s parser with about 1 MB of the file held at once, and
+keeps each player's ground flips (and body sequence changes, for the gun's
+sprint let-go, #704) by `svc_time`: about 1 s and 155 KB for a 40 MB,
+33-minute half. The crouch ease asks it each frame for the watched player's
+next flip and starts 0.41 s before it is due. The game's clock (and every
+`msg_time`) is not `svc_time` under `viewdemo`, and a seek doesn't move it,
+so the lookup goes through the demo player's world clock minus the game's,
+read every 0.1 s; a looked-ahead flip arrived a mean 0.001 s after it was due
+(sd 0.010 s) on PRE and POST. About 1 µs a frame on the engine thread.
+
+| `wsod25_grp2_h1_hltv` vs its 5 players' POVs | camera within 2 units of POV |
+| --- | --- |
+| the game | 51.7% |
+| ease from the flip | 42.5% |
+| ease from the look-ahead | 82.3% (81.2% with the live timing error added) |
+
+Guards: no ease starts that this view didn't see start on time (after a seek,
+a switch of player, or a timeline that lands mid-crouch, the flip is waited
+for), a looked-ahead flip that hasn't come 0.15 s after it was due lets the
+camera back up, and so does one the file stops promising while it is still
+0.1 s off (a seek moved the world clock). `ds_debug_status` says which demo
+the look-ahead has read, or why it has none.
 
 ---
 

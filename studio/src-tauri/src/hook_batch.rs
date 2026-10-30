@@ -116,6 +116,8 @@ pub fn prepare(
         streaks,
         config.decal_flush,
         &play_as,
+        // OBS records in real time: each clip waits for it to start (#1109).
+        config.capture_mode == native::patch::CaptureMode::Obs,
     )?;
     if !copies.is_empty() {
         let needed: u64 = copies.iter().map(|c| c.bytes).sum();
