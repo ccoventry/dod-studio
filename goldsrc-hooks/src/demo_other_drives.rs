@@ -30,8 +30,8 @@
 //! assert, which is why this is a hook and not a console command.
 //! `AddSearchPath` runs on the thread that opens the demo, the engine's.
 //!
-//! Without the hook DLL, a demo on another drive still needs Studio's
-//! + Link Folder to Game (a junction, #376) or a copy into `dod\`.
+//! Without the hook DLL, a demo on another drive still needs a copy in
+//! `dod\` (a batch) or a patched copy (a preview).
 //!
 //! `tools/verify_demo_other_drives.py` checks the slots and the `:` assert
 //! against both movie installs.
