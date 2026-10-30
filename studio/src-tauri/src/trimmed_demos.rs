@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use native::patch::PatchJob;
 use native::patch::entity_trim::{Step, TrimError};
-use native::patch::trimmed_copies::{Engine, Playable, prepare_playable};
+use native::patch::trimmed_copies::{self, Engine, Playable, prepare_playable};
 use tauri::Emitter;
 
 /// The event a Launch Preview's trim reports on: `{ status, done }`.
@@ -90,6 +90,7 @@ pub fn for_batch(
             }
         }
     }
+    trimmed_copies::prune_keeping(&trimmed_copies::copies_root(), copies.len());
     Ok(copies)
 }
 
@@ -113,6 +114,7 @@ pub fn for_preview(
     match prepare_playable(demo, &engine, &|| false, &mut progress) {
         Ok(Playable::Original) => Ok(None),
         Ok(Playable::Copy { path, .. }) => {
+            trimmed_copies::prune_keeping(&trimmed_copies::copies_root(), 1);
             emit(crate::messages::preview_plays_trimmed_copy(&engine), true);
             Ok(Some(path))
         }

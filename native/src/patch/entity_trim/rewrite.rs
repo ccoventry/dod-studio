@@ -9,8 +9,17 @@
 //! (`rep movsd` at `hw.dll+0x13453`), so a count that is too small overruns
 //! the heap (#15's `m1_h1` crash). The count is worked out by carrying every
 //! snapshot forward the way the engine does ([`Carry`]).
+//!
+//! A full packet's entry can also take its baseline from an entry listed
+//! earlier in the same packet, a 6-bit count of entries back (the `offset` of
+//! `SV_WriteDeltaHeader`, `has_baseline_index` / `baseline_index` in `dem`;
+//! the players of the `dod_lennon2` second halves use it). Leaving an entry
+//! out between the two moves that base onto another entity, which the packet
+//! still parses as but decodes into the wrong state, so the offset is restated
+//! to name the same entity ([`restate_offsets`]). An entity another entry
+//! bases on is never dropped (`select`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use dem::bit::BitSliceCast;
 use dem::types::{
@@ -24,6 +33,9 @@ const DIFFERENCE_LIMIT: u16 = 64;
 const DIFFERENCE_BITS: u32 = 6;
 const ABSOLUTE_BITS: u32 = 11;
 const COUNT_BITS: u32 = 16;
+/// A full entry's baseline offset: how many entries back its base is listed.
+const OFFSET_BITS: u32 = 6;
+const OFFSET_LIMIT: usize = 1 << OFFSET_BITS;
 
 /// What a walk over the demo saw.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -38,6 +50,49 @@ pub(super) struct Tally {
     pub entries_dropped: usize,
     /// Entries of `drop`'s entities still listed after the walk.
     pub dropped_still_listed: usize,
+    /// Every full-packet entry that takes its baseline from an earlier entry,
+    /// as (entity, the entity it bases on), in demo order, as read before the
+    /// walk changed anything.
+    pub offset_bases: Vec<(u16, u16)>,
+}
+
+/// Each entry of a full packet that bases on an earlier entry, as (entity,
+/// the entity it bases on). An offset reaching before the first entry names
+/// nothing and is left out.
+pub(super) fn offset_bases(entries: &[EntityState]) -> impl Iterator<Item = (u16, u16)> + '_ {
+    entries.iter().enumerate().filter_map(|(at, e)| {
+        if !e.has_baseline_index {
+            return None;
+        }
+        let back = e.baseline_index.as_ref()?.to_u32() as usize;
+        let base = at.checked_sub(back)?;
+        Some((e.entity_index, entries[base].entity_index))
+    })
+}
+
+/// Points every kept entry's baseline offset back at the entity it named
+/// before entries were left out (`bases`, from [`offset_bases`]). An entry
+/// whose base is gone keeps its old offset, which the read-back check
+/// rejects.
+fn restate_offsets(entries: &mut [EntityState], bases: &HashMap<u16, u16>) {
+    let at: HashMap<u16, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.entity_index, i))
+        .collect();
+    for (i, e) in entries.iter_mut().enumerate() {
+        if !e.has_baseline_index {
+            continue;
+        }
+        let back = bases
+            .get(&e.entity_index)
+            .and_then(|base| at.get(base))
+            .and_then(|&b| i.checked_sub(b))
+            .filter(|&back| (1..OFFSET_LIMIT).contains(&back));
+        if let Some(back) = back {
+            e.baseline_index = Some(dem::nbit_num!(back, OFFSET_BITS));
+        }
+    }
 }
 
 /// Index encoding for a full snapshot entry: +1 by a flag, a 6-bit
@@ -109,6 +164,7 @@ fn trim_message(
             let set = carry.full(seq, pe.entity_states.iter().map(|e| e.entity_index));
             let carried = set.len();
             let after = count_after(declared, set.iter().filter(|i| drop.contains(i)).count());
+            let bases: HashMap<u16, u16> = offset_bases(&pe.entity_states).collect();
             let before_len = pe.entity_states.len();
             pe.entity_states.retain(|e| !drop.contains(&e.entity_index));
             let dropped = before_len - pe.entity_states.len();
@@ -118,6 +174,7 @@ fn trim_message(
                     encode_full(e, prev);
                     prev = e.entity_index;
                 }
+                restate_offsets(&mut pe.entity_states, &bases);
             }
             if after != declared {
                 pe.entity_count = dem::nbit_num!(after, COUNT_BITS);
@@ -217,6 +274,9 @@ fn walk(demo: &mut Demo, drop: &HashSet<u16>, listed: &HashSet<u16>) -> Tally {
                     continue;
                 };
                 let still_listed = listed_of(em, listed);
+                if let EngineMessage::SvcPacketEntities(pe) = &**em {
+                    tally.offset_bases.extend(offset_bases(&pe.entity_states));
+                }
                 if let Some(p) = trim_message(em, seq, drop, &mut carry) {
                     changed |= p.dropped > 0 || p.after != p.declared;
                     tally.packets += 1;
@@ -305,6 +365,60 @@ mod tests {
             delta.absolute_entity_index.as_ref().map(|b| b.to_u32()),
             Some(200)
         );
+    }
+
+    /// A full packet listing `entries`, each (index, entries back it bases on).
+    fn full_packet(entries: &[(u16, u32)]) -> EngineMessage {
+        let mut prev = 0;
+        let entity_states = entries
+            .iter()
+            .map(|&(index, back)| {
+                let mut e = full_entry(index);
+                encode_full(&mut e, prev);
+                prev = index;
+                e.has_baseline_index = back > 0;
+                e.baseline_index = (back > 0).then(|| dem::nbit_num!(back, OFFSET_BITS));
+                e
+            })
+            .collect();
+        EngineMessage::SvcPacketEntities(dem::types::SvcPacketEntities {
+            entity_count: dem::nbit_num!(entries.len(), COUNT_BITS),
+            entity_states,
+        })
+    }
+
+    fn bases_of(em: &EngineMessage) -> Vec<(u16, u16)> {
+        match em {
+            EngineMessage::SvcPacketEntities(pe) => offset_bases(&pe.entity_states).collect(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn an_offset_across_a_dropped_entry_still_names_its_base() {
+        // 50 bases on 2, three entries back; 40 goes from between them.
+        let mut em = full_packet(&[(2, 0), (40, 0), (41, 0), (50, 3)]);
+        assert_eq!(bases_of(&em), vec![(50, 2)]);
+        trim_message(&mut em, 1, &HashSet::from([40]), &mut Carry::default());
+        assert_eq!(bases_of(&em), vec![(50, 2)]);
+        let EngineMessage::SvcPacketEntities(pe) = &em else {
+            unreachable!()
+        };
+        assert_eq!(
+            pe.entity_states[2]
+                .baseline_index
+                .as_ref()
+                .map(|b| b.to_u32()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn an_entry_whose_base_is_dropped_no_longer_names_it() {
+        // The read-back check compares these, so a dropped base is caught.
+        let mut em = full_packet(&[(2, 0), (40, 0), (50, 2)]);
+        trim_message(&mut em, 1, &HashSet::from([2]), &mut Carry::default());
+        assert!(!bases_of(&em).contains(&(50, 2)));
     }
 
     #[test]

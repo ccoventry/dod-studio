@@ -150,8 +150,9 @@ pub struct TrimRequest<'a> {
 /// or says it needn't: no snapshot holds more than `request.limit`. The trimmed demo is read back and checked before it is
 /// returned: it parses, every snapshot is at or under the target, no dropped
 /// entity is still listed, every declared count agrees with the snapshot the
-/// engine builds wherever the original's did, and its frames are the
-/// original's, in order.
+/// engine builds wherever the original's did, every entry that takes its
+/// baseline from an earlier entry still names the same entity, and its frames
+/// are the original's, in order.
 pub fn trim_demo(bytes: &[u8], request: TrimRequest<'_>) -> Result<Outcome, TrimError> {
     let TrimRequest {
         limit,
@@ -268,7 +269,22 @@ fn check(
             after.count_mismatch, before.count_mismatch
         ));
     }
+    if !offsets_agree(&before.offset_bases, &after.offset_bases, dropped) {
+        return failed(
+            "an entity takes its baseline from a different entity than in the original".into(),
+        );
+    }
     Ok(after)
+}
+
+/// Whether every kept entry that bases on an earlier entry of its packet
+/// names the same entity in the copy as in the original (`rewrite`'s module
+/// doc), and no other entry does.
+fn offsets_agree(before: &[(u16, u16)], after: &[(u16, u16)], dropped: &HashSet<u16>) -> bool {
+    before
+        .iter()
+        .filter(|(entity, _)| !dropped.contains(entity))
+        .eq(after.iter())
 }
 
 #[cfg(test)]
@@ -427,6 +443,18 @@ mod tests {
         let bytes = fixture();
         let err = trim(&bytes, peak(&bytes) - 1, &|| true).unwrap_err();
         assert_eq!(err, TrimError::Cancelled);
+    }
+
+    #[test]
+    fn the_check_rejects_an_entry_basing_on_another_entity_than_before() {
+        let dropped = HashSet::from([40]);
+        let before = [(50, 2), (40, 2), (60, 50)];
+        assert!(offsets_agree(&before, &[(50, 2), (60, 50)], &dropped));
+        assert!(!offsets_agree(&before, &[(50, 41), (60, 50)], &dropped));
+        assert!(
+            !offsets_agree(&before, &[(60, 50)], &dropped),
+            "a base lost"
+        );
     }
 
     #[test]

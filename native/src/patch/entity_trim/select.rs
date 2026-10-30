@@ -2,7 +2,8 @@
 //!
 //! Only entities that are safe to lose are eligible: present from the first
 //! snapshot, never updated and never removed afterwards (static map props, so
-//! dropping one changes nothing else and its index is never reused), and
+//! dropping one changes nothing else and its index is never reused), never
+//! the entry another entry of a full packet takes its baseline from, and
 //! never a player or the world. In the order they go:
 //!
 //! - [`Tier::Invisible`]: a render mode with `renderamt` 15 or less (on
@@ -17,7 +18,9 @@
 use std::collections::{HashMap, HashSet};
 
 use dem::bit::BitSliceCast;
-use dem::types::{Delta, Demo, EngineMessage, FrameData, MessageData, NetMessage};
+use dem::types::{
+    Delta, Demo, EngineMessage, FrameData, MessageData, NetMessage, SvcPacketEntities,
+};
 
 use super::MapProps;
 
@@ -54,6 +57,9 @@ struct Entity {
     in_first: bool,
     updates: u32,
     removed: bool,
+    /// Another entry of a full packet takes its baseline from this one
+    /// (`rewrite`'s module doc), so leaving it out would change that entity.
+    offset_base: bool,
 }
 
 /// Everything the first pass over the demo learns.
@@ -135,6 +141,7 @@ impl Survey {
                 }
                 EngineMessage::SvcPacketEntities(pe) if !first_seen => {
                     first_seen = true;
+                    s.mark_offset_bases(pe);
                     for e in &pe.entity_states {
                         let ent = s.entities.entry(e.entity_index).or_default();
                         ent.fields.extend(e.delta.clone());
@@ -142,6 +149,7 @@ impl Survey {
                     }
                 }
                 EngineMessage::SvcPacketEntities(pe) => {
+                    s.mark_offset_bases(pe);
                     for e in &pe.entity_states {
                         s.entities.entry(e.entity_index).or_default().updates += 1;
                     }
@@ -169,6 +177,12 @@ impl Survey {
         s
     }
 
+    fn mark_offset_bases(&mut self, pe: &SvcPacketEntities) {
+        for (_, base) in super::rewrite::offset_bases(&pe.entity_states) {
+            self.entities.entry(base).or_default().offset_base = true;
+        }
+    }
+
     fn is_player(&self, index: u16) -> bool {
         (1..=self.max_players).contains(&index)
     }
@@ -182,7 +196,13 @@ impl Survey {
 
     /// The tier `index` falls in, or `None` when it must stay.
     fn tier(&self, map: Option<&MapProps>, index: u16, e: &Entity) -> Option<Tier> {
-        if !e.in_first || e.removed || e.updates > 0 || index == 0 || self.is_player(index) {
+        if !e.in_first
+            || e.removed
+            || e.updates > 0
+            || e.offset_base
+            || index == 0
+            || self.is_player(index)
+        {
             return None;
         }
         let model = self.model_of(e);
@@ -291,6 +311,7 @@ mod tests {
             in_first,
             updates,
             removed: false,
+            offset_base: false,
         }
     }
 
@@ -355,6 +376,9 @@ mod tests {
         let mut removed = entity(&invisible, true, 0);
         removed.removed = true;
         assert_eq!(s.tier(None, 40, &removed), None, "removed");
+        let mut base = entity(&invisible, true, 0);
+        base.offset_base = true;
+        assert_eq!(s.tier(None, 40, &base), None, "another entry's baseline");
     }
 
     #[test]

@@ -13,8 +13,9 @@
 //! key is the demo's size-and-header key (`utils::demo_hasher`), the trim's
 //! target and [`TRIM_VERSION`], so a copy is made once per demo and reused by
 //! every later batch and preview, and a different file under the same name
-//! gets its own. The newest [`KEEP_COPIES`] stay; older ones are removed when
-//! a new one is made.
+//! gets its own. The newest [`KEEP_COPIES`] stay, and never fewer than the
+//! batch being started plays; older ones are removed once its copies are all
+//! ready ([`prune_keeping`]).
 //!
 //! A new copy gets the original's analyzer cache entry, so the in-game DoD
 //! Studio window lists its highlights at once instead of asking Studio to
@@ -172,7 +173,6 @@ pub fn prepare_playable(
         Some(trimmed.peak_after),
     );
     mark_used(&path);
-    prune(&root, KEEP_COPIES);
     crate::log_markdown(&made_message(demo, engine, &trimmed, &path));
     Ok(Playable::Copy { path, made: true })
 }
@@ -204,20 +204,30 @@ fn map_props(demo: &Path, engine: &Engine) -> Option<MapProps> {
 }
 
 /// Writes the copy beside its final name and renames it over, so a copy
-/// that exists is always whole.
+/// that exists is always whole. A preview and a batch can make the same copy
+/// at once: each writes its own partial file, and the one that renames second
+/// takes the first one's copy (the trim is the same bytes every run).
 fn save_copy(path: &Path, bytes: &[u8]) -> Result<(), TrimError> {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let fail = |e: std::io::Error| {
         TrimError::CheckFailed(format!("it could not be saved to {}: {e}", path.display()))
     };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(fail)?;
     }
-    let partial = path.with_extension("dem.part");
+    let partial = path.with_extension(format!(
+        "dem.{}-{}.part",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::write(&partial, bytes).map_err(fail)?;
-    std::fs::rename(&partial, path).map_err(|e| {
-        let _ = std::fs::remove_file(&partial);
-        fail(e)
-    })
+    match std::fs::rename(&partial, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&partial);
+            if path.is_file() { Ok(()) } else { Err(fail(e)) }
+        }
+    }
 }
 
 /// Gives the copy the original's analyzer cache entry under `root` (see the
@@ -237,6 +247,15 @@ fn mark_used(copy: &Path) {
     if let Some(dir) = copy.parent() {
         let _ = std::fs::write(dir.join(USED_MARKER), b"");
     }
+}
+
+/// Removes the copies past the newest [`KEEP_COPIES`], once a batch or a
+/// preview has every copy it plays (`in_use` of them, each just marked used,
+/// so the newest): pruning while a batch's copies are still being made would
+/// remove its first ones once it plays more than [`KEEP_COPIES`]. Returns how
+/// many it removed.
+pub fn prune_keeping(root: &Path, in_use: usize) -> usize {
+    prune(root, KEEP_COPIES.max(in_use))
 }
 
 /// Removes all but the `keep` most recently used copy folders under `root`.
@@ -332,6 +351,34 @@ mod tests {
         assert_eq!(prune(&dir, 2), 1);
         assert!(!dir.join("old").exists());
         assert!(dir.join("middle").exists() && dir.join("new").exists());
+    }
+
+    #[test]
+    fn a_copy_saved_twice_is_whole_and_leaves_no_partial_file() {
+        let dir = Scratch::new("trimmed_copy_save");
+        let path = dir.join("key").join("a_trimmed.dem");
+        save_copy(&path, b"HLDEMO copy").unwrap();
+        save_copy(&path, b"HLDEMO copy").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"HLDEMO copy");
+        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("a_trimmed.dem")]);
+    }
+
+    #[test]
+    fn a_batch_playing_more_copies_than_are_kept_keeps_them_all() {
+        let dir = Scratch::new("trimmed_copy_prune_batch");
+        let batch = KEEP_COPIES + 2;
+        for i in 0..batch {
+            let folder = dir.join(format!("copy{i}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join(USED_MARKER), b"").unwrap();
+        }
+        assert_eq!(prune_keeping(&dir, batch), 0);
+        assert_eq!(prune_keeping(&dir, 1), 2, "the next preview prunes them");
     }
 
     #[test]
