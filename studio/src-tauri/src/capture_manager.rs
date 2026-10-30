@@ -345,6 +345,10 @@ pub struct SerializedStreak {
     pub victims: Vec<String>,
     #[serde(default)]
     pub victim_factions: Vec<String>,
+    /// Whether each kill was a headshot (#1128). Empty on a demo scanned
+    /// before it existed: `scanIsCurrent` rescans it.
+    #[serde(default)]
+    pub headshots: Vec<::analysis::Headshot>,
     /// The scanned file's size and start hash, checked against the file on
     /// disk before a batch or preview patches it (#196). Absent from
     /// projects saved before it existed.
@@ -2449,6 +2453,7 @@ fn serialized_demo(
             serialized.faction = Some(facts.faction).filter(|f| !f.is_empty());
             serialized.victims = facts.victims;
             serialized.victim_factions = facts.victim_factions;
+            serialized.headshots = facts.headshots;
             serialized
         })
         .collect();
@@ -2502,6 +2507,7 @@ impl From<CaptureStreak> for SerializedStreak {
             faction: None,
             victims: Vec::new(),
             victim_factions: Vec::new(),
+            headshots: Vec::new(),
             source_key: c.source_key,
             spectated: c.spectated,
             steam_id: c.steam_id,
