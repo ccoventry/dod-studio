@@ -603,6 +603,24 @@ mod tests {
         assert!((settled - 36.0).abs() < 1e-3);
     }
 
+    /// A backward seek in an HLTV demo rewinds to the start and steps
+    /// forward 5 s a frame (#1137); landing just after a flip, the camera is
+    /// where the game puts it, not part-way down an ease.
+    #[test]
+    fn stepping_forward_in_five_second_steps_lands_at_the_games_height() {
+        let mut sim = crouch(11.0, 30.0, 14.0);
+        for t in [0.0, 5.0, 10.0] {
+            sim.camera(t);
+        }
+        let landing = 11.1;
+        let cam = sim.camera(landing);
+        let game = sim.drawn(landing) + 18.0 - 64.0;
+        assert!(
+            (cam - game).abs() < 1e-3,
+            "camera {cam} vs the game's {game}"
+        );
+    }
+
     #[test]
     fn a_new_player_starts_where_the_game_has_him() {
         let mut sim = crouch(1.0, 10.0, 3.0);
