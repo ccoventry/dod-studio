@@ -510,6 +510,7 @@ fn clips_that_fit_one_at_a_time_are_planned_when_renders_free_space_while_captur
     std::fs::create_dir_all(&temp_drive).expect("failed to create dummy capture drive");
     config.capture_directories = vec![temp_drive.clone()];
     let room = crate::sys::disk::get_available_bytes(&temp_drive)
+        .expect("the temp drive's free space is readable")
         .saturating_sub(crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES);
     assert!(
         room > 1_000_000_000,
@@ -1975,7 +1976,7 @@ fn test_two_capture_folders_on_one_drive_get_one_block_of_room() {
         std::path::PathBuf::from(r"C:\a"),
         std::path::PathBuf::from(r"C:\b"),
     ];
-    let (volume_of_drive, mut volume_free) = crate::sys::disk::group_by_volume(&dirs, |_| 15);
+    let (volume_of_drive, mut volume_free) = crate::sys::disk::group_by_volume(&dirs, |_| Some(15));
     let mut active_drive_idx = 0usize;
 
     let result = allocate_blocks_first_fit_decreasing(

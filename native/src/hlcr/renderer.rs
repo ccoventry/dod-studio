@@ -185,19 +185,19 @@ fn ledger_key(dir: &Path) -> PathBuf {
 /// Reserves `amount` on the first of `dirs` whose volume has more than
 /// `amount + margin` free once the ledger's reservations there are taken off.
 /// Returns that directory, what was already reserved on its volume, and its
-/// live free space.
+/// live free space (`None` when unreadable, which counts as having room).
 fn try_reserve(
     ledger: &mut HashMap<PathBuf, u64>,
     dirs: &[PathBuf],
     amount: u64,
     margin: u64,
-    mut free_of: impl FnMut(&Path) -> u64,
-) -> Option<(PathBuf, u64, u64)> {
+    mut free_of: impl FnMut(&Path) -> Option<u64>,
+) -> Option<(PathBuf, u64, Option<u64>)> {
     for dir in dirs {
         let key = ledger_key(dir);
         let live_free = free_of(dir);
         let already_reserved = *ledger.get(&key).unwrap_or(&0);
-        if live_free.saturating_sub(already_reserved) > amount + margin {
+        if live_free.is_none_or(|free| free.saturating_sub(already_reserved) > amount + margin) {
             *ledger.entry(key).or_insert(0) += amount;
             return Some((dir.clone(), already_reserved, live_free));
         }
@@ -531,13 +531,16 @@ fn reserve_export_dir(
     // concurrent batch, that the ledger correctly reflects other
     // in-flight jobs' reservations rather than every job seeing the
     // same live free-space number.
+    let live_free_text = live_free.map_or("unknown".to_string(), |free| {
+        format!("{:.2} GB", free as f64 / (1024.0 * 1024.0 * 1024.0))
+    });
     crate::log_markdown(&format!(
-        "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
+        "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {} live free)",
         job.job_id,
         reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
         dir,
         already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
-        live_free as f64 / (1024.0 * 1024.0 * 1024.0),
+        live_free_text,
     ));
     drop(ledger);
     let guard = ReservationGuard {
@@ -807,7 +810,7 @@ mod tests {
     #[test]
     fn reservations_on_one_folder_reduce_its_drives_other_folders() {
         let mut ledger = HashMap::new();
-        let free = |p: &Path| if p.starts_with(r"C:\") { 15 } else { 12 };
+        let free = |p: &Path| Some(if p.starts_with(r"C:\") { 15 } else { 12 });
         let c_only = [PathBuf::from(r"C:\a"), PathBuf::from(r"C:\b")];
         let with_d = [
             PathBuf::from(r"C:\a"),
@@ -823,6 +826,22 @@ mod tests {
         assert_eq!(try_reserve(&mut ledger, &with_d, 10, 0, free), None);
         assert_eq!(ledger.get(&ledger_key(Path::new(r"C:\a"))), Some(&10));
         assert_eq!(ledger.get(&ledger_key(Path::new(r"D:\x"))), Some(&10));
+    }
+
+    /// A folder whose free space can't be read is reserved on, as it was when
+    /// "unknown" was the largest number; a known one still has to have room.
+    #[test]
+    fn an_unreadable_export_folder_still_takes_a_reservation() {
+        let mut ledger = HashMap::new();
+        let dirs = [PathBuf::from("no-drive-a")];
+        let hit = try_reserve(&mut ledger, &dirs, 10, 5, |_| None);
+        assert_eq!(hit, Some((PathBuf::from("no-drive-a"), 0, None)));
+        assert_eq!(ledger.get(&ledger_key(&dirs[0])), Some(&10));
+        // Reservations never make an unreadable folder refuse.
+        assert!(try_reserve(&mut ledger, &dirs, 10, 5, |_| None).is_some());
+        let mut ledger = HashMap::new();
+        assert_eq!(try_reserve(&mut ledger, &dirs, 10, 5, |_| Some(15)), None);
+        assert!(try_reserve(&mut ledger, &dirs, 10, 5, |_| Some(16)).is_some());
     }
 
     /// #120: the first clip of a kind reserves the raw estimate; once one

@@ -69,8 +69,13 @@ fn patched_demos_need(total_patched_bytes: u64, save_local_patched_copy: bool) -
 }
 
 /// The error for hl.exe's drive, when its free space is short of `required`.
-fn game_drive_short_of_room(hl_exe_parent: &Path, free: u64, required: u64) -> Option<String> {
-    (free < required).then(|| {
+/// A drive whose free space can't be read (`None`) is not reported short.
+fn game_drive_short_of_room(
+    hl_exe_parent: &Path,
+    free: Option<u64>,
+    required: u64,
+) -> Option<String> {
+    free.is_some_and(|free| free < required).then(|| {
         format!(
             "{} (hl.exe's own drive) has less than {:.1} GB free space for the patched demos.",
             hl_exe_parent.display(),
@@ -121,13 +126,21 @@ mod tests {
     #[test]
     fn hl_exes_drive_is_short_only_below_what_the_demos_need() {
         let game = Path::new("C:/Games/Half-Life");
-        assert_eq!(game_drive_short_of_room(game, 100, 100), None);
+        assert_eq!(game_drive_short_of_room(game, Some(100), 100), None);
         assert_eq!(
-            game_drive_short_of_room(game, 99, 3 * 1024 * 1024 * 1024 / 2).as_deref(),
+            game_drive_short_of_room(game, Some(99), 3 * 1024 * 1024 * 1024 / 2).as_deref(),
             Some(
                 "C:/Games/Half-Life (hl.exe's own drive) has less than 1.5 GB free space for the patched demos."
             )
         );
+    }
+
+    /// A game drive whose free space can't be read is let through, as before.
+    #[test]
+    fn an_unreadable_game_drive_is_not_short() {
+        let game = Path::new("C:/Games/Half-Life");
+        assert_eq!(game_drive_short_of_room(game, None, u64::MAX), None);
+        assert_eq!(game_drive_short_of_room(game, None, 0), None);
     }
 
     /// The capture drives are checked before hl.exe's drive is asked: a
