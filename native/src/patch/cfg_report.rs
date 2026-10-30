@@ -97,6 +97,27 @@ pub struct AsymmetricAfterRow {
     pub baseline: ValueSourceRow,
 }
 
+impl From<&crate::patch::cfg_scan::ValueConflict> for ValueConflictRow {
+    fn from(c: &crate::patch::cfg_scan::ValueConflict) -> Self {
+        ValueConflictRow {
+            cvar: c.cvar.clone(),
+            values: c.values.iter().map(ValueSourceRow::from).collect(),
+            effective: ValueSourceRow::from(&c.effective),
+            scheduled: c.values.iter().any(|v| v.source.is_scheduled()),
+        }
+    }
+}
+
+impl From<&crate::patch::cfg_scan::AsymmetricAfter> for AsymmetricAfterRow {
+    fn from(a: &crate::patch::cfg_scan::AsymmetricAfter) -> Self {
+        AsymmetricAfterRow {
+            cvar: a.cvar.clone(),
+            after: ValueSourceRow::from(&a.after),
+            baseline: ValueSourceRow::from(&a.baseline),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomCommandWarning {
@@ -331,72 +352,152 @@ pub struct CfgReportRequest {
 /// config file — the fix is always the user's to make. An empty report when
 /// the game folder can't be found.
 pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
-    let CfgReportRequest {
-        game_path,
-        init_commands,
-        scheduled_commands: custom_commands,
-        capture_fps,
-        decal_flush,
-        hook_runs_batch,
-    } = request;
-    // Seek Between Clips: the hook DLL runs both command lists through
-    // `ClientCmd`, which the demo filter never sees (`cfg_scan`'s filter
-    // section), so the filter tier applies only when the batch is patched.
-    let patched = !hook_runs_batch.unwrap_or_else(crate::patch::types::default_hook_runs_batch);
-    let exe = PathBuf::from(&game_path);
-    let Some(dir) = crate::shared::paths::mod_dir_for_exe(&exe) else {
+    let filter = DemoFilter::for_batch(request.hook_runs_batch);
+    let Some(dir) = game_mod_dir(&request.game_path) else {
         return CfgReport::default();
     };
-    if !dir.is_dir() {
-        return CfgReport::default();
-    }
-
     let scan = crate::patch::cfg_scan::scan(&dir);
     let config_cfg_writable = config_cfg_is_writable(&dir);
+    let cfg = pipeline_config(&request);
+    let effective_commands = crate::patch::final_init_commands(&cfg);
+    let init_commands = &request.init_commands;
+    let command_texts: Vec<String> = request
+        .scheduled_commands
+        .iter()
+        .map(|c| c.command.clone())
+        .collect();
 
-    // The list the engine will actually receive, so the app's own additions
-    // — the movie fps, the decal pin — are checked too. game_path is
-    // needed for `ring_limit`/`final_init_commands` to find the same
-    // executed configs `scan` above already found — without it, they
-    // cannot see anything a config states and would disagree with what a
-    // real capture actually does.
+    let custom = hazard_rows(&command_texts);
+    let banned_scheduled = banned_scheduled_rows(&command_texts);
+    let values = value_rules(ValueRuleInputs {
+        game_dir: &dir,
+        scan: &scan,
+        effective_commands: &effective_commands,
+        init_commands,
+        scheduled_commands: &request.scheduled_commands,
+        flagged: &flagged_cvars(&custom, &banned_scheduled),
+        filter,
+    });
+
+    CfgReport {
+        unseen: unseen_settings(&scan, &cfg, &effective_commands),
+        conflicts: values.conflicts,
+        asymmetric: values.asymmetric,
+        custom,
+        banned_init: banned_rows(init_commands),
+        banned_scheduled,
+        too_long_init: crate::patch::too_long_commands(init_commands),
+        too_long_scheduled: crate::patch::too_long_commands(&command_texts),
+        decal_default_ring: decal_default_ring(&cfg),
+        decal_flush_is_noop: is_decal_flush_noop(&cfg),
+        noop_init: noop_rows(&scan, init_commands),
+        filtered_init: filter.rows(init_commands),
+        filtered_scheduled: filter.rows(&command_texts),
+        filter_applies: filter.applies,
+        missing_exec: values.missing_exec,
+        fatal_cvars: fatal_rows(&scan),
+        renamed: renamed_everywhere(&scan, init_commands, &command_texts),
+        config_cfg_writable,
+    }
+}
+
+/// The mod folder (`dod/`) beside the game's `hl.exe`, when it exists.
+fn game_mod_dir(game_path: &str) -> Option<PathBuf> {
+    let dir = crate::shared::paths::mod_dir_for_exe(&PathBuf::from(game_path))?;
+    dir.is_dir().then_some(dir)
+}
+
+/// Whether the engine's demo command filter (#679) sees this batch's
+/// commands. Seek Between Clips: the hook DLL runs both command lists through
+/// `ClientCmd`, which the demo filter never sees (`cfg_scan`'s filter
+/// section), so the filter applies only when the batch is patched.
+#[derive(Debug, Clone, Copy)]
+struct DemoFilter {
+    applies: bool,
+}
+
+impl DemoFilter {
+    /// For a batch with Seek Between Clips as given (`None`: the default).
+    fn for_batch(hook_runs_batch: Option<bool>) -> Self {
+        DemoFilter {
+            applies: !hook_runs_batch.unwrap_or_else(crate::patch::types::default_hook_runs_batch),
+        }
+    }
+
+    /// Whether the engine drops `command` on the way in, wherever in the demo
+    /// it arrives (`cfg_scan::demo_filter_rule`). Never, when the filter
+    /// doesn't apply.
+    fn drops(self, command: &str) -> bool {
+        self.applies && crate::patch::cfg_scan::demo_filter_rule(command).is_some()
+    }
+
+    /// The rows for `commands` the filter drops; empty when it doesn't apply.
+    fn rows(self, commands: &[String]) -> Vec<FilteredCommandRow> {
+        if self.applies {
+            filtered_rows(commands)
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// The patcher config a capture with this request would run with.
+///
+/// Built so the list the engine will actually receive is checked, the app's
+/// own additions (the movie fps, the decal pin) included. `game_path` is
+/// needed for `ring_limit`/`final_init_commands` to find the same executed
+/// configs `cfg_scan::scan` finds — without it, they cannot see anything a
+/// config states and would disagree with what a real capture actually does.
+fn pipeline_config(request: &CfgReportRequest) -> crate::patch::PatcherConfig {
     let mut cfg = crate::patch::PatcherConfig {
-        init_commands: init_commands.clone(),
-        game_path: game_path.clone(),
+        init_commands: request.init_commands.clone(),
+        game_path: request.game_path.clone(),
         ..Default::default()
     };
-    if let Some(v) = capture_fps {
+    if let Some(v) = request.capture_fps {
         cfg.capture_fps = v;
     }
-    if let Some(v) = decal_flush {
+    if let Some(v) = request.decal_flush {
         cfg.decal_flush = v;
     }
+    cfg
+}
 
-    // Nothing states r_decals themselves — neither Initial Commands nor
-    // an auto-executed config (`ring_limit_from_game_config`, same
-    // precedence `ring_limit` itself resolves) — so the app's own default
-    // is about to silently apply. Worth saying so, even though there is
-    // nothing actually wrong with taking the default. Guarded to a
-    // nonzero ring: a 0 default would mean the flush is a no-op, which is
-    // a different (and louder) fact than "here is the default" — see
-    // decal_flush_is_noop below.
-    let decal_default_ring = (cfg.decal_flush
+/// The `r_decals` ring the flush will silently use: Flush Decals is on and
+/// nothing states r_decals itself — neither Initial Commands nor an
+/// auto-executed config (`ring_limit_from_game_config`, same precedence
+/// `ring_limit` itself resolves) — so the app's own default is about to
+/// apply. Worth saying so, even though there is nothing actually wrong with
+/// taking the default. Guarded to a nonzero ring: a 0 default would mean the
+/// flush is a no-op, which is a different (and louder) fact than "here is the
+/// default" — see [`is_decal_flush_noop`].
+fn decal_default_ring(cfg: &crate::patch::PatcherConfig) -> Option<u32> {
+    (cfg.decal_flush
         && crate::patch::ring_limit_from_init(&cfg.init_commands).is_none()
-        && crate::patch::ring_limit_from_game_config(&cfg).is_none())
-    .then(|| crate::patch::ring_limit(&cfg))
-    .filter(|&ring| ring > 0);
-    // The "louder fact" the comment above alludes to: a 0 ring makes the
-    // flush provably pointless, not merely undocumented. Checked
-    // independently of decal_default_ring above — this fires whether the
-    // 0 came from an explicit Initial Command, an executed config (same
-    // precedence as everything else here — see `ring_limit`), or, if it
-    // ever becomes settable, decal_ring_limit's own default being 0.
-    let decal_flush_is_noop = cfg.decal_flush && crate::patch::ring_limit(&cfg) == 0;
-    let effective_commands = crate::patch::final_init_commands(&cfg);
+        && crate::patch::ring_limit_from_game_config(cfg).is_none())
+    .then(|| crate::patch::ring_limit(cfg))
+    .filter(|&ring| ring > 0)
+}
 
-    // Anything the pipeline reads that a config sets and no init command
-    // even names — the genuinely silent case. Naming it at the same value
-    // still counts as seeing it, so that is not reported as unseen.
+/// Whether Flush Decals is on with a 0 ring: the flush is provably
+/// pointless, not merely undocumented. Independent of
+/// [`decal_default_ring`]: this fires whether the 0 came from an explicit
+/// Initial Command, an executed config (same precedence as everything else
+/// here — see `ring_limit`), or, if it ever becomes settable,
+/// decal_ring_limit's own default being 0.
+fn is_decal_flush_noop(cfg: &crate::patch::PatcherConfig) -> bool {
+    cfg.decal_flush && crate::patch::ring_limit(cfg) == 0
+}
+
+/// Anything the pipeline reads (`cfg_scan::WATCHED_CVARS`, in that order)
+/// that a config sets and no init command even names — the genuinely silent
+/// case. Naming it at the same value still counts as seeing it, so that is
+/// not reported as unseen.
+fn unseen_settings(
+    scan: &crate::patch::cfg_scan::CfgScan,
+    cfg: &crate::patch::PatcherConfig,
+    effective_commands: &[String],
+) -> Vec<CfgWarningRow> {
     let named: std::collections::HashSet<String> = effective_commands
         .iter()
         .filter_map(|c| c.split_whitespace().next().map(str::to_lowercase))
@@ -415,10 +516,9 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
     // — see `ring_limit`'s doc comment for why it used to be different):
     // a config's own value is read and used directly, with no pin needed
     // to make it "seen" the way `named` otherwise requires.
-    let capture_fov_stated = crate::patch::capture_fov_from_init(&init_commands).is_some();
+    let capture_fov_stated = crate::patch::capture_fov_from_init(&cfg.init_commands).is_some();
     let r_decals_stated_in_init = crate::patch::ring_limit_from_init(&cfg.init_commands).is_some();
-    let unseen = scan
-        .effective_settings()
+    scan.effective_settings()
         .into_iter()
         .filter(|s| !named.contains(&s.cvar.to_lowercase()))
         .filter(|s| {
@@ -435,19 +535,40 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
             file: s.file_name(),
             line: s.line,
         })
-        .collect();
+        .collect()
+}
 
-    // Refused outright, in both lists — see BANNED_COMMANDS' doc comment.
-    let banned_init: Vec<BannedCommandRow> =
-        crate::patch::cfg_scan::banned_commands(&init_commands)
+/// Commands refused outright (`cfg_scan::BANNED_COMMANDS`, see its doc
+/// comment), in either list.
+fn banned_rows(commands: &[String]) -> Vec<BannedCommandRow> {
+    crate::patch::cfg_scan::banned_commands(commands)
+        .into_iter()
+        .map(|(cvar, command)| BannedCommandRow { cvar, command })
+        .collect()
+}
+
+/// Scheduled Commands refused outright: the [`banned_rows`] first, then the
+/// ones fine as Initial Commands — that's how the decal flush is meant to be
+/// configured — but refused here (`cfg_scan::SCHEDULED_BANNED_COMMANDS`).
+fn banned_scheduled_rows(command_texts: &[String]) -> Vec<BannedCommandRow> {
+    let mut rows = banned_rows(command_texts);
+    rows.extend(
+        crate::patch::cfg_scan::scheduled_banned_commands(command_texts)
             .into_iter()
-            .map(|(cvar, command)| BannedCommandRow { cvar, command })
-            .collect();
+            .map(|(cvar, command)| BannedCommandRow { cvar, command }),
+    );
+    rows
+}
 
-    // Does nothing wherever found — see NOOP_IN_INIT_COMMANDS's doc
-    // comment for why.
-    let mut noop_init: Vec<NoopCommandRow> =
-        crate::patch::cfg_scan::noop_commands_in_init(&init_commands)
+/// Commands that do nothing wherever found (see `NOOP_IN_INIT_COMMANDS`'s
+/// doc comment for why): Initial Commands first, then the value a config
+/// the engine executes leaves in effect.
+fn noop_rows(
+    scan: &crate::patch::cfg_scan::CfgScan,
+    init_commands: &[String],
+) -> Vec<NoopCommandRow> {
+    let mut rows: Vec<NoopCommandRow> =
+        crate::patch::cfg_scan::noop_commands_in_init(init_commands)
             .into_iter()
             .map(|(cvar, command)| NoopCommandRow {
                 cvar,
@@ -457,91 +578,89 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
             .collect();
     for &cvar in crate::patch::cfg_scan::NOOP_IN_INIT_COMMANDS {
         if let Some(setting) = scan.effective(cvar) {
-            noop_init.push(NoopCommandRow {
+            rows.push(NoopCommandRow {
                 cvar: cvar.to_string(),
                 command: format!("{} {}", cvar, setting.value),
                 source: format!("{}, line {}", setting.file_name(), setting.line),
             });
         }
     }
+    rows
+}
 
-    // Custom commands are scheduled into playback, so they run after the
-    // configs AND after the init commands, and are the only place a value
-    // can change mid-demo.
-    let mut custom = Vec::new();
-    let command_texts: Vec<String> = custom_commands.iter().map(|c| c.command.clone()).collect();
-    let mut banned_scheduled: Vec<BannedCommandRow> =
-        crate::patch::cfg_scan::banned_commands(&command_texts)
-            .into_iter()
-            .map(|(cvar, command)| BannedCommandRow { cvar, command })
-            .collect();
-    // Fine as Initial Commands — that's how the decal flush is meant to be
-    // configured — but refused outright here: see
-    // `cfg_scan::SCHEDULED_BANNED_COMMANDS`.
-    banned_scheduled.extend(
-        crate::patch::cfg_scan::scheduled_banned_commands(&command_texts)
-            .into_iter()
-            .map(|(cvar, command)| BannedCommandRow { cvar, command }),
-    );
-    // Dropped by the engine on the way in (#679), wherever in the demo
-    // they arrive — see `cfg_scan::demo_filter_rule`. Only a patched
-    // batch puts them in the demo.
-    let filter = |c: &str| {
-        if patched {
-            crate::patch::cfg_scan::demo_filter_rule(c)
-        } else {
-            None
-        }
-    };
-    let (filtered_init, filtered_scheduled) = if patched {
-        (filtered_rows(&init_commands), filtered_rows(&command_texts))
-    } else {
-        (Vec::new(), Vec::new())
-    };
-    // Every scheduled `r_decals` breaks the flush, however many there are,
-    // so the hazard list is not deduplicated the way the overrides are.
-    for (cvar, command) in crate::patch::cfg_scan::mid_demo_hazards(&command_texts) {
-        custom.push(CustomCommandWarning {
+/// Scheduled Commands that must not run mid-demo. Custom commands are
+/// scheduled into playback, so they run after the configs AND after the init
+/// commands, and are the only place a value can change mid-demo. Every
+/// scheduled `r_decals` breaks the flush, however many there are, so the
+/// list is not deduplicated the way the value rules are.
+fn hazard_rows(command_texts: &[String]) -> Vec<CustomCommandWarning> {
+    crate::patch::cfg_scan::mid_demo_hazards(command_texts)
+        .into_iter()
+        .map(|(cvar, command)| CustomCommandWarning {
             command,
             cvar,
             kind: "hazard".to_string(),
             replaced_value: String::new(),
             source: String::new(),
-        });
-    }
+        })
+        .collect()
+}
 
-    // The two value rules (#216). Scheduled commands already reported as
-    // hazards or banned are left out: each has its own, louder warning.
-    // So are the ones the demo filter drops, which set nothing at all.
-    let flagged: std::collections::HashSet<String> = custom
+/// The cvars (lowercase) of Scheduled Commands already reported as hazards or
+/// banned. The value rules leave them out: each has its own, louder warning.
+fn flagged_cvars(
+    hazards: &[CustomCommandWarning],
+    banned_scheduled: &[BannedCommandRow],
+) -> std::collections::HashSet<String> {
+    hazards
         .iter()
         .map(|w| w.cvar.to_lowercase())
         .chain(banned_scheduled.iter().map(|b| b.cvar.to_lowercase()))
-        .collect();
-    let scheduled: Vec<crate::patch::cfg_scan::ScheduledCommand> =
-        application_order(&custom_commands)
-            .into_iter()
-            .filter(|c| filter(&c.command).is_none())
-            .filter(|c| {
-                crate::patch::cfg_scan::assigned_cvar(&c.command)
-                    .is_none_or(|(cvar, _)| !flagged.contains(&cvar.to_lowercase()))
-            })
-            .map(|c| crate::patch::cfg_scan::ScheduledCommand {
-                command: &c.command,
-                after: c.relation == CommandRelation::After,
-                offset_seconds: c.offset,
-            })
-            .collect();
+        .collect()
+}
+
+/// What [`value_rules`] reads.
+struct ValueRuleInputs<'a> {
+    game_dir: &'a Path,
+    scan: &'a crate::patch::cfg_scan::CfgScan,
+    /// Initial Commands as the engine receives them, the app's own included.
+    effective_commands: &'a [String],
+    /// Initial Commands as the user typed them.
+    init_commands: &'a [String],
+    scheduled_commands: &'a [CustomCommand],
+    /// From [`flagged_cvars`].
+    flagged: &'a std::collections::HashSet<String>,
+    filter: DemoFilter,
+}
+
+/// The two value rules' rows (#216), and the Initial `exec`s found missing on
+/// the way.
+struct ValueRules {
+    conflicts: Vec<ValueConflictRow>,
+    asymmetric: Vec<AsymmetricAfterRow>,
+    missing_exec: Vec<String>,
+}
+
+/// The two value rules (#216) over the configs, Initial Commands and
+/// Scheduled Commands. Commands the demo filter drops set nothing at all, so
+/// they are left out; so are flagged Scheduled Commands. An `exec` that gets
+/// through runs its file: it is followed (read-only), so its settings join
+/// the value rules where the `exec` stands.
+fn value_rules(input: ValueRuleInputs) -> ValueRules {
+    let scheduled = value_rule_schedule(input.scheduled_commands, input.flagged, input.filter);
     // Initial Commands the demo filter drops set nothing either. The
     // pipeline's own additions all get through (pinned by a builder test),
     // so dropping from the whole list keeps the user's count right.
-    let passes = |c: &&String| filter(c).is_none();
-    let applied_init: Vec<String> = effective_commands.iter().filter(passes).cloned().collect();
-    // An `exec` that gets through runs its file: follow it (read-only),
-    // so its settings join the value rules where the `exec` stands.
+    let passes = |c: &&String| !input.filter.drops(c);
+    let applied_init: Vec<String> = input
+        .effective_commands
+        .iter()
+        .filter(passes)
+        .cloned()
+        .collect();
     let execs: Vec<crate::patch::cfg_scan::InitialExec> = applied_init
         .iter()
-        .filter_map(|c| crate::patch::cfg_scan::follow_initial_exec(&dir, c))
+        .filter_map(|c| crate::patch::cfg_scan::follow_initial_exec(input.game_dir, c))
         .collect();
     let missing_exec: Vec<String> = execs
         .iter()
@@ -549,36 +668,55 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
         .map(|e| e.command.clone())
         .collect();
     let values = crate::patch::cfg_scan::value_warnings_with_execs(
-        &scan,
+        input.scan,
         &applied_init,
-        init_commands.iter().filter(passes).count(),
+        input.init_commands.iter().filter(passes).count(),
         &scheduled,
         &execs,
     );
-    let conflicts: Vec<ValueConflictRow> = values
-        .conflicts
-        .iter()
-        .map(|c| ValueConflictRow {
-            cvar: c.cvar.clone(),
-            values: c.values.iter().map(ValueSourceRow::from).collect(),
-            effective: ValueSourceRow::from(&c.effective),
-            scheduled: c.values.iter().any(|v| v.source.is_scheduled()),
-        })
-        .collect();
-    let asymmetric: Vec<AsymmetricAfterRow> = values
-        .asymmetric
-        .iter()
-        .map(|a| AsymmetricAfterRow {
-            cvar: a.cvar.clone(),
-            after: ValueSourceRow::from(&a.after),
-            baseline: ValueSourceRow::from(&a.baseline),
-        })
-        .collect();
+    ValueRules {
+        conflicts: values
+            .conflicts
+            .iter()
+            .map(ValueConflictRow::from)
+            .collect(),
+        asymmetric: values
+            .asymmetric
+            .iter()
+            .map(AsymmetricAfterRow::from)
+            .collect(),
+        missing_exec,
+    }
+}
 
-    // Config-file values DoD's own client will quit the game over --
-    // distinct from banned_init/banned_scheduled, which is about commands
-    // typed into the pipeline's own fields (see CfgFatalRow's doc comment).
-    let fatal_cvars: Vec<CfgFatalRow> = crate::patch::cfg_scan::fatal_cvar_hazards(&scan)
+/// The Scheduled Commands the value rules weigh, in the order the engine
+/// reaches them ([`application_order`]): not the ones the demo filter drops,
+/// nor the ones whose cvar is `flagged`.
+fn value_rule_schedule<'a>(
+    commands: &'a [CustomCommand],
+    flagged: &std::collections::HashSet<String>,
+    filter: DemoFilter,
+) -> Vec<crate::patch::cfg_scan::ScheduledCommand<'a>> {
+    application_order(commands)
+        .into_iter()
+        .filter(|c| !filter.drops(&c.command))
+        .filter(|c| {
+            crate::patch::cfg_scan::assigned_cvar(&c.command)
+                .is_none_or(|(cvar, _)| !flagged.contains(&cvar.to_lowercase()))
+        })
+        .map(|c| crate::patch::cfg_scan::ScheduledCommand {
+            command: &c.command,
+            after: c.relation == CommandRelation::After,
+            offset_seconds: c.offset,
+        })
+        .collect()
+}
+
+/// Config-file values DoD's own client will quit the game over -- distinct
+/// from the banned lists, which are about commands typed into the
+/// pipeline's own fields (see [`CfgFatalRow`]'s doc comment).
+fn fatal_rows(scan: &crate::patch::cfg_scan::CfgScan) -> Vec<CfgFatalRow> {
+    crate::patch::cfg_scan::fatal_cvar_hazards(scan)
         .into_iter()
         .map(|f| CfgFatalRow {
             file: f.file_name(),
@@ -587,10 +725,17 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
             required: f.required,
             line: f.line,
         })
-        .collect();
+        .collect()
+}
 
-    // Configs first, as the engine runs them first.
-    let mut renamed: Vec<RenamedCommandRow> = scan
+/// Hook console names from before #555 in the configs, Initial Commands and
+/// Scheduled Commands. Configs first, as the engine runs them first.
+fn renamed_everywhere(
+    scan: &crate::patch::cfg_scan::CfgScan,
+    init_commands: &[String],
+    command_texts: &[String],
+) -> Vec<RenamedCommandRow> {
+    let mut rows: Vec<RenamedCommandRow> = scan
         .renamed
         .iter()
         .map(|r| RenamedCommandRow {
@@ -599,29 +744,9 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
             source: format!("{}, line {}", r.file_name(), r.line),
         })
         .collect();
-    renamed.extend(renamed_rows(&init_commands, "Initial Commands"));
-    renamed.extend(renamed_rows(&command_texts, "Scheduled Commands"));
-
-    CfgReport {
-        unseen,
-        conflicts,
-        asymmetric,
-        custom,
-        banned_init,
-        banned_scheduled,
-        too_long_init: crate::patch::too_long_commands(&init_commands),
-        too_long_scheduled: crate::patch::too_long_commands(&command_texts),
-        decal_default_ring,
-        decal_flush_is_noop,
-        noop_init,
-        filtered_init,
-        filtered_scheduled,
-        filter_applies: patched,
-        missing_exec,
-        fatal_cvars,
-        renamed,
-        config_cfg_writable,
-    }
+    rows.extend(renamed_rows(init_commands, "Initial Commands"));
+    rows.extend(renamed_rows(command_texts, "Scheduled Commands"));
+    rows
 }
 
 #[cfg(test)]
@@ -1242,6 +1367,35 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_scheduled_command_never_conflicts_with_a_config() {
+        // The test above drops both sides; here a config states the value,
+        // and configs are never filtered, so only the scheduled side's
+        // filter keeps this from being a conflict.
+        let config = ("dod/config.cfg", "exec movie.cfg\ncl_killsound \"0\"\n");
+        let custom = || vec![scheduled("cl_killsound 1", "Before", 2.0)];
+        let patched = report_with_files("dropped_vs_config", &[config], &[], custom(), Some(false));
+        assert_eq!(
+            patched.filtered_scheduled.len(),
+            1,
+            "{:?}",
+            patched.filtered_scheduled
+        );
+        assert!(
+            conflict(&patched, "cl_killsound").is_none(),
+            "{:?}",
+            patched.conflicts
+        );
+
+        // Seek Between Clips: nothing is filtered, so the two do conflict.
+        let seek = report_with_files("kept_vs_config", &[config], &[], custom(), Some(true));
+        assert!(
+            conflict(&seek, "cl_killsound").is_some(),
+            "{:?}",
+            seek.conflicts
+        );
+    }
+
+    #[test]
     fn with_seek_between_clips_on_nothing_is_reported_as_dropped() {
         // The hook DLL runs both lists through ClientCmd, past the filter.
         let r = report(
@@ -1635,6 +1789,184 @@ mod tests {
                 .any(|v| v.value == "4000"),
             "{:?}",
             r.conflicts
+        );
+    }
+
+    // ── Row order and wording, list by list ──────────────────────────────────
+    //
+    // Pinned before `cfg_report` was split into stages (#1177), so each stage
+    // is held to the rows it produced as one function.
+
+    #[test]
+    fn unseen_rows_name_each_config_setting_with_its_file_and_line() {
+        // Flush off: nothing pins r_decals. mirv_fov is read from the config
+        // directly, mirv_movie_fps is pinned by the app, and the pipeline
+        // never reads hud_deathnotice_time, so it is not "unseen" either.
+        let (_dir, game) = fake_game("unseen_rows");
+        let r = report_for(game, Vec::new(), Vec::new(), Some(120), Some(false), None);
+
+        let rows: Vec<(&str, &str, &str, usize)> = r
+            .unseen
+            .iter()
+            .map(|u| (u.cvar.as_str(), u.value.as_str(), u.file.as_str(), u.line))
+            .collect();
+        assert_eq!(rows, [("r_decals", "0", "movie.cfg", 1)]);
+    }
+
+    #[test]
+    fn unseen_rows_follow_the_watched_cvars_order_not_the_configs() {
+        // An Initial Command stating the fov makes a config's other fov cvar
+        // unseen. The config states default_fov first; the rows still list
+        // r_decals first (`cfg_scan::WATCHED_CVARS`). Flush off, so nothing
+        // pins r_decals.
+        let root = Scratch::new("cfgrep_unseen_order_off");
+        let dod = root.join("dod");
+        std::fs::create_dir_all(&dod).unwrap();
+        std::fs::write(dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
+        std::fs::write(
+            dod.join("movie.cfg"),
+            "default_fov \"90\"\nr_decals \"0\"\n",
+        )
+        .unwrap();
+        let exe = root.join("hl.exe");
+        std::fs::write(&exe, b"").unwrap();
+        let r = report_for(
+            exe.to_string_lossy().to_string(),
+            vec!["mirv_fov 100".to_string()],
+            Vec::new(),
+            Some(120),
+            Some(false),
+            None,
+        );
+
+        let rows: Vec<(&str, &str, usize)> = r
+            .unseen
+            .iter()
+            .map(|u| (u.cvar.as_str(), u.value.as_str(), u.line))
+            .collect();
+        assert_eq!(rows, [("r_decals", "0", 2), ("default_fov", "90", 1)]);
+    }
+
+    #[test]
+    fn noop_rows_list_initial_commands_before_the_configs() {
+        let (_dir, game) = fake_game_with_mirv_movie_filename("noop_order");
+        let r = report_for(
+            game,
+            vec!["mirv_movie_filename take".to_string()],
+            Vec::new(),
+            Some(120),
+            Some(true),
+            None,
+        );
+
+        let rows: Vec<(&str, &str, &str)> = r
+            .noop_init
+            .iter()
+            .map(|n| (n.cvar.as_str(), n.command.as_str(), n.source.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "mirv_movie_filename",
+                    "mirv_movie_filename take",
+                    "Initial Commands"
+                ),
+                (
+                    "mirv_movie_filename",
+                    "mirv_movie_filename clip",
+                    "movie.cfg, line 1"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn banned_scheduled_lists_banned_commands_before_the_decal_flush_ones() {
+        let r = report(
+            "banned_order",
+            &[],
+            &["r_decals 128", "host_framerate 0.05"],
+            120,
+        );
+
+        let rows: Vec<(&str, &str)> = r
+            .banned_scheduled
+            .iter()
+            .map(|b| (b.cvar.as_str(), b.command.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("host_framerate", "host_framerate 0.05"),
+                ("r_decals", "r_decals 128"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_banned_scheduled_command_sets_no_value_in_the_value_rules() {
+        // Initial 1 against Scheduled 2 would be a conflict, but the
+        // scheduled one is refused and has its own, louder row.
+        let r = report("banned_no_value", &["dem_speed 1"], &["dem_speed 2"], 120);
+
+        assert!(
+            r.banned_scheduled.iter().any(|b| b.cvar == "dem_speed"),
+            "{:?}",
+            r.banned_scheduled
+        );
+        assert!(conflict(&r, "dem_speed").is_none(), "{:?}", r.conflicts);
+    }
+
+    #[test]
+    fn a_hazard_row_names_the_command_and_nothing_it_displaces() {
+        let r = report("hazard_row", &[], &["gl_widescreenfov 1"], 120);
+
+        let rows: Vec<(&str, &str, &str, &str, &str)> = r
+            .custom
+            .iter()
+            .map(|c| {
+                (
+                    c.command.as_str(),
+                    c.cvar.as_str(),
+                    c.kind.as_str(),
+                    c.replaced_value.as_str(),
+                    c.source.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [("gl_widescreenfov 1", "gl_widescreenfov", "hazard", "", "")]
+        );
+    }
+
+    #[test]
+    fn renamed_names_list_the_configs_then_initial_then_scheduled_commands() {
+        let r = report_with_files(
+            "renamed_order",
+            &[(
+                "dod/config.cfg",
+                "exec movie.cfg\ndodstudio_hide_scoreboard \"1\"\n",
+            )],
+            &["dodstudio_hide_scoreboard 0"],
+            vec![scheduled("dodstudio_hide_scoreboard 1", "Before", 2.0)],
+            None,
+        );
+
+        let rows: Vec<(&str, &str, &str)> = r
+            .renamed
+            .iter()
+            .map(|n| (n.old.as_str(), n.new.as_str(), n.source.as_str()))
+            .collect();
+        let (old, new) = ("dodstudio_hide_scoreboard", "ds_hud_hide_scoreboard");
+        assert_eq!(
+            rows,
+            [
+                (old, new, "config.cfg, line 2"),
+                (old, new, "Initial Commands"),
+                (old, new, "Scheduled Commands"),
+            ]
         );
     }
 }
