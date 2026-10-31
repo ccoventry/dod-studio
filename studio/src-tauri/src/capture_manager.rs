@@ -1503,13 +1503,16 @@ pub async fn start_capture_batch_impl(
         }
 
         // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
-        let trimmed = match crate::trimmed_demos::for_batch(
+        let crate::trimmed_demos::BatchCopies {
+            copies: trimmed,
+            pins: trim_pins,
+        } = match crate::trimmed_demos::for_batch(
             &app_handle_clone,
             &patch_jobs,
             &patcher_config.game_path,
             &cancel_token_arc,
         ) {
-            Ok(copies) => copies,
+            Ok(batch) => batch,
             Err(status) => {
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
@@ -1851,6 +1854,8 @@ pub async fn start_capture_batch_impl(
         std::thread::spawn(move || {
             // Ends Render While Capturing however the listener ends.
             let _room_guard = RoomGuard(room.clone());
+            // The batch's trimmed copies can't be pruned until it ends (#207).
+            let _trim_pins = trim_pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per

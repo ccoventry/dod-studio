@@ -291,6 +291,30 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     )
 }
 
+// ── patch/trimmed_copies.rs (#207) ────────────────────────────────────────
+
+/// Why a trimmed copy wasn't saved: its drive is too full. Read after "no
+/// trimmed copy could be made: ".
+pub fn no_room_for_trimmed_copy(folder: &std::path::Path, free: u64, needed: u64) -> String {
+    let gb = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
+    let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
+    format!(
+        "the drive it goes on ({}) has {:.1} GB free, and the copy needs {:.0} MB plus {:.0} GB to spare; free some space there and try again",
+        folder.display(),
+        gb(free),
+        mb(needed),
+        gb(crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES)
+    )
+}
+
+/// The activity log's line when a demo's trimmed copy is made again because
+/// its map's `.bsp` is not the one the copy was made with.
+pub fn trimmed_copy_map_changed(demo: &str) -> String {
+    format!(
+        "✂️ **Trimmed copy** — `{demo}`'s map isn't the one its trimmed copy was made with (the .bsp changed, or was added or removed), so the copy is made again"
+    )
+}
+
 // ── crash_maps.rs (#207) ──────────────────────────────────────────────────
 
 /// What the hook log says about a crash that ended a batch.
