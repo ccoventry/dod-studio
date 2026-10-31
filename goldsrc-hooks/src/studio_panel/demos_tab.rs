@@ -337,6 +337,33 @@ pub(super) fn folder_box_shown(cvar: &str, folders: bool, counts: bool) -> Optio
     }
 }
 
+/// The lines of the Settings tab with no box showing, so the rows below can
+/// move up over them instead of leaving a gap (#787). `rows` is each box's
+/// top, height and whether it shows; a line closes when every box on it is
+/// hidden. Returns each closed line's top and how far the rows under it move
+/// up: the distance to the next line, else the box's own height.
+pub(super) fn closed_lines(rows: &[(i32, i32, bool)]) -> Vec<(i32, i32)> {
+    let mut tops: Vec<i32> = rows.iter().map(|r| r.0).collect();
+    tops.sort_unstable();
+    tops.dedup();
+    tops.iter()
+        .enumerate()
+        .filter(|&(_, &top)| rows.iter().filter(|r| r.0 == top).all(|r| !r.2))
+        .map(|(i, &top)| {
+            let step = tops.get(i + 1).map_or_else(
+                || rows.iter().find(|r| r.0 == top).map_or(0, |r| r.1),
+                |next| next - top,
+            );
+            (top, step)
+        })
+        .collect()
+}
+
+/// How far a row whose top is `top` moves up over the `closed` lines above it.
+pub(super) fn moved_up(closed: &[(i32, i32)], top: i32) -> i32 {
+    closed.iter().filter(|c| c.0 < top).map(|c| c.1).sum()
+}
+
 /// [`folder_settings`] before anything was seen: the tab has only just
 /// filled its list.
 pub(super) const SETTINGS_UNSEEN: u8 = 0xff;
@@ -636,6 +663,32 @@ mod tests {
             display_name("temp demos/", shown_count(true, counted).as_deref()),
             format!("{FOLDER_MARK}temp demos/")
         );
+    }
+
+    #[test]
+    fn a_line_with_every_box_hidden_closes_and_the_rows_below_move_up() {
+        // The tab's folder rows: two lines of two boxes, then one more row.
+        let rows = |sub: bool| {
+            vec![
+                (690, 22, true),
+                (690, 22, true),
+                (712, 22, sub),
+                (712, 22, sub),
+                (734, 22, true),
+            ]
+        };
+        assert!(closed_lines(&rows(true)).is_empty());
+        let closed = closed_lines(&rows(false));
+        assert_eq!(closed, [(712, 22)]);
+        assert_eq!(moved_up(&closed, 690), 0);
+        assert_eq!(moved_up(&closed, 712), 0);
+        assert_eq!(moved_up(&closed, 734), 22);
+        // One box showing keeps its line open.
+        let half = [(712, 22, true), (712, 22, false), (734, 22, true)];
+        assert!(closed_lines(&half).is_empty());
+        // A closed last line moves nothing, and a gap larger than a box counts whole.
+        assert_eq!(closed_lines(&[(0, 22, true), (30, 22, false)]), [(30, 22)]);
+        assert_eq!(closed_lines(&[(0, 22, false), (30, 22, true)]), [(0, 30)]);
     }
 
     #[test]
