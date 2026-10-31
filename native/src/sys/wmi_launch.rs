@@ -191,10 +191,7 @@ fn settle(error: WmiLaunchError, found: Option<u32>) -> Result<u32, WmiLaunchErr
     match (error, found) {
         (WmiLaunchError::Cancelled(_), found) => Err(WmiLaunchError::Cancelled(found)),
         (error, Some(pid)) => {
-            crate::log_markdown(&format!(
-                "[launch] WMI's call ended without an answer ({error}), but it had started the \
-                 launcher (PID {pid}): that one is used, not a second"
-            ));
+            crate::log_markdown(&crate::messages::wmi_ended_without_answer(&error, pid));
             Ok(pid)
         }
         (error, None) => Err(error),
