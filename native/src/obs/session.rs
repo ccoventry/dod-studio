@@ -461,6 +461,28 @@ impl ObsSession {
         self.dead || self.refused.is_some()
     }
 
+    /// A session whose OBS went away and couldn't be reached again, for the
+    /// capture engine's tests of how a batch ends on that.
+    #[cfg(test)]
+    pub(crate) fn lost_for_tests() -> Self {
+        Self {
+            client: Arc::new(Mutex::new(None)),
+            cfg: ObsConfig::default(),
+            dead: true,
+            refused: None,
+            take_folders: Vec::new(),
+            next_block: 0,
+            active: None,
+            active_since: None,
+            obs_started: None,
+            previous_scene: None,
+            previous_profile: None,
+            frame_stats_baseline: None,
+            recorded: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+
     /// Why OBS refused to start recording, when that is what ended the batch.
     pub fn refused(&self) -> Option<&str> {
         self.refused.as_deref()
