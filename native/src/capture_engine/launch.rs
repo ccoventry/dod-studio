@@ -201,8 +201,10 @@ pub(super) fn start_game(
         // (`Launcher::spawn_unless_cancelled`), and a game it got as far as
         // starting goes too.
         Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-            let mut game = super::game::BatchGame::new(games_before_launch, None);
-            super::game::kill_hl_exe_and_wait(&mut super::processes::Live::new(), &mut game);
+            if cancel_may_leave_a_game(&e) {
+                let mut game = super::game::BatchGame::new(games_before_launch, None);
+                super::game::kill_hl_exe_and_wait(&mut super::processes::Live::new(), &mut game);
+            }
             let _ = batch.tx.send(super::EngineEvent::Cancelled);
             std::fs::remove_file(&cfg_path).ok();
             return None;
@@ -237,6 +239,14 @@ pub(super) fn start_game(
     })
 }
 
+/// Whether a launch cancelled while WMI was starting HLAE may have left a
+/// game of the batch's to end: only when WMI had started the launcher. With
+/// none started, a new hl.exe is another launch's or the user's, never this
+/// batch's (#1213).
+fn cancel_may_leave_a_game(error: &std::io::Error) -> bool {
+    crate::sys::launcher::LaunchCancelled::of(error).is_some_and(|c| c.started.is_some())
+}
+
 /// Starts the HLAE launcher, or for a batch in the open game, nothing.
 fn start_launcher(
     cmd: &mut std::process::Command,
@@ -263,6 +273,21 @@ mod tests {
     use super::*;
     use crate::patch::{CaptureMode, PatcherConfig};
     use std::path::PathBuf;
+
+    /// A cancel during the WMI launch ends a new game only when WMI had
+    /// started the launcher: with none, no hl.exe can be this batch's.
+    #[test]
+    fn a_cancelled_launch_ends_a_game_only_when_it_started_the_launcher() {
+        use crate::sys::launcher::LaunchCancelled;
+        let cancelled = |started| {
+            std::io::Error::new(std::io::ErrorKind::Interrupted, LaunchCancelled { started })
+        };
+        assert!(cancel_may_leave_a_game(&cancelled(Some(12))));
+        assert!(!cancel_may_leave_a_game(&cancelled(None)));
+        assert!(!cancel_may_leave_a_game(&std::io::Error::from(
+            std::io::ErrorKind::Interrupted
+        )));
+    }
 
     /// The batch starts on whatever the plan put first: the primer without the
     /// hook DLL, dodstudio_chain_01 with it (#365).

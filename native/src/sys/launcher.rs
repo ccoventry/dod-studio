@@ -25,6 +25,31 @@ const ACCESS_DENIED: i32 = 5;
 /// How long a killed launcher Studio doesn't own has to leave the list.
 const KILL_WAIT: Duration = Duration::from_secs(2);
 
+/// Why [`Launcher::spawn_unless_cancelled`] failed when the launch was
+/// cancelled, inside its [`std::io::ErrorKind::Interrupted`] error: the
+/// launcher WMI had started by then (already ended), if any. A caller ends a
+/// game that launcher may have started only when there was one: with none,
+/// any new hl.exe is someone else's (#1213).
+#[derive(Debug)]
+pub struct LaunchCancelled {
+    pub started: Option<u32>,
+}
+
+impl LaunchCancelled {
+    /// The cancel `error` carries, when it is one.
+    pub fn of(error: &std::io::Error) -> Option<&Self> {
+        error.get_ref()?.downcast_ref()
+    }
+}
+
+impl std::fmt::Display for LaunchCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cancelled while the launcher was starting")
+    }
+}
+
+impl std::error::Error for LaunchCancelled {}
+
 /// The HLAE launcher a launch started.
 pub struct Launcher {
     kind: Kind,
@@ -82,7 +107,7 @@ impl Launcher {
                 ));
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Interrupted,
-                    "cancelled while the launcher was starting",
+                    LaunchCancelled { started },
                 ))
             }
             Err(e) => {
