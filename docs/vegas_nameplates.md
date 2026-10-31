@@ -27,14 +27,18 @@ A clip gets no nameplate when its player has none set, when Studio doesn't know 
 
 The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Nameplates.cs).
 
-1. Put the clips on the timeline: File > Import > EDL Text File with the EDL (or drag the clips in yourself; the script goes by each clip's file, not its place).
-2. Tools > Scripting > **Run Script…**, and pick `DoD Studio Nameplates.cs`.
+1. Put the clips on the timeline: File > Import > EDL Text File with the EDL (or drag the clips in yourself; the script goes by each clip's file, not its place). The import dialog only lists `*.txt` files: switch its file type to all files, or type `*.*` in the file name box, to see the `.edl`.
+2. **Edit > Select None.** VEGAS leaves the first imported event selected, and the script works on the selected clips only when any are selected, so skipping this gives you one nameplate.
+3. Tools > Scripting > **Run Script…**, and pick `DoD Studio Nameplates.cs`.
    To have it in the Tools > Scripting menu, copy it into `Documents\Vegas Script Menu` and use Tools > Scripting > Rescan Script Menu Folder.
-3. With some clips selected it does only those; with none selected, every video clip on the timeline.
+
+With some clips selected it does only those; with none selected, every video clip on the timeline. The box at the end says which it did.
 
 It adds a track called **Nameplates** above the topmost of those clips, and on it one still per clip: the player's nameplate, from the clip's start to its end, faded in and out, in the bottom-left corner. A clip you slowed down or trimmed in VEGAS before running it gets a nameplate as long as it is now. A box then says how many it added and why any clip got none.
 
-It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away. Running it again adds a second track, so undo the first run (or delete its track) first.
+It never saves the project. Everything it adds is one undo step: Ctrl+Z takes it all away.
+
+Running it again reuses the **Nameplates** track (the first video track with that name) and adds a nameplate only to clips that have none over their exact start and length, so a rerun doesn't stack duplicates. A clip you stretched or trimmed since gets a new one and its old one stays for you to delete. The box says how many clips already had one.
 
 ### Changing the defaults
 

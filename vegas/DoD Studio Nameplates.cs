@@ -12,13 +12,15 @@
  * Players > Nameplate. How to use it: docs/vegas_nameplates.md.
  *
  * Run it from Tools > Scripting > Run Script... with the clips on the
- * timeline. With some clips selected it does only those; with none selected,
- * every clip. It looks for clip lists in the clips' own folders (and the
+ * timeline. With some clips selected it does only those (File > Import > EDL
+ * leaves the first imported clip selected: use Edit > Select None first); with
+ * none selected, every clip. It looks for clip lists in the clips' own folders (and the
  * folder above each), and asks for one when it finds none that fits.
  *
  * It never saves the project. Everything it adds is one undo step
- * (Edit > Undo "DoD Studio nameplates", or Ctrl+Z). Running it again adds
- * another track: undo the first run, or delete its track, before re-running.
+ * (Edit > Undo "DoD Studio nameplates", or Ctrl+Z). Running it again reuses
+ * the "Nameplates" track and adds only the clips that have no nameplate over
+ * their exact start and length yet.
  */
 
 using System;
@@ -82,7 +84,8 @@ public class EntryPoint
     public void FromVegas(Vegas vegas)
     {
         Project project = vegas.Project;
-        List<VideoEvent> clips = ClipsToDo(project);
+        bool selectedOnly;
+        List<VideoEvent> clips = ClipsToDo(project, out selectedOnly);
         if (clips.Count == 0)
         {
             Say("There are no video clips on the timeline.");
@@ -118,33 +121,70 @@ public class EntryPoint
             else placed.Add(pair.Key);
         }
 
+        // A clip that already has a nameplate over its exact span is left alone.
+        VideoTrack existing = FindTrack(project);
+        List<VideoEvent> todo = new List<VideoEvent>();
+        int alreadyThere = 0;
+        foreach (VideoEvent clip in placed)
+        {
+            if (existing != null && HasNameplate(existing, clip)) alreadyThere++;
+            else todo.Add(clip);
+        }
+
         int added = 0;
-        if (placed.Count > 0)
+        if (todo.Count > 0)
         {
             using (UndoBlock undo = new UndoBlock(project, UNDO_NAME))
             {
-                VideoTrack track = new VideoTrack(project, TopTrackIndex(placed), TRACK_NAME);
-                project.Tracks.Add(track);
-                foreach (VideoEvent clip in placed)
+                VideoTrack track = existing;
+                if (track == null)
+                {
+                    track = new VideoTrack(project, TopTrackIndex(todo), TRACK_NAME);
+                    project.Tracks.Add(track);
+                }
+                foreach (VideoEvent clip in todo)
                 {
                     if (AddNameplate(project, track, clip, matched[clip])) added++;
                 }
                 // No picture opened: leave no empty track behind.
-                if (added == 0) project.Tracks.Remove(track);
+                if (existing == null && added == 0) project.Tracks.Remove(track);
             }
         }
 
-        Say(Summary(added, placed.Count - added, notListed, noNameplate, missingFiles, manifests));
+        Say(Summary(added, todo.Count - added, alreadyThere, notListed, noNameplate, missingFiles, manifests, selectedOnly, clips.Count));
+    }
+
+    /// The first video track named TRACK_NAME, or null.
+    static VideoTrack FindTrack(Project project)
+    {
+        foreach (Track track in project.Tracks)
+        {
+            if (track.IsVideo() && track.Name == TRACK_NAME) return (VideoTrack)track;
+        }
+        return null;
+    }
+
+    /// True when `track` has an event over exactly `clip`'s start and length.
+    static bool HasNameplate(VideoTrack track, VideoEvent clip)
+    {
+        foreach (TrackEvent ev in track.Events)
+        {
+            if (Math.Abs(ev.Start.ToMilliseconds() - clip.Start.ToMilliseconds()) < 0.5
+                && Math.Abs(ev.Length.ToMilliseconds() - clip.Length.ToMilliseconds()) < 0.5) return true;
+        }
+        return false;
     }
 
     /// The selected video clips, or every video clip when none is selected.
-    static List<VideoEvent> ClipsToDo(Project project)
+    /// The nameplate track's own stills are never clips. `selectedOnly` says
+    /// which of the two it returned.
+    static List<VideoEvent> ClipsToDo(Project project, out bool selectedOnly)
     {
         List<VideoEvent> all = new List<VideoEvent>();
         List<VideoEvent> selected = new List<VideoEvent>();
         foreach (Track track in project.Tracks)
         {
-            if (!track.IsVideo()) continue;
+            if (!track.IsVideo() || track.Name == TRACK_NAME) continue;
             foreach (TrackEvent ev in track.Events)
             {
                 VideoEvent video = ev as VideoEvent;
@@ -153,7 +193,8 @@ public class EntryPoint
                 if (video.Selected) selected.Add(video);
             }
         }
-        return selected.Count > 0 ? selected : all;
+        selectedOnly = selected.Count > 0;
+        return selectedOnly ? selected : all;
     }
 
     /// The file an event plays, or null for generated media and empty events.
@@ -346,12 +387,15 @@ public class EntryPoint
         }
     }
 
-    static string Summary(int added, int unopened, int notListed, int noNameplate, List<string> missingFiles, Manifests manifests)
+    static string Summary(int added, int unopened, int alreadyThere, int notListed, int noNameplate, List<string> missingFiles, Manifests manifests, bool selectedOnly, int clipCount)
     {
         StringBuilder text = new StringBuilder();
         if (added > 0) text.AppendLine("Added " + Count(added, "nameplate") + " on the \"" + TRACK_NAME + "\" track. Ctrl+Z takes them all away again.");
         else text.AppendLine("No nameplates were added.");
+        if (alreadyThere > 0) text.AppendLine(Count(alreadyThere, "clip") + " already had a nameplate over its exact start and length, so " + (alreadyThere == 1 ? "it was" : "they were") + " left alone.");
         text.AppendLine();
+        if (selectedOnly) text.AppendLine("Worked on the " + Count(clipCount, "selected clip") + " only. With nothing selected (Edit > Select None) it does every clip.");
+        else text.AppendLine("Nothing was selected, so it worked on every clip (" + clipCount + ").");
         if (manifests.Read.Count == 0) text.AppendLine("No DoD Studio clip list was found. Save one with Render > Export VEGAS EDL... in DoD Studio.");
         else text.AppendLine("Read " + Count(manifests.Read.Count, "clip list") + ": " + Names(manifests.Read) + ".");
         if (notListed > 0) text.AppendLine(Count(notListed, "clip") + " on the timeline " + (notListed == 1 ? "isn't" : "aren't") + " in any clip list.");
