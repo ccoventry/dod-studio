@@ -136,7 +136,7 @@ fn foreground_lock(
     };
     let foreground_locked_at = Instant::now();
     if foreground_lock.locked() {
-        log_markdown("[HLAE] The game can't take the foreground while it starts");
+        log_markdown(crate::messages::FOREGROUND_LOCKED_LOG);
     }
     (foreground_lock, foreground_locked_at)
 }
@@ -181,10 +181,9 @@ pub(super) fn start_game(
     std::fs::write(&cfg_path, "quit\n").ok();
 
     if reuse_game.is_none() {
-        log_markdown(&format!(
-            "[HLAE] Spawning: {:?} {:?}",
+        log_markdown(&crate::messages::hlae_spawning(
             cmd.get_program(),
-            cmd.get_args().collect::<Vec<_>>()
+            cmd.get_args().collect::<Vec<_>>(),
         ));
     }
 
@@ -212,11 +211,7 @@ pub(super) fn start_game(
         Err(e) => {
             super::abort(
                 &batch.tx,
-                &format!(
-                    "Failed to launch HLAE ({}): {}",
-                    cmd.get_program().to_string_lossy(),
-                    e
-                ),
+                &crate::messages::failed_to_launch_hlae(cmd.get_program().to_string_lossy(), e),
             );
             std::fs::remove_file(&cfg_path).ok();
             return None;
@@ -255,14 +250,12 @@ fn start_launcher(
 ) -> std::io::Result<Option<crate::sys::launcher::Launcher>> {
     match reuse_game {
         Some(pid) => {
-            log_markdown(&format!(
-                "[HLAE] Running the batch in the game that is already open (PID {pid}), not starting one (#725)"
-            ));
+            log_markdown(&crate::messages::hlae_reusing_open_game(pid));
             Ok(None)
         }
         None => {
             let c = crate::sys::launcher::Launcher::spawn_unless_cancelled(cmd, cancel)?;
-            log_markdown(&format!("[HLAE] Spawned (PID {})", c.id()));
+            log_markdown(&crate::messages::hlae_spawned(c.id()));
             Ok(Some(c))
         }
     }

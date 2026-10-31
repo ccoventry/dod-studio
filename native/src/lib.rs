@@ -81,6 +81,10 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blender;
 
+/// Installing the VEGAS Pro nameplate script into its script menu (#429).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod vegas;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;

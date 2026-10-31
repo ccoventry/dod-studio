@@ -367,16 +367,35 @@ pub type BitSlice = _BitSlice<u8, Lsb0>;
 pub type ByteVec = Vec<u8>;
 
 // Delta
-pub type Delta = HashMap<String, ByteVec>;
+pub use crate::delta_fields::{Delta, DeltaValue, FieldName};
 pub type DeltaDecoder = Vec<DeltaDecoderS>;
 pub type DeltaDecoderTable = HashMap<String, DeltaDecoder>;
 
 #[derive(Debug, Clone)]
 pub struct DeltaDecoderS {
     pub name: ByteVec,
+    /// `name` as the key a decoded [`Delta`] files the field under, made once
+    /// here so every decoded field shares it rather than copying it (#37).
+    pub key: FieldName,
     pub bits: u32,
     pub divisor: f32,
     pub flags: u32,
+}
+
+impl DeltaDecoderS {
+    pub fn new(name: ByteVec, bits: u32, divisor: f32, flags: u32) -> Self {
+        // A decoder table built from a corrupted delta_description can carry
+        // a non-UTF-8 field name. Lossy rather than `unwrap`, because the
+        // release profile aborts on panic. #225.
+        let key = FieldName::from(String::from_utf8_lossy(&name));
+        Self {
+            name,
+            key,
+            bits,
+            divisor,
+            flags,
+        }
+    }
 }
 
 #[repr(u32)]

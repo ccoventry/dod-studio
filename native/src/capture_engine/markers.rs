@@ -149,9 +149,7 @@ pub(super) fn start_readers(
     // serves the events pipe. Not fatal if it can't start: the log
     // above is still reading.
     let pipe_tailer = crate::obs::PipeTailer::new(|pid, hello| {
-        log_markdown(&format!(
-            "[HLAE] Game events pipe connected (hl.exe PID {pid}, `{hello}`) — markers now come from the game directly, not qconsole.log"
-        ));
+        log_markdown(&crate::messages::events_pipe_connected(pid, hello));
     });
     let cancel = Arc::clone(tail_cancel);
     let gate = Arc::clone(marker_gate);
@@ -159,9 +157,7 @@ pub(super) fn start_readers(
         .name("events_pipe_tail".into())
         .spawn(move || pipe_tailer.run(marker_tx, cancel, gate))
     {
-        log_markdown(&format!(
-            "[HLAE] Could not start the game events reader ({e}); using qconsole.log only"
-        ));
+        log_markdown(&crate::messages::events_reader_failed(e));
     }
     Ok(())
 }

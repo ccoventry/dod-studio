@@ -86,6 +86,12 @@ pub enum TrimError {
     /// The trimmed demo did not pass the check it is put through before
     /// anything plays it.
     CheckFailed(String),
+    /// The drive the copy goes on hasn't room for it.
+    NoRoom {
+        folder: std::path::PathBuf,
+        free_bytes: u64,
+        needed_bytes: u64,
+    },
     Cancelled,
 }
 
@@ -119,6 +125,15 @@ impl std::fmt::Display for TrimError {
                     "the trimmed copy failed its check ({why}), so it isn't used"
                 )
             }
+            TrimError::NoRoom {
+                folder,
+                free_bytes,
+                needed_bytes,
+            } => f.write_str(&crate::messages::no_room_for_trimmed_copy(
+                folder,
+                *free_bytes,
+                *needed_bytes,
+            )),
             TrimError::Cancelled => write!(f, "cancelled"),
         }
     }

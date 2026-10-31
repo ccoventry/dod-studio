@@ -89,10 +89,7 @@ pub fn hold_command(hold: bool) -> String {
 
 /// The `Error` text a batch ends with, around what failed.
 fn abort_text(msg: &str) -> String {
-    format!(
-        "Capture Engine Aborted — {} (see View Logs for details)",
-        msg
-    )
+    crate::messages::capture_aborted(msg)
 }
 
 /// Ends the batch on a failure: the activity log gets `msg`, the listener an
@@ -179,7 +176,7 @@ fn start_engine_thread(
     body: impl FnOnce() + Send + 'static,
 ) {
     if let Err(e) = builder.spawn(body) {
-        abort(tx, &format!("Could not start the capture thread: {e}"));
+        abort(tx, &crate::messages::capture_thread_failed(e));
     }
 }
 
@@ -191,7 +188,7 @@ fn run_batch(batch: Batch) {
         return;
     }
     let Some(hl_exe_parent) = batch.hl_path.parent() else {
-        abort(tx, "Invalid hl.exe path: it has no parent folder");
+        abort(tx, crate::messages::HL_PATH_NO_PARENT);
         return;
     };
     let dod_dir = crate::shared::paths::mod_dir(hl_exe_parent);
@@ -228,7 +225,7 @@ fn run_batch(batch: Batch) {
         .send(EngineEvent::Launching("Batch Queue".into()))
         .is_err()
     {
-        abort(tx, "Failed to send Launching event (channel disconnected)");
+        abort(tx, crate::messages::LAUNCHING_EVENT_UNSENT);
         return;
     }
     if let Err(problem) = preflight::check_room(
@@ -345,10 +342,7 @@ fn start_marker_feed(
     let log_path = hl_exe_parent.join("qconsole.log");
     let log_len_before_launch = markers::console_log_len(&log_path);
     if let Err(e) = markers::start_readers(&log_path, marker_tx, &tail_cancel, &marker_gate) {
-        abort(
-            tx,
-            &format!("could not start the console log reader: {}", e),
-        );
+        abort(tx, &crate::messages::console_log_reader_failed(e));
         return None;
     }
     Some(MarkerFeed {
@@ -398,13 +392,7 @@ fn stop_markers(
 fn send_batch_end(tx: &Sender<EngineEvent>, end: BatchEnd, files: &workspace::BatchFiles) {
     match end {
         BatchEnd::Failed(reason) => {
-            abort(
-                tx,
-                &format!(
-                    "{} — see [HLAE] lines above in this log for timing.",
-                    reason
-                ),
-            );
+            abort(tx, &crate::messages::batch_failed_see_log(reason));
             files.remove_with_demo_copies();
         }
         BatchEnd::Cancelled => {

@@ -59,6 +59,7 @@
       "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md",
       "../../blender/*.py": "blender-scripts/",
       "../../blender/README.md": "blender-scripts/README.md",
+      "../../vegas/DoD Studio Nameplates.cs": "vegas-scripts/DoD Studio Nameplates.cs",
       "../../test-fixtures/dodstudio_benchmark_anzio.dem": "obs-test/dodstudio_benchmark_anzio.dem"
     }
   },

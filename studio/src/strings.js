@@ -570,6 +570,21 @@ export const STRINGS = {
     CAPTURE_FPS_TITLE:
       'Frames per second written to the recorded video. Nothing to do with the demo\'s own tickrate, which is a property of how the demo was recorded and is not adjustable here. Not used in OBS mode — see OBS Capture FPS in the OBS Connection section below.',
     OUTPUT_DIR_PLACEHOLDER: 'Capture output directory path...',
+    // The chip at the end of each Capture Output row (#25).
+    OUTPUT_ROW_CHECKING: 'Checking…',
+    OUTPUT_ROW_OK: 'Found',
+    OUTPUT_ROW_WILL_BE_CREATED: 'Will be created',
+    OUTPUT_ROW_WILL_BE_CREATED_TITLE: 'This folder does not exist yet, but its drive does, so it is created when a capture first writes to it. Check the spelling if you meant an existing folder.',
+    OUTPUT_ROW_DRIVE_MISSING: 'Drive not found',
+    OUTPUT_ROW_DRIVE_MISSING_TITLE: 'This folder is on a drive that is not connected, so captures cannot be written here.',
+    OUTPUT_ROW_NOT_FULL_PATH: 'Needs a full path',
+    OUTPUT_ROW_NOT_FULL_PATH_TITLE: 'Start the path with a drive letter, for example D:/captures.',
+    OUTPUT_ROW_MALFORMED: 'Not a valid path',
+    OUTPUT_ROW_MALFORMED_TITLE: 'This path has characters Windows does not allow in a folder name.',
+    OUTPUT_ROW_NOT_A_FOLDER: 'That is a file',
+    OUTPUT_ROW_NOT_A_FOLDER_TITLE: 'This path points at a file, not a folder.',
+    OUTPUT_ROW_OK_TITLE: 'This folder exists.',
+    OUTPUT_ROW_CHECKING_TITLE: 'Checking this folder.',
     ADD_DIRECTORY_BUTTON: 'Add Directory',
     DESTINATIONS_HELP_TEXT: 'Captures are written here, and Render Studio scans these same locations for takes to render.',
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
@@ -712,7 +727,7 @@ export const STRINGS = {
     // A take whose video stopped early (#1105) is partial too: not missing either.
     takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
       const missing = total - captured - cutShort - stoppedEarly - startedLate;
-      const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped' }[cutBy] || 'by Cancel';
+      const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped', studio_closed: 'when DoD Studio closed' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
@@ -779,13 +794,19 @@ export const STRINGS = {
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     // #110: the finished renders as an EDL for VEGAS Pro.
     EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
-    EXPORT_EDL_TITLE: 'Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there.',
+    EXPORT_EDL_TITLE: "Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there. It is saved as .txt because that is the only type VEGAS's import dialog lists. A .dodstudio.json file beside it lists each clip's player and nameplate, for the VEGAS nameplate script.",
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
+    // #429: the nameplate script into VEGAS's script menu.
+    VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
+    VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
+    vegasScriptDone: (path) => `Script copied to ${path}. In VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder, then pick it from Tools > Scripting.`,
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
-    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlDone: (count, skipped, nameplates = 0) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
+    // #429: the clip manifest beside the EDL, for the nameplate script.
+    exportManifestFailed: (err) => `The EDL is saved, but the clip list for the nameplate script isn't: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -2485,6 +2506,8 @@ export const STRINGS = {
     cutShortBy: (cutBy) => ({
       game_closed: 'Cut short: the game closed (partial take, not captured)',
       stopped: 'Cut short: the batch stopped (partial take, not captured)',
+      // An OBS recording nobody stopped: Studio closed mid-clip (#20).
+      studio_closed: 'Cut short: DoD Studio closed while OBS recorded it (not captured)',
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
@@ -2900,6 +2923,7 @@ export const STRINGS = {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
     blenderFailed: (err) => `Blender: ${err}`,
+    vegasScriptFailed: (err) => `Couldn't add the script to VEGAS: ${err}`,
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
     hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,
@@ -3293,6 +3317,18 @@ export const STRINGS = {
     USE_AS_PLACEHOLDER: 'In-game name',
     USE_AS_NEEDS_STEAMID: 'A name is only swapped for a player with a SteamID: a player added by name has none.',
     useAsAria: (who) => `Use as name for ${who}`,
+    // #429: a picture per player that the VEGAS nameplate script puts above their clips.
+    COLUMN_NAMEPLATE: 'Nameplate',
+    NAMEPLATE_TITLE: "A PNG put on its own track above each of this player's clips by the VEGAS nameplate script (Render > Export VEGAS EDL… saves the list it reads).",
+    NAMEPLATE_PICK: 'Pick a PNG…',
+    NAMEPLATE_PICK_TITLE: 'Pick a nameplate picture',
+    NAMEPLATE_FILTER: 'PNG picture',
+    NAMEPLATE_NEEDS_STEAMID: 'A nameplate follows a SteamID: a player added by name has none.',
+    nameplateMissing: (name) => `${name} (missing)`,
+    nameplateMissingTitle: (path) => `${path}\nThis file isn't there any more: pick it again, or put it back.`,
+    nameplateAria: (who) => `Nameplate for ${who}`,
+    nameplateClearAria: (who) => `Remove the nameplate for ${who}`,
+    NAMEPLATE_CLEAR_TITLE: 'No nameplate for this player (the file itself stays)',
     COLUMN_SPRAY: 'Spray',
     COLUMN_CROSSHAIR: 'Crosshair',
     PICK_PNG: 'Pick a PNG…',

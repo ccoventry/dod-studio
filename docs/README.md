@@ -14,6 +14,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [command_tiers.md](command_tiers.md) — which commands Initial and Scheduled Commands refuse, warn about or ignore, and why.
 - [direct_to_video_capture.md](direct_to_video_capture.md) — capturing straight to video with `mirv_movie_ffmpeg`.
 - [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: the settings Studio gives OBS, OBS measured against HLAE, how it is driven, failure modes, open questions.
+- [vegas_nameplates.md](vegas_nameplates.md) — each player's nameplate picture on its own track above their clips in VEGAS Pro: setting it on the Players tab, the clip list the EDL export saves, and the VEGAS script (#429).
 
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
