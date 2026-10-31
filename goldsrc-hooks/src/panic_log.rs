@@ -49,18 +49,29 @@ mod tests {
 
     /// What `describe` makes of a real panic, caught on a test thread.
     fn described(f: impl FnOnce() + Send + 'static) -> String {
+        // The hook is process-wide: hold the guard while it is swapped, and
+        // only record the probe thread's panic so another test's panic (an
+        // assertion failing elsewhere) can't overwrite or be swallowed by it.
+        static HOOK_GUARD: Mutex<()> = Mutex::new(());
+        let _guard = HOOK_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let seen = Arc::new(Mutex::new(String::new()));
         let keep = Arc::clone(&seen);
-        let previous = std::panic::take_hook();
+        let previous: Arc<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync> =
+            Arc::from(std::panic::take_hook());
+        let chain = Arc::clone(&previous);
         std::panic::set_hook(Box::new(move |info| {
-            *keep.lock().unwrap() = describe(info);
+            if std::thread::current().name() == Some("probe") {
+                *keep.lock().unwrap() = describe(info);
+            } else {
+                chain(info);
+            }
         }));
         let _ = std::thread::Builder::new()
             .name("probe".into())
             .spawn(f)
             .unwrap()
             .join();
-        std::panic::set_hook(previous);
+        std::panic::set_hook(Box::new(move |info| previous(info)));
         seen.lock().unwrap().clone()
     }
 
