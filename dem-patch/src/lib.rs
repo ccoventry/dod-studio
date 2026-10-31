@@ -309,7 +309,7 @@ mod test {
     ///
     /// Two differences are allowed, and printed. A demo DoD Studio wrote
     /// before the writer kept the engine's frame counts (one with a nonzero
-    /// LOADING count, #PRNUM) keeps its old counts, so they are not compared.
+    /// LOADING count, #1271) keeps its old counts, so they are not compared.
     /// And an entry whose bytes run on past its first `NextSection` (a second
     /// `NextSection`, in `ktps8w7-warchyld_over_harr_h1.dem`'s LOADING) loses
     /// that tail: the parser ends an entry at its first `NextSection`, as the
