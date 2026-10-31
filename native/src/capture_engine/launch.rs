@@ -195,8 +195,15 @@ pub(super) fn start_game(
         use super::processes::Processes;
         super::processes::Live::new().games()
     };
-    let child = match start_launcher(&mut cmd, reuse_game) {
+    let child = match start_launcher(&mut cmd, reuse_game, &batch.cancel_token) {
         Ok(child) => child,
+        // Cancel while WMI was starting HLAE: nothing of it is left running
+        // (`Launcher::spawn_unless_cancelled`).
+        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+            let _ = batch.tx.send(super::EngineEvent::Cancelled);
+            std::fs::remove_file(&cfg_path).ok();
+            return None;
+        }
         Err(e) => {
             super::abort(
                 &batch.tx,
@@ -231,6 +238,7 @@ pub(super) fn start_game(
 fn start_launcher(
     cmd: &mut std::process::Command,
     reuse_game: Option<u32>,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> std::io::Result<Option<crate::sys::launcher::Launcher>> {
     match reuse_game {
         Some(pid) => {
@@ -240,7 +248,7 @@ fn start_launcher(
             Ok(None)
         }
         None => {
-            let c = crate::sys::launcher::Launcher::spawn(cmd)?;
+            let c = crate::sys::launcher::Launcher::spawn_unless_cancelled(cmd, cancel)?;
             log_markdown(&format!("[HLAE] Spawned (PID {})", c.id()));
             Ok(Some(c))
         }

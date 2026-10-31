@@ -11,6 +11,7 @@
 //! way hl.exe already is.
 
 use std::process::{Child, Command};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use sysinfo::{Pid, System};
@@ -40,6 +41,14 @@ impl Launcher {
     /// Starts `cmd`, outside Studio's job when that job would end it when
     /// Studio closes. May set `cmd`'s creation flags, so callers set none.
     pub fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
+        Self::spawn_unless_cancelled(cmd, &AtomicBool::new(false))
+    }
+
+    /// [`Launcher::spawn`] for a launch the user can cancel (a capture
+    /// batch). A cancel while WMI is starting the launcher ends whatever it
+    /// started and fails with [`std::io::ErrorKind::Interrupted`]; it never
+    /// falls back to starting another (follows #1198).
+    pub fn spawn_unless_cancelled(cmd: &mut Command, cancel: &AtomicBool) -> std::io::Result<Self> {
         if !crate::sys::job::kills_children_on_close() {
             return cmd.spawn().map(Self::child);
         }
@@ -49,17 +58,32 @@ impl Launcher {
             );
             return Ok(Self::child(child));
         }
-        match crate::sys::wmi_launch::spawn(cmd) {
+        let exe_name = crate::sys::wmi_launch::exe_name(cmd);
+        match crate::sys::wmi_launch::spawn(cmd, cancel) {
             Ok(pid) => {
                 crate::log_markdown(&format!(
                     "[launch] Started through WMI (PID {pid}), so the game outlives this dev Studio (#545)"
                 ));
                 Ok(Self {
-                    kind: Kind::Detached {
-                        pid,
-                        exe_name: exe_name(cmd),
-                    },
+                    kind: Kind::Detached { pid, exe_name },
                 })
+            }
+            Err(crate::sys::wmi_launch::WmiLaunchError::Cancelled(started)) => {
+                if let Some(pid) = started {
+                    kill_detached(pid, &exe_name);
+                }
+                crate::log_markdown(&format!(
+                    "[launch] Cancelled while WMI was starting {}; {}",
+                    std::path::Path::new(cmd.get_program()).display(),
+                    match started {
+                        Some(pid) => format!("ended the launcher it had started (PID {pid})"),
+                        None => "it had started nothing".to_string(),
+                    }
+                ));
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "cancelled while the launcher was starting",
+                ))
             }
             Err(e) => {
                 crate::log_markdown(&format!(
@@ -131,14 +155,6 @@ fn spawn_breaking_away(_cmd: &mut Command) -> std::io::Result<Option<Child>> {
     Ok(None)
 }
 
-/// The file name `cmd` runs, as the process list names it.
-fn exe_name(cmd: &Command) -> String {
-    std::path::Path::new(cmd.get_program())
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
 /// Whether `pid` is still the process named `exe_name`. A pid now held by
 /// another process means the launcher has gone.
 fn is_running_in(sys: &System, pid: u32, exe_name: &str) -> bool {
@@ -196,14 +212,5 @@ mod tests {
         assert!(renamed.exit_status(&sys).unwrap().is_some());
         // Not this process's name, so it is never ended.
         renamed.kill();
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn names_the_program_by_its_file() {
-        assert_eq!(
-            exe_name(&Command::new(r"C:\Programs\HLAE\HLAE.exe")),
-            "HLAE.exe"
-        );
     }
 }
