@@ -10,9 +10,9 @@
 // caught up on once.
 //
 // While a game with HLAE in it is running, a planned batch may still be
-// going, so the check waits until no such game is left. Reconnecting to that game's events pipe to
-// resume live progress is not done: the batch's progress state lived in the
-// Studio that closed.
+// going, so the check waits until no such game is left. Reconnecting to that
+// game's events pipe to resume live progress is not done: the batch's
+// progress state lived in the Studio that closed.
 
 use crate::capture_manager::{
     CaptureManifest, VerifiedBlock, record_capture_settings, verify_capture_takes_settling,

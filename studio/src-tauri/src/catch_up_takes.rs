@@ -29,9 +29,11 @@ use native::obs::{Marker, MarkerKind};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-/// How much of the console log's end is read. A batch writes a few lines a
-/// clip, but a log nobody clears holds every game session since.
-const LOG_TAIL_BYTES: u64 = 16 * 1024 * 1024;
+/// How much of the console log's end is read. A log nobody clears holds
+/// every game session since (48 MB and 30 MB on two test installs,
+/// measured 2026-10-30), and one batch's run took up to 5.8 MB of it, so this is over
+/// ten times that.
+const LOG_TAIL_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The last [`LOG_TAIL_BYTES`] of the console log at `path`, or `None` when
 /// there is none.
