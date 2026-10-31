@@ -69,9 +69,20 @@ pub fn for_launch(source: &Path) -> PathBuf {
 /// replaced Studio's last run) at start-up, so they do not wait for the next
 /// launch to go. The same rules as a launch's clean-up: nothing a game has
 /// loaded and nothing launched from in the last [`KEEP_AFTER_LAST_USE`].
-pub fn clean_at_start() {
+///
+/// `configured` is the Hooks DLL setting: its folder is kept, as a launch
+/// keeps its source's, since the setting may point into a copy's folder.
+pub fn clean_at_start(configured: Option<&Path>) {
     let root = crate::shared::paths::get_local_appdata_dir().join(COPIES_DIR);
-    remove_idle_copies(&root, Vec::new());
+    remove_idle_copies(&root, folder_of(configured));
+}
+
+/// The folder of the DLL at `dll`, as a keep-list.
+fn folder_of(dll: Option<&Path>) -> Vec<PathBuf> {
+    dll.and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect()
 }
 
 /// Removes the copies under `root` no game uses, but those in `keep`, and
@@ -376,6 +387,17 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_copy_the_setting_points_at_survives_the_start_up_clean_up() {
+        let (root, source) = setup("configured", b"MZ DSHOOKBUILD:0.10.0+aaa\0 one");
+        let copy = launch_copy_in(&root, &source).unwrap();
+        let later = SystemTime::now() + KEEP_AFTER_LAST_USE * 2;
+        assert_eq!(remove_unused(&root, &folder_of(Some(&copy)), later), 0);
+        assert_eq!(copies(&root).len(), 1);
+        // With no setting pointing there, the idle copy goes.
+        assert_eq!(remove_unused(&root, &folder_of(None), later), 1);
+    }
+
+    #[test]
     fn a_labelled_hook_dll_counts_as_a_hook_dll() {
         for name in [
             "dodstudio_goldsrc_hooks.dll",
@@ -396,7 +418,7 @@ mod tests {
 
     #[test]
     fn a_labelled_copy_is_made_under_its_own_name_and_removed_when_idle() {
-        let (root, source) = setup("labelled", b"MZ DSHOOKBUILD:0.10.0+aaa  one");
+        let (root, source) = setup("labelled", b"MZ DSHOOKBUILD:0.10.0+aaa\0 one");
         let labelled = source.with_file_name("dodstudio_goldsrc_hooks_910.dll");
         std::fs::rename(&source, &labelled).unwrap();
         let copy = launch_copy_in(&root, &labelled).unwrap();
