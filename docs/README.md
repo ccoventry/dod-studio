@@ -39,6 +39,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV and POV demos lose (`ds_sound_restore_gunshots`).
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
+- [goldsrc_player_info.md](goldsrc_player_info.md) — `client.dll`'s per-player record `g_PlayerExtraInfo` (layout, who writes `health`), what POV and HLTV demos fill in it, and the name plates drawn from it (#1130).
 - [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — the HUD elements' vftable stub (`ds_hud_hide_teammate_info`), what each element draws, and where `ds_hud_hide_element`'s names went when #342 retired it.
 - [goldsrc_objective_icons.md](goldsrc_objective_icons.md) — placing the objective icons.
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.

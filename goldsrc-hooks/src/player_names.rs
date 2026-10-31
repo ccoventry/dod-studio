@@ -530,7 +530,7 @@ fn publish(slot: usize, desired: Option<(u32, *const c_char)>) {
 }
 
 /// The new name for `slot` whose real name is `real`, if it's renamed.
-fn new_name_for(slot: i32, real: &[u8]) -> Option<&'static CStr> {
+pub(crate) fn new_name_for(slot: i32, real: &[u8]) -> Option<&'static CStr> {
     let index = usize::try_from(slot)
         .ok()
         .filter(|s| (1..=MAX_SLOTS).contains(s))?;

@@ -147,6 +147,12 @@ is the complete list):
   `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307). Outside the
   scope's frame the screen is black at any FOV (`gl_widescreen_yfov 1`,
   `mirv_fov`), in demos only; see `src/demo_scope/fill.rs` (#799).
+- **Names and health bars over players** (`ds_hud_show_player_names 1`,
+  `ds_hud_show_player_health 1`, each on its own): while a demo plays, a
+  name and a health bar over each player the game draws, from the record
+  `client.dll` keeps per player (`g_PlayerExtraInfo`, `src/player_info.rs`).
+  A prototype (#1130); see `src/nameplates.rs` and
+  `docs/goldsrc_player_info.md`.
 - **Spectator target** (`ds_spec_target <player>`): puts the camera on
   a player by number, the one `ds_hud_deathmsg players` lists. Same doc.
 - **Spectator bars** (`ds_spec_hide_bars 1`): hides the two dark
