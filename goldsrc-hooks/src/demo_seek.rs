@@ -263,22 +263,11 @@ fn rewound(last_frame_time: f64, from: f64) -> bool {
 /// events and console commands it jumps over. Off by default, so a seek does
 /// what the engine's own Goto does until asked otherwise.
 ///
-/// Read from the cvar when a seek runs, so it needs no per-frame poll. The flag
-/// is the fallback path's, set by a plain toggle command when cvars could not
-/// be registered.
+/// Read from the cvar when a seek runs, so it needs no per-frame poll.
 pub static SKIP_BETWEEN: Setting = Setting::new(SKIP_BETWEEN_NAME, false);
 
 fn skip_between() -> bool {
     SKIP_BETWEEN.on()
-}
-
-/// For the fallback toggle command's bare-name query.
-pub fn status() -> String {
-    if skip_between() {
-        "seeks skip the events and commands between the old and new position".to_string()
-    } else {
-        "seeks run the events and commands they jump over, like the editor's Goto".to_string()
-    }
 }
 
 /// One `DemoPlayer.dll` build this module was checked against.

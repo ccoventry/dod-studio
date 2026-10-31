@@ -97,6 +97,9 @@ fn status_text() -> String {
     if anim_fix::enabled() || missing_shots::enabled() {
         lines.push(format!("gunshot sounds: {}", fire_sounds::status()));
     }
+    if let Some(line) = crate::pov_crosshair_gap::status_line() {
+        lines.push(line);
+    }
     if let Some(deathcam) = crate::spectator_deathcam::status_line() {
         lines.push(deathcam);
     }
@@ -146,6 +149,9 @@ fn status_text() -> String {
     }
     if let Some(tempent) = crate::tempent_fix::status_line() {
         lines.push(tempent);
+    }
+    if let Some(map_files) = crate::map_file_leak::status_line() {
+        lines.push(map_files);
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);

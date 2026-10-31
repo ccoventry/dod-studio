@@ -283,12 +283,12 @@ static WANTED: AtomicBool = AtomicBool::new(false);
 /// [`NAME`] `2`: a log line for every round, not only the first few. For
 /// checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
-/// [`NAME`]'s cvar, or, when it could not be one, the fallback command's
-/// value: on, as the cvar's default is.
+/// [`NAME`]'s cvar, or, when it could not be one, on, as the cvar's
+/// default is.
 pub static SETTING: Setting = Setting::new(NAME, true);
 
-/// [`NAME`]'s value: its cvar, or the fallback toggle without one. `0` off,
-/// `1` on, `2` on and logging every round, on every path.
+/// [`NAME`]'s value: its cvar, or its default (on) without one. `0` off,
+/// `1` on, `2` on and logging every round.
 pub(crate) fn level() -> f32 {
     SETTING
         .value()

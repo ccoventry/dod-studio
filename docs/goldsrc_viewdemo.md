@@ -278,24 +278,14 @@ Studio knows a DLL can by the marker `demo_other_drives::FULL_PATH_MARKER`
 in the DLL file; for an older DLL a batch copies such a demo into `dod\`
 (`native::patch::source_copies`) and a preview is patched.
 
-**Without it**, a demo on `D:\` needs a path under `dod\`. A directory
-junction gives it one with no copy and no engine change: Studio's + Link
-Folder to Game makes `dod\demos\<name>` point at the folder
-(`native::demo_links`), and the game follows it like any folder, for
-opening and for the Load Demo list (#409).
-
-The link's rules, each there so no folder walk can loop through it: it
-points at the folder picked, never a drive root; a folder that holds the
-install or is inside it is refused, as are links and network paths; Remove
-unlinks the junction only (`RemoveDirectoryW` on the link, never a
-recursive delete). Studio's own walks skip every junction and symlink and
-stop at a depth cap (`native::sys::folder_walk`); the hook's walks read the
-entry kind from the listing, which never follows a link.
-
-Checked in game on the Anniversary install (#764): `viewdemo
-"demos/<link>/<demo>"` from the console, and the link's folder and demos in
-the Load Demo window. Still unchecked: the same path on the launch line
-(`+viewdemo "demos/<link>/<demo>"`).
+**Without it**, a demo on `D:\` needs a path under `dod\`, so Studio copies it
+there or patches a copy (above). Studio used to offer + Link Folder to Game, a
+directory junction at `dod\demos\<name>` (#376, #764); it was removed once the
+hook played demos in place (#779). A link made earlier still works: the game
+follows it like any folder, for opening and for the Load Demo list (#409).
+Studio's own walks skip every junction and symlink and stop at a depth cap
+(`native::sys::folder_walk`); the hook's walks read the entry kind from the
+listing, which never follows a link.
 
 ## What this means for moving the batch
 

@@ -30,8 +30,8 @@
 //! assert, which is why this is a hook and not a console command.
 //! `AddSearchPath` runs on the thread that opens the demo, the engine's.
 //!
-//! Without the hook DLL, a demo on another drive still needs Studio's
-//! + Link Folder to Game (a junction, #376) or a copy into `dod\`.
+//! Without the hook DLL, a demo on another drive still needs a copy in
+//! `dod\` (a batch) or a patched copy (a preview).
 //!
 //! `tools/verify_demo_other_drives.py` checks the slots and the `:` assert
 //! against both movie installs.
@@ -47,7 +47,8 @@ use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("demo_other_drives");
 
-/// `ds_demo_other_drives`, or its fallback toggle.
+/// `ds_demo_other_drives`, or its default when the cvar could not be
+/// registered.
 pub static SETTING: Setting = Setting::new(NAME, true);
 /// Bit `letter - b'A'` is set once that drive's root is a search path.
 static DRIVES: AtomicU32 = AtomicU32::new(0);
@@ -86,23 +87,6 @@ const PATH_ID: &std::ffi::CStr = c"DODSTUDIO";
 
 pub(crate) fn enabled() -> bool {
     SETTING.on()
-}
-
-pub fn status() -> String {
-    let drives = DRIVES.load(Ordering::Relaxed);
-    let added: Vec<String> = (0..26u32)
-        .filter(|i| drives & (1 << i) != 0)
-        .map(|i| format!("{}:", (b'A' + i as u8) as char))
-        .collect();
-    format!(
-        "{NAME} is {}; drives added as search paths: {}",
-        if enabled() { "on" } else { "off" },
-        if added.is_empty() {
-            "none".to_string()
-        } else {
-            added.join(" ")
-        }
-    )
 }
 
 /// `D:/folder/demo` split into the drive letter (upper case) and the path
@@ -312,17 +296,5 @@ mod tests {
     #[test]
     fn the_search_path_is_the_drive_root() {
         assert_eq!(&drive_root(b'D'), b"D:\\\0");
-    }
-
-    #[test]
-    fn status_names_the_drives_added() {
-        assert!(status().contains("drives added as search paths: none"));
-        DRIVES.fetch_or(1 << 3, Ordering::Relaxed);
-        assert!(
-            status().contains("drives added as search paths: D:"),
-            "{}",
-            status()
-        );
-        DRIVES.store(0, Ordering::Relaxed);
     }
 }

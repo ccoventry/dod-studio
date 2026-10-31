@@ -13,7 +13,7 @@ const VIEWDEMO_WAIT_FRAMES: u32 = 600;
 /// Playback tab and parks the VCR bar off screen. Not `ds_ui_panel_...`:
 /// no name may be the start of another (the console's autocomplete).
 pub const VIEWDEMO_NAME: &str = console_name!("ui_viewdemo_in_panel");
-/// The cvar, or the fallback toggle when it could not be registered.
+/// The cvar, or its default (on) when it could not be registered.
 pub static VIEWDEMO_IN_PANEL: Setting = Setting::new(VIEWDEMO_NAME, true);
 /// Frames left to wait for the VCR bar after a `viewdemo`, or 0.
 pub(super) static VIEWDEMO_PENDING: std::sync::atomic::AtomicU32 =
@@ -22,7 +22,7 @@ pub(super) static VIEWDEMO_PENDING: std::sync::atomic::AtomicU32 =
 /// `ds_ui_console_in_panel 1`: the console key (`toggleconsole`) opens our
 /// window on its Console tab instead of the console window.
 pub const CONSOLE_NAME: &str = console_name!("ui_console_in_panel");
-/// The cvar, or the fallback toggle when it could not be registered.
+/// The cvar, or its default (on) when it could not be registered.
 pub static CONSOLE_IN_PANEL: Setting = Setting::new(CONSOLE_NAME, true);
 /// Frames left to wait for the console window after `toggleconsole`, or 0.
 pub(super) static CONSOLE_PENDING: std::sync::atomic::AtomicU32 =
@@ -34,15 +34,6 @@ static TOGGLECONSOLE_WRAPPED: std::sync::atomic::AtomicBool =
 
 pub(super) fn console_in_panel() -> bool {
     CONSOLE_IN_PANEL.on()
-}
-
-/// For the fallback toggle's bare-name query.
-pub fn console_status() -> String {
-    if console_in_panel() {
-        "the console key opens the DoD Studio window on its Console tab".to_string()
-    } else {
-        "the console key opens the console window".to_string()
-    }
 }
 
 /// Wraps `toggleconsole` (the console key's binding), once the engine has it.
@@ -109,15 +100,6 @@ unsafe extern "C" fn wrapped_toggleconsole() {
 
 pub(crate) fn viewdemo_in_panel() -> bool {
     VIEWDEMO_IN_PANEL.on()
-}
-
-/// For the fallback toggle's bare-name query.
-pub fn viewdemo_status() -> String {
-    if viewdemo_in_panel() {
-        "viewdemo opens the DoD Studio window on its Playback tab".to_string()
-    } else {
-        "viewdemo opens the stock demo bar".to_string()
-    }
 }
 
 /// Called by `demo_reload`'s `viewdemo` wrapper for a bare `viewdemo`, which

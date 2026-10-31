@@ -247,6 +247,11 @@ mod tests {
 
         const TEST_PARENT: &str = r"Software\DoDStudioTest";
 
+        /// Creating a key makes the parent first, and another test's drop may
+        /// delete that parent in between while it is still empty (the key
+        /// create then fails). Creating and the parent's removal take turns.
+        static PARENT_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
         struct TestRoot {
             name: String,
             key: RegKey,
@@ -259,6 +264,7 @@ mod tests {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0);
                 let name = format!(r"{TEST_PARENT}\{tag}-{}-{nanos}", std::process::id());
+                let _turn = PARENT_TURN.lock().unwrap_or_else(|e| e.into_inner());
                 let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
                     .create_subkey(&name)
                     .expect("create the test key");
@@ -268,6 +274,7 @@ mod tests {
 
         impl Drop for TestRoot {
             fn drop(&mut self) {
+                let _turn = PARENT_TURN.lock().unwrap_or_else(|e| e.into_inner());
                 let hkcu = RegKey::predef(HKEY_CURRENT_USER);
                 let _ = hkcu.delete_subkey_all(&self.name);
                 // Only when no other test still has a key in it.

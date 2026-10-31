@@ -59,10 +59,10 @@ use crate::setting::Setting;
 /// The switch: 1 holds the models on a step-back frame (#927).
 pub const NAME: &str = console_name!("player_fix_model_flicker");
 
-/// The cvar, or the fallback toggle when it could not be registered.
+/// The cvar, or its default (on) when it could not be registered.
 pub static FIX_MODEL_FLICKER: Setting = Setting::new(NAME, true);
 
-/// Whether the switch is on: the cvar, or the fallback toggle without one.
+/// Whether the switch is on: the cvar, or its default without one.
 pub fn enabled() -> bool {
     FIX_MODEL_FLICKER.on()
 }

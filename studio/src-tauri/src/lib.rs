@@ -12,7 +12,6 @@ mod config_checks_cmd;
 mod crash_maps_manager;
 mod dem_open_with;
 mod demo_cache_cmd;
-mod demo_links_manager;
 mod demo_preview;
 mod demo_rename_manager;
 mod demo_split_manager;
@@ -1120,9 +1119,6 @@ pub fn run() {
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
-            demo_links_manager::list_demo_links,
-            demo_links_manager::add_demo_link,
-            demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
             menu_scale_manager::menu_scale_status,
             menu_scale_manager::set_menu_scale,

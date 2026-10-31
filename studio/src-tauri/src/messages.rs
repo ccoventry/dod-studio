@@ -683,14 +683,6 @@ fn failed_to(action: &str, err: impl Display) -> String {
     format!("Failed to {action}: {cause}")
 }
 
-pub fn failed_to_add_demo_link(err: impl Display) -> String {
-    failed_to("link the demo folder", err)
-}
-
-pub fn failed_to_remove_demo_link(err: impl Display) -> String {
-    failed_to("remove the demo folder link", err)
-}
-
 pub fn failed_to_forget_crash_map(err: impl Display) -> String {
     failed_to("forget the crashed map", err)
 }
@@ -1021,10 +1013,6 @@ mod tests {
 
     #[test]
     fn lower_crate_errors_name_the_action_then_the_cause() {
-        assert_eq!(
-            failed_to_add_demo_link("not a folder"),
-            "Failed to link the demo folder: not a folder"
-        );
         assert_eq!(
             failed_to_copy_demos_for_batch("no room on D:"),
             "Failed to copy the demos for the batch: no room on D:"

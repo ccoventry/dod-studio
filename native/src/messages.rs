@@ -604,7 +604,6 @@ pub fn preview_write_failed(name: impl Display, err: impl Display) -> String {
 
 pub const CLI_NO_DEMOS: &str =
     "Error: Please specify at least one demo file to analyze, or use a subcommand.";
-pub const CLI_NO_KILLSTREAKS: &str = "No killstreaks found matching the criteria.";
 pub const CLI_READING_RAW_BYTES: &str = "Reading raw demo bytes...";
 pub const CLI_PATCHING_HIGHLIGHTS: &str = "Patching demo highlights...";
 pub const CLI_EXPORT_DONE: &str = "Successfully exported patched demo!";
@@ -625,6 +624,25 @@ pub fn cli_no_player_match(query: impl Display, available: impl Display) -> Stri
     format!(
         "Could not find player matching query '{}'. Available players: {}",
         query, available
+    )
+}
+
+/// `patch-streak` found nothing to patch: says which player, how long a streak
+/// was asked for and the longest one the player had, so a short demo reads as
+/// "no streak" and not as a failure (#1237).
+pub fn cli_no_killstreaks(
+    player: impl Display,
+    min_streak: usize,
+    weapon: Option<&str>,
+    longest: usize,
+) -> String {
+    let weapon = weapon
+        .map(|w| format!(" with a weapon matching '{w}'"))
+        .unwrap_or_default();
+    format!(
+        "{player} has no killstreak of {min_streak} or more kills{weapon} in this demo \
+         (longest streak: {longest}), so there is nothing to patch. \
+         Lower --min-streak to patch a shorter one."
     )
 }
 
@@ -658,6 +676,16 @@ pub fn cli_failed_to_write(path: impl Display, err: impl Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_killstreaks_names_the_player_the_ask_and_the_longest_streak() {
+        assert_eq!(
+            cli_no_killstreaks("Pvt. Clopton", 3, Some("k98"), 2),
+            "Pvt. Clopton has no killstreak of 3 or more kills with a weapon matching 'k98' \
+             in this demo (longest streak: 2), so there is nothing to patch. \
+             Lower --min-streak to patch a shorter one."
+        );
+    }
 
     #[test]
     fn map_fetch_messages_match_their_original_inline_text() {

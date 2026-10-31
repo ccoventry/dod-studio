@@ -1,30 +1,18 @@
 //! The gap in POV's red crosshair (`cl_xhair_style 0`), worked out for the
 //! spectated player (#308). Part of `ds_spec_match_pov`: `spectator_crosshair`
 //! routes the spectator draw to the game's own style-0 draw, and this module
-//! feeds that draw the watched player's gap instead of the local client's.
+//! answers that draw's gap call (`crosshair_gap`) with the watched player's
+//! gap instead of the local client's.
 //!
 //! ## What the gap is
 //!
-//! `CHudDoDCrossHair`'s style-0 draw (`client+0x2cda0`) asks
-//! `client+0x2cfb0` for the gap between the dot and the four arms, once a
-//! frame, then blits the five pieces around the screen centre. Read out of
-//! the binary (and matched against dod13-client's `GetCrossHairWidth`):
-//!
-//! ```text
-//!     cl_dynamic_xhair < 1                    -> 4, fixed
-//!     weapon 13-16 (grenades), 29-31 (rockets) -> 4, fixed
-//!     spread = deployed ? alt : base           (IsInMGDeploy: bipod or sandbag)
-//!     speed > 105 u/s: spread += moving
-//!     target = 2 + trunc(200 * spread)
-//!     [this+0x98] steps toward target by at most 3 px; return it
-//! ```
-//!
-//! `base`, `moving` and `alt` are the weapon's row of `P_WpnInfo`, the table
-//! the spread function (`client+0x2d070`) indexes by weapon id: 0x15c bytes
-//! a row, the three floats at +0x150, after the row's third-person model
-//! (+0) and viewmodel (+0x20). Nothing in it is prediction-only: the weapon,
-//! whether he is deployed and how fast he moves are all things a spectator
-//! sees, so the gap can follow the watched player rather than sit still.
+//! `crosshair_gap` has the game's function. `base`, `moving` and `alt` are
+//! the weapon's row of `P_WpnInfo`, the table the spread function
+//! (`client+0x2d070`) indexes by weapon id: 0x15c bytes a row, the three
+//! floats at +0x150, after the row's third-person model (+0) and viewmodel
+//! (+0x20). Nothing in it is prediction-only: the weapon, whether he is
+//! deployed and how fast he moves are all things a spectator sees, so the
+//! gap can follow the watched player rather than sit still.
 //! `docs/goldsrc_crosshair.md` has the measured gaps.
 //!
 //! "Deployed" is not "prone": `IsInMGDeploy` is `g_iUser3 == 2` (prone with
@@ -50,15 +38,14 @@
 //!
 //! ## How it is wired
 //!
-//! The draw's `call client+0x2cfb0` (at `client+0x2cda9`) is pointed at
-//! [`gap_hook`] while `spectator_crosshair` routes the spectator draw here,
-//! and put back otherwise. In POV (`g_iUser1` 0) the hook calls the original,
-//! so live play and POV demos are untouched even while it is in. The hook
+//! `spectator_crosshair` calls [`ready`] (the table) and then
+//! `crosshair_gap::set_spectator_hook` before it routes the spectator draw
+//! here. While spectating (`g_iUser1` not 0) the hook calls [`gap`], which
 //! reads atomics only: [`note_watched`], from `anim_fix::apply` once a frame,
 //! works the target out.
 
-// The hook is a thiscall, which only the 32-bit build has; the host build
-// (clippy, tests) compiles the rest.
+// [`gap`] is called only from the 32-bit hook; the host build (clippy,
+// tests) compiles the rest.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::cell::RefCell;
@@ -66,24 +53,8 @@ use std::ffi::CStr;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 
+use crate::crosshair_gap::FIXED_GAP;
 use crate::engine;
-use crate::hw_call_site::{CALL_LEN, call_bytes, call_target};
-use crate::scan;
-
-/// The style-0 draw, `client+0x2cda0`, up to and past its gap call. The
-/// call's `rel32` is a wildcard so the hooked form matches too.
-const DRAW_PATTERN: &str = "83 EC 0C 53 55 56 57 8B F1 E8 ?? ?? ?? ?? 8B E8 A1";
-/// Where the gap call's `E8` sits in [`DRAW_PATTERN`].
-const GAP_CALL_AT: usize = 9;
-/// The gap function, `client+0x2cfb0`: the `cl_dynamic_xhair` test it opens
-/// with.
-const GAP_PATTERN: &str = "A1 ?? ?? ?? ?? 56 85 C0 8B F1 74 17 D9 40 0C D8 1D";
-/// The spread function, `client+0x2d070`, up to `mov edx, [esi+table]`.
-const SPREAD_PATTERN: &str = "51 56 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 0C C5 00 00 00 00 \
-                              2B C8 8D 04 88 B9 ?? ?? ?? ?? 8D 34 40 C1 E6 02 8B 96 ?? ?? ?? ??";
-/// Where the table's address (its `base` float for weapon 0) sits in
-/// [`SPREAD_PATTERN`].
-const TABLE_AT: usize = 37;
 
 /// One `P_WpnInfo` row.
 const STRIDE: usize = 0x15c;
@@ -98,9 +69,6 @@ const MAX_ID: usize = 64;
 /// Rows checked before the table is trusted.
 const KNOWN_ROWS: [(i32, &str); 2] = [(5, "models/v_garand.mdl"), (17, "models/v_mg42.mdl")];
 
-/// What the game returns without easing: `cl_dynamic_xhair 0`, grenades and
-/// rockets.
-pub const FIXED_GAP: i32 = 4;
 /// Weapons with the fixed gap (the byte table at `client+0x2d050`).
 const FIXED_IDS: [std::ops::RangeInclusive<i32>; 2] = [13..=16, 29..=31];
 /// Faster than this, in u/s, adds the weapon's `moving` spread
@@ -165,15 +133,9 @@ impl Target {
     }
 }
 
-/// Addresses found by the scans, 0 before them. `client.dll` does not reload
-/// between demos; [`RESOLVED_BASE`] notices whatever else would.
-static CALL_SITE: AtomicUsize = AtomicUsize::new(0);
-static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
-static DRAW: AtomicUsize = AtomicUsize::new(0);
-static RESOLVED_BASE: AtomicUsize = AtomicUsize::new(0);
-/// The module base a scan failed against, so it is not repeated each frame.
-static FAILED_BASE: AtomicUsize = AtomicUsize::new(0);
-/// The table, read once at the scans. Written there only, so the per-frame
+/// The table address [`TABLE`] was read from, 0 before it.
+static TABLE_READ_FROM: AtomicUsize = AtomicUsize::new(0);
+/// The table, read once by [`ready`]. Written there only, so the per-frame
 /// readers never wait.
 static TABLE: RwLock<Vec<Weapon>> = RwLock::new(Vec::new());
 
@@ -395,92 +357,6 @@ impl Speedometer {
     }
 }
 
-#[cfg(target_arch = "x86")]
-type GapFn = unsafe extern "thiscall" fn(*mut u8) -> i32;
-
-/// Stands in for `client+0x2cfb0` at the style-0 draw's call. `this` is the
-/// `CHudDoDCrossHair` the draw was called on.
-#[cfg(target_arch = "x86")]
-unsafe extern "thiscall" fn gap_hook(this: *mut u8) -> i32 {
-    if crate::spectator_target::mode().unwrap_or(0) == 0 {
-        let original = ORIGINAL.load(Ordering::Relaxed);
-        if original == 0 {
-            return FIXED_GAP;
-        }
-        // Safety: the address the call went to before it was pointed here,
-        // a thiscall with no arguments returning the gap.
-        let original: GapFn = unsafe { std::mem::transmute::<usize, GapFn>(original) };
-        return unsafe { original(this) };
-    }
-    let gap = match Target::from_code(TARGET.load(Ordering::Relaxed)) {
-        Target::Fixed => FIXED_GAP,
-        Target::Toward(target) => {
-            // Safety: the game's own easing slot in the object it passed.
-            let slot = unsafe { this.add(LAST_GAP_AT) } as *mut i32;
-            let gap = ease(unsafe { slot.read_unaligned() }, target);
-            unsafe { slot.write_unaligned(gap) };
-            gap
-        }
-    };
-    SHOWN.store(gap, Ordering::Relaxed);
-    gap
-}
-
-/// Where the gap call goes while hooked.
-#[cfg(target_arch = "x86")]
-fn hook_address() -> usize {
-    gap_hook as *const () as usize
-}
-
-#[cfg(not(target_arch = "x86"))]
-fn hook_address() -> usize {
-    0
-}
-
-/// The style-0 draw's address, the gap call's, and the original gap
-/// function's, scanning once per `client.dll`. The scan matches the hooked
-/// call too (its `rel32` is a wildcard), and the gap function is found by
-/// its own signature, not through the call.
-fn resolve() -> Result<(usize, usize, usize), String> {
-    let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
-    if RESOLVED_BASE.load(Ordering::Acquire) == base {
-        return Ok((
-            DRAW.load(Ordering::Acquire),
-            CALL_SITE.load(Ordering::Acquire),
-            ORIGINAL.load(Ordering::Acquire),
-        ));
-    }
-    // Asked every frame while style 0 is wanted: one failed scan is enough.
-    if FAILED_BASE.load(Ordering::Acquire) == base {
-        return Err("the red crosshair's code was not found in this client.dll".to_string());
-    }
-    scan_client(base).inspect_err(|_| FAILED_BASE.store(base, Ordering::Release))
-}
-
-/// [`resolve`]'s scans and table read, for the module at `base`.
-fn scan_client(base: usize) -> Result<(usize, usize, usize), String> {
-    // Safety: `client_module_base` only returns a mapped module's base.
-    let draw = unsafe { scan::find_unique(base, DRAW_PATTERN) }
-        .map_err(|why| format!("could not find the style-0 crosshair draw -- {why}"))?;
-    let original = unsafe { scan::find_unique(base, GAP_PATTERN) }
-        .map_err(|why| format!("could not find the crosshair gap function -- {why}"))?;
-    let spread = unsafe { scan::find_unique(base, SPREAD_PATTERN) }
-        .map_err(|why| format!("could not find the weapon spread function -- {why}"))?;
-    // Safety: the pattern matched, and its last four bytes are the operand.
-    let table = unsafe { ((spread + TABLE_AT) as *const u32).read_unaligned() } as usize;
-    let weapons = unsafe { read_table(table) }?;
-    match TABLE.write() {
-        Ok(mut slot) => *slot = weapons,
-        Err(_) => return Err("the weapon table's lock is poisoned".to_string()),
-    }
-    let call_site = draw + GAP_CALL_AT;
-    DRAW.store(draw, Ordering::Release);
-    CALL_SITE.store(call_site, Ordering::Release);
-    ORIGINAL.store(original, Ordering::Release);
-    RESOLVED_BASE.store(base, Ordering::Release);
-    Ok((draw, call_site, original))
-}
-
 /// Reads `P_WpnInfo` from the loaded module, refusing a table whose known
 /// rows are not where they should be.
 ///
@@ -530,40 +406,44 @@ unsafe fn read_table(table: usize) -> Result<Vec<Weapon>, String> {
     Ok(weapons)
 }
 
-/// The style-0 draw's address, for `spectator_crosshair`'s jump.
-pub fn style0_draw() -> Result<usize, String> {
-    resolve().map(|(draw, ..)| draw)
+/// Reads the weapon table out of the loaded `client.dll`, once per table
+/// address. `spectator_crosshair` calls it before routing the red crosshair:
+/// an error (the code not found, or a table laid out differently) keeps the
+/// stock spectator dot.
+pub fn ready() -> Result<(), String> {
+    let table = crate::crosshair_gap::table_address()?;
+    if TABLE_READ_FROM.load(Ordering::Acquire) == table {
+        return Ok(());
+    }
+    // Safety: the operand the spread function indexes the table by.
+    let weapons = unsafe { read_table(table) }?;
+    match TABLE.write() {
+        Ok(mut slot) => *slot = weapons,
+        Err(_) => return Err("the weapon table's lock is poisoned".to_string()),
+    }
+    TABLE_READ_FROM.store(table, Ordering::Release);
+    Ok(())
 }
 
-/// Points the style-0 draw's gap call at [`gap_hook`] while `on`, back at the
-/// game's own otherwise. Returns whether anything was written. Off costs
-/// nothing before the first time it was on.
-pub fn set_hooked(on: bool) -> Result<bool, String> {
-    if !on && RESOLVED_BASE.load(Ordering::Acquire) == 0 {
-        return Ok(false);
-    }
-    let (_, call_site, original) = resolve()?;
-    let stock = call_bytes(call_site, original);
-    let ours = call_bytes(call_site, hook_address());
-    let want = if on { ours } else { stock };
-    // Safety: the draw's pattern covers the call's five bytes.
-    let present = unsafe { std::slice::from_raw_parts(call_site as *const u8, CALL_LEN) };
-    if present == want {
-        return Ok(false);
-    }
-    if present != stock && present != ours {
-        let mut bytes = [0u8; CALL_LEN];
-        bytes.copy_from_slice(present);
-        return Err(format!(
-            "the crosshair gap call goes to {:#x}, neither the game's gap function nor ours -- something else has patched it",
-            call_target(call_site, &bytes)
-        ));
-    }
-    // Safety: as above; written from the game's thread between frames.
-    if !unsafe { crate::patch::write_code_bytes(call_site, &want) } {
-        return Err("could not make the crosshair gap call writable".to_string());
-    }
-    Ok(true)
+/// The watched player's gap, eased in the game's own slot: the hook's answer
+/// while spectating.
+///
+/// # Safety
+///
+/// `this` is the `CHudDoDCrossHair` the style-0 draw passed.
+pub unsafe fn gap(this: *mut u8) -> i32 {
+    let gap = match Target::from_code(TARGET.load(Ordering::Relaxed)) {
+        Target::Fixed => FIXED_GAP,
+        Target::Toward(target) => {
+            // Safety: the game's own easing slot in the object it passed.
+            let slot = unsafe { this.add(LAST_GAP_AT) } as *mut i32;
+            let gap = ease(unsafe { slot.read_unaligned() }, target);
+            unsafe { slot.write_unaligned(gap) };
+            gap
+        }
+    };
+    SHOWN.store(gap, Ordering::Relaxed);
+    gap
 }
 
 /// For `spectator_crosshair::status`: the gap and what it came from.
@@ -772,18 +652,5 @@ mod tests {
         for (_, path) in KNOWN_ROWS {
             assert!(path.starts_with("models/v_") && path.len() < PATH_MAX);
         }
-    }
-
-    #[test]
-    fn the_patterns_parse_and_reach_their_operands() {
-        for pattern in [DRAW_PATTERN, GAP_PATTERN, SPREAD_PATTERN] {
-            assert!(scan::Pattern::parse(pattern).is_ok(), "{pattern}");
-        }
-        let draw: Vec<&str> = DRAW_PATTERN.split_whitespace().collect();
-        assert_eq!(draw[GAP_CALL_AT], "E8");
-        assert!(draw.len() >= GAP_CALL_AT + CALL_LEN);
-        let spread: Vec<&str> = SPREAD_PATTERN.split_whitespace().collect();
-        assert_eq!(spread.len(), TABLE_AT + 4);
-        assert_eq!(&spread[TABLE_AT - 2..TABLE_AT], &["8B", "96"]);
     }
 }
