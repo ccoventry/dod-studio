@@ -39,6 +39,10 @@ And for POV's red crosshair (`cl_xhair_style 0`, #308), against
  11. The weapon table the spread function indexes has the module's stride and
      layout: the floats at +0/+4/+8 of the address it reads, and the known
      rows' viewmodels where the module looks for them.
+ 12. The velocity `crosshair_gap.rs` finds at `VELOCITY_AT` is the vector the
+     spread function takes the length of, and one function writes it
+     (`HUD_WeaponsPostThink`, which only prediction runs): what a POV demo
+     lacks, and what `pov_crosshair_gap.rs` puts in for the gap call.
 
 Usage:
     python goldsrc-hooks/tools/verify_spectator_crosshair_offsets.py [path-to-client.dll]
@@ -120,8 +124,15 @@ def rust_u8_array(src: str, name: str):
     return [int(x, 16) for x in re.findall(r"0x([0-9a-fA-F]+)", m.group(1))]
 
 
+def every_instruction(code, address):
+    """Every instruction in `.text`, skipping bytes that don't decode."""
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.skipdata = True
+    return md.disasm(bytes(code), address)
+
+
 def check_red_crosshair(span_src, image, code, trva, span_rva, base, check):
-    """Checks 8-11: the red crosshair's jump, `crosshair_gap.rs` and
+    """Checks 8-12: the red crosshair's jump, `crosshair_gap.rs` and
     `spectator_crosshair_gap.rs`."""
     gsrc = "\n".join(path.read_text(encoding="utf-8") for path in GAP_SRCS)
 
@@ -230,6 +241,34 @@ def check_red_crosshair(span_src, image, code, trva, span_rva, base, check):
         at = table + stride * int(weapon) - floats_at + viewmodel_at
         found = image[at : image.find(b"\0", at)].decode("latin-1")
         check(found == path, f"weapon {weapon}'s viewmodel is {path} ({found})")
+
+    # 12. the velocity a POV demo's crosshair gets (`pov_crosshair_gap.rs`)
+    velocity_at = rust_const(gsrc, "VELOCITY_AT")
+    velocity = u32(spread + velocity_at)
+    check(
+        image[spread + velocity_at - 1] == 0x68 and image[spread + velocity_at + 4] == 0xE8,
+        f"VELOCITY_AT is the vector the spread function pushes for a call, its length ({velocity:#x})",
+    )
+    # Every instruction that names one of its three floats: the one writer
+    # stores x, y and z a few instructions apart; everything else pushes the
+    # vector for its length.
+    uses = [
+        ins
+        for ins in every_instruction(code, base + trva)
+        if any(f"{part:#x}" in ins.op_str for part in (velocity, velocity + 4, velocity + 8))
+    ]
+    stores = [i for i in uses if i.mnemonic == "mov" and i.op_str.startswith("dword ptr [")]
+    pushes = [i for i in uses if i.mnemonic == "push" and i.op_str == f"{velocity:#x}"]
+    others = [i for i in uses if i not in stores and i not in pushes]
+    first = min((i.address for i in stores), default=0)
+    check(
+        len(stores) == 3 and max(i.address for i in stores) - first < 0x20,
+        f"one writer stores its x, y and z ({len(stores)} store(s), from client+{first - base:#x})",
+    )
+    check(
+        not others and pushes,
+        f"everything else only pushes it ({len(pushes)} push(es), {len(others)} other use(s))",
+    )
 
 
 def main() -> int:

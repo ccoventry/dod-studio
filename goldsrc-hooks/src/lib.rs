@@ -169,6 +169,12 @@
 //!   folder (`-game dod_movies`), which the engine otherwise refuses with
 //!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
 //!   check, both builds; only when the game folder is not `dod`.
+//! - `pov_crosshair_gap`: a POV demo's red crosshair (`cl_xhair_style 0`)
+//!   opens while its recorder runs, as it did live, where the game, which
+//!   reads the velocity only prediction writes, would keep it at rest. The
+//!   red crosshair's gap call (`crosshair_gap`) gets the recorded velocity
+//!   for the game's own gap function, only while a POV demo plays. No
+//!   setting of its own: the stock `cl_dynamic_xhair` still decides.
 //! - `demo_console_keys`: in a POV demo only the console key opens the
 //!   console; the engine otherwise opens it for Alt (so Alt+Tab), Tab and
 //!   every printable key, as it never does in an HLTV demo (#894). One byte in
@@ -320,6 +326,7 @@ mod player_table;
 mod plugin_text;
 mod pmove_guard;
 mod position;
+mod pov_crosshair_gap;
 mod pov_live_bob;
 mod pov_recorder_shots;
 mod remote;
