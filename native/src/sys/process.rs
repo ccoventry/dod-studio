@@ -102,8 +102,9 @@ pub fn running_games() -> Vec<crate::patch::launch_settings::RunningGame> {
     launches_of(&[GAME_EXE])
 }
 
-/// [`running_games`] for any process names, so a test can read itself.
-fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame> {
+/// [`running_games`] for any process names: a test reads itself, and a WMI
+/// launch looks for the launcher it may have started (`sys::wmi_launch`).
+pub(crate) fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame> {
     let mut sys = snapshot();
     let pids: Vec<Pid> = pids_named_in(&sys, names)
         .into_iter()
