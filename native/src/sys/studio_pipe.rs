@@ -42,10 +42,17 @@ pub fn launch_arg() -> String {
 }
 
 /// The pipe name a game's command line (one argument per entry) carries
-/// after [`PIPE_ARG`], if any.
+/// after [`PIPE_ARG`], if any. Each argument is also split on whitespace and
+/// unquoted, as `launch_settings::game_folder_from_cmd` reads `-game`: a
+/// launcher that passes the whole `-cmdLine` text as one argument leaves it
+/// unsplit, and the game would then read as naming no Studio.
 pub fn pipe_on_command_line(cmd: &[String]) -> Option<&str> {
-    let at = cmd.iter().position(|a| a.eq_ignore_ascii_case(PIPE_ARG))?;
-    cmd.get(at + 1).map(String::as_str)
+    let mut tokens = cmd
+        .iter()
+        .flat_map(|a| a.split_whitespace())
+        .map(|t| t.trim_matches('"'));
+    tokens.find(|t| t.eq_ignore_ascii_case(PIPE_ARG))?;
+    tokens.next().filter(|v| !v.is_empty())
 }
 
 /// What decides which Studio a running game asks.
@@ -142,6 +149,15 @@ mod tests {
         assert_eq!(pipe_on_command_line(&args("hl.exe -game dod")), None);
         assert_eq!(pipe_on_command_line(&args("hl.exe -dodstudio_pipe")), None);
         assert_eq!(pipe_on_command_line(&[]), None);
+    }
+
+    #[test]
+    fn the_pipe_name_is_read_off_a_command_line_passed_as_one_argument() {
+        let cmd = vec![
+            r#""C:\Games\hl.exe""#.to_string(),
+            "-game dod -dodstudio_pipe dodstudio-analyzer-42 +viewdemo x".to_string(),
+        ];
+        assert_eq!(pipe_on_command_line(&cmd), Some("dodstudio-analyzer-42"));
     }
 
     const OURS: &str = "dodstudio-analyzer-10";

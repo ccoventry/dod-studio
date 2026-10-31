@@ -46,7 +46,13 @@ fn launch_pipe() -> Option<&'static str> {
     static NAMED: OnceLock<Option<String>> = OnceLock::new();
     NAMED
         .get_or_init(|| {
-            let args: Vec<String> = std::env::args().collect();
+            // `args_os`, not `args`: `std::env::args()` panics on an
+            // argument that isn't valid Unicode, and a panic here is a game
+            // crash under `panic = "abort"`. A lossy value just isn't a
+            // Studio pipe name.
+            let args: Vec<String> = std::env::args_os()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
             let named = named_pipe(&args);
             let line = match &named {
                 Some(name) => format!("studio pipe: asking {name} ({PIPE_FLAG})"),

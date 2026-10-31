@@ -140,6 +140,8 @@ fn serve(name: &str, held: Option<&AtomicBool>) -> bool {
         }
         if first && let Some(held) = held {
             held.store(true, Ordering::Release);
+            // At start, or once the Studio holding it has closed.
+            crate::log_markdown(&format!("Analysis server: serving {name}"));
         }
         first = false;
         // Safety: the handle just created; blocks until a client connects.
