@@ -290,7 +290,9 @@ mod tests {
         });
 
         let mut client = None;
-        for _ in 0..50 {
+        // The server thread may not be listening yet on a loaded machine.
+        let open_deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while std::time::Instant::now() < open_deadline {
             match std::fs::OpenOptions::new().read(true).open(&name) {
                 Ok(pipe) => {
                     client = Some(pipe);
@@ -304,14 +306,19 @@ mod tests {
             pipe: client.expect("the test pipe never opened"),
             cancel: Arc::clone(&cancel),
         };
+        let (read_tx, read_rx) = std::sync::mpsc::channel::<()>();
         let reading = std::thread::spawn(move || {
             let mut lines = BufReader::new(reader).lines().map_while(Result::ok);
             let hello = lines.next();
+            let _ = read_tx.send(());
             // Nothing more comes: only `cancel` ends this.
             let rest: Vec<String> = lines.collect();
             (hello, rest)
         });
-        std::thread::sleep(Duration::from_millis(100));
+        // Cancel only once the first line is in, however slow the machine is.
+        read_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the reader never saw the first line");
         cancel.store(true, Ordering::Relaxed);
         let (hello, rest) = reading.join().unwrap();
         assert_eq!(hello.as_deref(), Some("hello"));
