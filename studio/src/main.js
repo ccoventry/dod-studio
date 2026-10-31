@@ -156,7 +156,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize modular UI panes
   initThemedConfirm();
-  initAuditorPane({ getDemos: queue.getDemos, onSettingsChange: () => persistAppSettings() });
+  // relocateMovedDemos is declared further down (project_demos.js).
+  initAuditorPane({
+    getDemos: queue.getDemos,
+    relocateMoved: (pairs) => relocateMovedDemos(pairs),
+    onSettingsChange: () => persistAppSettings(),
+  });
   initAuditorTabs();
   initSplitPane();
   initDemoRenamePane({
@@ -249,6 +254,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     useFoundCopies,
     offerIdenticalCopies,
     locateDemoByHand,
+    relocateMovedDemos,
   } = createProjectDemos({
     getDemos: queue.getDemos,
     getTakeIndex: () => takeIndex,
