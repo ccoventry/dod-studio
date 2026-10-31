@@ -394,7 +394,9 @@ reaches the ones before). Studio scans the demo first when it isn't in the
 Master Demo Queue, and the tab shows what it is doing. The buttons are
 greyed while DoD Studio isn't running or no demo plays. An `ask` typed while
 the demo still loads waits for it to finish loading (three minutes at most),
-then asks; `ask here` keeps the clock it was typed at.
+then asks; `ask here` keeps the clock it was typed at. A wait that gives up
+says so on the tab ("Not sent to DoD Studio: ..."), and one typed while an
+earlier request is still on its way is refused, as a second `ask` is.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
 move the camera off the highlight's player (#826), and the console refuses

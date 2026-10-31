@@ -586,7 +586,12 @@ impl IdleFacts {
     /// Whether From the start and From here may be pressed.
     pub(crate) fn can_ask(&self) -> bool {
         use crate::review_ask::Status;
-        self.studio && self.demo && matches!(self.ask, Status::Idle | Status::Failed(_))
+        self.studio
+            && self.demo
+            && matches!(
+                self.ask,
+                Status::Idle | Status::Failed(_) | Status::NotAsked(_)
+            )
     }
 
     /// The tab's second line with no review running.
@@ -598,7 +603,11 @@ impl IdleFacts {
             Status::Failed(why) if self.studio => {
                 return format!("DoD Studio couldn't start it: {why}");
             }
-            Status::Failed(_) | Status::Idle => {}
+            // The game gave up before asking: Studio never had the request.
+            Status::NotAsked(why) if self.studio => {
+                return format!("Not sent to DoD Studio: {why}");
+            }
+            Status::Failed(_) | Status::NotAsked(_) | Status::Idle => {}
         }
         // One line that fits the default window's 520-pixel label (about 85
         // characters); the buttons' tooltips say the rest.
@@ -654,8 +663,10 @@ fn ask(what: &str) {
         }
     };
     if demo_now() == crate::review_ask::DemoNow::Loading {
-        crate::review_ask::wait_for_demo(start);
-        say("the demo is still loading: DoD Studio is asked once it plays");
+        match crate::review_ask::wait_for_demo(start) {
+            Ok(()) => say("the demo is still loading: DoD Studio is asked once it plays"),
+            Err(why) => say(&why),
+        }
         return;
     }
     // An ask still waiting would go out a second time on the next frame.
@@ -1702,6 +1713,7 @@ mod tests {
         let facts = |studio, demo, ask| IdleFacts { studio, demo, ask };
         assert!(facts(true, true, Status::Idle).can_ask());
         assert!(facts(true, true, Status::Failed("x".into())).can_ask());
+        assert!(facts(true, true, Status::NotAsked("x".into())).can_ask());
         assert!(!facts(false, true, Status::Idle).can_ask());
         assert!(!facts(true, false, Status::Idle).can_ask());
         assert!(!facts(true, true, Status::Asking("Scanning".into())).can_ask());
@@ -1735,6 +1747,11 @@ mod tests {
             facts(true, true, Status::Failed("no highlights".into())).detail(),
             "DoD Studio couldn't start it: no highlights"
         );
+        // A wait that gave up in the game doesn't blame Studio.
+        let gave_up = "the demo did not finish loading in three minutes";
+        let line = facts(true, true, Status::NotAsked(gave_up.into())).detail();
+        assert_eq!(line, format!("Not sent to DoD Studio: {gave_up}"));
+        assert!(line.len() <= 88, "{line}");
         // A failure from before Studio closed gives way to why nothing works.
         assert!(
             facts(false, true, Status::Failed("x".into()))
