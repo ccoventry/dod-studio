@@ -7,7 +7,7 @@
 //! `%APPDATA%\dod-studio\analyzer_cache`): a demo Studio's Demo Analyzer or
 //! Master Queue scan already read, or one shown here before, is there and
 //! takes a few milliseconds. Anything else is analysed by DoD Studio itself
-//! when it is running (its analysis pipe, `STUDIO_PIPE`), else here, on a thread of its own at
+//! when it is running (its analysis pipe, `studio_pipe`), else here, on a thread of its own at
 //! below-normal priority; either way it is saved there, for Studio and the
 //! next time.
 //!
@@ -383,10 +383,6 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     ))
 }
 
-/// DoD Studio's analysis pipe; must match `native::sys::analysis_server::
-/// PIPE_NAME` to the character.
-pub(crate) const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
-
 /// One line of DoD Studio's answer (`native::sys::analysis_server`'s
 /// protocol).
 #[derive(Debug, PartialEq)]
@@ -432,11 +428,7 @@ fn version_mismatch(studio: u32, ours: u32) -> String {
 /// from before #684 doesn't).
 fn ask_studio(path: &Path, generation: u64) -> Option<Result<Option<u32>, String>> {
     use std::io::{BufRead, BufReader, Write};
-    let mut pipe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(STUDIO_PIPE)
-        .ok()?;
+    let mut pipe = crate::studio_pipe::connect().ok()?;
     log(&format!("asking DoD Studio to analyse {}", path.display()));
     let request = format!("analyze {}\n", path.to_string_lossy());
     if let Err(e) = pipe.write_all(request.as_bytes()) {
@@ -627,12 +619,6 @@ mod tests {
         let (free, largest) = free_address_space().unwrap();
         assert!(largest > 0 && largest <= free);
         assert_eq!(block_needed(100 << 20), 232 << 20);
-    }
-
-    #[test]
-    fn the_studio_pipe_is_the_one_studio_serves() {
-        let server = include_str!("../../native/src/sys/analysis_server.rs");
-        assert!(server.contains(&format!("pub const PIPE_NAME: &str = r\"{STUDIO_PIPE}\";")));
     }
 
     #[test]

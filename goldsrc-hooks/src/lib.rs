@@ -300,6 +300,7 @@ mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
 mod lookahead;
+mod map_file_leak;
 mod map_sounds;
 mod map_text;
 mod map_weather;
@@ -362,6 +363,7 @@ mod steam_id;
 mod strafe_twitch;
 mod streaks;
 mod studio_panel;
+mod studio_pipe;
 mod teammate_info;
 mod tempent_fix;
 mod texture_hires;
@@ -433,6 +435,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // A crash fix rather than a capture setting, so on unless asked not to.
     tempent_fix::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_TEMPENT_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Only frees memory the game never uses again, so on unless asked not to.
+    map_file_leak::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX", true),
         Ordering::Relaxed,
     );
     hull_trace_guard::ENABLED.store(
