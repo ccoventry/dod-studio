@@ -304,7 +304,8 @@ pub fn plan_on_disk(req: &Request) -> Result<Plan, String> {
     if dest.exists() && !dest.is_dir() {
         return Err(crate::messages::consolidate_destination_bad(&dest));
     }
-    let free = crate::sys::disk::get_available_bytes(&dest);
+    // An unreadable drive never blocks the move (the pre-Option answer).
+    let free = crate::sys::disk::get_available_bytes(&dest).unwrap_or(u64::MAX);
     plan(req, &|p| p.symlink_metadata().is_ok(), free)
 }
 
