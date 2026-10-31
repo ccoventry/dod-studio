@@ -583,15 +583,11 @@ impl IdleFacts {
         }
     }
 
-    /// Whether From the start and From here may be pressed.
+    /// Whether From the start and From here may be pressed: not while a
+    /// request or a wait for the demo is on its way.
     pub(crate) fn can_ask(&self) -> bool {
         use crate::review_ask::Status;
-        self.studio
-            && self.demo
-            && matches!(
-                self.ask,
-                Status::Idle | Status::Failed(_) | Status::NotAsked(_)
-            )
+        self.studio && self.demo && !matches!(self.ask, Status::Asking(_) | Status::Sent(_))
     }
 
     /// The tab's second line with no review running.
