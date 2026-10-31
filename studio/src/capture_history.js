@@ -3,12 +3,14 @@
 // A Highlight Details row's capture history (#439): a ▸ in the row that opens
 // a list of every capture of the highlight, newest first, with its settings,
 // whether its take is still on disk, the highlights it was recorded with, and
-// the renders of that take. The lines come from capture_history_logic.js; this
-// draws them and asks the disk (takeCaptureStates) about the takes.
+// the renders of that take, including the videos the project recorded for a
+// take since deleted (#1264). The lines come from capture_history_logic.js;
+// this draws them and asks the disk about the takes (takeCaptureStates) and
+// where their videos are now (locateRenderedVideos).
 
 import { STRINGS } from './strings.js';
 import { streakUid } from './take_index.js';
-import { capturesOf, folderList, describeCapture } from './capture_history_logic.js';
+import { capturesOf, folderList, describeCapture, videoPathList } from './capture_history_logic.js';
 import { highlightStartSeconds } from './highlight_time.js';
 import { clockFloor } from './time_format.js';
 import { renderSizeText } from './byte_size.js';
@@ -63,6 +65,11 @@ function lineElement(line, reveal) {
   if (line.status !== 'checking' && line.renders.length === 0) renders.textContent = STRINGS.CAPTURE_HISTORY.NO_RENDERS;
   line.renders.forEach((render) => {
     const item = el('div', render.text, { className: 'capture-history-render' });
+    // Dim, not hide: a moved or deleted video was still rendered.
+    if (render.missing) {
+      item.dataset.videoMissing = 'true';
+      item.style.opacity = GONE_OPACITY;
+    }
     if (render.videoPath) item.append(revealButton(STRINGS.CAPTURE_HISTORY.OPEN_VIDEO, STRINGS.CAPTURE_HISTORY.OPEN_VIDEO_TITLE, render.videoPath, reveal));
     renders.append(item);
   });
@@ -73,13 +80,15 @@ function lineElement(line, reveal) {
 /**
  * `getTakeIndex()` is the project's take index and `getDemos()` the queue (to
  * name the highlights a take is shared with). `fetchStates(folders)` is
- * `takeCaptureStates` and `reveal(path)` is `revealInExplorer`.
+ * `takeCaptureStates`, `locateVideos(paths)` is `locateRenderedVideos` and
+ * `reveal(path)` is `revealInExplorer`.
  */
-export function createCaptureHistory({ getTakeIndex, getDemos, fetchStates, reveal }) {
+export function createCaptureHistory({ getTakeIndex, getDemos, fetchStates, locateVideos, reveal }) {
   // Highlights whose list is open, kept across the pane's re-renders, and the
   // last answers from the disk so a re-render shows them while it asks again.
   const open = new Set();
   const lastStates = new Map();
+  const lastLocated = new Map();
 
   function labelOfUid() {
     const names = new Map();
@@ -90,20 +99,32 @@ export function createCaptureHistory({ getTakeIndex, getDemos, fetchStates, reve
     return (uid) => names.get(uid) || null;
   }
 
-  function draw(listCell, uid, captures, states) {
+  function draw(listCell, uid, captures, states, located) {
     const label = labelOfUid();
-    const context = { labelOfUid: label, formatSize };
+    const context = { labelOfUid: label, formatSize, located: located || new Map() };
     listCell.replaceChildren(...captures.map((capture, i) =>
       lineElement(describeCapture(capture, uid, states?.[i], context), reveal)));
   }
 
+  /** Where each finished video of the list is now: path -> current path or
+   *  null (missing). Empty when the lookup failed: the lines then fall back
+   *  to what the take folders said. */
+  async function locate(captures, states) {
+    const paths = videoPathList(captures, states);
+    if (paths.length === 0) return new Map();
+    const answer = await locateVideos(paths);
+    return answer ? new Map(paths.map((path, i) => [path, answer[i] ?? null])) : new Map();
+  }
+
   async function fill(listCell, uid, captures) {
-    draw(listCell, uid, captures, lastStates.get(uid));
+    draw(listCell, uid, captures, lastStates.get(uid), lastLocated.get(uid));
     const answer = await fetchStates(folderList(captures));
     // null = the check failed; each line says so rather than staying "checking".
     const states = answer ? answer.map((state, i) => (captures[i].record.take_folder ? state : undefined)) : captures.map(() => null);
     lastStates.set(uid, states);
-    if (listCell.isConnected) draw(listCell, uid, captures, states);
+    const located = await locate(captures, states);
+    lastLocated.set(uid, located);
+    if (listCell.isConnected) draw(listCell, uid, captures, states, located);
   }
 
   function showList(tr, uid, captures) {

@@ -4,6 +4,7 @@ pub mod autosave;
 pub mod capture_room;
 pub mod combine;
 pub mod config;
+pub mod render_locate;
 pub mod renderer;
 pub mod scanner;
 pub mod take_checks;

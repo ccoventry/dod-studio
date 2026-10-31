@@ -5,8 +5,12 @@
 //! list can mark a take gone while its line stays.
 
 use crate::render_manager::{HistoryEntry, history_for};
+use crate::settings_manager::SettingsManager;
+use native::log_markdown;
 use serde::Serialize;
 use std::path::Path;
+use std::time::Instant;
+use tauri::{AppHandle, Manager};
 
 /// One take folder's state on disk.
 #[derive(Serialize)]
@@ -35,6 +39,43 @@ fn state_of(take_folder: &str) -> TakeCaptureState {
 #[tauri::command(async)]
 pub fn take_capture_states(take_folders: Vec<String>) -> Vec<TakeCaptureState> {
     take_folders.iter().map(|f| state_of(f)).collect()
+}
+
+/// Where each rendered video the project recorded is now (#1264), in order:
+/// its own path while it is there, else the first file of that name in the
+/// render export folders (a video the user moved), else `None` (missing).
+/// Off the main thread, like `take_capture_states`: a moved video means a
+/// walk of the export folders, which can sit on a slow drive.
+#[tauri::command(async)]
+pub fn locate_rendered_videos(app: AppHandle, paths: Vec<String>) -> Vec<Option<String>> {
+    let export_dirs = {
+        let settings = app.state::<SettingsManager>();
+        let s = settings.inner.lock().unwrap_or_else(|p| p.into_inner());
+        s.render_export_dirs.clone()
+    };
+    let started = Instant::now();
+    let located = native::hlcr::render_locate::locate_videos(&paths, &export_dirs);
+    let moved = located
+        .iter()
+        .zip(&paths)
+        .filter(|(found, path)| found.as_deref().is_some_and(|f| f != Path::new(path)))
+        .count();
+    let missing = located.iter().filter(|found| found.is_none()).count();
+    // Only a lookup that had to search is worth a line: one per opened list
+    // whose videos are all in place would bury the log.
+    if moved + missing > 0 {
+        log_markdown(&format!(
+            "[render-locate] {} rendered video(s): {} found again in the export folders, {} missing ({} ms)",
+            paths.len(),
+            moved,
+            missing,
+            started.elapsed().as_millis()
+        ));
+    }
+    located
+        .into_iter()
+        .map(|found| found.map(|p| p.display().to_string()))
+        .collect()
 }
 
 #[cfg(test)]
