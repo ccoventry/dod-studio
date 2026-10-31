@@ -699,6 +699,10 @@ fn apply_render_update(
             let mut just_finished = None;
             let mut just_failed = None;
             let mut attempt_ended = None;
+            // The finished attempt as the take's history now holds it, sent
+            // with `render_take_finished` so the project records the video
+            // (#1264).
+            let mut finished_attempt: Option<RenderAttempt> = None;
             let mut finished_clip: Option<ClipData> = None;
             {
                 let mut guard = jobs.lock().unwrap();
@@ -734,6 +738,9 @@ fn apply_render_update(
                             entry.attempt.output_size_bytes = size;
                             entry.attempt.error = error.clone();
                             entry.output_exists = success;
+                            if success {
+                                finished_attempt = Some(entry.attempt.clone());
+                            }
                         }
                         attempt_ended = Some((
                             job.clip.take_folder.clone(),
@@ -799,6 +806,7 @@ fn apply_render_update(
                         "take_folder": take_folder,
                         "base_name": base_name,
                         "clip_type": clip_type,
+                        "render": finished_attempt,
                     }),
                 );
             }

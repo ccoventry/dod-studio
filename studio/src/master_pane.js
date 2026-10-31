@@ -448,7 +448,6 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdName = document.createElement('td');
     tdName.style.padding = '6px 8px';
     tdName.style.fontWeight = 'bold';
-    tdName.style.maxWidth = '200px';
     tdName.style.display = 'flex';
     tdName.style.alignItems = 'center';
     tdName.style.gap = '5px';
