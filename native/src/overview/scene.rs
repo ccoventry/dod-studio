@@ -501,8 +501,7 @@ pub fn build_until(
             continue;
         };
         let (i, j) = (cell / reach.ny, cell % reach.ny);
-        'near: for (ii, jj) in [(i, j), (i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)] {
-            let c2 = ii * reach.ny + jj;
+        'near: for c2 in beside_cells(i, j, reach.ny) {
             for k in reach.nodes_in(c2) {
                 if reach.reached[k] && (reach.z[k] - cz).abs() <= 24.0 {
                     if let Some(&area) = area_of.get(&c2) {
@@ -624,6 +623,16 @@ pub fn build_until(
     })
 }
 
+/// The cell `(i, j)` and its four neighbours as cell numbers. A cell number
+/// is `i * ny + j`, so a `j` outside `0..ny` would read the next or previous
+/// column's cell instead of nothing, and is left out.
+fn beside_cells(i: i32, j: i32, ny: i32) -> impl Iterator<Item = i32> {
+    [(i, j), (i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)]
+        .into_iter()
+        .filter(move |&(_, jj)| (0..ny).contains(&jj))
+        .map(move |(ii, jj)| ii * ny + jj)
+}
+
 /// Which areas touch, from the area of each grid cell (`i * ny + j`). Each
 /// pair of side-by-side cells is looked at once; the cell after the last in
 /// a column is the first of the next column, not a neighbour.
@@ -733,6 +742,16 @@ fn scene_face(level: &Level, reach: &Reach, t: &Transform, face: usize, area: u3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cells_beside_one_stop_at_the_ends_of_a_column() {
+        let beside = |i, j| beside_cells(i, j, 4).collect::<Vec<_>>();
+        // The last cell of column 1 has no cell above it: 8 is column 2's first.
+        assert!(!beside(1, 3).contains(&8));
+        // The first cell of column 1 has none below: 3 is column 0's last.
+        assert!(!beside(1, 0).contains(&3));
+        assert_eq!(beside(1, 2), vec![6, 10, 2, 7, 5]);
+    }
 
     #[test]
     fn a_triangle_cut_to_a_box_keeps_only_the_part_inside() {

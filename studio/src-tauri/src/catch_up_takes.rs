@@ -44,7 +44,11 @@ pub(crate) fn read_console_log(path: &Path) -> Option<String> {
         .ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    // Valid UTF-8 moves into the String without a copy of the tail.
+    Some(
+        String::from_utf8(bytes)
+            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
+    )
 }
 
 /// The clip recordings `manifest`'s batch made, as the markers in `log` say:
@@ -400,6 +404,15 @@ mod tests {
             read_console_log(&path).as_deref(),
             Some("[dod-studio] DEMO_START 1 2 2\n")
         );
+    }
+
+    #[test]
+    fn a_console_log_with_bad_bytes_still_reads() {
+        let dir = Scratch::new("catch_up_console_lossy");
+        let path = dir.path().join("qconsole.log");
+        std::fs::write(&path, [b'o', b'k', b' ', 0xff, b' ', b'e']).unwrap();
+        let expected = format!("ok {} e", char::REPLACEMENT_CHARACTER);
+        assert_eq!(read_console_log(&path).as_deref(), Some(expected.as_str()));
     }
 
     #[test]
