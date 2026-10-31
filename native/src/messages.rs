@@ -1124,6 +1124,13 @@ pub fn cli_failed_to_write(path: impl Display, err: impl Display) -> String {
     format!("Failed to write {}: {}", path, err)
 }
 
+// ── vegas.rs ─────────────────────────────────────────────────────────────
+
+pub const VEGAS_NO_SCRIPT: &str = "This copy of DoD Studio has no VEGAS script to install (the vegas folder in the DoD Studio repo).";
+
+pub const VEGAS_NO_DOCUMENTS: &str =
+    "Windows did not say where your Documents folder is, so the VEGAS script cannot be placed.";
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any
