@@ -687,7 +687,9 @@ fn parse_texture_names(data: &[u8]) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let count = rd_u32(data, 0)? as usize;
-    let mut out = Vec::with_capacity(count);
+    // The reader stops at the first offset past the lump, so reserve no more
+    // than the lump can hold: a corrupt count must not abort on allocation (#1236).
+    let mut out = Vec::with_capacity(count.min(data.len() / 4));
     for i in 0..count {
         let at = 4 + i * 4;
         let Ok(offset) = rd_i32(data, at) else {
