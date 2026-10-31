@@ -42,7 +42,7 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps nine of its 43 slots for our
+//!   `cldll_func_t` table, then swaps ten of its 43 slots for our
 //!   trampolines before handing it back to the engine.
 //! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` / `"HUD_Redraw"` /
 //!   `"HUD_Key_Event"` / `"HUD_DirectorMessage"` /
@@ -1637,7 +1637,7 @@ unsafe fn swap_slot(
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
 /// the engine's `cldll_func_t` buffer exactly as it normally would, then
-/// replaces the five slots we care about before the engine ever reads them.
+/// replaces the ten slots we care about before the engine ever reads them.
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {

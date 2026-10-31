@@ -308,3 +308,32 @@ fn the_batchs_game_going_away_is_noticed_with_another_game_open() {
     assert!(watch.failure_reason.is_some());
     assert!(procs.m().killed.is_empty());
 }
+
+/// OBS going away for good ends the batch, and a game the player had open
+/// (#725) is left open at its menu, as on Cancel: only the batch's own
+/// launched game is closed (#1231).
+#[test]
+fn obs_gone_leaves_a_borrowed_game_open_and_closes_a_launched_one() {
+    let rig = Rig::new("watch_pass_obs_gone_borrowed");
+    let procs = FakeProcesses::default();
+    procs.set(&[OURS]);
+    let mut watch = rig.watch(true, &procs);
+    watch.io.reuse_game = Some(OURS.pid);
+    watch.game = BatchGame::new(Vec::new(), Some(OURS.pid));
+    watch.obs_session = Some(crate::obs::ObsSession::lost_for_tests());
+    assert!(watch.pass().is_break());
+    let reason = watch.failure_reason.clone().unwrap_or_default();
+    assert!(reason.contains("lost contact with OBS"), "{reason}");
+    assert!(procs.m().killed.is_empty(), "the borrowed game was closed");
+    assert_eq!(procs.m().games, [OURS]);
+    assert!(!watch.game_closed);
+
+    let rig = Rig::new("watch_pass_obs_gone_launched");
+    let procs = FakeProcesses::default();
+    procs.set(&[THEIRS, OURS]);
+    let mut watch = rig.watch(true, &procs);
+    watch.obs_session = Some(crate::obs::ObsSession::lost_for_tests());
+    assert!(watch.pass().is_break());
+    assert_eq!(procs.m().killed, [OURS.pid]);
+    assert_eq!(procs.m().games, [THEIRS]);
+}
