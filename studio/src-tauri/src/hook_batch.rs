@@ -6,7 +6,8 @@
 //! (`viewdemo_refresh`). A demo on another drive than the game plays where it
 //! is, by its full path, when the hook DLL can open it that way (#779); for
 //! an older DLL it is copied into the game's folder for the batch
-//! (`source_copies`).
+//! (`source_copies`). A demo over the engine's entity limit plays from its
+//! trimmed copy (`trimmed_demos`, #207).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -65,11 +66,13 @@ pub fn refresh_viewdemo_times(app: &tauri::AppHandle, streaks: &mut [CaptureStre
 
 /// Writes the hook's batch file for `jobs` and returns it with the copies it
 /// plays from, or says why this batch has to be patched instead. Nothing is
-/// copied for a batch that then can't run this way.
+/// copied for a batch that then can't run this way. A demo in `trimmed` (the
+/// original's path to its trimmed copy, #207) is played from the copy.
 pub fn prepare(
     jobs: &[PatchJob],
     streaks: &[CaptureStreak],
     config: &PatcherConfig,
+    trimmed: &HashMap<String, PathBuf>,
 ) -> Result<RuntimeBatch, String> {
     let Some(dll) = config.goldsrc_hooks_dll() else {
         return Err(
@@ -78,11 +81,19 @@ pub fn prepare(
     };
     let other_drives = native::preview_in_place::hook_plays_other_drives(&dll);
     let dod_dir = dod_dir(config)?;
-    let demos: Vec<&str> = jobs
+    // What the game opens for each demo: its trimmed copy, or itself.
+    let played = |demo: &str| -> String {
+        trimmed
+            .get(demo)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| demo.to_string())
+    };
+    let played_demos: Vec<String> = jobs
         .iter()
         .filter(|j| !j.blocks.is_empty())
-        .map(|j| j.source_demo.as_str())
+        .map(|j| played(&j.source_demo))
         .collect();
+    let demos: Vec<&str> = played_demos.iter().map(String::as_str).collect();
     let swept = native::patch::source_copies::remove_stale(&dod_dir);
     if swept > 0 {
         native::log_markdown(&format!(
@@ -106,9 +117,20 @@ pub fn prepare(
             }
         }
     }
-    let play_as: HashMap<String, PathBuf> = copies
+    // Keyed by the original, as the batch file's jobs are: a copy beside
+    // the game of what it plays, else the trimmed copy itself.
+    let play_as: HashMap<String, PathBuf> = jobs
         .iter()
-        .map(|c| (c.source.to_string_lossy().into_owned(), c.copy.clone()))
+        .filter(|j| !j.blocks.is_empty())
+        .filter_map(|j| {
+            let plays = PathBuf::from(played(&j.source_demo));
+            let target = copies
+                .iter()
+                .find(|c| c.source == plays)
+                .map(|c| c.copy.clone())
+                .or_else(|| trimmed.get(&j.source_demo).cloned())?;
+            Some((j.source_demo.clone(), target))
+        })
         .collect();
     // The file first: a batch that can't run this way copies nothing.
     let text = native::patch::runtime_batch::batch_file_playing(

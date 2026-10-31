@@ -856,6 +856,17 @@ export async function removeNonRenderingRenderJobs() {
     });
 }
 
+/** Capture history (#439): per take folder, in order, whether it is still
+ *  there and its renders. Resolves to `[{ exists, renders }]`, or null when
+ *  the check failed (the list then says it couldn't look). */
+export async function takeCaptureStates(takeFolders) {
+  return invoke("take_capture_states", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (take_capture_states):", err);
+      return null;
+    });
+}
+
 /** Delete Take (#644): checks each take folder and measures it for the
  *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
  *  with the reason when any take can't be deleted. */
@@ -1174,35 +1185,6 @@ export async function crashMapWarnings(demoPaths) {
   return invoke("crash_map_warnings", { demoPaths })
     .catch((err) => {
       console.error("IPC Execution Error (crash_map_warnings):", err);
-      throw err;
-    });
-}
-
-/** The demo folders linked into the game folder of `hlExe` (#376). Throws
- *  the reason when it cannot read them; demo_links.js shows it. */
-export async function listDemoLinks(hlExe) {
-  return invoke("list_demo_links", { hlExe })
-    .catch((err) => {
-      console.error("IPC Execution Error (list_demo_links):", err);
-      throw err;
-    });
-}
-
-/** Links `folder` into the game folder of `hlExe` (#376). Throws why it was
- *  refused; demo_links.js shows it. */
-export async function addDemoLink(hlExe, folder) {
-  return invoke("add_demo_link", { hlExe, folder })
-    .catch((err) => {
-      console.error("IPC Execution Error (add_demo_link):", err);
-      throw err;
-    });
-}
-
-/** Removes the link `name` only; the folder it points at stays (#376). */
-export async function removeDemoLink(hlExe, name) {
-  return invoke("remove_demo_link", { hlExe, name })
-    .catch((err) => {
-      console.error("IPC Execution Error (remove_demo_link):", err);
       throw err;
     });
 }

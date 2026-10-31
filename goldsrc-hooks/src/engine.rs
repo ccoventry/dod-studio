@@ -42,7 +42,7 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps nine of its 43 slots for our
+//!   `cldll_func_t` table, then swaps ten of its 43 slots for our
 //!   trampolines before handing it back to the engine.
 //! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` / `"HUD_Redraw"` /
 //!   `"HUD_Key_Event"` / `"HUD_DirectorMessage"` /
@@ -531,7 +531,9 @@ pub struct RefParamsPartial {
     spectator: i32,
     onground: i32,
     waterlevel: i32,
-    simvel: [f32; 3],
+    /// The client's simulated velocity; in a POV demo, the recorder's
+    /// (`pov_crosshair_gap`).
+    pub simvel: [f32; 3],
     /// The client's simulated origin. The engine copies it back into
     /// `cl.simorg` after `V_CalcRefdef`, and culls an HLTV demo's entities
     /// from there (`spectator_chase_pvs`).
@@ -932,14 +934,6 @@ static PER_FRAME_PROLOGUE: std::sync::OnceLock<fn()> = std::sync::OnceLock::new(
 
 pub fn set_per_frame_prologue(callback: fn()) {
     let _ = PER_FRAME_PROLOGUE.set(callback);
-}
-
-/// Whether something has called `set_per_frame_prologue` yet -- issue #324's
-/// regression test needs to observe this without a real engine to drive
-/// `run_per_frame_callback` itself.
-#[cfg(test)]
-pub(crate) fn per_frame_prologue_is_set() -> bool {
-    PER_FRAME_PROLOGUE.get().is_some()
 }
 
 pub fn set_per_frame_callback(callback: fn()) {
@@ -1457,7 +1451,8 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 /// replace the camera for a dead player (`spectator_deathcam`, before the
 /// position is recorded, so the recorded view is the drawn one), adjust the
 /// viewmodel it just placed (`spectator_gun`) and keep its live bob for a POV
-/// demo (`pov_live_bob`).
+/// demo (`pov_live_bob`). A POV demo's crosshair takes the main view's
+/// velocity (`pov_crosshair_gap`).
 unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
     if real.is_null() {
@@ -1468,6 +1463,10 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     // Before: `V_GetInEyePos` reads the height inside `V_CalcRefdef`.
     unsafe { crate::spectator_eye::before_calc_refdef(pparams) };
     unsafe { real(pparams) };
+    if main_view {
+        // Safety: non-null (`is_main_view`), the engine's for this call.
+        crate::pov_crosshair_gap::note_view(unsafe { &*pparams });
+    }
     unsafe { crate::spectator_chase_pvs::after_calc_refdef(pparams, main_view) };
     unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {
@@ -1638,7 +1637,7 @@ unsafe fn swap_slot(
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
 /// the engine's `cldll_func_t` buffer exactly as it normally would, then
-/// replaces the five slots we care about before the engine ever reads them.
+/// replaces the ten slots we care about before the engine ever reads them.
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {

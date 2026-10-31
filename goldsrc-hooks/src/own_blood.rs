@@ -39,11 +39,12 @@
 //! `tools/verify_own_blood_offsets.py` checks the pattern is unique and its
 //! operand is the 32.0 in both installs' `client.dll`.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 pub const NAME: &str = console_name!("view_show_own_blood");
 
@@ -61,7 +62,7 @@ const OPERAND_AT: usize = 18;
 /// The cut the patched `fcomp` reads, as f32 bits. The client code holds its
 /// address, so it stays a plain 4-byte static.
 static CUT: AtomicU32 = AtomicU32::new(0x4200_0000);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+pub static CVAR: Cvar = Cvar::new();
 /// The cvar's raw f32 bits the last time it was acted on; NaN until then.
 static SEEN: AtomicU32 = AtomicU32::new(0x7fc0_0000);
 /// The operand's address, for the `client.dll` base in [`SCANNED_BASE`].
@@ -70,10 +71,6 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// The game's own operand (the 32.0's address), read before the first write.
 static STOCK_OPERAND: AtomicU32 = AtomicU32::new(0);
 static GAVE_UP: AtomicBool = AtomicBool::new(false);
-
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// The level a cvar value asks for, and whether it had to be clamped to get
 /// there. A fraction rounds down; NaN and infinities read as 0.
@@ -178,12 +175,12 @@ pub fn status_line() -> Option<String> {
 
 /// Once a frame from `commands::poll`, on the engine thread.
 pub fn poll() {
-    let ptr = CVAR.load(Ordering::Acquire);
-    if ptr.is_null() || GAVE_UP.load(Ordering::Relaxed) {
+    let Some(raw) = CVAR.value() else {
+        return;
+    };
+    if GAVE_UP.load(Ordering::Relaxed) {
         return;
     }
-    // Safety: the engine owns the cvar for the session.
-    let raw = unsafe { (*ptr).value };
     if SEEN.load(Ordering::Relaxed) == raw.to_bits() {
         return;
     }

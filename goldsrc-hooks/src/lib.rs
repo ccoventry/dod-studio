@@ -22,7 +22,7 @@
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
 //!     are drawn by different code paths and do not otherwise share a look;
 //!     for style 0, POV's red crosshair, with `spectator_crosshair_gap`
-//!     giving it the spectated player's gap.
+//!     giving it the spectated player's gap through `crosshair_gap`.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
@@ -169,6 +169,12 @@
 //!   folder (`-game dod_movies`), which the engine otherwise refuses with
 //!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
 //!   check, both builds; only when the game folder is not `dod`.
+//! - `pov_crosshair_gap`: a POV demo's red crosshair (`cl_xhair_style 0`)
+//!   opens while its recorder runs, as it did live, where the game, which
+//!   reads the velocity only prediction writes, would keep it at rest. The
+//!   red crosshair's gap call (`crosshair_gap`) gets the recorded velocity
+//!   for the game's own gap function, only while a POV demo plays. No
+//!   setting of its own: the stock `cl_dynamic_xhair` still decides.
 //! - `demo_console_keys`: in a POV demo only the console key opens the
 //!   console; the engine otherwise opens it for Alt (so Alt+Tab), Tab and
 //!   every printable key, as it never does in an HLTV demo (#894). One byte in
@@ -227,7 +233,7 @@
 //! The settings are `ds_*` **cvars**, so they behave like any other
 //! engine setting: `ds_spec_match_pov 1` from the console,
 //! `+ds_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
-//! user execs. `commands.rs` copies them into the runtime flags once per
+//! user execs. `commands/poll.rs` copies them into the runtime flags once per
 //! frame, and `ds_debug_status` reports what each part is actually
 //! doing rather than only what it is set to.
 //!
@@ -242,11 +248,14 @@ mod behind_imports;
 mod build_id;
 mod center_text;
 mod clan_text;
+mod clip_log;
 mod cmd_list;
 mod commands;
 mod connect_guard;
+mod console_tokens;
 mod crash;
 mod crosshair;
+mod crosshair_gap;
 mod deathmsg;
 mod debug;
 mod decals;
@@ -317,6 +326,7 @@ mod player_table;
 mod plugin_text;
 mod pmove_guard;
 mod position;
+mod pov_crosshair_gap;
 mod pov_live_bob;
 mod pov_recorder_shots;
 mod remote;
@@ -331,6 +341,7 @@ mod schedule;
 mod scoreboard;
 mod screen_effects;
 mod server_query;
+mod setting;
 mod settings_tab;
 mod spectator_bars;
 mod spectator_buttons;
@@ -347,6 +358,7 @@ mod spectator_text;
 mod spray;
 mod spray_hltv;
 mod sprite_blend;
+mod steam_id;
 mod strafe_twitch;
 mod streaks;
 mod studio_panel;
@@ -392,7 +404,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// player's own recording is a clear win
 /// for everyone. `ds_spec_match_pov 0` turns it off, and
 /// `GOLDSRC_HOOKS_SPEC_MATCH_POV=0` starts it off. The value lands in
-/// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
+/// `anim_fix::LEVEL`, which `commands/install.rs` hands the engine as the cvar's
 /// default, and the cvar then drives every part.
 const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_MAX;
 

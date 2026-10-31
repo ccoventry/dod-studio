@@ -10,6 +10,7 @@
 // across range edits.
 
 import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { recordCapture, carryCaptures } from './take_record.js';
 
 /**
  * Content-addressed id for one highlight, stable across re-scans, project
@@ -109,10 +110,12 @@ export function setVerifiedStatus(streak, status) {
  * the same key again (e.g. a re-capture) just unions the uid sets rather
  * than dropping the earlier ones.
  */
-export function recordTake(takeIndex, takeKey, uids) {
+export function recordTake(takeIndex, takeKey, uids, meta) {
   if (!takeIndex || !takeKey || !uids || uids.length === 0) return;
   const existing = takeIndex[takeKey] || [];
   takeIndex[takeKey] = Array.from(new Set([...existing, ...uids]));
+  // How it was captured goes beside the index, never into it (take_record.js).
+  recordCapture(takeIndex, takeKey, meta);
 }
 
 /**
@@ -120,8 +123,12 @@ export function recordTake(takeIndex, takeKey, uids) {
  * in the take index, so a render of it resolves back to them. Shared by the
  * post-batch verification and Render While Capturing (#861), which renders
  * (and may delete) a take before the batch ends. `{ advanced, markCleared }`.
+ * It also records when and how the take was captured (#439): `block` is a
+ * verified block or a `capture_clip_ready` payload (which carries its own
+ * rate); the dispatch's own rate (what the mode really records at) wins, then
+ * `captureFps` for a block that carries none.
  */
-export function markBlockCaptured(block, dispatch, takeIndex) {
+export function markBlockCaptured(block, dispatch, takeIndex, captureFps) {
   let advanced = 0;
   let markCleared = false;
   // A block can cover several highlights — overlapping ones are recorded
@@ -154,7 +161,13 @@ export function markBlockCaptured(block, dispatch, takeIndex) {
   // still needs to resolve this take_key back to these highlights once
   // it succeeds, and the index outlives this dispatch's in-memory state.
   if (takeIndex && block.take_key) {
-    recordTake(takeIndex, block.take_key, uids);
+    recordTake(takeIndex, block.take_key, uids, {
+      session_id: block.session_id ?? dispatch?.sessionId,
+      captured_at: Date.now(),
+      capture_mode: block.capture_mode ?? dispatch?.captureMode,
+      capture_fps: dispatch?.captureFps ?? block.capture_fps ?? captureFps,
+      take_folder: block.take_folder,
+    });
   }
   return { advanced, markCleared };
 }
@@ -209,6 +222,7 @@ export function pruneTakeIndex(takeIndex, knownUids) {
     const kept = uids.filter(uid => known.has(uid));
     if (kept.length > 0) pruned[key] = kept;
   }
+  carryCaptures(takeIndex, pruned);
   return pruned;
 }
 

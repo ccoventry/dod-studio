@@ -204,7 +204,7 @@ export function initAuditorPane({ getDemos = () => [], relocateMoved = () => 0, 
       setStatus(STRINGS.AUDITOR.CANCELLING_STATUS);
       try {
         await cancelAudit();
-      } catch (e) {
+      } catch {
         // ipc_bridge already toasts; leave the in-flight audit to resolve
         // on its own and re-enable buttons via the runAuditBtn handler's
         // finally block.

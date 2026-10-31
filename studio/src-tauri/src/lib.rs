@@ -4,6 +4,7 @@ mod batch_close;
 mod batch_eta;
 mod blender_manager;
 mod builtin_profiles;
+mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
 mod combine_manager;
@@ -12,7 +13,6 @@ mod consolidate_manager;
 mod crash_maps_manager;
 mod dem_open_with;
 mod demo_cache_cmd;
-mod demo_links_manager;
 mod demo_preview;
 mod demo_rename_manager;
 mod demo_split_manager;
@@ -48,6 +48,7 @@ mod take_checks_manager;
 mod take_cleanup_manager;
 mod take_delete_manager;
 mod take_preview_manager;
+mod trimmed_demos;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -490,7 +491,7 @@ fn capture_output_diagnostics(paths: Vec<String>) -> Vec<CaptureOutputDiagnostic
                 native::sys::disk::PathStatus::NotFound => "not_found",
                 native::sys::disk::PathStatus::NotADirectory => "not_a_directory",
             };
-            let usable = native::sys::disk::get_available_bytes(&p) != u64::MAX;
+            let usable = native::sys::disk::get_available_bytes(&p).is_some();
             CaptureOutputDiagnostic {
                 path: path_str,
                 status,
@@ -1081,6 +1082,7 @@ pub fn run() {
             reset_render_jobs,
             remove_render_jobs,
             clear_render_queue,
+            capture_history_manager::take_capture_states,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             take_preview_manager::take_preview_thumb,
@@ -1124,9 +1126,6 @@ pub fn run() {
             consolidate_manager::consolidate_cancel,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
-            demo_links_manager::list_demo_links,
-            demo_links_manager::add_demo_link,
-            demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
             menu_scale_manager::menu_scale_status,
             menu_scale_manager::set_menu_scale,

@@ -59,8 +59,8 @@
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
-use crate::demo_list_folders::Setting;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 /// `ds_ui_review_keys 1` (default): while a highlight plays and at its end,
 /// Y, M, N, R, B, Space or S answer it on the game screen, E opens the kill
@@ -74,24 +74,6 @@ pub static KEYS: Setting = Setting::new(console_name!("ui_review_keys"), true);
 /// either way; with this off, the keys still answer while a highlight plays,
 /// only unseen.
 pub static INFO: Setting = Setting::new(console_name!("ui_review_info"), true);
-
-pub fn keys_status() -> String {
-    if KEYS.on() {
-        "while a highlight plays and at its end, Y M N R B Space S answer it on screen, E opens the kill range and note form, ESC the Review tab"
-            .to_string()
-    } else {
-        "at a highlight's end, the Review tab opens for the answer".to_string()
-    }
-}
-
-pub fn info_status() -> String {
-    if INFO.on() {
-        "while a highlight plays, a box on screen says which one it is, with the answer keys"
-            .to_string()
-    } else {
-        "nothing on screen while a highlight plays".to_string()
-    }
-}
 
 /// What a key asks the review to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

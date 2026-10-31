@@ -91,9 +91,10 @@
 //! gate before the span runs first, so the zoom skip and the #310 hide below
 //! work for it unchanged; the rest of the span keeps its stock bytes and is
 //! not reached. The draw's gap would be the *local* client's, which for a
-//! spectator holds no weapon, so `spectator_crosshair_gap` points its gap
-//! call at the spectated player's first, and the jump is only written once
-//! that is in. When it can't be, the stock dot stays.
+//! spectator holds no weapon, so `crosshair_gap` points its gap call at
+//! `spectator_crosshair_gap`'s answer for the spectated player first, and
+//! the jump is only written once that is in. When it can't be, the stock dot
+//! stays.
 //!
 //! A Players-table crosshair for the player on screen (#428) wins over this:
 //! `player_crosshair` swaps the stock spectator rect, so the span keeps it.
@@ -155,7 +156,7 @@ use crate::engine;
 use crate::scan;
 
 /// The cvar this follows, for status and error text. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = crate::names::SPEC_MATCH_POV;
 
 /// DoD's own cvar, read here rather than mirrored: whatever the player sets for
@@ -393,7 +394,7 @@ fn wanted(present: &[u8], style: i32, jump: Option<&[u8; JUMP_LEN]>) -> Option<V
 /// The red crosshair's jump for the span at `span`, once the style-0 draw
 /// has been found.
 fn jump_for(span: usize) -> Result<[u8; JUMP_LEN], String> {
-    crate::spectator_crosshair_gap::style0_draw().map(|draw| red_jump(span, draw))
+    crate::crosshair_gap::style0_draw().map(|draw| red_jump(span, draw))
 }
 
 /// Sets up the red crosshair for the span at `span`: its gap call first, so
@@ -401,7 +402,8 @@ fn jump_for(span: usize) -> Result<[u8; JUMP_LEN], String> {
 /// whether the gap call was written.
 fn red_ready(span: usize) -> Result<([u8; JUMP_LEN], bool), String> {
     let jump = jump_for(span)?;
-    let hooked = crate::spectator_crosshair_gap::set_hooked(true)?;
+    crate::spectator_crosshair_gap::ready()?;
+    let hooked = crate::crosshair_gap::set_spectator_hook(true)?;
     Ok((jump, hooked))
 }
 
@@ -506,7 +508,7 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     ACTIVE_STYLE.store(style, Ordering::Release);
     // After the span stops jumping to the draw, never before.
     if style != POV_RED {
-        wrote |= crate::spectator_crosshair_gap::set_hooked(false)?;
+        wrote |= crate::crosshair_gap::set_spectator_hook(false)?;
     }
     Ok(wrote)
 }

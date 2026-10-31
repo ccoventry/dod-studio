@@ -1,0 +1,60 @@
+<!doctype html>
+<!--
+  Harness for the Players tab's Use as column (#686) beside the Clip Name
+  Template preview it changes. Settings are kept in localStorage so a reload
+  loads what was saved, as the app does from settings.json.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Use as test harness</title>
+</head>
+<body>
+  <input type="text" id="hl-path-input" value="C:/Games/Half-Life/hl.exe" />
+  <div id="tab-players">
+    <input type="checkbox" id="players-use-in-game" checked />
+    <input type="text" id="players-player-input" />
+    <datalist id="players-player-options"></datalist>
+    <button id="players-add-btn" disabled>Add Player</button>
+    <button id="players-refresh-btn">Refresh</button>
+    <div id="players-players-status"></div>
+    <div id="players-players-bar" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+    <div id="players-list"></div>
+  </div>
+  <input type="text" id="config-clip-name-template" />
+  <button id="config-clip-name-reset">Default</button>
+  <div id="config-clip-name-chips"></div>
+  <div id="config-clip-name-errors" style="display: none;"></div>
+  <div id="config-clip-name-warnings" style="display: none;"></div>
+  <div id="config-clip-name-preview"></div>
+
+  <script type="module">
+    import { createPlayersUi, getPlayers, setPlayers } from '/src/players_ui.js';
+    import { initClipNameSettings } from '/src/clip_name_ui.js';
+
+    const streak = {
+      player_index: 3, target_player: 'dicE[: :]m00cat :D', steam_id: '76561197972576011',
+      start_tick: 1000, end_tick: 1400, kill_count: 2,
+      kills: [[1000, 754.2, 'Garand'], [1400, 758, 'MP40']], viewdemo_times: [754.2, 758],
+      start_index: 0, end_index: 1, faction: 'Axis', victims: ['a', 'b'], victim_factions: ['Allies', 'Allies'],
+    };
+    const demo = {
+      path: 'C:/d/x.dem', name: 'x.dem', map_name: 'dod_anzio', local_player_index: 3, streaks: [streak], is_pov: true,
+      teams: [{ side: 'Allies', tag: 'dicE' }, { side: 'Axis', tag: 'KROD' }],
+    };
+    initClipNameSettings({ getHighlight: () => ({ demo, streak }), getExportDirList: () => [] });
+    document.querySelector('#config-clip-name-template').value = '{name}_{kills}k';
+
+    createPlayersUi({
+      getDemos: () => [],
+      getHlPath: () => document.querySelector('#hl-path-input').value.trim(),
+      getGameFolder: () => 'dod',
+      persist: () => localStorage.setItem('__players', JSON.stringify(getPlayers())),
+    });
+    // What the app does when settings load.
+    setPlayers(JSON.parse(localStorage.getItem('__players') || 'null'));
+    window.__players = () => getPlayers();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

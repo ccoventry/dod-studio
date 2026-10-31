@@ -482,7 +482,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // kill range, status, notes) — all of it is part of the `demos` written
     // by saveProjectSession(), so all of it marks the project dirty.
     markProjectDirty();
-  }, { getProjectTeams: () => projectTeams });
+  }, { getProjectTeams: () => projectTeams, getTakeIndex: () => takeIndex });
 
   // The Demo Analyzer's Explorer shares the pinned folders with Capture Studio.
   demoFolders.startAnalyzerPane();

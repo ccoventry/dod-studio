@@ -155,11 +155,11 @@ pub fn with_mortality_detection(state: &mut AnalyzerState, event: &AnalyzerEvent
 
     let mortality_change = match event {
         AnalyzerEvent::UserMessage(UserMessage::DeathMsg(death_msg)) => {
-            Some((death_msg.victim_client_index - 1, Mortality::Dead))
+            Some((death_msg.victim_client_index, Mortality::Dead))
         }
 
         AnalyzerEvent::UserMessage(UserMessage::PStatus(p_status)) => {
-            Some((p_status.client_index - 1, Mortality::Alive))
+            Some((p_status.client_index, Mortality::Alive))
         }
 
         _ => None,
@@ -167,7 +167,7 @@ pub fn with_mortality_detection(state: &mut AnalyzerState, event: &AnalyzerEvent
 
     mortality_change.and_then(|(client_index, mortality)| {
         let current_time = state.current_time.clone();
-        let player = state.find_player_by_client_index_mut(client_index)?;
+        let player = state.find_player_by_wire_index_mut(client_index)?;
 
         if player.mortality() != Some(&mortality) {
             player.mortality_changed(MortalityChange(current_time, mortality));

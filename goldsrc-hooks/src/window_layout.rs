@@ -64,59 +64,24 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const RESIZABLE_NAME: &str = console_name!("ui_resizable_windows");
 pub const REMEMBER_NAME: &str = console_name!("ui_remember_layout");
 
-/// The fallback path's flags, when the cvars could not be registered.
-pub static RESIZABLE: AtomicBool = AtomicBool::new(true);
-pub static REMEMBER: AtomicBool = AtomicBool::new(true);
-static RESIZABLE_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static REMEMBER_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands.rs` once the two cvars are registered.
-pub fn set_cvars(resizable: *mut CvarSPartial, remember: *mut CvarSPartial) {
-    RESIZABLE_CVAR.store(resizable, Ordering::Release);
-    REMEMBER_CVAR.store(remember, Ordering::Release);
-}
-
-fn flag(cvar: &AtomicPtr<CvarSPartial>, fallback: &AtomicBool) -> bool {
-    let cvar = cvar.load(Ordering::Acquire);
-    if cvar.is_null() {
-        fallback.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
+/// The two cvars, or their defaults (on) when they could not be
+/// registered.
+pub static RESIZABLE: Setting = Setting::new(RESIZABLE_NAME, true);
+pub static REMEMBER: Setting = Setting::new(REMEMBER_NAME, true);
 
 fn resizable() -> bool {
-    flag(&RESIZABLE_CVAR, &RESIZABLE)
+    RESIZABLE.on()
 }
 
 fn remember() -> bool {
-    flag(&REMEMBER_CVAR, &REMEMBER)
-}
-
-/// For the fallback toggle commands' bare-name query.
-pub fn resizable_status() -> String {
-    if resizable() {
-        "GameUI's windows can be resized".to_string()
-    } else {
-        "only the windows the game makes resizable can be resized".to_string()
-    }
-}
-
-pub fn remember_status() -> String {
-    if remember() {
-        "GameUI's windows come back where they were left".to_string()
-    } else {
-        "GameUI's windows open where the game puts them".to_string()
-    }
+    REMEMBER.on()
 }
 
 /// One DLL build: its identity.

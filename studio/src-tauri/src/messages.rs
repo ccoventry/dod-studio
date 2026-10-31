@@ -473,6 +473,51 @@ pub fn take_is_queued_or_rendering(take_folder: &str) -> String {
 pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
     "Capture cancelled while making room. Nothing was captured.";
 
+// ── trimmed_demos.rs (#207) ──────────────────────────────────────────────
+
+pub const CAPTURE_CANCELLED_WHILE_TRIMMING: &str =
+    "Capture cancelled while making a trimmed copy. Nothing was captured.";
+
+/// The status line while a demo over the engine's entity limit is trimmed.
+pub fn trimming_demo(demo: &str, step: native::patch::entity_trim::Step) -> String {
+    use native::patch::entity_trim::Step;
+    let percent = |f: f32| (f.clamp(0.0, 1.0) * 100.0).round() as u32;
+    match step {
+        Step::Reading(f) => format!(
+            "Making a trimmed copy of {demo}: reading it ({}%)",
+            percent(f)
+        ),
+        Step::Writing => format!("Making a trimmed copy of {demo}: writing it"),
+        Step::Checking(f) => format!(
+            "Making a trimmed copy of {demo}: checking it ({}%)",
+            percent(f)
+        ),
+    }
+}
+
+/// Why a demo over the engine's entity limit can't be played: no trimmed copy
+/// could be made safely.
+pub fn demo_cannot_be_trimmed(
+    demo: &str,
+    engine: &native::patch::trimmed_copies::Engine,
+    why: &native::patch::entity_trim::TrimError,
+) -> String {
+    format!(
+        "{demo} has more entities in one snapshot than the {} engine takes ({}), and no trimmed copy could be made: {why}. \
+         Play it with the 25th Anniversary install instead (Configuration → Paths), or untick its highlights.",
+        engine.name(),
+        engine.limit
+    )
+}
+
+/// What a Launch Preview says when it plays a trimmed copy.
+pub fn preview_plays_trimmed_copy(engine: &native::patch::trimmed_copies::Engine) -> String {
+    format!(
+        "This demo has more entities than the {} engine takes, so the preview plays a trimmed copy: fog, invisible hulls and a few far decorations are left out. The original is unchanged.",
+        engine.name()
+    )
+}
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
 // The path as Explorer shows it; the copy-compare messages live with the
@@ -597,14 +642,6 @@ fn failed_to(action: &str, err: impl Display) -> String {
         return cause;
     }
     format!("Failed to {action}: {cause}")
-}
-
-pub fn failed_to_add_demo_link(err: impl Display) -> String {
-    failed_to("link the demo folder", err)
-}
-
-pub fn failed_to_remove_demo_link(err: impl Display) -> String {
-    failed_to("remove the demo folder link", err)
 }
 
 pub fn failed_to_forget_crash_map(err: impl Display) -> String {
@@ -937,10 +974,6 @@ mod tests {
 
     #[test]
     fn lower_crate_errors_name_the_action_then_the_cause() {
-        assert_eq!(
-            failed_to_add_demo_link("not a folder"),
-            "Failed to link the demo folder: not a folder"
-        );
         assert_eq!(
             failed_to_copy_demos_for_batch("no room on D:"),
             "Failed to copy the demos for the batch: no room on D:"

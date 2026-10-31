@@ -50,32 +50,21 @@
 //! origin written there never reached the gait estimate).
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use crate::engine::{self, ClEntityS, CvarSPartial, Vec3};
+use crate::engine::{self, ClEntityS, Vec3};
 use crate::names::console_name;
+use crate::setting::Setting;
 
 /// The switch: 1 holds the models on a step-back frame (#927).
 pub const NAME: &str = console_name!("player_fix_model_flicker");
 
-/// The fallback toggle, when the cvar could not be registered.
-pub static FIX_MODEL_FLICKER: AtomicBool = AtomicBool::new(true);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+/// The cvar, or its default (on) when it could not be registered.
+pub static FIX_MODEL_FLICKER: Setting = Setting::new(NAME, true);
 
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
-/// Whether the switch is on: the cvar, or the fallback toggle without one.
+/// Whether the switch is on: the cvar, or its default without one.
 pub fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        FIX_MODEL_FLICKER.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
+    FIX_MODEL_FLICKER.on()
 }
 
 /// GoldSrc's player slots, entity indices 1..=32.
@@ -389,16 +378,16 @@ mod tests {
         // anim_fix's tests mutate LEVEL too; cargo runs tests in parallel.
         let _statics = crate::anim_fix::tests::lock_statics();
         let level = crate::anim_fix::LEVEL.load(Ordering::Relaxed);
-        assert!(CVAR.load(Ordering::Acquire).is_null());
+        assert!(FIX_MODEL_FLICKER.value().is_none());
         assert!(enabled(), "on by default");
         for match_pov in [0, 1] {
             crate::anim_fix::LEVEL.store(match_pov, Ordering::Relaxed);
-            FIX_MODEL_FLICKER.store(true, Ordering::Relaxed);
+            FIX_MODEL_FLICKER.fallback.store(true, Ordering::Relaxed);
             assert!(enabled(), "match_pov {match_pov}");
-            FIX_MODEL_FLICKER.store(false, Ordering::Relaxed);
+            FIX_MODEL_FLICKER.fallback.store(false, Ordering::Relaxed);
             assert!(!enabled(), "match_pov {match_pov}");
         }
-        FIX_MODEL_FLICKER.store(true, Ordering::Relaxed);
+        FIX_MODEL_FLICKER.fallback.store(true, Ordering::Relaxed);
         crate::anim_fix::LEVEL.store(level, Ordering::Relaxed);
     }
 }

@@ -21,8 +21,8 @@
 // Only the 32-bit build has the bar; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use crate::demo_list_folders::Setting;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("demo_show_load_progress");
 
@@ -32,15 +32,6 @@ pub const PROGRESS_BAR: &str = "StudioLoadProgress";
 
 /// `ds_demo_show_load_progress 1` (the default).
 pub static SETTING: Setting = Setting::new(NAME, true);
-
-/// For the fallback toggle's bare-name query.
-pub fn status() -> String {
-    if SETTING.on() {
-        "the demo bar shows how far a loading demo has got".to_string()
-    } else {
-        "the demo bar shows no loading progress".to_string()
-    }
-}
 
 /// The label's text for a percent.
 pub fn percent_text(percent: u32) -> String {

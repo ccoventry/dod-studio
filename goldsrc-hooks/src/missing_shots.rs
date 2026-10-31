@@ -101,13 +101,12 @@
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicU64, Ordering};
 
-use crate::engine::{
-    self, ClEngineFuncsPartial, ClEntityS, CvarSPartial, EventHandlerFn, ModelSPartial,
-};
+use crate::engine::{self, ClEngineFuncsPartial, ClEntityS, EventHandlerFn, ModelSPartial};
 use crate::names::console_name;
+use crate::setting::Setting;
 
 /// The one switch for every path (see the module docs). Registered in
-/// `commands.rs`; `pov_recorder_shots` reads it through [`level`].
+/// `commands/install.rs`; `pov_recorder_shots` reads it through [`level`].
 pub const NAME: &str = console_name!("sound_restore_gunshots");
 
 /// How long before its restart a real shot can be heard and still be that
@@ -280,25 +279,20 @@ const SPREAD: f32 = 0.04;
 /// was being tracked no longer follows from what is seen now.
 const TRACKING_GAP_SECONDS: f64 = 0.5;
 
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// [`NAME`] `2`: a log line for every round, not only the first few. For
 /// checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
-/// [`NAME`] when it could not be a cvar: the fallback command's value. On,
-/// as the cvar's default is.
-pub static WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(true);
+/// [`NAME`]'s cvar, or, when it could not be one, on, as the cvar's
+/// default is.
+pub static SETTING: Setting = Setting::new(NAME, true);
 
-/// [`NAME`]'s value: its cvar, or the fallback toggle without one. `0` off,
-/// `1` on, `2` on and logging every round, on every path.
+/// [`NAME`]'s value: its cvar, or its default (on) without one. `0` off,
+/// `1` on, `2` on and logging every round.
 pub(crate) fn level() -> f32 {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        f32::from(u8::from(WITHOUT_A_CVAR.load(Ordering::Relaxed)))
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value }
-    }
+    SETTING
+        .value()
+        .unwrap_or_else(|| f32::from(u8::from(SETTING.on())))
 }
 
 /// Whether [`NAME`] is on, for `ds_debug_status`.
@@ -441,11 +435,6 @@ static SPREAD_SEED: AtomicU32 = AtomicU32::new(0x2545_f491);
 static PLAYED: AtomicU32 = AtomicU32::new(0);
 static HAD_EVENT: AtomicU32 = AtomicU32::new(0);
 static UNKNOWN_WEAPON: AtomicU32 = AtomicU32::new(0);
-
-/// Called by `commands.rs` once the cvar is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
 
 /// `"events/weapons/mp40.sc"` -> the index of `mp40` in [`WEAPONS`].
 fn weapon_for_script(script: &[u8]) -> Option<usize> {
@@ -1213,7 +1202,7 @@ mod tests {
     /// Without a cvar the setting is on, as the cvar's default is.
     #[test]
     fn the_fallback_starts_on() {
-        assert!(WITHOUT_A_CVAR.load(Ordering::Relaxed));
+        assert!(SETTING.fallback.load(Ordering::Relaxed));
     }
 
     #[test]

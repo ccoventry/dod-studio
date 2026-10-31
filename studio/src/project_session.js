@@ -15,6 +15,7 @@ import { updateStreakVisuals } from './detail_pane.js';
 import { clearCheckedPaths } from './master_pane.js';
 import { switchNavTab } from './nav.js';
 import { streakUid, pruneTakeIndex } from './take_index.js';
+import { attachCaptures, capturesToSave } from './take_record.js';
 import { emptyProjectTeams, normalizeProjectTeams } from './project_teams.js';
 import { refreshTeamsPane } from './teams_pane.js';
 import { projectFolders } from './project_paths.js';
@@ -150,6 +151,7 @@ export function createProjectSession({
 
       // No HLAE or hl.exe path: those are this PC's settings, not the
       // project's, and a project carrying them switched them on every open.
+      const prunedTakes = pruneTakeIndex(getTakeIndex(), collectAllUids());
       const projectData = JSON.stringify({
         version: "0.12.0",
         // The folders this project's demos are in, not the app-wide pinned
@@ -159,7 +161,10 @@ export function createProjectSession({
         demos: getDemos(),
         // Pruned against what's actually still scanned so the index
         // doesn't accumulate uids for demos removed from the project.
-        takeIndex: pruneTakeIndex(getTakeIndex(), collectAllUids()),
+        takeIndex: prunedTakes,
+        // How each take was captured (#439), beside the index so a build
+        // from before it still reads takeIndex as bare uid lists.
+        takeCaptures: capturesToSave(prunedTakes),
         teams: getProjectTeams(),
         // Whose highlights an HLTV demo's review plays (#828).
         review: getReviewSettings(),
@@ -275,6 +280,7 @@ export function createProjectSession({
       // as empty rather than reject the file. Auto-Rendered just won't
       // retroactively apply to takes captured before this existed.
       const takeIndex = data.takeIndex || {};
+      attachCaptures(takeIndex, data.takeCaptures);
       setTakeIndex(takeIndex);
       // Deliberately verbose: this is the only place takeIndex is ever
       // populated from disk, so logging it here — with exactly what

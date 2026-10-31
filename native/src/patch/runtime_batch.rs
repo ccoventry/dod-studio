@@ -53,7 +53,7 @@ pub struct RuntimeBatch {
 /// The hook's batch file header (goldsrc-hooks `batch::HEADER`).
 pub const HEADER: &str = "dodstudio-batch 1";
 
-/// The hook DLL's decal clear (goldsrc-hooks `commands.rs`).
+/// The hook DLL's decal clear (goldsrc-hooks `decals.rs`).
 pub const CLEAR_DECALS: &str = "ds_map_clear_decals";
 
 /// How much of the run-up to each clip is fast-forwarded rather than jumped

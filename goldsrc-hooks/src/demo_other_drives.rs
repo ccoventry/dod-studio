@@ -30,8 +30,8 @@
 //! assert, which is why this is a hook and not a console command.
 //! `AddSearchPath` runs on the thread that opens the demo, the engine's.
 //!
-//! Without the hook DLL, a demo on another drive still needs Studio's
-//! + Link Folder to Game (a junction, #376) or a copy into `dod\`.
+//! Without the hook DLL, a demo on another drive still needs a copy in
+//! `dod\` (a batch) or a patched copy (a preview).
 //!
 //! `tools/verify_demo_other_drives.py` checks the slots and the `:` assert
 //! against both movie installs.
@@ -40,16 +40,16 @@
 // path logic for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::engine::CvarSPartial;
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("demo_other_drives");
 
-/// The fallback toggle's flag, when the cvar could not be registered.
-pub static ENABLED: AtomicBool = AtomicBool::new(true);
-static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+/// `ds_demo_other_drives`, or its default when the cvar could not be
+/// registered.
+pub static SETTING: Setting = Setting::new(NAME, true);
 /// Bit `letter - b'A'` is set once that drive's root is a search path.
 static DRIVES: AtomicU32 = AtomicU32::new(0);
 /// Set once the `Open` slot is ours.
@@ -85,36 +85,8 @@ const FS_SLOT_OPEN: usize = 10;
 /// (`GAME`, `GAMECONFIG`, ...) skips them; the demo opens name none.
 const PATH_ID: &std::ffi::CStr = c"DODSTUDIO";
 
-/// Called by `commands.rs` once `ds_demo_other_drives` is registered.
-pub fn set_cvar(cvar: *mut CvarSPartial) {
-    CVAR.store(cvar, Ordering::Release);
-}
-
 pub(crate) fn enabled() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        ENABLED.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
-
-pub fn status() -> String {
-    let drives = DRIVES.load(Ordering::Relaxed);
-    let added: Vec<String> = (0..26u32)
-        .filter(|i| drives & (1 << i) != 0)
-        .map(|i| format!("{}:", (b'A' + i as u8) as char))
-        .collect();
-    format!(
-        "{NAME} is {}; drives added as search paths: {}",
-        if enabled() { "on" } else { "off" },
-        if added.is_empty() {
-            "none".to_string()
-        } else {
-            added.join(" ")
-        }
-    )
+    SETTING.on()
 }
 
 /// `D:/folder/demo` split into the drive letter (upper case) and the path
@@ -324,17 +296,5 @@ mod tests {
     #[test]
     fn the_search_path_is_the_drive_root() {
         assert_eq!(&drive_root(b'D'), b"D:\\\0");
-    }
-
-    #[test]
-    fn status_names_the_drives_added() {
-        assert!(status().contains("drives added as search paths: none"));
-        DRIVES.fetch_or(1 << 3, Ordering::Relaxed);
-        assert!(
-            status().contains("drives added as search paths: D:"),
-            "{}",
-            status()
-        );
-        DRIVES.store(0, Ordering::Relaxed);
     }
 }

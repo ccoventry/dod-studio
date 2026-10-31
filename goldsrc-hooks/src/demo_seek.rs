@@ -154,11 +154,12 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::ffi::{CStr, c_char};
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::Ordering;
 
 use crate::commands::console_print;
-use crate::engine::{self, CvarSPartial};
+use crate::engine::{self};
 use crate::names::console_name;
+use crate::setting::Setting;
 
 pub const SEEK_TO_NAME: &str = console_name!("demo_seek_to");
 pub const SEEK_BY_NAME: &str = console_name!("demo_seek_by");
@@ -262,34 +263,11 @@ fn rewound(last_frame_time: f64, from: f64) -> bool {
 /// events and console commands it jumps over. Off by default, so a seek does
 /// what the engine's own Goto does until asked otherwise.
 ///
-/// Read from the cvar when a seek runs, so it needs no per-frame poll. The flag
-/// is the fallback path's, set by a plain toggle command when cvars could not
-/// be registered.
-pub static SKIP_BETWEEN: AtomicBool = AtomicBool::new(false);
-static SKIP_BETWEEN_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-
-/// Called by `commands.rs` once `ds_demo_seek_skip_between` is registered.
-pub fn set_skip_between_cvar(cvar: *mut CvarSPartial) {
-    SKIP_BETWEEN_CVAR.store(cvar, Ordering::Release);
-}
+/// Read from the cvar when a seek runs, so it needs no per-frame poll.
+pub static SKIP_BETWEEN: Setting = Setting::new(SKIP_BETWEEN_NAME, false);
 
 fn skip_between() -> bool {
-    let cvar = SKIP_BETWEEN_CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        SKIP_BETWEEN.load(Ordering::Relaxed)
-    } else {
-        // Safety: the engine owns the cvar for the session.
-        unsafe { (*cvar).value != 0.0 }
-    }
-}
-
-/// For the fallback toggle command's bare-name query.
-pub fn status() -> String {
-    if skip_between() {
-        "seeks skip the events and commands between the old and new position".to_string()
-    } else {
-        "seeks run the events and commands they jump over, like the editor's Goto".to_string()
-    }
+    SKIP_BETWEEN.on()
 }
 
 /// One `DemoPlayer.dll` build this module was checked against.

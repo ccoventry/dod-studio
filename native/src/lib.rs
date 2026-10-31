@@ -21,7 +21,10 @@ pub mod shared;
 pub mod sys;
 pub mod utils;
 
-mod messages;
+/// The app's text; public only so the command-line binaries can print from it
+/// (#237).
+#[doc(hidden)]
+pub mod messages;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
@@ -57,11 +60,6 @@ pub mod demo_compare;
 /// recycled on the way, with an undo log (#872).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_consolidate;
-
-/// Linking a demo folder on another drive into the game folder, so
-/// `viewdemo` can play from it in place (#376).
-#[cfg(windows)]
-pub mod demo_links;
 /// Which match and half each demo of a list is (#685).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod match_groups;

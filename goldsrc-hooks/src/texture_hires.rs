@@ -254,9 +254,10 @@ use crate::detour;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
+use crate::setting::Cvar;
 
 /// The command name that toggles verbose per-load logging. Registered in
-/// `commands.rs`.
+/// `commands/install.rs`.
 pub const NAME: &str = console_name!("debug_log_texture_loads");
 
 /// `GL_LoadTexture2`'s tail, from the optional upload callback through both
@@ -550,8 +551,8 @@ pub const STYLE_NAME: &str = console_name!("hd_style");
 pub const DEFAULT_STYLE: &str = "ultrasharp";
 /// Fallback when the cvar could not be registered.
 const STYLE_ENV: &str = "GOLDSRC_HOOKS_HD_STYLE";
-static STYLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+/// A string: read through [`Cvar::ptr`], not as an on/off.
+pub static STYLE_CVAR: Cvar = Cvar::new();
 /// The style in force; empty until first asked for.
 static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
 /// Hash of the style cvar's text as last seen by [`poll_hd`], so a frame
@@ -561,23 +562,12 @@ static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
 /// `ds_hd_enabled`: HD replacements on (1) or off (0). Same timing as the
 /// style: a change applies to what loads next.
 pub const HD_NAME: &str = console_name!("hd_enabled");
-static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+pub static HD_CVAR: Cvar = Cvar::new();
 /// The switch's current value; what every replacement path checks.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Set when the switch or style changed after a map had loaded: some of what's
 /// on screen was loaded the other way until the game restarts.
 static CHANGED_MID_SESSION: AtomicBool = AtomicBool::new(false);
-
-/// Called by `commands.rs` once `ds_hd_style` is registered.
-pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
-    STYLE_CVAR.store(cvar, Ordering::Release);
-}
-
-/// Called by `commands.rs` once `ds_hd_enabled` is registered.
-pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
-    HD_CVAR.store(cvar, Ordering::Release);
-}
 
 /// Whether HD starts on, and so whether `lib.rs` installs the hook at
 /// startup: `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` decides outright; unset,
@@ -617,7 +607,7 @@ fn clean_style(raw: &str) -> Option<String> {
 
 /// The style cvar's raw text, or `None` if it isn't registered.
 fn style_cvar_bytes() -> Option<&'static [u8]> {
-    let cvar = STYLE_CVAR.load(Ordering::Acquire);
+    let cvar = STYLE_CVAR.ptr();
     // Safety: a cvar_t the engine registered for us and keeps for the
     // session; its `string` is always a valid C string.
     let p = (!cvar.is_null()).then(|| unsafe { (*cvar).string })?;
@@ -724,20 +714,17 @@ impl<T> Cached<T> {
 /// `ds_hd_style`. A frame where neither changed costs a float read and
 /// a hash of the style text.
 pub fn poll_hd() {
-    let cvar = HD_CVAR.load(Ordering::Acquire);
-    if !cvar.is_null() {
-        // Safety: registered by us, kept by the engine for the session.
-        let on = unsafe { (*cvar).value } != 0.0;
-        if ENABLED.swap(on, Ordering::AcqRel) != on {
-            if on && let Err(why) = install() {
-                unsafe {
-                    crate::debug::report(&format!(
-                        "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
-                    ))
-                };
-            }
-            settings_changed(&format!("{HD_NAME} {}", on as u8));
+    if let Some(on) = HD_CVAR.try_on()
+        && ENABLED.swap(on, Ordering::AcqRel) != on
+    {
+        if on && let Err(why) = install() {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
+                ))
+            };
         }
+        settings_changed(&format!("{HD_NAME} {}", on as u8));
     }
     if let Some(bytes) = style_cvar_bytes() {
         let hash = fnv1a32(&[bytes]);
@@ -814,7 +801,7 @@ struct LastReplaced {
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
 /// `ds_debug_hd_misses`: lists every texture that kept its original this
-/// session, and why. Registered in `commands.rs`.
+/// session, and why. Registered in `commands/install.rs`.
 pub const MISSES_NAME: &str = console_name!("debug_hd_misses");
 pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
 
