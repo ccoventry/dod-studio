@@ -197,9 +197,12 @@ pub(super) fn start_game(
     };
     let child = match start_launcher(&mut cmd, reuse_game, &batch.cancel_token) {
         Ok(child) => child,
-        // Cancel while WMI was starting HLAE: nothing of it is left running
-        // (`Launcher::spawn_unless_cancelled`).
+        // Cancel while WMI was starting HLAE: the launcher is ended already
+        // (`Launcher::spawn_unless_cancelled`), and a game it got as far as
+        // starting goes too.
         Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+            let mut game = super::game::BatchGame::new(games_before_launch, None);
+            super::game::kill_hl_exe_and_wait(&mut super::processes::Live::new(), &mut game);
             let _ = batch.tx.send(super::EngineEvent::Cancelled);
             std::fs::remove_file(&cfg_path).ok();
             return None;
