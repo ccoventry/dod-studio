@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::Ordering;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdout, Command};
+use tokio::process::{Child, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::Interval;
 
@@ -125,8 +125,10 @@ const STDERR_DRAIN_WAIT: std::time::Duration = std::time::Duration::from_secs(2)
 /// Collects FFmpeg's stderr on a task of its own, so a full pipe can never
 /// deadlock the render. The task returns the last [`STDERR_TAIL_BYTES`] as
 /// raw bytes, decoded once at the end so a character split across two reads
-/// is not lost.
-fn collect_stderr(mut stderr_handle: ChildStderr) -> JoinHandle<Vec<u8>> {
+/// is not lost. Any reader, so the tests can feed it a pipe of their own.
+fn collect_stderr(
+    mut stderr_handle: impl tokio::io::AsyncRead + Unpin + Send + 'static,
+) -> JoinHandle<Vec<u8>> {
     tokio::spawn(async move {
         let mut tail: Vec<u8> = Vec::new();
         let mut buf = vec![0u8; 4096];
@@ -406,18 +408,7 @@ mod tests {
     #[tokio::test]
     async fn the_log_is_complete_when_the_pipe_closes_after_the_last_write() {
         let (mut tx, rx) = tokio::io::duplex(64);
-        let task = tokio::spawn(async move {
-            let mut rx = rx;
-            let mut tail = Vec::new();
-            let mut buf = [0u8; 8];
-            while let Ok(n) = rx.read(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                push_tail(&mut tail, &buf[..n]);
-            }
-            tail
-        });
+        let task = collect_stderr(rx);
         tokio::io::AsyncWriteExt::write_all(&mut tx, b"Error: no such filter\n")
             .await
             .unwrap();
