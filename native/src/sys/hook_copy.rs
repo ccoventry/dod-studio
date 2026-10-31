@@ -39,23 +39,15 @@ pub fn for_launch(source: &Path) -> PathBuf {
     let root = crate::shared::paths::get_local_appdata_dir().join(COPIES_DIR);
     match launch_copy_in(&root, source) {
         Ok(copy) => {
-            let removed = match folders_games_run() {
-                Some(mut keep) => {
-                    // The source too, should the Hooks DLL setting point
-                    // into one of the copies' folders.
-                    keep.extend(copy.parent().map(Path::to_path_buf));
-                    keep.extend(source.parent().map(Path::to_path_buf));
-                    remove_unused(&root, &keep, SystemTime::now())
-                }
-                None => 0,
-            };
-            if removed > 0 {
-                crate::log_markdown(&format!(
-                    "goldsrc-hooks: removed {removed} hook DLL cop{} no game uses from {}",
-                    if removed == 1 { "y" } else { "ies" },
-                    root.display()
-                ));
-            }
+            // The source too, should the Hooks DLL setting point into one of
+            // the copies' folders.
+            let own = copy
+                .parent()
+                .into_iter()
+                .chain(source.parent())
+                .map(Path::to_path_buf)
+                .collect();
+            remove_idle_copies(&root, own);
             crate::log_markdown(&format!(
                 "goldsrc-hooks: launching from a copy, {} (of {})",
                 copy.display(),
@@ -70,6 +62,32 @@ pub fn for_launch(source: &Path) -> PathBuf {
             ));
             source.to_path_buf()
         }
+    }
+}
+
+/// Removes the copies left by earlier launches (and by an uninstalled or
+/// replaced Studio's last run) at start-up, so they do not wait for the next
+/// launch to go. The same rules as a launch's clean-up: nothing a game has
+/// loaded and nothing launched from in the last [`KEEP_AFTER_LAST_USE`].
+pub fn clean_at_start() {
+    let root = crate::shared::paths::get_local_appdata_dir().join(COPIES_DIR);
+    remove_idle_copies(&root, Vec::new());
+}
+
+/// Removes the copies under `root` no game uses, but those in `keep`, and
+/// says so in the activity log. Does nothing when a game's modules could not
+/// be read, as no copy is then known to be free.
+fn remove_idle_copies(root: &Path, mut keep: Vec<PathBuf>) {
+    let Some(running) = folders_games_run() else {
+        return;
+    };
+    keep.extend(running);
+    let removed = remove_unused(root, &keep, SystemTime::now());
+    if removed > 0 {
+        crate::log_markdown(&crate::messages::hook_copies_removed(
+            removed,
+            root.display(),
+        ));
     }
 }
 
@@ -141,15 +159,23 @@ fn folders_games_run() -> Option<Vec<PathBuf>> {
             modules
                 .iter()
                 .filter(|m| {
-                    m.file_name().is_some_and(|n| {
-                        n.to_string_lossy()
-                            .eq_ignore_ascii_case(crate::patch::batch_reuse::HOOK_DLL_NAME)
-                    })
+                    m.file_name()
+                        .is_some_and(|n| is_hook_dll_name(&n.to_string_lossy()))
                 })
                 .filter_map(|m| m.parent().map(Path::to_path_buf)),
         );
     }
     Some(folders)
+}
+
+/// Whether `name` is a hook DLL's file name: the plain one, or a labelled
+/// test build (`dodstudio_goldsrc_hooks_910.dll`, `hook_dll_list.rs`), which
+/// keeps its name in its copy.
+fn is_hook_dll_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let plain = crate::patch::batch_reuse::HOOK_DLL_NAME;
+    let stem = plain.trim_end_matches(".dll");
+    name == plain || (name.starts_with(&format!("{stem}_")) && name.ends_with(".dll"))
 }
 
 /// Removes every copy under `root` but those in `keep` (the one being
@@ -347,6 +373,37 @@ mod tests {
     fn a_dll_that_is_not_a_copy_has_no_source() {
         let (_, source) = setup("not_a_copy", b"MZ");
         assert_eq!(source_of(&source), None);
+    }
+
+    #[test]
+    fn a_labelled_hook_dll_counts_as_a_hook_dll() {
+        for name in [
+            "dodstudio_goldsrc_hooks.dll",
+            "dodstudio_goldsrc_hooks_910.dll",
+            "DODSTUDIO_GOLDSRC_HOOKS_test-910b.DLL",
+        ] {
+            assert!(is_hook_dll_name(name), "{name}");
+        }
+        for name in [
+            "dodstudio_goldsrc_hooks.dll.old",
+            "dodstudio_goldsrc_hooks_910.txt",
+            "dodstudio_goldsrc_hooks910.dll",
+            "AfxHookGoldSrc.dll",
+        ] {
+            assert!(!is_hook_dll_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_labelled_copy_is_made_under_its_own_name_and_removed_when_idle() {
+        let (root, source) = setup("labelled", b"MZ DSHOOKBUILD:0.10.0+aaa  one");
+        let labelled = source.with_file_name("dodstudio_goldsrc_hooks_910.dll");
+        std::fs::rename(&source, &labelled).unwrap();
+        let copy = launch_copy_in(&root, &labelled).unwrap();
+        assert_eq!(copy.file_name().unwrap(), "dodstudio_goldsrc_hooks_910.dll");
+        let later = SystemTime::now() + KEEP_AFTER_LAST_USE * 2;
+        assert_eq!(remove_unused(&root, &[], later), 1);
+        assert!(copies(&root).is_empty());
     }
 
     #[test]

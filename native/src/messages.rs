@@ -291,6 +291,18 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     )
 }
 
+// ── sys/hook_copy.rs (#1146) ──────────────────────────────────────────────
+
+/// What the activity log says after removing hook DLL copies no game uses.
+pub fn hook_copies_removed(count: usize, root: impl Display) -> String {
+    let (noun, verb) = if count == 1 {
+        ("copy", "uses")
+    } else {
+        ("copies", "use")
+    };
+    format!("goldsrc-hooks: removed {count} hook DLL {noun} no game {verb} from {root}")
+}
+
 // ── crash_maps.rs (#207) ──────────────────────────────────────────────────
 
 /// What the hook log says about a crash that ended a batch.
