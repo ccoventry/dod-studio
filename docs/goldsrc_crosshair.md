@@ -194,15 +194,17 @@ target = 2 + trunc(200 * spread)
 `base`, `moving` and `alt` are the weapon's row of `P_WpnInfo` (`.data+0xca210`,
 0x15c bytes a row; the row's viewmodel path is at +0x20 of the row, the floats
 at +0x150). All three inputs are things a spectator sees, so this is not
-prediction-only state: `spectator_crosshair_gap.rs` points the draw's gap call
-(`client+0x2cda9`) at a hook that works the gap out for the watched player,
-and calls the original in POV, so live play and POV demos are untouched.
+prediction-only state: `crosshair_gap.rs` points the draw's gap call
+(`client+0x2cda9`) at a hook, and while spectating `spectator_crosshair_gap.rs`
+works the gap out for the watched player. In a POV demo the hook runs the
+game's own function with the recorded velocity (below); in live play it is
+the game's own, untouched.
 
 | input | POV | spectated, from |
 | --- | --- | --- |
 | weapon | the local weapon id | the viewmodel, matched to the table row's own viewmodel path |
 | deployed | `g_iUser3 == 2` (prone with the bipod down) or the sandbag flag | body `bipod_*` / `sandbag_*` |
-| speed | the local predicted velocity, 3D | horizontal origin change over the newest 0.3 s of snapshots |
+| speed | the local predicted velocity, 3D (in a POV demo, the recorded one) | horizontal origin change over the newest 0.3 s of snapshots |
 
 **Deployed is not prone.** A prone rifleman keeps his standing gap; only the
 bipod and the sandbag swap `base` for `alt`.
@@ -230,14 +232,27 @@ level) does not widen it, and neither does a plain fall, which POV's 3D
 velocity would. The easing runs per frame, as in POV, so the arms move at the
 frame rate in both.
 
-**A POV demo never widens it for movement; live play does, and so does this.**
-The velocity the gap reads is the client's own prediction, which does not run
-while a demo plays, so a POV demo keeps the resting gap however fast its
-recorder runs: warchyld's K43 in `wsod25_grp2_h1_warchyld` stayed at 5 px over
-40 s of the first round's rush (377 frames, 5 to 6 px measured), where the
-spectated view of him in `wsod25_grp2_h1_hltv` opened to 25 px whenever he ran.
-The weapon and the deploy terms are recorded and show in both. As for §2's
-hides, the spectated view follows live play.
+**A POV demo widens it too (`pov_crosshair_gap.rs`).** The game reads the
+speed from the velocity at `client+0x1080f8`, and its one writer is
+`HUD_WeaponsPostThink` (`client+0x12360`), copying in the client's own
+prediction, which does not run while a demo plays. So the stock game keeps a
+POV demo at the resting gap however fast its recorder runs: warchyld's K43 in
+`wsod25_grp2_h1_warchyld` stayed at 4 to 6 px over 40 s of the first round's
+rush (326 frames with the crosshair), where the spectated view of him in
+`wsod25_grp2_h1_hltv` opened to 25 px whenever he ran. The weapon (the HUD's
+`CurWeapon`) and the deploy terms (`g_iUser3` and the sandbag flag, from the
+recorded entity state) are recorded and always showed.
+
+While a POV demo plays, the gap call goes to a hook that puts the view's
+velocity (`ref_params_s.simvel` at `V_CalcRefdef`, the recorder's predicted
+velocity as recorded) in that slot for one call of the game's own function,
+then puts the old value back. Everything else is the game's: the weapon
+table, the fixed 4 px for grenades, rockets and `cl_dynamic_xhair 0`, the
+3D speed, the easing and the x87's precision. Live play and HLTV demos
+never reach it. The same 40 s now open to 25-26 px while he runs, ease 3 px a
+frame, settle at 5 at rest and hold the fixed 4 on a stick grenade, frame for
+frame with the spectated view of him; `cl_dynamic_xhair 0` holds 4 (4 to 5
+measured) as before. As for §2's hides, both views follow live play.
 
 Measured on both builds with `game_probe.py` clips (5 fps, frame-locked) and
 a scan of each frame for the first red pixel of each arm: resting 5 px, running 25 px, a stick

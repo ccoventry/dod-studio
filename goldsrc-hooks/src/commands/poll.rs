@@ -364,6 +364,8 @@ pub fn poll() {
     // ds_hud_hide_teammate_info sets hudelement's bit, which the next line
     // writes.
     crate::teammate_info::poll();
+    // Follows the demo, not a cvar: a POV demo's red crosshair gap.
+    crate::pov_crosshair_gap::poll();
     poll_hudelements();
     // ds_hud_overview_layout keeps its own state -- held rects, not a cvar --
     // so it belongs here alongside hudelement rather than in the gated block
