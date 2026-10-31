@@ -29,9 +29,11 @@
 //!
 //! ## When it closes by itself
 //!
-//! When the review moves to another highlight or ends, and when the menu
-//! comes up (the form isn't part of it, so it would sit on top): each
-//! cancels, as Esc does. The engine brings the menu up on the very Esc the
+//! When the review moves to another highlight or ends, when a demo load
+//! ends the clip it is for, and when the menu comes up (the form isn't part
+//! of it, so it would sit on top): each cancels, as Esc does. The form keeps
+//! no draft, so a demo load says in the console that what was typed wasn't
+//! saved. The engine brings the menu up on the very Esc the
 //! form cancels with, so a menu that comes up just after the form's Esc, or
 //! while it shows, is put away again: Esc on the form means the form.
 
@@ -137,6 +139,13 @@ unsafe fn reason_to_close(vgui: &Vgui, vp: Vpanel) -> Option<&'static str> {
         if shown_key != review_key {
             return Some("the review moved to another highlight");
         }
+        if crate::review_form::demo_load_ended(demo_playing()) {
+            crate::commands::console_print(&format!(
+                "{}: closed the kill range and note form without saving: a demo load ended its highlight's clip\n",
+                crate::review::NAME
+            ));
+            return Some("a demo load ended its highlight's clip");
+        }
         if menu_up(vgui) {
             // Esc, whichever of the form and the engine saw it first.
             crate::review_form::note_esc();
@@ -144,6 +153,11 @@ unsafe fn reason_to_close(vgui: &Vgui, vp: Vpanel) -> Option<&'static str> {
         }
         None
     }
+}
+
+/// Whether a demo is in the player and read.
+fn demo_playing() -> bool {
+    crate::demo_seek::clock().is_some_and(|c| c.active && !c.loading)
 }
 
 /// Whether GameUI's menu shows: its `TaskBar` and everything above it.
@@ -255,6 +269,7 @@ unsafe fn open(vgui: &Vgui) -> Result<String, String> {
         // Keys down now are released into the form, never to the game's
         // key hook: forget them there.
         crate::review_keys::forget_held();
+        crate::review_form::note_demo_at_open(demo_playing());
         crate::review_form::set_shown(true);
         let note = format!(
             "opened for {} (kills {}-{} of {}); {}",

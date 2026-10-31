@@ -80,6 +80,32 @@ pub(crate) fn is_shown() -> bool {
     SHOWN.load(Ordering::Acquire)
 }
 
+/// Whether the demo was playing (in the player and read) at the last look
+/// while the form showed.
+static DEMO_WAS_PLAYING: AtomicBool = AtomicBool::new(false);
+
+/// Notes whether the demo plays as the form opens.
+pub(crate) fn note_demo_at_open(playing: bool) {
+    DEMO_WAS_PLAYING.store(playing, Ordering::Release);
+}
+
+/// Whether a demo load ended the clip the form is for, with the demo
+/// playing now or not: it played at the last look and doesn't now. A demo
+/// loaded by hand mid-review (when the review's lock couldn't wrap
+/// `viewdemo`) keeps the review on the same highlight, so the highlight check
+/// alone leaves the form up over another demo. A form opened while its demo
+/// still loads stays up until it has played.
+pub(crate) fn demo_load_ended(playing_now: bool) -> bool {
+    load_ended(
+        DEMO_WAS_PLAYING.swap(playing_now, Ordering::AcqRel),
+        playing_now,
+    )
+}
+
+fn load_ended(was_playing: bool, playing_now: bool) -> bool {
+    was_playing && !playing_now
+}
+
 /// How long after the form's Esc a menu coming up is Esc's doing. The engine
 /// brings the menu up on the same Esc that cancels the form (seen live on
 /// PRE), within a frame or two.
@@ -217,6 +243,18 @@ mod tests {
         assert!(menu_is_from_esc());
         ESC_AT.store(0, Ordering::Release);
         assert!(!menu_is_from_esc(), "never pressed");
+    }
+
+    #[test]
+    fn a_demo_that_stops_playing_under_the_form_ends_its_clip() {
+        assert!(load_ended(true, false), "loading another demo");
+        assert!(!load_ended(true, true), "still playing");
+        assert!(!load_ended(false, false), "opened while the demo loads");
+        assert!(!load_ended(false, true), "the demo it opened over is read");
+        note_demo_at_open(true);
+        assert!(!demo_load_ended(true));
+        assert!(demo_load_ended(false));
+        assert!(!demo_load_ended(false), "said once");
     }
 
     #[test]
