@@ -18,7 +18,7 @@
 //! is made again, since the trim's drop set depends on it. The newest
 //! [`KEEP_COPIES`] stay ([`prune`]), and a copy a running batch plays is never
 //! removed, however many it plays ([`Pins`]). Before a copy is saved, its
-//! drive must have room for it with [`FREE_SPACE_HEADROOM_BYTES`] to spare.
+//! drive must have room for it with [`FREE_SPACE_HEADROOM_BYTES`](crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES) to spare.
 //!
 //! A new copy gets the original's analyzer cache entry, so the in-game DoD
 //! Studio window lists its highlights at once instead of asking Studio to
@@ -32,7 +32,6 @@ use std::time::Instant;
 use crate::patch::entity_trim::{
     MapProps, Outcome, Step, Tier, TrimError, TrimRequest, Trimmed, target_for, trim_demo,
 };
-use crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES;
 
 /// Under `%LOCALAPPDATA%\dod-studio`.
 pub const COPIES_DIR: &str = "trimmed_demos";
@@ -283,17 +282,26 @@ fn file_name(demo: &Path) -> String {
 /// maps folder has it, and their [`map_tag`].
 struct MapFile {
     tag: String,
-    bytes: Option<Vec<u8>>,
+    /// `Err` says why the `.bsp` couldn't be read; `Ok(None)`: no map to look for.
+    bytes: Result<Option<Vec<u8>>, String>,
 }
 
 impl MapFile {
     /// The map's props for the trim; `None` (logged) when it isn't there or
-    /// doesn't parse, which leaves the decorative props out.
+    /// doesn't read, which leaves the decorative props out. Logged here, when
+    /// a copy is made, not on every use of one already made.
     fn props(&self, demo: &Path) -> Option<MapProps> {
-        match MapProps::parse(self.bytes.as_deref()?) {
+        let parsed = match &self.bytes {
+            Ok(bytes) => MapProps::parse(bytes.as_deref()?),
+            Err(why) => Err(why.clone()),
+        };
+        match parsed {
             Ok(props) => Some(props),
             Err(e) => {
-                log_unreadable_map(demo, &e);
+                crate::log_markdown(&format!(
+                    "⚠️ **Trimmed copy** — couldn't read the map for `{}` ({e}); its decorations are left out of the trim",
+                    file_name(demo)
+                ));
                 None
             }
         }
@@ -303,15 +311,14 @@ impl MapFile {
 /// Reads `demo`'s map from the engine's maps folder. Read on every use, a
 /// few milliseconds for a `.bsp`, so a changed map is always noticed.
 fn read_map(demo: &Path, engine: &Engine) -> MapFile {
-    let bytes = map_file(demo, engine).and_then(|path| match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(e) => {
-            log_unreadable_map(demo, &format!("{}: {e}", path.display()));
-            None
-        }
-    });
+    let bytes = match map_file(demo, engine) {
+        None => Ok(None),
+        Some(path) => std::fs::read(&path)
+            .map(Some)
+            .map_err(|e| format!("{}: {e}", path.display())),
+    };
     MapFile {
-        tag: map_tag(bytes.as_deref()),
+        tag: map_tag(bytes.as_ref().ok().and_then(|b| b.as_deref())),
         bytes,
     }
 }
@@ -327,13 +334,6 @@ fn map_file(demo: &Path, engine: &Engine) -> Option<PathBuf> {
         engine.maps_dir.as_ref()?,
         &name,
     ))
-}
-
-fn log_unreadable_map(demo: &Path, why: &str) {
-    crate::log_markdown(&format!(
-        "⚠️ **Trimmed copy** — couldn't read the map for `{}` ({why}); its decorations are left out of the trim",
-        file_name(demo)
-    ));
 }
 
 /// Names a map's `.bsp` by its contents (`None`: no map to read). The trim
@@ -377,7 +377,7 @@ fn save_map_marker(path: &Path, map_tag: &str) {
 }
 
 /// `Err` when the drive `copy` goes on hasn't `needed_bytes` free with
-/// [`FREE_SPACE_HEADROOM_BYTES`] to spare. A drive whose free space can't be
+/// [`FREE_SPACE_HEADROOM_BYTES`](crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES) to spare. A drive whose free space can't be
 /// told is let through: the write itself still fails cleanly.
 fn check_room(copy: &Path, needed_bytes: u64) -> Result<(), TrimError> {
     // The free-space query wants a folder that exists.
@@ -689,7 +689,7 @@ mod tests {
     fn a_copy_that_would_leave_its_drive_too_full_is_refused() {
         let folder = Path::new("C:/copies");
         let copy = 50 * 1024 * 1024;
-        let enough = copy + FREE_SPACE_HEADROOM_BYTES;
+        let enough = copy + crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES;
         assert_eq!(room_for(folder, Some(enough), copy), Ok(()));
         assert_eq!(
             room_for(folder, Some(enough - 1), copy),
