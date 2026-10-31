@@ -252,6 +252,28 @@ fn stall_texts(stalled_for: Duration, never_started: bool) -> (String, &'static 
     (line, reason)
 }
 
+/// Logged when an error box ends a batch in a game the player already had
+/// open (#725): unlike Cancel, a stall or OBS going away, this closes it.
+const BORROWED_GAME_CLOSED_LOG: &str = "[HLAE] Closing the game that was already open \
+    (the batch borrowed it): an error box stops the game until it is answered, and the boxes it \
+    shows (a fatal error, a failed assertion) end it once they are (#1231)";
+
+/// The reason a batch ended by an error box fails with. Every box the game
+/// shows is modal: its frame loop stops until someone answers it, and the
+/// known ones (Sys_Error's "Fatal Error", a CRT assert) end the process once
+/// answered. So even a game the player had open (#725) is closed, unlike on
+/// Cancel, and the message says so: they didn't close it (#1231).
+fn dialog_failure_reason(summary: &str, borrowed_game: bool) -> String {
+    if borrowed_game {
+        format!(
+            "{summary} DoD Studio closed the game you had open: it was stuck on that error box \
+             and couldn't carry on."
+        )
+    } else {
+        summary.to_string()
+    }
+}
+
 /// Whether the batch is complete: past its first 10 s, by a done folder or a
 /// BATCH_COMPLETE marker.
 fn batch_complete(elapsed: Duration, markers: CompleteMarkers, folders: &impl DoneFolders) -> bool {
@@ -670,7 +692,13 @@ impl<'a> BatchWatch<'a> {
             self.elapsed_text(),
             dialog.full_text()
         ));
-        self.failure_reason = Some(dialog.summary());
+        self.failure_reason = Some(dialog_failure_reason(
+            &dialog.summary(),
+            self.io.reuse_game.is_some(),
+        ));
+        if self.io.reuse_game.is_some() {
+            log_markdown(BORROWED_GAME_CLOSED_LOG);
+        }
         for pid in launcher_pids
             .iter()
             .filter(|&&pid| Some(pid) != launcher_pid)
@@ -769,7 +797,9 @@ impl<'a> BatchWatch<'a> {
             self.failure_reason =
                 Some("lost contact with OBS mid-batch and could not reconnect".into());
         }
-        kill_hl_exe_and_wait(&mut *self.procs, &mut self.game);
+        // The game itself is fine: a borrowed one (#725) is left open at its
+        // menu, as on Cancel (#1231).
+        end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
     }
 
@@ -909,6 +939,21 @@ mod tests {
 
     fn ago(secs: u64) -> Instant {
         Instant::now() - Duration::from_secs(secs)
+    }
+
+    /// An error box closes even a game the player had open, and then the
+    /// message says DoD Studio closed it; a launched game's message is the
+    /// box's summary alone (#1231).
+    #[test]
+    fn an_error_box_in_a_borrowed_game_says_the_game_was_closed() {
+        let summary = "The game stopped on one of its own internal checks.";
+        assert_eq!(dialog_failure_reason(summary, false), summary);
+        let borrowed = dialog_failure_reason(summary, true);
+        assert!(borrowed.starts_with(summary), "{borrowed}");
+        assert!(
+            borrowed.contains("closed the game you had open"),
+            "{borrowed}"
+        );
     }
 
     /// A batch that has shown nothing unusual gets the floor. Five minutes is
