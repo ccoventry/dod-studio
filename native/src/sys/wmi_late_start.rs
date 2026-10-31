@@ -12,7 +12,8 @@
 //! Only a process the cancelled call started is ever ended: one with the
 //! launcher's name that wasn't running before the call, whose arguments are
 //! the call's own exactly (they carry this Studio's `-dodstudio_pipe`, #1235),
-//! and, for the game, an hl.exe whose parent is that launcher. Unlike the
+//! and, for the game, an hl.exe whose parent is that launcher, that wasn't
+//! running before the call and started after the launcher did. Unlike the
 //! look after a failed call, a process whose command line can't be read is
 //! never taken for it. The watch stops as soon as Studio starts another WMI
 //! launch, whose launcher would match too.
@@ -54,6 +55,8 @@ pub(crate) struct CancelledCall {
     pub args: Vec<String>,
     /// The processes with that name that ran before the call.
     pub running_before: Vec<u32>,
+    /// The games (hl.exe) that ran before the call: never ended.
+    pub games_before: Vec<u32>,
 }
 
 /// Starts a thread that watches for [`WATCH`] for the launcher `call` may
@@ -89,7 +92,7 @@ fn watch(call: &CancelledCall) {
     };
     let line = match ended {
         Watch::Found(pid) => {
-            let games = end_launcher_and_its_games(pid);
+            let games = end_launcher_and_its_games(call, pid);
             crate::messages::late_launcher_ended(pid, games, since.elapsed().as_secs_f64())
         }
         Watch::NothingStarted => crate::messages::late_launcher_none(WATCH.as_secs()),
@@ -118,15 +121,49 @@ fn late_start(running_before: &[u32], running: &[RunningGame], args: &[String]) 
 
 /// Ends launcher `pid`, then every hl.exe it had started, and returns how
 /// many games were ended. The games are listed after the launcher is gone,
-/// so it can't start another in between.
-fn end_launcher_and_its_games(pid: u32) -> usize {
-    crate::sys::process::kill_pid(pid);
-    let sys = crate::sys::process::snapshot();
-    let games = crate::sys::process::children_named_in(&sys, &[crate::sys::process::GAME_EXE], pid);
+/// so it can't start another in between. A pid that is no longer the
+/// launcher is left alone, and so are its "children" ([`its_games`]).
+fn end_launcher_and_its_games(call: &CancelledCall, pid: u32) -> usize {
+    use crate::sys::process::{GAME_EXE, is_named, kill_pid, snapshot};
+    let sys = snapshot();
+    let Some(launcher) = sys
+        .process(sysinfo::Pid::from_u32(pid))
+        .filter(|p| is_named(p, &[&call.exe_name]))
+    else {
+        return 0;
+    };
+    let launcher_start = launcher.start_time();
+    kill_pid(pid);
+    let sys = snapshot();
+    let children: Vec<(u32, u64)> = crate::sys::process::children_named_in(&sys, &[GAME_EXE], pid)
+        .into_iter()
+        .filter_map(|game| {
+            let start = sys.process(sysinfo::Pid::from_u32(game))?.start_time();
+            Some((game, start))
+        })
+        .collect();
+    let games = its_games(&call.games_before, launcher_start, &children);
     for game in &games {
-        crate::sys::process::kill_pid(*game);
+        kill_pid(*game);
     }
     games.len()
+}
+
+/// Which of `children` (hl.exe pids whose parent pid is the launcher's, with
+/// their start times) the launcher started. HLAE exits once it has started
+/// its game, so an hl.exe whose own launcher exited keeps that launcher's pid
+/// as its parent, and Windows hands pids out again: the late launcher may
+/// have the pid of the one that started the user's game. So a game that ran
+/// before the call, or started before the launcher did, is never its. A
+/// start time of 0 is one Windows wouldn't give, and is not compared.
+fn its_games(games_before: &[u32], launcher_start: u64, children: &[(u32, u64)]) -> Vec<u32> {
+    children
+        .iter()
+        .filter(|(pid, start)| {
+            !games_before.contains(pid) && (launcher_start == 0 || *start >= launcher_start)
+        })
+        .map(|(pid, _)| *pid)
+        .collect()
 }
 
 #[cfg(test)]
@@ -178,34 +215,64 @@ mod tests {
         assert_eq!(late_start(&[], &[launcher(16, &[])], &args()), None);
     }
 
+    /// An hl.exe whose parent pid is the late launcher's is only its game
+    /// when it started after the launcher and wasn't running before the
+    /// call: one whose own (exited) HLAE had that pid before is the user's.
+    #[test]
+    fn only_a_game_the_late_launcher_started_is_ended() {
+        let children = [(20, 100), (21, 99), (22, 105), (23, 100)];
+        assert_eq!(its_games(&[23], 100, &children), vec![20, 22]);
+        // A launcher start time Windows wouldn't give leaves the pids alone
+        // to decide.
+        assert_eq!(its_games(&[23], 0, &children), vec![20, 21, 22]);
+    }
+
+    /// The plain process list carries start times, so [`its_games`] has them
+    /// to compare.
+    #[cfg(windows)]
+    #[test]
+    fn the_process_list_gives_start_times() {
+        let sys = crate::sys::process::snapshot();
+        let me = sys
+            .process(sysinfo::Pid::from_u32(std::process::id()))
+            .expect("the test process is listed");
+        assert_ne!(me.start_time(), 0);
+    }
+
     /// A real process that turns up after the watch began, with the call's
     /// arguments, is ended; one started before it with the same arguments
-    /// is left alone. Ignored: it starts `ping`s and takes a few seconds.
+    /// is left alone. Ignored: it starts `ping`s and takes a few seconds;
+    /// run it on its own, since any WMI launch (another test's) stops the
+    /// watch. The pings get no window (`CREATE_NO_WINDOW`), so a run never
+    /// opens one on the desktop.
     #[cfg(windows)]
     #[test]
     #[ignore]
     fn a_launcher_that_starts_during_the_watch_is_ended() {
-        let ping = r"C:\Windows\System32\PING.EXE";
+        use std::os::windows::process::CommandExt;
         let args: Vec<String> = ["-n", "30", "127.0.0.77"]
             .iter()
             .map(|a| a.to_string())
             .collect();
-        let mut earlier = std::process::Command::new(ping)
-            .args(&args)
-            .spawn()
-            .unwrap();
+        let ping = move |args: &[String]| {
+            std::process::Command::new(r"C:\Windows\System32\PING.EXE")
+                .args(args)
+                .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap()
+        };
+        let mut earlier = ping(&args);
         let call = CancelledCall {
             launch: begin_launch(),
             exe_name: "PING.EXE".to_string(),
             args: args.clone(),
             running_before: crate::sys::process::pids_named(&["PING.EXE"]),
+            games_before: Vec::new(),
         };
         let starter = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(2));
-            std::process::Command::new(ping)
-                .args(&args)
-                .spawn()
-                .unwrap()
+            ping(&args)
         });
         let since = Instant::now();
         watch(&call);

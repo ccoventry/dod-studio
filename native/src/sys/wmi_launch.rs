@@ -140,7 +140,13 @@ fn spawn_within(
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
     let launch = crate::sys::wmi_late_start::begin_launch();
-    let running_before: Vec<u32> = crate::sys::process::pids_named(&[&exe_name]);
+    let (running_before, games_before) = {
+        let sys = crate::sys::process::snapshot();
+        (
+            crate::sys::process::pids_named_in(&sys, &[&exe_name]),
+            crate::sys::process::game_pids_in(&sys),
+        )
+    };
     let result = run_script(
         &base64::engine::general_purpose::STANDARD.encode(payload),
         cancel,
@@ -160,6 +166,7 @@ fn spawn_within(
                 exe_name,
                 args,
                 running_before,
+                games_before,
             },
         );
     }
