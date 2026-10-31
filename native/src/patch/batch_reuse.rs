@@ -65,6 +65,14 @@ fn named<'a>(modules: &'a [PathBuf], name: &str) -> Vec<&'a PathBuf> {
         .collect()
 }
 
+/// Whether a running game with `modules` loaded could be capturing a batch:
+/// every batch records through HLAE, and a game left open for one (#1075)
+/// was started by Studio through HLAE too, so a game without it (started
+/// from Steam) never is. One whose DLLs can't be read (`None`) may be.
+pub fn may_be_capturing(modules: Option<&[PathBuf]>) -> bool {
+    modules.is_none_or(|m| !named(m, HLAE_DLL_NAME).is_empty())
+}
+
 /// The game to run the batch in, or why a launch is needed (one sentence
 /// for the activity log, starting lower case).
 pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
@@ -162,6 +170,21 @@ mod tests {
             pipe_answers: true,
             asks_this_studio: true,
         }
+    }
+
+    /// #20: a game from Steam, with no HLAE in it, can't be capturing a
+    /// batch from before Studio closed, so the catch-up doesn't wait for it.
+    #[test]
+    fn only_a_game_with_hlae_in_it_may_be_capturing() {
+        let m = modules();
+        assert!(may_be_capturing(Some(&m)));
+        let steam = vec![
+            PathBuf::from(r"C:\Games\Half-Life\hl.exe"),
+            PathBuf::from(r"C:\Games\Half-Life\hw.dll"),
+        ];
+        assert!(!may_be_capturing(Some(&steam)));
+        // Unreadable: it may be.
+        assert!(may_be_capturing(None));
     }
 
     #[test]
