@@ -23,7 +23,7 @@ pub(super) fn start(
     cleanup: &mut CaptureCleanupGuard,
 ) -> Result<(crate::obs::ObsSession, Option<crate::obs::DropPoller>), String> {
     if obs_take_folders.is_empty() {
-        return Err("OBS capture was requested but no blocks were planned".into());
+        return Err(crate::messages::OBS_NO_BLOCKS_PLANNED.into());
     }
     match crate::obs::ObsSession::start(
         &config.obs,
@@ -33,10 +33,7 @@ pub(super) fn start(
         config.obs_capture_fps,
     ) {
         Ok((session, preflight)) => {
-            log_markdown(&format!(
-                "🎥 **OBS capture** — connected to OBS {} (obs-websocket {}) at {}. \
-                 Canvas {}x{} @ {:.0}fps, scene `{}`. HLAE will record nothing; OBS is \
-                 driven from the engine's own console markers.",
+            log_markdown(&crate::messages::obs_connected(
                 preflight.obs_version,
                 preflight.websocket_version,
                 config.obs.redacted(),
@@ -64,7 +61,7 @@ pub(super) fn start(
             .ok();
             Ok((session, drop_poller))
         }
-        Err(e) => Err(format!("OBS capture could not start — {}", e)),
+        Err(e) => Err(crate::messages::obs_could_not_start(e)),
     }
 }
 
@@ -93,13 +90,12 @@ pub(super) fn finish(
     if let Some(poller) = drop_poller {
         poller.stop_and_wait();
     }
-    log_markdown(&format!(
-        "🎥 **OBS capture** — {} block(s) recorded, {} skipped.",
+    log_markdown(&crate::messages::obs_blocks_summary(
         session.recorded.len(),
-        session.skipped.len()
+        session.skipped.len(),
     ));
     for problem in &session.skipped {
-        log_markdown(&format!("⚠️ **OBS** — {problem}"));
+        log_markdown(&crate::messages::obs_problem(problem));
     }
     for block in &session.recorded {
         // The duration is wall-clock, which tracks the file on a
@@ -107,16 +103,11 @@ pub(super) fn finish(
         // recording was cut off, so the seconds after that are not
         // in the file. Said out loud rather than silently printed
         // as if it were a length.
-        log_markdown(&format!(
-            "- [obs] {} ({}{}) -> {}",
+        log_markdown(&crate::messages::obs_recorded_block(
             block.take_folder.display(),
             crate::utils::duration_text::duration_text(block.seconds),
-            if block.salvaged {
-                " of recording, salvaged — the file is shorter"
-            } else {
-                ""
-            },
-            block.video.display()
+            block.salvaged,
+            block.video.display(),
         ));
     }
 }

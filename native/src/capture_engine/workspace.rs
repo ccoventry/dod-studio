@@ -48,19 +48,19 @@ impl CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log_markdown(&format!(
-                "[cleanup] Failed to pre-clean exit_trigger {}: {}",
+            log_markdown(&crate::messages::cleanup_failed(
+                "pre-clean exit_trigger",
                 exit_trigger.display(),
-                e
+                e,
             ));
         }
         if let Err(e) = std::fs::remove_dir(&session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log_markdown(&format!(
-                "[cleanup] Failed to pre-clean session_junction {}: {}",
+            log_markdown(&crate::messages::cleanup_failed(
+                "pre-clean session_junction",
                 session_junction.display(),
-                e
+                e,
             ));
         }
         Self {
@@ -100,19 +100,19 @@ impl Drop for CaptureCleanupGuard {
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log_markdown(&format!(
-                "[cleanup] Failed to remove exit_trigger {}: {}",
+            log_markdown(&crate::messages::cleanup_failed(
+                "remove exit_trigger",
                 self.exit_trigger.display(),
-                e
+                e,
             ));
         }
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            log_markdown(&format!(
-                "[cleanup] Failed to remove session_junction {}: {}",
+            log_markdown(&crate::messages::cleanup_failed(
+                "remove session_junction",
                 self.session_junction.display(),
-                e
+                e,
             ));
         }
 
@@ -295,10 +295,9 @@ fn link_capture_folders(
             .output();
         match status {
             Ok(out) if out.status.success() => {
-                log_markdown(&format!(
-                    "[pool] Junction created: {} -> {}",
+                log_markdown(&crate::messages::pool_junction_created(
                     junction_path.display(),
-                    target_dir.display()
+                    target_dir.display(),
                 ));
                 leftovers.add_pool_junction(junction_path);
             }
@@ -417,18 +416,13 @@ fn copy_demo(
                 }
             };
 
-            log_markdown(&format!(
-                "- [IO] Copying (Windows) from {}",
-                source_path_str
-            ));
-            log_markdown(&format!("- [IO] Copying (Windows) to {}", dest_path_str));
+            log_markdown(&crate::messages::io_copy_from("Windows", &source_path_str));
+            log_markdown(&crate::messages::io_copy_to("Windows", &dest_path_str));
             match std::io::copy(&mut src_file, &mut dest_file) {
-                Ok(bytes) => {
-                    log_markdown(&format!("- [IO] Copy SUCCESS! Bytes written: {}", bytes))
-                }
+                Ok(bytes) => log_markdown(&crate::messages::io_copy_ok(bytes)),
                 Err(e) => {
-                    log_markdown(&format!("- [IO] Copy FAILED! Error: {}", e));
-                    abort(tx, &format!("Failed to copy demo to game folder: {}", e));
+                    log_markdown(&crate::messages::io_copy_failed(&e));
+                    abort(tx, &crate::messages::failed_to_copy_demo(e));
                     return None;
                 }
             }
@@ -436,15 +430,13 @@ fn copy_demo(
 
         #[cfg(not(target_os = "windows"))]
         {
-            log_markdown(&format!("- [IO] Copying (*nix) from {}", source_path_str));
-            log_markdown(&format!("- [IO] Copying (*nix) to {}", dest_path_str));
+            log_markdown(&crate::messages::io_copy_from("*nix", &source_path_str));
+            log_markdown(&crate::messages::io_copy_to("*nix", &dest_path_str));
             match std::fs::copy(&job.patched_demo_path, &dest_demo_path) {
-                Ok(bytes) => {
-                    log_markdown(&format!("- [IO] Copy SUCCESS! Bytes written: {}", bytes))
-                }
+                Ok(bytes) => log_markdown(&crate::messages::io_copy_ok(bytes)),
                 Err(e) => {
-                    log_markdown(&format!("- [IO] Copy FAILED! Error: {}", e));
-                    abort(tx, &format!("Failed to copy demo to game folder: {}", e));
+                    log_markdown(&crate::messages::io_copy_failed(&e));
+                    abort(tx, &crate::messages::failed_to_copy_demo(e));
                     return None;
                 }
             }
@@ -461,14 +453,10 @@ fn copy_demo(
         let _ = std::fs::create_dir_all(&demos_dir);
         let local_dest = demos_dir.join(&demo_filename);
         match std::fs::copy(&job.patched_demo_path, &local_dest) {
-            Ok(_) => log_markdown(&format!(
-                "- [IO] Saved local copy to demos/{}",
-                demo_filename
-            )),
-            Err(e) => log_markdown(&format!(
-                "- [IO] Failed to save local patched copy to {}: {}",
+            Ok(_) => log_markdown(&crate::messages::io_saved_local_copy(&demo_filename)),
+            Err(e) => log_markdown(&crate::messages::io_local_copy_failed(
                 local_dest.display(),
-                e
+                e,
             )),
         }
     }
