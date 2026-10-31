@@ -471,6 +471,7 @@ crash. Set the variable to `0` to turn it off.
 | --- | --- | --- |
 | `src/tempent_fix.rs` | `client.dll+0x225cc` crash: DoD writes into a temporary effect entity the engine never gave it (#374). `ds_debug_status` shows how many effects it skipped. | `GOLDSRC_HOOKS_TEMPENT_FIX=0` |
 | `src/hull_trace_guard.rs` | `hw.dll+0x6c839` stack-overflow crash from a previous map's collision data after `playdemo` (#384). Both engine builds. | `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` |
+| `src/map_file_leak.rs` | `Fatal Error: COM_LoadFile: not enough space for maps/<map>.bsp`, or a silent exit, after about 30 map loads on the pre-Anniversary build: DoD's client leaks a copy of every map's `.bsp` (#1232). `ds_debug_status` shows how many it freed. | `GOLDSRC_HOOKS_MAP_FILE_LEAK_FIX=0` |
 | `src/pmove_guard.rs` | `hw.dll+0x3a77c` crash when the session's first demo sends `InitHUD` before the engine's `pmove` pointer is set (#546). | `GOLDSRC_HOOKS_PMOVE_GUARD=0` |
 | `src/sprite_blend.rs` | Dark, dotted crosshair and sprites after `gl_spriteblend 0` at the first sprite load (#467). Both builds. | `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` |
 
