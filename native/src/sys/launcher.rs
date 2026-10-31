@@ -102,7 +102,7 @@ impl Launcher {
                     std::path::Path::new(cmd.get_program()).display(),
                     match started {
                         Some(pid) => format!("ended the launcher it had started (PID {pid})"),
-                        None => "it had started nothing".to_string(),
+                        None => "it had started nothing yet".to_string(),
                     }
                 ));
                 Err(std::io::Error::new(

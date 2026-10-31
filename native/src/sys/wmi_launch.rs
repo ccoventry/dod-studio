@@ -21,7 +21,9 @@
 //! the PowerShell that asked. So before such a call is given up on, the new
 //! process is looked for by name and command line, among the ones that weren't
 //! running before the call; the caller then has it rather than starting a
-//! second one (follows #1198).
+//! second one (follows #1198). A launch cancelled by the end of that look is
+//! cancelled whatever the call said, and when the look found nothing,
+//! `sys::wmi_late_start` keeps watching for a launcher started even later.
 
 use std::ffi::OsStr;
 use std::io::Write as _;
@@ -137,6 +139,7 @@ fn spawn_within(
         .get_args()
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
+    let launch = crate::sys::wmi_late_start::begin_launch();
     let running_before: Vec<u32> = crate::sys::process::pids_named(&[&exe_name]);
     let result = run_script(
         &base64::engine::general_purpose::STANDARD.encode(payload),
@@ -144,12 +147,33 @@ fn spawn_within(
         timeout,
     )
     .and_then(|answer| read_answer(&answer));
-    match result {
-        Err(error) if error.may_have_started() => {
-            let found = look_for_started(&exe_name, &args, &running_before);
-            settle(error, found)
-        }
-        other => other,
+    let error = match result {
+        Err(error) if error.may_have_started() => error,
+        other => return other,
+    };
+    let found = look_for_started(&exe_name, &args, &running_before);
+    let settled = settle(cancelled_meanwhile(error, cancel), found);
+    if matches!(settled, Err(WmiLaunchError::Cancelled(None))) {
+        crate::sys::wmi_late_start::watch_for_late_start(
+            crate::sys::wmi_late_start::CancelledCall {
+                launch,
+                exe_name,
+                args,
+                running_before,
+            },
+        );
+    }
+    settled
+}
+
+/// `error`, or a cancel when `cancel` was set by the time the look after
+/// the failed call ended: a launch cancelled then never falls back to
+/// starting another, and hands over what the call started to be ended.
+fn cancelled_meanwhile(error: WmiLaunchError, cancel: &AtomicBool) -> WmiLaunchError {
+    if cancel.load(Ordering::Relaxed) {
+        WmiLaunchError::Cancelled(None)
+    } else {
+        error
     }
 }
 
@@ -172,7 +196,9 @@ fn settle(error: WmiLaunchError, found: Option<u32>) -> Result<u32, WmiLaunchErr
 
 /// Polls the process list for up to [`SETTLE`] for the process a WMI call
 /// may have started: one named `exe_name`, not running before the call, with
-/// `args` (`started_process`).
+/// `args` (`started_process`). A cancel doesn't cut the look short: what it
+/// finds is what a cancelled launch ends ([`cancelled_meanwhile`]), and the
+/// look is short.
 fn look_for_started(exe_name: &str, args: &[String], running_before: &[u32]) -> Option<u32> {
     let since = Instant::now();
     let waited = wait_until(
@@ -568,6 +594,35 @@ mod tests {
         assert!(
             !WmiLaunchError::PowerShell(std::io::Error::other("no powershell")).may_have_started()
         );
+    }
+
+    /// A cancel that comes during the look after a timed-out call makes the
+    /// launch a cancelled one, so it ends what the call started instead of
+    /// using it, and never falls back to a plain start.
+    #[test]
+    fn a_cancel_during_the_look_after_a_timeout_cancels_the_launch() {
+        let cancel = AtomicBool::new(true);
+        assert!(matches!(
+            settle(
+                cancelled_meanwhile(WmiLaunchError::TimedOut, &cancel),
+                Some(12)
+            ),
+            Err(WmiLaunchError::Cancelled(Some(12)))
+        ));
+        assert!(matches!(
+            settle(cancelled_meanwhile(WmiLaunchError::TimedOut, &cancel), None),
+            Err(WmiLaunchError::Cancelled(None))
+        ));
+    }
+
+    /// Without a cancel, the call's own failure stands.
+    #[test]
+    fn a_failure_without_a_cancel_stays_that_failure() {
+        let cancel = AtomicBool::new(false);
+        assert!(matches!(
+            cancelled_meanwhile(WmiLaunchError::TimedOut, &cancel),
+            WmiLaunchError::TimedOut
+        ));
     }
 
     #[cfg(windows)]
