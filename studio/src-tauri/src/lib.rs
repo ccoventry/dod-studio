@@ -1096,6 +1096,7 @@ pub fn run() {
             remove_render_jobs,
             clear_render_queue,
             capture_history_manager::take_capture_states,
+            capture_history_manager::locate_rendered_videos,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             take_preview_manager::take_preview_thumb,
