@@ -680,6 +680,11 @@ is on the way *back in* — `obs::recover` asks OBS at start-up whether it is re
 shaped like `<take>/take0000/all`, which is a path only this app produces, and offers to stop it and
 fold the file. Anything else is somebody's own recording and is left alone.
 
+That folded take is not the clip as planned: nobody stopped it at the clip's end. So the session
+writes `dodstudio_obs_take.json` into the block folder while OBS records (`obs::take_state`), and
+removes it at the stop; a late start (#1109) is kept in it after the stop. The next start's catch-up
+(#20) reads it and counts neither take as captured.
+
 Two smaller ones found on the way:
 
 - **An OBS killed mid-recording truncates a plain MP4 — it does not destroy it.** Measured on OBS

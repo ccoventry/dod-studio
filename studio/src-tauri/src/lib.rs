@@ -7,6 +7,7 @@ mod builtin_profiles;
 mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
+mod catch_up_takes;
 mod combine_manager;
 mod config_checks_cmd;
 mod crash_maps_manager;
