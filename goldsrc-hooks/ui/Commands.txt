@@ -49,6 +49,10 @@ HUD
       Leave the speaker icon off the players on the overview map.
   ds_hud_show_scope 0/1
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
+  ds_hud_show_player_names 0/1
+      Show each player's name over his head while a demo plays (the players the game draws, so through walls too).
+  ds_hud_show_player_health 0/1
+      Show a health bar over each player's head while a demo plays.
 
 VIEW (POV demos: the recording player's own view)
   ds_view_use_cl_bob 0/1

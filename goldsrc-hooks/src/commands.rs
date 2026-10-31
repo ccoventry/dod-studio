@@ -312,6 +312,8 @@ mod tests {
             missing_shots::NAME,
             crate::own_blood::NAME,
             crate::map_weather::NAME,
+            crate::nameplates::NAMES_NAME,
+            crate::nameplates::HEALTH_NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")

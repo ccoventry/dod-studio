@@ -211,6 +211,16 @@ pub const AREAS: &[Area] = &[
                 "Show the sniper scope",
                 "show the sniper scope while a demo plays.",
             ),
+            check(
+                console_name!("hud_show_player_names"),
+                "Show names over players",
+                "show each player's name over his head while a demo plays.",
+            ),
+            check(
+                console_name!("hud_show_player_health"),
+                "Show health bars over players",
+                "show a health bar over each player's head while a demo plays.",
+            ),
             choice(
                 console_name!("hud_overview_players"),
                 "Overview shows",
