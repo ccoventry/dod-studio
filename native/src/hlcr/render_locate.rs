@@ -23,26 +23,49 @@ pub const SEARCH_DEPTH: usize = 3;
 pub const SEARCH_ENTRY_BUDGET: usize = 50_000;
 
 /// Where each of `paths` is now, in order: the path itself while it is a
-/// file, else the first file of the same name (in any case) under
+/// file, else the file of the same name (in any case) found under
 /// `export_dirs`, else `None`.
+///
+/// A name is only trusted when it is unambiguous: two missing videos with the
+/// same file name (rendered into different folders) would both land on one
+/// file, and a file that is another video's own path in this list is that
+/// video's, so both stay missing rather than point at the wrong clip. When
+/// one name exists in several export folders, the nearest wins (the walk is
+/// breadth first, export folders in their listed order).
 pub fn locate_videos(paths: &[String], export_dirs: &[String]) -> Vec<Option<PathBuf>> {
     let mut located: Vec<Option<PathBuf>> = paths
         .iter()
         .map(|p| Some(PathBuf::from(p)).filter(|p| !p.as_os_str().is_empty() && p.is_file()))
         .collect();
-    let missing_names: Vec<String> = paths
-        .iter()
-        .zip(&located)
-        .filter(|(_, found)| found.is_none())
-        .filter_map(|(p, _)| name_key(Path::new(p)))
+    let mut missing_by_name: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+    for (p, _) in paths.iter().zip(&located).filter(|(_, f)| f.is_none()) {
+        if let Some(name) = name_key(Path::new(p)) {
+            missing_by_name
+                .entry(name)
+                .or_default()
+                .insert(p.to_lowercase());
+        }
+    }
+    // A name two different missing paths share cannot say which is which.
+    let names: Vec<String> = missing_by_name
+        .into_iter()
+        .filter(|(_, from)| from.len() == 1)
+        .map(|(name, _)| name)
         .collect();
-    if missing_names.is_empty() {
+    if names.is_empty() {
         return located;
     }
-    let found = find_by_name(&missing_names, export_dirs);
+    let found = find_by_name(&names, export_dirs);
+    let in_place: std::collections::HashSet<String> = located
+        .iter()
+        .flatten()
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .collect();
     for (slot, path) in located.iter_mut().zip(paths) {
         if slot.is_none() {
-            *slot = name_key(Path::new(path)).and_then(|name| found.get(&name).cloned());
+            *slot = name_key(Path::new(path))
+                .and_then(|name| found.get(&name).cloned())
+                .filter(|f| !in_place.contains(&f.to_string_lossy().to_lowercase()));
         }
     }
     located
@@ -136,6 +159,39 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(located, vec![None, None]);
+    }
+
+    #[test]
+    fn two_missing_videos_with_one_name_are_not_given_the_same_file() {
+        let dir = temp_dir("same_name");
+        let exports = dir.join("exports");
+        std::fs::create_dir_all(&exports).unwrap();
+        std::fs::write(exports.join("clip.mov"), b"x").unwrap();
+        let located = locate_videos(
+            &[
+                s(&dir.join("a").join("clip.mov")),
+                s(&dir.join("b").join("clip.mov")),
+                s(&dir.join("c").join("other.mov")),
+            ],
+            &[s(&exports)],
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(located, vec![None, None, None]);
+    }
+
+    #[test]
+    fn a_file_that_is_another_videos_own_path_is_not_its_replacement() {
+        let dir = temp_dir("claimed");
+        let exports = dir.join("exports");
+        std::fs::create_dir_all(&exports).unwrap();
+        let here = exports.join("clip.mov");
+        std::fs::write(&here, b"x").unwrap();
+        let located = locate_videos(
+            &[s(&here), s(&dir.join("gone").join("CLIP.mov"))],
+            &[s(&exports)],
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(located, vec![Some(here), None]);
     }
 
     #[test]
