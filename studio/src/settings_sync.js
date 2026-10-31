@@ -119,6 +119,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       kept_json_projects: getKeptJsonProjects(),
       scan_folders_for_demos: state.scanFoldersForDemos,
       analyzer_explorer_width: state.analyzerExplorerWidth,
+      capture_split_left_permille: state.captureSplitLeftPermille ?? null,
+      analyzer_demos_height_px: state.analyzerDemosHeightPx ?? null,
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
