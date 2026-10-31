@@ -1092,3 +1092,30 @@ test.describe('take checks (#1084)', () => {
     await expect(chip).toHaveAttribute('title', "Couldn't check this take: FFmpeg failed: bad file");
   });
 });
+
+// #429: the button that copies the VEGAS nameplate script into VEGAS's script menu.
+test.describe('Add Nameplate Script to VEGAS', () => {
+  test('the click asks the backend and the toast says where the script went', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers['vegas_install_script'] =
+        () => 'D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs';
+    });
+    await page.locator('#vegas-script-install-btn').click();
+    await expect(page.locator('#toast-container')).toContainText('D:/OneDrive/Documents/Vegas Script Menu/DoD Studio Nameplates.cs');
+    await expect(page.locator('#toast-container')).toContainText('Tools > Scripting > Rescan Script Menu Folder');
+    expect(await invocationsFor(page, 'vegas_install_script')).toHaveLength(1);
+    await expect(page.locator('#vegas-script-install-btn')).toBeEnabled();
+  });
+
+  test('a failed copy toasts the backend error naming the path', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers['vegas_install_script'] =
+        () => Promise.reject('D:/Documents/Vegas Script Menu: Access is denied.');
+    });
+    await page.locator('#vegas-script-install-btn').click();
+    await expect(page.locator('#toast-container')).toContainText("Couldn't add the script to VEGAS: D:/Documents/Vegas Script Menu: Access is denied.");
+    await expect(page.locator('#vegas-script-install-btn')).toBeEnabled();
+  });
+});

@@ -783,6 +783,10 @@ export const STRINGS = {
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
+    // #429: the nameplate script into VEGAS's script menu.
+    VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
+    VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
+    vegasScriptDone: (path) => `Script copied to ${path}. In VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder, then pick it from Tools > Scripting.`,
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
     exportEdlDone: (count, skipped, nameplates = 0) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
@@ -2842,6 +2846,7 @@ export const STRINGS = {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
     blenderFailed: (err) => `Blender: ${err}`,
+    vegasScriptFailed: (err) => `Couldn't add the script to VEGAS: ${err}`,
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
     hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,

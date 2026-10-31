@@ -1265,3 +1265,10 @@ mod tests {
         );
     }
 }
+
+// ── vegas.rs ─────────────────────────────────────────────────────────────
+
+pub const VEGAS_NO_SCRIPT: &str = "This copy of DoD Studio has no VEGAS script to install (the vegas folder in the DoD Studio repo).";
+
+pub const VEGAS_NO_DOCUMENTS: &str =
+    "Windows did not say where your Documents folder is, so the VEGAS script cannot be placed.";

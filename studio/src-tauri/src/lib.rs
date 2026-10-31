@@ -50,6 +50,7 @@ mod take_delete_manager;
 mod take_preview_manager;
 mod trimmed_demos;
 mod updater_manager;
+mod vegas_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
@@ -1188,6 +1189,7 @@ pub fn run() {
             blender_manager::blender_set_exe,
             blender_manager::blender_run,
             blender_manager::blender_cancel,
+            vegas_manager::vegas_install_script,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
