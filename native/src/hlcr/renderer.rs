@@ -704,10 +704,9 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
 
     let mut reader = tokio::fs::File::open(src).await?;
     let mut writer = tokio::fs::File::create(dst).await?;
-    // 2 MiB, matching this codebase's stated heap-buffer payload limit
-    // (CLAUDE.md's Memory Safety rule) — still large enough that per-chunk
-    // overhead is negligible against the copy itself, and a cancel lands
-    // within a second or two even on a slow disk.
+    // 2 MiB: large enough that per-chunk overhead is negligible against the
+    // copy itself, and a cancel lands within a second or two even on a slow
+    // disk.
     let mut buf = vec![0u8; 2 * 1024 * 1024];
     loop {
         if cancel.load(Ordering::Relaxed) {
