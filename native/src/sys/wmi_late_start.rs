@@ -178,6 +178,49 @@ mod tests {
         assert_eq!(late_start(&[], &[launcher(16, &[])], &args()), None);
     }
 
+    /// A real process that turns up after the watch began, with the call's
+    /// arguments, is ended; one started before it with the same arguments
+    /// is left alone. Ignored: it starts `ping`s and takes a few seconds.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn a_launcher_that_starts_during_the_watch_is_ended() {
+        let ping = r"C:\Windows\System32\PING.EXE";
+        let args: Vec<String> = ["-n", "30", "127.0.0.77"]
+            .iter()
+            .map(|a| a.to_string())
+            .collect();
+        let mut earlier = std::process::Command::new(ping)
+            .args(&args)
+            .spawn()
+            .unwrap();
+        let call = CancelledCall {
+            launch: begin_launch(),
+            exe_name: "PING.EXE".to_string(),
+            args: args.clone(),
+            running_before: crate::sys::process::pids_named(&["PING.EXE"]),
+        };
+        let starter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            std::process::Command::new(ping)
+                .args(&args)
+                .spawn()
+                .unwrap()
+        });
+        let since = Instant::now();
+        watch(&call);
+        let mut late = starter.join().unwrap();
+        assert!(since.elapsed() < WATCH, "the watch ran out instead");
+        let ended = late.wait().unwrap();
+        assert!(!ended.success(), "the late ping ran to its end");
+        assert_eq!(
+            earlier.try_wait().unwrap(),
+            None,
+            "the earlier ping was ended"
+        );
+        earlier.kill().unwrap();
+    }
+
     /// A watch stops once any later launch begins, so it can't end that
     /// launch's launcher.
     #[test]
