@@ -2,7 +2,7 @@
 //!
 //! The DoD Studio window's Review tab has **From the start** and **From
 //! here** while no review runs (`ds_demo_review ask start` / `ask here`).
-//! Each sends DoD Studio a request over its game pipe ([`STUDIO_PIPE`],
+//! Each sends DoD Studio a request over its game pipe (`studio_pipe`,
 //! `native::sys::game_review_requests` on Studio's side): the loaded demo's
 //! full path, and for From here the demo player's clock now. Studio reviews
 //! that demo as its Review highlights button would, scanning it first if
@@ -135,9 +135,6 @@ fn set_end(end: Status, starts_then: u32) {
 /// Whether a request is on its way, so a second click doesn't send another.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
-/// DoD Studio's game pipe; the same as `streaks::STUDIO_PIPE`.
-const STUDIO_PIPE: &str = crate::streaks::STUDIO_PIPE;
-
 /// How often [`studio_running`] looks again.
 const LOOK_EVERY: Duration = Duration::from_secs(1);
 /// When it last looked, as milliseconds since [`epoch`], and what it saw.
@@ -158,22 +155,9 @@ pub(crate) fn studio_running() -> bool {
     let last = LOOKED_MS.load(Ordering::Relaxed);
     if last == 0 || now.saturating_sub(last) >= LOOK_EVERY.as_millis() as u64 {
         LOOKED_MS.store(now, Ordering::Relaxed);
-        RUNNING.store(pipe_exists(), Ordering::Relaxed);
+        RUNNING.store(crate::studio_pipe::studio_serves(), Ordering::Relaxed);
     }
     RUNNING.load(Ordering::Relaxed)
-}
-
-#[cfg(windows)]
-fn pipe_exists() -> bool {
-    use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
-    let wide: Vec<u16> = STUDIO_PIPE.encode_utf16().chain([0]).collect();
-    // Safety: a NUL-terminated name; a 1 ms wait at most.
-    unsafe { WaitNamedPipeW(wide.as_ptr(), 1) != 0 }
-}
-
-#[cfg(not(windows))]
-fn pipe_exists() -> bool {
-    false
 }
 
 /// One line of Studio's answer.
@@ -235,11 +219,7 @@ fn log(line: &str) {
 /// One request, start to end: the status it ends on.
 fn ask(line: &str) -> Status {
     use std::io::{BufRead, BufReader, Write};
-    let Ok(mut pipe) = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(STUDIO_PIPE)
-    else {
+    let Ok(mut pipe) = crate::studio_pipe::connect() else {
         return Status::Failed("DoD Studio isn't running".to_string());
     };
     if let Err(e) = pipe.write_all(line.as_bytes()) {
@@ -318,9 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pipe_is_studios() {
-        let server = include_str!("../../native/src/sys/analysis_server.rs");
-        assert!(server.contains(&format!("pub const PIPE_NAME: &str = r\"{STUDIO_PIPE}\";")));
+    fn the_requests_are_the_ones_studio_reads() {
         let requests = include_str!("../../native/src/sys/game_review_requests.rs");
         assert!(requests.contains("`review start <absolute path to the .dem>`"));
         assert!(requests.contains("`review at <seconds> <absolute path>`"));

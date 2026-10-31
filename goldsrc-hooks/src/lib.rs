@@ -362,6 +362,7 @@ mod steam_id;
 mod strafe_twitch;
 mod streaks;
 mod studio_panel;
+mod studio_pipe;
 mod teammate_info;
 mod tempent_fix;
 mod texture_hires;

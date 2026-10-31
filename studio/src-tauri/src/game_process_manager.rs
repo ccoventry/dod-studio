@@ -283,6 +283,7 @@ pub async fn running_game_for_batch(
             hook_dll: hook_dll.as_deref(),
             modules: modules.as_deref(),
             pipe_answers,
+            asks_this_studio: pid.is_some_and(native::sys::studio_pipe::game_asks_this_studio),
         });
         match &verdict {
             Ok(pid) => log_markdown(&format!(

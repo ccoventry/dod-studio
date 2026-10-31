@@ -29,35 +29,86 @@
 //! review the demo it has loaded instead (#1142); `game_review_requests`
 //! answers it on the same connection.
 //!
-//! The hook DLL's side is `goldsrc-hooks/src/streaks.rs`; [`PIPE_NAME`](crate::sys::analysis_server::PIPE_NAME) must
-//! match its `STUDIO_PIPE` to the character.
+//! ## Names
+//!
+//! Each Studio serves the pipe under its own name, and the first one open
+//! also under the plain [`PIPE_NAME`], so two Studios never answer each
+//! other's game (#1235, `sys::studio_pipe`).
+//!
+//! The hook DLL's side is `goldsrc-hooks/src/studio_pipe.rs`;
+//! [`PIPE_NAME`](crate::sys::analysis_server::PIPE_NAME) must match its
+//! `PLAIN_PIPE` to the character.
 
 use std::ffi::c_void;
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::io::FromRawHandle;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
+/// The plain name: asked by a game nothing named a pipe for, and by a hook
+/// DLL from before #1235.
 pub const PIPE_NAME: &str = r"\\.\pipe\dodstudio-analyzer";
 
 /// The longest request line read: a path, with room to spare.
 const MAX_REQUEST: u64 = 8192;
 
-static STARTED: AtomicBool = AtomicBool::new(false);
+/// How often a Studio that found the plain name taken tries it again, so it
+/// takes it over once the Studio holding it closes.
+const PLAIN_RETRY: Duration = Duration::from_secs(5);
 
-/// Starts serving the pipe on a thread of its own, once per process. Another
-/// Studio already serving it keeps it; this one then serves nothing.
+static STARTED: AtomicBool = AtomicBool::new(false);
+static SERVES_PLAIN: AtomicBool = AtomicBool::new(false);
+
+/// Starts serving this Studio's own pipe and, while no other Studio holds
+/// it, the plain one, each on a thread of its own; once per process.
 pub fn start() {
     if STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
+    let own = super::studio_pipe::instance_pipe();
+    crate::log_markdown(&format!("Analysis server: serving {own}"));
     let _ = std::thread::Builder::new()
         .name("analysis-server".into())
-        .spawn(|| serve(PIPE_NAME));
+        .spawn(move || {
+            if !serve(&own, None) {
+                crate::log_markdown(&format!(
+                    "Analysis server: could not serve {own}, which another process holds"
+                ));
+            }
+        });
+    let _ = std::thread::Builder::new()
+        .name("analysis-server-plain".into())
+        .spawn(serve_plain);
 }
 
-/// Accepts connections forever, each handled on its own thread.
-fn serve(name: &str) {
+/// Whether this Studio serves the plain [`PIPE_NAME`] now.
+pub fn serves_plain_name() -> bool {
+    SERVES_PLAIN.load(Ordering::Acquire)
+}
+
+/// Serves [`PIPE_NAME`] whenever no other Studio does: while one holds it,
+/// tries again every [`PLAIN_RETRY`].
+fn serve_plain() {
+    let mut said = false;
+    loop {
+        if serve(PIPE_NAME, Some(&SERVES_PLAIN)) {
+            return;
+        }
+        if !said {
+            said = true;
+            crate::log_markdown(&format!(
+                "Analysis server: {PIPE_NAME} is served by another DoD Studio, so this one serves only its own name until that one closes"
+            ));
+        }
+        std::thread::sleep(PLAIN_RETRY);
+    }
+}
+
+/// Accepts connections on `name` forever, each handled on its own thread.
+/// Returns `false` at once when another process already serves `name`;
+/// `held` is set once this one does.
+fn serve(name: &str, held: Option<&AtomicBool>) -> bool {
     let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
     let mut first = true;
     loop {
@@ -82,13 +133,13 @@ fn serve(name: &str) {
         };
         if handle == INVALID_HANDLE_VALUE {
             if first {
-                crate::log_markdown(&format!(
-                    "Analysis server: {name} is already served (another DoD Studio), so this one is not"
-                ));
-                return;
+                return false;
             }
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(Duration::from_secs(1));
             continue;
+        }
+        if first && let Some(held) = held {
+            held.store(true, Ordering::Release);
         }
         first = false;
         // Safety: the handle just created; blocks until a client connects.
@@ -274,13 +325,33 @@ mod tests {
         );
     }
 
+    /// Two Studios on one name: the first holds it, the second is told at
+    /// once and holds nothing (#1235).
+    #[test]
+    fn a_name_another_server_holds_is_not_served_twice() {
+        static FIRST: AtomicBool = AtomicBool::new(false);
+        let second = AtomicBool::new(false);
+        let name = format!(r"\\.\pipe\dodstudio-analyzer-held-{}", std::process::id());
+        let server_name = name.clone();
+        std::thread::spawn(move || serve(&server_name, Some(&FIRST)));
+        for _ in 0..50 {
+            if FIRST.load(Ordering::Acquire) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(FIRST.load(Ordering::Acquire));
+        assert!(!serve(&name, Some(&second)));
+        assert!(!second.load(Ordering::Acquire));
+    }
+
     /// A real round trip through the pipe: a file that isn't a demo comes
     /// back `failed`.
     #[test]
     fn the_pipe_answers_a_request() {
         let name = format!(r"\\.\pipe\dodstudio-analyzer-test-{}", std::process::id());
         let server_name = name.clone();
-        std::thread::spawn(move || serve(&server_name));
+        std::thread::spawn(move || serve(&server_name, None));
         let dir = std::env::temp_dir().join(format!("analysis_server_pipe_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let demo = dir.join("broken.dem");
