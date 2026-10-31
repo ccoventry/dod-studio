@@ -129,6 +129,20 @@ pub fn run_analyzer_with_progress<F>(
 where
     F: FnMut(usize, usize),
 {
+    run_analyzer_decoding(demo_path, analysis::Sounds::Decode, progress_cb)
+}
+
+/// `run_analyzer_with_progress`, decoding the demo's sounds or not
+/// (`analysis::Sounds`: the same analysis either way).
+#[cfg(not(target_arch = "wasm32"))]
+fn run_analyzer_decoding<F>(
+    demo_path: &PathBuf,
+    sounds: analysis::Sounds,
+    progress_cb: F,
+) -> Result<(FileInfo, Analysis), String>
+where
+    F: FnMut(usize, usize),
+{
     let mut file = fs::OpenOptions::new()
         .read(true)
         .open(demo_path)
@@ -139,7 +153,7 @@ where
     file.read_to_end(&mut bytes)
         .map_err(|e| format!("Could not read {}: {}", demo_path.display(), e))?;
 
-    let analysis = Analysis::try_from_bytes_with_progress(bytes.as_slice(), progress_cb)?;
+    let analysis = Analysis::try_from_bytes_decoding(bytes.as_slice(), sounds, progress_cb)?;
     let file_info = FileInfo::of(demo_path)?;
 
     Ok((file_info, analysis))
@@ -171,11 +185,26 @@ pub fn run_analyzer_cached<F>(
 where
     F: FnMut(usize, usize),
 {
+    run_analyzer_cached_decoding(demo_path, analysis::Sounds::Decode, progress_cb)
+}
+
+/// `run_analyzer_cached`, decoding the demo's sounds or not on a miss. The
+/// capture-queue scan skips them (#37); the entry it saves is the one the
+/// Demo Analyzer would have made, since no analyzer reads a sound.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_analyzer_cached_decoding<F>(
+    demo_path: &PathBuf,
+    sounds: analysis::Sounds,
+    progress_cb: F,
+) -> Result<(FileInfo, Analysis, bool), String>
+where
+    F: FnMut(usize, usize),
+{
     let root = analyzer_cache_root();
     if let Some((file_info, analysis)) = analysis::cache::load(&root, demo_path) {
         return Ok((file_info, analysis, true));
     }
-    let (file_info, analysis) = run_analyzer_with_progress(demo_path, progress_cb)?;
+    let (file_info, analysis) = run_analyzer_decoding(demo_path, sounds, progress_cb)?;
     store_in_analyzer_cache(&root, demo_path, &file_info, &analysis);
     Ok((file_info, analysis, false))
 }

@@ -24,7 +24,11 @@
 //! ```
 #![allow(mismatched_lifetime_syntaxes)]
 
-use nom::{Parser, combinator::all_consuming, multi::many0};
+use nom::{
+    Parser,
+    combinator::all_consuming,
+    multi::{fold_many0, many0},
+};
 use std::{ffi::OsStr, path::Path};
 use types::{AuxRefCell, ByteVec, DeltaDecoderTable, Demo, NetMessage};
 
@@ -58,6 +62,18 @@ pub extern crate bitvec;
 pub fn parse_netmsg(i: &[u8], aux: AuxRefCell) -> Result<Vec<NetMessage>> {
     let parser = move |i| NetMessage::parse(i, aux.clone());
     all_consuming(many0(parser)).parse(i)
+}
+
+/// [`parse_netmsg`] leaving out every `svc_sound`
+/// ([`types::MessageDataParseMode::ParseWithoutSounds`]). Fails where it
+/// fails: the sounds are still read through, just not kept.
+pub fn parse_netmsg_without_sounds(i: &[u8], aux: AuxRefCell) -> Result<Vec<NetMessage>> {
+    let parser = move |i| NetMessage::parse_unless_sound(i, aux.clone());
+    let keep = |mut kept: Vec<NetMessage>, message: Option<NetMessage>| {
+        kept.extend(message);
+        kept
+    };
+    all_consuming(fold_many0(parser, Vec::new, keep)).parse(i)
 }
 
 /// Should be used for replacing `data.msg` of each frame.
@@ -104,8 +120,19 @@ pub fn open_demo_from_bytes_tolerant_with_progress(
     demo_bytes: &[u8],
     progress: &mut dyn FnMut(usize, usize),
 ) -> eyre::Result<(Demo, Option<demo_parser::ParseDamage>)> {
+    open_demo_from_bytes_tolerant_in_mode(demo_bytes, types::MessageDataParseMode::Parse, progress)
+}
+
+/// [`open_demo_from_bytes_tolerant_with_progress`] decoding the network
+/// messages as `mode` says (e.g.
+/// [`types::MessageDataParseMode::ParseWithoutSounds`]).
+pub fn open_demo_from_bytes_tolerant_in_mode(
+    demo_bytes: &[u8],
+    mode: types::MessageDataParseMode,
+    progress: &mut dyn FnMut(usize, usize),
+) -> eyre::Result<(Demo, Option<demo_parser::ParseDamage>)> {
     progress::with_progress(progress, || {
-        Demo::parse_from_bytes_tolerant(demo_bytes, types::MessageDataParseMode::Parse)
+        Demo::parse_from_bytes_tolerant(demo_bytes, mode)
     })
 }
 
@@ -285,6 +312,64 @@ mod test {
             None,
             "re-encoding the parsed demo changed its bytes"
         );
+    }
+
+    /// `debug` with every `addr: 0x<hex>` a `BitVec` prints taken out.
+    fn without_addresses(debug: &str) -> String {
+        let mut out = String::with_capacity(debug.len());
+        let mut rest = debug;
+        while let Some(at) = rest.find("addr: 0x") {
+            out.push_str(&rest[..at]);
+            rest =
+                rest[at + "addr: 0x".len()..].trim_start_matches(|c: char| c.is_ascii_hexdigit());
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// `ParseWithoutSounds` on the same recording: every network frame keeps
+    /// exactly the full parse's messages minus its sounds, in order, and the
+    /// demo has sounds to leave out.
+    #[test]
+    fn a_parse_without_sounds_keeps_every_other_message() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let full = Demo::parse_from_bytes(&bytes, types::MessageDataParseMode::Parse).unwrap();
+        let fast = Demo::parse_from_bytes(&bytes, types::MessageDataParseMode::ParseWithoutSounds)
+            .unwrap();
+        let frames = |demo: &Demo| -> Vec<Vec<NetMessage>> {
+            demo.directory
+                .entries
+                .iter()
+                .flat_map(|e| &e.frames)
+                .filter_map(|frame| match &frame.frame_data {
+                    types::FrameData::NetworkMessage(network) => match &network.1.messages {
+                        types::MessageData::Parsed(parsed) => Some(parsed.clone()),
+                        other => panic!("frame {} not parsed: {other:?}", frame.frame),
+                    },
+                    _ => None,
+                })
+                .collect()
+        };
+        let is_sound = |m: &NetMessage| matches!(m, NetMessage::EngineMessage(e) if matches!(**e, types::EngineMessage::SvcSound(_)));
+        let (full, fast) = (frames(&full), frames(&fast));
+        assert_eq!(full.len(), fast.len(), "network frames");
+        let mut sounds = 0;
+        for (k, (full, fast)) in full.into_iter().zip(fast).enumerate() {
+            sounds += full.iter().filter(|m| is_sound(m)).count();
+            assert!(!fast.iter().any(is_sound), "network frame {k} kept a sound");
+            let kept: Vec<NetMessage> = full.into_iter().filter(|m| !is_sound(m)).collect();
+            // The messages have no `PartialEq`; every field is in `Debug`,
+            // beside the address of each bit vector's buffer.
+            assert!(
+                without_addresses(&format!("{kept:?}")) == without_addresses(&format!("{fast:?}")),
+                "network frame {k}'s other messages differ"
+            );
+        }
+        assert!(sounds > 1_000, "{sounds} sounds");
     }
 
     /// Where two files first differ, and how long each is, or `None` when
