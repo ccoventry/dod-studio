@@ -380,7 +380,7 @@ pub fn cfg_report(request: CfgReportRequest) -> CfgReport {
     });
 
     CfgReport {
-        unseen: unseen_settings(&scan, &cfg, &effective_commands),
+        unseen: unseen_settings(&scan, &cfg, &effective_commands, filter),
         conflicts: values.conflicts,
         asymmetric: values.asymmetric,
         custom,
@@ -492,14 +492,17 @@ fn is_decal_flush_noop(cfg: &crate::patch::PatcherConfig) -> bool {
 /// Anything the pipeline reads (`cfg_scan::WATCHED_CVARS`, in that order)
 /// that a config sets and no init command even names — the genuinely silent
 /// case. Naming it at the same value still counts as seeing it, so that is
-/// not reported as unseen.
+/// not reported as unseen. A command the demo filter drops never reaches the
+/// game, so it names nothing.
 fn unseen_settings(
     scan: &crate::patch::cfg_scan::CfgScan,
     cfg: &crate::patch::PatcherConfig,
     effective_commands: &[String],
+    filter: DemoFilter,
 ) -> Vec<CfgWarningRow> {
     let named: std::collections::HashSet<String> = effective_commands
         .iter()
+        .filter(|c| !filter.drops(c))
         .filter_map(|c| c.split_whitespace().next().map(str::to_lowercase))
         .collect();
     // mirv_fov/default_fov are read directly from an executed config
@@ -516,8 +519,14 @@ fn unseen_settings(
     // — see `ring_limit`'s doc comment for why it used to be different):
     // a config's own value is read and used directly, with no pin needed
     // to make it "seen" the way `named` otherwise requires.
-    let capture_fov_stated = crate::patch::capture_fov_from_init(&cfg.init_commands).is_some();
-    let r_decals_stated_in_init = crate::patch::ring_limit_from_init(&cfg.init_commands).is_some();
+    let delivered: Vec<String> = cfg
+        .init_commands
+        .iter()
+        .filter(|c| !filter.drops(c))
+        .cloned()
+        .collect();
+    let capture_fov_stated = crate::patch::capture_fov_from_init(&delivered).is_some();
+    let r_decals_stated_in_init = crate::patch::ring_limit_from_init(&delivered).is_some();
     scan.effective_settings()
         .into_iter()
         .filter(|s| !named.contains(&s.cvar.to_lowercase()))
@@ -1811,6 +1820,33 @@ mod tests {
             .map(|u| (u.cvar.as_str(), u.value.as_str(), u.file.as_str(), u.line))
             .collect();
         assert_eq!(rows, [("r_decals", "0", "movie.cfg", 1)]);
+    }
+
+    #[test]
+    fn an_initial_command_the_demo_filter_drops_names_nothing() {
+        // `kill` anywhere on the line makes the engine drop it, so its
+        // r_decals never lands and the config's value is still unseen.
+        let (_dir, game) = fake_game("unseen_filtered");
+        let init = vec!["r_decals 500 ; kill".to_string()];
+        let patched = report_for(
+            game.clone(),
+            init.clone(),
+            Vec::new(),
+            Some(120),
+            Some(false),
+            Some(false),
+        );
+        assert_eq!(
+            patched
+                .unseen
+                .iter()
+                .map(|u| u.cvar.as_str())
+                .collect::<Vec<_>>(),
+            ["r_decals"]
+        );
+        // With Seek Between Clips on, nothing is filtered and it counts.
+        let hooked = report_for(game, init, Vec::new(), Some(120), Some(false), Some(true));
+        assert!(hooked.unseen.is_empty());
     }
 
     #[test]

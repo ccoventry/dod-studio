@@ -75,10 +75,10 @@ fn remove_junction(junction: &Path) {
     if let Err(e) = std::fs::remove_dir(junction)
         && e.kind() != std::io::ErrorKind::NotFound
     {
-        crate::log_markdown(&format!(
-            "[cleanup] Failed to remove pool junction {}: {}",
+        crate::log_markdown(&crate::messages::cleanup_failed(
+            "remove pool junction",
             junction.display(),
-            e
+            e,
         ));
     }
 }

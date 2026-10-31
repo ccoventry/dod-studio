@@ -356,8 +356,9 @@ after 20 s it plays on anyway; with Studio gone from the events pipe for
 Whenever a clip's recording stops, in this batch or a patched demo's, the
 hook sends one `CLIP_SUMMARY` line on the events pipe (and writes it to its
 own log): the clip's number, its demo time at record start and stop, the
-frames drawn while recording and which of its markers arrived; a clip cut
-short (a skipped demo, `stop`) gets one without its stop. Studio writes
+frames HLAE wrote to its take and which of its markers arrived; a clip cut
+short (a skipped demo, `stop`, Studio gone from a held batch) gets one
+without its stop. Studio writes
 it to the activity log as one line per clip (#1221; `goldsrc-hooks/src/clip_log.rs`).
 `stop` ends the batch; bare says where it is. With
 `ds_capture_stay_behind` on when it starts, the game steps aside behind
@@ -394,7 +395,9 @@ reaches the ones before). Studio scans the demo first when it isn't in the
 Master Demo Queue, and the tab shows what it is doing. The buttons are
 greyed while DoD Studio isn't running or no demo plays. An `ask` typed while
 the demo still loads waits for it to finish loading (three minutes at most),
-then asks; `ask here` keeps the clock it was typed at.
+then asks; `ask here` keeps the clock it was typed at. A wait that gives up
+says so on the tab ("Not sent to DoD Studio: ..."), and one typed while an
+earlier request is still on its way is refused, as a second `ask` is.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
 move the camera off the highlight's player (#826), and the console refuses

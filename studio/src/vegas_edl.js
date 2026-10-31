@@ -19,6 +19,36 @@
 // video event only (it has no sound) at the same time as that clip, so it
 // lies over it instead of after it.
 
+/** The save dialog's default name and filter: `.txt`, because VEGAS Pro's
+ *  File > Import > EDL Text File dialog only lists `*.txt` files. */
+export const EDL_DEFAULT_FILE_NAME = 'dod_highlights.txt';
+export const EDL_SAVE_FILTER = { name: 'VEGAS EDL (*.txt)', extensions: ['txt'] };
+
+/**
+ * Where the save dialog opens: the folder holding the exported clips, with the
+ * default name. The nameplate script looks for the clip list in a clip's own
+ * folder and the one above, so a save there needs no question (#429). When the
+ * clips span folders, the one holding most of them (a tie goes to the earliest
+ * clip's); no clips, or clips without a folder, give the bare name.
+ */
+export function edlDefaultPath(clips) {
+  const counts = new Map();
+  for (const clip of clips || []) {
+    const path = String(clip?.path || '');
+    const cut = Math.max(path.lastIndexOf('\\'),path.lastIndexOf('/'));
+    if (cut <= 0) continue;
+    const folder = path.slice(0, cut);
+    const entry = counts.get(folder) || { n: 0, sep: path[cut] };
+    entry.n += 1;
+    counts.set(folder, entry);
+  }
+  let best = null;
+  for (const [folder, { n, sep }] of counts) {
+    if (!best || n > best.n) best = { folder, n, sep };
+  }
+  return best ? `${best.folder}${best.sep}${EDL_DEFAULT_FILE_NAME}` : EDL_DEFAULT_FILE_NAME;
+}
+
 /** Frames a second the EDL's timecodes count in: how VEGAS reads them. */
 export const EDL_TIMECODE_FPS = 30;
 
@@ -79,10 +109,12 @@ export function edlClips(jobs, finishedStatus = 'Finished', probed = new Map()) 
   finishedJobs(jobs, finishedStatus).forEach((job) => {
     const seconds = lengthFromSettings(job) ?? probed.get(job.output_path);
     if (!(seconds > 0)) { skipped += 1; return; }
+    // take_key: whose highlight it is, for the clip manifest (#429).
     clips.push({
       name: job.name,
       path: job.output_path,
       seconds,
+      take_key: job.take_key || '',
       hud: job.stream === HUD_STREAM,
       takeFolder: job.take_folder || '',
     });
@@ -122,13 +154,13 @@ export function planEdlParts(clips, maxEvents = EDL_MAX_EVENTS) {
   return parts;
 }
 
-/** The files for `count` parts: `path` itself for one, else `name_part1.edl`, `name_part2.edl`... */
+/** The files for `count` parts: `path` itself for one, else `name_part1.txt`, `name_part2.txt`... (the chosen extension is kept) */
 export function partPaths(path, count) {
   if (count <= 1) return [path];
   const dot = path.lastIndexOf('.');
   const hasExt = dot > path.lastIndexOf('\\') && dot > path.lastIndexOf('/');
   const stem = hasExt ? path.slice(0, dot) : path;
-  const ext = hasExt ? path.slice(dot) : '.edl';
+  const ext = hasExt ? path.slice(dot) : '.txt';
   return Array.from({ length: count }, (_, i) => `${stem}_part${i + 1}${ext}`);
 }
 

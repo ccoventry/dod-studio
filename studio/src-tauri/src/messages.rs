@@ -478,17 +478,22 @@ pub const CAPTURE_CANCELLED_WHILE_MAKING_ROOM: &str =
 pub const CAPTURE_CANCELLED_WHILE_TRIMMING: &str =
     "Capture cancelled while making a trimmed copy. Nothing was captured.";
 
-/// The status line while a demo over the engine's entity limit is trimmed.
-pub fn trimming_demo(demo: &str, step: native::patch::entity_trim::Step) -> String {
-    use native::patch::entity_trim::Step;
+/// The status line while Studio learns whether a demo is over the engine's
+/// entity limit, or makes its trimmed copy.
+pub fn trimming_demo(demo: &str, step: native::patch::trimmed_copies::Progress) -> String {
+    use native::patch::trimmed_copies::Progress;
     let percent = |f: f32| (f.clamp(0.0, 1.0) * 100.0).round() as u32;
     match step {
-        Step::Reading(f) => format!(
+        Progress::Counting(f) => format!(
+            "Checking whether {demo} has more entities than the game takes ({}%)",
+            percent(f)
+        ),
+        Progress::Reading(f) => format!(
             "Making a trimmed copy of {demo}: reading it ({}%)",
             percent(f)
         ),
-        Step::Writing => format!("Making a trimmed copy of {demo}: writing it"),
-        Step::Checking(f) => format!(
+        Progress::Writing => format!("Making a trimmed copy of {demo}: writing it"),
+        Progress::Checking(f) => format!(
             "Making a trimmed copy of {demo}: checking it ({}%)",
             percent(f)
         ),

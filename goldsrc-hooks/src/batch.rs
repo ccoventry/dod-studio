@@ -453,6 +453,18 @@ fn skip(guard: &mut Option<Batch>, why: String) {
     go_to(guard, next);
 }
 
+/// Ends a held or waiting batch whose Studio has gone, which echoes no
+/// `BATCH_COMPLETE`: unpauses the demo, sums up a clip still recording
+/// (#1221; with nobody on the pipe the summary lands in the hook's log),
+/// and lets the game quit as after a batch Studio stopped watching.
+fn end_without_studio(guard: &mut Option<Batch>, why: &str) {
+    let _ = crate::demo_seek::set_paused(false);
+    say(why);
+    crate::clip_log::batch_stopped();
+    finish(guard);
+    crate::batch_end::batch_ended();
+}
+
 fn finish(guard: &mut Option<Batch>) {
     let Some(batch) = guard.take() else { return };
     say(&format!(
@@ -645,12 +657,10 @@ pub fn poll() {
                     // rest of the clips can't be recorded: end the batch,
                     // keeping what it recorded, and let the game quit as
                     // after a batch Studio stopped watching.
-                    let _ = crate::demo_seek::set_paused(false);
-                    say(
+                    end_without_studio(
+                        &mut guard,
                         "Studio is gone while a clip waited for OBS to record: ending the batch here; the clips recorded so far are kept",
                     );
-                    finish(&mut guard);
-                    crate::batch_end::batch_ended();
                     return;
                 }
                 RecordingWait::TimedOut => {
@@ -702,12 +712,10 @@ pub fn poll() {
                     // batch here, keeping what it recorded, and let the game
                     // quit as it does after a batch Studio stopped watching.
                     HOLD.store(false, Ordering::Relaxed);
-                    let _ = crate::demo_seek::set_paused(false);
-                    say(
+                    end_without_studio(
+                        &mut guard,
                         "Studio is gone while the batch was held for space: ending it here; the clips recorded so far are kept",
                     );
-                    finish(&mut guard);
-                    crate::batch_end::batch_ended();
                     return;
                 }
                 let beat = if beat.elapsed() >= HELD_BEAT {
