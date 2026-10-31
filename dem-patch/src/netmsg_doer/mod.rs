@@ -91,6 +91,9 @@ mod voice_data;
 mod voice_init;
 mod weapon_anim;
 
+mod tier4;
+pub use tier4::Tier4Flavour;
+
 /// `svc_sound`'s message number.
 const SVC_SOUND: u8 = 6;
 

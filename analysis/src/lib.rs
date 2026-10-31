@@ -184,6 +184,10 @@ fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
 pub enum Sounds {
     Decode,
     Skip,
+    /// R&D (#37): also decode then drop entities and client data.
+    Tier4Decode,
+    /// R&D (#37): also bit-walk entities and client data.
+    Tier4Walk,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -295,6 +299,8 @@ impl Analysis {
         let mode = match sounds {
             Sounds::Decode => MessageDataParseMode::Parse,
             Sounds::Skip => MessageDataParseMode::ParseWithoutSounds,
+            Sounds::Tier4Decode => MessageDataParseMode::ExperimentalTier4Decode,
+            Sounds::Tier4Walk => MessageDataParseMode::ExperimentalTier4Walk,
         };
         // This only catches anything in a build that unwinds -- tests and
         // `cargo run` without `--release`. The release profile sets

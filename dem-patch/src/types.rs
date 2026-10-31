@@ -357,6 +357,10 @@ pub enum MessageDataParseMode {
     /// a demo fails to parse exactly where `Parse` fails. Never write a demo
     /// parsed this way: its sounds are gone.
     ParseWithoutSounds,
+    /// R&D (#37): also decodes then drops entity snapshots and client data.
+    ExperimentalTier4Decode,
+    /// R&D (#37): also bit-walks entity snapshots and client data unbuilt.
+    ExperimentalTier4Walk,
     /// Store raw network message bytes
     Raw,
     /// Does not store any network message bytes

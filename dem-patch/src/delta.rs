@@ -56,6 +56,52 @@ macro_rules! div_or_zero {
     };
 }
 
+/// R&D (#37 Tier 4): walks one delta exactly as [`parse_delta`] reads it,
+/// building nothing.
+pub fn skip_delta(dd: &DeltaDecoder, br: &mut BitReader) {
+    let mask_byte_count = br.read_n_bit(3).to_u8() as usize;
+    let mut mask_bytes = [0u8; 8];
+    for mask_byte in mask_bytes.iter_mut().take(mask_byte_count) {
+        *mask_byte = br.read_n_bit(8).to_u8();
+    }
+    for (i, mask_byte) in mask_bytes.iter().enumerate().take(mask_byte_count) {
+        for j in 0..8 {
+            let index = j + i * 8;
+            if index == dd.len() {
+                return;
+            }
+            if (mask_byte & (1 << j)) != 0 {
+                skip_delta_field(&dd[index], br);
+            }
+        }
+    }
+}
+
+fn skip_delta_field(description: &DeltaDecoderS, br: &mut BitReader) {
+    let lhs = description.flags;
+    let is_signed = flag!(lhs, DeltaType::Signed);
+    let sized = flag!(lhs, DeltaType::Byte)
+        || flag!(lhs, DeltaType::Short)
+        || flag!(lhs, DeltaType::Integer)
+        || flag!(lhs, DeltaType::Float)
+        || flag!(lhs, DeltaType::TimeWindow8)
+        || flag!(lhs, DeltaType::TimeWindowBig);
+    if sized {
+        if is_signed {
+            br.read_1_bit();
+            br.read_n_bit(signed_bits(description));
+        } else {
+            br.read_n_bit(description.bits as usize);
+        }
+    } else if flag!(lhs, DeltaType::Angle) {
+        br.read_n_bit(description.bits as usize);
+    } else if flag!(lhs, DeltaType::String) {
+        br.read_string();
+    } else {
+        br.flag_bad_read();
+    }
+}
+
 fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> DeltaValue {
     let lhs = description.flags;
 

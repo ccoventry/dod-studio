@@ -109,6 +109,8 @@ fn main() {
     let decode_mode = match sounds {
         analysis::Sounds::Decode => MessageDataParseMode::Parse,
         analysis::Sounds::Skip => MessageDataParseMode::ParseWithoutSounds,
+        analysis::Sounds::Tier4Decode => MessageDataParseMode::ExperimentalTier4Decode,
+        analysis::Sounds::Tier4Walk => MessageDataParseMode::ExperimentalTier4Walk,
     };
     if args.is_empty() {
         eprintln!(
@@ -423,6 +425,15 @@ fn tally(demo: &Demo, histogram: &mut HashMap<(String, bool), usize>) {
 
 /// Removes `--without-sounds` from `args`, saying whether it was there.
 fn take_sounds(args: &mut Vec<String>) -> analysis::Sounds {
+    for (flag, mode) in [
+        ("--tier4-decode", analysis::Sounds::Tier4Decode),
+        ("--tier4-walk", analysis::Sounds::Tier4Walk),
+    ] {
+        if let Some(at) = args.iter().position(|a| a == flag) {
+            args.remove(at);
+            return mode;
+        }
+    }
     match args.iter().position(|a| a == "--without-sounds") {
         Some(at) => {
             args.remove(at);

@@ -76,6 +76,21 @@ pub fn parse_netmsg_without_sounds(i: &[u8], aux: AuxRefCell) -> Result<Vec<NetM
     all_consuming(fold_many0(parser, Vec::new, keep)).parse(i)
 }
 
+/// R&D (#37 Tier 4): [`parse_netmsg_without_sounds`] that also leaves out
+/// entity snapshots and client data.
+pub fn parse_netmsg_tier4(
+    i: &[u8],
+    aux: AuxRefCell,
+    flavour: netmsg_doer::Tier4Flavour,
+) -> Result<Vec<NetMessage>> {
+    let parser = move |i| NetMessage::parse_tier4(i, aux.clone(), flavour);
+    let keep = |mut kept: Vec<NetMessage>, message: Option<NetMessage>| {
+        kept.extend(message);
+        kept
+    };
+    all_consuming(fold_many0(parser, Vec::new, keep)).parse(i)
+}
+
 /// Should be used for replacing `data.msg` of each frame.
 pub fn write_netmsg(i: &Vec<NetMessage>, aux: AuxRefCell) -> ByteVec {
     let mut res: ByteVec = vec![];

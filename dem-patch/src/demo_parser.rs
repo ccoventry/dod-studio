@@ -821,6 +821,22 @@ pub fn parse_network_messages(
             let (_, netmessages) = parse_netmsg_without_sounds(netmessage_data_chunk, aux)?;
             MessageData::Parsed(netmessages)
         }
+        MessageDataParseMode::ExperimentalTier4Decode => {
+            let (_, netmessages) = crate::parse_netmsg_tier4(
+                netmessage_data_chunk,
+                aux,
+                crate::netmsg_doer::Tier4Flavour::DecodeAndDrop,
+            )?;
+            MessageData::Parsed(netmessages)
+        }
+        MessageDataParseMode::ExperimentalTier4Walk => {
+            let (_, netmessages) = crate::parse_netmsg_tier4(
+                netmessage_data_chunk,
+                aux,
+                crate::netmsg_doer::Tier4Flavour::BitWalk,
+            )?;
+            MessageData::Parsed(netmessages)
+        }
         MessageDataParseMode::Raw => MessageData::Raw(netmessage_data_chunk.to_vec()),
         MessageDataParseMode::None => MessageData::None,
     };
