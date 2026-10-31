@@ -530,72 +530,14 @@ async fn validate_paths(hlae_path: String, hl_path: String) -> Result<bool, Stri
 async fn check_hlae_ffmpeg(
     hlae_path: String,
     ffmpeg_path: Option<String>,
-) -> Result<serde_json::Value, String> {
-    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        hlae_ffmpeg_report(hlae_path, ffmpeg_path)
+) -> Result<native::shared::hlae_ffmpeg_report::HlaeFfmpegReport, String> {
+    messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        native::shared::hlae_ffmpeg_report::report(
+            std::path::Path::new(&hlae_path),
+            ffmpeg_path.as_deref(),
+        )
     }))
     .await
-}
-
-fn hlae_ffmpeg_report(
-    hlae_path: String,
-    ffmpeg_path: Option<String>,
-) -> Result<serde_json::Value, String> {
-    use native::shared::hlae_ffmpeg as hf;
-
-    let state = hf::detect(std::path::Path::new(&hlae_path));
-
-    // "HLAE is pointed somewhere" and "HLAE is pointed at the same FFmpeg
-    // Render Studio uses" are different questions, and only the second keeps
-    // both halves of the pipeline encoding with the same build — which was the
-    // stated reason for writing an ini instead of copying the binary. Nothing
-    // was checking it stayed true, so changing the app's FFmpeg silently left
-    // HLAE on the old one.
-    let app_ffmpeg = hf::resolve_absolute(ffmpeg_path.as_deref().unwrap_or("ffmpeg"));
-    let agrees_with_app = match (&state, &app_ffmpeg) {
-        (hf::HlaeFfmpeg::Linked { target, .. }, Some(app)) => Some(hf::same_file(target, app)),
-        // A bundled binary is HLAE's own and is meant to differ; with nothing
-        // linked there is nothing to disagree with.
-        _ => None,
-    };
-
-    // "It exists" was the only test the picker applied, and ffplay.exe and
-    // ffprobe.exe sit in the same folder as ffmpeg.exe. Checking here as well as
-    // at link time means the row says so before the button is pressed, instead
-    // of reporting a disagreement between two paths one of which cannot record.
-    //
-    // Chaining this off `app_ffmpeg` was a hole: a path that does not resolve
-    // produces `None`, so the check never ran and a typo'd override said
-    // nothing at all. Failing to resolve is itself the problem worth reporting.
-    let configured = ffmpeg_path.as_deref().unwrap_or("").trim().to_string();
-    // The frontend sends the bare default `ffmpeg` when no override is set, so
-    // that is "no override" too, not a file called ffmpeg that went missing.
-    let no_override = configured.is_empty() || configured.eq_ignore_ascii_case("ffmpeg");
-    let app_ffmpeg_problem = match &app_ffmpeg {
-        Some(p) => hf::verify_is_ffmpeg(p).err(),
-        None if no_override => {
-            Some("no ffmpeg.exe was found on PATH, and no override is set".to_string())
-        }
-        None => Some(format!("there is no file at \"{}\"", configured)),
-    };
-
-    // Whether the HLAE Executable above is a working HLAE install, answered by
-    // the file the pipeline actually consumes rather than by what the exe calls
-    // itself: `build_hlae_process` passes this DLL as `-hookDllPath`, so its
-    // absence means a capture cannot work whatever the exe is named. Advisory —
-    // reported, never enforced.
-    let missing_hook_dll = hf::missing_hook_dll(std::path::Path::new(&hlae_path))
-        .map(|p| p.to_string_lossy().into_owned());
-
-    Ok(serde_json::json!({
-        "state": state,
-        "usable": state.is_usable(),
-        "can_link": state.can_link(),
-        "app_ffmpeg": app_ffmpeg.map(|p| p.to_string_lossy().into_owned()),
-        "agrees_with_app": agrees_with_app,
-        "app_ffmpeg_problem": app_ffmpeg_problem,
-        "missing_hook_dll": missing_hook_dll,
-    }))
 }
 
 /// Whether each configured executable path actually points at a file.
