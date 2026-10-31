@@ -784,7 +784,7 @@ export const STRINGS = {
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
-    exportEdlDone: (count, skipped) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlDone: (count, skipped, files = 1) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${files > 1 ? ` in ${files} files, as one EDL holds at most 999 events` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',

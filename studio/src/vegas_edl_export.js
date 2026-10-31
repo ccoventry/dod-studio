@@ -3,12 +3,12 @@
 // renders as an EDL (`vegas_edl.js`) that VEGAS Pro imports.
 
 import { save } from '@tauri-apps/plugin-dialog';
-import { combinePlan, writeTextFile } from './ipc_bridge.js';
+import { combinePlan, writeTextFile, logFrontendEvent } from './ipc_bridge.js';
 import { whileDialogOpens } from './dialog_wait.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { JOB_STATUS } from './render_jobs.js';
-import { edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
+import { edlClips, pathsToProbe, partPaths, planEdlParts, vegasEdl } from './vegas_edl.js';
 
 /**
  * The length of each file in `paths` as FFmpeg reads it (the Combine Clips
@@ -63,8 +63,13 @@ async function exportEdl(jobs, ffmpegPath) {
   });
   if (!path) return;
   try {
-    await writeTextFile(path, vegasEdl(clips));
-    showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped), 'success');
+    const parts = planEdlParts(clips);
+    const paths = partPaths(path, parts.length);
+    for (let i = 0; i < parts.length; i += 1) {
+      await writeTextFile(paths[i], vegasEdl(parts[i]));
+    }
+    logFrontendEvent(`Exported VEGAS EDL: ${clips.length} clips in ${parts.length} file(s), ${skipped} left out`);
+    showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, parts.length), 'success');
   } catch (err) {
     showToast(STRINGS.RENDER.exportEdlFailed(err), 'error');
   }
