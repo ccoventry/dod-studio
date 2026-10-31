@@ -7,16 +7,20 @@ describe('splitProgressView', () => {
       .toEqual({ pct: 20, text: 'Reading the demo… 20%' });
   });
 
-  it('names the map and which of the maps while writing and checking', () => {
-    expect(splitProgressView({ fraction: 0.4, stage: 'writing', map: 'dod_anzio', part: 1, parts: 2 }).text)
-      .toBe('Writing dod_anzio (1 of 2)… 40%');
-    expect(splitProgressView({ fraction: 0.655, stage: 'checking', map: 'dod_anzio', part: 1, parts: 2 }).text)
-      .toBe('Checking dod_anzio (1 of 2)… 66%');
+  it('counts the maps done when several are written side by side', () => {
+    expect(splitProgressView({ fraction: 0.4, stage: 'writing', map: 'dod_anzio', part: 1, parts: 2, done: 0 }).text)
+      .toBe('Writing and checking 2 maps: 0 done… 40%');
+    expect(splitProgressView({ fraction: 0.655, stage: 'finished', map: 'dod_anzio', part: 1, parts: 2, done: 1 }).text)
+      .toBe('Writing and checking 2 maps: 1 done… 66%');
   });
 
-  it('leaves out "1 of 1" for a single map', () => {
+  it('names a single map while writing and checking it', () => {
     expect(splitProgressView({ fraction: 0.5, stage: 'writing', map: 'dod_lennon2', part: 1, parts: 1 }).text)
       .toBe('Writing dod_lennon2… 50%');
+    expect(splitProgressView({ fraction: 0.4, stage: 'waiting', map: 'dod_lennon2', part: 1, parts: 1 }).text)
+      .toBe('Writing dod_lennon2… 40%');
+    expect(splitProgressView({ fraction: 0.8, stage: 'checking', map: 'dod_lennon2', part: 1, parts: 1 }).text)
+      .toBe('Checking dod_lennon2… 80%');
   });
 
   it('starts at 0% reading when there is nothing yet, and stays within 0-100', () => {

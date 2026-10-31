@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use native::demo_maps_scan::{DemoMaps, find_multi_map_demos};
 use native::demo_split::{
-    Keep, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_cancellable,
+    Keep, MapFailure, MapSegment, SplitProgress, Written, quick_demo_segments, split_file_report,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -22,10 +22,12 @@ pub struct DemoSplitManager {
     pub splits: std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
 
-/// What Split Checked Maps wrote, and whether Cancel stopped it first.
+/// What Split Checked Maps wrote, the maps that failed (the others still
+/// run, #876), and whether Cancel stopped it first.
 #[derive(serde::Serialize)]
 pub struct SplitOutcome {
     pub written: Vec<Written>,
+    pub failed: Vec<MapFailure>,
     pub cancelled: bool,
 }
 
@@ -110,8 +112,13 @@ pub async fn split_demo_maps(
     let key = path.clone();
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let stop = || cancel.load(Ordering::Relaxed);
-        split_events_cancellable(&app_handle, &path, Keep::These(&keep), &map_dirs, &stop)
-            .map(|(written, cancelled)| SplitOutcome { written, cancelled })
+        split_with_events(&app_handle, &path, Keep::These(&keep), &map_dirs, &stop).map(|r| {
+            SplitOutcome {
+                written: r.written,
+                failed: r.failed,
+                cancelled: r.cancelled,
+            }
+        })
     }))
     .await;
     state
@@ -150,7 +157,15 @@ pub async fn split_demo_auto(
 ) -> Result<Vec<Written>, String> {
     let map_dirs = game_map_dirs(&settings);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        split_with_events(&app_handle, &path, Keep::AtLeast(min_seconds), &map_dirs)
+        split_with_events(
+            &app_handle,
+            &path,
+            Keep::AtLeast(min_seconds),
+            &map_dirs,
+            &|| false,
+        )
+        .and_then(|r| r.into_written())
+        .map(|(written, _)| written)
     }))
     .await
 }
@@ -175,42 +190,30 @@ fn game_map_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Runs a split, emitting `split_progress` (the demo's path plus
-/// [`SplitProgress`]) at most every [`PROGRESS_EVERY_MS`], and always at a new
-/// stage or map, so a stage change is never dropped.
+/// Runs a split that `cancel` can stop, emitting `split_progress` (the
+/// demo's path plus [`SplitProgress`]) at most every [`PROGRESS_EVERY_MS`],
+/// and always when a map moves to a new stage, so a map's Finished or Failed
+/// is never dropped while others are checked beside it (#876).
 fn split_with_events(
     app_handle: &AppHandle,
     path: &str,
     keep: Keep,
     map_dirs: &[PathBuf],
-) -> Result<Vec<Written>, String> {
-    split_events_cancellable(app_handle, path, keep, map_dirs, &|| false).map(|(w, _)| w)
-}
-
-/// [`split_with_events`] that `cancel` can stop.
-fn split_events_cancellable(
-    app_handle: &AppHandle,
-    path: &str,
-    keep: Keep,
-    map_dirs: &[PathBuf],
-    cancel: &dyn Fn() -> bool,
-) -> Result<(Vec<Written>, bool), String> {
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<native::demo_split::SplitReport, String> {
     let started = std::time::Instant::now();
     let last = AtomicU32::new(0);
-    let mut last_step = (String::new(), 0usize);
-    split_file_cancellable(
+    let mut stages = StageChanges::default();
+    split_file_report(
         Path::new(path),
         keep,
         map_dirs,
         &mut |p: SplitProgress| {
             let now = started.elapsed().as_millis() as u32;
-            let step = (p.stage.to_string(), p.part);
-            if step == last_step
-                && now.saturating_sub(last.load(Ordering::Relaxed)) < PROGRESS_EVERY_MS
-            {
+            let changed = stages.changed(p.part, p.stage);
+            if !changed && now.saturating_sub(last.load(Ordering::Relaxed)) < PROGRESS_EVERY_MS {
                 return;
             }
-            last_step = step;
             last.store(now, Ordering::Relaxed);
             let _ = app_handle.emit(
                 "split_progress",
@@ -219,4 +222,34 @@ fn split_events_cancellable(
         },
         cancel,
     )
+}
+
+/// The stage each map (by its `part`; 0 is the read) was last sent at.
+#[derive(Default)]
+struct StageChanges(std::collections::HashMap<usize, &'static str>);
+
+impl StageChanges {
+    /// Whether map `part` is at a stage it wasn't last sent at; notes it.
+    fn changed(&mut self, part: usize, stage: &'static str) -> bool {
+        self.0.insert(part, stage) != Some(stage)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_maps_stage_change_is_sent_even_between_others() {
+        let mut s = StageChanges::default();
+        assert!(s.changed(0, "reading"));
+        assert!(!s.changed(0, "reading"));
+        assert!(s.changed(1, "checking"));
+        assert!(s.changed(2, "checking"));
+        // Map 1's check goes on beside map 2's: only the clock lets it through.
+        assert!(!s.changed(1, "checking"));
+        assert!(s.changed(1, "finished"));
+        assert!(!s.changed(2, "checking"));
+        assert!(s.changed(2, "failed"));
+    }
 }

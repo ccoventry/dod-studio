@@ -44,11 +44,14 @@
           { index: 1, map: 'dod_avalanche', map_checksum: 2, start_seconds: 300, end_seconds: 1500, frames: 1 },
           { index: 2, map: 'dod_armory_b6', map_checksum: 3, start_seconds: 1500, end_seconds: 1520, frames: 1 },
         ]),
+      // Released with 'cancelled' (the first map written), 'failed' (the
+      // last map fails), or nothing (every map written).
       split_demo_maps: ({ path, keep }) => (window.__holdSplit ? new Promise((r) => { window.__releaseSplit = r; }) : Promise.resolve()).then((how) => ({
         cancelled: how === 'cancelled',
-        written: (how === 'cancelled' ? keep.slice(0, 1) : keep).map((k) => ({ index: k,
+        written: (how === 'cancelled' ? keep.slice(0, 1) : how === 'failed' ? keep.slice(0, -1) : keep).map((k) => ({ index: k,
           path: path.replace('.dem', `_part${k + 1}.dem`), map: 'm', seconds: 1200, size_bytes: 5e6,
         })),
+        failed: how === 'failed' ? keep.slice(-1).map((k) => ({ index: k, map: 'm', error: `map ${k + 1} (m) read back as 2 map(s)` })) : [],
       })),
       cancel_demo_split: () => null,
     };
