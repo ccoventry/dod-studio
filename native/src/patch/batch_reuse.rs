@@ -18,6 +18,8 @@
 //! - **HLAE is in it** (`AfxHookGoldSrc.dll`, read off the same list): every
 //!   capture mode records through HLAE's `mirv_` commands.
 //! - **Its command pipe answers**, so the batch can be handed over.
+//! - **It asks this Studio**, not another one open beside it, for analyses
+//!   and reviews (#1235): a game another open Studio started stays that one's.
 //!
 //! What a launch guarantees and a reuse doesn't is listed in
 //! `docs/features.md` (3.3); `REUSE_LINES` resets what the batch relies on.
@@ -42,6 +44,9 @@ pub struct ReuseFacts<'a> {
     pub modules: Option<&'a [PathBuf]>,
     /// Its command pipe took an empty message.
     pub pipe_answers: bool,
+    /// It asks this Studio, not another one open beside it, for analyses
+    /// and reviews (`sys::studio_pipe::game_asks_this_studio`, #1235).
+    pub asks_this_studio: bool,
 }
 
 /// The hook DLL's file name, as the game has it loaded.
@@ -100,6 +105,9 @@ pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
     if !facts.pipe_answers {
         return Err("the running game does not take commands from Studio".into());
     }
+    if !facts.asks_this_studio {
+        return Err("the running game was started by another DoD Studio that is still open".into());
+    }
     Ok(pid)
 }
 
@@ -152,6 +160,7 @@ mod tests {
             hook_dll: Some(Path::new(DLL)),
             modules: Some(modules),
             pipe_answers: true,
+            asks_this_studio: true,
         }
     }
 
@@ -209,6 +218,21 @@ mod tests {
                 ..facts(&running, &m)
             })
             .contains("does not take commands")
+        );
+    }
+
+    #[test]
+    fn a_game_another_open_studio_started_is_not_reused() {
+        let running = RunningGameCheck::Match { pid: 42 };
+        let m = modules();
+        let f = ReuseFacts {
+            asks_this_studio: false,
+            ..facts(&running, &m)
+        };
+        assert!(
+            game_to_reuse(&f)
+                .unwrap_err()
+                .contains("another DoD Studio")
         );
     }
 

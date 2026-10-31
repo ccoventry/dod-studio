@@ -59,6 +59,10 @@ pub mod recycle_bin;
 pub mod screen;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod steam;
+/// Which Studio's pipe a game asks, so two Studios don't answer each other's
+/// game (#1235).
+#[cfg(windows)]
+pub mod studio_pipe;
 /// Starts a process through WMI, outside every job of Studio's (#545).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wmi_launch;

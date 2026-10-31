@@ -253,11 +253,22 @@ pub async fn send_preview_to_running_game(
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         // Only a game started with the settings a launch would use now: a
         // preview sent to any other plays at the old resolution or install.
+        // Nor one another open Studio started, whose Highlights tab would ask
+        // that Studio (#1235).
         let pids =
             match native::patch::launch_settings::check_running_game(&launch.launch_settings()) {
                 RunningGameCheck::Match { pid } => vec![pid],
                 RunningGameCheck::None | RunningGameCheck::Mismatch { .. } => return Ok(None),
             };
+        if !pids
+            .iter()
+            .all(|&pid| native::sys::studio_pipe::game_asks_this_studio(pid))
+        {
+            log_markdown(
+                "[preview] the open game was started by another DoD Studio that is still open, so the preview does not go to it (#1235)",
+            );
+            return Ok(None);
+        }
         let (patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
         let first = streaks.first().map(|s| PathBuf::from(&s.source_demo));

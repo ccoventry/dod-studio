@@ -8,8 +8,8 @@
 //!
 //! Both are read every frame from the engine's thread (`commands::poll`) and
 //! from hot hooks, so a read is one atomic pointer load and one float load:
-//! on x86 an `Acquire` load is a plain `mov`, the same instruction the
-//! `Relaxed` loads this replaced compiled to. No lock, no allocation.
+//! on x86 an `Acquire` load is a plain `mov`, the same instruction a
+//! `Relaxed` load compiles to. No lock, no allocation.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 

@@ -383,7 +383,8 @@ form over the demo, as **E** does during a highlight (#1139): a small window of
 its own with the menu closed (`ReviewForm.res`); Tab moves between its boxes,
 Enter saves (a `[dod-studio] REVIEW_EDIT` line: Studio sets the row's kill
 range and note and leaves its mark), Esc cancels, and it closes by itself when
-the review moves on or the menu comes up. Clicking its buttons works on the
+the review moves on, a demo load ends its clip (without saving) or the menu
+comes up. Clicking its buttons works on the
 pre-Anniversary build; the keyboard does everything on both. Bare prints where the review is.
 With no review running, `ask start` and `ask here` (the Review tab's **From
 the start** and **From here**, #1142) ask DoD Studio, over its game pipe, to
@@ -391,7 +392,9 @@ review the demo playing: every highlight, from the first or from the first
 at or after the demo's clock now (`from=` on the queue's header; Back still
 reaches the ones before). Studio scans the demo first when it isn't in the
 Master Demo Queue, and the tab shows what it is doing. The buttons are
-greyed while DoD Studio isn't running or no demo plays.
+greyed while DoD Studio isn't running or no demo plays. An `ask` typed while
+the demo still loads waits for it to finish loading (three minutes at most),
+then asks; `ask here` keeps the clock it was typed at.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
 move the camera off the highlight's player (#826), and the console refuses
