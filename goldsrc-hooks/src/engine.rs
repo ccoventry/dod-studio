@@ -1145,6 +1145,8 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
     // this, so the hooks that map handles to paths go in now, not on the
     // first `ds_map_hide_asset add` (#808).
     crate::hud_sprites::install();
+    // Before the first map loads, whose .bsp copy the client would leak.
+    crate::map_file_leak::install();
 
     if !engfuncs.is_null()
         && let Some(callback) = ON_ENGINE_READY.get()
