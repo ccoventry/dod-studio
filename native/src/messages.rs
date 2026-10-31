@@ -375,6 +375,38 @@ pub fn take_frames_no_frame(at: &str, source: impl Display) -> String {
     format!("FFmpeg made no picture at {at} in {source}")
 }
 
+// ── sys/wmi_late_start.rs (#1243) ─────────────────────────────────────────
+// Activity-log lines.
+
+pub fn late_launcher_watch_started(secs: u64) -> String {
+    format!(
+        "[launch] Watching {secs} s for a launcher the cancelled WMI call may still start, to end it"
+    )
+}
+
+pub fn late_launcher_watch_failed(err: impl Display) -> String {
+    format!(
+        "[launch] Could not watch for a launcher the cancelled WMI call may still start ({err}); \
+         one that starts late keeps running"
+    )
+}
+
+pub fn late_launcher_ended(pid: u32, games: usize, after_secs: f64) -> String {
+    format!(
+        "[launch] The cancelled WMI call started the launcher (PID {pid}) late, {after_secs:.1} s \
+         into the watch; ended it and {games} game(s) it had started"
+    )
+}
+
+pub fn late_launcher_none(secs: u64) -> String {
+    format!("[launch] The cancelled WMI call started no launcher within {secs} s")
+}
+
+pub fn late_launcher_watch_superseded() -> String {
+    "[launch] Stopped watching for the cancelled WMI call's launcher: a new launch began"
+        .to_string()
+}
+
 pub fn take_frames_timed_out(secs: u64) -> String {
     format!("FFmpeg took over {secs} s for one picture and was stopped")
 }
