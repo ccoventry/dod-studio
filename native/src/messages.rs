@@ -107,6 +107,14 @@ pub fn reports_itself_as(path: impl Display, banner: &str) -> String {
     )
 }
 
+// ── shared/hlae_ffmpeg_report.rs ─────────────────────────────────────────
+
+pub const NO_FFMPEG_ON_PATH: &str = "no ffmpeg.exe was found on PATH, and no override is set";
+
+pub fn no_ffmpeg_file_at(configured: impl Display) -> String {
+    format!("there is no file at \"{}\"", configured)
+}
+
 // ── obs/session.rs ───────────────────────────────────────────────────────
 
 /// Independently authored twice (`start_record`/`stop_record`'s
@@ -1123,6 +1131,13 @@ pub fn cli_writing_patched(path: impl Display) -> String {
 pub fn cli_failed_to_write(path: impl Display, err: impl Display) -> String {
     format!("Failed to write {}: {}", path, err)
 }
+
+// ── vegas.rs ─────────────────────────────────────────────────────────────
+
+pub const VEGAS_NO_SCRIPT: &str = "This copy of DoD Studio has no VEGAS script to install (the vegas folder in the DoD Studio repo).";
+
+pub const VEGAS_NO_DOCUMENTS: &str =
+    "Windows did not say where your Documents folder is, so the VEGAS script cannot be placed.";
 
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,

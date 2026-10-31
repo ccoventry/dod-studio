@@ -4,6 +4,7 @@
 // with its filters, sort and keyboard navigation. analyzer_pane.js starts it
 // and opens the demo the user picks; the report itself is drawn there.
 
+import { attachSplitResize } from './split_resize.js';
 import { pickPath } from './pick_path.js';
 import { listen } from '@tauri-apps/api/event';
 import { browseDirectory, readDemoHeads, defaultBrowseDir, countDemoFiles, scanDemoFolders, indexDemoPlayers, lookupDemoPlayers } from './ipc_bridge.js';
@@ -735,46 +736,34 @@ function initAnalyzerBrowser() {
 // Explorer sidebar drag-to-resize — width persists to settings.json via
 // getAnalyzerExplorerWidth/setAnalyzerExplorerWidth (main.js), the same
 // pattern every other layout/preference field in this app uses.
+// 260px matches the sidebar's original static width (pre-resize) — known
+// to render every row cleanly. Anything narrower wraps the Explorer
+// Settings checkbox label onto two lines and truncates folder names to
+// 3-4 characters.
+const EXPLORER_DEFAULT_WIDTH = 260;
+// The cap tracks its actual purpose — never let the Demos/Analyzer main
+// column get squeezed below a usable width — rather than a window-relative
+// percentage, which produced a confusingly different max % depending on
+// whether the window was maximized, restored, or moved to another monitor.
+const MIN_MAIN_COLUMN_WIDTH = 500;
+
 function initExplorerResize() {
   const handle = document.querySelector('#analyzer-explorer-resize-handle');
   const sidebar = document.querySelector('#analyzer-explorer-sidebar');
   if (!handle || !sidebar) return;
 
-  // 260px matches the sidebar's original static width (pre-resize) — known
-  // to render every row cleanly. Anything narrower wraps the Explorer
-  // Settings checkbox label onto two lines and truncates folder names to
-  // 3-4 characters.
-  const MIN_WIDTH = 260;
-  // Cap tracks the cap's actual purpose — never let the Demos/Analyzer main
-  // column get squeezed below a usable width — rather than a window-relative
-  // percentage, which produced a confusingly different max % depending on
-  // whether the window was maximized, restored, or moved to another monitor.
-  const MIN_MAIN_COLUMN_WIDTH = 500;
   sidebar.style.width = `${getAnalyzerExplorerWidth()}px`;
-
-  let startX = 0;
-  let startWidth = 0;
-
-  function onPointerMove(e) {
-    const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - MIN_MAIN_COLUMN_WIDTH);
-    const newWidth = Math.min(maxWidth, Math.max(MIN_WIDTH, startWidth + (e.clientX - startX)));
-    sidebar.style.width = `${newWidth}px`;
-  }
-
-  function onPointerUp() {
-    handle.classList.remove('resizing');
-    document.removeEventListener('mousemove', onPointerMove);
-    document.removeEventListener('mouseup', onPointerUp);
-    setAnalyzerExplorerWidth(sidebar.getBoundingClientRect().width).catch(() => {});
-  }
-
-  handle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    startX = e.clientX;
-    startWidth = sidebar.getBoundingClientRect().width;
-    handle.classList.add('resizing');
-    document.addEventListener('mousemove', onPointerMove);
-    document.addEventListener('mouseup', onPointerUp);
+  attachSplitResize({
+    handle,
+    axis: 'x',
+    measure: () => sidebar.getBoundingClientRect().width,
+    limits: () => ({ min: EXPLORER_DEFAULT_WIDTH, max: window.innerWidth - MIN_MAIN_COLUMN_WIDTH }),
+    apply: (px) => { sidebar.style.width = `${px}px`; },
+    commit: (px) => { setAnalyzerExplorerWidth(px).catch(() => {}); },
+    reset: () => {
+      sidebar.style.width = `${EXPLORER_DEFAULT_WIDTH}px`;
+      setAnalyzerExplorerWidth(EXPLORER_DEFAULT_WIDTH).catch(() => {});
+    },
   });
 }
 

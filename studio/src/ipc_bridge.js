@@ -1573,6 +1573,17 @@ export async function blenderStatus(gamePath) {
     });
 }
 
+/** Copies the bundled VEGAS nameplate script into Documents\Vegas Script Menu
+ *  (#429). Resolves to the installed file's path. */
+export async function vegasInstallScript() {
+  return invoke("vegas_install_script")
+    .catch((err) => {
+      console.error("IPC Execution Error (vegas_install_script):", err);
+      showToast(STRINGS.IPC.vegasScriptFailed(err), 'error');
+      throw err;
+    });
+}
+
 /** Uses `path` (a blender.exe) from now on, or finds one again with null. */
 export async function blenderSetExe(path) {
   return invoke("blender_set_exe", { path })

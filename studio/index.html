@@ -237,6 +237,8 @@
           </div>
         </section>
 
+        <div id="capture-split-handle" class="split-handle" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
+
         <!-- Right / Bottom Split Pane: Detail View & Configuration Panels -->
         <section id="pane-details-config" class="content-pane">
 
@@ -1028,6 +1030,7 @@
               <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
               <button id="export-vegas-edl-btn" data-str="RENDER.EXPORT_EDL_BUTTON" data-str-title="RENDER.EXPORT_EDL_TITLE">Export VEGAS EDL…</button>
+              <button id="vegas-script-install-btn" data-str="RENDER.VEGAS_SCRIPT_BUTTON" data-str-title="RENDER.VEGAS_SCRIPT_TITLE">Add Nameplate Script to VEGAS</button>
             </div>
             <div id="render-job-container"></div>
 
@@ -1791,7 +1794,7 @@
             </details>
           </div>
 
-          <div id="analyzer-explorer-resize-handle" class="analyzer-resize-handle" data-str-title="ANALYZER.RESIZE_HANDLE_TITLE" title="Drag to resize"></div>
+          <div id="analyzer-explorer-resize-handle" class="split-handle" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
 
           <!-- Right: Demos panel (scoped to only the selected folder, non-recursive)
                docked above the report tabs. -->
@@ -1834,6 +1837,8 @@
                 </table>
               </div>
             </div>
+
+            <div id="analyzer-demos-resize-handle" class="split-handle split-handle-row" data-str-title="LAYOUT.SPLIT_HANDLE_TITLE" title="Drag to resize, double-click to reset"></div>
 
             <div class="egui-panel analyzer-report-panel">
               <div class="panel-header flex-between">

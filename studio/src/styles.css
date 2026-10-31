@@ -591,12 +591,20 @@ html.picking-path * {
   gap: 10px;
 }
 
+/* Left pane takes 40% by default (the queue is a short list; the tables on
+   the right are what's read, #47). capture-split-handle resizes it, and the
+   minimums keep both tables usable. */
 #pane-workspace {
-  border-right: 1px solid var(--border-color);
+  flex: 0 0 40%;
+  min-width: 380px;
+  /* A saved split wider than a smaller window allows stops short of the details
+     pane's minimum instead of clipping it (min-width wins when both can't fit). */
+  max-width: calc(100% - 530px);
   background: #161616;
 }
 
 #pane-details-config {
+  min-width: 520px;
   background: #1a1a1a;
 }
 
@@ -936,6 +944,10 @@ button.danger-btn {
    one column left out on purpose — its <td> is left-aligned too. */
 #master-demo-table th.col-center {
   text-align: center;
+  /* The count columns take only what they need, so the Demo File column gets
+     the rest instead of cutting names while space is free (#46). */
+  width: 1%;
+  white-space: nowrap;
 }
 
 #master-demo-table td {
@@ -974,6 +986,8 @@ button.danger-btn {
   font-size: 0.8em;
   white-space: normal;
   word-break: break-word;
+  /* Wide enough that a timeline line isn't broken mid-number beside Notes (#46). */
+  min-width: 7em;
 }
 
 .table-row-selected {
@@ -2201,14 +2215,15 @@ button.danger-btn {
   min-height: 0;
 }
 
-/* Drag handle between the Explorer sidebar and the main column — JS-driven
-   (analyzer_pane.js) rather than native CSS `resize` so width can persist
+/* Drag handle between two panels (Explorer sidebar / main column, Capture
+   Studio's two panes, the Analyzer's Demos / report) — JS-driven
+   (split_resize.js) rather than native CSS `resize` so the size can persist
    to settings.json the same way every other layout preference does. Sized
    to the standard 10px .content-pane gap (see #pane-demo-analyzer above)
    with a thin 1px line centered inside it, rather than an extra bar on top
    of that gap — keeps the resting look identical to every other split in
    the app, only revealing itself as interactive on hover/drag. */
-.analyzer-resize-handle {
+.split-handle {
   width: 10px;
   flex-shrink: 0;
   cursor: col-resize;
@@ -2216,17 +2231,40 @@ button.danger-btn {
   justify-content: center;
 }
 
-.analyzer-resize-handle::before {
+.split-handle::before {
   content: "";
   width: 1px;
   align-self: stretch;
   background: var(--border-color);
 }
 
-.analyzer-resize-handle:hover::before,
-.analyzer-resize-handle.resizing::before {
+.split-handle:hover::before,
+.split-handle.resizing::before {
   width: 2px;
   background: var(--primary-accent);
+}
+
+/* The horizontal variant sits in the column's 10px gaps (-10px margins give
+   back the handle's own height), so the resting look is the usual gap. */
+.split-handle-row {
+  width: auto;
+  height: 10px;
+  margin: -10px 0;
+  cursor: row-resize;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.split-handle-row::before {
+  width: auto;
+  height: 1px;
+  align-self: stretch;
+}
+
+.split-handle-row:hover::before,
+.split-handle-row.resizing::before {
+  width: auto;
+  height: 2px;
 }
 
 .analyzer-main-column {
@@ -3311,7 +3349,7 @@ input[type="checkbox"].hd-box-pattern {
    to make it bigger. A class, not a column position, so a new column doesn't
    move the width onto the wrong one. */
 #detail-streaks-table th.col-notes {
-  width: 45%;
+  width: 35%;
 }
 
 .streak-notes-input {
@@ -4466,3 +4504,22 @@ button.setup-skip:hover:not(:disabled) {
 #obs-test-apply-btn {
   margin-top: 8px;
 }
+
+/* Status chip at the end of a Capture Output row (#25). */
+.output-row-status {
+  flex-shrink: 0;
+  margin-left: 6px;
+  /* One width for every chip, so the buttons before it line up row to row. */
+  width: 9.5em;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.output-row-status[hidden] { display: none; }
+.output-row-status-ok { color: #66bb6a; }
+.output-row-status-note { color: var(--text-muted); }
+.output-row-status-bad { color: #ef5350; }

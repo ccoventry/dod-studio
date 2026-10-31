@@ -13,10 +13,10 @@ use std::collections::BTreeMap;
 /// comparing raw Debug strings flags every frame as "different" even when
 /// every field and value is identical. Canonicalise by sorting keys first.
 fn canon_delta(d: &Delta) -> String {
-    let mut keys: Vec<&String> = d.keys().collect();
+    let mut keys: Vec<&dem::types::FieldName> = d.keys().collect();
     keys.sort();
     keys.iter()
-        .map(|k| format!("{k}={:?}", d[*k]))
+        .map(|k| format!("{k}={:?}", d.get(k).unwrap()))
         .collect::<Vec<_>>()
         .join(",")
 }

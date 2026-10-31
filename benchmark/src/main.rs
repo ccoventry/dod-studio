@@ -15,12 +15,25 @@
 //! dropped). The discarded share is the headroom available to a selective
 //! parse mode.
 //!
+//! Every phase also reports heap blocks allocated and the heap's peak
+//! (`alloc_counter`), and the decoded tree's delta tables are counted
+//! (`tree_census`), so a slow phase can be pinned on a representation (#37).
+//!
+//! `--without-sounds` decodes the way the capture-queue scan does, leaving
+//! the sounds out (`analysis::Sounds::Skip`, #37).
+//!
 //! Usage: cargo run --release -p dod-benchmark -- <demo.dem | directory>...
+
+mod alloc_counter;
+mod tree_census;
 
 use dem::types::{Demo, FrameData, MessageData, MessageDataParseMode, NetMessage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
+
+#[global_allocator]
+static ALLOCATOR: alloc_counter::Counting = alloc_counter::Counting;
 
 /// EngineMessage variants the `analysis` crate matches on.
 /// Keep in sync with `grep -rho 'EngineMessage::[A-Za-z0-9]*' analysis/src/`.
@@ -35,6 +48,14 @@ const CONSUMED_ENGINE: &[&str] = &[
     "SvcSpawnBaseline",
     "SvcPacketEntities",
     "SvcDeltaPacketEntities",
+    // The recorder's own position on a POV demo.
+    "SvcClientData",
+    // Headshots (#1128), objectives and the rest.
+    "SvcEvent",
+    "SvcResourceList",
+    "SvcTempEntity",
+    "SvcPrint",
+    "SvcSpawnStaticSound",
 ];
 
 /// UserMessage names the analyzer accepts.
@@ -73,13 +94,30 @@ struct Row {
     events_ms: f64,
     serial_ms: f64,
     json_mb: f64,
+    decode_allocs: usize,
+    delta_tables: usize,
+    delta_fields: usize,
+    decode_peak_mb: f64,
+    analysis_peak_mb: f64,
+    analysis_allocs: usize,
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let dump_dir = take_dump_dir(&mut args);
+    let sounds = take_sounds(&mut args);
+    let decode_mode = match sounds {
+        analysis::Sounds::Decode => MessageDataParseMode::Parse,
+        analysis::Sounds::Skip => MessageDataParseMode::ParseWithoutSounds,
+    };
     if args.is_empty() {
-        eprintln!("Usage: dod-benchmark <demo.dem | directory>...");
+        eprintln!(
+            "Usage: dod-benchmark [--dump-json <dir>] [--without-sounds] <demo.dem | directory>..."
+        );
         eprintln!("Profiles the Demo Analyzer load path phase by phase.");
+        eprintln!("--dump-json writes each demo's analysis there, keys sorted, so two");
+        eprintln!("builds' outputs can be compared file by file.");
+        eprintln!("--without-sounds decodes as the capture-queue scan does.");
         std::process::exit(1);
     }
 
@@ -110,6 +148,7 @@ fn main() {
         eprintln!("Profiling {}...", name);
 
         // ── read ─────────────────────────────────────────────────────────────
+        alloc_counter::settle();
         let t = Instant::now();
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
@@ -133,8 +172,12 @@ fn main() {
         let structural_ms = ms_since(t);
 
         // ── full decode ──────────────────────────────────────────────────────
+        alloc_counter::settle();
+        alloc_counter::reset_peak();
+        let base_live = alloc_counter::live_bytes();
+        let base_allocs = alloc_counter::allocations();
         let t = Instant::now();
-        let demo = match Demo::parse_from_bytes(&bytes, MessageDataParseMode::Parse) {
+        let demo = match Demo::parse_from_bytes(&bytes, decode_mode) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("  skipped (parse error: {})", e);
@@ -142,32 +185,41 @@ fn main() {
             }
         };
         let decode_ms = ms_since(t);
+        let decode_allocs = alloc_counter::allocations() - base_allocs;
+        let decode_peak_mb = mb(alloc_counter::peak_bytes() - base_live);
+        let census = tree_census::take(&demo);
 
         // Classify the stream while the decoded demo is in hand.
         tally(&demo, &mut histogram);
 
         // ── drop of the decoded tree ─────────────────────────────────────────
-        // Freeing the frame tree is NOT free: a 90 MB demo decodes into ~1 GB
-        // of small allocations (Delta = HashMap<String, Vec<u8>> per entity
-        // update), and releasing them costs real wall-clock time inside
-        // `try_from_bytes`. Timing it separately keeps it from being silently
-        // attributed to the event loop.
+        // Freeing the frame tree is NOT free: a 90 MB demo decodes into
+        // millions of small allocations (the heap table counts them), and
+        // releasing them costs real time. `try_from_bytes` does it on a
+        // thread of its own (#511); this shows what that thread pays.
         let t = Instant::now();
         drop(demo);
         let drop_ms = ms_since(t);
 
         // ── event loop ───────────────────────────────────────────────────────
-        // `try_from_bytes` = decode + event loop + drop of the tree, so back
-        // out the two phases just measured under matching heap conditions.
+        // `try_from_bytes` = decode + event loop; it frees the tree on a thread
+        // of its own (#511), so back out only the decode just measured.
+        alloc_counter::settle();
+        alloc_counter::reset_peak();
+        let base_live = alloc_counter::live_bytes();
+        let base_allocs = alloc_counter::allocations();
         let t = Instant::now();
-        let analysis = match analysis::Analysis::try_from_bytes(&bytes) {
+        let analysis = match analysis::Analysis::try_from_bytes_decoding(&bytes, sounds, |_, _| {})
+        {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("  skipped (analysis error: {})", e);
                 continue;
             }
         };
-        let events_ms = (ms_since(t) - decode_ms - drop_ms).max(0.0);
+        let events_ms = (ms_since(t) - decode_ms).max(0.0);
+        let analysis_allocs = alloc_counter::allocations() - base_allocs;
+        let analysis_peak_mb = mb(alloc_counter::peak_bytes() - base_live);
 
         // ── serialize the IPC payload (mirrors AnalyzerReportPayload) ────────
         let t = Instant::now();
@@ -178,6 +230,9 @@ fn main() {
         .unwrap_or_default();
         let serial_ms = ms_since(t);
         let json_mb = json.len() as f64 / 1_048_576.0;
+        if let Some(dir) = &dump_dir {
+            dump_analysis(dir, &name, &analysis);
+        }
 
         rows.push(Row {
             name,
@@ -189,6 +244,12 @@ fn main() {
             events_ms,
             serial_ms,
             json_mb,
+            decode_allocs,
+            delta_tables: census.delta_tables,
+            delta_fields: census.delta_fields,
+            decode_peak_mb,
+            analysis_peak_mb,
+            analysis_allocs,
         });
     }
 
@@ -222,6 +283,26 @@ fn report(rows: &[Row], histogram: &HashMap<(String, bool), usize>) {
             r.serial_ms,
             r.json_mb,
             total
+        );
+    }
+
+    println!("\n### Heap: blocks allocated and peak\n");
+    println!(
+        "| File | decode blocks | delta tables | delta fields | decode peak (MB) | analysis blocks | analysis peak (MB) |"
+    );
+    println!(
+        "|------|---------------|-----------------------|---------------|------------------|-----------------|--------------------|"
+    );
+    for r in rows {
+        println!(
+            "| {} | {:.2} M | {:.2} M | {:.2} M | {:.0} | {:.2} M | {:.0} |",
+            r.name,
+            r.decode_allocs as f64 / 1e6,
+            r.delta_tables as f64 / 1e6,
+            r.delta_fields as f64 / 1e6,
+            r.decode_peak_mb,
+            r.analysis_allocs as f64 / 1e6,
+            r.analysis_peak_mb
         );
     }
 
@@ -338,6 +419,45 @@ fn tally(demo: &Demo, histogram: &mut HashMap<(String, bool), usize>) {
             }
         }
     }
+}
+
+/// Removes `--without-sounds` from `args`, saying whether it was there.
+fn take_sounds(args: &mut Vec<String>) -> analysis::Sounds {
+    match args.iter().position(|a| a == "--without-sounds") {
+        Some(at) => {
+            args.remove(at);
+            analysis::Sounds::Skip
+        }
+        None => analysis::Sounds::Decode,
+    }
+}
+
+/// Removes `--dump-json <dir>` from `args`, returning the directory.
+fn take_dump_dir(args: &mut Vec<String>) -> Option<PathBuf> {
+    let at = args.iter().position(|a| a == "--dump-json")?;
+    args.remove(at);
+    (at < args.len()).then(|| PathBuf::from(args.remove(at)))
+}
+
+/// Writes the analysis as JSON with every object's keys sorted (through
+/// `serde_json::Value`), so a map's hash order cannot make two identical
+/// analyses differ on disk.
+fn dump_analysis(dir: &std::path::Path, name: &str, analysis: &analysis::Analysis) {
+    let written = std::fs::create_dir_all(dir)
+        .map_err(|e| e.to_string())
+        .and_then(|()| serde_json::to_value(analysis).map_err(|e| e.to_string()))
+        .and_then(|v| serde_json::to_string_pretty(&v).map_err(|e| e.to_string()))
+        .and_then(|json| {
+            let path = dir.join(format!("{name}.json"));
+            std::fs::write(&path, json).map_err(|e| format!("{}: {e}", path.display()))
+        });
+    if let Err(e) = written {
+        eprintln!("  could not dump the analysis of {name}: {e}");
+    }
+}
+
+fn mb(bytes: usize) -> f64 {
+    bytes as f64 / 1_048_576.0
 }
 
 fn ms_since(t: Instant) -> f64 {
