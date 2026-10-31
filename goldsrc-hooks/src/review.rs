@@ -634,32 +634,42 @@ fn demo_now() -> crate::review_ask::DemoNow {
 /// `ask start` / `ask here`: asks DoD Studio to review the demo playing, or
 /// once the demo loading now plays.
 fn ask(what: &str) {
-    use crate::review_ask::AskFrom;
+    use crate::review_ask::Start;
     if lock().is_some() {
         say("a review is running already");
         return;
     }
-    let from = match what {
-        "start" => AskFrom::Start,
-        "here" => AskFrom::Here,
+    // From here is the clock as asked, even while the demo still loads: it
+    // plays meanwhile, so the clock when it is read has moved on.
+    let now = crate::demo_seek::clock()
+        .filter(|c| c.active)
+        .map(|c| c.now);
+    let start = match (what, now) {
+        ("start", _) => Start::First,
+        ("here", Some(now)) => Start::At(now),
+        ("here", None) => Start::First,
         _ => {
             say(&format!("usage: {NAME} ask start | ask here"));
             return;
         }
     };
     if demo_now() == crate::review_ask::DemoNow::Loading {
-        crate::review_ask::wait_for_demo(from);
+        crate::review_ask::wait_for_demo(start);
         say("the demo is still loading: DoD Studio is asked once it plays");
         return;
     }
-    send_ask(from);
+    // An ask still waiting would go out a second time on the next frame.
+    if crate::review_ask::waiting().is_some() {
+        crate::review_ask::stop_waiting(None);
+    }
+    send_ask(start);
 }
 
 /// An ask waiting for its demo to load, every frame: sent once the demo
 /// plays, dropped when a review starts meanwhile or the demo goes.
 fn poll_waiting_ask() {
     use crate::review_ask::WaitStep;
-    let Some((from, waited)) = crate::review_ask::waiting() else {
+    let Some((start, waited)) = crate::review_ask::waiting() else {
         return;
     };
     if lock().is_some() {
@@ -671,7 +681,7 @@ fn poll_waiting_ask() {
         WaitStep::Wait => {}
         WaitStep::Ask => {
             crate::review_ask::stop_waiting(None);
-            send_ask(from);
+            send_ask(start);
         }
         WaitStep::GiveUp(why) => {
             say(&format!("not asking DoD Studio: {why}"));
@@ -681,14 +691,10 @@ fn poll_waiting_ask() {
 }
 
 /// Sends the ask for the demo playing now.
-fn send_ask(from: crate::review_ask::AskFrom) {
-    let Some((name, now)) = loaded_demo() else {
+fn send_ask(start: crate::review_ask::Start) {
+    let Some((name, _)) = loaded_demo() else {
         say("no demo is playing: play one with viewdemo first");
         return;
-    };
-    let start = match from {
-        crate::review_ask::AskFrom::Start => crate::review_ask::Start::First,
-        crate::review_ask::AskFrom::Here => crate::review_ask::Start::At(now),
     };
     let demo = crate::review_ask::demo_path(&crate::texture_hires::game_dir(), &name);
     match crate::review_ask::send(demo.clone(), start) {
