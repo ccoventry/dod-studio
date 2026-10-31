@@ -54,7 +54,6 @@ pub(super) const VARIANT_NAMES: [(&str, Rifle, Head); 4] = [
     ("d_k43butt_us", Rifle::K43, Head::Us),
 ];
 
-
 /// The index into [`VARIANT_NAMES`] of a rifle and head.
 pub(super) fn variant_index(rifle: Rifle, head: Head) -> usize {
     VARIANT_NAMES

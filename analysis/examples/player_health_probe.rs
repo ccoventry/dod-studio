@@ -110,7 +110,9 @@ fn main() {
         eprintln!("usage: player_health_probe <demo>...");
         std::process::exit(2);
     }
-    println!("demo\tkind\thealth_deltas\talive_values\tplayers\thltv_msgs\thltv_health\thltv_players");
+    println!(
+        "demo\tkind\thealth_deltas\talive_values\tplayers\thltv_msgs\thltv_health\thltv_players"
+    );
     for path in &args {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
         let Some(t) = std::fs::read(path).ok().as_deref().and_then(survey) else {

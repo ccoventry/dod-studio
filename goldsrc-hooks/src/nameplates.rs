@@ -131,7 +131,11 @@ fn health_fraction(health: i32) -> Option<f32> {
 /// Green at full health through yellow to red.
 fn bar_colour(fraction: f32) -> Rgb {
     let f = fraction.clamp(0.0, 1.0);
-    let red = if f > 0.5 { (2.0 - 2.0 * f) * 255.0 } else { 255.0 };
+    let red = if f > 0.5 {
+        (2.0 - 2.0 * f) * 255.0
+    } else {
+        255.0
+    };
     let green = if f < 0.5 { 2.0 * f * 255.0 } else { 255.0 };
     (red as i32, green as i32, 0)
 }
@@ -163,7 +167,12 @@ fn layout(anchor: (i32, i32), name: Option<(i32, i32)>, bar: Option<(i32, i32)>)
         let top = bottom - h;
         (
             (left, top),
-            [left - PADDING, top - PADDING, left + w + PADDING, bottom + PADDING],
+            [
+                left - PADDING,
+                top - PADDING,
+                left + w + PADDING,
+                bottom + PADDING,
+            ],
         )
     });
     Layout {
@@ -182,14 +191,14 @@ pub(crate) unsafe fn draw(intermission: i32) {
     let health = HEALTH_CVAR.on();
     ENABLED.store(names || health, Ordering::Relaxed);
     let added = ADDED.swap(0, Ordering::Relaxed);
-    if !(names || health) || added == 0 || intermission != 0 {
-        return;
-    }
+    let wanted = (names || health) && added != 0 && intermission == 0;
     #[cfg(target_arch = "x86")]
-    // Safety: the caller's.
-    unsafe {
-        live::draw(added, Show { names, health })
-    };
+    if wanted {
+        // Safety: the caller's.
+        unsafe { live::draw(added, Show { names, health }) };
+    }
+    #[cfg(not(target_arch = "x86"))]
+    let _ = wanted;
 }
 
 /// Which parts of the plate are on.
@@ -287,7 +296,11 @@ mod live {
             let Some(anchor) = to_pixels([ndc[0], ndc[1]], screen.width, screen.height) else {
                 continue;
             };
-            let name = if show.names { shown_name(e, index) } else { None };
+            let name = if show.names {
+                shown_name(e, index)
+            } else {
+                None
+            };
             let fraction = if show.health {
                 health_fraction(player_info::health(base, index).unwrap_or(0))
             } else {
@@ -333,11 +346,7 @@ mod live {
             }
             if let (Some(rect), Some(f)) = (at.bar, fraction) {
                 let [x0, y0, x1, y1] = rect;
-                crate::deathmsg::fill_box(
-                    [x0 - 1, y0 - 1, x1 + 1, y1 + 1],
-                    BOX,
-                    BAR_ALPHA,
-                );
+                crate::deathmsg::fill_box([x0 - 1, y0 - 1, x1 + 1, y1 + 1], BOX, BAR_ALPHA);
                 let filled = x0 + ((x1 - x0) as f32 * f).round() as i32;
                 crate::deathmsg::fill_box([x0, y0, filled, y1], bar_colour(f), BAR_ALPHA);
             }
