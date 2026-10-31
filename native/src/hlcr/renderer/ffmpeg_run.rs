@@ -6,9 +6,9 @@
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdout, Command};
+use tokio::process::{Child, ChildStdout, Command};
+use tokio::task::JoinHandle;
 use tokio::time::Interval;
 
 use super::{RenderJob, RenderUpdate, record_output_size, remove_partial_output};
@@ -56,7 +56,7 @@ pub(super) async fn run_ffmpeg(job: &RenderJob, args: Vec<String>, out_file: &Pa
         return;
     };
 
-    let err_log = stderr_text(&stderr_log);
+    let err_log = finished_stderr(stderr_log).await;
 
     match exit_status {
         Ok(status) if status.success() => {
@@ -114,37 +114,61 @@ fn spawn_error_text(e: &std::io::Error) -> String {
     }
 }
 
+/// The most stderr kept for the failure log: FFmpeg prints its reason last,
+/// so a long run keeps the tail, not the banner.
+const STDERR_TAIL_BYTES: usize = 16 * 1024;
+
+/// How long to wait for the stderr task after FFmpeg has exited. The pipe
+/// closes with the process, so this only guards a grandchild holding it open.
+const STDERR_DRAIN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Collects FFmpeg's stderr on a task of its own, so a full pipe can never
-/// deadlock the render; the text is the failure's log.
-fn collect_stderr(mut stderr_handle: ChildStderr) -> Arc<Mutex<String>> {
-    let stderr_log = Arc::new(Mutex::new(String::new()));
-    let stderr_log_clone = Arc::clone(&stderr_log);
+/// deadlock the render. The task returns the last [`STDERR_TAIL_BYTES`] as
+/// raw bytes, decoded once at the end so a character split across two reads
+/// is not lost. Any reader, so the tests can feed it a pipe of their own.
+fn collect_stderr(
+    mut stderr_handle: impl tokio::io::AsyncRead + Unpin + Send + 'static,
+) -> JoinHandle<Vec<u8>> {
     tokio::spawn(async move {
-        let mut buf = vec![0u8; 1024];
+        let mut tail: Vec<u8> = Vec::new();
+        let mut buf = vec![0u8; 4096];
         while let Ok(n) = stderr_handle.read(&mut buf).await {
             if n == 0 {
                 break;
             }
-            if let Ok(s) = std::str::from_utf8(&buf[..n])
-                && let Ok(mut log) = stderr_log_clone.lock()
-            {
-                log.push_str(s);
-            }
+            push_tail(&mut tail, &buf[..n]);
         }
-    });
-    stderr_log
+        tail
+    })
 }
 
-/// What stderr collected so far, `None` when it is blank.
-fn stderr_text(stderr_log: &Mutex<String>) -> Option<String> {
-    if let Ok(log) = stderr_log.lock() {
-        if log.trim().is_empty() {
-            None
-        } else {
-            Some(log.clone())
-        }
-    } else {
+/// Appends `chunk` to `tail`, dropping the oldest bytes past the cap.
+fn push_tail(tail: &mut Vec<u8>, chunk: &[u8]) {
+    tail.extend_from_slice(chunk);
+    if tail.len() > STDERR_TAIL_BYTES {
+        tail.drain(..tail.len() - STDERR_TAIL_BYTES);
+    }
+}
+
+/// Waits for the stderr task to finish reading (FFmpeg has exited, so the
+/// pipe is closed) and returns its log; whatever was read is lost only if
+/// the task is stuck past [`STDERR_DRAIN_WAIT`].
+async fn finished_stderr(task: JoinHandle<Vec<u8>>) -> Option<String> {
+    let bytes = tokio::time::timeout(STDERR_DRAIN_WAIT, task)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    stderr_text(&bytes)
+}
+
+/// The collected stderr as text, `None` when it is blank.
+fn stderr_text(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    if text.trim().is_empty() {
         None
+    } else {
+        Some(text.into_owned())
     }
 }
 
@@ -349,10 +373,49 @@ mod tests {
 
     #[test]
     fn a_blank_stderr_is_no_log() {
-        assert_eq!(stderr_text(&Mutex::new(" \n".to_string())), None);
+        assert_eq!(stderr_text(b" \n"), None);
         assert_eq!(
-            stderr_text(&Mutex::new("Unknown encoder\n".to_string())),
+            stderr_text(b"Unknown encoder\n"),
             Some("Unknown encoder\n".to_string())
+        );
+    }
+
+    #[test]
+    fn a_long_stderr_keeps_its_last_lines() {
+        let mut tail = Vec::new();
+        for i in 0..5000 {
+            push_tail(&mut tail, format!("line {i}\n").as_bytes());
+        }
+        assert_eq!(tail.len(), STDERR_TAIL_BYTES);
+        let text = stderr_text(&tail).unwrap();
+        assert!(text.ends_with("line 4999\n"));
+        assert!(!text.contains("line 0\n"));
+    }
+
+    #[test]
+    fn a_character_split_across_reads_is_kept() {
+        let bytes = "Fehler: \u{fc}bergr\u{f6}\u{df}e".as_bytes();
+        let mut tail = Vec::new();
+        // Split inside the two-byte u-umlaut.
+        push_tail(&mut tail, &bytes[..9]);
+        push_tail(&mut tail, &bytes[9..]);
+        assert_eq!(
+            stderr_text(&tail).unwrap(),
+            "Fehler: \u{fc}bergr\u{f6}\u{df}e"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_log_is_complete_when_the_pipe_closes_after_the_last_write() {
+        let (mut tx, rx) = tokio::io::duplex(64);
+        let task = collect_stderr(rx);
+        tokio::io::AsyncWriteExt::write_all(&mut tx, b"Error: no such filter\n")
+            .await
+            .unwrap();
+        drop(tx);
+        assert_eq!(
+            finished_stderr(task).await.as_deref(),
+            Some("Error: no such filter\n")
         );
     }
 }

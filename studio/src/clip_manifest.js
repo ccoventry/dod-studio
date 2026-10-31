@@ -70,7 +70,8 @@ export function clipManifest(clips, { edlName = '', takeIndex = {}, demos = [], 
     format: MANIFEST_FORMAT,
     version: MANIFEST_VERSION,
     edl: edlName,
-    clips: (clips || []).map((clip) => {
+    // A HUD-only render lies over its clip; the clip carries the nameplate.
+    clips: (clips || []).filter((clip) => !clip.hud).map((clip) => {
       const who = takePlayer(clip.take_key, takeIndex, byUid);
       const player = who ? {
         steam_id: who.steam_id,

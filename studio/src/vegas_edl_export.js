@@ -4,12 +4,12 @@
 // the clip manifest (`clip_manifest.js`, #429) the nameplate script reads.
 
 import { save } from '@tauri-apps/plugin-dialog';
-import { combinePlan, writeTextFile } from './ipc_bridge.js';
+import { combinePlan, writeTextFile, logFrontendEvent } from './ipc_bridge.js';
 import { whileDialogOpens } from './dialog_wait.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { JOB_STATUS } from './render_jobs.js';
-import { edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
+import { edlClips, pathsToProbe, partPaths, planEdlParts, vegasEdl } from './vegas_edl.js';
 import { edlDefaultPath, EDL_SAVE_FILTER } from './vegas_edl.js';
 import { clipManifest, manifestPathFor, nameplateCount } from './clip_manifest.js';
 import { useAsName, nameplatePath } from './player_alias.js';
@@ -71,18 +71,38 @@ async function exportEdl(jobs, ffmpegPath, project) {
   });
   if (!path) return;
   try {
-    await writeTextFile(path, vegasEdl(clips));
+    const parts = planEdlParts(clips);
+    const paths = partPaths(path, parts.length);
+    for (let i = 0; i < parts.length; i += 1) {
+      await writeTextFile(paths[i], vegasEdl(parts[i]));
+    }
+    await finishExport({ parts, paths, clips, skipped, project });
   } catch (err) {
     showToast(STRINGS.RENDER.exportEdlFailed(err), 'error');
-    return;
   }
-  const manifest = clipManifest(clips, {
-    edlName: fileNameOf(path), ...project, useAsName, nameplatePath,
-  });
-  try {
-    await writeTextFile(manifestPathFor(path), `${JSON.stringify(manifest, null, 2)}\n`);
-  } catch (err) {
-    showToast(STRINGS.RENDER.exportManifestFailed(err), 'error');
+}
+
+/**
+ * The clip manifest beside each EDL file (`name_part1.dodstudio.json` for
+ * `name_part1.txt`): the nameplate script reads every `*.dodstudio.json` near
+ * a clip, so several part manifests need no merging. A manifest that can't be
+ * saved doesn't undo the EDL.
+ */
+async function finishExport({ parts, paths, clips, skipped, project }) {
+  let nameplates = 0;
+  let manifestError = null;
+  for (let i = 0; i < parts.length; i += 1) {
+    const manifest = clipManifest(parts[i], {
+      edlName: fileNameOf(paths[i]), ...project, useAsName, nameplatePath,
+    });
+    nameplates += nameplateCount(manifest);
+    try {
+      await writeTextFile(manifestPathFor(paths[i]), `${JSON.stringify(manifest, null, 2)}\n`);
+    } catch (err) {
+      manifestError = err;
+    }
   }
-  showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, nameplateCount(manifest)), 'success');
+  if (manifestError) showToast(STRINGS.RENDER.exportManifestFailed(manifestError), 'error');
+  logFrontendEvent(`Exported VEGAS EDL: ${clips.length} clips in ${parts.length} file(s), ${skipped} left out`);
+  showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, nameplates, parts.length), 'success');
 }

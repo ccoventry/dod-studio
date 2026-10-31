@@ -803,7 +803,7 @@ export const STRINGS = {
     VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
     vegasScriptDone: (path) => `Script copied to ${path}. In VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder, then pick it from Tools > Scripting.`,
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
-    exportEdlDone: (count, skipped, nameplates = 0) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
+    exportEdlDone: (count, skipped, nameplates = 0, files = 1) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${files > 1 ? ` in ${files} files, as one EDL holds at most 999 events` : ''}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
     // #429: the clip manifest beside the EDL, for the nameplate script.
     exportManifestFailed: (err) => `The EDL is saved, but the clip list for the nameplate script isn't: ${err}`,

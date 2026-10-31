@@ -36,6 +36,11 @@ describe('manifestPathFor', () => {
     expect(manifestPathFor('D:\\movie\\cut.EDL')).toBe('D:\\movie\\cut.dodstudio.json');
     expect(manifestPathFor('D:\\movie\\noext')).toBe('D:\\movie\\noext.dodstudio.json');
   });
+
+  it('gives each part file of a split EDL its own manifest', () => {
+    expect(manifestPathFor('D:\\movie\\dod_highlights_part1.txt')).toBe('D:\\movie\\dod_highlights_part1.dodstudio.json');
+    expect(manifestPathFor('D:\\movie\\dod_highlights_part2.txt')).toBe('D:\\movie\\dod_highlights_part2.dodstudio.json');
+  });
 });
 
 describe('takePlayer', () => {
@@ -65,6 +70,12 @@ describe('clipManifest', () => {
     { name: 'clip2', path: 'D:\\r\\clip2.mov', seconds: 3, take_key: 'session_1/chain_02_b0' },
     { name: 'clip3', path: 'D:\\r\\clip3.mov', seconds: 1.5, take_key: '' },
   ];
+
+  it('leaves a HUD-only render out: its clip carries the nameplate', () => {
+    const hud = { name: 'clip1 hud', path: 'D:/r/clip1_hud.mov', seconds: 2, take_key: 'session_1/chain_01_b0', hud: true };
+    const m = clipManifest([clips[0], hud], { ...project(), ...lookups });
+    expect(m.clips.map((c) => c.name)).toEqual(['clip1']);
+  });
 
   it('names each clip\'s player by their Use as name, with their nameplate', () => {
     const m = clipManifest(clips, { edlName: 'dod_highlights.txt', ...project(), ...lookups });
