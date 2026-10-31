@@ -49,8 +49,10 @@ export function createCaptureOutputStatus({ getPaths, diagnose, container, log }
 
   function paintChip(chip, path) {
     const answer = known.get(path);
-    chip.hidden = answer === null;
-    if (answer === null) return;
+    // A blank row is never sent to the check, so it would read "Checking…"
+    // for good; a failed check has nothing to say either.
+    chip.hidden = answer === null || !path?.trim();
+    if (chip.hidden) return;
     const { tone, text, title } = rowStatusFor(answer);
     chip.className = `output-row-status output-row-status-${tone}`;
     chip.textContent = text;
