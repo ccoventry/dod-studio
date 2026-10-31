@@ -712,6 +712,8 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   startVegasEdlExport({
     getJobs: () => jobs,
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+    getTakeIndex: () => (getTakeIndex ? getTakeIndex() : {}),
+    getAllDemos: () => (getAllDemos ? getAllDemos() : []),
   });
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
