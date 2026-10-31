@@ -941,6 +941,10 @@ button.danger-btn {
    one column left out on purpose — its <td> is left-aligned too. */
 #master-demo-table th.col-center {
   text-align: center;
+  /* The count columns take only what they need, so the Demo File column gets
+     the rest instead of cutting names while space is free (#46). */
+  width: 1%;
+  white-space: nowrap;
 }
 
 #master-demo-table td {
@@ -979,6 +983,8 @@ button.danger-btn {
   font-size: 0.8em;
   white-space: normal;
   word-break: break-word;
+  /* Wide enough that a timeline line isn't broken mid-number beside Notes (#46). */
+  min-width: 7em;
 }
 
 .table-row-selected {
@@ -3340,7 +3346,7 @@ input[type="checkbox"].hd-box-pattern {
    to make it bigger. A class, not a column position, so a new column doesn't
    move the width onto the wrong one. */
 #detail-streaks-table th.col-notes {
-  width: 45%;
+  width: 35%;
 }
 
 .streak-notes-input {
