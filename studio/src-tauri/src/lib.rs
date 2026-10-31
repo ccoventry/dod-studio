@@ -7,6 +7,7 @@ mod builtin_profiles;
 mod capture_history_manager;
 mod capture_manager;
 mod capture_room_manager;
+mod catch_up_takes;
 mod combine_manager;
 mod config_checks_cmd;
 mod crash_maps_manager;
@@ -989,6 +990,20 @@ pub fn run() {
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
+            // Hook DLL copies an earlier run left, which nothing else would
+            // remove until the next game launch (#1146).
+            #[cfg(windows)]
+            {
+                let settings = app.state::<SettingsManager>().inner.clone();
+                std::thread::spawn(move || {
+                    let configured = settings
+                        .lock()
+                        .ok()
+                        .and_then(|s| s.goldsrc_hooks_dll_path.clone())
+                        .map(std::path::PathBuf::from);
+                    native::sys::hook_copy::clean_at_start(configured.as_deref());
+                });
+            }
             // ...and its Review tab to review the demo it has loaded (#1142).
             review_manager::serve_game_requests(app.handle().clone());
             // Files a later double-click hands this copy (#528): queued, then

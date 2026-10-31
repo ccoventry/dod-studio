@@ -291,6 +291,42 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     )
 }
 
+// ── sys/hook_copy.rs (#1146) ──────────────────────────────────────────────
+
+/// What the activity log says after removing hook DLL copies no game uses.
+pub fn hook_copies_removed(count: usize, root: impl Display) -> String {
+    let (noun, verb) = if count == 1 {
+        ("copy", "uses")
+    } else {
+        ("copies", "use")
+    };
+    format!("goldsrc-hooks: removed {count} hook DLL {noun} no game {verb} from {root}")
+}
+
+// ── patch/trimmed_copies.rs (#207) ────────────────────────────────────────
+
+/// Why a trimmed copy wasn't saved: its drive is too full. Read after "no
+/// trimmed copy could be made: ".
+pub fn no_room_for_trimmed_copy(folder: &std::path::Path, free: u64, needed: u64) -> String {
+    let gb = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
+    let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
+    format!(
+        "the drive it goes on ({}) has {:.1} GB free, and the copy needs {:.0} MB plus {:.0} GB to spare; free some space there and try again",
+        folder.display(),
+        gb(free),
+        mb(needed),
+        gb(crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES)
+    )
+}
+
+/// The activity log's line when a demo's trimmed copy is made again because
+/// its map's `.bsp` is not the one the copy was made with.
+pub fn trimmed_copy_map_changed(demo: &str) -> String {
+    format!(
+        "✂️ **Trimmed copy** — `{demo}`'s map isn't the one its trimmed copy was made with (the .bsp changed, or was added or removed), so the copy is made again"
+    )
+}
+
 // ── crash_maps.rs (#207) ──────────────────────────────────────────────────
 
 /// What the hook log says about a crash that ended a batch.
@@ -339,6 +375,38 @@ pub fn take_frames_no_frame(at: &str, source: impl Display) -> String {
     format!("FFmpeg made no picture at {at} in {source}")
 }
 
+// ── sys/wmi_late_start.rs (#1243) ─────────────────────────────────────────
+// Activity-log lines.
+
+pub fn late_launcher_watch_started(secs: u64) -> String {
+    format!(
+        "[launch] Watching {secs} s for a launcher the cancelled WMI call may still start, to end it"
+    )
+}
+
+pub fn late_launcher_watch_failed(err: impl Display) -> String {
+    format!(
+        "[launch] Could not watch for a launcher the cancelled WMI call may still start ({err}); \
+         one that starts late keeps running"
+    )
+}
+
+pub fn late_launcher_ended(pid: u32, games: usize, after_secs: f64) -> String {
+    format!(
+        "[launch] The cancelled WMI call started the launcher (PID {pid}) late, {after_secs:.1} s \
+         into the watch; ended it and {games} game(s) it had started"
+    )
+}
+
+pub fn late_launcher_none(secs: u64) -> String {
+    format!("[launch] The cancelled WMI call started no launcher within {secs} s")
+}
+
+pub fn late_launcher_watch_superseded() -> String {
+    "[launch] Stopped watching for the cancelled WMI call's launcher: a new launch began"
+        .to_string()
+}
+
 pub fn take_frames_timed_out(secs: u64) -> String {
     format!("FFmpeg took over {secs} s for one picture and was stopped")
 }
@@ -372,6 +440,393 @@ pub const RENAME_TARGET_EXISTS: &str = "a file with the new name is already ther
 
 pub fn rename_bad_name(name: &str) -> String {
     format!("`{name}` isn't a usable demo name")
+}
+
+// ── capture_engine/watch.rs (#237) ────────────────────────────────────────
+// Activity-log lines and the reasons a batch fails with.
+
+pub fn stall_log_line(stalled_for: impl Display, never_started: bool) -> String {
+    format!(
+        "[HLAE] No console markers for {stalled_for} with hl.exe still running — treating the batch as stalled. {}",
+        if never_started {
+            "Playback never produced a single marker, so the demo most likely failed to load."
+        } else {
+            "`disconnect` typed in the console, a demo that ended early, and a frozen engine all look like this from out here."
+        }
+    )
+}
+
+pub fn stall_reason(never_started: bool) -> &'static str {
+    if never_started {
+        "the demo never started: the game came up, but no demo began playing in it. Check that the \
+         hook DLL is up to date (an older one may not start this batch) and that the demo file is \
+         still where Studio found it"
+    } else {
+        "the batch stopped progressing while hl.exe was still running — no console markers arrived for several minutes"
+    }
+}
+
+pub const BORROWED_GAME_CLOSED_LOG: &str = "[HLAE] Closing the game that was already open \
+    (the batch borrowed it): an error box stops the game until it is answered, and the boxes it \
+    shows (a fatal error, a failed assertion) end it once they are (#1231)";
+
+pub fn error_box_closed_borrowed_game(summary: &str) -> String {
+    format!(
+        "{summary} DoD Studio closed the game you had open: it was stuck on that error box \
+         and couldn't carry on."
+    )
+}
+
+pub const COMPLETION_VIA_PIPE: &str = "BATCH_COMPLETE from the game events pipe";
+pub const COMPLETION_VIA_OBS_MARKER: &str = "BATCH_COMPLETE marker";
+
+pub fn completion_via_folders(done_marker: bool, exit_trigger: bool) -> String {
+    format!("done marker: {done_marker}, exit trigger: {exit_trigger}")
+}
+
+pub fn obs_recording_game_waited(waited_ms: u128) -> String {
+    format!("[OBS] Recording; the game waited {waited_ms} ms for it and plays on")
+}
+
+pub fn hold_sent(command: impl Display) -> String {
+    format!("[HLAE] Sent `{command}`")
+}
+
+pub fn hold_send_failed(command: impl Display, outcome: impl std::fmt::Debug) -> String {
+    format!("[HLAE] Could not send `{command}` yet ({outcome:?}); trying again")
+}
+
+pub fn launcher_exited(after: impl Display, status: impl Display) -> String {
+    format!(
+        "[HLAE] Launcher exited after {after} (status: {status}) — expected handoff behaviour, not a crash by itself"
+    )
+}
+
+pub fn launcher_try_wait_failed(err: impl Display) -> String {
+    format!("[HLAE] try_wait() failed: {err}")
+}
+
+pub fn game_up_batch_started(pid: u32, lines: impl Display) -> String {
+    format!("[HLAE] The game is up (PID {pid}); started the batch: `{lines}`")
+}
+
+pub fn handoff_failed(why: impl Display) -> String {
+    format!("[HLAE] {why}")
+}
+
+pub fn error_box_seen(pid: u32, after: impl Display, text: impl Display) -> String {
+    format!("[HLAE] Error box from PID {pid} after {after}: {text}")
+}
+
+pub fn error_box_answered_ignore(text: impl Display) -> String {
+    format!(
+        "[HLAE] The game was already exiting and couldn't be ended; answered its box with Ignore: {text}"
+    )
+}
+
+pub fn cancelled_by_user(after: impl Display) -> String {
+    format!("[HLAE] Cancelled by user after {after}")
+}
+
+pub const LAUNCHER_CLOSED_TOO: &str =
+    "[HLAE] Closed the launcher too: it had not handed off to hl.exe yet";
+
+pub fn obs_refused_abort(why: impl Display) -> String {
+    format!("[HLAE] {why} — aborting rather than finishing the batch with nothing recorded.")
+}
+
+pub const OBS_UNREACHABLE_LOG: &str = "[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.";
+
+pub const OBS_LOST_REASON: &str = "lost contact with OBS mid-batch and could not reconnect";
+
+pub fn batch_complete_log(
+    after: impl Display,
+    via: impl Display,
+    leaving_game_open: bool,
+) -> String {
+    format!(
+        "[HLAE] Batch complete after {after} (via {via}) — {}",
+        if leaving_game_open {
+            "leaving the game open"
+        } else {
+            "taskkilling hl.exe"
+        }
+    )
+}
+
+pub fn game_never_started_log(after: impl Display) -> String {
+    format!(
+        "[HLAE] hl.exe never came up after the launcher exited ({after} elapsed) — treating as failure"
+    )
+}
+
+pub const GAME_NEVER_STARTED_REASON: &str = "hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat";
+
+pub fn game_went_away_log(after: impl Display) -> String {
+    format!(
+        "[HLAE] hl.exe is gone with no exit trigger after {after} — either the game was closed (quit / ALT+F4 / End Process) or it crashed"
+    )
+}
+
+pub fn game_crash_log(crash: impl Display) -> String {
+    format!("[HLAE] {crash}")
+}
+
+pub const GAME_ENDED_EARLY_REASON: &str = "hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)";
+
+/// The loud warning for a console log the engine isn't writing.
+pub fn console_log_not_written(log_path: impl Display, unchanged_for: impl Display) -> String {
+    format!(
+        "⚠️ **The engine is not writing its console log.** `{log_path}` is unchanged \
+         {unchanged_for} after the game started, so dod-studio is getting no console \
+         markers from it.\n\n\
+         Per-demo progress, fast-forward-to-clip notifications, crash \
+         detection and OBS capture all read that log — without it they do \
+         not fail, they simply never fire, and this batch may finish looking \
+         like it worked.\n\n\
+         `-condebug` is passed on every launch and this is the folder the \
+         engine writes to, so the cause is on the writing side: the folder \
+         may not be writable (antivirus and Controlled Folder Access can \
+         block it as well as permissions), something else may be holding \
+         the file open, or HLAE may not be passing the flag through to the \
+         game."
+    )
+}
+
+// ── sys/launcher.rs, sys/wmi_launch.rs (#545, #1243) ──────────────────────
+
+pub const LAUNCH_OUTSIDE_JOB: &str =
+    "[launch] Started outside Studio's job, so the game outlives Studio (#545)";
+
+pub fn launch_through_wmi(pid: u32) -> String {
+    format!("[launch] Started through WMI (PID {pid}), so the game outlives this dev Studio (#545)")
+}
+
+pub fn launch_cancelled_in_wmi(program: impl Display, started: Option<u32>) -> String {
+    format!(
+        "[launch] Cancelled while WMI was starting {program}; {}",
+        match started {
+            Some(pid) => format!("ended the launcher it had started (PID {pid})"),
+            None => "it had started nothing yet".to_string(),
+        }
+    )
+}
+
+pub fn launch_wmi_failed_fell_back(program: impl Display, err: impl Display) -> String {
+    format!(
+        "[launch] Could not start {program} outside Studio's job ({err}); started it as Studio's own, \
+         so closing this dev Studio closes the game too"
+    )
+}
+
+pub fn launcher_still_running(pid: u32, secs: u64) -> String {
+    format!("[launch] The launcher (PID {pid}) was still running {secs} s after it was ended")
+}
+
+pub fn wmi_ended_without_answer(err: impl Display, pid: u32) -> String {
+    format!(
+        "[launch] WMI's call ended without an answer ({err}), but it had started the \
+         launcher (PID {pid}): that one is used, not a second"
+    )
+}
+
+// ── capture_engine/game.rs, launch.rs, markers.rs, obs_capture.rs (#237) ──
+
+pub const GAME_NEVER_SEEN_LOG: &str = "[HLAE] This batch's hl.exe was never seen in the process list, so no game is ended: \
+     any hl.exe open was running before the launch and isn't the batch's (#1212)";
+
+pub const MOUSE_RELEASED_LOG: &str =
+    "[capture] Released the mouse the closed game had confined to its window.";
+
+pub fn game_left_open(pid: u32, lines: impl Display) -> String {
+    format!("[HLAE] Left the game open (PID {pid}): `{lines}`")
+}
+
+pub fn game_unreachable_to_stop(pid: u32, outcome: impl std::fmt::Debug) -> String {
+    format!(
+        "[HLAE] Could not reach the game (PID {pid}) to stop its recording and demo: {outcome:?}"
+    )
+}
+
+pub const FOREGROUND_LOCKED_LOG: &str = "[HLAE] The game can't take the foreground while it starts";
+
+pub fn hlae_spawning(program: impl std::fmt::Debug, args: impl std::fmt::Debug) -> String {
+    format!("[HLAE] Spawning: {program:?} {args:?}")
+}
+
+pub fn hlae_reusing_open_game(pid: u32) -> String {
+    format!(
+        "[HLAE] Running the batch in the game that is already open (PID {pid}), not starting one (#725)"
+    )
+}
+
+pub fn hlae_spawned(pid: u32) -> String {
+    format!("[HLAE] Spawned (PID {pid})")
+}
+
+pub fn failed_to_launch_hlae(program: impl Display, err: impl Display) -> String {
+    format!("Failed to launch HLAE ({program}): {err}")
+}
+
+pub fn events_pipe_connected(pid: u32, hello: impl Display) -> String {
+    format!(
+        "[HLAE] Game events pipe connected (hl.exe PID {pid}, `{hello}`) — markers now come from the game directly, not qconsole.log"
+    )
+}
+
+pub fn events_reader_failed(err: impl Display) -> String {
+    format!("[HLAE] Could not start the game events reader ({err}); using qconsole.log only")
+}
+
+pub fn obs_connected(
+    obs_version: impl Display,
+    websocket_version: impl Display,
+    address: impl Display,
+    width: impl Display,
+    height: impl Display,
+    fps: f64,
+    scene: impl Display,
+) -> String {
+    format!(
+        "🎥 **OBS capture** — connected to OBS {obs_version} (obs-websocket {websocket_version}) at {address}. \
+         Canvas {width}x{height} @ {fps:.0}fps, scene `{scene}`. HLAE will record nothing; OBS is \
+         driven from the engine's own console markers."
+    )
+}
+
+pub fn obs_blocks_summary(recorded: usize, skipped: usize) -> String {
+    format!("🎥 **OBS capture** — {recorded} block(s) recorded, {skipped} skipped.")
+}
+
+pub fn obs_problem(problem: impl Display) -> String {
+    format!("⚠️ **OBS** — {problem}")
+}
+
+pub fn obs_recorded_block(
+    take_folder: impl Display,
+    duration: impl Display,
+    salvaged: bool,
+    video: impl Display,
+) -> String {
+    format!(
+        "- [obs] {take_folder} ({duration}{}) -> {video}",
+        if salvaged {
+            " of recording, salvaged — the file is shorter"
+        } else {
+            ""
+        }
+    )
+}
+
+pub const OBS_NO_BLOCKS_PLANNED: &str = "OBS capture was requested but no blocks were planned";
+
+pub fn obs_could_not_start(err: impl Display) -> String {
+    format!("OBS capture could not start — {err}")
+}
+
+// ── capture_engine/workspace.rs, leftovers.rs (#237) ──────────────────────
+
+pub fn cleanup_failed(what: &str, path: impl Display, err: impl Display) -> String {
+    format!("[cleanup] Failed to {what} {path}: {err}")
+}
+
+pub fn pool_junction_created(junction: impl Display, target: impl Display) -> String {
+    format!("[pool] Junction created: {junction} -> {target}")
+}
+
+pub fn io_copy_from(os: &str, source: impl Display) -> String {
+    format!("- [IO] Copying ({os}) from {source}")
+}
+
+pub fn io_copy_to(os: &str, dest: impl Display) -> String {
+    format!("- [IO] Copying ({os}) to {dest}")
+}
+
+pub fn io_copy_ok(bytes: u64) -> String {
+    format!("- [IO] Copy SUCCESS! Bytes written: {bytes}")
+}
+
+pub fn io_copy_failed(err: impl Display) -> String {
+    format!("- [IO] Copy FAILED! Error: {err}")
+}
+
+pub fn io_saved_local_copy(demo_filename: impl Display) -> String {
+    format!("- [IO] Saved local copy to demos/{demo_filename}")
+}
+
+pub fn io_local_copy_failed(dest: impl Display, err: impl Display) -> String {
+    format!("- [IO] Failed to save local patched copy to {dest}: {err}")
+}
+
+pub fn failed_to_copy_demo(err: impl Display) -> String {
+    format!("Failed to copy demo to game folder: {err}")
+}
+
+// ── capture_engine/mod.rs, workspace.rs: what a batch aborts with (#237) ──
+
+/// The `Error` text a batch ends with, around what failed.
+pub fn capture_aborted(msg: impl Display) -> String {
+    format!("Capture Engine Aborted — {msg} (see View Logs for details)")
+}
+
+pub fn capture_thread_failed(err: impl Display) -> String {
+    format!("Could not start the capture thread: {err}")
+}
+
+pub const HL_PATH_NO_PARENT: &str = "Invalid hl.exe path: it has no parent folder";
+
+pub const LAUNCHING_EVENT_UNSENT: &str = "Failed to send Launching event (channel disconnected)";
+
+pub fn console_log_reader_failed(err: impl Display) -> String {
+    format!("could not start the console log reader: {err}")
+}
+
+pub fn batch_failed_see_log(reason: impl Display) -> String {
+    format!("{reason} — see [HLAE] lines above in this log for timing.")
+}
+
+pub fn mklink_unusable_path(junction: impl Display, target: impl Display) -> String {
+    format!("Can't link {junction} to {target}: the path has characters mklink can't take")
+}
+
+pub fn mklink_failed(junction: impl Display, target: impl Display, stderr: impl Display) -> String {
+    format!("Could not link {junction} to {target} (mklink): {stderr}")
+}
+
+pub fn mklink_not_run(junction: impl Display, err: impl Display) -> String {
+    format!("Could not run mklink to link {junction}: {err}")
+}
+
+pub fn capture_dir_create_failed(dir: impl Display, err: impl Display) -> String {
+    format!("Failed to create capture directory {dir}: {err}")
+}
+
+pub fn capture_dir_unusable_path(junction: impl Display, dir: impl Display) -> String {
+    format!(
+        "Can't link {junction} to capture directory {dir}: the path has characters mklink can't take"
+    )
+}
+
+pub fn capture_dir_link_failed(
+    junction: impl Display,
+    dir: impl Display,
+    stderr: impl Display,
+) -> String {
+    format!("Could not link {junction} to capture directory {dir} (mklink): {stderr}")
+}
+
+pub fn invalid_demo_path(path: impl Display) -> String {
+    format!("Invalid demo path: {path}")
+}
+
+pub fn source_demo_open_failed(err: impl Display) -> String {
+    format!("Failed to open source demo for copy: {err}")
+}
+
+pub fn demo_copy_target_busy(dest: impl Display, source: impl Display) -> String {
+    format!(
+        "Could not create {dest} after several tries (copying from {source}). Is the file open in another program?"
+    )
 }
 
 // ── bin/check_cfgs.rs (#237) ──────────────────────────────────────────────

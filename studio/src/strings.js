@@ -712,7 +712,7 @@ export const STRINGS = {
     // A take whose video stopped early (#1105) is partial too: not missing either.
     takesFoundMissing: (captured, total, cutShort = 0, stoppedEarly = 0, cutBy = 'cancel', startedLate = 0) => {
       const missing = total - captured - cutShort - stoppedEarly - startedLate;
-      const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped' }[cutBy] || 'by Cancel';
+      const cutWhen = { game_closed: 'when the game closed', stopped: 'when the batch stopped', studio_closed: 'when DoD Studio closed' }[cutBy] || 'by Cancel';
       const parts = [];
       if (missing > 0) parts.push(`${missing} missing`);
       if (cutShort > 0) parts.push(`${cutShort} cut short ${cutWhen} (partial take, not captured)`);
@@ -2425,6 +2425,8 @@ export const STRINGS = {
     cutShortBy: (cutBy) => ({
       game_closed: 'Cut short: the game closed (partial take, not captured)',
       stopped: 'Cut short: the batch stopped (partial take, not captured)',
+      // An OBS recording nobody stopped: Studio closed mid-clip (#20).
+      studio_closed: 'Cut short: DoD Studio closed while OBS recorded it (not captured)',
     })[cutBy] || 'Cut short by Cancel (partial take, not captured)',
     // A take whose video FFmpeg stopped writing mid-clip, against its audio (#1105).
     shortTake: (video, audio) => `Video stops early: ${video.toFixed(1)} s of ${audio.toFixed(1)} s (partial take, not captured)`,
