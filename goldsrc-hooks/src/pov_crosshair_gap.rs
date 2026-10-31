@@ -56,7 +56,19 @@ pub fn poll() {
         forget_velocity();
     }
     match crate::crosshair_gap::set_pov_demo_hook(playing) {
-        Ok(_) => FAILED.store(false, Ordering::Relaxed),
+        Ok(wrote) => {
+            FAILED.store(false, Ordering::Relaxed);
+            if wrote {
+                // Safety: plain file append; once per change, not per frame.
+                unsafe {
+                    crate::debug::report(if playing {
+                        "pov_crosshair_gap: a POV demo is playing: the red crosshair's gap gets its recorded velocity"
+                    } else {
+                        "pov_crosshair_gap: no POV demo: the red crosshair's gap call is the game's again"
+                    })
+                };
+            }
+        }
         Err(why) => {
             if !FAILED.swap(true, Ordering::Relaxed) {
                 // Safety: plain file append.
