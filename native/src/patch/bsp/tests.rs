@@ -538,3 +538,10 @@ fn a_face_that_holds_no_decal_is_never_sampled() {
         );
     }
 }
+
+#[test]
+fn texture_count_beyond_the_lump_does_not_over_allocate() {
+    let mut data = u32::MAX.to_le_bytes().to_vec();
+    data.extend_from_slice(&[0; 8]);
+    assert!(parse_texture_names(&data).unwrap().len() <= 2);
+}
