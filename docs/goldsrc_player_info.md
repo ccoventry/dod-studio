@@ -58,4 +58,6 @@ The rest are outside 1..=100 (not broken down further; a dead player's is 0). HL
 - **Where:** 12 units over `curstate.maxs[2]` (which follows crouch and prone), at `cl_entity_t::origin`, through TriAPI's `WorldToScreen`, the projection the engine just rendered with.
 - **Through walls:** "drawn this frame" means in the recorder's potentially visible set, not in his line of sight. A trace per player would hide the ones behind walls; that is for the user to choose.
 
-<!-- LIVE RESULTS -->
+Seen in the game on both installs (#1130): POV demos `solifotw-bud` (PRE) and `solifotw-pb1` (POST), HLTV demos `monday-wsod25_r07_m1_h1_hltv` (PRE) and `hltv-ktps5-wk5-gold-saints-over-vs-bandits-half1` (POST), in-eye. Names, team tints and bars draw; the watched player in-eye gets none, and the bars alone draw with the names off. One player in one POST POV frame had a name and no bar: his `health` was outside 1..=100 there, likely before the client had heard any value for him.
+
+**Cost.** Six 6-second frame-time samples per install (`ds_debug_record_frame_times`), alternating off and on, `fps_max 1000`. The game held about 239 fps either way, a ceiling both states hit (its cause, with the window parked behind others, not looked into): PRE off 238.7, 153.4, 238.4, on 238.6, 237.9, 228.3; POST off 239.5, 238.0, 152.0, on 238.7, 225.8, 239.3. The dips land on scene changes in both states. No cost shows at that ceiling; what it costs above it was not measured.
