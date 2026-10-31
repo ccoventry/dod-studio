@@ -867,6 +867,17 @@ export async function takeCaptureStates(takeFolders) {
     });
 }
 
+/** The project's rendered videos (#1264): where each of `paths` is now, in
+ *  order, the path itself, the same file name found in a render export
+ *  folder, or null when missing. Resolves to null when the lookup failed. */
+export async function locateRenderedVideos(paths) {
+  return invoke("locate_rendered_videos", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (locate_rendered_videos):", err);
+      return null;
+    });
+}
+
 /** Delete Take (#644): checks each take folder and measures it for the
  *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
  *  with the reason when any take can't be deleted. */

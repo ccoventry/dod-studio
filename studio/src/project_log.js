@@ -31,3 +31,18 @@ export function missingDemosLine(checked, missing, foundElsewhere) {
 export function changedDemosLine(count, willRescan) {
   return `[project] ${count} demo(s) changed since they were scanned${willRescan ? ', rescanning' : ', left as they are'}`;
 }
+
+/** A finished render was added to the project's record of its videos (#1264). */
+export function renderRecordedLine(takeKey, outputPath) {
+  return `[project] recorded a render of ${takeKey}: ${outputPath}`;
+}
+
+/** What opening a project picked up from its take folders' render histories. */
+export function rendersPickedUpLine(takes, added, elapsedMs) {
+  return `[project] read the render history of ${takes} take folder(s): ${added} video(s) new to the project (${elapsedMs} ms)`;
+}
+
+/** The take folders' render histories could not be read. */
+export function rendersPickUpFailedLine(takes) {
+  return `[project] could not read the render history of ${takes} take folder(s)`;
+}

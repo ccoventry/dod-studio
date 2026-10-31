@@ -54,6 +54,20 @@ test.describe('Highlight Details capture history', () => {
     expect(await page.evaluate(() => window.__revealed)).toEqual(['D:/out/live.mov']);
   });
 
+  test("a deleted take still lists the project's videos: a moved one found again, a lost one dimmed (#1264)", async ({ page }) => {
+    await gotoHarness(page);
+    await toggles(page).first().click();
+    const renders = lines(page).nth(1).locator('.capture-history-render');
+    await expect(renders).toHaveCount(2);
+    await expect(renders.nth(0)).toContainText('lost.mov was moved or deleted');
+    await expect(renders.nth(0)).toHaveAttribute('data-video-missing', 'true');
+    await expect(renders.nth(0)).toHaveCSS('opacity', '0.5');
+    await expect(renders.nth(0).getByRole('button')).toHaveCount(0);
+    await expect(renders.nth(1)).toContainText('moved.mov');
+    await renders.nth(1).getByRole('button', { name: 'Show video' }).click();
+    expect(await page.evaluate(() => window.__revealed)).toEqual(['E:/sorted/moved.mov']);
+  });
+
   test('Open Folder shows the take folder, and a second click on the arrow closes the list', async ({ page }) => {
     await gotoHarness(page);
     await toggles(page).first().click();
