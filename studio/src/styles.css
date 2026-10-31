@@ -597,6 +597,9 @@ html.picking-path * {
 #pane-workspace {
   flex: 0 0 40%;
   min-width: 380px;
+  /* A saved split wider than a smaller window allows stops short of the details
+     pane's minimum instead of clipping it (min-width wins when both can't fit). */
+  max-width: calc(100% - 530px);
   background: #161616;
 }
 

@@ -66,6 +66,16 @@ test('a saved Capture Studio split is restored on start', async ({ page }) => {
   expect(Math.abs(left / total - 0.55)).toBeLessThan(0.01);
 });
 
+test('a saved split too wide for a smaller window keeps the details pane at its minimum', async ({ page }) => {
+  await boot(page, { capture_split_left_permille: 800 });
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const total = await width(page, '#main-content-split');
+  const left = await width(page, '#pane-workspace');
+  const right = await page.locator('#pane-details-config').evaluate((el) => el.getBoundingClientRect().right);
+  expect(left).toBeLessThanOrEqual(total - 530 + 1);
+  expect(right).toBeLessThanOrEqual(total + 1);
+});
+
 test('double-clicking the Capture Studio handle goes back to the default split', async ({ page }) => {
   await boot(page, { capture_split_left_permille: 600 });
   await page.locator('#capture-split-handle').dblclick();

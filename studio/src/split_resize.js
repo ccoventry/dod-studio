@@ -33,6 +33,8 @@ export function attachSplitResize({ handle, axis, measure, limits, apply, commit
   let moved = false;
 
   function onMove(e) {
+    // The button came up where no mouseup reached us (window blur, alt-tab).
+    if (e.buttons === 0) { onUp(); return; }
     const { min, max } = limits();
     moved = true;
     lastSize = clampSize(startSize + (e[client] - startPointer), min, max);

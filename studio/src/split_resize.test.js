@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { clampSize, pxToPermille } from './split_resize.js';
+import { describe, it, expect, vi } from 'vitest';
+import { attachSplitResize, clampSize, pxToPermille } from './split_resize.js';
 
 describe('split_resize', () => {
   it('keeps a size inside the limits', () => {
@@ -18,5 +18,32 @@ describe('split_resize', () => {
 
   it('stores nothing sensible for a zero-width container', () => {
     expect(pxToPermille(100, 0)).toBe(0);
+  });
+
+  it('ends the drag when a move arrives with no button held (mouseup lost to a blur)', () => {
+    const docHandlers = {};
+    vi.stubGlobal('document', {
+      addEventListener: (t, f) => { docHandlers[t] = f; },
+      removeEventListener: (t) => { delete docHandlers[t]; },
+    });
+    const handleHandlers = {};
+    const handle = {
+      classList: { add() {}, remove() {} },
+      addEventListener: (t, f) => { handleHandlers[t] = f; },
+    };
+    const apply = vi.fn();
+    const commit = vi.fn();
+    attachSplitResize({
+      handle, axis: 'x', measure: () => 100, limits: () => ({ min: 0, max: 1000 }),
+      apply, commit, reset() {},
+    });
+    handleHandlers.mousedown({ preventDefault() {}, clientX: 0 });
+    docHandlers.mousemove({ clientX: 50, buttons: 1 });
+    expect(commit).not.toHaveBeenCalled();
+    docHandlers.mousemove({ clientX: 80, buttons: 0 });
+    expect(commit).toHaveBeenCalledWith(150);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(docHandlers.mousemove).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 });
