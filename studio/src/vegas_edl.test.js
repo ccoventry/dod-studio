@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
+import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl, EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER, edlDefaultPath } from './vegas_edl.js';
+
+describe('edlDefaultPath', () => {
+  const clip = (path) => ({ path });
+  it('opens in the clips\' folder', () => {
+    expect(edlDefaultPath([clip('D:\\out\\a.mp4'), clip('D:\\out\\b.mp4')])).toBe('D:\\out\\dod_highlights.txt');
+    expect(edlDefaultPath([clip('/home/x/a.mp4')])).toBe('/home/x/dod_highlights.txt');
+  });
+  it('takes the folder holding most clips, a tie going to the first clip', () => {
+    expect(edlDefaultPath([clip('D:\\a\\1.mp4'), clip('D:\\b\\2.mp4'), clip('D:\\b\\3.mp4')])).toBe('D:\\b\\dod_highlights.txt');
+    expect(edlDefaultPath([clip('D:\\a\\1.mp4'), clip('D:\\b\\2.mp4')])).toBe('D:\\a\\dod_highlights.txt');
+  });
+  it('falls back to the bare name', () => {
+    expect(edlDefaultPath([])).toBe(EDL_DEFAULT_FILE_NAME);
+    expect(edlDefaultPath(undefined)).toBe(EDL_DEFAULT_FILE_NAME);
+    expect(edlDefaultPath([clip('a.mp4')])).toBe(EDL_DEFAULT_FILE_NAME);
+  });
+});
 
 describe('timecodes', () => {
   it('counts 30 frames a second, as VEGAS reads them', () => {
@@ -27,8 +44,13 @@ describe('edlClips', () => {
       job(), job({ name: 'b', status: 'Queued' }), job({ name: 'c', output_path: '' }),
       job({ name: 'd', settings_summary: 'Source copy' }),
     ]);
-    expect(clips).toEqual([{ name: 'a', path: 'D:\\r\\a.mov', seconds: 2 }]);
+    expect(clips).toEqual([{ name: 'a', path: 'D:\\r\\a.mov', seconds: 2, take_key: '' }]);
     expect(skipped).toBe(1);
+  });
+
+  it("carries each job's take key, for whose highlight it is (#429)", () => {
+    const { clips } = edlClips([job({ take_key: 'session_1/chain_01_b0' })]);
+    expect(clips[0].take_key).toBe('session_1/chain_01_b0');
   });
 
   it('names only the finished renders with no fps in their settings line to probe', () => {
@@ -47,8 +69,8 @@ describe('edlClips', () => {
     ];
     const { clips, skipped } = edlClips(jobs, 'Finished', new Map([['D:\\r\\d.mp4', 4.25]]));
     expect(clips).toEqual([
-      { name: 'd', path: 'D:\\r\\d.mp4', seconds: 4.25 },
-      { name: 'a', path: 'D:\\r\\a.mov', seconds: 2 },
+      { name: 'd', path: 'D:\\r\\d.mp4', seconds: 4.25, take_key: '' },
+      { name: 'a', path: 'D:\\r\\a.mov', seconds: 2, take_key: '' },
     ]);
     expect(skipped).toBe(1); // e: its file could not be read
   });
@@ -97,5 +119,12 @@ describe('vegasEdl', () => {
 
   it('keeps a label on one line', () => {
     expect(vegasEdl([{ name: 'a\nb', path: 'D:\\x.mov', seconds: 1 }])).toContain('RED     a b');
+  });
+});
+
+describe('save dialog defaults', () => {
+  it('is a .txt, the only type the VEGAS EDL import dialog lists', () => {
+    expect(EDL_DEFAULT_FILE_NAME).toMatch(/\.txt$/);
+    expect(EDL_SAVE_FILTER.extensions).toEqual(['txt']);
   });
 });

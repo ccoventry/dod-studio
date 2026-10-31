@@ -608,14 +608,19 @@ pub enum CutBy {
     /// The batch stopped on an error with the game still up (a stall, OBS
     /// lost, an error box): the engine ended the game.
     Stopped,
+    /// DoD Studio closed while OBS recorded the clip, so nobody stopped the
+    /// recording at the clip's end (#20). Only a catch-up after a restart
+    /// says this.
+    StudioClosed,
 }
 
 impl CutBy {
-    fn log_text(self) -> &'static str {
+    pub(crate) fn log_text(self) -> &'static str {
         match self {
             CutBy::Cancel => "was cut short by Cancel",
             CutBy::GameClosed => "was cut short when the game closed",
             CutBy::Stopped => "was cut short when the batch stopped",
+            CutBy::StudioClosed => "was still recording in OBS when DoD Studio closed",
         }
     }
 }
@@ -663,7 +668,7 @@ fn mark_short_takes(
 
 /// Each manifest block's demo, as the 1-based index `DEMO_START` names: a
 /// demo's blocks are contiguous and demos play in the manifest's order.
-fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
+pub(crate) fn demo_ordinals(blocks: &[native::patch::types::CaptureBlock]) -> Vec<u32> {
     let mut ordinal = 0u32;
     blocks
         .iter()
@@ -691,7 +696,7 @@ fn recording_order(blocks: &[native::patch::types::CaptureBlock]) -> Vec<usize> 
 /// The clip recordings a batch's `START_RECORD` / `STOP_RECORD` markers
 /// reported, for a Cancel (#1081).
 #[derive(Debug, Default, Clone, Copy)]
-struct Records {
+pub(crate) struct Records {
     started: usize,
     stopped: usize,
     /// The demo tick the last `START_RECORD` named: its block's
@@ -707,18 +712,18 @@ impl Records {
     /// `DEMO_START`: a clip the last demo left recording (it ended or stopped
     /// playing mid-clip, and the hook's batch skipped on) is over, so a
     /// Cancel later in the batch can't count it as still recording.
-    fn demo_started(&mut self, job_idx: u32) {
+    pub(crate) fn demo_started(&mut self, job_idx: u32) {
         self.stopped = self.stopped.max(self.started);
         self.demo = Some(job_idx);
     }
 
-    fn clip_started(&mut self, tick: Option<i64>) {
+    pub(crate) fn clip_started(&mut self, tick: Option<i64>) {
         self.started += 1;
         self.last_start_tick = tick;
         self.last_start_demo = self.demo;
     }
 
-    fn clip_stopped(&mut self) {
+    pub(crate) fn clip_stopped(&mut self) {
         self.stopped += 1;
     }
 
@@ -820,7 +825,7 @@ fn mark_started_late(verified: &mut [VerifiedBlock], late_starts: &[native::obs:
 /// clip can sit further on than the count says (#861's `resolve_block` does
 /// the same). With no tick, or none matching, the block at `stopped`.
 /// Without markers both counts are 0 and nothing changes.
-fn mark_cut_short(
+pub(crate) fn mark_cut_short(
     manifest: &CaptureManifest,
     verified: &mut [VerifiedBlock],
     records: Records,
@@ -1503,13 +1508,16 @@ pub async fn start_capture_batch_impl(
         }
 
         // ── A demo over the engine's entity limit plays a trimmed copy (#207) ──
-        let trimmed = match crate::trimmed_demos::for_batch(
+        let crate::trimmed_demos::BatchCopies {
+            copies: trimmed,
+            pins: trim_pins,
+        } = match crate::trimmed_demos::for_batch(
             &app_handle_clone,
             &patch_jobs,
             &patcher_config.game_path,
             &cancel_token_arc,
         ) {
-            Ok(copies) => copies,
+            Ok(batch) => batch,
             Err(status) => {
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
@@ -1851,6 +1859,8 @@ pub async fn start_capture_batch_impl(
         std::thread::spawn(move || {
             // Ends Render While Capturing however the listener ends.
             let _room_guard = RoomGuard(room.clone());
+            // The batch's trimmed copies can't be pruned until it ends (#207).
+            let _trim_pins = trim_pins;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per

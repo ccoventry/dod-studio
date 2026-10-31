@@ -78,17 +78,13 @@ impl Launcher {
             return cmd.spawn().map(Self::child);
         }
         if let Some(child) = spawn_breaking_away(cmd)? {
-            crate::log_markdown(
-                "[launch] Started outside Studio's job, so the game outlives Studio (#545)",
-            );
+            crate::log_markdown(crate::messages::LAUNCH_OUTSIDE_JOB);
             return Ok(Self::child(child));
         }
         let exe_name = crate::sys::wmi_launch::exe_name(cmd);
         match crate::sys::wmi_launch::spawn(cmd, cancel) {
             Ok(pid) => {
-                crate::log_markdown(&format!(
-                    "[launch] Started through WMI (PID {pid}), so the game outlives this dev Studio (#545)"
-                ));
+                crate::log_markdown(&crate::messages::launch_through_wmi(pid));
                 Ok(Self {
                     kind: Kind::Detached { pid, exe_name },
                 })
@@ -97,13 +93,9 @@ impl Launcher {
                 if let Some(pid) = started {
                     kill_detached(pid, &exe_name);
                 }
-                crate::log_markdown(&format!(
-                    "[launch] Cancelled while WMI was starting {}; {}",
+                crate::log_markdown(&crate::messages::launch_cancelled_in_wmi(
                     std::path::Path::new(cmd.get_program()).display(),
-                    match started {
-                        Some(pid) => format!("ended the launcher it had started (PID {pid})"),
-                        None => "it had started nothing".to_string(),
-                    }
+                    started,
                 ));
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Interrupted,
@@ -111,10 +103,9 @@ impl Launcher {
                 ))
             }
             Err(e) => {
-                crate::log_markdown(&format!(
-                    "[launch] Could not start {} outside Studio's job ({e}); started it as Studio's own, \
-                     so closing this dev Studio closes the game too",
-                    std::path::Path::new(cmd.get_program()).display()
+                crate::log_markdown(&crate::messages::launch_wmi_failed_fell_back(
+                    std::path::Path::new(cmd.get_program()).display(),
+                    e,
                 ));
                 cmd.spawn().map(Self::child)
             }
@@ -203,9 +194,9 @@ fn kill_detached(pid: u32, exe_name: &str) {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    crate::log_markdown(&format!(
-        "[launch] The launcher (PID {pid}) was still running {} s after it was ended",
-        KILL_WAIT.as_secs()
+    crate::log_markdown(&crate::messages::launcher_still_running(
+        pid,
+        KILL_WAIT.as_secs(),
     ));
 }
 

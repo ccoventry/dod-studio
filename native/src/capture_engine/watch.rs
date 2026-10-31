@@ -16,6 +16,7 @@ use super::markers::{RecordingGoAhead, console_log_len, marker_event};
 use super::processes::Processes;
 use crate::game_handoff::{BatchStart, GameHandoff, StartState};
 use crate::log_markdown;
+use crate::messages;
 use crate::utils::duration_text::duration_text;
 use std::ops::ControlFlow;
 use std::path::Path;
@@ -233,30 +234,11 @@ fn stalled(
 
 /// The stall's log line and the reason the batch fails with.
 fn stall_texts(stalled_for: Duration, never_started: bool) -> (String, &'static str) {
-    let line = format!(
-        "[HLAE] No console markers for {} with hl.exe still running — treating the batch as stalled. {}",
-        duration_text(stalled_for.as_secs_f64()),
-        if never_started {
-            "Playback never produced a single marker, so the demo most likely failed to load."
-        } else {
-            "`disconnect` typed in the console, a demo that ended early, and a frozen engine all look like this from out here."
-        }
-    );
-    let reason = if never_started {
-        "the demo never started: the game came up, but no demo began playing in it. Check that the \
-         hook DLL is up to date (an older one may not start this batch) and that the demo file is \
-         still where Studio found it"
-    } else {
-        "the batch stopped progressing while hl.exe was still running — no console markers arrived for several minutes"
-    };
-    (line, reason)
+    (
+        messages::stall_log_line(duration_text(stalled_for.as_secs_f64()), never_started),
+        messages::stall_reason(never_started),
+    )
 }
-
-/// Logged when an error box ends a batch in a game the player already had
-/// open (#725): unlike Cancel, a stall or OBS going away, this closes it.
-const BORROWED_GAME_CLOSED_LOG: &str = "[HLAE] Closing the game that was already open \
-    (the batch borrowed it): an error box stops the game until it is answered, and the boxes it \
-    shows (a fatal error, a failed assertion) end it once they are (#1231)";
 
 /// The reason a batch ended by an error box fails with. Every box the game
 /// shows is modal: its frame loop stops until someone answers it, and the
@@ -265,10 +247,7 @@ const BORROWED_GAME_CLOSED_LOG: &str = "[HLAE] Closing the game that was already
 /// Cancel, and the message says so: they didn't close it (#1231).
 fn dialog_failure_reason(summary: &str, borrowed_game: bool) -> String {
     if borrowed_game {
-        format!(
-            "{summary} DoD Studio closed the game you had open: it was stuck on that error box \
-             and couldn't carry on."
-        )
+        messages::error_box_closed_borrowed_game(summary)
     } else {
         summary.to_string()
     }
@@ -290,13 +269,13 @@ fn batch_complete(elapsed: Duration, markers: CompleteMarkers, folders: &impl Do
 /// had already delivered.
 fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool) -> String {
     if pipe_seen {
-        "BATCH_COMPLETE from the game events pipe".to_string()
+        messages::COMPLETION_VIA_PIPE.to_string()
     } else if obs_seen && !trigger {
         // The common OBS-mode case: caught it off the marker, ahead of
         // exit_trigger ever needing to be written.
-        "BATCH_COMPLETE marker".to_string()
+        messages::COMPLETION_VIA_OBS_MARKER.to_string()
     } else {
-        format!("done marker: {dummy}, exit trigger: {trigger}")
+        messages::completion_via_folders(dummy, trigger)
     }
 }
 
@@ -533,10 +512,7 @@ impl<'a> BatchWatch<'a> {
         if let Some(Ok(crate::sys::game_remote::Sent::Delivered)) = sent
             && let Some(waited) = self.go_ahead.sent()
         {
-            log_markdown(&format!(
-                "[OBS] Recording; the game waited {} ms for it and plays on",
-                waited.as_millis()
-            ));
+            log_markdown(&messages::obs_recording_game_waited(waited.as_millis()));
         }
     }
 
@@ -562,13 +538,13 @@ impl<'a> BatchWatch<'a> {
                 }
                 self.hold_sent = want_hold;
                 self.hold_retry_at = None;
-                log_markdown(&format!("[HLAE] Sent `{}`", super::hold_command(want_hold)));
+                log_markdown(&messages::hold_sent(super::hold_command(want_hold)));
             }
             other => {
                 self.hold_retry_at = Some(Instant::now());
-                log_markdown(&format!(
-                    "[HLAE] Could not send `{}` yet ({other:?}); trying again",
-                    super::hold_command(want_hold)
+                log_markdown(&messages::hold_send_failed(
+                    super::hold_command(want_hold),
+                    other,
                 ));
             }
         }
@@ -584,14 +560,13 @@ impl<'a> BatchWatch<'a> {
         match self.procs.launcher_status(child) {
             Ok(Some(status)) => {
                 self.launcher_exit_logged = true;
-                log_markdown(&format!(
-                    "[HLAE] Launcher exited after {} (status: {}) — expected handoff behaviour, not a crash by itself",
+                log_markdown(&messages::launcher_exited(
                     duration_text(self.start_time.elapsed().as_secs_f64()),
-                    status
+                    status,
                 ));
             }
             Ok(None) => {}
-            Err(e) => log_markdown(&format!("[HLAE] try_wait() failed: {}", e)),
+            Err(e) => log_markdown(&messages::launcher_try_wait_failed(e)),
         }
     }
 
@@ -622,14 +597,14 @@ impl<'a> BatchWatch<'a> {
             Handoff::JustSent(pid) => {
                 self.foreground_lock.release();
                 self.io.batch_start.set(StartState::Sent);
-                log_markdown(&format!(
-                    "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
-                    handoff.lines.join("; ")
+                log_markdown(&messages::game_up_batch_started(
+                    pid,
+                    handoff.lines.join("; "),
                 ))
             }
             Handoff::Failed(why) => {
                 self.io.batch_start.set(StartState::Failed);
-                log_markdown(&format!("[HLAE] {why}"));
+                log_markdown(&messages::handoff_failed(&why));
                 self.failure_reason = Some(why);
                 // An open game the batch never reached stays as it was.
                 if self.io.reuse_game.is_none() {
@@ -686,18 +661,17 @@ impl<'a> BatchWatch<'a> {
         else {
             return ControlFlow::Continue(());
         };
-        log_markdown(&format!(
-            "[HLAE] Error box from PID {} after {}: {}",
+        log_markdown(&messages::error_box_seen(
             dialog.pid,
             self.elapsed_text(),
-            dialog.full_text()
+            dialog.full_text(),
         ));
         self.failure_reason = Some(dialog_failure_reason(
             &dialog.summary(),
             self.io.reuse_game.is_some(),
         ));
         if self.io.reuse_game.is_some() {
-            log_markdown(BORROWED_GAME_CLOSED_LOG);
+            log_markdown(messages::BORROWED_GAME_CLOSED_LOG);
         }
         for pid in launcher_pids
             .iter()
@@ -719,10 +693,7 @@ impl<'a> BatchWatch<'a> {
         let left = crate::sys::dialogs::error_dialogs(&game_pids, &[]);
         if !left.is_empty() {
             for dialog in &left {
-                log_markdown(&format!(
-                    "[HLAE] The game was already exiting and couldn't be ended; answered its box with Ignore: {}",
-                    dialog.full_text()
-                ));
+                log_markdown(&messages::error_box_answered_ignore(dialog.full_text()));
                 crate::sys::dialogs::dismiss(dialog);
             }
             wait_for_hl_exe_to_exit(&mut *self.procs, &self.game);
@@ -734,10 +705,7 @@ impl<'a> BatchWatch<'a> {
         if !self.io.cancel_token.load(Ordering::Relaxed) {
             return ControlFlow::Continue(());
         }
-        log_markdown(&format!(
-            "[HLAE] Cancelled by user after {}",
-            self.elapsed_text()
-        ));
+        log_markdown(&messages::cancelled_by_user(self.elapsed_text()));
         // A cancel in the first few seconds catches the launcher
         // still injecting into hl.exe. Killing only hl.exe then
         // leaves HLAE open on "AfxHook error, Code: 1" (seen
@@ -746,7 +714,7 @@ impl<'a> BatchWatch<'a> {
             && let Some(child) = self.child.as_mut()
         {
             child.kill();
-            log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
+            log_markdown(messages::LAUNCHER_CLOSED_TOO);
         }
         end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
@@ -786,16 +754,11 @@ impl<'a> BatchWatch<'a> {
             return ControlFlow::Continue(());
         };
         if let Some(why) = session.refused() {
-            log_markdown(&format!(
-                "[HLAE] {why} — aborting rather than finishing the batch with nothing recorded."
-            ));
+            log_markdown(&messages::obs_refused_abort(why));
             self.failure_reason = Some(why.to_string());
         } else {
-            log_markdown(
-                "[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.",
-            );
-            self.failure_reason =
-                Some("lost contact with OBS mid-batch and could not reconnect".into());
+            log_markdown(messages::OBS_UNREACHABLE_LOG);
+            self.failure_reason = Some(messages::OBS_LOST_REASON.into());
         }
         // The game itself is fine: a borrowed one (#725) is left open at its
         // menu, as on Cancel (#1231).
@@ -814,15 +777,10 @@ impl<'a> BatchWatch<'a> {
             folders.done_marker(),
             folders.exit_trigger(),
         );
-        log_markdown(&format!(
-            "[HLAE] Batch complete after {} (via {}) — {}",
+        log_markdown(&messages::batch_complete_log(
             self.elapsed_text(),
             via,
-            if self.io.reuse_game.is_some() {
-                "leaving the game open"
-            } else {
-                "taskkilling hl.exe"
-            }
+            self.io.reuse_game.is_some(),
         ));
         end_game(self.io.reuse_game, &mut *self.procs, &mut self.game);
         ControlFlow::Break(())
@@ -837,11 +795,8 @@ impl<'a> BatchWatch<'a> {
         ) {
             return ControlFlow::Continue(());
         }
-        log_markdown(&format!(
-            "[HLAE] hl.exe never came up after the launcher exited ({} elapsed) — treating as failure",
-            self.elapsed_text()
-        ));
-        self.failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat".into());
+        log_markdown(&messages::game_never_started_log(self.elapsed_text()));
+        self.failure_reason = Some(messages::GAME_NEVER_STARTED_REASON.into());
         ControlFlow::Break(())
     }
 
@@ -854,10 +809,7 @@ impl<'a> BatchWatch<'a> {
         ) {
             return ControlFlow::Continue(());
         }
-        log_markdown(&format!(
-            "[HLAE] hl.exe is gone with no exit trigger after {} — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
-            self.elapsed_text()
-        ));
+        log_markdown(&messages::game_went_away_log(self.elapsed_text()));
         // The hook DLL's crash recorder says whether it was a
         // crash, where, and on which map; a known one is
         // remembered so later batches on that map are warned
@@ -877,10 +829,10 @@ impl<'a> BatchWatch<'a> {
         );
         self.failure_reason = Some(match explained {
             Some(crash) => {
-                log_markdown(&format!("[HLAE] {crash}"));
+                log_markdown(&messages::game_crash_log(&crash));
                 crash
             }
-            None => "hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)".into(),
+            None => messages::GAME_ENDED_EARLY_REASON.into(),
         });
         self.game_closed = true;
         ControlFlow::Break(())
@@ -889,20 +841,7 @@ impl<'a> BatchWatch<'a> {
 
 /// The loud warning for a console log the engine isn't writing.
 fn console_log_not_written_text(log_path: &Path) -> String {
-    format!(
-        "⚠️ **The engine is not writing its console log.** `{}` is unchanged \
-         {} after the game started, so dod-studio is getting no console \
-         markers from it.\n\n\
-         Per-demo progress, fast-forward-to-clip notifications, crash \
-         detection and OBS capture all read that log — without it they do \
-         not fail, they simply never fire, and this batch may finish looking \
-         like it worked.\n\n\
-         `-condebug` is passed on every launch and this is the folder the \
-         engine writes to, so the cause is on the writing side: the folder \
-         may not be writable (antivirus and Controlled Folder Access can \
-         block it as well as permissions), something else may be holding \
-         the file open, or HLAE may not be passing the flag through to the \
-         game.",
+    messages::console_log_not_written(
         log_path.display(),
         duration_text(CONDEBUG_WRITE_GRACE.as_secs_f64()),
     )

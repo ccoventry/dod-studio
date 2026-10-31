@@ -97,13 +97,10 @@ pub(super) fn kill_hl_exe_and_wait(procs: &mut dyn Processes, game: &mut BatchGa
             wait_for_hl_exe_to_exit(procs, game);
         }
         (None, Some(_)) => {}
-        (None, None) => log_markdown(
-            "[HLAE] This batch's hl.exe was never seen in the process list, so no game is ended: \
-             any hl.exe open was running before the launch and isn't the batch's (#1212)",
-        ),
+        (None, None) => log_markdown(crate::messages::GAME_NEVER_SEEN_LOG),
     }
     if procs.games().is_empty() && procs.release_cursor() {
-        log_markdown("[capture] Released the mouse the closed game had confined to its window.");
+        log_markdown(crate::messages::MOUSE_RELEASED_LOG);
     }
 }
 
@@ -115,13 +112,10 @@ pub(super) fn leave_game(pid: u32) {
         .map(|l| l.to_string())
         .collect();
     match crate::sys::game_remote::send_console_commands(pid, &lines) {
-        Ok(crate::sys::game_remote::Sent::Delivered) => log_markdown(&format!(
-            "[HLAE] Left the game open (PID {pid}): `{}`",
-            lines.join("; ")
-        )),
-        other => log_markdown(&format!(
-            "[HLAE] Could not reach the game (PID {pid}) to stop its recording and demo: {other:?}"
-        )),
+        Ok(crate::sys::game_remote::Sent::Delivered) => {
+            log_markdown(&crate::messages::game_left_open(pid, lines.join("; ")))
+        }
+        other => log_markdown(&crate::messages::game_unreachable_to_stop(pid, other)),
     }
 }
 
