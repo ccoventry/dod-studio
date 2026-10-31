@@ -36,8 +36,8 @@ pub(super) fn write_helper_cfg(dod_dir: &std::path::Path, content: &str) -> std:
 }
 
 /// The helper cfg's start, ahead of any job's own lines: its header, the
-/// global aliases every job calls (speed, sound, record, batch end) and, in
-/// direct-to-video mode, HLAE's FFmpeg settings. `dod_dir`'s configs are
+/// global aliases every job calls (speed, sound, record, batch end) and
+/// HLAE's FFmpeg settings for the mode. `dod_dir`'s configs are
 /// scanned for the values the normal-speed alias puts back.
 pub(super) fn helper_cfg_preamble(config: &PatcherConfig, dod_dir: &std::path::Path) -> String {
     let date_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -90,14 +90,27 @@ pub(super) fn helper_cfg_preamble(config: &PatcherConfig, dod_dir: &std::path::P
     helper_cfg_content.push_str(&record_alias_lines(config));
     helper_cfg_content.push_str("alias sys_capture_done_path \"mirv_movie_filename DOD_STUDIO_EXIT_TRIGGER; mirv_recordmovie_start; mirv_recordmovie_stop\"\n");
 
-    if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
-        helper_cfg_content.push_str(&direct_to_video_lines(config));
-    }
-    if config.capture_mode == crate::patch::CaptureMode::Agr {
-        helper_cfg_content.push_str(AGR_SOUND_LINES);
+    match config.capture_mode {
+        crate::patch::CaptureMode::DirectToVideo => {
+            helper_cfg_content.push_str(&direct_to_video_lines(config));
+        }
+        crate::patch::CaptureMode::Agr => helper_cfg_content.push_str(AGR_SOUND_LINES),
+        crate::patch::CaptureMode::FrameSequence | crate::patch::CaptureMode::Obs => {
+            helper_cfg_content.push_str(FFMPEG_OFF_LINES);
+        }
     }
     helper_cfg_content
 }
+
+/// The other modes turn HLAE's FFmpeg pipe off. A batch in a game that is
+/// already open (#725) inherits whatever the batch before it set, and
+/// `mirv_movie_ffmpeg` outlives a demo: after an AGR batch (null muxer) a
+/// frame-sequence batch would write no frame at all, and after a
+/// direct-to-video one a video instead of BMPs. The pipeline owns the
+/// command (`cfg_scan::BANNED_COMMANDS`), so turning it off loses no
+/// setting of the user's.
+const FFMPEG_OFF_LINES: &str = "\n# HLAE's FFmpeg pipe off, whatever an earlier batch set\n\
+                                mirv_movie_ffmpeg all enabled 0\n";
 
 /// AGR mode's sound (#450): HLAE's movie recorder runs beside `mirv_agr` for
 /// its `sound.wav` alone, with every image stream piped into FFmpeg's null

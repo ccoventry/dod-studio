@@ -47,13 +47,15 @@ pub fn take_sound(block_folder: &Path) -> Option<PathBuf> {
 /// ([`sound_path_for`]), replacing an older one there, then removes the take
 /// folder it came from when nothing but empty folders is left in it.
 /// Returns where the sound went, or `None` when there was none
-/// ([`take_sound`]). Fails when the move fails; a take folder that won't go
-/// is left.
+/// ([`take_sound`]). A sound already placed, with none left in a take
+/// folder, is where it went: the check runs again when Studio stopped after
+/// placing it but before the batch's manifest said so (#545). Fails when the
+/// move fails; a take folder that won't go is left.
 pub fn place_take_sound(block_folder: &Path, agr: &Path) -> std::io::Result<Option<PathBuf>> {
-    let Some(sound) = take_sound(block_folder) else {
-        return Ok(None);
-    };
     let placed = sound_path_for(agr);
+    let Some(sound) = take_sound(block_folder) else {
+        return Ok(placed.is_file().then_some(placed));
+    };
     std::fs::rename(&sound, &placed)?;
     if let Some(take) = sound.parent()
         && holds_no_files(take)
@@ -278,6 +280,16 @@ mod tests {
         let agr = block.join("dodstudio_chain_01_b0.agr");
         assert_eq!(place_take_sound(&block, &agr).unwrap(), None);
         assert!(!sound_path_for(&agr).exists());
+    }
+
+    #[test]
+    fn placing_again_finds_the_sound_already_placed() {
+        let (_root, block) = block("twice");
+        hlae_take(&block, "take0000", b"RIFF sound");
+        let agr = block.join("dodstudio_chain_01_b0.agr");
+        let first = place_take_sound(&block, &agr).unwrap();
+        assert_eq!(place_take_sound(&block, &agr).unwrap(), first);
+        assert_eq!(std::fs::read(first.unwrap()).unwrap(), b"RIFF sound");
     }
 
     #[test]

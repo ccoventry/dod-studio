@@ -794,7 +794,36 @@ fn agr_mode_sends_the_picture_to_ffmpegs_null_muxer_and_keeps_the_sound() {
         &config_in_mode(crate::patch::CaptureMode::FrameSequence),
         &dir,
     );
-    assert!(!frames.contains("mirv_movie_ffmpeg"), "{frames}");
+    assert!(!frames.contains("enabled 1"), "{frames}");
+}
+
+/// A batch in a game already open (#725) inherits the batch before it's
+/// `mirv_movie_ffmpeg`: after AGR's null muxer, a frame-sequence batch
+/// would write no frame. Every mode says what it wants, last.
+#[test]
+fn every_mode_sets_hlaes_ffmpeg_pipe_so_an_earlier_batch_leaves_none_behind() {
+    let dir = std::env::temp_dir().join("dod_test_ffmpeg_pipe_per_mode");
+    let pipe = |mode| {
+        let cfg = helper_cfg_preamble(&config_in_mode(mode), &dir);
+        cfg.lines()
+            .rfind(|l| l.starts_with("mirv_movie_ffmpeg all enabled "))
+            .map(str::to_string)
+    };
+    use crate::patch::CaptureMode::*;
+    for mode in [FrameSequence, Obs] {
+        assert_eq!(
+            pipe(mode).as_deref(),
+            Some("mirv_movie_ffmpeg all enabled 0"),
+            "{mode:?}"
+        );
+    }
+    for mode in [DirectToVideo, Agr] {
+        assert_eq!(
+            pipe(mode).as_deref(),
+            Some("mirv_movie_ffmpeg all enabled 1"),
+            "{mode:?}"
+        );
+    }
 }
 
 #[test]
