@@ -32,6 +32,7 @@ use nom_helper::Result;
 
 mod byte_writer;
 mod delta;
+mod delta_fields;
 mod nom_helper;
 mod utils;
 
