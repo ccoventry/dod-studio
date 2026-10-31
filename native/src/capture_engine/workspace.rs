@@ -237,10 +237,9 @@ fn link_session(session_junction: &Path, session_dir: &Path) -> Result<(), Strin
     let session_junction_str = session_junction.to_str().unwrap_or_default();
     let session_dir_str = session_dir.to_str().unwrap_or_default();
     if session_junction_str.is_empty() || session_dir_str.is_empty() {
-        return Err(format!(
-            "Can't link {} to {}: the path has characters mklink can't take",
+        return Err(crate::messages::mklink_unusable_path(
             session_junction.display(),
-            session_dir.display()
+            session_dir.display(),
         ));
     }
 
@@ -248,16 +247,14 @@ fn link_session(session_junction: &Path, session_dir: &Path) -> Result<(), Strin
         .args(["/C", "mklink", "/J", session_junction_str, session_dir_str])
         .output()
     {
-        Ok(out) if !out.status.success() => Err(format!(
-            "Could not link {} to {} (mklink): {}",
+        Ok(out) if !out.status.success() => Err(crate::messages::mklink_failed(
             session_junction.display(),
             session_dir.display(),
-            String::from_utf8_lossy(&out.stderr).trim()
+            String::from_utf8_lossy(&out.stderr).trim(),
         )),
-        Err(e) => Err(format!(
-            "Could not run mklink to link {}: {}",
+        Err(e) => Err(crate::messages::mklink_not_run(
             session_junction.display(),
-            e
+            e,
         )),
         _ => Ok(()),
     }
@@ -275,19 +272,17 @@ fn link_capture_folders(
         let junction_path = hl_exe_parent.join(format!("dod_pool_{}", idx));
         let _ = std::fs::remove_dir(&junction_path);
         if let Err(e) = std::fs::create_dir_all(target_dir) {
-            return Err(format!(
-                "Failed to create capture directory {}: {}",
+            return Err(crate::messages::capture_dir_create_failed(
                 target_dir.display(),
-                e
+                e,
             ));
         }
         let junction_str = junction_path.to_str().unwrap_or_default();
         let target_str = target_dir.to_str().unwrap_or_default();
         if junction_str.is_empty() || target_str.is_empty() {
-            return Err(format!(
-                "Can't link {} to capture directory {}: the path has characters mklink can't take",
+            return Err(crate::messages::capture_dir_unusable_path(
                 junction_path.display(),
-                target_dir.display()
+                target_dir.display(),
             ));
         }
         let status = std::process::Command::new("cmd")
@@ -303,19 +298,14 @@ fn link_capture_folders(
             }
             Ok(out) => {
                 let err_msg = String::from_utf8_lossy(&out.stderr);
-                return Err(format!(
-                    "Could not link {} to capture directory {} (mklink): {}",
+                return Err(crate::messages::capture_dir_link_failed(
                     junction_path.display(),
                     target_dir.display(),
-                    err_msg.trim()
+                    err_msg.trim(),
                 ));
             }
             Err(e) => {
-                return Err(format!(
-                    "Could not run mklink to link {}: {}",
-                    junction_path.display(),
-                    e
-                ));
+                return Err(crate::messages::mklink_not_run(junction_path.display(), e));
             }
         }
     }
@@ -358,7 +348,7 @@ fn copy_demo(
         None => {
             abort(
                 tx,
-                &format!("Invalid demo path: {}", job.patched_demo_path.display()),
+                &crate::messages::invalid_demo_path(job.patched_demo_path.display()),
             );
             return None;
         }
@@ -379,7 +369,7 @@ fn copy_demo(
             {
                 Ok(f) => f,
                 Err(e) => {
-                    abort(tx, &format!("Failed to open source demo for copy: {}", e));
+                    abort(tx, &crate::messages::source_demo_open_failed(e));
                     return None;
                 }
             };
@@ -406,10 +396,9 @@ fn copy_demo(
                 None => {
                     abort(
                         tx,
-                        &format!(
-                            "Could not create {} after several tries (copying from {}). Is the file open in another program?",
+                        &crate::messages::demo_copy_target_busy(
                             dest_demo_path.display(),
-                            job.patched_demo_path.display()
+                            job.patched_demo_path.display(),
                         ),
                     );
                     return None;

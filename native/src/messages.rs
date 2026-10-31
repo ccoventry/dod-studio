@@ -762,6 +762,73 @@ pub fn failed_to_copy_demo(err: impl Display) -> String {
     format!("Failed to copy demo to game folder: {err}")
 }
 
+// ── capture_engine/mod.rs, workspace.rs: what a batch aborts with (#237) ──
+
+/// The `Error` text a batch ends with, around what failed.
+pub fn capture_aborted(msg: impl Display) -> String {
+    format!("Capture Engine Aborted — {msg} (see View Logs for details)")
+}
+
+pub fn capture_thread_failed(err: impl Display) -> String {
+    format!("Could not start the capture thread: {err}")
+}
+
+pub const HL_PATH_NO_PARENT: &str = "Invalid hl.exe path: it has no parent folder";
+
+pub const LAUNCHING_EVENT_UNSENT: &str = "Failed to send Launching event (channel disconnected)";
+
+pub fn console_log_reader_failed(err: impl Display) -> String {
+    format!("could not start the console log reader: {err}")
+}
+
+pub fn batch_failed_see_log(reason: impl Display) -> String {
+    format!("{reason} — see [HLAE] lines above in this log for timing.")
+}
+
+pub fn mklink_unusable_path(junction: impl Display, target: impl Display) -> String {
+    format!("Can't link {junction} to {target}: the path has characters mklink can't take")
+}
+
+pub fn mklink_failed(junction: impl Display, target: impl Display, stderr: impl Display) -> String {
+    format!("Could not link {junction} to {target} (mklink): {stderr}")
+}
+
+pub fn mklink_not_run(junction: impl Display, err: impl Display) -> String {
+    format!("Could not run mklink to link {junction}: {err}")
+}
+
+pub fn capture_dir_create_failed(dir: impl Display, err: impl Display) -> String {
+    format!("Failed to create capture directory {dir}: {err}")
+}
+
+pub fn capture_dir_unusable_path(junction: impl Display, dir: impl Display) -> String {
+    format!(
+        "Can't link {junction} to capture directory {dir}: the path has characters mklink can't take"
+    )
+}
+
+pub fn capture_dir_link_failed(
+    junction: impl Display,
+    dir: impl Display,
+    stderr: impl Display,
+) -> String {
+    format!("Could not link {junction} to capture directory {dir} (mklink): {stderr}")
+}
+
+pub fn invalid_demo_path(path: impl Display) -> String {
+    format!("Invalid demo path: {path}")
+}
+
+pub fn source_demo_open_failed(err: impl Display) -> String {
+    format!("Failed to open source demo for copy: {err}")
+}
+
+pub fn demo_copy_target_busy(dest: impl Display, source: impl Display) -> String {
+    format!(
+        "Could not create {dest} after several tries (copying from {source}). Is the file open in another program?"
+    )
+}
+
 // ── bin/check_cfgs.rs (#237) ──────────────────────────────────────────────
 // Constants that start with "\n" keep the blank line the report puts before
 // a section; the binary prints each with `println!("{}", ..)`.
