@@ -19,8 +19,8 @@
 //! every marker uses) and writes the same line to the hook's own log, which
 //! keeps it when no Studio is listening. A clip whose `STOP_RECORD` never
 //! came is reported when the next clip starts, the next demo starts, the
-//! batch ends or `ds_capture_batch stop` runs (a Cancel), with the stop left
-//! out.
+//! batch ends, `ds_capture_batch stop` runs (a Cancel) or the hook ends a
+//! batch whose Studio has gone, with the stop left out.
 //!
 //! The only per-frame cost is [`poll`]'s frame count: one atomic load, and
 //! one atomic add while a clip records.
@@ -30,8 +30,8 @@
 //! `[dod-studio] CLIP_SUMMARY` then tab-separated `key=value` fields, any of
 //! which may be missing: `clip` (1-based across the batch), `demo` and
 //! `demo_clip` (`n/of`), `start` and `stop` (the demo player's clock, the one
-//! `ds_demo_seek_to` takes, in seconds), `frames` (game frames drawn while
-//! recording) and `markers` (which of `AUDIO_SYNC`, `START_RECORD`,
+//! `ds_demo_seek_to` takes, in seconds), `frames` (the frames HLAE wrote to
+//! the take, see [`take_frames`]) and `markers` (which of `AUDIO_SYNC`, `START_RECORD`,
 //! `STOP_RECORD` arrived, comma-separated). Studio skips keys it does not
 //! know, and an older Studio ignores the whole line as a marker it does not
 //! know. The label holds no `Tick `, so no reader takes a tick from it.
@@ -52,6 +52,18 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 static FRAMES: AtomicU32 = AtomicU32::new(0);
 
 static STATE: Mutex<Clips> = Mutex::new(Clips::new());
+
+/// The frames HLAE wrote to a clip's take, from the frames [`poll`] counted
+/// between its `START_RECORD` and its stop: one fewer. The count is the
+/// frames from the start's frame to the stop's, whichever way `poll` and the
+/// command buffer fall within a frame, and HLAE's take holds one fewer:
+/// measured on 7 takes (two highlights three times, and a Cancel mid-clip) on
+/// PRE and POST alike, every take's video and sound exactly 1 frame short of
+/// the raw count (#1226 reported 2320 on PRE and 2321 on POST for takes of
+/// 2319 and 2320 frames; the take itself moves by a frame run to run).
+pub(crate) fn take_frames(counted: u32) -> u32 {
+    counted.saturating_sub(1)
+}
 
 /// Counts the frame while a clip records. Runs once per frame from
 /// `commands::poll`.
@@ -79,8 +91,9 @@ pub(crate) fn on_marker(line: &str) {
     report(done);
 }
 
-/// `ds_capture_batch stop` ran: a Cancel, or the next batch taking over a
-/// game left open (#725). Neither echoes `BATCH_COMPLETE`, so a clip still
+/// `ds_capture_batch stop` ran (a Cancel, or the next batch taking over a
+/// game left open, #725), or the hook ended a batch whose Studio has gone.
+/// None of them echoes `BATCH_COMPLETE`, so a clip still
 /// recording is reported now, without its stop, rather than at the next
 /// batch's first `DEMO_START` with every frame drawn in between.
 pub fn batch_stopped() {
@@ -242,7 +255,7 @@ impl Clips {
             demo_clip,
             start: start.flatten(),
             stop: if stop { now } else { None },
-            frames: start.is_some().then_some(frames),
+            frames: start.is_some().then(|| take_frames(frames)),
             audio_sync: std::mem::take(&mut self.audio_sync),
             start_record: start.is_some(),
             stop_record: stop,
@@ -273,7 +286,7 @@ mod tests {
         assert_eq!(
             first[0].label(),
             "CLIP_SUMMARY\tclip=1\tdemo=1/1\tdemo_clip=1/2\tstart=11.000\tstop=23.500\t\
-             frames=750\tmarkers=AUDIO_SYNC,START_RECORD,STOP_RECORD"
+             frames=749\tmarkers=AUDIO_SYNC,START_RECORD,STOP_RECORD"
         );
         // A chained clip: no NEXT_CLIP, no AUDIO_SYNC outside OBS mode.
         run(&mut c, "START_RECORD - Tick 960", 25.0, 0);
@@ -293,7 +306,7 @@ mod tests {
         let done = run(&mut c, "DEMO_START 2 2 1", 0.0, 300);
         assert_eq!(
             done[0].label(),
-            "CLIP_SUMMARY\tclip=1\tdemo=1/2\tdemo_clip=1/1\tstart=11.000\tframes=300\t\
+            "CLIP_SUMMARY\tclip=1\tdemo=1/2\tdemo_clip=1/1\tstart=11.000\tframes=299\t\
              markers=START_RECORD"
         );
         run(&mut c, "START_RECORD - Tick 170", 5.0, 0);
@@ -313,7 +326,7 @@ mod tests {
         let done = c.stopped(90);
         assert_eq!(
             done[0].label(),
-            "CLIP_SUMMARY\tclip=1\tdemo=1/1\tdemo_clip=1/2\tstart=11.000\tframes=90\t\
+            "CLIP_SUMMARY\tclip=1\tdemo=1/1\tdemo_clip=1/2\tstart=11.000\tframes=89\t\
              markers=START_RECORD"
         );
         assert!(!c.recording());
@@ -322,6 +335,15 @@ mod tests {
             "a second stop has nothing to report"
         );
         assert!(run(&mut c, "DEMO_START 1 1 1", 0.0, 5000).is_empty());
+    }
+
+    /// The take holds one frame fewer than the frames counted from the
+    /// start's frame to the stop's (#1226: 2321 counted, 2320 in the take).
+    #[test]
+    fn frames_are_the_takes_one_fewer_than_counted() {
+        assert_eq!(take_frames(2321), 2320);
+        assert_eq!(take_frames(1), 0);
+        assert_eq!(take_frames(0), 0, "a stop on the start's frame");
     }
 
     #[test]
