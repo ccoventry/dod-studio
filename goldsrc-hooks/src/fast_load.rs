@@ -233,7 +233,7 @@ fn stub(count: &[u8], callback: usize, resume_slot: usize) -> Vec<u8> {
 }
 
 /// `ds_demo_fast_load`: the budget in milliseconds, or, when the cvar could
-/// not be registered, the fallback toggle, where on means the default budget.
+/// not be registered, the default budget.
 pub static SETTING: Setting = Setting::new(NAME, true);
 
 /// The budget the setting asks for now, in milliseconds.
@@ -250,11 +250,6 @@ fn describe_budget(ms: u32) -> String {
         0 => "off (the engine's 33 packets a frame)".to_string(),
         ms => format!("{ms} ms a frame"),
     }
-}
-
-/// For the fallback toggle's bare-name query.
-pub fn status() -> String {
-    format!("demo loading: {}", describe_budget(wanted_budget_ms()))
 }
 
 /// Where the stub jumps back to: the engine's `jg`.

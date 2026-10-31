@@ -3,8 +3,8 @@
 //! - [`Cvar`]: the pointer the engine hands back when `commands/install.rs`
 //!   registers a cvar. Null until then, and for good if the registration
 //!   failed, so an unregistered setting reads as off (or as no value).
-//! - [`Setting`]: a [`Cvar`] with a name and a fallback flag, for a setting
-//!   whose plain toggle command stands in when the cvar can't be registered.
+//! - [`Setting`]: a [`Cvar`] with a name and a fallback flag, the on/off it
+//!   reads while the cvar isn't registered: the cvar's default.
 //!
 //! Both are read every frame from the engine's thread (`commands::poll`) and
 //! from hot hooks, so a read is one atomic pointer load and one float load:
@@ -66,11 +66,12 @@ impl Cvar {
     }
 }
 
-/// An on/off setting: its cvar or, when that couldn't be registered, the
-/// fallback toggle command's flag.
+/// An on/off setting: its cvar or, when that couldn't be registered, its
+/// default.
 pub struct Setting {
     pub name: &'static str,
-    /// The fallback toggle's state; starts at the cvar's default.
+    /// What [`Setting::on`] reads while the cvar isn't registered: the cvar's
+    /// default. Only tests change it.
     pub fallback: AtomicBool,
     pub cvar: Cvar,
 }
@@ -89,7 +90,7 @@ impl Setting {
         self.cvar.set(cvar);
     }
 
-    /// The cvar's value, or `None` on the fallback path.
+    /// The cvar's value, or `None` while it isn't registered.
     #[inline]
     pub fn value(&self) -> Option<f32> {
         self.cvar.value()

@@ -71,7 +71,7 @@ use crate::setting::Setting;
 pub const RESIZABLE_NAME: &str = console_name!("ui_resizable_windows");
 pub const REMEMBER_NAME: &str = console_name!("ui_remember_layout");
 
-/// The two cvars, or their fallback toggles when they could not be
+/// The two cvars, or their defaults (on) when they could not be
 /// registered.
 pub static RESIZABLE: Setting = Setting::new(RESIZABLE_NAME, true);
 pub static REMEMBER: Setting = Setting::new(REMEMBER_NAME, true);
@@ -82,23 +82,6 @@ fn resizable() -> bool {
 
 fn remember() -> bool {
     REMEMBER.on()
-}
-
-/// For the fallback toggle commands' bare-name query.
-pub fn resizable_status() -> String {
-    if resizable() {
-        "GameUI's windows can be resized".to_string()
-    } else {
-        "only the windows the game makes resizable can be resized".to_string()
-    }
-}
-
-pub fn remember_status() -> String {
-    if remember() {
-        "GameUI's windows come back where they were left".to_string()
-    } else {
-        "GameUI's windows open where the game puts them".to_string()
-    }
 }
 
 /// One DLL build: its identity.
