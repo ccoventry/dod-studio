@@ -13,9 +13,12 @@
 //! key is the demo's size-and-header key (`utils::demo_hasher`), the trim's
 //! target and [`TRIM_VERSION`], so a copy is made once per demo and reused by
 //! every later batch and preview, and a different file under the same name
-//! gets its own. The newest [`KEEP_COPIES`] stay, and never fewer than the
-//! batch being started plays; older ones are removed once its copies are all
-//! ready ([`prune_keeping`]).
+//! gets its own. Beside each copy, a marker names the map `.bsp` it was made
+//! with ([`map_tag`]): when the map changes (or appears, or goes), the copy
+//! is made again, since the trim's drop set depends on it. The newest
+//! [`KEEP_COPIES`] stay ([`prune`]), and a copy a running batch plays is never
+//! removed, however many it plays ([`Pins`]). Before a copy is saved, its
+//! drive must have room for it with [`FREE_SPACE_HEADROOM_BYTES`] to spare.
 //!
 //! A new copy gets the original's analyzer cache entry, so the in-game DoD
 //! Studio window lists its highlights at once instead of asking Studio to
@@ -23,10 +26,13 @@
 //! list of analysed demos shows the demo once, by its own name.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
 
 use crate::patch::entity_trim::{
     MapProps, Outcome, Step, Tier, TrimError, TrimRequest, Trimmed, target_for, trim_demo,
 };
+use crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES;
 
 /// Under `%LOCALAPPDATA%\dod-studio`.
 pub const COPIES_DIR: &str = "trimmed_demos";
@@ -38,6 +44,10 @@ pub const TRIM_VERSION: u32 = 1;
 pub const KEEP_COPIES: usize = 8;
 /// Written beside each copy every time it is used, for [`KEEP_COPIES`].
 const USED_MARKER: &str = "last_used";
+/// Written beside each copy: the [`map_tag`] of the map it was made with.
+const MAP_MARKER: &str = "map";
+/// [`map_tag`] when the map's `.bsp` isn't there to read.
+const NO_MAP_TAG: &str = "none";
 /// Each copy's name: the original's stem with this after it.
 const COPY_SUFFIX: &str = "_trimmed";
 
@@ -79,6 +89,69 @@ pub enum Playable {
     Copy { path: PathBuf, made: bool },
 }
 
+/// Where [`prepare_playable`] is, for its status line, with how far through
+/// the step it is (0.0-1.0).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Progress {
+    /// Reading a demo with no peak in the analyzer cache, to learn whether it
+    /// needs a copy at all: most such demos don't.
+    Counting(f32),
+    /// Reading a demo known to need a copy.
+    Reading(f32),
+    /// Writing the copy.
+    Writing,
+    /// Reading the copy back to check it.
+    Checking(f32),
+}
+
+/// The [`Progress`] of a trim's `step`, for a demo whose cached peak is
+/// `peak` (`None` when the cache has none, so the read decides).
+fn progress_of(peak: Option<u32>, step: Step) -> Progress {
+    match step {
+        Step::Reading(f) if peak.is_none() => Progress::Counting(f),
+        Step::Reading(f) => Progress::Reading(f),
+        Step::Writing => Progress::Writing,
+        Step::Checking(f) => Progress::Checking(f),
+    }
+}
+
+/// Copy folders that running batches play, one entry per [`Pins`] holding
+/// one. [`prune`] never removes them.
+static PINNED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn pinned() -> MutexGuard<'static, Vec<PathBuf>> {
+    // The list stays whole if a holder panicked: each push or remove is one call.
+    PINNED.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Keeps copies from being pruned while it lives. A batch holds one from the
+/// moment each of its copies is ready until its game is done with them, so a
+/// Launch Preview started meanwhile can't remove a copy the batch has yet to
+/// play, however many it plays.
+#[derive(Debug, Default)]
+pub struct Pins(Vec<PathBuf>);
+
+impl Pins {
+    /// Pins `copy`'s folder until this is dropped.
+    pub fn add(&mut self, copy: &Path) {
+        if let Some(dir) = copy.parent() {
+            pinned().push(dir.to_path_buf());
+            self.0.push(dir.to_path_buf());
+        }
+    }
+}
+
+impl Drop for Pins {
+    fn drop(&mut self) {
+        let mut all = pinned();
+        for dir in self.0.drain(..) {
+            if let Some(at) = all.iter().position(|d| *d == dir) {
+                all.swap_remove(at);
+            }
+        }
+    }
+}
+
 /// Where `demo`'s trimmed copy for `limit` goes under `root`, or `None` when
 /// the demo can't be read for its key.
 pub fn copy_path(root: &Path, demo: &Path, limit: u32) -> Option<PathBuf> {
@@ -106,17 +179,18 @@ pub fn cached_peak(demo: &Path) -> Option<u32> {
 }
 
 /// What the game should play for `demo` on `engine`: the original, or a
-/// trimmed copy, made now if there is none yet. Reports each step of a trim
-/// through `progress`. Writes the copy, its analyzer cache entry and the
-/// "last used" marker, and logs what it did to the activity log.
+/// trimmed copy, made now if there is none yet or the one there was made
+/// with another map. Reports each step through `progress`. Writes the copy,
+/// its analyzer cache entry and its markers, and logs what it did to the
+/// activity log.
 ///
-/// `Err` when the demo is over the limit and can't be trimmed safely; the
-/// caller must not play it then.
+/// `Err` when the demo is over the limit and can't be trimmed safely, or its
+/// copy has no room on the drive; the caller must not play it then.
 pub fn prepare_playable(
     demo: &Path,
     engine: &Engine,
     cancel: &dyn Fn() -> bool,
-    progress: &mut dyn FnMut(Step),
+    progress: &mut dyn FnMut(Progress),
 ) -> Result<Playable, TrimError> {
     let peak = cached_peak(demo);
     if peak.is_some_and(|p| p <= engine.limit) {
@@ -129,35 +203,29 @@ pub fn prepare_playable(
             demo.display()
         )));
     };
-    if path.is_file() {
-        // A copy made while the original had no current cache entry gets one
-        // now, if the original has one since.
-        let cache = crate::analyzer_cache_root();
-        if !analysis::cache::is_fresh(&cache, &path) {
-            seed_analysis(&cache, demo, &path, None);
+    let map = read_map(demo, engine);
+    match copy_state(&path, &map.tag) {
+        CopyState::Current => {
+            reuse_copy(demo, engine, &path);
+            return Ok(Playable::Copy { path, made: false });
         }
-        mark_used(&path);
-        crate::log_markdown(&format!(
-            "✂️ **Trimmed copy** — `{}` has more entities in one snapshot than the {} engine takes ({}); \
-             the game plays the trimmed copy made earlier, `{}`. The original is unchanged.",
-            file_name(demo),
-            engine.name(),
-            engine.limit,
-            path.display()
-        ));
-        return Ok(Playable::Copy { path, made: false });
+        CopyState::MadeWithAnotherMap => {
+            crate::log_markdown(&crate::messages::trimmed_copy_map_changed(&file_name(demo)));
+        }
+        CopyState::Missing => {}
     }
+    let started = Instant::now();
     let bytes = std::fs::read(demo)
         .map_err(|e| TrimError::Unreadable(format!("{}: {e}", demo.display())))?;
-    let map = map_props(demo, engine);
+    let props = map.props(demo);
     let outcome = trim_demo(
         &bytes,
         TrimRequest {
             limit: engine.limit,
             target: target_for(engine.limit),
-            map: map.as_ref(),
+            map: props.as_ref(),
             cancel,
-            progress,
+            progress: &mut |step| progress(progress_of(peak, step)),
         },
     )?;
     drop(bytes);
@@ -165,7 +233,9 @@ pub fn prepare_playable(
         Outcome::Unneeded { .. } => return Ok(Playable::Original),
         Outcome::Trimmed(t) => t,
     };
+    check_room(&path, trimmed.bytes.len() as u64)?;
     save_copy(&path, &trimmed.bytes)?;
+    save_map_marker(&path, &map.tag);
     seed_analysis(
         &crate::analyzer_cache_root(),
         demo,
@@ -173,8 +243,34 @@ pub fn prepare_playable(
         Some(trimmed.peak_after),
     );
     mark_used(&path);
-    crate::log_markdown(&made_message(demo, engine, &trimmed, &path));
+    crate::log_markdown(&made_message(
+        demo,
+        engine,
+        &trimmed,
+        &path,
+        started.elapsed(),
+    ));
     Ok(Playable::Copy { path, made: true })
+}
+
+/// Plays the copy already at `path`: seeds its cache entry if it has none
+/// yet, stamps it used, and logs it.
+fn reuse_copy(demo: &Path, engine: &Engine, path: &Path) {
+    // A copy made while the original had no current cache entry gets one
+    // now, if the original has one since.
+    let cache = crate::analyzer_cache_root();
+    if !analysis::cache::is_fresh(&cache, path) {
+        seed_analysis(&cache, demo, path, None);
+    }
+    mark_used(path);
+    crate::log_markdown(&format!(
+        "✂️ **Trimmed copy** — `{}` has more entities in one snapshot than the {} engine takes ({}); \
+         the game plays the trimmed copy made earlier, `{}`. The original is unchanged.",
+        file_name(demo),
+        engine.name(),
+        engine.limit,
+        path.display()
+    ));
 }
 
 fn file_name(demo: &Path) -> String {
@@ -183,24 +279,128 @@ fn file_name(demo: &Path) -> String {
         .unwrap_or_else(|| demo.display().to_string())
 }
 
-/// The demo's map, from the engine's maps folder; `None` (logged) when it
-/// isn't there or doesn't read, which leaves the decorative props out.
-fn map_props(demo: &Path, engine: &Engine) -> Option<MapProps> {
+/// A demo's map as the trim sees it: the `.bsp`'s bytes, when the engine's
+/// maps folder has it, and their [`map_tag`].
+struct MapFile {
+    tag: String,
+    bytes: Option<Vec<u8>>,
+}
+
+impl MapFile {
+    /// The map's props for the trim; `None` (logged) when it isn't there or
+    /// doesn't parse, which leaves the decorative props out.
+    fn props(&self, demo: &Path) -> Option<MapProps> {
+        match MapProps::parse(self.bytes.as_deref()?) {
+            Ok(props) => Some(props),
+            Err(e) => {
+                log_unreadable_map(demo, &e);
+                None
+            }
+        }
+    }
+}
+
+/// Reads `demo`'s map from the engine's maps folder. Read on every use, a
+/// few milliseconds for a `.bsp`, so a changed map is always noticed.
+fn read_map(demo: &Path, engine: &Engine) -> MapFile {
+    let bytes = map_file(demo, engine).and_then(|path| match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            log_unreadable_map(demo, &format!("{}: {e}", path.display()));
+            None
+        }
+    });
+    MapFile {
+        tag: map_tag(bytes.as_deref()),
+        bytes,
+    }
+}
+
+/// Where `demo`'s map's `.bsp` would be, or `None` when its map name can't be
+/// read or used, or the engine has no maps folder.
+fn map_file(demo: &Path, engine: &Engine) -> Option<PathBuf> {
     let name = crate::patch::map_check::map_reference(demo).ok()?.map_name;
     if !crate::patch::map_check::is_safe_map_name(&name) {
         return None;
     }
-    let path = crate::patch::map_check::map_path(engine.maps_dir.as_ref()?, &name);
-    match MapProps::from_file(&path) {
-        Ok(props) => Some(props),
-        Err(e) => {
-            crate::log_markdown(&format!(
-                "⚠️ **Trimmed copy** — couldn't read the map for `{}` ({e}); its decorations are left out of the trim",
-                file_name(demo)
-            ));
-            None
-        }
+    Some(crate::patch::map_check::map_path(
+        engine.maps_dir.as_ref()?,
+        &name,
+    ))
+}
+
+fn log_unreadable_map(demo: &Path, why: &str) {
+    crate::log_markdown(&format!(
+        "⚠️ **Trimmed copy** — couldn't read the map for `{}` ({why}); its decorations are left out of the trim",
+        file_name(demo)
+    ));
+}
+
+/// Names a map's `.bsp` by its contents (`None`: no map to read). The trim
+/// leaves out decorations only when it has the map, and picks them by where
+/// the map puts them, so a copy is only reused with the map it was made with.
+pub fn map_tag(bsp: Option<&[u8]>) -> String {
+    match bsp {
+        Some(bytes) => format!("{:016x}", crate::utils::demo_hasher::fnv1a_hash(bytes)),
+        None => NO_MAP_TAG.to_string(),
     }
+}
+
+/// Whether the copy at `path` can be played as it is.
+#[derive(Debug, PartialEq)]
+enum CopyState {
+    Missing,
+    /// Made with the map `map_tag` names (its marker says so).
+    Current,
+    /// Made with another map, or before copies carried a map marker: it is
+    /// made again.
+    MadeWithAnotherMap,
+}
+
+fn copy_state(path: &Path, map_tag: &str) -> CopyState {
+    if !path.is_file() {
+        return CopyState::Missing;
+    }
+    let marker = path.parent().map(|dir| dir.join(MAP_MARKER));
+    match marker.and_then(|m| std::fs::read_to_string(m).ok()) {
+        Some(tag) if tag == map_tag => CopyState::Current,
+        _ => CopyState::MadeWithAnotherMap,
+    }
+}
+
+/// Records which map the copy at `path` was made with. Best-effort: a copy
+/// whose marker couldn't be written is only made again next time.
+fn save_map_marker(path: &Path, map_tag: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::write(dir.join(MAP_MARKER), map_tag);
+    }
+}
+
+/// `Err` when the drive `copy` goes on hasn't `needed_bytes` free with
+/// [`FREE_SPACE_HEADROOM_BYTES`] to spare. A drive whose free space can't be
+/// told is let through: the write itself still fails cleanly.
+fn check_room(copy: &Path, needed_bytes: u64) -> Result<(), TrimError> {
+    // The free-space query wants a folder that exists.
+    let Some(folder) = copy.ancestors().skip(1).find(|p| p.is_dir()) else {
+        return Ok(());
+    };
+    room_for(
+        folder,
+        crate::sys::disk::get_available_bytes(folder),
+        needed_bytes,
+    )
+}
+
+/// [`check_room`]'s rule, for `free` bytes on `folder`'s drive.
+fn room_for(folder: &Path, free: Option<u64>, needed_bytes: u64) -> Result<(), TrimError> {
+    if crate::shared::movie_copy::fits(needed_bytes, free) {
+        return Ok(());
+    }
+    Err(TrimError::NoRoom {
+        folder: folder.to_path_buf(),
+        free_bytes: free.unwrap_or(0),
+        needed_bytes,
+    })
 }
 
 /// Writes the copy beside its final name and renames it over, so a copy
@@ -253,22 +453,14 @@ fn mark_used(copy: &Path) {
     }
 }
 
-/// Removes the copies past the newest [`KEEP_COPIES`], once a batch or a
-/// preview has every copy it plays (`in_use` of them, each just marked used,
-/// so the newest): pruning while a batch's copies are still being made would
-/// remove its first ones once it plays more than [`KEEP_COPIES`]. Returns how
-/// many it removed.
-pub fn prune_keeping(root: &Path, in_use: usize) -> usize {
-    prune(root, KEEP_COPIES.max(in_use))
-}
-
-/// Removes all but the `keep` most recently used copy folders under `root`.
+/// Removes all but the `keep` most recently used copy folders under `root`,
+/// leaving any a running batch has pinned ([`Pins`]) whatever their age.
 /// Returns how many it removed.
 pub fn prune(root: &Path, keep: usize) -> usize {
     let Ok(entries) = std::fs::read_dir(root) else {
         return 0;
     };
-    let mut folders: Vec<(std::time::SystemTime, PathBuf)> = entries
+    let folders: Vec<(std::time::SystemTime, PathBuf)> = entries
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.is_dir())
@@ -279,21 +471,42 @@ pub fn prune(root: &Path, keep: usize) -> usize {
             (used, p)
         })
         .collect();
-    folders.sort_by_key(|(used, _)| std::cmp::Reverse(*used));
-    folders
+    let pinned = pinned().clone();
+    folders_to_prune(folders, keep, &pinned)
         .iter()
-        .skip(keep)
-        .filter(|(_, p)| std::fs::remove_dir_all(p).is_ok())
+        .filter(|p| std::fs::remove_dir_all(p).is_ok())
         .count()
 }
 
-/// The activity log's line for a copy just made.
-fn made_message(demo: &Path, engine: &Engine, t: &Trimmed, path: &Path) -> String {
+/// [`prune`]'s rule: of `folders` (each with when it was last used), the ones
+/// past the `keep` newest that aren't in `pinned`.
+fn folders_to_prune(
+    mut folders: Vec<(std::time::SystemTime, PathBuf)>,
+    keep: usize,
+    pinned: &[PathBuf],
+) -> Vec<PathBuf> {
+    folders.sort_by_key(|(used, _)| std::cmp::Reverse(*used));
+    folders
+        .into_iter()
+        .skip(keep)
+        .map(|(_, p)| p)
+        .filter(|p| !pinned.contains(p))
+        .collect()
+}
+
+/// The activity log's line for a copy just made, `took` after it started.
+fn made_message(
+    demo: &Path,
+    engine: &Engine,
+    t: &Trimmed,
+    path: &Path,
+    took: std::time::Duration,
+) -> String {
     format!(
         "✂️ **Trimmed copy** — `{}` has up to {} entities in one snapshot, and the {} engine closes at more than {}. \
          The game plays a copy with {} static entities left out of every snapshot (up to {} now): \
          {} invisible, {} sprites (fog and glows), {} decorations far from where anyone played. \
-         Saved as `{}`; the original is unchanged.",
+         Saved as `{}` in {:.1} s; the original is unchanged.",
         file_name(demo),
         t.peak_before,
         engine.name(),
@@ -303,7 +516,8 @@ fn made_message(demo: &Path, engine: &Engine, t: &Trimmed, path: &Path) -> Strin
         t.count_of(Tier::Invisible),
         t.count_of(Tier::Sprite),
         t.count_of(Tier::Decoration),
-        path.display()
+        path.display(),
+        took.as_secs_f64()
     )
 }
 
@@ -372,17 +586,137 @@ mod tests {
         assert_eq!(names, vec![std::ffi::OsString::from("a_trimmed.dem")]);
     }
 
+    /// `count` copy folders under `dir`, `copy0` the oldest used, each with a
+    /// copy file; returns the copies' paths.
+    fn copies_used_in_order(dir: &Path, count: usize) -> Vec<PathBuf> {
+        (0..count)
+            .map(|i| {
+                let folder = dir.join(format!("copy{i}"));
+                std::fs::create_dir_all(&folder).unwrap();
+                let marker = std::fs::File::create(folder.join(USED_MARKER)).unwrap();
+                let when = std::time::SystemTime::UNIX_EPOCH
+                    + std::time::Duration::from_secs(1_000_000 + i as u64 * 1000);
+                marker.set_modified(when).unwrap();
+                folder.join("a_trimmed.dem")
+            })
+            .collect()
+    }
+
     #[test]
-    fn a_batch_playing_more_copies_than_are_kept_keeps_them_all() {
+    fn a_preview_during_a_batch_of_more_copies_than_are_kept_removes_none_of_the_batchs() {
         let dir = Scratch::new("trimmed_copy_prune_batch");
-        let batch = KEEP_COPIES + 2;
-        for i in 0..batch {
-            let folder = dir.join(format!("copy{i}"));
-            std::fs::create_dir_all(&folder).unwrap();
-            std::fs::write(folder.join(USED_MARKER), b"").unwrap();
+        let copies = copies_used_in_order(&dir, KEEP_COPIES + 2);
+        let mut batch = Pins::default();
+        for copy in &copies {
+            batch.add(copy);
         }
-        assert_eq!(prune_keeping(&dir, batch), 0);
-        assert_eq!(prune_keeping(&dir, 1), 2, "the next preview prunes them");
+        assert_eq!(prune(&dir, KEEP_COPIES), 0, "the batch's copies are pinned");
+        assert!(copies.iter().all(|c| c.parent().unwrap().is_dir()));
+        drop(batch);
+        assert_eq!(prune(&dir, KEEP_COPIES), 2, "once it ends they prune");
+        assert!(!dir.join("copy0").exists() && !dir.join("copy1").exists());
+    }
+
+    #[test]
+    fn a_copy_pinned_twice_stays_pinned_until_both_let_go() {
+        let dir = Scratch::new("trimmed_copy_pin_twice");
+        let copy = &copies_used_in_order(&dir, 1)[0];
+        let mut first = Pins::default();
+        let mut second = Pins::default();
+        first.add(copy);
+        second.add(copy);
+        drop(first);
+        assert_eq!(prune(&dir, 0), 0);
+        drop(second);
+        assert_eq!(prune(&dir, 0), 1);
+    }
+
+    #[test]
+    fn prune_skips_pinned_folders_past_the_newest() {
+        let at = |s: u64| std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(s);
+        let folders = vec![
+            (at(1), PathBuf::from("old")),
+            (at(3), PathBuf::from("new")),
+            (at(2), PathBuf::from("pinned")),
+        ];
+        assert_eq!(
+            folders_to_prune(folders, 1, &[PathBuf::from("pinned")]),
+            vec![PathBuf::from("old")]
+        );
+    }
+
+    #[test]
+    fn a_copy_made_with_the_same_map_is_reused() {
+        let dir = Scratch::new("trimmed_copy_state_current");
+        let copy = dir.join("key").join("a_trimmed.dem");
+        save_copy(&copy, b"HLDEMO copy").unwrap();
+        let tag = map_tag(Some(b"BSP v30"));
+        save_map_marker(&copy, &tag);
+        assert_eq!(copy_state(&copy, &tag), CopyState::Current);
+    }
+
+    #[test]
+    fn a_copy_is_made_again_when_its_map_changes_appears_or_goes() {
+        let dir = Scratch::new("trimmed_copy_state_map");
+        let copy = dir.join("key").join("a_trimmed.dem");
+        save_copy(&copy, b"HLDEMO copy").unwrap();
+        save_map_marker(&copy, &map_tag(Some(b"BSP v30")));
+        assert_eq!(
+            copy_state(&copy, &map_tag(Some(b"BSP v30, edited"))),
+            CopyState::MadeWithAnotherMap
+        );
+        assert_eq!(
+            copy_state(&copy, &map_tag(None)),
+            CopyState::MadeWithAnotherMap
+        );
+        save_map_marker(&copy, &map_tag(None));
+        assert_eq!(
+            copy_state(&copy, &map_tag(Some(b"BSP v30"))),
+            CopyState::MadeWithAnotherMap
+        );
+    }
+
+    #[test]
+    fn a_copy_with_no_map_marker_is_made_again() {
+        let dir = Scratch::new("trimmed_copy_state_unmarked");
+        let copy = dir.join("key").join("a_trimmed.dem");
+        assert_eq!(copy_state(&copy, NO_MAP_TAG), CopyState::Missing);
+        save_copy(&copy, b"HLDEMO copy").unwrap();
+        assert_eq!(copy_state(&copy, NO_MAP_TAG), CopyState::MadeWithAnotherMap);
+    }
+
+    #[test]
+    fn a_copy_that_would_leave_its_drive_too_full_is_refused() {
+        let folder = Path::new("C:/copies");
+        let copy = 50 * 1024 * 1024;
+        let enough = copy + FREE_SPACE_HEADROOM_BYTES;
+        assert_eq!(room_for(folder, Some(enough), copy), Ok(()));
+        assert_eq!(
+            room_for(folder, Some(enough - 1), copy),
+            Err(TrimError::NoRoom {
+                folder: folder.to_path_buf(),
+                free_bytes: enough - 1,
+                needed_bytes: copy,
+            })
+        );
+        assert_eq!(room_for(folder, None, copy), Ok(()), "unknown: let through");
+    }
+
+    #[test]
+    fn reading_a_demo_with_no_cached_peak_says_it_is_counting_not_copying() {
+        assert_eq!(
+            progress_of(None, Step::Reading(0.5)),
+            Progress::Counting(0.5)
+        );
+        assert_eq!(
+            progress_of(Some(300), Step::Reading(0.5)),
+            Progress::Reading(0.5)
+        );
+        assert_eq!(progress_of(None, Step::Writing), Progress::Writing);
+        assert_eq!(
+            progress_of(None, Step::Checking(0.2)),
+            Progress::Checking(0.2)
+        );
     }
 
     #[test]
