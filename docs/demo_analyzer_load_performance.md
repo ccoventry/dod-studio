@@ -5,12 +5,13 @@ progress events, the dead-code removal and cache warm-up from the Capture scan,
 plus later work: the scan warms the cache (#512), the decoded demo is freed off
 the calling thread (#511), and older cache schema versions are swept (#510).
 **Tier 5 (cheaper storage for decoded deltas) is done** (see "Tier 5: what was
-built" below); **Tier 4 is not started**. Both are tracked as
+built" below). **Tier 4 is done as far as it can go without losing data**
+(see "Tier 4: what was built"): the capture-queue scan skips the demo's
+sounds, but it cannot skip `SvcDeltaPacketEntities` / `SvcClientData`, the two
+streams the plan named, because its rows read them. Both are tracked as
 [GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) (open),
 whose 2026-09-28 decision keeps full decoding for the Demo Analyzer and makes
 Tier 4 a fast mode for the capture-queue scan only.
-Written so a fresh chat can pick Tier 4 up without re-deriving anything: read
-the measurements and the Tier 4/5 section before touching code.
 
 ## Goal
 
@@ -38,6 +39,7 @@ building an optimization you partly undo.
 ```
 cargo build --release -p dod-benchmark
 ./target/release/dod-benchmark.exe ./local/demos          # or any folder of .dem files
+./target/release/dod-benchmark.exe --without-sounds ./local/demos   # the scan's fast parse
 ```
 
 ## Measured baseline (release build, 4 demos, 52-89 MB each)
@@ -185,6 +187,63 @@ all 8, and the fixture's parse-and-re-encode test still gives back the original
 bytes. No cached field changed, so `SCHEMA_VERSION` stays. The decode's other
 6-10 M blocks are not attributed yet; the many small `BitVec` fields and the
 per-message boxes are the obvious candidates.
+
+### Tier 4: what was built (#37)
+
+**What the scan needs from the parse.** `scan_demo_for_highlights_with_analysis`
+gets a whole `Analysis` (from the analyzer cache, or a parse that fills it), and
+`scan_manager::serialized_demo` stores, beside the highlights and the opening
+`frame_times` (read from the raw bytes, no parse): each kill's **headshot**
+(`clip_facts::streak_facts` -> `headshot_of` over `state.kill_positions`, whose
+victim origins come from the entity replay over `SvcSpawnBaseline` /
+`SvcPacketEntities` / `SvcDeltaPacketEntities` and, for a POV recorder, from
+`SvcClientData`), and `demo_info.peak_packet_entities` (the entity count of
+those same messages). The scan also **writes the analyzer cache**, which the
+Demo Analyzer (Kill Map), the in-game Highlights tab
+(`sys/analysis_server.rs`), demo renames, match groups and `player_index` read
+back as a full analysis. And an engine message has no length prefix: stepping
+over a delta message means bit-decoding it anyway. So skipping
+`SvcDeltaPacketEntities` / `SvcClientData` would drop headshots and the entity
+count from the scan's rows and put a reduced analysis in the cache. It is not
+done; a scan that wanted it would first have to stop caching its analysis.
+
+**What the scan skips instead: sounds.** Nothing in `analysis` reads
+`svc_sound`, a fifth of all messages at about seven heap blocks each. dem-patch's
+`MessageDataParseMode::ParseWithoutSounds` reads each sound through (the bit
+layout is written once, `sound.rs`'s `read_sound`, so it fails where the full
+parse fails) and leaves it out of the frame's list; `analysis::Sounds::Skip`
+selects it and `native::run_analyzer_cached_decoding` passes it down. Only the
+scan uses it; the Demo Analyzer's `run_analyzer_cached` keeps `Sounds::Decode`.
+The two give the same `Analysis`, so the cache entry the scan writes is the one
+the Analyzer would have made, and neither `SCHEMA_VERSION` nor
+`HIGHLIGHTS_VERSION` moves. An analyzer that starts reading sounds must make the
+scan decode them, and `tests_sounds.rs` fails if it doesn't. Separately,
+`BitReader` now borrows the message's bytes rather than copying the rest of the
+packet for every message that reads bits (both paths gain from that).
+
+Checked on every demo in the PRE install's `dod\` folder (490: the `solifotw-`
+set, KTP, WSOD25 and scrim POVs, 35 HLTV), with
+`DOD_ANALYSIS_DEMOS=<folder> cargo test --release -p analysis -- --ignored skipping_sounds`:
+the analysis is identical, or fails with the same error, on all of them. CI
+runs the same check on `ci_fixture.dem` and three cut copies of it, and
+dem-patch's `a_parse_without_sounds_keeps_every_other_message` checks every
+other message survives in order.
+
+Benchmark, 9 PRE demos (7 recorders, 2 HLTV, 47-124 MB) plus `ci_fixture.dem`,
+two alternating rounds each; times are averages over the 10, heap ranges the
+9 PRE demos':
+
+| | before (`dev`) | Analyzer path (borrowed `BitReader`) | scan (`--without-sounds`) |
+|---|---|---|---|
+| decode | 681 ms | 641-650 ms | 562-589 ms |
+| free of the decoded tree | 283-291 ms | 289-291 ms | 244 ms |
+| end to end | 1128-1148 ms | 1097-1109 ms | 965-971 ms |
+| decode heap blocks | 5.2-11.6 M | 5.0-11.3 M (-3 to -5%) | 2.7-9.4 M (-15 to -48%) |
+| decode heap peak | 370-895 MB | same | 261-808 MB |
+
+So a cold scan parse is about 15% faster and frees about 15% less; the HLTV
+demos, with the most sounds, gain most (`monday-wsod25_r07_m1_h1_hltv.dem`:
+decode 458 -> 290 ms, blocks 5.2 -> 2.7 M).
 
 ### Tier 4/5 — the plan as written before either was started (issue #37)
 
