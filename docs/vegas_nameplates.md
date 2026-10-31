@@ -14,9 +14,9 @@ Configuration > **Players**. Add each player (from the queue's demos, or by Stea
 
 ## 2. Render, then export
 
-Capture and render the highlights as usual. Then on the Render tab click **Export VEGAS EDL…** and save the EDL. Studio writes two files:
+Capture and render the highlights as usual. Then on the Render tab click **Export VEGAS EDL…** and save the EDL. Studio saves it as a `.txt` because VEGAS Pro's File > Import > EDL Text File dialog only lists `*.txt`. Studio writes writes two files:
 
-- `dod_highlights.edl`: the finished renders, one after another (#110).
+- `dod_highlights.txt`: the finished renders, one after another (#110).
 - `dod_highlights.dodstudio.json`: the clip list. For each clip: its file, whose highlight it is (SteamID, the **Use as** name or else the in-game name) and that player's nameplate path.
 
 Save the EDL in the clips' folder or the folder above it, and the script finds the clip list by itself. Anywhere else, it asks for it.
@@ -27,7 +27,7 @@ A clip gets no nameplate when its player has none set, when Studio doesn't know 
 
 The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Nameplates.cs).
 
-1. Put the clips on the timeline: File > Import > EDL Text File with the EDL (or drag the clips in yourself; the script goes by each clip's file, not its place). The import dialog only lists `*.txt` files: switch its file type to all files, or type `*.*` in the file name box, to see the `.edl`.
+1. Put the clips on the timeline: File > Import > EDL Text File with the EDL (or drag the clips in yourself; the script goes by each clip's file, not its place). Studio's export is a `.txt`, so the dialog lists it. An `.edl` from another tool needs the dialog's file type switched to all files (or `*.*` typed in the file name box).
 2. **Edit > Select None.** VEGAS leaves the first imported event selected, and the script works on the selected clips only when any are selected, so skipping this gives you one nameplate.
 3. Tools > Scripting > **Run Script…**, and pick `DoD Studio Nameplates.cs`.
    To have it in the Tools > Scripting menu, copy it into `Documents\Vegas Script Menu` and use Tools > Scripting > Rescan Script Menu Folder.
@@ -62,7 +62,7 @@ For other scripts or editors. JSON, UTF-8:
 {
   "format": "dodstudio-clip-manifest",
   "version": 1,
-  "edl": "dod_highlights.edl",
+  "edl": "dod_highlights.txt",
   "clips": [
     {
       "name": "m00cat_3k_anzio",

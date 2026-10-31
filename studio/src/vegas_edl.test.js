@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
+import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl, EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER } from './vegas_edl.js';
 
 describe('timecodes', () => {
   it('counts 30 frames a second, as VEGAS reads them', () => {
@@ -102,5 +102,12 @@ describe('vegasEdl', () => {
 
   it('keeps a label on one line', () => {
     expect(vegasEdl([{ name: 'a\nb', path: 'D:\\x.mov', seconds: 1 }])).toContain('RED     a b');
+  });
+});
+
+describe('save dialog defaults', () => {
+  it('is a .txt, the only type the VEGAS EDL import dialog lists', () => {
+    expect(EDL_DEFAULT_FILE_NAME).toMatch(/\.txt$/);
+    expect(EDL_SAVE_FILTER.extensions).toEqual(['txt']);
   });
 });

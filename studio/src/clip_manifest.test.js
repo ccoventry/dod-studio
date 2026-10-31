@@ -32,7 +32,7 @@ const lookups = {
 
 describe('manifestPathFor', () => {
   it('sits beside the EDL with the same name', () => {
-    expect(manifestPathFor('D:\\movie\\dod_highlights.edl')).toBe('D:\\movie\\dod_highlights.dodstudio.json');
+    expect(manifestPathFor('D:\\movie\\dod_highlights.txt')).toBe('D:\\movie\\dod_highlights.dodstudio.json');
     expect(manifestPathFor('D:\\movie\\cut.EDL')).toBe('D:\\movie\\cut.dodstudio.json');
     expect(manifestPathFor('D:\\movie\\noext')).toBe('D:\\movie\\noext.dodstudio.json');
   });
@@ -67,10 +67,10 @@ describe('clipManifest', () => {
   ];
 
   it('names each clip\'s player by their Use as name, with their nameplate', () => {
-    const m = clipManifest(clips, { edlName: 'dod_highlights.edl', ...project(), ...lookups });
+    const m = clipManifest(clips, { edlName: 'dod_highlights.txt', ...project(), ...lookups });
     expect(m.format).toBe(MANIFEST_FORMAT);
     expect(m.version).toBe(1);
-    expect(m.edl).toBe('dod_highlights.edl');
+    expect(m.edl).toBe('dod_highlights.txt');
     expect(m.clips[0]).toEqual({
       name: 'clip1', path: 'D:\\r\\clip1.mov', seconds: 2,
       player: { steam_id: M00CAT, name: 'Chris', in_game_name: 'dicE[: :]m00cat :D' },

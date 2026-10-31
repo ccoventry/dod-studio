@@ -19,9 +19,9 @@ export const MANIFEST_VERSION = 1;
 export const MANIFEST_SUFFIX = '.dodstudio.json';
 
 /** The manifest's path for an EDL saved at `edlPath`: beside it, the same
- *  name with `.edl` swapped for MANIFEST_SUFFIX. */
+ *  name with `.txt` (or `.edl`, if typed) swapped for MANIFEST_SUFFIX. */
 export function manifestPathFor(edlPath) {
-  return String(edlPath).replace(/\.edl$/i, '') + MANIFEST_SUFFIX;
+  return String(edlPath).replace(/\.(txt|edl)$/i, '') + MANIFEST_SUFFIX;
 }
 
 /** Each highlight of `demos` by its uid, for looking takes up. */

@@ -779,7 +779,7 @@ export const STRINGS = {
     exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     // #110: the finished renders as an EDL for VEGAS Pro.
     EXPORT_EDL_BUTTON: 'Export VEGAS EDL…',
-    EXPORT_EDL_TITLE: "Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there. A .dodstudio.json file beside it lists each clip's player and nameplate, for the VEGAS nameplate script.",
+    EXPORT_EDL_TITLE: "Save the finished renders as an EDL, one after another with their sound. In VEGAS Pro use File > Import > EDL Text File. The clips stay where they are, so keep them there. It is saved as .txt because that is the only type VEGAS's import dialog lists. A .dodstudio.json file beside it lists each clip's player and nameplate, for the VEGAS nameplate script.",
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',

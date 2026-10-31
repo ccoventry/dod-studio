@@ -13,6 +13,11 @@
 //  - It ignores `* LOC:` locators (no markers or regions appear). They stay
 //    in the file for editors that read them, with the clip's label.
 
+/** The save dialog's default name and filter: `.txt`, because VEGAS Pro's
+ *  File > Import > EDL Text File dialog only lists `*.txt` files. */
+export const EDL_DEFAULT_FILE_NAME = 'dod_highlights.txt';
+export const EDL_SAVE_FILTER = { name: 'VEGAS EDL (*.txt)', extensions: ['txt'] };
+
 /** Frames a second the EDL's timecodes count in: how VEGAS reads them. */
 export const EDL_TIMECODE_FPS = 30;
 
