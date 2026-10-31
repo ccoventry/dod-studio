@@ -303,6 +303,48 @@ mod tests {
         assert_eq!(names, ["a.dem", "b.dem"]);
     }
 
+    /// Two files whose starts match and whose ends can't be read are not
+    /// proof of a copy: an unreadable tail must key the file by its own path
+    /// (a constant would group them, and the user could delete one, #1233).
+    /// The heads come from the cache so only the tail read hits the lock.
+    #[cfg(windows)]
+    #[test]
+    fn files_with_matching_heads_and_unreadable_tails_are_not_grouped() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("auditor_badtail_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = vec![7u8; 3 * KEY_BYTES as usize];
+        let mut cache = KeyCache::default();
+        let mut paths = Vec::new();
+        for name in ["a.dem", "b.dem"] {
+            let p = dir.join(name);
+            fs::write(&p, &bytes).unwrap();
+            let p = fs::canonicalize(&p).unwrap();
+            let head = crate::keys::head_hash(&p, bytes.len() as u64).unwrap();
+            cache.put(&p, crate::keys::stamp(&p).unwrap(), head);
+            paths.push(p);
+        }
+        // Exclusive handles: opening to read the tail now fails.
+        let _locks: Vec<_> = paths
+            .iter()
+            .map(|p| {
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(p)
+                    .unwrap()
+            })
+            .collect();
+        assert!(crate::keys::tail_hash(&paths[0], bytes.len() as u64).is_err());
+        let audit =
+            find_duplicates_cached(paths.clone(), &AtomicBool::new(false), &None, &mut cache);
+        drop(_locks);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(audit.groups.is_empty(), "{:?}", audit.groups);
+        assert_eq!(audit.copies, 0);
+    }
+
     fn fixture_path() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures/ci_fixture.dem")
     }

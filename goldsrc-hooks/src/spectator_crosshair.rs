@@ -91,9 +91,10 @@
 //! gate before the span runs first, so the zoom skip and the #310 hide below
 //! work for it unchanged; the rest of the span keeps its stock bytes and is
 //! not reached. The draw's gap would be the *local* client's, which for a
-//! spectator holds no weapon, so `spectator_crosshair_gap` points its gap
-//! call at the spectated player's first, and the jump is only written once
-//! that is in. When it can't be, the stock dot stays.
+//! spectator holds no weapon, so `crosshair_gap` points its gap call at
+//! `spectator_crosshair_gap`'s answer for the spectated player first, and
+//! the jump is only written once that is in. When it can't be, the stock dot
+//! stays.
 //!
 //! A Players-table crosshair for the player on screen (#428) wins over this:
 //! `player_crosshair` swaps the stock spectator rect, so the span keeps it.
@@ -241,9 +242,23 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// The style currently written into the code, 0 for the stock rect or
 /// [`POV_RED`]. Read by [`status`] and by `ds_debug_status`.
 static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
-/// Set once the red crosshair could not be set up, so the reason is logged
-/// once and `status` can say why the stock dot is showing.
+/// Set while the red crosshair could not be set up at the last try, so the
+/// reason is logged once and `status` can say why the stock dot is showing.
+/// Cleared when a later try works ([`note_red_setup`]).
 static RED_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Notes whether setting up the red crosshair worked; true when a failure
+/// is the first since it last worked, so its reason is logged. A success
+/// clears the failure, or `ds_debug_status` would go on saying it "could not
+/// be set up" after a later `client.dll` where it works.
+fn note_red_setup(worked: bool) -> bool {
+    if worked {
+        RED_FAILED.store(false, Ordering::Relaxed);
+        false
+    } else {
+        !RED_FAILED.swap(true, Ordering::Relaxed)
+    }
+}
 
 /// Why the player's own view would have no crosshair this frame, as
 /// `anim_fix::CrosshairHidden`'s code, or 0 while it would have one.
@@ -393,7 +408,7 @@ fn wanted(present: &[u8], style: i32, jump: Option<&[u8; JUMP_LEN]>) -> Option<V
 /// The red crosshair's jump for the span at `span`, once the style-0 draw
 /// has been found.
 fn jump_for(span: usize) -> Result<[u8; JUMP_LEN], String> {
-    crate::spectator_crosshair_gap::style0_draw().map(|draw| red_jump(span, draw))
+    crate::crosshair_gap::style0_draw().map(|draw| red_jump(span, draw))
 }
 
 /// Sets up the red crosshair for the span at `span`: its gap call first, so
@@ -401,7 +416,8 @@ fn jump_for(span: usize) -> Result<[u8; JUMP_LEN], String> {
 /// whether the gap call was written.
 fn red_ready(span: usize) -> Result<([u8; JUMP_LEN], bool), String> {
     let jump = jump_for(span)?;
-    let hooked = crate::spectator_crosshair_gap::set_hooked(true)?;
+    crate::spectator_crosshair_gap::ready()?;
+    let hooked = crate::crosshair_gap::set_spectator_hook(true)?;
     Ok((jump, hooked))
 }
 
@@ -410,9 +426,12 @@ fn red_ready(span: usize) -> Result<([u8; JUMP_LEN], bool), String> {
 /// value says whether setting it up wrote anything.
 fn red_or_stock(span: usize) -> (i32, Option<[u8; JUMP_LEN]>, bool) {
     match red_ready(span) {
-        Ok((jump, hooked)) => (POV_RED, Some(jump), hooked),
+        Ok((jump, hooked)) => {
+            note_red_setup(true);
+            (POV_RED, Some(jump), hooked)
+        }
         Err(why) => {
-            if !RED_FAILED.swap(true, Ordering::Relaxed) {
+            if note_red_setup(false) {
                 unsafe {
                     crate::debug::report(&format!(
                         "spectator_crosshair: POV's red crosshair could not be set up, the stock one stays -- {why}"
@@ -506,7 +525,7 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     ACTIVE_STYLE.store(style, Ordering::Release);
     // After the span stops jumping to the draw, never before.
     if style != POV_RED {
-        wrote |= crate::spectator_crosshair_gap::set_hooked(false)?;
+        wrote |= crate::crosshair_gap::set_spectator_hook(false)?;
     }
     Ok(wrote)
 }
@@ -590,6 +609,20 @@ pub fn status() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_red_crosshair_that_works_later_clears_the_failure() {
+        assert!(note_red_setup(false), "the first failure is logged");
+        assert!(!note_red_setup(false), "once");
+        assert!(RED_FAILED.load(Ordering::Relaxed));
+        assert!(!note_red_setup(true));
+        assert!(
+            !RED_FAILED.load(Ordering::Relaxed),
+            "status stops saying it failed"
+        );
+        assert!(note_red_setup(false), "a new failure is logged again");
+        note_red_setup(true);
+    }
 
     /// The offsets are read off the disassembly in the module docs. Anchoring
     /// them to the pattern means a mistyped pattern cannot quietly move a

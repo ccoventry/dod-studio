@@ -47,13 +47,14 @@
 //! (`scale::name_draw_y`); at scale 1 with no font they stay where the game
 //! puts them.
 //!
-//! The font is `ISurface::CreateFont()` plus `AddGlyphSetToFont`. Each change
-//! makes a **new** handle: `CFontManager::AddGlyphSetToFont` returns false
-//! for a handle that already has a glyph set, and `VGUI_Surface026` has no
-//! way to free one. The old handle costs one table entry; the Windows font
-//! behind it is cached by name, size and flags, so switching back and forth
-//! allocates nothing more. The next frame draws with the new handle: no
-//! demo reload.
+//! The font is `ISurface::CreateFont()` plus `AddGlyphSetToFont`. A handle
+//! can't be changed: `CFontManager::AddGlyphSetToFont` returns false for a
+//! handle that already has a glyph set, and `VGUI_Surface026` has no way to
+//! free one. So every handle made is kept by what it was made for
+//! ([`HANDLES`]: face, size, weight, effects, widened or not), and `font` or
+//! `fallback` asking for one again gets the same handle back instead of a
+//! new table entry. The next frame draws with the new handle: no demo
+//! reload.
 //!
 //! Installed on the first `font` or `scale` other than 1, and never undone
 //! (`detour::Detour`):
@@ -791,6 +792,61 @@ pub(super) fn set_fallback(faces: Vec<String>) -> Result<String, String> {
     }
 }
 
+/// What a font handle was made for: the face (as Windows matches it, any
+/// case), the size, weight and effects, and whether it was widened to draw
+/// past Latin-1 itself (a widened handle can't be widened again, and a plain
+/// one may be in use plain).
+#[derive(Debug, Clone, PartialEq)]
+struct HandleKey {
+    face: String,
+    tall: i32,
+    weight: i32,
+    flags: i32,
+    wide: bool,
+}
+
+impl HandleKey {
+    fn new(face: &str, spec: &FontSpec, wide: bool) -> HandleKey {
+        HandleKey {
+            face: face.to_ascii_lowercase(),
+            tall: spec.tall,
+            weight: spec.weight(),
+            flags: spec.flags(),
+            wide,
+        }
+    }
+}
+
+/// How many handles [`HANDLES`] keeps: far more fonts than anyone tries in a
+/// game. Past it, new ones are made and not kept, as before the cache.
+const HANDLES_KEPT: usize = 64;
+
+/// Every font handle made, by what it was made for, so `font` and
+/// `fallback` reuse one instead of making another each time: vgui2's font
+/// manager has no way to free a handle, and each costs `hl.exe` GDI objects
+/// (#1182's review). Reusing never frees, so a handle still selected in a DC
+/// or in this frame's draw stays good. Console paths only (`font`,
+/// `fallback`), never the draw, so a `Mutex` is fine.
+static HANDLES: Mutex<Vec<(HandleKey, u32)>> = Mutex::new(Vec::new());
+
+/// The handle made before for `key`, if any.
+fn kept_handle(handles: &[(HandleKey, u32)], key: &HandleKey) -> Option<u32> {
+    handles.iter().find(|(k, _)| k == key).map(|&(_, h)| h)
+}
+
+/// Keeps `handle` for `key` (the first one stays when `key` has one); false
+/// when the cache is full and it isn't kept.
+fn keep_handle(handles: &mut Vec<(HandleKey, u32)>, key: HandleKey, handle: u32) -> bool {
+    if kept_handle(handles, &key).is_some() {
+        return true;
+    }
+    if handles.len() >= HANDLES_KEPT {
+        return false;
+    }
+    handles.push((key, handle));
+    true
+}
+
 #[cfg(target_arch = "x86")]
 mod hook {
     use std::ffi::{CStr, CString, c_char, c_void};
@@ -1375,24 +1431,69 @@ mod hook {
         Ok(())
     }
 
-    /// Makes `handle` (the chosen face, just made) draw every character the
-    /// face has, with a Tahoma handle for the rest (#1054). Returns how many
-    /// characters past Latin-1 the face covers.
-    fn widen_to_face(surface: *mut c_void, handle: u32, spec: &FontSpec) -> Result<usize, String> {
+    /// The chosen face drawing every character it has itself, with a Tahoma
+    /// handle for the rest (#1054).
+    struct Wide {
+        handle: u32,
+        fallback: u32,
+        coverage: Coverage,
+        /// How many characters past Latin-1 the face covers.
+        past_latin1: usize,
+    }
+
+    /// `spec`'s face widened to draw every character it has, and the Tahoma
+    /// handle for the rest; nothing in force changes.
+    fn widen_to_face(surface: *mut c_void, spec: &FontSpec) -> Result<Wide, String> {
         let (coverage, _) = face_coverage(&spec.face, spec)?;
-        let manager = font_manager(surface)?;
-        let fallback = make_handle(surface, FALLBACK_FACE, spec).map_err(|_| {
+        let fallback = font_handle(surface, FALLBACK_FACE, spec, false).map_err(|_| {
             format!("the engine would not make a {FALLBACK_FACE} font to fall back on")
         })?;
-        widen(manager, handle)?;
+        let handle = font_handle(surface, &spec.face, spec, true)?;
         let past_latin1 = (0x100u32..0x1_0000)
             .filter(|&u| coverage.has(u as u16))
             .count();
-        if let Ok(mut held) = COVERAGE.write() {
-            *held = Some(coverage);
+        Ok(Wide {
+            handle,
+            fallback,
+            coverage,
+            past_latin1,
+        })
+    }
+
+    /// A handle for `face` at `spec`'s size, weight and effects, widened
+    /// when `wide`: the one made before for the same, else a new one, kept
+    /// for next time ([`HANDLES`]). A handle whose widening failed is kept
+    /// as the plain one it still is.
+    fn font_handle(
+        surface: *mut c_void,
+        face: &str,
+        spec: &FontSpec,
+        wide: bool,
+    ) -> Result<u32, String> {
+        let key = HandleKey::new(face, spec, wide);
+        let mut handles = HANDLES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(handle) = kept_handle(&handles, &key) {
+            return Ok(handle);
         }
-        FALLBACK.store(fallback, Ordering::Release);
-        Ok(past_latin1)
+        let manager = if wide {
+            Some(font_manager(surface)?)
+        } else {
+            None
+        };
+        let handle = make_handle(surface, face, spec)?;
+        let widened = manager.map(|manager| widen(manager, handle));
+        let kept_as = match widened {
+            Some(Err(_)) => HandleKey { wide: false, ..key },
+            _ => key,
+        };
+        if !keep_handle(&mut handles, kept_as, handle) {
+            unsafe {
+                crate::debug::report(&format!(
+                    "deathmsg font: {HANDLES_KEPT} font handles kept already; handle {handle} for {face:?} is not reused"
+                ))
+            };
+        }
+        widened.unwrap_or(Ok(())).map(|()| handle)
     }
 
     /// A new handle for `face` at `spec`'s size, weight and effects, through
@@ -1437,7 +1538,6 @@ mod hook {
     /// "UI").
     fn make_backup(
         surface: *mut c_void,
-        manager: usize,
         face: &str,
         spec: &FontSpec,
         tahoma: u32,
@@ -1451,9 +1551,7 @@ mod hook {
         if face.eq_ignore_ascii_case(FALLBACK_FACE) {
             return Ok((tahoma, coverage));
         }
-        let handle = make_handle(surface, face, spec)?;
-        widen(manager, handle)?;
-        Ok((handle, coverage))
+        Ok((font_handle(surface, face, spec, true)?, coverage))
     }
 
     /// The typed backup faces made in `spec`, in order, and a sentence for
@@ -1465,10 +1563,9 @@ mod hook {
         if faces.is_empty() || tahoma == 0 {
             return (Vec::new(), String::new());
         }
-        let manager = match font_manager(surface) {
-            Ok(manager) => manager,
-            Err(why) => return (Vec::new(), format!(" No backup faces: {why}.")),
-        };
+        if let Err(why) = font_manager(surface) {
+            return (Vec::new(), format!(" No backup faces: {why}."));
+        }
         let mut made = Vec::new();
         let mut said = Vec::new();
         for face in &faces {
@@ -1476,7 +1573,7 @@ mod hook {
                 said.push(format!("\"{face}\" is the font itself, skipped"));
                 continue;
             }
-            match make_backup(surface, manager, face, spec, tahoma) {
+            match make_backup(surface, face, spec, tahoma) {
                 Ok((handle, coverage)) => {
                     let past_latin1 = (0x100u32..0x1_0000)
                         .filter(|&u| coverage.has(u as u16))
@@ -1689,45 +1786,51 @@ mod hook {
             };
         }
         let surface = surface()?;
-        let handle = make_handle(surface, &spec.face, &spec)
-            .map_err(|why| format!("{why}: {spec} -- could Windows not create that font?"))?;
+        let compat = !spec.face.eq_ignore_ascii_case(FALLBACK_FACE);
+        let wide = compat.then(|| widen_to_face(surface, &spec));
+        let handle = match &wide {
+            Some(Ok(wide)) => wide.handle,
+            _ => font_handle(surface, &spec.face, &spec, false)
+                .map_err(|why| format!("{why}: {spec} -- could Windows not create that font?"))?,
+        };
         // Safety: the surface's own call, slot checked on both builds.
         let tall = unsafe {
             let font_tall: FontTallFn = slot(surface, SURFACE_GET_FONT_TALL);
             font_tall(surface, handle)
         };
-        let compat = !spec.face.eq_ignore_ascii_case(FALLBACK_FACE);
         // The old handle's runs must not be drawn with the new one's coverage.
         FONT.store(0, Ordering::Release);
         FALLBACK.store(0, Ordering::Release);
         if let Ok(mut held) = BACKUPS.write() {
             held.clear();
         }
-        let beyond = if compat {
-            match widen_to_face(surface, handle, &spec) {
-                Ok(n) => {
-                    let (made, said) = make_backups(surface, &spec);
-                    let rest = if said.is_empty() {
-                        format!(", the rest in {FALLBACK_FACE}.")
-                    } else {
-                        ".".to_string()
-                    };
-                    if let Ok(mut held) = BACKUPS.write() {
-                        *held = made;
-                    }
-                    format!(" Past Latin-1 it draws the {n} characters it has itself{rest}{said}")
+        let beyond = match wide {
+            Some(Ok(wide)) => {
+                if let Ok(mut held) = COVERAGE.write() {
+                    *held = Some(wide.coverage);
                 }
-                Err(why) => {
-                    unsafe {
-                        crate::debug::report(&format!(
-                            "deathmsg font: characters past Latin-1 stay {FALLBACK_FACE}'s -- {why}"
-                        ))
-                    };
-                    format!(" Past Latin-1 it draws in {FALLBACK_FACE} ({why}).")
+                FALLBACK.store(wide.fallback, Ordering::Release);
+                let (made, said) = make_backups(surface, &spec);
+                let rest = if said.is_empty() {
+                    format!(", the rest in {FALLBACK_FACE}.")
+                } else {
+                    ".".to_string()
+                };
+                if let Ok(mut held) = BACKUPS.write() {
+                    *held = made;
                 }
+                let n = wide.past_latin1;
+                format!(" Past Latin-1 it draws the {n} characters it has itself{rest}{said}")
             }
-        } else {
-            String::new()
+            Some(Err(why)) => {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "deathmsg font: characters past Latin-1 stay {FALLBACK_FACE}'s -- {why}"
+                    ))
+                };
+                format!(" Past Latin-1 it draws in {FALLBACK_FACE} ({why}).")
+            }
+            None => String::new(),
         };
         COMPAT.store(compat, Ordering::Relaxed);
         // Height first: the stub reads it, and a draw with the new handle
@@ -1952,6 +2055,74 @@ mod tests {
             .unwrap();
         assert_eq!(all.flags(), 0x80 | 0x200);
         assert_eq!(all.weight(), 700);
+    }
+
+    #[test]
+    fn a_font_asked_for_again_reuses_its_handle() {
+        let spec = parse_args(&argv(&["Verdana", "20"])).unwrap().unwrap();
+        let bold = parse_args(&argv(&["Verdana", "20", "bold"]))
+            .unwrap()
+            .unwrap();
+        let mut kept = Vec::new();
+        assert!(keep_handle(
+            &mut kept,
+            HandleKey::new("Verdana", &spec, true),
+            7
+        ));
+        assert!(keep_handle(
+            &mut kept,
+            HandleKey::new("Tahoma", &spec, false),
+            8
+        ));
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("verdana", &spec, true)),
+            Some(7),
+            "Windows matches a face in any case"
+        );
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("Verdana", &spec, false)),
+            None,
+            "a plain handle is not the widened one"
+        );
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("Verdana", &bold, true)),
+            None
+        );
+        assert!(keep_handle(
+            &mut kept,
+            HandleKey::new("Verdana", &spec, true),
+            9
+        ));
+        assert_eq!(
+            kept_handle(&kept, &HandleKey::new("Verdana", &spec, true)),
+            Some(7),
+            "the first handle stays"
+        );
+    }
+
+    #[test]
+    fn the_handle_cache_is_bounded() {
+        let spec = |tall| FontSpec {
+            face: "Verdana".into(),
+            tall,
+            bold: false,
+            shadow: false,
+            outline: false,
+        };
+        let mut kept = Vec::new();
+        for tall in 0..HANDLES_KEPT as i32 {
+            assert!(keep_handle(
+                &mut kept,
+                HandleKey::new("Verdana", &spec(tall), false),
+                1
+            ));
+        }
+        assert!(!keep_handle(
+            &mut kept,
+            HandleKey::new("Verdana", &spec(999), false),
+            2
+        ));
+        assert_eq!(kept.len(), HANDLES_KEPT);
     }
 
     #[test]

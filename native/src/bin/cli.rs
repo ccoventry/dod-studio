@@ -279,7 +279,18 @@ fn run_patch_streak_subcommand(
     }
 
     if intervals.is_empty() {
-        return Err(messages::CLI_NO_KILLSTREAKS.to_string());
+        let longest = player
+            .kill_streaks
+            .iter()
+            .map(|s| s.kills.len())
+            .max()
+            .unwrap_or(0);
+        return Err(messages::cli_no_killstreaks(
+            &player.name,
+            min_streak,
+            weapon_query.as_deref(),
+            longest,
+        ));
     }
 
     println!("{}", messages::CLI_READING_RAW_BYTES);

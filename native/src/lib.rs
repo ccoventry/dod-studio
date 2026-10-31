@@ -52,10 +52,6 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
-/// Linking a demo folder on another drive into the game folder, so
-/// `viewdemo` can play from it in place (#376).
-#[cfg(windows)]
-pub mod demo_links;
 /// Which match and half each demo of a list is (#685).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod match_groups;

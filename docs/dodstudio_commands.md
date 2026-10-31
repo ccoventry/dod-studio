@@ -383,7 +383,8 @@ form over the demo, as **E** does during a highlight (#1139): a small window of
 its own with the menu closed (`ReviewForm.res`); Tab moves between its boxes,
 Enter saves (a `[dod-studio] REVIEW_EDIT` line: Studio sets the row's kill
 range and note and leaves its mark), Esc cancels, and it closes by itself when
-the review moves on or the menu comes up. Clicking its buttons works on the
+the review moves on, a demo load ends its clip (without saving) or the menu
+comes up. Clicking its buttons works on the
 pre-Anniversary build; the keyboard does everything on both. Bare prints where the review is.
 With no review running, `ask start` and `ask here` (the Review tab's **From
 the start** and **From here**, #1142) ask DoD Studio, over its game pipe, to
@@ -391,7 +392,9 @@ review the demo playing: every highlight, from the first or from the first
 at or after the demo's clock now (`from=` on the queue's header; Back still
 reaches the ones before). Studio scans the demo first when it isn't in the
 Master Demo Queue, and the tab shows what it is doing. The buttons are
-greyed while DoD Studio isn't running or no demo plays.
+greyed while DoD Studio isn't running or no demo plays. An `ask` typed while
+the demo still loads waits for it to finish loading (three minutes at most),
+then asks; `ask here` keeps the clock it was typed at.
 While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
 `+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
 move the camera off the highlight's player (#826), and the console refuses
@@ -698,6 +701,7 @@ or `engine <console command>`. See `src/studio_panel.rs` (#408).
 ## Stock settings the hook extends
 
 - **`hud_fastswitch 1` also keeps the weapon list hidden in demo playback (#1032).** A POV demo replays the player's number keys, and the game's own `SelectSlot` opens the weapon list even with fast switch when the key's slot holds two weapons. In DoD that happens to the grenade key after a primed grenade is caught with USE: the caught one becomes a weapon of its own beside the class's grenade. While a demo plays with `hud_fastswitch 1`, the hook skips drawing the list (one code byte in `CHudAmmo::DrawWeaponList`); the weapon still switches as recorded. With `hud_fastswitch 0` playback shows the list as the player saw it, and live play is unchanged either way. `ds_debug_status` gets a `weapon list:` line once it has hidden it. `goldsrc-hooks/src/weapon_list.rs`.
+- **`cl_dynamic_xhair 1` also opens a POV demo's red crosshair while its recorder runs.** With `cl_xhair_style 0`, the game widens the gap above 105 u/s from a velocity only its own prediction writes, and prediction does not run while a demo plays, so a POV demo kept the resting gap however fast the recorder ran. While a POV demo plays, the hook hands the game's gap function the velocity the demo recorded for the view, for that one call; the weapon, the bipod and sandbag, grenades and rockets (a fixed 4 px) and `cl_dynamic_xhair 0` (a fixed 4 px) are the game's own as before. HLTV demos follow the watched player through `ds_spec_match_pov` (#308), and live play is unchanged. `ds_debug_status` gets a `POV demo red crosshair:` line while a POV demo plays. `goldsrc-hooks/src/pov_crosshair_gap.rs`, [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2.
 
 ## Renamed from `dodstudio_` (#555)
 
