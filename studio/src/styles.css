@@ -4466,3 +4466,22 @@ button.setup-skip:hover:not(:disabled) {
 #obs-test-apply-btn {
   margin-top: 8px;
 }
+
+/* Status chip at the end of a Capture Output row (#25). */
+.output-row-status {
+  flex-shrink: 0;
+  margin-left: 6px;
+  /* One width for every chip, so the buttons before it line up row to row. */
+  width: 9.5em;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.output-row-status[hidden] { display: none; }
+.output-row-status-ok { color: #66bb6a; }
+.output-row-status-note { color: var(--text-muted); }
+.output-row-status-bad { color: #ef5350; }
