@@ -109,6 +109,8 @@ mod tests {
         "hud_hide_plugin_text",
         "hud_hide_teammate_info",
         "hud_overview_hide_speaker",
+        "hud_show_player_health",
+        "hud_show_player_names",
         "map_weather",
         "player_change_name",
         "player_fix_model_flicker",
