@@ -10,8 +10,9 @@ built" below). **Tier 4 is done as far as it can go without losing data**
 sounds, but it cannot skip `SvcDeltaPacketEntities` / `SvcClientData`, the two
 streams the plan named, because its rows read them. Both are tracked as
 [GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) (open),
-whose 2026-09-28 decision keeps full decoding for the Demo Analyzer and makes
-Tier 4 a fast mode for the capture-queue scan only.
+whose 2026-09-28 decision kept full decoding for the Demo Analyzer; the sound
+skip has since become the default for every analysis (see "What the scan skips
+instead: sounds"), and the rest of Tier 4 stays undone.
 
 ## Goal
 
@@ -212,16 +213,19 @@ done; a scan that wanted it would first have to stop caching its analysis.
 `MessageDataParseMode::ParseWithoutSounds` reads each sound through (the bit
 layout is written once, `sound.rs`'s `read_sound`, so it fails where the full
 parse fails) and leaves it out of the frame's list; `analysis::Sounds::Skip`
-selects it and `native::run_analyzer_cached_decoding` passes it down. Only the
-scan uses it; the Demo Analyzer's `run_analyzer_cached` keeps `Sounds::Decode`.
-The two give the same `Analysis`, so the cache entry the scan writes is the one
+selects it and `native::run_analyzer_cached_decoding` passes it down. It is the
+default: the scan, the Demo Analyzer (`analyze_demo_full` ->
+`run_analyzer_cached`), the in-game analysis server, `dod-studio-cli` and the
+web analyzer (`try_from_bytes_with_progress`) all skip sounds. `Sounds::Decode`
+stays selectable through `try_from_bytes_decoding` / `run_analyzer_cached_decoding`
+(the benchmark's default, for the before numbers). The two give the same `Analysis`, so the cache entry the scan writes is the one
 the Analyzer would have made, and neither `SCHEMA_VERSION` nor
-`HIGHLIGHTS_VERSION` moves. An analyzer that starts reading sounds must make the
-scan decode them, and `tests_sounds.rs` fails if it doesn't. Separately,
+`HIGHLIGHTS_VERSION` moves. An analyzer that starts reading sounds must switch the
+default back to `Decode`, and `tests_sounds.rs` fails if it doesn't. Separately,
 `BitReader` now borrows the message's bytes rather than copying the rest of the
 packet for every message that reads bits (both paths gain from that).
 
-Checked on every demo in the PRE install's `dod\` folder (490: the `solifotw-`
+Checked on 21 PRE demos spread across the folder when the default changed, and on every demo in the PRE install's `dod\` folder (490: the `solifotw-`
 set, KTP, WSOD25 and scrim POVs, 35 HLTV), with
 `DOD_ANALYSIS_DEMOS=<folder> cargo test --release -p analysis -- --ignored skipping_sounds`:
 the analysis is identical, or fails with the same error, on all of them. CI
@@ -244,6 +248,8 @@ two alternating rounds each; times are averages over the 10, heap ranges the
 So a cold scan parse is about 15% faster and frees about 15% less; the HLTV
 demos, with the most sounds, gain most (`monday-wsod25_r07_m1_h1_hltv.dem`:
 decode 458 -> 290 ms, blocks 5.2 -> 2.7 M).
+
+Re-measured when the Analyzer switched to the skip (8 PRE demos, `dod-benchmark` with and without `--without-sounds`, 4 alternating rounds on a busy desktop): decode+drop of the quietest round fell from 6.6 s to 5.5 s in total (-17%), but the other rounds varied by 5-20% either way, so read it as a gain of roughly the table's 15% with a noisy machine.
 
 ### Tier 4/5 — the plan as written before either was started (issue #37)
 

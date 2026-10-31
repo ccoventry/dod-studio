@@ -129,7 +129,7 @@ pub fn run_analyzer_with_progress<F>(
 where
     F: FnMut(usize, usize),
 {
-    run_analyzer_decoding(demo_path, analysis::Sounds::Decode, progress_cb)
+    run_analyzer_decoding(demo_path, analysis::Sounds::Skip, progress_cb)
 }
 
 /// `run_analyzer_with_progress`, decoding the demo's sounds or not
@@ -185,12 +185,12 @@ pub fn run_analyzer_cached<F>(
 where
     F: FnMut(usize, usize),
 {
-    run_analyzer_cached_decoding(demo_path, analysis::Sounds::Decode, progress_cb)
+    run_analyzer_cached_decoding(demo_path, analysis::Sounds::Skip, progress_cb)
 }
 
-/// `run_analyzer_cached`, decoding the demo's sounds or not on a miss. The
-/// capture-queue scan skips them (#37); the entry it saves is the one the
-/// Demo Analyzer would have made, since no analyzer reads a sound.
+/// `run_analyzer_cached`, decoding the demo's sounds or not on a miss.
+/// Every caller skips them (#37), the default; the entry is the same either
+/// way, since no analyzer reads a sound.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer_cached_decoding<F>(
     demo_path: &PathBuf,
