@@ -33,6 +33,8 @@ mod segment;
 mod team_tag;
 #[cfg(test)]
 mod tests_fixture;
+#[cfg(test)]
+mod tests_sounds;
 mod time;
 #[cfg(not(target_arch = "wasm32"))]
 mod utf16;
@@ -59,7 +61,9 @@ use crate::{
     segment::{use_segment_boundary, use_signon_maps},
     time::{GameTime, use_timing_updates},
 };
-use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
+use dem::types::{
+    Demo, EngineMessage, Frame, FrameData, MessageData, MessageDataParseMode, NetMessage,
+};
 use dod::UserMessage;
 use std::time::Duration;
 
@@ -171,6 +175,17 @@ fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
     from + (done * (to - from) as u128 / total as u128) as usize
 }
 
+/// Whether an analysis decodes the demo's `svc_sound` messages. No analyzer
+/// reads them, so both give the same [`Analysis`] (a test holds them equal),
+/// and the analyzer cache serves either; skipping them is the capture-queue
+/// scan's fast parse (#37), while the Demo Analyzer keeps the full decode.
+/// An analyzer that starts reading sounds must make the scan decode them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sounds {
+    Decode,
+    Skip,
+}
+
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Analysis {
     pub demo_info: DemoInfo,
@@ -260,10 +275,27 @@ impl Analysis {
     /// [`PARSE_SHARE`] of [`PROGRESS_SCALE`] (it is ~85% of the time, measured
     /// on a 72 MB demo), going through its frames the rest, and the last call
     /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`.
-    pub fn try_from_bytes_with_progress<F>(value: &[u8], mut progress_cb: F) -> Result<Self, String>
+    pub fn try_from_bytes_with_progress<F>(value: &[u8], progress_cb: F) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
     {
+        Self::try_from_bytes_decoding(value, Sounds::Decode, progress_cb)
+    }
+
+    /// [`Analysis::try_from_bytes_with_progress`], decoding the demo's
+    /// sounds or not as `sounds` says.
+    pub fn try_from_bytes_decoding<F>(
+        value: &[u8],
+        sounds: Sounds,
+        mut progress_cb: F,
+    ) -> Result<Self, String>
+    where
+        F: FnMut(usize, usize),
+    {
+        let mode = match sounds {
+            Sounds::Decode => MessageDataParseMode::Parse,
+            Sounds::Skip => MessageDataParseMode::ParseWithoutSounds,
+        };
         // This only catches anything in a build that unwinds -- tests and
         // `cargo run` without `--release`. The release profile sets
         // `panic = "abort"`, so a panic inside the parser aborts the process
@@ -277,7 +309,7 @@ impl Analysis {
         // A demo damaged partway (#811) is read up to the frame that breaks,
         // and the analysis says where that is (`DemoInfo::damage`).
         let demo_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dem::open_demo_from_bytes_tolerant_with_progress(value, &mut |read, total| {
+            dem::open_demo_from_bytes_tolerant_in_mode(value, mode, &mut |read, total| {
                 progress_cb(scaled(read, total, 0, PARSE_SHARE), PROGRESS_SCALE)
             })
         }));
