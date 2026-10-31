@@ -758,20 +758,72 @@ fn the_movie_modes_record_aliases_are_unchanged_by_agr_mode() {
 }
 
 #[test]
-fn agr_mode_pins_the_timestep_to_the_agr_fps_and_never_records_a_movie() {
+fn agr_mode_starts_the_agr_and_its_sound_on_one_frame_at_the_agr_fps() {
     let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
     config.capture_fps = 300;
     config.agr_fps = 30;
-    let lines = record_alias_lines(&config);
+    // The timestep first, then both recordings on the same command line.
     assert_eq!(
-        lines,
+        route_alias_line(&config, "dodstudio_chain_01", 4, 1),
         format!(
-            "alias sys_record_start \"host_framerate {}\"\n\
-             alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
-            1.0f32 / 30.0
+            "alias dodstudio_chain_01_route_4 \"host_framerate {}; mirv_movie_filename \
+             _route_1/dodstudio_chain_01_b4; mirv_agr start {}; mirv_recordmovie_start\"\n",
+            1.0f32 / 30.0,
+            agr_route_path(1, "dodstudio_chain_01", 4)
         )
     );
-    assert!(!lines.contains("mirv_recordmovie"), "{lines}");
+    assert_eq!(
+        record_alias_lines(&config),
+        "alias sys_record_start \"stopsound\"\n\
+         alias sys_record_stop \"mirv_agr stop; mirv_recordmovie_stop; host_framerate 0\"\n"
+    );
+    // The movie recorder pins the timestep to 1 / mirv_movie_fps.
+    assert!(final_init_commands(&config).contains(&"mirv_movie_fps 30".to_string()));
+}
+
+#[test]
+fn agr_mode_sends_the_picture_to_ffmpegs_null_muxer_and_keeps_the_sound() {
+    let dir = std::env::temp_dir().join("dod_test_agr_sound_lines");
+    let agr = helper_cfg_preamble(&config_in_mode(crate::patch::CaptureMode::Agr), &dir);
+    assert!(agr.contains("mirv_movie_ffmpeg all enabled 1\n"), "{agr}");
+    assert!(
+        agr.contains("mirv_movie_ffmpeg all options \"-c:v rawvideo -f null NUL\"\n"),
+        "{agr}"
+    );
+    let frames = helper_cfg_preamble(
+        &config_in_mode(crate::patch::CaptureMode::FrameSequence),
+        &dir,
+    );
+    assert!(!frames.contains("enabled 1"), "{frames}");
+}
+
+/// A batch in a game already open (#725) inherits the batch before it's
+/// `mirv_movie_ffmpeg`: after AGR's null muxer, a frame-sequence batch
+/// would write no frame. Every mode says what it wants, last.
+#[test]
+fn every_mode_sets_hlaes_ffmpeg_pipe_so_an_earlier_batch_leaves_none_behind() {
+    let dir = std::env::temp_dir().join("dod_test_ffmpeg_pipe_per_mode");
+    let pipe = |mode| {
+        let cfg = helper_cfg_preamble(&config_in_mode(mode), &dir);
+        cfg.lines()
+            .rfind(|l| l.starts_with("mirv_movie_ffmpeg all enabled "))
+            .map(str::to_string)
+    };
+    use crate::patch::CaptureMode::*;
+    for mode in [FrameSequence, Obs] {
+        assert_eq!(
+            pipe(mode).as_deref(),
+            Some("mirv_movie_ffmpeg all enabled 0"),
+            "{mode:?}"
+        );
+    }
+    for mode in [DirectToVideo, Agr] {
+        assert_eq!(
+            pipe(mode).as_deref(),
+            Some("mirv_movie_ffmpeg all enabled 1"),
+            "{mode:?}"
+        );
+    }
 }
 
 #[test]
@@ -798,9 +850,9 @@ fn the_agr_path_survives_goldsrcs_tokenizer_as_one_argument() {
     for (drive, block) in [(0, 0), (3, 17), (12, 250)] {
         let line = route_alias_line(&config, "dodstudio_chain_12", block, drive);
         let path = agr_route_path(drive, "dodstudio_chain_12", block);
-        assert_eq!(
-            line,
-            format!("alias dodstudio_chain_12_route_{block} \"mirv_agr start {path}\"\n")
+        assert!(
+            line.contains(&format!("; mirv_agr start {path}; ")),
+            "{line}"
         );
         assert!(
             !path
@@ -869,7 +921,23 @@ fn an_agr_batch_patches_the_same_demos_as_a_frame_sequence_batch() {
     assert_eq!(agr_jobs.len(), seq_jobs.len());
     for (a, s) in agr_jobs.iter().zip(&seq_jobs) {
         assert_eq!(a.scheduled_commands, s.scheduled_commands);
-        assert_eq!(a.init_commands, s.init_commands);
+        // All but the movie rate, which AGR mode's sound runs at (#450).
+        let others = |commands: &[String]| -> Vec<String> {
+            commands
+                .iter()
+                .filter(|c| !c.starts_with("mirv_movie_fps "))
+                .cloned()
+                .collect()
+        };
+        assert_eq!(others(&a.init_commands), others(&s.init_commands));
+        // The primer job sets no movie rate at all.
+        assert!(
+            a.init_commands
+                .iter()
+                .all(|c| !c.starts_with("mirv_movie_fps ") || c == "mirv_movie_fps 60"),
+            "{:?}",
+            a.init_commands
+        );
         for (tick, cmd) in &a.scheduled_commands {
             assert!(
                 cmd.len() < crate::patch::MAX_CONSOLE_CMD_SAFE_LEN,
@@ -877,6 +945,11 @@ fn an_agr_batch_patches_the_same_demos_as_a_frame_sequence_batch() {
             );
         }
     }
+    assert!(
+        agr_jobs
+            .iter()
+            .any(|j| j.init_commands.contains(&"mirv_movie_fps 60".to_string()))
+    );
 }
 
 #[test]
@@ -908,20 +981,11 @@ fn an_agr_batch_routes_each_block_into_its_own_take_folder_and_makes_it() {
         );
         assert!(
             cfg.contains(&format!(
-                "alias {}_route_{} \"mirv_agr start {rel}\"\n",
-                block.demo_name, block.block_index
+                "; mirv_agr start {rel}; mirv_recordmovie_start\"\n"
             )),
             "{cfg}"
         );
     }
-    assert!(!cfg.contains("mirv_movie_filename _route_"), "{cfg}");
-    assert!(
-        cfg.contains(&format!(
-            "alias sys_record_start \"host_framerate {}\"",
-            1.0f32 / 60.0
-        )),
-        "{cfg}"
-    );
 }
 
 #[test]

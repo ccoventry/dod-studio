@@ -91,6 +91,10 @@ fn catch_up_one(
         captured,
         blocks.len()
     ));
+    // An AGR take's sound goes beside its `.agr` (#450).
+    if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::agr_take::place_batch_sounds(&manifest.blocks);
+    }
     record_capture_settings(&manifest, &blocks);
     crate::manifest_file::write_in(dir, &manifest, OUTCOME_UNWATCHED, Some(&blocks));
     CaughtUpBatch {

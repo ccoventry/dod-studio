@@ -1,5 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod agr_take;
 pub mod autosave;
 pub mod capture_room;
 pub mod combine;

@@ -43,7 +43,7 @@ pub fn is_short(video: f64, audio: f64) -> bool {
 
 /// The take folders under a block folder: the block itself and HLAE's
 /// numbered `take*` folders inside it.
-fn take_folders(block_folder: &Path) -> Vec<PathBuf> {
+pub(crate) fn take_folders(block_folder: &Path) -> Vec<PathBuf> {
     let mut folders = vec![block_folder.to_path_buf()];
     if let Ok(entries) = std::fs::read_dir(block_folder) {
         folders.extend(
