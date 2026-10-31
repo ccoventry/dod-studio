@@ -597,7 +597,12 @@ fn asks_start_behind<S: AsRef<str>>(args: &[S]) -> bool {
 /// Starts the start-up watch when the launch line asks for it. Called once,
 /// from the DLL's worker thread, before the game opens its window.
 pub fn start_behind_if_asked() {
-    let args: Vec<String> = std::env::args().collect();
+    // `args_os`, not `args`: `std::env::args()` panics on any argument that
+    // isn't valid Unicode (a demo or folder name), and a panic here aborts
+    // the game under `panic = "abort"`. A lossy argument just fails to match.
+    let args: Vec<String> = std::env::args_os()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
     if !asks_start_behind(&args) {
         return;
     }
