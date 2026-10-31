@@ -1311,6 +1311,13 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
   },
 
+  // ── Draggable splits between panels (#47) ────────────────────────────────
+  LAYOUT: {
+    SPLIT_HANDLE_TITLE: 'Drag to resize, double-click to reset',
+    CAPTURE_SPLIT_RESET_LOG: 'Capture Studio split reset to the default',
+    ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
+  },
+
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
   ANALYZER: {
     EXPLORER_TITLE: 'Explorer',
@@ -1319,7 +1326,6 @@ export const STRINGS = {
     EXPLORER_SETTINGS_SUMMARY: '⚙ Explorer Settings',
     SHOW_FOLDER_COUNTS_LABEL: 'Show folder demo counts in the tree',
     ADD_PIN_BUTTON: '➕ Add Pin…',
-    RESIZE_HANDLE_TITLE: 'Drag to resize',
     DEMOS_TITLE: 'Demos',
     CACHE_ALL_BUTTON: 'Cache all',
     CACHE_STOP_BUTTON: 'Stop',

@@ -591,12 +591,17 @@ html.picking-path * {
   gap: 10px;
 }
 
+/* Left pane takes 40% by default (the queue is a short list; the tables on
+   the right are what's read, #47). capture-split-handle resizes it, and the
+   minimums keep both tables usable. */
 #pane-workspace {
-  border-right: 1px solid var(--border-color);
+  flex: 0 0 40%;
+  min-width: 380px;
   background: #161616;
 }
 
 #pane-details-config {
+  min-width: 520px;
   background: #1a1a1a;
 }
 
@@ -2201,14 +2206,15 @@ button.danger-btn {
   min-height: 0;
 }
 
-/* Drag handle between the Explorer sidebar and the main column — JS-driven
-   (analyzer_pane.js) rather than native CSS `resize` so width can persist
+/* Drag handle between two panels (Explorer sidebar / main column, Capture
+   Studio's two panes, the Analyzer's Demos / report) — JS-driven
+   (split_resize.js) rather than native CSS `resize` so the size can persist
    to settings.json the same way every other layout preference does. Sized
    to the standard 10px .content-pane gap (see #pane-demo-analyzer above)
    with a thin 1px line centered inside it, rather than an extra bar on top
    of that gap — keeps the resting look identical to every other split in
    the app, only revealing itself as interactive on hover/drag. */
-.analyzer-resize-handle {
+.split-handle {
   width: 10px;
   flex-shrink: 0;
   cursor: col-resize;
@@ -2216,17 +2222,40 @@ button.danger-btn {
   justify-content: center;
 }
 
-.analyzer-resize-handle::before {
+.split-handle::before {
   content: "";
   width: 1px;
   align-self: stretch;
   background: var(--border-color);
 }
 
-.analyzer-resize-handle:hover::before,
-.analyzer-resize-handle.resizing::before {
+.split-handle:hover::before,
+.split-handle.resizing::before {
   width: 2px;
   background: var(--primary-accent);
+}
+
+/* The horizontal variant sits in the column's 10px gaps (-10px margins give
+   back the handle's own height), so the resting look is the usual gap. */
+.split-handle-row {
+  width: auto;
+  height: 10px;
+  margin: -10px 0;
+  cursor: row-resize;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.split-handle-row::before {
+  width: auto;
+  height: 1px;
+  align-self: stretch;
+}
+
+.split-handle-row:hover::before,
+.split-handle-row.resizing::before {
+  width: auto;
+  height: 2px;
 }
 
 .analyzer-main-column {
