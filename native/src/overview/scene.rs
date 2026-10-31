@@ -406,18 +406,7 @@ pub fn build_until(
     }
 
     // Indoor colours: the least-used one no touching indoor area has.
-    let mut touch: HashMap<u32, HashSet<u32>> = HashMap::new();
-    for (&c, &a) in &area_of {
-        let (i, j) = (c / reach.ny, c % reach.ny);
-        for c2 in [(i + 1) * reach.ny + j, c + 1] {
-            if let Some(&b) = area_of.get(&c2)
-                && b != a
-            {
-                touch.entry(a).or_default().insert(b);
-                touch.entry(b).or_default().insert(a);
-            }
-        }
-    }
+    let touch = touching_areas(&area_of, reach.ny);
     let mut order: Vec<u32> = areas.iter().filter(|a| a.indoor).map(|a| a.id).collect();
     order.sort_by_key(|&id| std::cmp::Reverse(areas[id as usize].cells));
     let mut used: HashMap<[u8; 3], usize> = HashMap::new();
@@ -635,6 +624,26 @@ pub fn build_until(
     })
 }
 
+/// Which areas touch, from the area of each grid cell (`i * ny + j`). Each
+/// pair of side-by-side cells is looked at once; the cell after the last in
+/// a column is the first of the next column, not a neighbour.
+fn touching_areas(area_of: &HashMap<i32, u32>, ny: i32) -> HashMap<u32, HashSet<u32>> {
+    let mut touch: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for (&c, &a) in area_of {
+        let (i, j) = (c / ny, c % ny);
+        let right = (j + 1 < ny).then_some(c + 1);
+        for c2 in [Some((i + 1) * ny + j), right].into_iter().flatten() {
+            if let Some(&b) = area_of.get(&c2)
+                && b != a
+            {
+                touch.entry(a).or_default().insert(b);
+                touch.entry(b).or_default().insert(a);
+            }
+        }
+    }
+    touch
+}
+
 /// The outer edges of each breakable's drawn floors: every edge of its
 /// faces that no other of its faces shares.
 fn breakable_edges(level: &Level, faces: &[SceneFace], t: &Transform) -> Vec<[[f32; 2]; 2]> {
@@ -757,6 +766,19 @@ mod tests {
         assert_eq!(edges.len(), 6);
         let shared = |e: &[[f32; 2]; 2]| e.iter().all(|p| p[0] == 10.0);
         assert!(!edges.iter().any(shared));
+    }
+
+    #[test]
+    fn areas_touch_across_a_cell_edge_but_not_around_the_end_of_a_column() {
+        // A grid 2 wide (i) and 3 tall (j): cell = i * 3 + j.
+        let area_of: HashMap<i32, u32> = [(2, 0), (3, 1), (0, 2), (4, 2)].into_iter().collect();
+        let touch = touching_areas(&area_of, 3);
+        // Cell 2 (i 0, j 2) and cell 3 (i 1, j 0) are not neighbours.
+        assert!(!touch.get(&0).is_some_and(|t| t.contains(&1)));
+        // Cell 0 and cell 3 are (same j, next i); 3 and 4 are (same i, next j).
+        assert!(touch[&2].contains(&1) && touch[&1].contains(&2));
+        // Cell 2 sits next to cell 5 (nothing there) and cell 1 (nothing).
+        assert!(!touch.contains_key(&0));
     }
 
     #[test]
