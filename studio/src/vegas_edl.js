@@ -18,6 +18,31 @@
 export const EDL_DEFAULT_FILE_NAME = 'dod_highlights.txt';
 export const EDL_SAVE_FILTER = { name: 'VEGAS EDL (*.txt)', extensions: ['txt'] };
 
+/**
+ * Where the save dialog opens: the folder holding the exported clips, with the
+ * default name. The nameplate script looks for the clip list in a clip's own
+ * folder and the one above, so a save there needs no question (#429). When the
+ * clips span folders, the one holding most of them (a tie goes to the earliest
+ * clip's); no clips, or clips without a folder, give the bare name.
+ */
+export function edlDefaultPath(clips) {
+  const counts = new Map();
+  for (const clip of clips || []) {
+    const path = String(clip?.path || '');
+    const cut = Math.max(path.lastIndexOf('\\'),path.lastIndexOf('/'));
+    if (cut <= 0) continue;
+    const folder = path.slice(0, cut);
+    const entry = counts.get(folder) || { n: 0, sep: path[cut] };
+    entry.n += 1;
+    counts.set(folder, entry);
+  }
+  let best = null;
+  for (const [folder, { n, sep }] of counts) {
+    if (!best || n > best.n) best = { folder, n, sep };
+  }
+  return best ? `${best.folder}${best.sep}${EDL_DEFAULT_FILE_NAME}` : EDL_DEFAULT_FILE_NAME;
+}
+
 /** Frames a second the EDL's timecodes count in: how VEGAS reads them. */
 export const EDL_TIMECODE_FPS = 30;
 

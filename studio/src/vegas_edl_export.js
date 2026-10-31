@@ -10,7 +10,7 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { JOB_STATUS } from './render_jobs.js';
 import { edlClips, pathsToProbe, vegasEdl } from './vegas_edl.js';
-import { EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER } from './vegas_edl.js';
+import { edlDefaultPath, EDL_SAVE_FILTER } from './vegas_edl.js';
 import { clipManifest, manifestPathFor, nameplateCount } from './clip_manifest.js';
 import { useAsName, nameplatePath } from './player_alias.js';
 import { fileNameOf } from './path_display.js';
@@ -63,7 +63,7 @@ async function exportEdl(jobs, ffmpegPath, project) {
     return;
   }
   const path = await whileDialogOpens(() => save({
-    defaultPath: EDL_DEFAULT_FILE_NAME,
+    defaultPath: edlDefaultPath(clips),
     filters: [EDL_SAVE_FILTER, { name: 'All files', extensions: ['*'] }],
   })).catch((err) => {
     console.error('Save dialog failed:', err);

@@ -19,7 +19,7 @@ Capture and render the highlights as usual. Then on the Render tab click **Expor
 - `dod_highlights.txt`: the finished renders, one after another (#110).
 - `dod_highlights.dodstudio.json`: the clip list. For each clip: its file, whose highlight it is (SteamID, the **Use as** name or else the in-game name) and that player's nameplate path.
 
-Save the EDL in the clips' folder or the folder above it, and the script finds the clip list by itself. Anywhere else, it asks for it.
+The save dialog opens in the clips' folder (the one holding most of them, if they span several). Save the EDL there or in the folder above it, and the script finds the clip list by itself. Saving anywhere else makes it ask for the list with an Open dialog.
 
 A clip gets no nameplate when its player has none set, when Studio doesn't know whose it is (a take captured before Studio kept track of takes, or a project that isn't loaded), or when one take holds two players' highlights.
 

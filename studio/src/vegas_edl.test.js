@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl, EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER } from './vegas_edl.js';
+import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl, EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER, edlDefaultPath } from './vegas_edl.js';
+
+describe('edlDefaultPath', () => {
+  const clip = (path) => ({ path });
+  it('opens in the clips\' folder', () => {
+    expect(edlDefaultPath([clip('D:\\out\\a.mp4'), clip('D:\\out\\b.mp4')])).toBe('D:\\out\\dod_highlights.txt');
+    expect(edlDefaultPath([clip('/home/x/a.mp4')])).toBe('/home/x/dod_highlights.txt');
+  });
+  it('takes the folder holding most clips, a tie going to the first clip', () => {
+    expect(edlDefaultPath([clip('D:\\a\\1.mp4'), clip('D:\\b\\2.mp4'), clip('D:\\b\\3.mp4')])).toBe('D:\\b\\dod_highlights.txt');
+    expect(edlDefaultPath([clip('D:\\a\\1.mp4'), clip('D:\\b\\2.mp4')])).toBe('D:\\a\\dod_highlights.txt');
+  });
+  it('falls back to the bare name', () => {
+    expect(edlDefaultPath([])).toBe(EDL_DEFAULT_FILE_NAME);
+    expect(edlDefaultPath(undefined)).toBe(EDL_DEFAULT_FILE_NAME);
+    expect(edlDefaultPath([clip('a.mp4')])).toBe(EDL_DEFAULT_FILE_NAME);
+  });
+});
 
 describe('timecodes', () => {
   it('counts 30 frames a second, as VEGAS reads them', () => {
