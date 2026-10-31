@@ -1,9 +1,9 @@
 //! The one folder walk for every scan in the app (#376).
 //!
 //! A junction inside a folder being walked can point back above it: a demo
-//! folder linked into the game folder (`demo_links`) is refused when it would
-//! do that, but a user can make such a link by hand, and a symlink can do
-//! the same. A walk that followed it would never end. So every walk here:
+//! folder a user linked into the game folder by hand (`mklink /J`) can do
+//! that, and a symlink can do the same. A walk that followed it would never
+//! end. So every walk here:
 //!
 //! - **skips reparse points** (junctions and symlinks), except the root it
 //!   was asked to open, which is read through whatever it is;
