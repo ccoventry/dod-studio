@@ -233,8 +233,7 @@ pub fn prepare_playable(
         Outcome::Trimmed(t) => t,
     };
     check_room(&path, trimmed.bytes.len() as u64)?;
-    save_copy(&path, &trimmed.bytes)?;
-    save_map_marker(&path, &map.tag);
+    store_copy(&path, &trimmed.bytes, &map.tag)?;
     seed_analysis(
         &crate::analyzer_cache_root(),
         demo,
@@ -376,6 +375,17 @@ fn save_map_marker(path: &Path, map_tag: &str) {
     }
 }
 
+/// Saves the copy made with the map `map_tag` names, and its map marker.
+/// The marker is written only when these bytes became the copy: a copy the
+/// game held open stays the one made with its own map, and a marker naming
+/// the new map beside it would have it reused with the wrong map for good.
+fn store_copy(path: &Path, bytes: &[u8], map_tag: &str) -> Result<(), TrimError> {
+    if save_copy(path, bytes)? {
+        save_map_marker(path, map_tag);
+    }
+    Ok(())
+}
+
 /// `Err` when the drive `copy` goes on hasn't `needed_bytes` free with
 /// [`FREE_SPACE_HEADROOM_BYTES`](crate::shared::movie_copy::FREE_SPACE_HEADROOM_BYTES) to spare. A drive whose free space can't be
 /// told is let through: the write itself still fails cleanly.
@@ -407,7 +417,9 @@ fn room_for(folder: &Path, free: Option<u64>, needed_bytes: u64) -> Result<(), T
 /// that exists is always whole. A preview and a batch can make the same copy
 /// at once: each writes its own partial file, and the one that renames second
 /// takes the first one's copy (the trim is the same bytes every run).
-fn save_copy(path: &Path, bytes: &[u8]) -> Result<(), TrimError> {
+/// `Ok(false)` when the rename couldn't replace a copy already there (the
+/// game has it open), so that copy, not `bytes`, is what plays.
+fn save_copy(path: &Path, bytes: &[u8]) -> Result<bool, TrimError> {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let fail = |e: std::io::Error| {
         TrimError::CheckFailed(format!("it could not be saved to {}: {e}", path.display()))
@@ -426,10 +438,14 @@ fn save_copy(path: &Path, bytes: &[u8]) -> Result<(), TrimError> {
         return Err(fail(e));
     }
     match std::fs::rename(&partial, path) {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(true),
         Err(e) => {
             let _ = std::fs::remove_file(&partial);
-            if path.is_file() { Ok(()) } else { Err(fail(e)) }
+            if path.is_file() {
+                Ok(false)
+            } else {
+                Err(fail(e))
+            }
         }
     }
 }
@@ -683,6 +699,42 @@ mod tests {
         assert_eq!(copy_state(&copy, NO_MAP_TAG), CopyState::Missing);
         save_copy(&copy, b"HLDEMO copy").unwrap();
         assert_eq!(copy_state(&copy, NO_MAP_TAG), CopyState::MadeWithAnotherMap);
+    }
+
+    #[test]
+    fn a_new_copy_gets_its_maps_marker() {
+        let dir = Scratch::new("trimmed_copy_store");
+        let copy = dir.join("key").join("a_trimmed.dem");
+        let tag = map_tag(Some(b"BSP v30"));
+        store_copy(&copy, b"HLDEMO copy", &tag).unwrap();
+        assert_eq!(copy_state(&copy, &tag), CopyState::Current);
+    }
+
+    /// The game opens a demo with the C runtime's `fopen`, which shares it
+    /// for reading and writing but not deleting, so a rename can't replace it.
+    #[cfg(windows)]
+    #[test]
+    fn a_copy_the_game_holds_open_keeps_its_old_maps_marker() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ_WRITE: u32 = 0x1 | 0x2;
+        let dir = Scratch::new("trimmed_copy_store_open");
+        let copy = dir.join("key").join("a_trimmed.dem");
+        let old_map = map_tag(Some(b"BSP v30"));
+        let new_map = map_tag(Some(b"BSP v30, edited"));
+        store_copy(&copy, b"HLDEMO old copy", &old_map).unwrap();
+        let playing = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ_WRITE)
+            .open(&copy)
+            .unwrap();
+        store_copy(&copy, b"HLDEMO new copy", &new_map).unwrap();
+        drop(playing);
+        assert_eq!(std::fs::read(&copy).unwrap(), b"HLDEMO old copy");
+        assert_eq!(
+            copy_state(&copy, &new_map),
+            CopyState::MadeWithAnotherMap,
+            "the old copy is made again next time, not reused with the new map"
+        );
     }
 
     #[test]
