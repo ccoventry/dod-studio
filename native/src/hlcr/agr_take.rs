@@ -15,10 +15,10 @@ use std::path::{Path, PathBuf};
 pub const AGR_HEADER_BYTES: u64 = 18;
 
 /// Whether the `.agr` at `agr` holds at least one frame. HLAE leaves a
-/// header-only file when it records nothing: measured on the 25th
-/// Anniversary build with the game kept behind other windows (#450), every
-/// `.agr` was 18 bytes while `sound.wav` kept growing. A missing file holds
-/// nothing either.
+/// header-only file when it records nothing: seen in game_probe sessions on
+/// the 25th Anniversary build (#450), where every `.agr` was 18 bytes while
+/// `sound.wav` kept growing (a Studio batch on the same build recorded
+/// normally). A missing file holds nothing either.
 pub fn agr_has_frames(agr: &Path) -> bool {
     std::fs::metadata(agr).is_ok_and(|m| m.len() > AGR_HEADER_BYTES)
 }
@@ -97,8 +97,8 @@ pub fn place_batch_sounds(blocks: &[crate::patch::types::CaptureBlock]) -> Sound
         agrs += 1;
         if !agr_has_frames(&agr) {
             crate::log_markdown(&format!(
-                "⚠️ **AGR sound** — {}: HLAE recorded nothing into {} (header only). Seen on the \
-                 25th Anniversary build with the game kept behind other windows (#450).",
+                "⚠️ **AGR sound** — {}: HLAE recorded nothing into {} (header only), so there is \
+                 nothing for Blender to import; its sound is kept beside it all the same.",
                 block.take_key,
                 agr.display()
             ));
