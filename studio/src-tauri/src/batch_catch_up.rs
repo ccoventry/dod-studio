@@ -9,17 +9,20 @@
 // highlights. The manifest is then rewritten as "unwatched", so a batch is
 // caught up on once.
 //
-// While a game is running, a planned batch may still be going, so the check
-// waits until no game is left. Reconnecting to that game's events pipe to
-// resume live progress is not done: the batch's progress state lived in the
-// Studio that closed.
+// While a game with HLAE in it is running, a planned batch may still be
+// going, so the check waits until no such game is left. Reconnecting to that
+// game's events pipe to resume live progress is not done: the batch's
+// progress state lived in the Studio that closed.
 
 use crate::capture_manager::{
-    CaptureManifest, CutBy, VerifiedBlock, record_capture_settings, verify_capture_takes_settling,
+    CaptureManifest, VerifiedBlock, record_capture_settings, verify_capture_takes_settling,
+};
+use crate::catch_up_takes::{
+    apply_console_log, apply_obs_take_states, apply_unfinished_takes, read_console_log,
 };
 use native::log_markdown;
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::Emitter;
 
@@ -66,38 +69,21 @@ fn catchable_in(dir: &Path) -> Vec<CaptureManifest> {
         .collect()
 }
 
-/// Marks each take HLAE never finished as cut short when the game closed:
-/// not captured, not renderable, left on disk for the user. A watched batch
-/// knows this from its markers (#1124); a batch nobody watched end has only
-/// the take itself (#20). Returns how many it marked.
-fn apply_unfinished_takes(manifest: &CaptureManifest, blocks: &mut [VerifiedBlock]) -> usize {
-    let mut marked = 0;
-    for (v, block) in blocks.iter_mut().zip(&manifest.blocks) {
-        if !v.captured || v.rendered {
-            continue;
-        }
-        if native::hlcr::take_length::is_unfinished_take(&block.take_folder) {
-            v.captured = false;
-            v.renderable = false;
-            v.cut_short = true;
-            v.cut_by = Some(CutBy::GameClosed);
-            log_markdown(&format!(
-                "[batch-catch-up] {} was cut short when the game closed: not counted as captured. Its partial take is left at {}",
-                block.take_key,
-                block.take_folder.display()
-            ));
-            marked += 1;
-        }
-    }
-    marked
-}
-
 /// Checks `manifest`'s takes on disk, records the capture settings beside
 /// them as a watched batch does, and rewrites its manifest as unwatched.
-fn catch_up_one(dir: &Path, manifest: CaptureManifest) -> CaughtUpBatch {
+/// `log` is the game's console log (`log_path`), which says which clip the
+/// game was recording when it closed (`catch_up_takes`).
+fn catch_up_one(
+    dir: &Path,
+    manifest: CaptureManifest,
+    log: Option<&str>,
+    log_path: &Path,
+) -> CaughtUpBatch {
     // The batch ended long ago: no take is still being flushed.
     let mut blocks = verify_capture_takes_settling(&manifest, None, &mut |_| {});
+    apply_console_log(&manifest, &mut blocks, log, log_path);
     apply_unfinished_takes(&manifest, &mut blocks);
+    apply_obs_take_states(&manifest, &mut blocks);
     let captured = blocks.iter().filter(|b| b.captured).count();
     log_markdown(&format!(
         "[batch-catch-up] session {} ran while Studio was closed: {}/{} takes on disk",
@@ -117,26 +103,64 @@ fn catch_up_one(dir: &Path, manifest: CaptureManifest) -> CaughtUpBatch {
 }
 
 /// Catches up on the planned batches in `dir`; with `only`, just those
-/// sessions.
-fn catch_up_in(dir: &Path, only: Option<&[String]>) -> Vec<CaughtUpBatch> {
-    catchable_in(dir)
+/// sessions. `log_path` is the game's console log, read once for them all.
+fn catch_up_in(dir: &Path, only: Option<&[String]>, log_path: &Path) -> Vec<CaughtUpBatch> {
+    let batches: Vec<CaptureManifest> = catchable_in(dir)
         .into_iter()
         .filter(|m| only.is_none_or(|ids| ids.contains(&m.session_id)))
-        .map(|m| catch_up_one(dir, m))
+        .collect();
+    if batches.is_empty() {
+        return Vec::new();
+    }
+    let log = read_console_log(log_path);
+    batches
+        .into_iter()
+        .map(|m| catch_up_one(dir, m, log.as_deref(), log_path))
+        .collect()
+}
+
+/// The console log of the game Studio is set up for: `-condebug` writes it
+/// beside `hl.exe`.
+fn console_log_of(app: &tauri::AppHandle) -> PathBuf {
+    let hl = PathBuf::from(crate::game_process_manager::saved_settings(app).hl_path);
+    native::shared::paths::console_log_path(hl.parent().unwrap_or(Path::new("")))
+}
+
+/// The running games that could be capturing a batch from before Studio
+/// closed: a game with no HLAE in it (started from Steam) can't be, so the
+/// catch-up doesn't wait for it, and Start Capture Batch isn't held up by it.
+fn games_that_may_be_capturing() -> Vec<u32> {
+    crate::game_process_manager::running_game_pids()
+        .into_iter()
+        .filter(|&pid| {
+            native::patch::batch_reuse::may_be_capturing(
+                native::sys::modules::loaded_modules(pid).as_deref(),
+            )
+        })
         .collect()
 }
 
 /// Run once when Studio starts, before any batch of its own. With no game
-/// running, every planned batch is checked now. With one running, the
+/// running that could be capturing, every planned batch is checked now.
+/// With one running, the
 /// sessions planned at this moment are checked once no game is left, so a
 /// batch this Studio starts in the meantime is never mistaken for one.
 #[tauri::command]
 pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUpStart, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let dir = crate::manifest_file::manifests_dir();
-        if crate::game_process_manager::running_game_pids().is_empty() {
+        let log_path = console_log_of(&app);
+        let running = crate::game_process_manager::running_game_pids().len();
+        let capturing = games_that_may_be_capturing().len();
+        if capturing < running {
+            log_markdown(&format!(
+                "[batch-catch-up] {} running game(s) have no HLAE in them, so they can't be capturing a batch: not waiting for them",
+                running - capturing
+            ));
+        }
+        if capturing == 0 {
             return Ok(CatchUpStart {
-                batches: catch_up_in(&dir, None),
+                batches: catch_up_in(&dir, None, &log_path),
                 waiting_for_game: false,
             });
         }
@@ -155,10 +179,10 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
             ids.len()
         ));
         std::thread::spawn(move || {
-            while !crate::game_process_manager::running_game_pids().is_empty() {
+            while !games_that_may_be_capturing().is_empty() {
                 std::thread::sleep(GAME_POLL);
             }
-            let batches = catch_up_in(&dir, Some(&ids));
+            let batches = catch_up_in(&dir, Some(&ids), &log_path);
             // Sent even when empty: it also tells the frontend the wait is
             // over, so Start Capture Batch stops refusing (#20).
             if let Err(e) = app.emit(CATCH_UP_EVENT, &batches) {
@@ -178,6 +202,7 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture_manager::CutBy;
     use crate::test_support::Scratch;
     use native::patch::CaptureBlock;
 
@@ -196,6 +221,11 @@ mod tests {
             ramped_gaps: 0,
             plan: None,
         }
+    }
+
+    /// A console log that isn't there: the takes are judged by what they hold.
+    fn no_log() -> PathBuf {
+        PathBuf::from("Z:/no such game/qconsole.log")
     }
 
     fn manifest(session_id: &str, blocks: Vec<CaptureBlock>, uids: &[&str]) -> CaptureManifest {
@@ -227,7 +257,7 @@ mod tests {
         );
         crate::manifest_file::write_in(&manifests, &m, "planned", None).unwrap();
 
-        let batches = catch_up_in(&manifests, None);
+        let batches = catch_up_in(&manifests, None, &no_log());
         assert_eq!(batches.len(), 1);
         let b = &batches[0];
         assert_eq!(b.session_id, "session_a");
@@ -237,7 +267,7 @@ mod tests {
         assert_eq!(captured, vec![true, false]);
 
         // Rewritten as unwatched, so the next start leaves it alone.
-        assert!(catch_up_in(&manifests, None).is_empty());
+        assert!(catch_up_in(&manifests, None, &no_log()).is_empty());
     }
 
     #[test]
@@ -259,7 +289,7 @@ mod tests {
         );
         crate::manifest_file::write_in(&manifests, &m, "planned", None).unwrap();
 
-        let batches = catch_up_in(&manifests, None);
+        let batches = catch_up_in(&manifests, None, &no_log());
         let b = &batches[0].blocks;
         assert_eq!(
             b.iter().map(|v| v.captured).collect::<Vec<_>>(),
@@ -301,7 +331,7 @@ mod tests {
         crate::manifest_file::write_in(&manifests, &old, "planned", None).unwrap();
 
         let ids = vec!["session_b".to_string()];
-        let batches = catch_up_in(&manifests, Some(&ids));
+        let batches = catch_up_in(&manifests, Some(&ids), &no_log());
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].session_id, "session_b");
 
