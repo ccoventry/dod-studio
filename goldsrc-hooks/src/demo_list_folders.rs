@@ -71,7 +71,8 @@ use crate::setting::Setting;
 
 pub const NAME: &str = console_name!("ui_demo_list_folders");
 
-/// `ds_ui_demo_list_folders`, or its fallback toggle.
+/// `ds_ui_demo_list_folders`, or its default when the cvar could not be
+/// registered.
 pub static FOLDERS: Setting = Setting::new(NAME, true);
 
 pub(crate) fn enabled() -> bool {
@@ -104,31 +105,6 @@ pub fn hides_empty(show_counts: bool, hide_empty: bool) -> bool {
 
 fn hides_empty_now() -> bool {
     hides_empty(SHOW_COUNTS.on(), HIDE_EMPTY.on())
-}
-
-pub fn show_counts_status() -> String {
-    if SHOW_COUNTS.on() {
-        "folders are counted, and folder rows on the Demos tab end in their demo count".to_string()
-    } else {
-        "folders aren't counted: no demo counts, and empty folders are listed".to_string()
-    }
-}
-
-/// For the fallback toggle commands' bare-name query.
-pub fn hide_empty_status() -> String {
-    if HIDE_EMPTY.on() {
-        "folders with no demo anywhere inside them aren't listed".to_string()
-    } else {
-        "every folder is listed, with or without demos".to_string()
-    }
-}
-
-pub fn count_subfolders_status() -> String {
-    if COUNT_SUBFOLDERS.on() {
-        "a folder's count includes its subfolders' demos".to_string()
-    } else {
-        "a folder's count is only the demos directly in it".to_string()
-    }
 }
 
 /// The folder the lists show: a path from `dod/` (`""` for `dod/`), or a
@@ -678,18 +654,6 @@ pub fn drives() -> Vec<char> {
     #[cfg(not(target_arch = "x86"))]
     {
         Vec::new()
-    }
-}
-
-/// For the fallback toggle command's bare-name query.
-pub fn status() -> String {
-    if enabled() {
-        "the Load Demo window lists and opens folders".to_string()
-    } else {
-        format!(
-            "the Load Demo window lists only the demos in {}/",
-            crate::game_folder::name()
-        )
     }
 }
 

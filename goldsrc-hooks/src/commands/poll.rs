@@ -290,82 +290,77 @@ fn describe_spectator_crosshair(on: bool) -> &'static str {
 }
 
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
-/// the per-frame prologue so it lands before `anim_fix::apply()` runs --
-/// under both `install()` and `install_fallback_commands()`, since
-/// `poll_hudelements`, `deathmsg::poll`, `spectator_target::poll` and
-/// `msglog::poll` below do not depend on cvars existing at all and must run
-/// either way (issue #324).
+/// the per-frame prologue so it lands before `anim_fix::apply()` runs. It is
+/// registered even when a cvar failed to: `poll_hudelements`,
+/// `deathmsg::poll`, `spectator_target::poll` and `msglog::poll` below do
+/// not depend on cvars existing at all and must run either way (issue #324).
 pub fn poll() {
-    // Cvar-backed polling only: every function below reads a `CVAR_*`
-    // pointer that stays null on the fallback path, but each already
-    // null-checks it individually -- this outer guard is purely the fast
-    // path that skips all nine checks at once when cvars never registered.
-    if CVARS_LIVE.load(Ordering::Relaxed) {
-        // One cvar, several readers: the viewmodel's animations here, and
-        // the spectator crosshair and eye height below.
-        poll_level(SPEC_MATCH_POV_NAME, &CVAR_SPEC_MATCH_POV, &anim_fix::LEVEL);
-        poll_flag(
-            HELD_MODELS_NAME,
-            &CVAR_HELD_MODELS,
-            &anim_fix::LOG_HELD_MODELS,
-        );
-        poll_flag(
-            SPECTATOR_TARGET_LOG_NAME,
-            &CVAR_SPECTATOR_TARGET_LOG,
-            &spectator_target::LOG,
-        );
-        poll_code_patch(
-            SCOREBOARD_NAME,
-            &CVAR_SCOREBOARD,
-            &SCOREBOARD_COMPLAINED,
-            scoreboard::set_hidden,
-            describe_scoreboard,
-        );
-        poll_code_patch(
-            VOICE_NAME,
-            &CVAR_VOICE,
-            &VOICE_COMPLAINED,
-            voice::set_muted,
-            describe_voice,
-        );
-        poll_code_patch(
-            CROSSHAIR_NAME,
-            &CVAR_CROSSHAIR,
-            &CROSSHAIR_COMPLAINED,
-            crosshair::set_hidden,
-            describe_crosshair,
-        );
-        // Polled every frame like the rest, and for one extra reason: this is
-        // also how it notices `cl_xhair_style` changing under it.
-        //
-        // Both stand down in a POV demo, which is the recording they match.
-        let allowed = anim_fix::active();
-        poll_code_patch_when(
-            SPEC_MATCH_POV_NAME,
-            &CVAR_SPEC_MATCH_POV,
-            allowed,
-            &SPECTATOR_CROSSHAIR_COMPLAINED,
-            spectator_crosshair::set_matching,
-            describe_spectator_crosshair,
-        );
-        poll_code_patch_when(
-            SPEC_MATCH_POV_NAME,
-            &CVAR_SPEC_MATCH_POV,
-            allowed,
-            &SPECTATOR_EYE_COMPLAINED,
-            spectator_eye::set_matching,
-            describe_spectator_eye,
-        );
-        poll_hand_signals();
-        poll_ex_interp();
-        poll_flag(
-            TEXTURE_HIRES_LOG_NAME,
-            &CVAR_TEXTURE_HIRES_LOG,
-            &texture_hires::LOG_TEXTURE_LOADS,
-        );
-    }
-    // Everything below has nothing to do with cvars and must run under both
-    // paths (#324).
+    // Cvar-backed polling: each reads a `CVAR_*` pointer that stays null
+    // when its cvar did not register, and then does nothing.
+    // One cvar, several readers: the viewmodel's animations here, and
+    // the spectator crosshair and eye height below.
+    poll_level(SPEC_MATCH_POV_NAME, &CVAR_SPEC_MATCH_POV, &anim_fix::LEVEL);
+    poll_flag(
+        HELD_MODELS_NAME,
+        &CVAR_HELD_MODELS,
+        &anim_fix::LOG_HELD_MODELS,
+    );
+    poll_flag(
+        SPECTATOR_TARGET_LOG_NAME,
+        &CVAR_SPECTATOR_TARGET_LOG,
+        &spectator_target::LOG,
+    );
+    poll_code_patch(
+        SCOREBOARD_NAME,
+        &CVAR_SCOREBOARD,
+        &SCOREBOARD_COMPLAINED,
+        scoreboard::set_hidden,
+        describe_scoreboard,
+    );
+    poll_code_patch(
+        VOICE_NAME,
+        &CVAR_VOICE,
+        &VOICE_COMPLAINED,
+        voice::set_muted,
+        describe_voice,
+    );
+    poll_code_patch(
+        CROSSHAIR_NAME,
+        &CVAR_CROSSHAIR,
+        &CROSSHAIR_COMPLAINED,
+        crosshair::set_hidden,
+        describe_crosshair,
+    );
+    // Polled every frame like the rest, and for one extra reason: this is
+    // also how it notices `cl_xhair_style` changing under it.
+    //
+    // Both stand down in a POV demo, which is the recording they match.
+    let allowed = anim_fix::active();
+    poll_code_patch_when(
+        SPEC_MATCH_POV_NAME,
+        &CVAR_SPEC_MATCH_POV,
+        allowed,
+        &SPECTATOR_CROSSHAIR_COMPLAINED,
+        spectator_crosshair::set_matching,
+        describe_spectator_crosshair,
+    );
+    poll_code_patch_when(
+        SPEC_MATCH_POV_NAME,
+        &CVAR_SPEC_MATCH_POV,
+        allowed,
+        &SPECTATOR_EYE_COMPLAINED,
+        spectator_eye::set_matching,
+        describe_spectator_eye,
+    );
+    poll_hand_signals();
+    poll_ex_interp();
+    poll_flag(
+        TEXTURE_HIRES_LOG_NAME,
+        &CVAR_TEXTURE_HIRES_LOG,
+        &texture_hires::LOG_TEXTURE_LOADS,
+    );
+    // Everything below has nothing to do with cvars and runs whether or not
+    // they registered (#324).
     // ds_hud_hide_teammate_info sets hudelement's bit, which the next line
     // writes.
     crate::teammate_info::poll();
