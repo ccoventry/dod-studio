@@ -570,6 +570,21 @@ export const STRINGS = {
     CAPTURE_FPS_TITLE:
       'Frames per second written to the recorded video. Nothing to do with the demo\'s own tickrate, which is a property of how the demo was recorded and is not adjustable here. Not used in OBS mode — see OBS Capture FPS in the OBS Connection section below.',
     OUTPUT_DIR_PLACEHOLDER: 'Capture output directory path...',
+    // The chip at the end of each Capture Output row (#25).
+    OUTPUT_ROW_CHECKING: 'Checking…',
+    OUTPUT_ROW_OK: 'Found',
+    OUTPUT_ROW_WILL_BE_CREATED: 'Will be created',
+    OUTPUT_ROW_WILL_BE_CREATED_TITLE: 'This folder does not exist yet, but its drive does, so it is created when a capture first writes to it. Check the spelling if you meant an existing folder.',
+    OUTPUT_ROW_DRIVE_MISSING: 'Drive not found',
+    OUTPUT_ROW_DRIVE_MISSING_TITLE: 'This folder is on a drive that is not connected, so captures cannot be written here.',
+    OUTPUT_ROW_NOT_FULL_PATH: 'Needs a full path',
+    OUTPUT_ROW_NOT_FULL_PATH_TITLE: 'Start the path with a drive letter, for example D:/captures.',
+    OUTPUT_ROW_MALFORMED: 'Not a valid path',
+    OUTPUT_ROW_MALFORMED_TITLE: 'This path has characters Windows does not allow in a folder name.',
+    OUTPUT_ROW_NOT_A_FOLDER: 'That is a file',
+    OUTPUT_ROW_NOT_A_FOLDER_TITLE: 'This path points at a file, not a folder.',
+    OUTPUT_ROW_OK_TITLE: 'This folder exists.',
+    OUTPUT_ROW_CHECKING_TITLE: 'Checking this folder.',
     ADD_DIRECTORY_BUTTON: 'Add Directory',
     DESTINATIONS_HELP_TEXT: 'Captures are written here, and Render Studio scans these same locations for takes to render.',
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
@@ -783,6 +798,10 @@ export const STRINGS = {
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
+    // #429: the nameplate script into VEGAS's script menu.
+    VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
+    VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
+    vegasScriptDone: (path) => `Script copied to ${path}. In VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder, then pick it from Tools > Scripting.`,
     exportEdlProbing: (count) => `Reading the length of ${count} video${count === 1 ? '' : 's'} for the EDL…`,
     exportEdlDone: (count, skipped, nameplates = 0) => `EDL saved (${count} clip${count === 1 ? '' : 's'}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     exportEdlFailed: (err) => `Couldn't save the EDL: ${err}`,
@@ -2842,6 +2861,7 @@ export const STRINGS = {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
     blenderFailed: (err) => `Blender: ${err}`,
+    vegasScriptFailed: (err) => `Couldn't add the script to VEGAS: ${err}`,
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
     hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,

@@ -30,7 +30,9 @@ The script is [`vegas/DoD Studio Nameplates.cs`](../vegas/DoD%20Studio%20Namepla
 1. Put the clips on the timeline: File > Import > EDL Text File with the EDL (or drag the clips in yourself; the script goes by each clip's file, not its place). Studio's export is a `.txt`, so the dialog lists it. An `.edl` from another tool needs the dialog's file type switched to all files (or `*.*` typed in the file name box).
 2. **Edit > Select None.** VEGAS leaves the first imported event selected, and the script works on the selected clips only when any are selected, so skipping this gives you one nameplate.
 3. Tools > Scripting > **Run Script…**, and pick `DoD Studio Nameplates.cs`.
-   To have it in the Tools > Scripting menu, copy it into `Documents\Vegas Script Menu` and use Tools > Scripting > Rescan Script Menu Folder.
+
+   To have it in the Tools > Scripting menu instead, click **Add Nameplate Script to VEGAS** on the Render tab (next to **Export VEGAS EDL…**). Studio copies the script into your `Documents\Vegas Script Menu` folder (made if it is not there; your real Documents folder, so a OneDrive-redirected one works) and replaces an older copy of it; other scripts in that folder are left alone. Then in VEGAS use Tools > Scripting > Rescan Script Menu Folder. Studio tells you where it put the file.
+   By hand, the same thing: copy `vegas/DoD Studio Nameplates.cs` from the repo into that folder yourself, then rescan.
 
 With some clips selected it does only those; with none selected, every video clip on the timeline. The box at the end says which it did.
 
