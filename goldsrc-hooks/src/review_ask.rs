@@ -23,7 +23,7 @@
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Where the review starts.
@@ -225,6 +225,90 @@ pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
     Ok(())
 }
 
+/// The demo player as an ask waiting for it sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum DemoNow {
+    /// A demo is in the player and read.
+    Playing,
+    /// A demo is still being read.
+    Loading,
+    /// No demo.
+    Absent,
+}
+
+/// What an ask waiting for its demo does this frame.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WaitStep {
+    Ask,
+    Wait,
+    GiveUp(String),
+}
+
+/// How long an ask waits for its demo to load: as long as the review waits
+/// for one it loads itself.
+const WAIT_FOR_DEMO: Duration = Duration::from_secs(180);
+
+/// The ask waiting for the demo to finish loading: 0 for none, 1 for
+/// [`Start::First`], 2 for [`Start::At`] the time in [`WAITING_AT_BITS`]. An
+/// atomic, since the review's poll looks every frame.
+static WAITING: AtomicU8 = AtomicU8::new(0);
+/// The clock time of a waiting From here, as `f64` bits: taken when it was
+/// asked, since the demo plays while it still loads and the clock moves on
+/// meanwhile.
+static WAITING_AT_BITS: AtomicU64 = AtomicU64::new(0);
+/// When it started waiting, as milliseconds since [`epoch`].
+static WAITING_SINCE_MS: AtomicU64 = AtomicU64::new(0);
+
+/// What a waiting ask does with the demo as it is, `waited` after it was
+/// asked (#1152's follow-up: an ask sent while the demo still loaded was
+/// answered "no demo is playing").
+pub(crate) fn wait_step(demo: DemoNow, waited: Duration) -> WaitStep {
+    match demo {
+        DemoNow::Playing => WaitStep::Ask,
+        DemoNow::Loading if waited < WAIT_FOR_DEMO => WaitStep::Wait,
+        DemoNow::Loading => {
+            WaitStep::GiveUp("the demo did not finish loading in three minutes".to_string())
+        }
+        DemoNow::Absent => WaitStep::GiveUp("the demo stopped loading".to_string()),
+    }
+}
+
+/// Asks once the loading demo plays; the tab says so meanwhile, with its
+/// buttons greyed.
+pub(crate) fn wait_for_demo(start: Start) {
+    WAITING_SINCE_MS.store(epoch().elapsed().as_millis() as u64, Ordering::Relaxed);
+    let mode = match start {
+        Start::First => 1,
+        Start::At(seconds) => {
+            WAITING_AT_BITS.store(seconds.to_bits(), Ordering::Relaxed);
+            2
+        }
+    };
+    WAITING.store(mode, Ordering::Release);
+    set_status(Status::Asking(
+        "Waiting for the demo to load, then asking DoD Studio...".to_string(),
+    ));
+}
+
+/// The ask waiting for its demo, and how long it has waited.
+pub(crate) fn waiting() -> Option<(Start, Duration)> {
+    let start = match WAITING.load(Ordering::Acquire) {
+        1 => Start::First,
+        2 => Start::At(f64::from_bits(WAITING_AT_BITS.load(Ordering::Relaxed))),
+        _ => return None,
+    };
+    let since = WAITING_SINCE_MS.load(Ordering::Relaxed);
+    let now = epoch().elapsed().as_millis() as u64;
+    Some((start, Duration::from_millis(now.saturating_sub(since))))
+}
+
+/// Ends the wait: `why` it gave up, or none when it asks now or a review
+/// started meanwhile.
+pub(crate) fn stop_waiting(why: Option<String>) {
+    WAITING.store(0, Ordering::Release);
+    set_status(why.map_or(Status::Idle, Status::Failed));
+}
+
 /// To the hook's log only: this runs off the game's thread, where the
 /// console can't be printed to.
 fn log(line: &str) {
@@ -324,5 +408,34 @@ mod tests {
         let requests = include_str!("../../native/src/sys/game_review_requests.rs");
         assert!(requests.contains("`review start <absolute path to the .dem>`"));
         assert!(requests.contains("`review at <seconds> <absolute path>`"));
+    }
+
+    #[test]
+    fn an_ask_while_the_demo_loads_waits_for_it_to_play() {
+        let s = Duration::from_secs;
+        assert_eq!(wait_step(DemoNow::Loading, s(6)), WaitStep::Wait);
+        assert_eq!(wait_step(DemoNow::Playing, s(6)), WaitStep::Ask);
+        assert!(matches!(
+            wait_step(DemoNow::Loading, s(181)),
+            WaitStep::GiveUp(_)
+        ));
+        assert!(matches!(
+            wait_step(DemoNow::Absent, s(1)),
+            WaitStep::GiveUp(_)
+        ));
+    }
+
+    #[test]
+    fn a_waiting_ask_greys_the_buttons_until_it_ends() {
+        // From here keeps the clock it was asked at: the demo plays on while
+        // it loads.
+        wait_for_demo(Start::At(42.5));
+        assert_eq!(waiting().map(|(start, _)| start), Some(Start::At(42.5)));
+        assert!(matches!(status(), Status::Asking(_)));
+        stop_waiting(Some("the demo stopped loading".into()));
+        assert_eq!(waiting(), None);
+        assert_eq!(status(), Status::Failed("the demo stopped loading".into()));
+        stop_waiting(None);
+        assert_eq!(status(), Status::Idle);
     }
 }
