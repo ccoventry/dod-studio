@@ -27,7 +27,7 @@ Every constant below is read out of the Rust rather than restated.
      one, so nothing after it is left mid-instruction.
 
 And for POV's red crosshair (`cl_xhair_style 0`, #308), against
-`spectator_crosshair_gap.rs`:
+`crosshair_gap.rs` and `spectator_crosshair_gap.rs`:
 
   8. The red jump's `add esp, 0x10` undoes the spectator draw's own
      `sub esp, 0x10`, and the style-0 draw it jumps to ends in a plain `ret`.
@@ -105,7 +105,12 @@ def find_all(code, pattern):
     return hits
 
 
-GAP_SRC = Path(__file__).resolve().parent.parent / "src" / "spectator_crosshair_gap.rs"
+# The gap call and its patterns live in `crosshair_gap.rs`, the spectator's
+# arithmetic and the table layout in `spectator_crosshair_gap.rs`.
+GAP_SRCS = [
+    Path(__file__).resolve().parent.parent / "src" / name
+    for name in ("crosshair_gap.rs", "spectator_crosshair_gap.rs")
+]
 
 
 def rust_u8_array(src: str, name: str):
@@ -116,8 +121,9 @@ def rust_u8_array(src: str, name: str):
 
 
 def check_red_crosshair(span_src, image, code, trva, span_rva, base, check):
-    """Checks 8-11: the red crosshair's jump and `spectator_crosshair_gap.rs`."""
-    gsrc = GAP_SRC.read_text(encoding="utf-8")
+    """Checks 8-11: the red crosshair's jump, `crosshair_gap.rs` and
+    `spectator_crosshair_gap.rs`."""
+    gsrc = "\n".join(path.read_text(encoding="utf-8") for path in GAP_SRCS)
 
     def u32(rva):
         return struct.unpack_from("<I", image, rva)[0]

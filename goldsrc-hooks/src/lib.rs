@@ -22,7 +22,7 @@
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
 //!     are drawn by different code paths and do not otherwise share a look;
 //!     for style 0, POV's red crosshair, with `spectator_crosshair_gap`
-//!     giving it the spectated player's gap.
+//!     giving it the spectated player's gap through `crosshair_gap`.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
 //!   - `spectator_gun`: the gun drops off the bottom of the screen when the
@@ -249,6 +249,7 @@ mod connect_guard;
 mod console_tokens;
 mod crash;
 mod crosshair;
+mod crosshair_gap;
 mod deathmsg;
 mod debug;
 mod decals;
