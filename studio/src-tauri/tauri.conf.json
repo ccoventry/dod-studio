@@ -57,7 +57,6 @@
       "../../goldsrc-hooks/tools/hd/hd_maps.example.txt": "hd-scripts/hd_maps.example.txt",
       "../../goldsrc-hooks/tools/hd/my_styles.example.txt": "hd-scripts/my_styles.example.txt",
       "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md",
-      "../../vegas/DoD Studio Nameplates.cs": "vegas-scripts/DoD Studio Nameplates.cs",
       "../../blender/*.py": "blender-scripts/",
       "../../blender/README.md": "blender-scripts/README.md",
       "../../vegas/DoD Studio Nameplates.cs": "vegas-scripts/DoD Studio Nameplates.cs",
