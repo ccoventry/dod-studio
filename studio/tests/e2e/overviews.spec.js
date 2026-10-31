@@ -630,6 +630,9 @@ test('colours used show as recent, and Pick from map takes a colour off the map'
   // Pick from map: the outdoor floor's colour as drawn (Colour-coded), then
   // back to Colour area.
   await page.selectOption('#ov-theme', 'colours');
+  // Choosing a theme is an edit, saved after the pane's 400 ms pause: let that
+  // save land, or it counts as one made by the Ctrl-click below.
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).length).toBe(1);
   await page.click('#ov-pick-btn');
   await clickPixel(page, 300, 450);
   await expect(page.locator('#ov-custom-colour')).toHaveValue('#5e5e55');
