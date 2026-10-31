@@ -5,7 +5,8 @@
 // line. Kept out of main.js, which only wires (#683).
 
 import { pickPath } from './pick_path.js';
-import { calculateExportPoolSpace } from './ipc_bridge.js';
+import { calculateExportPoolSpace, diagnoseCaptureOutputPaths, logFrontendEvent } from './ipc_bridge.js';
+import { createCaptureOutputStatus } from './capture_output_status.js';
 import { createListEditor } from './list_editor.js';
 import { refreshLaunchGuard } from './capture_pane.js';
 import { refreshRenderButtons } from './render_pane.js';
@@ -58,14 +59,24 @@ export function createFolderPools({ getDemos, persist, refreshSetup }) {
     }
   }
 
+  const captureListEl = document.querySelector('#target-drive-list');
+  const captureStatus = createCaptureOutputStatus({
+    getPaths: () => targetDrives,
+    diagnose: diagnoseCaptureOutputPaths,
+    container: captureListEl,
+    log: logFrontendEvent,
+  });
+
   const captureEditor = createListEditor({
-    container: document.querySelector('#target-drive-list'),
+    container: captureListEl,
+    decorateRow: captureStatus.decorateRow,
     getItems: () => targetDrives,
     fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.OUTPUT_DIR_PLACEHOLDER }],
     unique: true,
     browse: pickTargetDrive,
     onChange: () => {
       updateExportPoolIndicator();
+      captureStatus.refresh();
       persist();
       refreshLaunchGuard({ targetDrives, currentScannedDemos: getDemos() });
       refreshSetup();
@@ -102,6 +113,7 @@ export function createFolderPools({ getDemos, persist, refreshSetup }) {
       targetDrives = [...settings.target_drives];
       captureEditor.render();
       updateExportPoolIndicator();
+      captureStatus.refresh();
     }
     if (Array.isArray(settings.render_export_dirs) && settings.render_export_dirs.length > 0) {
       renderExportDirs = [...settings.render_export_dirs];
