@@ -107,6 +107,14 @@ pub fn reports_itself_as(path: impl Display, banner: &str) -> String {
     )
 }
 
+// ── shared/hlae_ffmpeg_report.rs ─────────────────────────────────────────
+
+pub const NO_FFMPEG_ON_PATH: &str = "no ffmpeg.exe was found on PATH, and no override is set";
+
+pub fn no_ffmpeg_file_at(configured: impl Display) -> String {
+    format!("there is no file at \"{}\"", configured)
+}
+
 // ── obs/session.rs ───────────────────────────────────────────────────────
 
 /// Independently authored twice (`start_record`/`stop_record`'s

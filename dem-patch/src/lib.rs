@@ -306,17 +306,10 @@ mod test {
         assert!(network_frames > 10_000, "{network_frames} network frames");
         assert!(messages > 50_000, "{messages} messages");
 
-        // The writer recomputes each directory entry's frame count from the
-        // frames it wrote rather than trusting the stored one, which the
-        // engine leaves at 0 for the LOADING entry.
-        let mut expected = bytes.clone();
-        let directory = i32::from_le_bytes(bytes[540..544].try_into().unwrap()) as usize;
-        for (k, entry) in demo.directory.entries.iter().enumerate() {
-            let at = directory + 4 + k * 92 + 80;
-            expected[at..at + 4].copy_from_slice(&(entry.frames.len() as i32).to_le_bytes());
-        }
-        assert!(
-            demo.write_to_bytes() == expected,
+        // Directory included: the frame counts are the engine's own.
+        assert_eq!(
+            first_difference(&demo.write_to_bytes(), &bytes),
+            None,
             "re-encoding the parsed demo changed its bytes"
         );
     }
@@ -377,6 +370,159 @@ mod test {
             );
         }
         assert!(sounds > 1_000, "{sounds} sounds");
+    }
+
+    /// Where two files first differ, and how long each is, or `None` when
+    /// they're the same: a 10 MB `assert_eq!` on the bytes prints nothing
+    /// anyone can read.
+    fn first_difference(written: &[u8], source: &[u8]) -> Option<(usize, usize, usize)> {
+        if written == source {
+            return None;
+        }
+        let at = written
+            .iter()
+            .zip(source)
+            .position(|(a, b)| a != b)
+            .unwrap_or(written.len().min(source.len()));
+        Some((at, written.len(), source.len()))
+    }
+
+    /// The fixture's round trip, on more and longer demos than CI carries:
+    /// `DOD_ROUNDTRIP_DEMO` (a `.dem` or a folder of them), else an even
+    /// spread of six from the PRE install's `dod` folder. Ignored because CI
+    /// has neither: `cargo test -p dem --release -- --ignored many_real_recordings`.
+    ///
+    /// Two differences are allowed, and printed. A demo DoD Studio wrote
+    /// before the writer kept the engine's frame counts (one with a nonzero
+    /// LOADING count, #1271) keeps its old counts, so they are not compared.
+    /// And an entry whose bytes run on past its first `NextSection` (a second
+    /// `NextSection`, in `ktps8w7-warchyld_over_harr_h1.dem`'s LOADING) loses
+    /// that tail: the parser ends an entry at its first `NextSection`, as the
+    /// engine does when it jumps to the next entry's offset there, so the
+    /// engine never reads it either (`docs/goldsrc_viewdemo.md` §2). Every
+    /// other byte must come back as it was.
+    #[test]
+    #[ignore]
+    fn many_real_recordings_re_encode_byte_for_byte() {
+        let source = std::env::var_os("DOD_ROUNDTRIP_DEMO")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+                )
+            });
+        let demos = roundtrip_demos(&source);
+        assert!(
+            !demos.is_empty(),
+            "no demos in {}: set DOD_ROUNDTRIP_DEMO to a .dem or a folder",
+            source.display()
+        );
+
+        for path in &demos {
+            let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let demo =
+                open_demo_from_bytes(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let written = demo.write_to_bytes();
+            let engine_counts = demo
+                .directory
+                .entries
+                .first()
+                .is_none_or(|e| e.frame_count == 0);
+            let notes = assert_same_but_allowed(&written, &bytes, engine_counts)
+                .unwrap_or_else(|why| panic!("{}: re-encoding changed it: {why}", path.display()));
+            println!("{}: {} bytes, the same{notes}", path.display(), bytes.len());
+        }
+    }
+
+    /// `written` against `source` entry by entry, allowing only what
+    /// [`many_real_recordings_re_encode_byte_for_byte`] allows. `Ok` carries
+    /// what was allowed, for the listing; `Err` says what differs.
+    fn assert_same_but_allowed(
+        written: &[u8],
+        source: &[u8],
+        compare_counts: bool,
+    ) -> std::result::Result<String, String> {
+        let i32_at = |b: &[u8], at: usize| i32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        if written[..540] != source[..540] {
+            return Err(format!(
+                "header: {:?}",
+                first_difference(&written[..540], &source[..540])
+            ));
+        }
+        let (dir_w, dir_s) = (i32_at(written, 540) as usize, i32_at(source, 540) as usize);
+        let count = i32_at(source, dir_s);
+        if i32_at(written, dir_w) != count {
+            return Err("directory entry count".into());
+        }
+        let mut notes = String::new();
+        let mut next_source_entry = 544;
+        for k in 0..count as usize {
+            let (ew, es) = (dir_w + 4 + k * 92, dir_s + 4 + k * 92);
+            // type, description, flags, CD track, track time; then frames.
+            if written[ew..ew + 80] != source[es..es + 80] {
+                return Err(format!("directory entry {k}'s fields"));
+            }
+            if compare_counts && written[ew + 80..ew + 84] != source[es + 80..es + 84] {
+                return Err(format!(
+                    "directory entry {k}'s frame count: {} for {}",
+                    i32_at(written, ew + 80),
+                    i32_at(source, es + 80)
+                ));
+            }
+            let span = |b: &[u8], e: usize| {
+                let start = i32_at(b, e + 84) as usize;
+                start..start + i32_at(b, e + 88) as usize
+            };
+            // No bytes between the source's entries go uncompared.
+            if span(source, es).start != next_source_entry {
+                return Err(format!("bytes before entry {k}'s frames"));
+            }
+            next_source_entry = span(source, es).end;
+            let (w, s) = (&written[span(written, ew)], &source[span(source, es)]);
+            if !s.starts_with(w) {
+                return Err(format!("entry {k}'s frames: {:?}", first_difference(w, s)));
+            }
+            if s.len() > w.len() {
+                // The written entry ends at its NextSection: type 5, time, frame.
+                if w.len() < 9 || w[w.len() - 9] != 5 {
+                    return Err(format!("entry {k} is cut short, not at a NextSection"));
+                }
+                notes += &format!(
+                    " (entry {k}: {} bytes past its NextSection dropped)",
+                    s.len() - w.len()
+                );
+            }
+        }
+        let end = |dir: usize| dir + 4 + count as usize * 92;
+        if next_source_entry != dir_s || written.len() != end(dir_w) || source.len() != end(dir_s) {
+            return Err("bytes before or after the directory".into());
+        }
+        if !compare_counts {
+            notes += " (frame counts not compared: an older DoD Studio wrote it)";
+        }
+        Ok(notes)
+    }
+
+    /// `source` itself when it's a file, else every `.dem` in it when it was
+    /// named on purpose, else an even spread of six.
+    fn roundtrip_demos(source: &std::path::Path) -> Vec<std::path::PathBuf> {
+        if source.is_file() {
+            return vec![source.to_path_buf()];
+        }
+        let Ok(entries) = std::fs::read_dir(source) else {
+            return Vec::new();
+        };
+        let mut demos: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
+            .collect();
+        demos.sort();
+        if std::env::var_os("DOD_ROUNDTRIP_DEMO").is_some() || demos.len() <= 6 {
+            return demos;
+        }
+        let step = demos.len() / 6;
+        demos.into_iter().step_by(step).take(6).collect()
     }
 
     /// `svc_pings` splits each entry 5 (slot) + 12 (ping) + 7 (loss) bits
