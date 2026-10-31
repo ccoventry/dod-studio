@@ -11,6 +11,7 @@
 
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { recordCapture, carryCaptures } from './take_record.js';
+import { carryRenders } from './take_renders.js';
 
 /**
  * Content-addressed id for one highlight, stable across re-scans, project
@@ -223,6 +224,7 @@ export function pruneTakeIndex(takeIndex, knownUids) {
     if (kept.length > 0) pruned[key] = kept;
   }
   carryCaptures(takeIndex, pruned);
+  carryRenders(takeIndex, pruned);
   return pruned;
 }
 

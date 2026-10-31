@@ -108,6 +108,9 @@
   Delete "$INSTDIR\goldsrc-hooks\dodstudio_goldsrc_hooks.*.old"
   Delete "$INSTDIR\resources\goldsrc-hooks\dodstudio_goldsrc_hooks.*.old"
   ${If} $UpdateMode <> 1
+    ; The hook DLL copies a launch makes (native/src/sys/hook_copy.rs, #1146) live here and
+    ; nothing else does; an update keeps them, as the next start-up cleans them anyway.
+    RMDir /r "$LOCALAPPDATA\dod-studio\hooks"
     ReadRegStr $R7 HKCU "Software\Classes\DoDStudio.Demo\shell\open\command" ""
     ${If} $R7 == '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
       DeleteRegKey HKCU "Software\Classes\DoDStudio.Demo"

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { recordCapture } from './take_record.js';
-import { capturesOf, folderList, describeCapture } from './capture_history_logic.js';
+import { recordRender } from './take_renders.js';
+import { capturesOf, folderList, describeCapture, renderEntriesOf, videoPathList } from './capture_history_logic.js';
 
 const ME = 'd.dem#1#10#20';
 const OTHER = 'd.dem#2#12#30';
@@ -86,5 +87,40 @@ describe('describeCapture', () => {
     expect(renders[1].text).toContain('b.mov');
     expect(renders[1].videoPath).toBe(null);
     expect(renders[2].videoPath).toBe('D:/out/a.mov');
+  });
+});
+
+describe('the renders the project recorded (#1264)', () => {
+  const recorded = (started, extra = {}) => ({ started_unix_ms: started, stream: 'all', codec: 'prores', fps: 60, outcome: 'finished', output_path: `D:/out/${started}.mov`, ...extra });
+  const project = { 'del/chain_00_b0': [ME] };
+  recordCapture(project, 'del/chain_00_b0', { captured_at: 1_700_000_000_000, take_folder: 'D:/caps/del/chain_00_b0' });
+  recordRender(project, 'del/chain_00_b0', recorded(1_700_000_100_000));
+  recordRender(project, 'del/chain_00_b0', recorded(1_700_000_200_000));
+  const [capture] = capturesOf(project, ME);
+
+  it('a deleted take still lists the videos rendered from it', () => {
+    const line = describeCapture(capture, ME, { exists: false, renders: [] }, context);
+    expect(line.status).toBe('gone');
+    expect(line.renders).toHaveLength(2);
+  });
+
+  it('a video still there gets Show video; one moved is shown where it was found; one not found is missing', () => {
+    const located = new Map([['D:/out/1700000100000.mov', 'E:/sorted/1700000100000.mov'], ['D:/out/1700000200000.mov', null]]);
+    const { renders } = describeCapture(capture, ME, { exists: false, renders: [] }, { ...context, located });
+    expect(renders[0]).toMatchObject({ videoPath: null, missing: true });
+    expect(renders[0].text).toContain('was moved or deleted');
+    expect(renders[1]).toMatchObject({ videoPath: 'E:/sorted/1700000100000.mov', missing: false });
+  });
+
+  it('before the lookup answers, a recorded video has no button and is not called missing', () => {
+    const { renders } = describeCapture(capture, ME, undefined, context);
+    expect(renders.every((r) => r.videoPath === null && !r.missing)).toBe(true);
+  });
+
+  it("a render both the take folder and the project hold is listed once, with the folder's outcome", () => {
+    const state = { exists: true, renders: [recorded(1_700_000_100_000, { output_exists: true, output_size_bytes: 10 }), recorded(1_700_000_300_000, { outcome: 'failed', output_path: '' })] };
+    const entries = renderEntriesOf(capture, state);
+    expect(entries.map((e) => e.started_unix_ms)).toEqual([1_700_000_100_000, 1_700_000_200_000, 1_700_000_300_000]);
+    expect(videoPathList([capture], [state])).toEqual(['D:/out/1700000100000.mov', 'D:/out/1700000200000.mov']);
   });
 });

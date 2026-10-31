@@ -1,6 +1,6 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame, takeCaptureStates, revealInExplorer } from './ipc_bridge.js';
+import { launchDemoPreview, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame, takeCaptureStates, locateRenderedVideos, revealInExplorer } from './ipc_bridge.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
@@ -51,7 +51,7 @@ export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getPro
   currentOnDirty = onDirty || null;
   if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
   captureHistory = getTakeIndex
-    ? createCaptureHistory({ getTakeIndex, getDemos: getAllDemos, fetchStates: takeCaptureStates, reveal: revealInExplorer })
+    ? createCaptureHistory({ getTakeIndex, getDemos: getAllDemos, fetchStates: takeCaptureStates, locateVideos: locateRenderedVideos, reveal: revealInExplorer })
     : null;
 }
 
