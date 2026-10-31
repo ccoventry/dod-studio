@@ -4448,6 +4448,10 @@ button.setup-skip:hover:not(:disabled) {
 .output-row-status {
   flex-shrink: 0;
   margin-left: 6px;
+  /* One width for every chip, so the buttons before it line up row to row. */
+  width: 9.5em;
+  box-sizing: border-box;
+  text-align: center;
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 0.8em;
