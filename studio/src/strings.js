@@ -385,7 +385,7 @@ export const STRINGS = {
         'How frames get onto disk. Frame sequence and Video are both HLAE, deterministic and capable of any frame rate. OBS records the screen in real time instead, which is faster to a finished file but captures whatever actually rendered.',
     CAPTURE_MODE_AGR: 'AGR for Blender (no video)',
     CAPTURE_MODE_AGR_TITLE:
-        'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes. The game's sound for each clip is saved beside its .agr as a .wav of the same name, so the two line up.',
+        'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes. The sound of each clip is saved beside its .agr as a .wav of the same name, so the two line up.',
     AGR_FPS_LABEL: 'AGR FPS:',
     AGR_FPS_TITLE:
         'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
