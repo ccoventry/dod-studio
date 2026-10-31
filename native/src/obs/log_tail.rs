@@ -257,7 +257,9 @@ impl LogTailer {
     }
 }
 
-pub(crate) fn parse_marker(line: &str) -> Option<Marker> {
+/// One console line as a marker, or `None` when it carries no `[dod-studio]`
+/// tag. Also read by the catch-up after a restart, over a whole log (#20).
+pub fn parse_marker(line: &str) -> Option<Marker> {
     let line = line.trim_end_matches('\r').trim();
     let (_, rest) = line.split_once(LOG_TAG)?;
     let label = rest.trim().to_string();

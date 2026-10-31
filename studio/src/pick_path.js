@@ -59,6 +59,7 @@ export const PICK_FIELDS = {
   'auditor.add_folder': 'demos',
   'auditor.keep_folder': 'demos',
   'players.crosshair': 'documents',
+  'players.nameplate': 'documents',
   'blender.exe': 'programs',
   'blender.agr': 'videos',
   'blender.assets': 'documents',

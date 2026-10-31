@@ -4,9 +4,12 @@ Status: **Tiers 1a/1b/2/3 are done and on `dev`**: the on-disk analyzer cache, r
 progress events, the dead-code removal and cache warm-up from the Capture scan,
 plus later work: the scan warms the cache (#512), the decoded demo is freed off
 the calling thread (#511), and older cache schema versions are swept (#510).
-**Tier 4/5 are not started**, tracked as
-[GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) (open).
-Written so a fresh chat can pick Tier 4/5 up without re-deriving anything: read
+**Tier 5 (cheaper storage for decoded deltas) is done** (see "Tier 5: what was
+built" below); **Tier 4 is not started**. Both are tracked as
+[GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) (open),
+whose 2026-09-28 decision keeps full decoding for the Demo Analyzer and makes
+Tier 4 a fast mode for the capture-queue scan only.
+Written so a fresh chat can pick Tier 4 up without re-deriving anything: read
 the measurements and the Tier 4/5 section before touching code.
 
 ## Goal
@@ -153,7 +156,37 @@ work (Tier 4), that's the first thing to instrument.
 - **Free off the calling thread (#511).** The decoded demo is dropped on a
   background thread, taking the drop row of the baseline off the open path.
 
-### Tier 4/5 — not started (issue #37)
+### Tier 5: what was built (#37)
+
+Profiled first, as #37 decided. The benchmark now counts heap blocks and the
+heap's peak per phase (`benchmark/src/alloc_counter.rs`) and the decoded
+tree's delta tables and fields (`benchmark/src/tree_census.rs`). On 7 demos
+from the PRE install's `dod\` folder (7 recorders and matches, one HLTV, 72-124
+MB) plus `ci_fixture.dem`, the `HashMap<String, Vec<u8>>` deltas were 55-59% of
+every heap block the decode made (a table, then a key and a value per field;
+~1 M tables and ~5-7 M fields a demo), and the heap peaked at 0.86-1.4 GB.
+
+`Delta` (`dem-patch/src/delta_fields.rs`) is now one vector of fields per
+update: the name is an `Arc<str>` made once per decoder field
+(`DeltaDecoderS::key`) and shared by every field decoded from it, and a value of
+up to four bytes (every number type) is inline. Its API is the map's (`get`,
+`insert`, `iter`, `keys`, `contains_key`, ...), and values read as `&[u8]`.
+Same 8 demos, same benchmark, alternating runs on a busy machine:
+
+| | before | after |
+|---|---|---|
+| decode heap blocks | 17.8-28.8 M | 6.7-11.6 M (-60%) |
+| heap peak | 855-1400 MB | 539-895 MB (-35%) |
+| decode | 1.16-2.47 s | 0.52-1.36 s |
+| free of the decoded tree | 0.51-1.43 s | 0.21-0.73 s |
+
+The analysis (`--dump-json`, keys sorted) is byte-identical before and after on
+all 8, and the fixture's parse-and-re-encode test still gives back the original
+bytes. No cached field changed, so `SCHEMA_VERSION` stays. The decode's other
+6-10 M blocks are not attributed yet; the many small `BitVec` fields and the
+per-message boxes are the obvious candidates.
+
+### Tier 4/5 — the plan as written before either was started (issue #37)
 
 Tracked as [issue #37](https://github.com/ccoventry/dod-studio/issues/37). Kept in full below since it's the technical detail an implementer of that issue will actually need (which message types, which fields, why the sequencing with the stats work matters).
 

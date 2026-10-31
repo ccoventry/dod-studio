@@ -63,6 +63,9 @@ pub mod steam;
 /// game (#1235).
 #[cfg(windows)]
 pub mod studio_pipe;
+/// Ends a launcher a cancelled WMI call starts late (#1243).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wmi_late_start;
 /// Starts a process through WMI, outside every job of Studio's (#545).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wmi_launch;

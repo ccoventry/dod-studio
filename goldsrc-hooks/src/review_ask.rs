@@ -73,8 +73,15 @@ pub(crate) enum Status {
     Asking(String),
     /// Studio sent the review, at this time; the game starts it in a moment.
     Sent(Instant),
+    /// Studio answered the request with this failure.
     Failed(String),
+    /// The game never asked: an ask waiting for its demo gave up, for this
+    /// reason. Studio wasn't part of it, so the tab doesn't blame it.
+    NotAsked(String),
 }
+
+/// What `send` and `wait_for_demo` answer while a request is on its way.
+const STILL_WORKING: &str = "DoD Studio is still working on the last request";
 
 static STATUS: RwLock<Status> = RwLock::new(Status::Idle);
 
@@ -188,7 +195,7 @@ fn parse_reply(line: &str) -> Reply {
 /// already on its way.
 pub(crate) fn send(demo: PathBuf, start: Start) -> Result<(), String> {
     if IN_FLIGHT.swap(true, Ordering::AcqRel) {
-        return Err("DoD Studio is still working on the last request".to_string());
+        return Err(STILL_WORKING.to_string());
     }
     set_status(Status::Asking("Asking DoD Studio...".to_string()));
     let line = request_line(&demo, start);
@@ -258,8 +265,14 @@ pub(crate) fn wait_step(demo: DemoNow, waited: Duration) -> WaitStep {
 }
 
 /// Asks once the loading demo plays; the tab says so meanwhile, with its
-/// buttons greyed.
-pub(crate) fn wait_for_demo(start: Start) {
+/// buttons greyed. Refused, as [`send`] refuses, while a request is on its
+/// way: its end would overwrite the wait's status and ungrey the buttons
+/// with the wait still pending. A request's thread sets its end before it
+/// clears [`IN_FLIGHT`], so once that is clear, no end can come later.
+pub(crate) fn wait_for_demo(start: Start) -> Result<(), String> {
+    if IN_FLIGHT.load(Ordering::Acquire) {
+        return Err(STILL_WORKING.to_string());
+    }
     WAITING_SINCE_MS.store(epoch().elapsed().as_millis() as u64, Ordering::Relaxed);
     let mode = match start {
         Start::First => 1,
@@ -272,6 +285,7 @@ pub(crate) fn wait_for_demo(start: Start) {
     set_status(Status::Asking(
         "Waiting for the demo to load, then asking DoD Studio...".to_string(),
     ));
+    Ok(())
 }
 
 /// The ask waiting for its demo, and how long it has waited.
@@ -290,7 +304,7 @@ pub(crate) fn waiting() -> Option<(Start, Duration)> {
 /// started meanwhile.
 pub(crate) fn stop_waiting(why: Option<String>) {
     WAITING.store(0, Ordering::Release);
-    set_status(why.map_or(Status::Idle, Status::Failed));
+    set_status(why.map_or(Status::Idle, Status::NotAsked));
 }
 
 /// To the hook's log only: this runs off the game's thread, where the
@@ -403,17 +417,53 @@ mod tests {
         ));
     }
 
+    /// The tests below share the module's statics.
+    static STATICS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn statics() -> std::sync::MutexGuard<'static, ()> {
+        STATICS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn a_waiting_ask_greys_the_buttons_until_it_ends() {
+        let _statics = statics();
         // From here keeps the clock it was asked at: the demo plays on while
         // it loads.
-        wait_for_demo(Start::At(42.5));
+        wait_for_demo(Start::At(42.5)).unwrap();
         assert_eq!(waiting().map(|(start, _)| start), Some(Start::At(42.5)));
         assert!(matches!(status(), Status::Asking(_)));
+        stop_waiting(None);
+        assert_eq!(waiting(), None);
+        assert_eq!(status(), Status::Idle);
+    }
+
+    /// A wait that gives up says the game never asked, not that Studio
+    /// failed.
+    #[test]
+    fn a_wait_that_gives_up_ends_not_asked() {
+        let _statics = statics();
+        wait_for_demo(Start::First).unwrap();
         stop_waiting(Some("the demo stopped loading".into()));
         assert_eq!(waiting(), None);
-        assert_eq!(status(), Status::Failed("the demo stopped loading".into()));
+        assert_eq!(
+            status(),
+            Status::NotAsked("the demo stopped loading".into())
+        );
         stop_waiting(None);
-        assert_eq!(status(), Status::Idle);
+    }
+
+    /// With a request on its way, an ask doesn't wait: that request's end
+    /// would overwrite the wait's status and ungrey the buttons.
+    #[test]
+    fn an_ask_doesnt_wait_while_a_request_is_on_its_way() {
+        let _statics = statics();
+        set_status(Status::Asking("Scanning the demo...".into()));
+        IN_FLIGHT.store(true, Ordering::Release);
+        let waited = wait_for_demo(Start::First);
+        IN_FLIGHT.store(false, Ordering::Release);
+        assert_eq!(waited, Err(STILL_WORKING.to_string()));
+        assert_eq!(waiting(), None);
+        assert_eq!(status(), Status::Asking("Scanning the demo...".into()));
+        set_status(Status::Idle);
     }
 }

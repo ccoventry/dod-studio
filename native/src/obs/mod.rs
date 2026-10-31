@@ -40,6 +40,7 @@ pub mod pipe_tail;
 pub mod provision;
 pub mod recover;
 pub mod session;
+pub mod take_state;
 
 pub use client::{ObsClient, ObsError};
 pub use drop_rate::{DropPoller, FrameCounters, ObsDropReport};

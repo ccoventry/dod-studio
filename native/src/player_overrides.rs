@@ -68,6 +68,12 @@ pub struct PlayerRow {
     /// the hook has no use for it.
     #[serde(default)]
     pub use_as: String,
+    /// The player's nameplate picture (#429): a full path to a PNG anywhere
+    /// on disk, which the VEGAS script puts on its own track above each of
+    /// their clips. Empty means none. Only a row with a SteamID uses it, and
+    /// like [`Self::use_as`] it is Studio-only: [`table_text`] leaves it out.
+    #[serde(default)]
+    pub nameplate: String,
 }
 
 /// What a player not in the table gets for their spray.
@@ -514,6 +520,7 @@ mod tests {
             crosshair_sprite: sprite.into(),
             crosshair_tile: tile,
             use_as: String::new(),
+            nameplate: String::new(),
         };
         PlayerTable {
             use_in_game: true,
@@ -623,6 +630,27 @@ mod tests {
         let saved = serde_json::to_string(&table).unwrap();
         let back: PlayerTable = serde_json::from_str(&saved).unwrap();
         assert_eq!(back.players[0].use_as, "Chris");
+        assert_eq!(table_text(&table), plain);
+    }
+
+    #[test]
+    fn a_row_saved_before_nameplates_loads_with_none() {
+        let table: PlayerTable = serde_json::from_str(
+            r#"{"players":[{"steam_id":"76561197972576011","name":"m00cat","use_as":"Chris"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(table.players[0].nameplate, "");
+        assert_eq!(table.players[0].use_as, "Chris");
+    }
+
+    #[test]
+    fn a_nameplate_is_saved_but_never_reaches_the_hook() {
+        let mut table = fixture_table();
+        let plain = table_text(&table);
+        table.players[0].nameplate = "D:/movie/nameplates/m00cat.png".into();
+        let saved = serde_json::to_string(&table).unwrap();
+        let back: PlayerTable = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.players[0].nameplate, "D:/movie/nameplates/m00cat.png");
         assert_eq!(table_text(&table), plain);
     }
 
