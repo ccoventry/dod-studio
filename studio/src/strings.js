@@ -585,6 +585,11 @@ export const STRINGS = {
     OUTPUT_ROW_MALFORMED_TITLE: 'This path has characters Windows does not allow in a folder name.',
     OUTPUT_ROW_NOT_A_FOLDER: 'That is a file',
     OUTPUT_ROW_NOT_A_FOLDER_TITLE: 'This path points at a file, not a folder.',
+    // The line under a row that cannot be used (#25): what is wrong with that path.
+    OUTPUT_ROW_DRIVE_MISSING_DETAIL: "This drive isn't connected, so nothing can be captured here. Connect it, or remove this folder.",
+    OUTPUT_ROW_NOT_FULL_PATH_DETAIL: 'Start with a drive letter, for example D:/captures.',
+    OUTPUT_ROW_MALFORMED_DETAIL: "This has characters Windows doesn't allow in a folder name.",
+    OUTPUT_ROW_NOT_A_FOLDER_DETAIL: 'This is a file, not a folder. Pick the folder to write captures into.',
     OUTPUT_ROW_OK_TITLE: 'This folder exists.',
     OUTPUT_ROW_CHECKING_TITLE: 'Checking this folder.',
     ADD_DIRECTORY_BUTTON: 'Add Directory',
@@ -673,13 +678,6 @@ export const STRINGS = {
 
   // ── capture_pane.js runtime text (toasts, warnings, confirms) ───────────
   CAPTURE: {
-    pathProblem: {
-      notAbsolute: (p) => `"${p}" isn't a full path (it needs a drive letter, e.g. C:\\...)`,
-      malformed: (p) => `"${p}" isn't a valid path (invalid characters or formatting)`,
-      notFound: (p) => `"${p}" doesn't exist on this computer (check the spelling, or that the drive is connected)`,
-      notADirectory: (p) => `"${p}" points to a file, not a folder`,
-      unusable: (p) => `"${p}" is unusable`,
-    },
     andNMore: (n) => `...and ${n} more`,
     PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
@@ -690,12 +688,12 @@ export const STRINGS = {
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
     // after rendering — the user has no other way to find out.
-    noUsableSpaceProblem: (desc) => `Capture Output problem:\n${desc}`,
+    NO_USABLE_OUTPUT_FOLDER_WARNING: 'None of the Capture Output folders can be used: see the red rows in the list.',
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
     insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
     insufficientSpaceRendersMakeRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: the batch will wait between clips for renders to free room ("Render while capturing").`,
-    partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
+    partialProblemsWarning: (wontBeUsed) => `Some Capture Output ${wontBeUsed} (see the red rows in the list). Capture will proceed using the others.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
     willBeCreatedSingle: (path, doesnt) => `${path} ${doesnt} exist yet — it'll be created when the capture starts.`,

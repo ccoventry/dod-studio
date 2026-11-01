@@ -14,12 +14,12 @@ import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked } from './obs_status.js';
 import { runObsConnectionTest, launchObsAndRetry, setObsCheckListener } from './obs_connection_ui.js';
 import { initClearPreviewsModal } from './orphaned_previews_modal.js';
-import { describeProblemPaths } from './capture_pane_logic.js';
 import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
 import { captureRateOf } from './take_record.js';
 import { STRINGS } from './strings.js';
+import { MAX_PROBLEM_PATHS_SHOWN } from './capture_pane_logic.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
 import { requestFinishClips, finishSummary } from './finish_clips.js';
@@ -370,7 +370,7 @@ export async function refreshLaunchGuard(state) {
     } else if (noUsableSpace) {
       warningEl.style.color = '#f44336';
       warningEl.textContent = problemPaths.length > 0
-        ? STRINGS.CAPTURE.noUsableSpaceProblem(describeProblemPaths(problemPaths))
+        ? STRINGS.CAPTURE.NO_USABLE_OUTPUT_FOLDER_WARNING
         : STRINGS.CAPTURE.NO_USABLE_SPACE_WARNING;
       warningEl.style.display = 'block';
     } else if (makesRoom) {
@@ -384,7 +384,7 @@ export async function refreshLaunchGuard(state) {
     } else if (hasPartialProblems) {
       warningEl.style.color = '#ffa726';
       const wontBeUsed = problemPaths.length === 1 ? STRINGS.CAPTURE.ENTRY_WONT_BE_USED_SINGULAR : STRINGS.CAPTURE.ENTRY_WONT_BE_USED_PLURAL;
-      warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed, describeProblemPaths(problemPaths));
+      warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed);
       warningEl.style.display = 'block';
     } else if (willBeCreatedPaths.length > 0) {
       warningEl.style.color = '#64b5f6';
