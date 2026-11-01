@@ -4,6 +4,7 @@
 // launch for the game's error boxes.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use native::log_markdown;
 use native::patch::PatcherConfig;
@@ -11,23 +12,65 @@ use native::patch::launch_settings::RunningGameCheck;
 use serde::Deserialize;
 use tauri::{Emitter, Manager};
 
+/// The newest launch's error-box watcher; every launch bumps it (#726).
+static CURRENT_ERROR_BOX_WATCH: AtomicU64 = AtomicU64::new(0);
+
+/// One launch's error-box watcher: which boxes it has reported, and whether a
+/// newer launch has taken over. The watcher sees every `hl.exe`, not just the
+/// one its launch started, and keeps going while any game runs, so a game
+/// closed and started again within 5 seconds (#666's "close and start
+/// again") kept the first launch's watcher alive beside the new one's, and
+/// each box was logged and toasted twice (#726). Only the newest watcher
+/// reports; an older one stops on its next look.
+struct ErrorBoxWatch {
+    generation: u64,
+    reported: Vec<isize>,
+}
+
+impl ErrorBoxWatch {
+    fn start(current: &AtomicU64) -> Self {
+        Self {
+            generation: current.fetch_add(1, Ordering::SeqCst) + 1,
+            reported: Vec::new(),
+        }
+    }
+
+    /// False once a newer launch's watcher has started.
+    fn is_current(&self, current: &AtomicU64) -> bool {
+        current.load(Ordering::SeqCst) == self.generation
+    }
+
+    /// True the first time this watcher sees box `window`.
+    fn first_sighting(&mut self, window: isize) -> bool {
+        if self.reported.contains(&window) {
+            return false;
+        }
+        self.reported.push(window);
+        true
+    }
+}
+
 /// After a preview or Launch Game: reports any error box the game, the HLAE
 /// launcher or its injector shows (`native::sys::dialogs`) as an
 /// `external_error` event, each box once. Report only, unlike a batch: the
 /// user is at the game, so the box stays for them to close. Stops once the
-/// launcher has exited and no game has been running for 5 seconds.
+/// launcher has exited and no game has been running for 5 seconds, or when
+/// a newer launch starts its own watcher.
 pub(crate) fn watch_for_error_dialogs(
     app: tauri::AppHandle,
     mut launcher: native::sys::launcher::Launcher,
 ) {
+    let mut watch = ErrorBoxWatch::start(&CURRENT_ERROR_BOX_WATCH);
     std::thread::spawn(move || {
         let launcher_pid = launcher.id();
         let mut launcher_running = true;
-        let mut reported: Vec<isize> = Vec::new();
         let mut last_game_seen = std::time::Instant::now();
         let mut sys = native::sys::process::snapshot();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
+            if !watch.is_current(&CURRENT_ERROR_BOX_WATCH) {
+                break;
+            }
             native::sys::process::refresh(&mut sys);
             if launcher_running && !matches!(launcher.exit_status(&sys), Ok(None)) {
                 launcher_running = false;
@@ -41,10 +84,9 @@ pub(crate) fn watch_for_error_dialogs(
                 last_game_seen = std::time::Instant::now();
             }
             for dialog in native::sys::dialogs::error_dialogs(&game_pids, &launcher_pids) {
-                if reported.contains(&dialog.window) {
+                if !watch.first_sighting(dialog.window) {
                     continue;
                 }
-                reported.push(dialog.window);
                 log_markdown(&crate::messages::game_process::launch_error_box(
                     dialog.pid,
                     dialog.full_text(),
@@ -375,6 +417,26 @@ pub fn kill_engine_processes() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #726: a game closed and started again within 5 s left the first
+    /// launch's watcher running beside the new one's; both saw the new
+    /// game's box and it was logged and toasted twice. One box, one report.
+    #[test]
+    fn a_box_is_reported_once_when_a_relaunch_starts_a_second_watcher() {
+        let current = AtomicU64::new(0);
+        let mut first_launch = ErrorBoxWatch::start(&current);
+        let mut relaunch = ErrorBoxWatch::start(&current);
+        let new_games_box = 0x1234;
+        let mut reports = 0;
+        for watch in [&mut first_launch, &mut relaunch] {
+            if watch.is_current(&current) && watch.first_sighting(new_games_box) {
+                reports += 1;
+            }
+        }
+        assert_eq!(reports, 1);
+        assert!(relaunch.is_current(&current));
+        assert!(!relaunch.first_sighting(new_games_box));
+    }
 
     /// The running-game check compares against what a launch would use: the
     /// caller's unsaved values over the saved settings, blanks ignored (#666).
