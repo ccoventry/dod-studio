@@ -94,6 +94,9 @@
 //! - `teammate_info`: the `ds_hud_hide_teammate_info` cvar -- hide the
 //!   teammate name and health line under a POV demo's crosshair, through
 //!   `hudelement`'s vftable stub (#342).
+//! - `nameplates`: the `ds_spec_show_player_info` cvar -- a name, a
+//!   health bar or both over each player drawn, in demo playback, from `player_info`'s read of
+//!   `client.dll`'s `g_PlayerExtraInfo` (#1130).
 //! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
 //!   keep the weapon-selection list off screen while a demo plays (#1032).
 //! - `crosshair`: the `ds_hud_hide_crosshair` cvar -- hide the crosshair and have
@@ -307,6 +310,7 @@ mod map_weather;
 mod mg_reload_hint;
 mod missing_shots;
 mod msglog;
+mod nameplates;
 mod names;
 mod objicons;
 mod old_names;
@@ -321,6 +325,7 @@ mod particle_hide;
 mod patch;
 mod pe;
 mod player_crosshair;
+mod player_info;
 mod player_names;
 mod player_overrides;
 mod player_table;

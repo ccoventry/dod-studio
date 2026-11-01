@@ -97,6 +97,33 @@
 		"textAlignment"		"west"
 		"helptext"		"ds_spec_hide_hltv_messages: hide the HLTV proxy's on-screen messages."
 	}
+	"label_ds_spec_show_player_info"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"label_ds_spec_show_player_info"
+		"xpos"		"266"
+		"ypos"		"94"
+		"wide"		"100"
+		"tall"		"22"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"Over players"
+		"textAlignment"		"west"
+		"helptext"		"ds_spec_show_player_info: what to show over each player's head in an HLTV demo."
+	}
+	"cvar_ds_spec_show_player_info"
+	{
+		"ControlName"		"ComboBox"
+		"fieldName"		"cvar_ds_spec_show_player_info"
+		"xpos"		"366"
+		"ypos"		"95"
+		"wide"		"142"
+		"tall"		"20"
+		"visible"		"1"
+		"enabled"		"1"
+		"editable"		"0"
+		"helptext"		"ds_spec_show_player_info: what to show over each player's head in an HLTV demo."
+	}
 	"HeadingHud"
 	{
 		"ControlName"		"Label"

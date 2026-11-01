@@ -1495,8 +1495,8 @@ unsafe extern "C" fn tramp_draw_transparent_triangles() {
     crate::demo_scope::with_black_fill(|| unsafe { real() });
 }
 
-/// Runs `client.dll`'s own `HUD_Redraw`, then draws the review's panel
-/// over the HUD (#660).
+/// Runs `client.dll`'s own `HUD_Redraw`, then draws the players' name
+/// plates (#1130) and the review's panel over the HUD (#660).
 unsafe extern "C" fn tramp_hud_redraw(time: f32, intermission: i32) -> i32 {
     let real = REAL_HUD_REDRAW.load(Ordering::Acquire);
     let result = if real.is_null() {
@@ -1506,8 +1506,12 @@ unsafe extern "C" fn tramp_hud_redraw(time: f32, intermission: i32) -> i32 {
         // Safety: the client's own export, called on the engine's thread.
         unsafe { real(time, intermission) }
     };
-    // Safety: on the engine's thread, inside HUD_Redraw.
-    unsafe { crate::review_keys::draw() };
+    // Safety: on the engine's thread, inside HUD_Redraw. The plates go
+    // first, so the review's panel covers them.
+    unsafe {
+        crate::nameplates::draw(intermission);
+        crate::review_keys::draw();
+    }
     result
 }
 
@@ -1556,7 +1560,13 @@ unsafe extern "C" fn tramp_hud_add_entity(
         return 1;
     }
     let real: HudAddEntityFn = unsafe { std::mem::transmute(real) };
-    unsafe { real(entity_type, ent, modelname) }
+    let drawn = unsafe { real(entity_type, ent, modelname) };
+    if drawn != 0 {
+        // Safety: the engine's own `cl_entity_t` for this call. The client's
+        // answer counts: it drops the player an HLTV camera watches in-eye.
+        unsafe { crate::nameplates::note_added(ent as *const ClEntityS) };
+    }
+    drawn
 }
 
 /// Set once `client.dll`'s `HUD_Shutdown` has run: the game is quitting.

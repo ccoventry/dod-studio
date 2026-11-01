@@ -253,6 +253,9 @@ pub fn install() {
     if let Some(blood) = register(crate::own_blood::NAME, "0") {
         crate::own_blood::CVAR.set(blood);
     }
+    if let Some(info) = register(crate::nameplates::NAME, "0") {
+        crate::nameplates::CVAR.set(info);
+    }
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
         crate::map_weather::CVAR.set(weather);
     }
