@@ -13,7 +13,7 @@ function setUp({ located, lengths, path = 'D:/out/movie.txt' }) {
   recordCapture(index, 't2', { take_folder: 'D:/caps/t2', captured_at: 2 });
   recordRender(index, 't1', render(10, 'all', 'D:/v/a.mov'));
   recordRender(index, 't2', render(20, 'all', 'D:/v/b.mov'));
-  recordRender(index, 't2', render(30, 'HUD ONLY', 'D:/v/b_hud.mov'));
+  recordRender(index, 't2', render(30, 'hud:hudcolor', 'D:/v/b_hud.mov'));
   const io = {
     locate: vi.fn(async () => located),
     probe: vi.fn(async () => new Map(Object.entries(lengths))),

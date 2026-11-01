@@ -94,8 +94,7 @@ export async function saveManifest(path, clips, project) {
     edlName: fileNameOf(path), ...project, useAsName, nameplatePath,
   });
   try {
-    await writeTextFile(manifestPathFor(path), `${JSON.stringify(manifest, null, 2)}
-`);
+    await writeTextFile(manifestPathFor(path), `${JSON.stringify(manifest, null, 2)}\n`);
   } catch (err) {
     showToast(STRINGS.RENDER.exportManifestFailed(err), 'error');
   }

@@ -8,9 +8,12 @@ const [s1, s2] = demos[0].streaks;
 const u1 = streakUid('a.dem', s1);
 const u2 = streakUid('a.dem', s2);
 const videos = [
-  { takeKey: 't1', uids: [u1], output_path: 'C:/v/one.mov', stream: 'Main' },
-  { takeKey: 't2', uids: [u2], output_path: 'C:/v/two.mov', stream: 'Main' },
-  { takeKey: 't2', uids: [u2], output_path: 'C:/v/two_hud.mov', stream: 'HUD ONLY' },
+  // The streams a take folder's history records (`attempt_stream` in
+  // native's take_cleanup.rs): the image folder, `hud:`-prefixed for a
+  // HUD-only render.
+  { takeKey: 't1', uids: [u1], output_path: 'C:/v/one.mov', stream: 'all' },
+  { takeKey: 't2', uids: [u2], output_path: 'C:/v/two.mov', stream: 'all' },
+  { takeKey: 't2', uids: [u2], output_path: 'C:/v/two_hud.mov', stream: 'hud:hudcolor' },
 ];
 
 describe('project VEGAS export', () => {

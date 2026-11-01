@@ -7,8 +7,13 @@ import { streakUid } from './take_index.js';
 import { captureOf } from './take_record.js';
 import { fileNameOf } from './path_display.js';
 
-/** The job `stream` of a HUD-only render, as vegas_edl.js reads it. */
-const HUD_STREAM = 'HUD ONLY';
+/**
+ * How a recorded render's `stream` starts when it was a HUD-only pass. The
+ * project records the take folder's history (`attempt_stream` in native's
+ * take_cleanup.rs: `hud:<folder>`), not the Render tab's job label that
+ * vegas_edl.js reads (`HUD ONLY`).
+ */
+const HUD_STREAM_PREFIX = 'hud:';
 
 /** The uids of the highlights ticked in `demos`. */
 export function tickedUids(demos) {
@@ -53,7 +58,7 @@ export function clipsOfVideos(videos, takeIndex, lengths) {
       path: video.output_path,
       seconds,
       take_key: video.takeKey || '',
-      hud: video.stream === HUD_STREAM,
+      hud: String(video.stream || '').startsWith(HUD_STREAM_PREFIX),
       takeFolder: captureOf(takeIndex, video.takeKey)?.take_folder || '',
     });
   });
