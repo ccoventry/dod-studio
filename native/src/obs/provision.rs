@@ -103,9 +103,9 @@ fn setup_with_config_roots(
     // profile's own canvas and frame rate. Best-effort: OBS still records if
     // these can't be set, just at whatever quality the profile was left on.
     if let Err(e) = ensure_recording_settings(client, previous_profile.as_deref(), quality, roots) {
-        log_markdown(&format!(
-            "⚠️ **OBS** — couldn't set the `{PROFILE_NAME}` profile's recording quality ({e}). \
-             Clips record at whatever OBS's Settings → Output has for it."
+        log_markdown(&crate::messages::obs_recording_quality_not_set(
+            PROFILE_NAME,
+            e,
         ));
         // A failure between the rebuild's two switches leaves OBS on the
         // other profile, often the user's own, and everything below writes to
@@ -128,17 +128,13 @@ fn ensure_profile(client: &mut ObsClient) -> Result<Option<String>, ObsError> {
     let (profiles, current) = client.profile_list()?;
     if !profiles.iter().any(|p| p == PROFILE_NAME) {
         client.create_profile(PROFILE_NAME)?;
-        log_markdown(&format!(
-            "🎬 **OBS** — created the `{PROFILE_NAME}` profile (first run on this OBS install)."
-        ));
+        log_markdown(&crate::messages::obs_profile_created(PROFILE_NAME));
     }
     if current == PROFILE_NAME {
         return Ok(None);
     }
     client.set_profile(PROFILE_NAME)?;
-    log_markdown(&format!(
-        "🎬 **OBS** — switched to profile `{PROFILE_NAME}` (restored afterwards)."
-    ));
+    log_markdown(&crate::messages::obs_profile_switched(PROFILE_NAME));
     Ok(Some(current))
 }
 
@@ -272,14 +268,13 @@ fn ensure_recording_settings(
             client.set_profile(&other)?;
             client.set_profile(PROFILE_NAME)?;
         }
-        None => log_markdown(&format!(
-            "⚠️ **OBS** — `{PROFILE_NAME}` is OBS's only profile, so its new recording settings \
-             apply from OBS's next start."
+        None => log_markdown(&crate::messages::obs_only_profile_applies_next_start(
+            PROFILE_NAME,
         )),
     }
-    log_markdown(&format!(
-        "🎬 **OBS** — set the `{PROFILE_NAME}` profile's recording settings: {}.",
-        changed.join(", ")
+    log_markdown(&crate::messages::obs_recording_settings_set(
+        PROFILE_NAME,
+        changed.join(", "),
     ));
     Ok(())
 }
@@ -312,10 +307,7 @@ fn write_encoder_file(
         .ok()
         .and_then(|()| encoder::find_profile_dir(roots, MARKER_KEY, &marker));
     let Some(dir) = dir else {
-        log_markdown(&format!(
-            "⚠️ **OBS** — couldn't find the `{PROFILE_NAME}` profile's folder, so it records in \
-             OBS's Simple mode, which may drop frames at 120 fps."
-        ));
+        log_markdown(&crate::messages::obs_profile_folder_not_found(PROFILE_NAME));
         return false;
     };
     match encoder::write_record_encoder(&dir, &enc.settings) {
@@ -325,10 +317,10 @@ fn write_encoder_file(
         }
         Ok(false) => true,
         Err(e) => {
-            log_markdown(&format!(
-                "⚠️ **OBS** — couldn't write `{}` ({e}), so the `{PROFILE_NAME}` profile records \
-                 in OBS's Simple mode, which may drop frames at 120 fps.",
-                dir.join("recordEncoder.json").display()
+            log_markdown(&crate::messages::obs_encoder_file_not_written(
+                dir.join("recordEncoder.json").display(),
+                e,
+                PROFILE_NAME,
             ));
             false
         }
@@ -343,9 +335,7 @@ fn ensure_scene_and_sources(
     let scenes = client.scene_names()?;
     if !scenes.iter().any(|s| s == SCENE_NAME) {
         client.create_scene(SCENE_NAME)?;
-        log_markdown(&format!(
-            "🎬 **OBS** — created the `{SCENE_NAME}` scene (first run in this scene collection)."
-        ));
+        log_markdown(&crate::messages::obs_scene_created(SCENE_NAME));
     }
 
     ensure_game_capture_source(client, width, height)?;
@@ -356,9 +346,7 @@ fn ensure_scene_and_sources(
         return Ok(None);
     }
     client.set_scene(SCENE_NAME)?;
-    log_markdown(&format!(
-        "🎬 **OBS** — switched to scene `{SCENE_NAME}` (restored afterwards)."
-    ));
+    log_markdown(&crate::messages::obs_scene_switched(SCENE_NAME));
     Ok(Some(current))
 }
 

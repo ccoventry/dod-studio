@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager};
 #[tauri::command(async)]
 pub fn vegas_install_script(app: AppHandle) -> Result<String, String> {
     let started = Instant::now();
-    native::log_markdown("[vegas] installing the nameplate script into the script menu");
+    native::log_markdown(crate::messages::vegas::INSTALLING_SCRIPT);
     let bundled = app
         .path()
         .resource_dir()
@@ -24,12 +24,11 @@ pub fn vegas_install_script(app: AppHandle) -> Result<String, String> {
             vegas::install_script(&source, &documents)
         });
     match &result {
-        Ok(path) => native::log_markdown(&format!(
-            "[vegas] script installed at {} in {} ms",
+        Ok(path) => native::log_markdown(&crate::messages::vegas::script_installed(
             path.display(),
-            started.elapsed().as_millis()
+            started.elapsed().as_millis(),
         )),
-        Err(err) => native::log_markdown(&format!("[vegas] script install failed: {err}")),
+        Err(err) => native::log_markdown(&crate::messages::vegas::script_install_failed(err)),
     }
     result.map(|path| path.display().to_string())
 }

@@ -16,10 +16,10 @@ export const HIGHLIGHT_STATUS = Object.freeze({
 });
 
 export const STATUS_COLORS = Object.freeze({
-  [HIGHLIGHT_STATUS.NONE]: '#555',
-  [HIGHLIGHT_STATUS.PENDING]: '#ffa726',
-  [HIGHLIGHT_STATUS.CAPTURED]: '#2196f3',
-  [HIGHLIGHT_STATUS.RENDERED]: '#4caf50',
+  [HIGHLIGHT_STATUS.NONE]: 'var(--text-dim)',
+  [HIGHLIGHT_STATUS.PENDING]: 'var(--warn-orange)',
+  [HIGHLIGHT_STATUS.CAPTURED]: 'var(--info-bright)',
+  [HIGHLIGHT_STATUS.RENDERED]: 'var(--ok)',
 });
 
 /** A status's colour; an unknown status gets None's grey. */
@@ -36,10 +36,10 @@ export function statusCountColor(status, count) {
  *  Review counts; none of them is a Status colour, so the two columns side by
  *  side never read as each other. */
 export const REVIEW_COLORS = Object.freeze({
-  Unmarked: '#e0e0e0',
-  Keep: '#26c6da',
-  Maybe: '#ffd54f',
-  Skip: '#ef5350',
+  Unmarked: 'var(--text-bright)',
+  Keep: 'var(--cyan)',
+  Maybe: 'var(--warn-mark)',
+  Skip: 'var(--danger-light)',
 });
 
 /** A Review count: the mark's colour, or grey at zero. */

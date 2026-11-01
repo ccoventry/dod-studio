@@ -16,6 +16,8 @@ import { clearCheckedPaths } from './master_pane.js';
 import { switchNavTab } from './nav.js';
 import { streakUid, pruneTakeIndex } from './take_index.js';
 import { attachCaptures, capturesToSave } from './take_record.js';
+import { attachRenders, rendersToSave } from './take_renders.js';
+import { createProjectRenders } from './project_renders.js';
 import { emptyProjectTeams, normalizeProjectTeams } from './project_teams.js';
 import { refreshTeamsPane } from './teams_pane.js';
 import { projectFolders } from './project_paths.js';
@@ -121,6 +123,11 @@ export function createProjectSession({
     updateSessionFileIndicator();
   }
 
+  // The project's record of its rendered videos (#1264): kept current as
+  // renders finish, and filled from the take folders when a project opens.
+  const projectRenders = createProjectRenders({ getTakeIndex, markDirty: markProjectDirty });
+  projectRenders.startRecording();
+
   // Save Project Session — also called from the Clear All modal's "Save
   // Session First" action, so it lives here as a plain function rather than
   // only inline in the button's click handler. Returns whether it actually
@@ -165,6 +172,9 @@ export function createProjectSession({
         // How each take was captured (#439), beside the index so a build
         // from before it still reads takeIndex as bare uid lists.
         takeCaptures: capturesToSave(prunedTakes),
+        // Every video rendered for the project (#1264), beside the index
+        // for the same reason; left out until the first render.
+        takeRenders: rendersToSave(prunedTakes),
         teams: getProjectTeams(),
         // Whose highlights an HLTV demo's review plays (#828).
         review: getReviewSettings(),
@@ -281,6 +291,7 @@ export function createProjectSession({
       // retroactively apply to takes captured before this existed.
       const takeIndex = data.takeIndex || {};
       attachCaptures(takeIndex, data.takeCaptures);
+      attachRenders(takeIndex, data.takeRenders);
       setTakeIndex(takeIndex);
       // Deliberately verbose: this is the only place takeIndex is ever
       // populated from disk, so logging it here — with exactly what
@@ -320,6 +331,9 @@ export function createProjectSession({
         if (rescanOffer) await offerRescan();
       }
       refreshTeamsPane();
+      // In the background: the project is usable while the take folders answer.
+      projectRenders.pickUpTakeFolderRenders()
+        .catch((err) => console.error('Picking up the take folders\' renders failed:', err));
     } catch (err) {
       console.error("Load project error:", err);
       logFrontendEvent(projectFailedLine('open the project', selected, err));

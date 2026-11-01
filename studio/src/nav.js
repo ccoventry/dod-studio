@@ -14,6 +14,7 @@ let activeCaptureDetailSubtab = 'highlights';
 
 function applyCaptureDetailSubtabDisplay() {
   const workspacePane = document.querySelector('#pane-workspace');
+  const splitHandle = document.querySelector('#capture-split-handle');
   const detailPane = document.querySelector('#detail-pane');
   const exportPanel = document.querySelector('#export-config-panel');
   const renderPanel = document.querySelector('#render-studio-panel');
@@ -31,6 +32,7 @@ function applyCaptureDetailSubtabDisplay() {
   // already had (a deliberate call, not a layout regression): only
   // Highlights keeps the master-queue pane visible alongside it.
   if (workspacePane) workspacePane.style.display = showHighlights ? 'flex' : 'none';
+  if (splitHandle) splitHandle.style.display = showHighlights ? 'flex' : 'none';
   if (detailPane) detailPane.style.display = showHighlights ? 'block' : 'none';
   if (exportPanel) exportPanel.style.display = showConfiguration ? 'block' : 'none';
   if (renderPanel) renderPanel.style.display = showRender ? 'block' : 'none';
