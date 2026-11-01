@@ -24,6 +24,8 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
+use crate::player_info::{ALLIES, AXIS};
+
 /// `DeathMsg`'s weapon index for a butt stroke, `d_garandbutt` in
 /// [`super::WEAPON_SPRITES`] (`dod::Weapon::ButtStock`).
 pub(super) const BUTT_WEAPON: u8 = 42;
@@ -51,10 +53,6 @@ pub(super) const VARIANT_NAMES: [(&str, Rifle, Head); 4] = [
     ("d_k43butt_axis", Rifle::K43, Head::Axis),
     ("d_k43butt_us", Rifle::K43, Head::Us),
 ];
-
-/// `g_PlayerExtraInfo`'s team numbers.
-const ALLIES: i32 = 1;
-const AXIS: i32 = 2;
 
 /// The index into [`VARIANT_NAMES`] of a rifle and head.
 pub(super) fn variant_index(rifle: Rifle, head: Head) -> usize {
@@ -159,14 +157,7 @@ mod live {
     /// A player's team from the scoreboard (`g_PlayerExtraInfo`), for
     /// 1..=32 only.
     fn team_of(base: usize, index: i32) -> Option<i32> {
-        if !(1..=32).contains(&index) {
-            return None;
-        }
-        let at = base
-            + crate::overview_marker::EXTRA_TEAM_RVA
-            + crate::overview_marker::EXTRA_STRIDE * index as usize;
-        // Safety: a fixed `.data` array of 65 entries in a mapped client.dll.
-        Some(i32::from(unsafe { *(at as *const i16) }))
+        crate::player_info::team(base, index)
     }
 
     /// The model the player at `index` holds, if the engine knows it.

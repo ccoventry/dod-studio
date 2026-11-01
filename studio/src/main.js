@@ -2,6 +2,7 @@ import { configurePickPath } from './pick_path.js';
 import { getSettings, openActivityLog, builtinCommandProfiles } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
+import { startDemoContextMenu } from './demo_context_menu.js';
 import { resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
@@ -365,6 +366,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChanged: onHighlightStatusChange,
     hltvPick,
   });
+  // Right-click menu on the queue's rows: demo_context_menu.js.
+  startDemoContextMenu({ startReview: reviewMode.startReview });
   // The in-game Review tab's From the start / From here (#1142).
   startReviewFromGame({ getDemos: queue.getDemos, startReview: reviewMode.startReview, isScanning,
     scan: (paths) => triggerAutoScan(paths, { pickedFiles: true }) });

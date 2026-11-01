@@ -2067,9 +2067,28 @@ mod hook {
                 .iter()
                 .filter(|(n, _, _)| n != SCROLL_UP && n != SCROLL_DOWN)
         };
+        let folders = crate::demo_list_folders::enabled();
+        let counts = crate::demo_list_folders::SHOW_COUNTS.on();
+        let shown = |name: &str| {
+            bound_cvar(name)
+                .and_then(|cvar| {
+                    folder_box_shown(&crate::names::current_name(cvar), folders, counts)
+                })
+                .unwrap_or(true)
+        };
+        // A line whose boxes are all hidden closes up (#787).
+        let closed = closed_lines(
+            &rows()
+                .map(|(n, _, at)| (at.1, at.3, shown(n)))
+                .collect::<Vec<_>>(),
+        );
         let line = button(SCROLL_UP).map_or(22, |(_, at)| at.3.max(1));
         let top = rows().map(|(_, _, at)| at.1).min().unwrap_or(0);
-        let content = rows().map(|(_, _, at)| at.1 + at.3).max().unwrap_or(0) + top;
+        let content = rows()
+            .map(|(_, _, at)| at.1 - moved_up(&closed, at.1) + at.3)
+            .max()
+            .unwrap_or(0)
+            + top;
         let view = (h - inset).max(1);
         let scroll = settings_scroll(
             scroll,
@@ -2080,17 +2099,11 @@ mod hook {
             content,
         );
         let most = (content - view).max(0);
-        let folders = crate::demo_list_folders::enabled();
-        let counts = crate::demo_list_folders::SHOW_COUNTS.on();
         unsafe {
             for (name, control, at) in rows() {
-                let y = at.1 - scroll + inset;
+                let y = at.1 - moved_up(&closed, at.1) - scroll + inset;
                 let in_view = y >= inset && y + at.3 <= h;
-                let shown = bound_cvar(name)
-                    .and_then(|cvar| {
-                        folder_box_shown(&crate::names::current_name(cvar), folders, counts)
-                    })
-                    .unwrap_or(true);
+                let shown = shown(name);
                 vgui.place(*control, (at.0, y, at.2, at.3));
                 if vgui.visible(*control) != (in_view && shown) {
                     vgui.set_visible(*control, in_view && shown);

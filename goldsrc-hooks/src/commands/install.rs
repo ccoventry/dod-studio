@@ -253,6 +253,23 @@ pub fn install() {
     if let Some(blood) = register(crate::own_blood::NAME, "0") {
         crate::own_blood::CVAR.set(blood);
     }
+    if let Some(info) = register(crate::nameplates::NAME, "0") {
+        crate::nameplates::CVAR.set(info);
+    }
+    // Off by default: a glow through every wall changes the whole picture
+    // (#1297).
+    if let Some(xray) = register(crate::spec_xray::NAME, "0") {
+        crate::spec_xray::XRAY.set_cvar(xray);
+    }
+    {
+        use crate::spec_xray::colour;
+        if let Some(allies) = register(colour::ALLIES_NAME, colour::ALLIES_DEFAULT) {
+            colour::ALLIES.set(allies);
+        }
+        if let Some(axis) = register(colour::AXIS_NAME, colour::AXIS_DEFAULT) {
+            colour::AXIS.set(axis);
+        }
+    }
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
         crate::map_weather::CVAR.set(weather);
     }
