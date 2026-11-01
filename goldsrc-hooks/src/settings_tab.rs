@@ -348,7 +348,7 @@ pub const AREAS: &[Area] = &[
             choice(
                 console_name!("demo_fast_load"),
                 "Fast loading",
-                "how long viewdemo loads the demo each frame. 8 ms loads it about twice as fast as Off and stays smooth; more loads no faster and is choppy until it has loaded.",
+                "how long viewdemo loads the demo each frame. 8 ms loads it about twice as fast as Off and stays smooth; more is barely faster and choppy until the demo has loaded.",
                 FAST_LOAD,
             ),
             choice(
