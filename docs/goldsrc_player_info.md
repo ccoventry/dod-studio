@@ -1,6 +1,6 @@
 # client.dll's per-player record: `g_PlayerExtraInfo`, and what demos fill in it
 
-`client.dll` keeps one record per player for the scoreboard, the kill feed's colours, the status bar and the spectator UI. The hook reads it for the overview's camera icon, the butt-stroke icon and the name plates (`ds_hud_show_player_names`, `ds_hud_show_player_health`, #1130). This page says where it is, who writes each field, and what POV and HLTV demos give it.
+`client.dll` keeps one record per player for the scoreboard, the kill feed's colours, the status bar and the spectator UI. The hook reads it for the overview's camera icon, the butt-stroke icon and the name plates (`ds_spec_show_player_info`, #1130). This page says where it is, who writes each field, and what POV and HLTV demos give it.
 
 ## 1. Where it is
 
@@ -52,7 +52,7 @@ The rest are outside 1..=100 (not broken down further; a dead player's is 0). HL
 
 ## 4. The name plates
 
-`goldsrc-hooks/src/nameplates.rs` draws from this table after `client.dll`'s own `HUD_Redraw`, in demo playback only (in a live game the plates would show enemies through walls):
+`goldsrc-hooks/src/nameplates.rs` draws from this table after `client.dll`'s own `HUD_Redraw`, in HLTV demos only (in a live game the plates would show enemies through walls, and in a POV demo they would read as a wallhack, with the game's own teammate line already there):
 
 - **Who:** the players `client.dll`'s `HUD_AddEntity` let through this frame. That is every player the engine is about to render: not the ones outside the recorder's view, nor the one an HLTV camera watches in-eye (the client returns 0 for him), nor a POV demo's recorder. A player the table holds as `dead`, or whose `teamnumber` is not Allies (1) or Axis (2), gets no plate.
 - **Where:** 12 units over `curstate.maxs[2]` (which follows crouch and prone), at `cl_entity_t::origin`, through TriAPI's `WorldToScreen`, the projection the engine just rendered with.

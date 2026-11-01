@@ -1,7 +1,6 @@
-//! `ds_hud_show_player_names` and `ds_hud_show_player_health` (#1130): a name
-//! above each player the game draws this frame, and a health bar, while a
-//! demo plays. Two settings, both off by default: someone may want the bars
-//! without the names, or the names alone.
+//! `ds_spec_show_player_info` (#1130): a name above each player the game draws
+//! this frame, a health bar, or both, while an HLTV demo plays. One setting, off by
+//! default: 1 the name alone, 2 the health bar alone, 3 both.
 //!
 //! ## What is drawn
 //!
@@ -10,7 +9,7 @@
 //!   answered): every player the engine is about to render, so nobody out of
 //!   the recorder's view, nobody the hook's own `ds_map_hide_asset` hid, and
 //!   not the player an HLTV camera watches in-eye (the client returns 0 for
-//!   him). The recording player of a POV demo is left out too, and anyone
+//!   him). Anyone
 //!   `g_PlayerExtraInfo` holds as dead or not on Allies or Axis.
 //! - **Where:** 12 units over the top of the player's box
 //!   (`curstate.maxs[2]`, which follows crouch and prone), at the place the
@@ -28,12 +27,13 @@
 //! potentially visible set, not in his line of sight. A trace per player
 //! would hide them; that is a look for the user to choose (#1130).
 //!
-//! Only in demo playback: in a live game the plates would show enemies
-//! through walls.
+//! Only in HLTV demos: in a live game the plates would show enemies through
+//! walls, and in a POV demo they would read as a wallhack in a clip, where the
+//! game's own teammate name and health line already exists.
 //!
 //! ## Cost
 //!
-//! Off: one atomic load per entity in `HUD_AddEntity` and two cvar reads in
+//! Off: one atomic load per entity in `HUD_AddEntity` and one cvar read in
 //! `HUD_Redraw`. On: per frame, one `WorldToScreen`, one text measure, one or
 //! two boxes and one string per player drawn, and no allocation. Everything
 //! runs on the engine's thread; the only shared state is atomics.
@@ -45,14 +45,12 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::names::console_name;
 use crate::setting::Cvar;
 
-pub const NAMES_NAME: &str = console_name!("hud_show_player_names");
-pub const HEALTH_NAME: &str = console_name!("hud_show_player_health");
+pub const NAME: &str = console_name!("spec_show_player_info");
 
-pub static NAMES_CVAR: Cvar = Cvar::new();
-pub static HEALTH_CVAR: Cvar = Cvar::new();
+pub static CVAR: Cvar = Cvar::new();
 
-/// Whether either setting was on at the last `HUD_Redraw`, so `note_added`
-/// costs one load while both are off.
+/// Whether the setting was on at the last `HUD_Redraw`, so `note_added`
+/// costs one load while it is off.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Bit `i - 1` set: player `i` was let through `HUD_AddEntity` since the
 /// last `HUD_Redraw`.
@@ -187,25 +185,38 @@ fn layout(anchor: (i32, i32), name: Option<(i32, i32)>, bar: Option<(i32, i32)>)
 ///
 /// On the engine's thread, inside `HUD_Redraw`.
 pub(crate) unsafe fn draw(intermission: i32) {
-    let names = NAMES_CVAR.on();
-    let health = HEALTH_CVAR.on();
-    ENABLED.store(names || health, Ordering::Relaxed);
+    let show = Show::from_value(CVAR.value().unwrap_or(0.0));
+    ENABLED.store(show.names || show.health, Ordering::Relaxed);
     let added = ADDED.swap(0, Ordering::Relaxed);
-    let wanted = (names || health) && added != 0 && intermission == 0;
+    let wanted = (show.names || show.health) && added != 0 && intermission == 0;
     #[cfg(target_arch = "x86")]
     if wanted {
         // Safety: the caller's.
-        unsafe { live::draw(added, Show { names, health }) };
+        unsafe { live::draw(added, show) };
     }
     #[cfg(not(target_arch = "x86"))]
     let _ = wanted;
 }
 
 /// Which parts of the plate are on.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Show {
     names: bool,
     health: bool,
+}
+
+impl Show {
+    /// The parts a `ds_spec_show_player_info` value turns on: 1 the name,
+    /// 2 the health bar, 3 both; 0 and anything else none.
+    fn from_value(value: f32) -> Self {
+        let (names, health) = match value as i32 {
+            1 => (true, false),
+            2 => (false, true),
+            3 => (true, true),
+            _ => (false, false),
+        };
+        Self { names, health }
+    }
 }
 
 #[cfg(target_arch = "x86")]
@@ -220,6 +231,14 @@ mod live {
         let api = e.p_demo_api;
         // Safety: the engine's demo API, valid for the session.
         !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
+    }
+
+    /// An HLTV demo: the client is a spectator-only view (the test `anim_fix`
+    /// and `deathmsg` use).
+    fn is_hltv(e: &engine::ClEngineFuncsPartial) -> bool {
+        // Safety: the engine's own function, on its thread.
+        let spectate_only = unsafe { (e.is_spectate_only)() };
+        spectate_only != 0
     }
 
     /// The name the scoreboard shows for `index`: a `ds_player_change_name`
@@ -247,7 +266,7 @@ mod live {
         let (Some(e), Some(base)) = (engine::engfuncs(), engine::client_module_base()) else {
             return;
         };
-        if !is_playing_demo(e) || e.p_tri_api.is_null() {
+        if !is_playing_demo(e) || !is_hltv(e) || e.p_tri_api.is_null() {
             return;
         }
         // Safety: the engine's TriAPI table, valid for the session.
@@ -357,6 +376,18 @@ mod live {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_setting_picks_the_name_the_bar_or_both() {
+        let show = |names, health| Show { names, health };
+        assert_eq!(Show::from_value(0.0), show(false, false));
+        assert_eq!(Show::from_value(1.0), show(true, false));
+        assert_eq!(Show::from_value(2.0), show(false, true));
+        assert_eq!(Show::from_value(3.0), show(true, true));
+        assert_eq!(Show::from_value(4.0), show(false, false));
+        assert_eq!(Show::from_value(-1.0), show(false, false));
+        assert_eq!(Show::from_value(f32::NAN), show(false, false));
+    }
 
     #[test]
     fn only_the_32_player_slots_have_a_bit() {

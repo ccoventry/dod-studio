@@ -94,9 +94,8 @@
 //! - `teammate_info`: the `ds_hud_hide_teammate_info` cvar -- hide the
 //!   teammate name and health line under a POV demo's crosshair, through
 //!   `hudelement`'s vftable stub (#342).
-//! - `nameplates`: the `ds_hud_show_player_names` and
-//!   `ds_hud_show_player_health` cvars -- a name and a health bar over each
-//!   player drawn, in demo playback, from `player_info`'s read of
+//! - `nameplates`: the `ds_spec_show_player_info` cvar -- a name, a
+//!   health bar or both over each player drawn, in demo playback, from `player_info`'s read of
 //!   `client.dll`'s `g_PlayerExtraInfo` (#1130).
 //! - `weapon_list`: no cvar of its own -- with the stock `hud_fastswitch 1`,
 //!   keep the weapon-selection list off screen while a demo plays (#1032).

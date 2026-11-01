@@ -147,9 +147,9 @@ is the complete list):
   `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307). Outside the
   scope's frame the screen is black at any FOV (`gl_widescreen_yfov 1`,
   `mirv_fov`), in demos only; see `src/demo_scope/fill.rs` (#799).
-- **Names and health bars over players** (`ds_hud_show_player_names 1`,
-  `ds_hud_show_player_health 1`, each on its own): while a demo plays, a
-  name and a health bar over each player the game draws, from the record
+- **Names and health bars over players** (`ds_spec_show_player_info`: 1
+  name, 2 health bar, 3 both): while an HLTV demo plays (not POV), a
+  name and/or a health bar over each player the game draws, from the record
   `client.dll` keeps per player (`g_PlayerExtraInfo`, `src/player_info.rs`).
   A prototype (#1130); see `src/nameplates.rs` and
   `docs/goldsrc_player_info.md`.
