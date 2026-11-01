@@ -33,7 +33,7 @@ export function renderCaptureSummary() {
     link.dataset.part = part.key;
     link.textContent = part.text;
     link.title = STRINGS.CAPTURE_SUMMARY.LINK_TITLE;
-    if (part.blocking) link.style.color = '#f44336';
+    if (part.blocking) link.style.color = 'var(--danger)';
     link.addEventListener('click', (e) => {
       e.preventDefault();
       openSetting(part.tab, part.field);

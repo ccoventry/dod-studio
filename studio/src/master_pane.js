@@ -417,7 +417,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
 
     const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid #333';
+    tr.style.borderBottom = '1px solid var(--border-soft)';
     tr.style.cursor = 'pointer';
 
     if (selectedDemoIdx === originalIdx) {
@@ -470,11 +470,11 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
     // Set by main.js's missing-demo check on project load (#21).
     if (demo.missing) {
-      nameSpan.style.color = '#ef5350';
+      nameSpan.style.color = 'var(--danger-light)';
       const missingBadge = document.createElement('span');
       missingBadge.textContent = STRINGS.WORKSPACE.MISSING_BADGE;
       missingBadge.title = STRINGS.WORKSPACE.missingBadgeTitle(demo.path);
-      missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:#ef5350;border:1px solid #ef5350;border-radius:2px;padding:0 4px;cursor:help;';
+      missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:var(--danger-light);border:1px solid var(--danger-light);border-radius:2px;padding:0 4px;cursor:help;';
       tdName.appendChild(missingBadge);
     }
 
@@ -494,7 +494,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     if (demoIsTracked) {
       const badge = document.createElement('span');
       badge.innerHTML = TRACKED_ICON_SVG;
-      badge.style.color = '#ffa726';
+      badge.style.color = 'var(--warn-orange)';
       badge.style.flexShrink = '0';
       badge.style.display = 'inline-flex';
       const reasons = describeTrackedReasons(demo);
@@ -513,7 +513,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdSelected = document.createElement('td');
     tdSelected.style.padding = '6px 8px';
     tdSelected.style.textAlign = 'center';
-    tdSelected.style.color = selected > 0 ? '#64b5f6' : '#555';
+    tdSelected.style.color = selected > 0 ? 'var(--info-light)' : 'var(--text-dim)';
     tdSelected.textContent = selected;
 
     // Col 5: Status, Pending / Captured / Rendered in one cell; col 6: Review,

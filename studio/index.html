@@ -128,7 +128,7 @@
                 <!-- #685, #823: the queue in groups, a header line per group; queue_group_by.js. -->
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_TITLE">
                   <span data-str="WORKSPACE.GROUP_BY_LABEL">Group by:</span>
-                  <select id="master-group-by-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <select id="master-group-by-select" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                     <option value="none" data-str="WORKSPACE.GROUP_BY_NONE">None</option>
                     <option value="match" data-str="WORKSPACE.GROUP_BY_MATCH">Match</option>
                     <option value="player" data-str="WORKSPACE.GROUP_BY_PLAYER">Player</option>
@@ -140,7 +140,7 @@
                 </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
                 <!-- #661: which Review marks a review plays. -->
-                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                   <option value="all" data-str="REVIEW.COVERS_ALL">All</option>
                   <option value="unmarked" data-str="REVIEW.COVERS_UNMARKED">Unmarked</option>
                   <option value="keep" data-str="REVIEW.COVERS_KEEP">Keep</option>
@@ -150,15 +150,15 @@
                 <!-- #822: whose highlights an HLTV demo's review plays; review_mode.js fills it. -->
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.HLTV_TITLE">
                   <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
-                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
+                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 260px;"></select>
                 </label>
                 <!-- #828: the players "Players I pick" reviews; review_hltv_picker.js fills it. -->
                 <span id="review-hltv-pick" class="review-hltv-pick" hidden>
-                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;"></select>
-                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 180px;"></select>
+                  <select id="review-hltv-add-player" data-str-title="REVIEW.PICK_ADD_PLAYER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 220px;"></select>
+                  <select id="review-hltv-add-team" data-str-title="REVIEW.PICK_ADD_TEAM_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 180px;"></select>
                 </span>
                 <!-- The order an HLTV demo's players' highlights play in. -->
-                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                   <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>
                   <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
                 </select>
@@ -170,12 +170,12 @@
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
                   <input type="checkbox" id="review-fast-forward-cb" checked />
                   <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
-                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;" />
                   <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
                 </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
-                <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
+                <button id="clear-all-btn" disabled style="color: var(--danger-hot); border-color: var(--danger-hot);" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
                 <!-- #845: the picked players get a line of their own under the
                      toolbar, so adding one never moves the lists. -->
                 <span id="review-hltv-chips" class="review-hltv-chips review-hltv-chips-row" hidden></span>
@@ -186,11 +186,11 @@
                  only narrow the demos. -->
             <div id="queue-filter-row" class="queue-filter-row" role="group" data-str-aria-label="WORKSPACE.FILTER_ROW_LABEL" aria-label="Filters">
               <span class="queue-filter-row-label" data-str="WORKSPACE.FILTER_ROW_LABEL">Filters</span>
-              <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
-              <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+              <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;" />
+              <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; max-width: 220px;">
                 <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
               </select>
-              <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+              <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px;">
                 <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
                 <option value="with_kills" data-str="WORKSPACE.KILLS_FILTER_WITH_KILLS">With kills</option>
                 <option value="multi_kill" data-str="WORKSPACE.KILLS_FILTER_MULTI_KILL">With a multi-kill</option>
@@ -255,7 +255,7 @@
               </div>
             </div>
             <div id="detail-streaks-container">
-              <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
+              <p class="placeholder-text" style="color: var(--text-muted);" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
             <!-- Last Batch (#172): batch_results.js, shown once a batch ends. -->
             <div id="batch-results" class="batch-results" hidden></div>
@@ -882,7 +882,7 @@
                 <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
               </div>
               <div id="config-clip-name-chips" class="placeholder-chips"></div>
-              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
+              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: var(--danger-light);"></div>
               <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
               <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
             </div>
@@ -1093,7 +1093,7 @@
               <span id="render-take-delete-progress-label"></span>
             </div>
 
-            <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
+            <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
               <div class="action-buttons">
                 <!-- #70: each acts on the ticked rows; render_pane.js sets the
                      label's count and the tooltip. -->
@@ -1172,10 +1172,10 @@
               <div class="row-inputs">
                 <button id="audit-prefer-folder-btn" disabled data-str="AUDITOR.PREFER_FOLDER_BUTTON" data-str-title="AUDITOR.PREFER_FOLDER_TITLE">Keep copies already in a folder…</button>
                 <button id="open-recycle-bin-btn" data-str="AUDITOR.OPEN_RECYCLE_BIN_BUTTON" data-str-title="AUDITOR.OPEN_RECYCLE_BIN_TITLE">Open Recycle Bin</button>
-                <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
+                <button id="delete-selected-audits-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
                 <!-- Hidden for 0.2.0, so every delete can be put back from the
                      Recycle Bin; remove `hidden` to offer it again. -->
-                <button id="delete-permanent-audits-btn" hidden style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+                <button id="delete-permanent-audits-btn" hidden style="color: var(--danger-hot); border-color: var(--danger-hot);" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
               </div>
             </div>
             <!-- The app's table style; the list grows with the window, like the
@@ -1898,7 +1898,7 @@
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
           <!-- OBS mode only, while a batch runs: frames OBS drops (#172). -->
           <p id="obs-drop-rate" class="status-text" hidden></p>
-          <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
+          <p id="disk-space-warning-banner" style="display: none; color: var(--danger); font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
@@ -1957,7 +1957,7 @@
     <div id="process-detector-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 480px; padding: 20px;">
         <h2 id="process-modal-title" data-str="PROCESS_DETECTOR_MODAL.TITLE">Half-Life Preview Detector</h2>
-        <p id="process-modal-body" style="color: #f44336; font-weight: 600;" data-str="PROCESS_DETECTOR_MODAL.BODY">
+        <p id="process-modal-body" style="color: var(--danger); font-weight: 600;" data-str="PROCESS_DETECTOR_MODAL.BODY">
           The Half-Life engine is already running (hl.exe / hlae.exe). Launching a new preview
           now can corrupt the capture session — close the running instance first, or force a relaunch.
         </p>
@@ -1979,7 +1979,7 @@
         <p id="clear-all-summary"></p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="clear-all-save-first-btn" class="primary-btn" data-str="CLEAR_ALL_MODAL.SAVE_SESSION_FIRST_BUTTON">Save Session First</button>
-          <button id="clear-all-confirm-btn" style="color: #ff5555; border-color: #ff5555;" data-str="CLEAR_ALL_MODAL.CLEAR_ANYWAY_DEFAULT">Clear Anyway</button>
+          <button id="clear-all-confirm-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" data-str="CLEAR_ALL_MODAL.CLEAR_ANYWAY_DEFAULT">Clear Anyway</button>
           <button id="clear-all-cancel-btn" data-str="CLEAR_ALL_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -1994,7 +1994,7 @@
         <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
-          <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
+          <button id="unsaved-changes-discard-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
           <button id="unsaved-changes-cancel-btn" data-str="UNSAVED_CHANGES_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -2074,7 +2074,7 @@
     <div id="render-error-log-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 640px; padding: 20px;">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>
-        <pre id="render-error-log-body" style="max-height: 360px; overflow: auto; white-space: pre-wrap; background: #121212; padding: 10px; border-radius: 2px; border: 1px solid #333;"></pre>
+        <pre id="render-error-log-body" style="max-height: 360px; overflow: auto; white-space: pre-wrap; background: var(--bg-dark); padding: 10px; border-radius: 2px; border: 1px solid var(--border-soft);"></pre>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button id="render-error-log-close-btn" data-str="ERROR_LOG_MODAL.CLOSE_BUTTON">Close</button>
         </div>
@@ -2126,7 +2126,7 @@
         </div>
         <div id="clear-previews-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="CLEAR_PREVIEWS_MODAL.FOOTER_DEFAULT">Found: 0 | Reclaimable: 0.00 GB</div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
-          <button id="clear-previews-delete-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
+          <button id="clear-previews-delete-btn" style="color: var(--danger-hot); border-color: var(--danger-hot);" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
           <button id="clear-previews-close-btn" data-str="CLEAR_PREVIEWS_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
