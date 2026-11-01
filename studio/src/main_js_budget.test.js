@@ -7,7 +7,9 @@ import { readFileSync } from 'node:fs';
 // not a target: build a feature in its own module from its first line and wire
 // it in with one startX/createX call. Growing past the budget should be a
 // decision, not drift: raise the number here only with a reason in the PR.
-const BUDGET = 521;
+// +3: the row context menu's import and one start call (#1111); +6: the
+// Auditor's relocateMoved wiring into project_demos (#872).
+const BUDGET = 524;
 
 describe('main.js', () => {
   it(`stays under ${BUDGET} lines`, () => {
