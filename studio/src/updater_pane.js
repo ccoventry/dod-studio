@@ -33,8 +33,8 @@ function setFooterButtonState(updateAvailable, version = null) {
   if (updateAvailable) {
     btn.textContent = STRINGS.FOOTER.UPDATE_AVAILABLE_BUTTON;
     btn.title = STRINGS.FOOTER.UPDATE_AVAILABLE_TITLE;
-    btn.style.color = '#5fb85f';
-    btn.style.borderColor = '#5fb85f';
+    btn.style.color = 'var(--ok-update)';
+    btn.style.borderColor = 'var(--ok-update)';
   } else {
     btn.textContent = STRINGS.FOOTER.CHECK_UPDATES_BUTTON;
     btn.title = STRINGS.FOOTER.CHECK_UPDATES_TITLE;

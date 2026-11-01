@@ -99,11 +99,11 @@ function syncCustomCodecVisibility() {
 
 function statusColor(status) {
   switch (status) {
-    case JOB_STATUS.FINISHED: return '#4caf50';
-    case JOB_STATUS.ERROR: return '#f44336';
-    case JOB_STATUS.CANCELLED: return '#ffeb3b';
-    case JOB_STATUS.RENDERING: return '#7ec8e3';
-    default: return '#ffffff';
+    case JOB_STATUS.FINISHED: return 'var(--ok)';
+    case JOB_STATUS.ERROR: return 'var(--danger)';
+    case JOB_STATUS.CANCELLED: return 'var(--warn-cancelled)';
+    case JOB_STATUS.RENDERING: return 'var(--sky)';
+    default: return 'var(--text-strong)';
   }
 }
 

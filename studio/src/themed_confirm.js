@@ -68,7 +68,7 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
       if (item.secondary) {
         const secondary = document.createElement('div');
         secondary.textContent = item.secondary;
-        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted, #999); word-break: break-word;';
+        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted); word-break: break-word;';
         entry.append(secondary);
       }
       return entry;

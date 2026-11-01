@@ -46,8 +46,8 @@ html {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 13px;
   line-height: 1.4;
-  color: #d0d0d0;
-  background-color: #121212;
+  color: var(--text);
+  background-color: var(--bg-dark);
 
   --bg-dark: #121212;
   --bg-panel: #1e1e1e;
@@ -58,6 +58,117 @@ html {
   --primary-accent: #2b5c8f;
   --primary-hover: #3772b0;
   --text-muted: #888888;
+  --text: #d0d0d0;
+
+  /* Colour tokens: every colour the UI paints, by role (#49). A theme sets these. */
+  /* Text */
+  --text-strong: #ffffff;
+  --text-emphasis: #eeeeee;
+  --text-bright: #e0e0e0;
+  --text-soft: #dddddd;
+  --text-secondary: #cccccc;
+  --text-subtle: #aaaaaa;
+  --text-quiet: #999999;
+  --text-faint: #666666;
+  --text-dim: #555555;
+  --text-on-light: #111111;
+  /* Surfaces */
+  --surface-black: #000000;
+  --surface-sunken: #141414;
+  --surface-well: #161616;
+  --surface-inset: #1a1a1a;
+  --surface-subrow: #1b1b1b;
+  --surface-row: #1c1c1c;
+  --surface-control: #222222;
+  --surface-raised: #2a2a2a;
+  --surface-menu: #2b2c30;
+  --surface-hover: #383838;
+  --surface-active: #444444;
+  /* Borders */
+  --border-faint: #282828;
+  --border-soft: #333333;
+  --border-mid: #444444;
+  /* Accent and info blues */
+  --accent-line: #4a82bd;
+  --info: #4a86c5;
+  --link: #4a90e2;
+  --accent-alt: #4a90d9;
+  --info-bright: #2196f3;
+  --info-light: #64b5f6;
+  --focus: #64a0ff;
+  --info-border: #2f4a68;
+  --purple: #ce93d8;
+  --cyan: #26c6da;
+  --sky: #7ec8e3;
+  /* Success greens */
+  --ok: #4caf50;
+  --ok-setup: #4caf7a;
+  --ok-light: #66bb6a;
+  --ok-lighter: #81c784;
+  --ok-update: #5fb85f;
+  --ok-bright: #8ade75;
+  --ok-steady: #7fc77f;
+  --ok-pattern: #3ea86b;
+  --ok-pattern-dim: #2f6b47;
+  --ok-border: #2e5a42;
+  --ok-vivid: #22c55e;
+  --ok-keep: #8fd18f;
+  /* Errors */
+  --danger: #f44336;
+  --danger-light: #ef5350;
+  --danger-bright: #ef4444;
+  --danger-hot: #ff5555;
+  --danger-soft: #e07a5f;
+  --danger-coral: #ff6b6b;
+  --danger-rose: #e57373;
+  --danger-chat: #dc3232;
+  --danger-pale: #ff9999;
+  /* Warnings */
+  --warn: #ffb74d;
+  --warn-gold: #fbbf24;
+  --warn-amber: #d9a441;
+  --warn-orange: #ffa726;
+  --warn-deep: #ff9800;
+  --warn-sand: #e0b050;
+  --warn-ochre: #e0a040;
+  --warn-border: #6b5226;
+  --warn-salmon: #ff8a5c;
+  --warn-yellow: #ffdd00;
+  --warn-lime: #d5e34f;
+  --warn-note: #f0c060;
+  --warn-note-bg: #2a2410;
+  --warn-note-border: #b58900;
+  --warn-note-text: #e8dcb0;
+  --warn-cancelled: #ffeb3b;
+  --warn-mark: #ffd54f;
+  --system-tag: #c89650;
+  /* Translucent overlays */
+  --shade-30: rgba(0, 0, 0, 0.3);
+  --shade-40: rgba(0, 0, 0, 0.4);
+  --shade-50: rgba(0, 0, 0, 0.5);
+  --shade-60: rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.8);
+  --wash-03: rgba(255, 255, 255, 0.03);
+  --wash-04: rgba(255, 255, 255, 0.04);
+  --wash-05: rgba(255, 255, 255, 0.05);
+  --wash-06: rgba(255, 255, 255, 0.06);
+  --wash-08: rgba(255, 255, 255, 0.08);
+  --wash-12: rgba(255, 255, 255, 0.12);
+  --wash-15: rgba(255, 255, 255, 0.15);
+  --text-on-dark-55: rgba(255, 255, 255, 0.55);
+  --wash-70: rgba(255, 255, 255, 0.7);
+  --accent-wash-35: rgba(43, 92, 143, 0.35);
+  --accent-wash-30: rgba(43, 92, 143, 0.3);
+  --ok-update-wash-12: rgba(95, 184, 95, 0.12);
+  --ok-update-wash-25: rgba(95, 184, 95, 0.25);
+  --warn-gold-wash-12: rgba(251, 191, 36, 0.12);
+  --warn-gold-wash-15: rgba(251, 191, 36, 0.15);
+  --warn-gold-line: rgba(251, 191, 36, 0.4);
+  --info-light-wash: rgba(100, 181, 246, 0.12);
+  --purple-wash: rgba(206, 147, 216, 0.12);
+  --focus-line: rgba(100, 160, 255, 0.5);
+  --focus-wash: rgba(100, 160, 255, 0.08);
+  --keep-wash: rgba(90, 200, 120, 0.1);
 }
 
 body {
@@ -65,7 +176,7 @@ body {
   width: 100vw;
   overflow: hidden;
   background: var(--bg-dark);
-  color: #d0d0d0;
+  color: var(--text);
   user-select: none;
 }
 
@@ -81,7 +192,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #181818;
+  background: var(--bg-input);
   border-bottom: 1px solid var(--border-color);
   padding: 4px 12px;
   height: 52px;
@@ -104,7 +215,7 @@ body {
 }
 
 .brand-title {
-  color: #ffffff;
+  color: var(--text-strong);
   font-size: 17px;
   white-space: nowrap;
 }
@@ -116,8 +227,8 @@ body {
 }
 
 .nav-tab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 10px;
@@ -127,8 +238,8 @@ body {
 
 .nav-tab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Same button:hover:not(:disabled) specificity override as
@@ -136,8 +247,8 @@ body {
    top-level tab's blue background flips to the generic hover gray. */
 .nav-tab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 .nav-actions {
@@ -167,7 +278,7 @@ body {
 
 .menu-dropdown-btn {
   background: transparent;
-  color: #aaaaaa;
+  color: var(--text-subtle);
   border: 1px solid transparent;
   border-radius: 2px;
   padding: 4px 8px;
@@ -180,9 +291,9 @@ body {
 
 .menu-dropdown-btn:hover,
 .menu-dropdown.open .menu-dropdown-btn {
-  background: #222222;
+  background: var(--surface-control);
   border-color: var(--border-color);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* The menu bar's update button (#868), beside Help: seen without opening a
@@ -192,17 +303,17 @@ body {
   margin-left: 6px;
   padding: 2px 10px;
   font-size: 12px;
-  color: #5fb85f;
-  background: rgba(95, 184, 95, 0.12);
-  border: 1px solid #5fb85f;
+  color: var(--ok-update);
+  background: var(--ok-update-wash-12);
+  border: 1px solid var(--ok-update);
   border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .update-chip:hover {
-  background: rgba(95, 184, 95, 0.25);
-  color: #ffffff;
+  background: var(--ok-update-wash-25);
+  color: var(--text-strong);
 }
 
 .update-chip[hidden] {
@@ -224,7 +335,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--shade-40);
   z-index: 500;
   flex-direction: column;
   padding: 4px;
@@ -246,7 +357,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   background: transparent;
-  color: #d0d0d0;
+  color: var(--text);
   border: none;
   border-radius: 2px;
   padding: 6px 10px;
@@ -258,7 +369,7 @@ body {
 
 .menu-dropdown-item:hover {
   background: var(--primary-accent);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .menu-shortcut-hint {
@@ -267,7 +378,7 @@ body {
 }
 
 .menu-dropdown-item:hover .menu-shortcut-hint {
-  color: #e0e0e0;
+  color: var(--text-bright);
 }
 
 /* File → Open Recent (#935): a submenu that opens beside its row on hover. */
@@ -287,7 +398,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--shade-40);
   z-index: 501;
   flex-direction: column;
   padding: 4px;
@@ -323,7 +434,7 @@ html.picking-path * {
   background: var(--bg-card);
   border: 1px solid var(--border-accent);
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 16px var(--shade-50);
   font-size: 14px;
   pointer-events: none;
 }
@@ -345,7 +456,7 @@ html.picking-path * {
 }
 
 .recent-project-item:hover .recent-project-folder {
-  color: #e0e0e0;
+  color: var(--text-bright);
 }
 
 /* A file that's gone: dimmed, still clickable to remove it. */
@@ -483,7 +594,7 @@ html.picking-path * {
 .info-icon:hover,
 .info-icon:focus-visible {
   opacity: 1;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* Custom tooltip for .info-icon — see info_tooltip.js and #164. Position is
@@ -497,8 +608,8 @@ html.picking-path * {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  color: #d0d0d0;
+  box-shadow: 0 2px 8px var(--shade-40);
+  color: var(--text);
   font-size: 11px;
   line-height: 1.4;
   pointer-events: none;
@@ -509,7 +620,7 @@ html.picking-path * {
 }
 
 .setting-label.active {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -531,7 +642,7 @@ html.picking-path * {
 .setting-switch-slider {
   position: absolute;
   inset: 0;
-  background: #444444;
+  background: var(--surface-active);
   border-radius: 10px;
   transition: background 0.15s;
 }
@@ -543,7 +654,7 @@ html.picking-path * {
   height: 13px;
   left: 2px;
   top: 2px;
-  background: #ffffff;
+  background: var(--text-strong);
   border-radius: 50%;
   transition: transform 0.15s;
 }
@@ -600,12 +711,12 @@ html.picking-path * {
   /* A saved split wider than a smaller window allows stops short of the details
      pane's minimum instead of clipping it (min-width wins when both can't fit). */
   max-width: calc(100% - 530px);
-  background: #161616;
+  background: var(--surface-well);
 }
 
 #pane-details-config {
   min-width: 520px;
-  background: #1a1a1a;
+  background: var(--surface-inset);
 }
 
 /* egui Panel Styling */
@@ -651,7 +762,7 @@ html.picking-path * {
 .panel-header h2, .panel-header h3 {
   font-size: 14px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* The Demo Analyzer's Cache all, beside the Demos title (#569). */
@@ -714,12 +825,12 @@ html.picking-path * {
 .input-row label {
   min-width: 150px;
   font-weight: 500;
-  color: #cccccc;
+  color: var(--text-secondary);
 }
 
 input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
-  color: #ffffff;
+  color: var(--text-strong);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 8px;
@@ -794,7 +905,7 @@ input.search-select-input {
   background: var(--bg-input);
   border: 1px solid var(--border-accent);
   border-radius: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 12px var(--shade-50);
   font-size: 12px;
 }
 
@@ -808,7 +919,7 @@ input.search-select-input {
 
 .search-select-option {
   cursor: pointer;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .search-select-option.active {
@@ -844,8 +955,8 @@ input.search-select-input {
 }
 
 button {
-  background: #2a2a2a;
-  color: #dddddd;
+  background: var(--surface-raised);
+  color: var(--text-soft);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 10px;
@@ -854,9 +965,9 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #383838;
+  background: var(--surface-hover);
   border-color: var(--border-accent);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 button:disabled {
@@ -866,8 +977,8 @@ button:disabled {
 
 button.primary-btn {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 button.primary-btn:hover:not(:disabled) {
@@ -879,8 +990,8 @@ button.primary-btn:hover:not(:disabled) {
    confirm's OK takes it only for those (#880); every other confirm is
    primary-btn. */
 button.danger-btn {
-  color: #ff5555;
-  border-color: #ff5555;
+  color: var(--danger-hot);
+  border-color: var(--danger-hot);
 }
 
 /* A text box's clear button (clearable_input.js, #529): an × at its
@@ -910,7 +1021,7 @@ button.danger-btn {
 /* Outranks the global button:hover:not(:disabled) background. */
 .clearable-x:hover:not(:disabled) {
   background: transparent;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* Master Demo Queue Table */
@@ -928,8 +1039,8 @@ button.danger-btn {
 }
 
 #master-demo-table th {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
@@ -952,11 +1063,11 @@ button.danger-btn {
 
 #master-demo-table td {
   padding: 6px 8px;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 #master-demo-table tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--wash-04);
 }
 
 /* Status and Review: coloured counts joined by slashes (queue_counts.js);
@@ -975,7 +1086,7 @@ button.danger-btn {
 }
 
 #master-demo-table .count-slash {
-  color: #555;
+  color: var(--text-dim);
 }
 
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of
@@ -991,7 +1102,7 @@ button.danger-btn {
 }
 
 .table-row-selected {
-  background: rgba(43, 92, 143, 0.3) !important;
+  background: var(--accent-wash-30) !important;
 }
 
 .table-empty {
@@ -1045,8 +1156,8 @@ button.danger-btn {
 }
 
 .config-tab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1054,16 +1165,16 @@ button.danger-btn {
 
 .config-tab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Same button:hover:not(:disabled) specificity override as the other
    .active:hover tab-button rules in this file. */
 .config-tab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 .config-tab-content {
@@ -1169,7 +1280,7 @@ button.danger-btn {
 /* The two fixed kill anchors (0.0s and the illustrative streak end) stand
    out from the four fields' derived offsets around them. */
 .timing-diagram-anchor td {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -1181,7 +1292,7 @@ button.danger-btn {
 #pinned-action-bar {
   display: flex;
   align-items: flex-start;
-  background: #161616;
+  background: var(--surface-well);
   border-top: 1px solid var(--border-color);
   padding: 6px 12px;
   min-height: 40px;
@@ -1284,7 +1395,7 @@ button.danger-btn {
 }
 
 #obs-drop-rate.lagging {
-  color: #ffb74d;
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -1292,7 +1403,7 @@ button.danger-btn {
 #render-footer-pool-free,
 #footer-audit-summary {
   font-weight: bold;
-  color: #4caf50;
+  color: var(--ok);
   font-size: 12px;
 }
 
@@ -1324,7 +1435,7 @@ button.danger-btn {
 .progress-bar-container {
   width: 100%;
   height: 6px;
-  background: #2a2a2a;
+  background: var(--surface-raised);
   border-radius: 2px;
   overflow: hidden;
   margin-top: 6px;
@@ -1406,11 +1517,11 @@ button.danger-btn {
 
 .list-editor-browse-btn:hover,
 .list-editor-move-btn:hover:not(:disabled) {
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .list-editor-remove-btn:hover {
-  color: #ef4444;
+  color: var(--danger-bright);
 }
 
 .list-editor-move-btn:disabled {
@@ -1451,7 +1562,7 @@ button.danger-btn {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--scrim);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -1507,13 +1618,13 @@ button.danger-btn {
   gap: 4px;
   flex-shrink: 0;
   padding: 8px 12px;
-  background: #181818;
+  background: var(--bg-input);
   border-bottom: 1px solid var(--border-color);
 }
 
 .capture-detail-subtab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1521,8 +1632,8 @@ button.danger-btn {
 
 .capture-detail-subtab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Matches button.primary-btn:hover's own override below — the generic
@@ -1531,8 +1642,8 @@ button.danger-btn {
    the active tab's blue background would flip to the generic hover gray. */
 .capture-detail-subtab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* ── Demo Analyzer ─────────────────────────────────────────────────────────── */
@@ -1547,8 +1658,8 @@ button.danger-btn {
 }
 
 .analyzer-subtab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1556,16 +1667,16 @@ button.danger-btn {
 
 .analyzer-subtab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 /* Same button:hover:not(:disabled) specificity override as the other
    .active:hover tab-button rules in this file. */
 .analyzer-subtab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--accent-line);
 }
 
 .analyzer-tab-content {
@@ -1588,7 +1699,7 @@ button.danger-btn {
 
 .analyzer-heading {
   font-size: 15px;
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 10px;
 }
 
@@ -1598,7 +1709,7 @@ button.danger-btn {
 
 .analyzer-section-title {
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 4px;
   margin-bottom: 6px;
@@ -1625,7 +1736,7 @@ button.danger-btn {
 
 .analyzer-kv-table .kv-value {
   padding: 3px 0;
-  color: #eee;
+  color: var(--text-emphasis);
 }
 
 .analyzer-kv-table thead th {
@@ -1642,8 +1753,8 @@ button.danger-btn {
 }
 
 .analyzer-table th {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-control);
+  color: var(--text-subtle);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
@@ -1653,13 +1764,13 @@ button.danger-btn {
 
 .analyzer-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 .scoreboard-group-header td {
   padding-top: 10px;
   font-weight: 700;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .scoreboard-spacer-row td {
@@ -1668,19 +1779,19 @@ button.danger-btn {
 }
 
 .scoreboard-player-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--wash-05);
 }
 
 .analyzer-total-row td {
   border-top: 1px solid var(--border-color);
   font-weight: 600;
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 .analyzer-warning-banner {
-  background: rgba(251, 191, 36, 0.12);
-  border: 1px solid rgba(251, 191, 36, 0.4);
-  color: #fbbf24;
+  background: var(--warn-gold-wash-12);
+  border: 1px solid var(--warn-gold-line);
+  color: var(--warn-gold);
   border-radius: 3px;
   padding: 8px 12px;
   font-size: 12px;
@@ -1738,7 +1849,7 @@ button.danger-btn {
 .analyzer-hero-name {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .analyzer-hero-sub {
@@ -1748,7 +1859,7 @@ button.danger-btn {
 }
 
 .analyzer-hero-links a {
-  color: #4a90e2;
+  color: var(--link);
   text-decoration: underline;
 }
 
@@ -1760,7 +1871,7 @@ button.danger-btn {
   padding-top: 8px;
   border-top: 1px solid var(--border-color);
   font-size: 11px;
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 /* #207: a demo this install's game can't play. #920: one with no camera data. */
@@ -1769,8 +1880,8 @@ button.danger-btn {
   flex-shrink: 0;
   font-size: 0.75em;
   font-weight: normal;
-  color: #ffb74d;
-  border: 1px solid #ffb74d;
+  color: var(--warn);
+  border: 1px solid var(--warn);
   border-radius: 2px;
   padding: 0 4px;
   cursor: help;
@@ -1781,16 +1892,16 @@ button.danger-btn {
   flex-shrink: 0;
   font-size: 0.75em;
   font-weight: normal;
-  color: #fbbf24;
+  color: var(--warn-gold);
   background: transparent;
-  border: 1px solid #fbbf24;
+  border: 1px solid var(--warn-gold);
   border-radius: 2px;
   padding: 0 4px;
   cursor: pointer;
 }
 
 .multimap-split-btn:hover:not(:disabled) {
-  background: rgba(251, 191, 36, 0.15);
+  background: var(--warn-gold-wash-15);
 }
 
 .multimap-split-progress {
@@ -1862,7 +1973,7 @@ button.danger-btn {
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--wash-03);
 }
 
 .batch-results-head {
@@ -1881,7 +1992,7 @@ button.danger-btn {
 }
 
 .batch-results-error {
-  color: #ef5350;
+  color: var(--danger-light);
 }
 
 .batch-results-wrap {
@@ -1889,22 +2000,22 @@ button.danger-btn {
 }
 
 .batch-results-row-missing td:first-child {
-  color: #ef5350;
+  color: var(--danger-light);
 }
 
 .batch-results-row-unrenderable td:first-child,
 .batch-results-row-cut_short td:first-child,
 .batch-results-row-late td:first-child,
 .batch-results-row-short td:first-child {
-  color: #ffb74d;
+  color: var(--warn);
 }
 
 .batch-results-row-ok td:first-child {
-  color: #66bb6a;
+  color: var(--ok-light);
 }
 
 .batch-results-obs-lagging {
-  color: #ffb74d;
+  color: var(--warn);
 }
 
 /* The Commands tab's type-ahead (#215). */
@@ -1919,7 +2030,7 @@ button.danger-btn {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: 3px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--shade-40);
   font-size: 12px;
 }
 
@@ -1933,7 +2044,7 @@ button.danger-btn {
 
 .command-suggest-item.active,
 .command-suggest-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--wash-08);
 }
 
 .command-suggest-name {
@@ -1950,13 +2061,13 @@ button.danger-btn {
 }
 
 .command-suggest-refused .command-suggest-name {
-  color: #ef5350;
+  color: var(--danger-light);
   text-decoration: line-through;
 }
 
 .command-suggest-refused .command-suggest-meta,
 .command-suggest-warned .command-suggest-meta {
-  color: #ffb74d;
+  color: var(--warn);
 }
 
 .command-suggest-noop .command-suggest-name {
@@ -1984,7 +2095,7 @@ button.danger-btn {
   align-items: center;
   margin-top: 8px;
   font-size: 11px;
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 .analyzer-copy-btn {
@@ -2017,7 +2128,7 @@ button.danger-btn {
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
   margin-top: 4px;
 }
 
@@ -2040,7 +2151,7 @@ button.danger-btn {
   display: inline-block;
   width: 60px;
   height: 6px;
-  background: #2a2a2a;
+  background: var(--surface-raised);
   border-radius: 2px;
   overflow: hidden;
   vertical-align: middle;
@@ -2053,12 +2164,12 @@ button.danger-btn {
 
 .analyzer-progress-label {
   font-size: 10.5px;
-  color: #999;
+  color: var(--text-quiet);
   margin-left: 4px;
 }
 
 .killstreak-subrow td {
-  color: #999;
+  color: var(--text-quiet);
   border-bottom: none;
 }
 
@@ -2115,13 +2226,13 @@ button.danger-btn {
 }
 
 .analyzer-killmap circle {
-  stroke: #000;
+  stroke: var(--surface-black);
   stroke-width: 1.5;
   cursor: default;
 }
 
 .analyzer-killmap circle:hover {
-  stroke: #fff;
+  stroke: var(--text-strong);
   stroke-width: 2.5;
 }
 
@@ -2174,7 +2285,7 @@ button.danger-btn {
 .analyzer-chat-log {
   max-height: 60vh;
   overflow-y: auto;
-  background: #141414;
+  background: var(--surface-sunken);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 6px 10px;
@@ -2187,7 +2298,7 @@ button.danger-btn {
 }
 
 .chat-timestamp {
-  color: #666;
+  color: var(--text-faint);
   font-family: monospace;
   margin-right: 4px;
 }
@@ -2340,12 +2451,12 @@ button.danger-btn {
 }
 
 .quicklink-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--wash-06);
 }
 
 .quicklink-row.selected {
-  background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  background: var(--accent-wash-35);
+  color: var(--text-strong);
 }
 
 .quicklink-pin-btn {
@@ -2399,12 +2510,12 @@ button.danger-btn {
 }
 
 .tree-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--wash-04);
 }
 
 .tree-row.selected .tree-label {
-  background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  background: var(--accent-wash-35);
+  color: var(--text-strong);
 }
 
 .tree-toggle {
@@ -2430,7 +2541,7 @@ button.danger-btn {
 
 .tree-children {
   margin-left: 13px;
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 1px solid var(--wash-06);
   padding-left: 4px;
 }
 
@@ -2454,7 +2565,7 @@ button.danger-btn {
 }
 
 .analyzer-explorer-settings summary:hover {
-  color: #dddddd;
+  color: var(--text-soft);
 }
 
 .settings-checkbox-row {
@@ -2495,7 +2606,7 @@ button.danger-btn {
 }
 
 .analyzer-table th[data-sort]:hover {
-  color: #dddddd;
+  color: var(--text-soft);
 }
 
 .analyzer-demo-row {
@@ -2503,12 +2614,12 @@ button.danger-btn {
 }
 
 .analyzer-demo-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--wash-06);
 }
 
 .analyzer-demo-row.selected {
-  background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  background: var(--accent-wash-35);
+  color: var(--text-strong);
 }
 
 .text-muted {
@@ -2517,7 +2628,7 @@ button.danger-btn {
 
 /* Keyboard Navigation Highlight */
 tr.keyboard-selected {
-  outline: 1px solid #4a90e2;
+  outline: 1px solid var(--link);
   outline-offset: -1px;
   background-color: transparent !important;
 }
@@ -2529,7 +2640,7 @@ tr.keyboard-selected {
   margin: -4px 0 6px 0;
   padding-left: 2px;
   font-size: 0.85em;
-  color: #ffa726;
+  color: var(--warn-orange);
 }
 
 /* A fix-it button at the end of a path warning (#925). */
@@ -2562,23 +2673,23 @@ tr.keyboard-selected {
   padding: 5px 12px;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 /* #426: fewer files than the fullest style, and the biggest size built. */
 #hd-status-table td.hd-cell-partial {
-  color: #ffb74d;
+  color: var(--warn);
 }
 
 .hd-cell-largest {
   font-size: 11px;
-  color: #888888;
+  color: var(--text-muted);
 }
 
 .hd-style-coverage,
 .hd-outdated,
 .hd-gl-max-size-low {
-  color: #ffb74d;
+  color: var(--warn);
 }
 
 .hd-style-maps summary {
@@ -2599,7 +2710,7 @@ tr.keyboard-selected {
 }
 
 #hd-status-table th {
-  color: #aaaaaa;
+  color: var(--text-subtle);
   font-weight: 600;
   border-bottom-color: var(--border-color);
 }
@@ -2662,29 +2773,29 @@ tr.keyboard-selected {
   display: flex;
   gap: 4px;
   margin-top: 10px;
-  border-bottom: 1px solid var(--border-color, #444);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .auditor-tab-btn {
-  border: 1px solid var(--border-color, #444);
+  border: 1px solid var(--border-color);
   border-bottom: none;
   border-radius: 4px 4px 0 0;
   background: transparent;
-  color: var(--text-muted, #aaa);
+  color: var(--text-muted);
   padding: 5px 14px;
   cursor: pointer;
 }
 
 .auditor-tab-btn.active {
-  background: var(--panel-bg-light, #2a2a2a);
-  color: var(--text-color, #fff);
+  background: var(--surface-raised);
+  color: var(--text-strong);
   font-weight: 600;
 }
 
 /* Split Maps (#624). */
 .split-hint {
   margin: 0 0 8px;
-  color: var(--text-muted, #aaa);
+  color: var(--text-muted);
   max-width: 80ch;
 }
 
@@ -2702,7 +2813,7 @@ tr.keyboard-selected {
 }
 
 .split-demo {
-  border: 1px solid var(--border-color, #444);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 8px 10px;
   min-width: 0;
@@ -2720,7 +2831,7 @@ tr.keyboard-selected {
 }
 
 .split-demo-meta {
-  color: var(--text-muted, #aaa);
+  color: var(--text-muted);
   font-size: 0.85em;
   overflow-wrap: anywhere;
 }
@@ -2738,7 +2849,7 @@ tr.keyboard-selected {
 
 .split-map-num,
 .split-map-when {
-  color: var(--text-muted, #aaa);
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2747,16 +2858,16 @@ tr.keyboard-selected {
 }
 
 .split-map-done {
-  color: var(--text-muted, #aaa);
+  color: var(--text-muted);
   font-size: 0.9em;
 }
 
 .split-done-chip {
   font-size: 0.8em;
   padding: 1px 8px;
-  border: 1px solid #5fb85f;
+  border: 1px solid var(--ok-update);
   border-radius: 10px;
-  color: #5fb85f;
+  color: var(--ok-update);
 }
 
 .split-short td {
@@ -2911,7 +3022,7 @@ tr.keyboard-selected {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #aaaaaa;
+  color: var(--text-subtle);
 }
 
 .ov-map-list {
@@ -2931,7 +3042,7 @@ tr.keyboard-selected {
   font-size: 12px;
   background: none;
   border: none;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 .ov-map-row span:first-child {
@@ -2954,13 +3065,13 @@ tr.keyboard-selected {
 }
 
 .ov-badge-ours {
-  color: #8ade75;
-  border-color: #8ade75;
+  color: var(--ok-bright);
+  border-color: var(--ok-bright);
 }
 
 .ov-badge-edited {
-  color: #d5e34f;
-  border-color: #d5e34f;
+  color: var(--warn-lime);
+  border-color: var(--warn-lime);
 }
 
 .ov-palette {
@@ -2972,7 +3083,7 @@ tr.keyboard-selected {
 .ov-swatch {
   height: 24px;
   padding: 0;
-  border: 1px solid #000;
+  border: 1px solid var(--surface-black);
   border-radius: 3px;
 }
 
@@ -3012,7 +3123,7 @@ tr.keyboard-selected {
 }
 
 .ov-swatch.active {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--text-strong);
 }
 
 .ov-checks {
@@ -3065,7 +3176,7 @@ tr.keyboard-selected {
 }
 
 .ov-label-row.active input {
-  outline: 1px dashed #ffdd00;
+  outline: 1px dashed var(--warn-yellow);
 }
 
 .ov-add-label {
@@ -3103,7 +3214,7 @@ tr.keyboard-selected {
   max-height: 70vh;
   overflow: auto;
   border: 1px solid var(--border-color);
-  background: #000;
+  background: var(--surface-black);
 }
 
 .hd-preview-wrap img {
@@ -3175,11 +3286,11 @@ tr.keyboard-selected {
 }
 
 .hd-pattern-unused {
-  border-color: #d9a441;
+  border-color: var(--warn-amber);
 }
 
 .hd-pattern-unused .hd-chip-count {
-  color: #d9a441;
+  color: var(--warn-amber);
 }
 
 .hd-chip-x {
@@ -3193,7 +3304,7 @@ tr.keyboard-selected {
 }
 
 .hd-chip-x:hover {
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* Clicking a map's box that a pattern picked points at the pattern's chip. */
@@ -3202,7 +3313,7 @@ tr.keyboard-selected {
 }
 
 @keyframes hd-chip-flash {
-  0%, 60% { background: #2f6b47; border-color: var(--hd-tick-pattern); }
+  0%, 60% { background: var(--ok-pattern-dim); border-color: var(--hd-tick-pattern); }
   100% { background: var(--bg-input); border-color: var(--border-color); }
 }
 
@@ -3211,7 +3322,7 @@ tr.keyboard-selected {
    "Picked only" is two drawn ticks in the same two colours. */
 :root {
   --hd-tick-own: var(--primary-accent);
-  --hd-tick-pattern: #3ea86b;
+  --hd-tick-pattern: var(--ok-pattern);
 }
 
 /* Outranks the global input[type="checkbox"] accent rule at the top. */
@@ -3246,7 +3357,7 @@ input[type="checkbox"].hd-box-pattern {
   text-align: center;
   line-height: 13px;
   font-size: 11px;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .hd-tick::after {
@@ -3306,7 +3417,7 @@ input[type="checkbox"].hd-box-pattern {
 
 /* Misses view: one collapsible block per map. */
 .hd-miss-map {
-  border-top: 1px solid #282828;
+  border-top: 1px solid var(--border-faint);
   padding: 6px 0;
 }
 
@@ -3319,7 +3430,7 @@ input[type="checkbox"].hd-box-pattern {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #aaaaaa;
+  color: var(--text-subtle);
 }
 
 .hd-miss-list {
@@ -3370,9 +3481,9 @@ input[type="checkbox"].hd-box-pattern {
   min-height: 3.2em;
   resize: both;
   padding: 2px 4px;
-  background: #1a1a1a;
-  color: #fff;
-  border: 1px solid #444;
+  background: var(--surface-inset);
+  color: var(--text-strong);
+  border: 1px solid var(--border-mid);
   border-radius: 3px;
   font-family: inherit;
   font-size: 12px;
@@ -3397,7 +3508,7 @@ input[type="checkbox"].hd-box-pattern {
 
 .rename-errors {
   margin: 2px 0 4px;
-  color: #ef5350;
+  color: var(--danger-light);
 }
 
 /* One row per placeholder group: its label, then its chips (#469), under
@@ -3442,7 +3553,7 @@ input[type="checkbox"].hd-box-pattern {
   font-weight: 600;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--wash-03);
   cursor: default;
 }
 
@@ -3472,7 +3583,7 @@ input[type="checkbox"].hd-box-pattern {
 }
 
 .rename-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--wash-04);
 }
 
 .rename-table tr.rename-unticked td {
@@ -3480,7 +3591,7 @@ input[type="checkbox"].hd-box-pattern {
 }
 
 #rename-table td.rename-new {
-  color: #81c784;
+  color: var(--ok-lighter);
 }
 
 #rename-table td.rename-note {
@@ -3489,7 +3600,7 @@ input[type="checkbox"].hd-box-pattern {
 }
 
 #rename-table td.rename-numbered {
-  color: #ffb74d;
+  color: var(--warn);
 }
 
 .rename-type {
@@ -3503,13 +3614,13 @@ input[type="checkbox"].hd-box-pattern {
 }
 
 .rename-type-pov {
-  color: #64b5f6;
-  background: rgba(100, 181, 246, 0.12);
+  color: var(--info-light);
+  background: var(--info-light-wash);
 }
 
 .rename-type-hltv {
-  color: #ce93d8;
-  background: rgba(206, 147, 216, 0.12);
+  color: var(--purple);
+  background: var(--purple-wash);
 }
 
 /* ── Setup window and checklist card (#599) ─────────────────────────────── */
@@ -3566,9 +3677,9 @@ input[type="checkbox"].hd-box-pattern {
   background: var(--border-accent);
 }
 
-.setup-steps li.done::before { background: #4caf7a; }
-.setup-steps li.now::before { background: #4a86c5; }
-.setup-steps li.now { color: #ffffff; }
+.setup-steps li.done::before { background: var(--ok-setup); }
+.setup-steps li.now::before { background: var(--info); }
+.setup-steps li.now { color: var(--text-strong); }
 
 .setup-content {
   padding: 16px 18px;
@@ -3605,7 +3716,7 @@ button.setup-skip {
 
 button.setup-skip:hover:not(:disabled) {
   background: none;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .setup-note {
@@ -3616,9 +3727,9 @@ button.setup-skip:hover:not(:disabled) {
   border: 1px solid var(--border-color);
 }
 
-.setup-note.info { border-color: #2f4a68; }
-.setup-note.warn { border-color: #6b5226; color: #ffb74d; }
-.setup-note.ok { border-color: #2e5a42; }
+.setup-note.info { border-color: var(--info-border); }
+.setup-note.warn { border-color: var(--warn-border); color: var(--warn); }
+.setup-note.ok { border-color: var(--ok-border); }
 
 .setup-field {
   display: flex;
@@ -3688,9 +3799,9 @@ button.setup-skip:hover:not(:disabled) {
   flex: none;
 }
 
-.setup-dot.ok { background: #4caf7a; }
-.setup-dot.warn { background: #ffb74d; }
-.setup-dot.bad { background: #f44336; }
+.setup-dot.ok { background: var(--ok-setup); }
+.setup-dot.warn { background: var(--warn); }
+.setup-dot.bad { background: var(--danger); }
 
 .setup-chip {
   display: inline-flex;
@@ -3702,9 +3813,9 @@ button.setup-skip:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-.setup-chip.info { border-color: #4a86c5; color: #4a86c5; }
-.setup-chip.ok { border-color: #4caf7a; color: #4caf7a; }
-.setup-chip.warn { border-color: #ffb74d; color: #ffb74d; }
+.setup-chip.info { border-color: var(--info); color: var(--info); }
+.setup-chip.ok { border-color: var(--ok-setup); color: var(--ok-setup); }
+.setup-chip.warn { border-color: var(--warn); color: var(--warn); }
 
 .setup-btn-row {
   display: flex;
@@ -3754,7 +3865,7 @@ button.setup-skip:hover:not(:disabled) {
 .setup-meter {
   flex: 1 1 100px;
   height: 6px;
-  background: #2b2c30;
+  background: var(--surface-menu);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -3762,7 +3873,7 @@ button.setup-skip:hover:not(:disabled) {
 .setup-meter i {
   display: block;
   height: 100%;
-  background: #4a86c5;
+  background: var(--info);
 }
 
 .setup-row {
@@ -3793,12 +3904,12 @@ button.setup-skip:hover:not(:disabled) {
   place-items: center;
   font-size: 10px;
   font-weight: 700;
-  color: #111;
+  color: var(--text-on-light);
   box-sizing: border-box;
 }
 
-.setup-tick.ok { background: #4caf7a; }
-.setup-tick.todo { border: 1.5px solid #ffb74d; }
+.setup-tick.ok { background: var(--ok-setup); }
+.setup-tick.todo { border: 1.5px solid var(--warn); }
 .setup-tick.opt { border: 1.5px dashed var(--border-accent); }
 
 
@@ -3856,7 +3967,7 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .players-nameplate-pick.missing {
-  color: #e0a040;
+  color: var(--warn-ochre);
 }
 
 .players-nameplate-clear {
@@ -3898,7 +4009,7 @@ button.setup-skip:hover:not(:disabled) {
 .players-tile-preview {
   width: 24px;
   height: 24px;
-  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 8px 8px;
+  background: repeating-conic-gradient(var(--border-accent) 0% 25%, var(--border-soft) 0% 50%) 50% / 8px 8px;
   border-radius: 3px;
 }
 
@@ -3916,7 +4027,7 @@ button.setup-skip:hover:not(:disabled) {
   grid-template-rows: repeat(4, 48px);
   width: 192px;
   height: 192px;
-  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 16px 16px;
+  background: repeating-conic-gradient(var(--border-accent) 0% 25%, var(--border-soft) 0% 50%) 50% / 16px 16px;
 }
 
 .players-grid-image {
@@ -3929,9 +4040,9 @@ button.setup-skip:hover:not(:disabled) {
 
 .players-cell {
   position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--wash-15);
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-on-dark-55);
   font-size: 10px;
   text-align: left;
   vertical-align: top;
@@ -3942,18 +4053,18 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .players-grid-numbers .players-cell {
-  color: #fff;
+  color: var(--text-strong);
   font-size: 13px;
   text-align: center;
 }
 
 .players-cell:hover {
-  border-color: var(--accent-color, #4a90d9);
+  border-color: var(--accent-alt);
 }
 
 .players-cell.selected {
-  border: 2px solid var(--accent-color, #4a90d9);
-  color: #fff;
+  border: 2px solid var(--accent-alt);
+  color: var(--text-strong);
 }
 
 .players-picker-note {
@@ -3978,7 +4089,7 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .players-x:hover {
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* The HLTV box's "Players I pick" (#828): the lists that add a player or a
@@ -4046,7 +4157,7 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .review-hltv-chip-x:hover {
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .review-hltv-none {
@@ -4082,13 +4193,13 @@ button.setup-skip:hover:not(:disabled) {
 /* Dropping demos from Windows (#530): both zones show while dragging, the
    one under the pointer more. */
 .drop-zone-active {
-  outline: 2px dashed rgba(100, 160, 255, 0.5);
+  outline: 2px dashed var(--focus-line);
   outline-offset: -2px;
 }
 
 .drop-zone-hover {
-  outline: 2px solid #64a0ff;
-  background: rgba(100, 160, 255, 0.08);
+  outline: 2px solid var(--focus);
+  background: var(--focus-wash);
 }
 
 .audit-all-drives, .scan-subfolders {
@@ -4101,7 +4212,7 @@ button.setup-skip:hover:not(:disabled) {
 /* Duplicates (#844): a group's header row stands out from its files, and the
    row buttons are the compact kind the render list uses. */
 .audit-table .audit-group-row td {
-  background: #1c1c1c;
+  background: var(--surface-row);
   border-top: 1px solid var(--border-color);
 }
 
@@ -4118,9 +4229,9 @@ button.setup-skip:hover:not(:disabled) {
 .audit-backup-chip {
   font-size: 0.8em;
   padding: 0 7px;
-  border: 1px solid #4a86c5;
+  border: 1px solid var(--info);
   border-radius: 10px;
-  color: #4a86c5;
+  color: var(--info);
   white-space: nowrap;
   cursor: help;
 }
@@ -4198,7 +4309,7 @@ button.setup-skip:hover:not(:disabled) {
   padding: 1px 8px;
   border: 1px solid var(--border-accent);
   border-radius: 10px;
-  color: var(--text-muted, #aaa);
+  color: var(--text-muted);
   cursor: help;
 }
 
@@ -4243,7 +4354,7 @@ button.setup-skip:hover:not(:disabled) {
   pointer-events: none;
   border: 1px solid var(--border-accent);
   background: var(--bg-panel);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 16px var(--shade-60);
 }
 
 .take-preview-hover img {
@@ -4295,11 +4406,11 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .rj-check-ok {
-  color: #4caf50;
+  color: var(--ok);
 }
 
 .rj-check-warn {
-  color: #d9a441;
+  color: var(--warn-amber);
   font-weight: 600;
 }
 
@@ -4319,7 +4430,7 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .take-check-warn {
-  color: #d9a441;
+  color: var(--warn-amber);
 }
 
 .take-check-note {
@@ -4369,7 +4480,7 @@ button.setup-skip:hover:not(:disabled) {
 .release-notes h4 {
   margin: 10px 0 4px;
   font-size: 13px;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .release-notes h5 {
@@ -4392,8 +4503,8 @@ button.setup-skip:hover:not(:disabled) {
 .release-notes code {
   font-family: Consolas, monospace;
   font-size: 12px;
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-soft);
   border-radius: 3px;
   padding: 0 3px;
 }
@@ -4422,7 +4533,7 @@ button.setup-skip:hover:not(:disabled) {
 }
 
 .whats-new-version-name {
-  color: #fff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -4490,10 +4601,10 @@ button.setup-skip:hover:not(:disabled) {
   user-select: text;
 }
 
-.obs-test-result[data-kind="steady"] { color: #7fc77f; }
-.obs-test-result[data-kind="borderline"] { color: #e0b050; }
+.obs-test-result[data-kind="steady"] { color: var(--ok-steady); }
+.obs-test-result[data-kind="borderline"] { color: var(--warn-sand); }
 .obs-test-result[data-kind="not_steady"],
-.obs-test-result[data-kind="error"] { color: #e07a5f; }
+.obs-test-result[data-kind="error"] { color: var(--danger-soft); }
 
 .obs-test-table {
   margin-top: 8px;
@@ -4507,9 +4618,9 @@ button.setup-skip:hover:not(:disabled) {
   text-align: left;
 }
 
-.obs-test-table tr[data-level="steady"] td:nth-child(2) { color: #7fc77f; }
-.obs-test-table tr[data-level="borderline"] td:nth-child(2) { color: #e0b050; }
-.obs-test-table tr[data-level="not_steady"] td:nth-child(2) { color: #e07a5f; }
+.obs-test-table tr[data-level="steady"] td:nth-child(2) { color: var(--ok-steady); }
+.obs-test-table tr[data-level="borderline"] td:nth-child(2) { color: var(--warn-sand); }
+.obs-test-table tr[data-level="not_steady"] td:nth-child(2) { color: var(--danger-soft); }
 
 #obs-test-apply-btn {
   margin-top: 8px;
@@ -4530,9 +4641,9 @@ button.setup-skip:hover:not(:disabled) {
   border: 1px solid currentColor;
 }
 .output-row-status[hidden] { display: none; }
-.output-row-status-ok { color: #66bb6a; }
+.output-row-status-ok { color: var(--ok-light); }
 .output-row-status-note { color: var(--text-muted); }
-.output-row-status-bad { color: #ef5350; }
+.output-row-status-bad { color: var(--danger-light); }
 /* A Capture Output row whose path cannot be used (#25): red field and the reason under it. */
 .list-editor-row.output-row-invalid { flex-wrap: wrap; }
 .output-row-invalid input { border-color: var(--danger-light); }
