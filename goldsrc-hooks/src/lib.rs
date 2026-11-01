@@ -197,6 +197,10 @@
 //! - `map_weather`: the `ds_map_weather` cvar -- rain or snow on any map,
 //!   or none, by pointing the weather updater's type read at our own value
 //!   (#1129).
+//! - `map_cfgs`: the `ds_map_run_cfgs` cvar -- run
+//!   `dodstudio_maps/all_maps.cfg` and `dodstudio_maps/<map>.cfg` before a
+//!   demo's map loads, for per-map brightness and gamma, which a server's map
+//!   cfgs would set but demo playback never runs.
 //! - `map_text`: the `ds_hud_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
@@ -303,6 +307,7 @@ mod hw_call_site;
 mod lightmap_gamma;
 mod list_panel;
 mod lookahead;
+mod map_cfgs;
 mod map_file_leak;
 mod map_sounds;
 mod map_text;
