@@ -84,6 +84,28 @@ export const STRINGS = {
   },
 
   // ── Workspace Pane: Directory Scan & Master Demo Queue ──────────────────
+  // Right-click menus (#1111): the Master Demo Queue's row menu.
+  CONTEXT_MENU: {
+    label: (name) => `Actions for ${name}`,
+    LAUNCH_PREVIEW: 'Launch Preview',
+    REVIEW: 'Review this demo',
+    OPEN_IN_ANALYZER: 'Open in Demo Analyzer',
+    OPEN_FOLDER: 'Open Folder in Explorer',
+    SPLIT_MAPS: 'Split Maps',
+    USE_FOUND_COPY: 'Use found copy',
+    LOCATE: 'Locate demo...',
+    COPY_NAME: 'Copy Demo Name',
+    COPY_PATH: 'Copy Path',
+    REMOVE: 'Remove from Queue',
+    DEMO_MISSING: 'The demo file is missing. Use Locate demo first.',
+    WHAT_NAME: 'Demo name',
+    WHAT_PATH: 'Path',
+    copied: (what) => `${what} copied to clipboard.`,
+    COPY_FAILED: 'Failed to copy to the clipboard.',
+    copiedLog: (what, demo) => `Right-click menu: copied ${what.toLowerCase()} of ${demo}.`,
+    copyFailedLog: (what, err) => `Right-click menu: could not copy ${what.toLowerCase()}: ${err}`,
+    openFolderLog: (path) => `Right-click menu: opened the folder of ${path} in Explorer.`,
+  },
   WORKSPACE: {
     SCAN_PANEL_TITLE: 'Directory Scan & Management',
     ADD_FILES_BUTTON: '+ Add Demo Files',
