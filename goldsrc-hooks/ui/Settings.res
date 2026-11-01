@@ -713,7 +713,7 @@
 		"enabled"		"1"
 		"labelText"		"Fast loading"
 		"textAlignment"		"west"
-		"helptext"		"ds_demo_fast_load: viewdemo loads the demo for this long each frame; Off is the game's 33 packets a frame."
+		"helptext"		"ds_demo_fast_load: how long viewdemo loads the demo each frame. 8 ms loads it about twice as fast as Off and stays smooth; more is barely faster and choppy until the demo has loaded."
 	}
 	"cvar_ds_demo_fast_load"
 	{
@@ -726,7 +726,7 @@
 		"visible"		"1"
 		"enabled"		"1"
 		"editable"		"0"
-		"helptext"		"ds_demo_fast_load: viewdemo loads the demo for this long each frame; Off is the game's 33 packets a frame."
+		"helptext"		"ds_demo_fast_load: how long viewdemo loads the demo each frame. 8 ms loads it about twice as fast as Off and stays smooth; more is barely faster and choppy until the demo has loaded."
 	}
 	"label_ds_demo_ex_interp_max"
 	{

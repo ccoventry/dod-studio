@@ -128,8 +128,10 @@ three demos, and the engine frames that takes:
 | `bandits-ktps5w10-map2-anzio-over-allies-milo` | 91 MB | 21 min | 113,764 | 3,447 | 34 s | 11 s |
 | `wsod25_ply2_m3_h2_dyelife` | 450 MB | 125 min | 672,418 | 20,376 | 204 s | 68 s |
 
-What frame rate the engine holds while it loads is not measured, and neither is
-memory: the world keeps every frame (`SetBufferSize(-1)`), inside a 32-bit
+`wsod25_ply2_m3_h2_dyelife` holds seven maps, and `viewdemo` stops at the
+first map change (`docs/features.md`, #217), so it loads only its first:
+1,372 s of demo, 121,513 packets (#1295). The frame rate while loading is
+measured below; memory is not: the world keeps every frame (`SetBufferSize(-1)`), inside a 32-bit
 process. The console prints `Demo file completely loaded.` when the loader
 disconnects, which is what `IsLoading()` reports.
 
@@ -149,6 +151,41 @@ at least 33 packets. `0` returns `0x20` every time, the engine's own decision.
 by signature; `tools/verify_fast_load_offsets.py` checks both builds' loops
 (the count's init, the span, what follows the `jg`). The hook log has one
 `fast_load:` line per load with its time, packets and frame times.
+
+**Which budget (#1295).** Measured 2026-10-31 on both builds with
+`game_probe`, the hook DLL from dev, `wsod25_ply2_m3_h2_dyelife` (its first
+map, 121,513 packets), 2560x1440 windowed behind other windows
+(`ds_capture_run_in_background 1`), `fps_max 164.5`, two runs each (shown
+`run 1 / run 2`). Load time is the hook's `fast_load:` figure; it includes
+the map's own load, one frame of 3-5 s, so the reading column takes that
+frame out. Frame rates while loading are 1000 / the median and 99th
+percentile frame times of the same line.
+
+| build | budget | load time | reading | median fps while loading | 1% low while loading |
+| --- | --- | --- | --- | --- | --- |
+| PRE | Off (`0`) | 27.7 / 25.7 s | 23.3 / 22.5 s | 164 / 164 | 75 / 139 |
+| PRE | 8 ms (`1`) | 12.7 / 12.4 s | 9.3 / 9.2 s | 110 / 110 | 100 / 101 |
+| PRE | 16 ms | 13.9 / 12.0 s | 10.6 / 8.7 s | 57 / 58 | 22 / 54 |
+| PRE | 33 ms | 11.8 / 14.0 s | 8.5 / 10.2 s | 29 / 29 | 17 / 10 |
+| PRE | 50 ms | 15.0 / 11.8 s | 11.7 / 8.3 s | 19 / 19 | 9 / 13 |
+| PRE | 100 ms | 15.6 / 11.4 s | 12.2 / 8.1 s | 10 / 10 | 5 / 5 |
+| POST | Off (`0`) | 35.1 / 26.9 s | 26.1 / 22.5 s | 164 / 164 | 45 / 143 |
+| POST | 8 ms (`1`) | 13.8 / 13.9 s | 9.3 / 9.5 s | 109 / 109 | 98 / 80 |
+| POST | 16 ms | 13.2 / 13.2 s | 8.8 / 8.7 s | 58 / 58 | 54 / 51 |
+| POST | 33 ms | 13.0 / 12.9 s | 8.6 / 8.4 s | 29 / 29 | 17 / 18 |
+| POST | 50 ms | 12.8 / 12.8 s | 8.4 / 8.2 s | 19 / 19 | 13 / 13 |
+| POST | 100 ms | 13.5 / 13.0 s | 8.6 / 8.3 s | 10 / 10 | 4 / 4 |
+
+Once loaded, every run played at 164-165 fps (the `fps_max`), whatever the
+budget. 8 ms reads the demo in about 40% of stock's time and holds about
+110 fps while it does. Every larger budget reads it within about a second of
+8 ms (half a second sooner on POST), because a 9 ms frame is already almost
+all reading: the extra time per frame only means fewer frames. And the frame
+rate falls with the budget, to about 58 fps at 16 ms and 29 at 33, which is
+visibly choppy until the demo has loaded. So 8 ms stays the default, and the
+Settings tab's choices say which way is faster and which are choppier. Run 2
+of PRE 33 ms overlapped a compile; the spread between runs elsewhere is
+other agents' games and builds on the same PC.
 
 `Core.dll` also holds 256 entities per frame on the pre-Anniversary build
 (1024 on the Anniversary one); see the entity-limit entry in
