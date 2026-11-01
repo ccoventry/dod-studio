@@ -89,6 +89,12 @@ fn status_text() -> String {
         crate::strafe_twitch::status()
     ));
     lines.push(format!(
+        "{} = {} -- x-ray: {}",
+        crate::spec_xray::NAME,
+        bit(crate::spec_xray::enabled()),
+        crate::spec_xray::status()
+    ));
+    lines.push(format!(
         "{} = {} -- rounds an HLTV or POV demo has no fire event for are played (HLTV: every player; POV: the others from the body, the recorder from his clip)",
         missing_shots::NAME,
         bit(missing_shots::enabled()),
