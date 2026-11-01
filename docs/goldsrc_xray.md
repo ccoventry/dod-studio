@@ -56,8 +56,8 @@ has it under Spectating):
   wall hides him.
 - Never in a live game, where it would be a wallhack: demo playback only.
 
-What isn't CS:GO's: no names through walls (`ds_hud_show_player_names` draws
-those, through walls too), no dimming of quiet players, no white selection
+What isn't CS:GO's: no names through walls (`ds_spec_show_player_info` draws
+those in HLTV demos, through walls too), no dimming of quiet players, no white selection
 highlight, nothing for dropped items.
 
 ### How it is drawn

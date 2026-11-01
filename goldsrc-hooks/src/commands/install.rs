@@ -253,11 +253,8 @@ pub fn install() {
     if let Some(blood) = register(crate::own_blood::NAME, "0") {
         crate::own_blood::CVAR.set(blood);
     }
-    if let Some(names) = register(crate::nameplates::NAMES_NAME, "0") {
-        crate::nameplates::NAMES_CVAR.set(names);
-    }
-    if let Some(health) = register(crate::nameplates::HEALTH_NAME, "0") {
-        crate::nameplates::HEALTH_CVAR.set(health);
+    if let Some(info) = register(crate::nameplates::NAME, "0") {
+        crate::nameplates::CVAR.set(info);
     }
     // Off by default: a glow through every wall changes the whole picture
     // (#1297).

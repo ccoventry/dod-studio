@@ -1,7 +1,6 @@
-//! `ds_hud_show_player_names` and `ds_hud_show_player_health` (#1130): a name
-//! above each player the game draws this frame, and a health bar, while a
-//! demo plays. Two settings, both off by default: someone may want the bars
-//! without the names, or the names alone.
+//! `ds_spec_show_player_info` (#1130): a name above each player the game draws
+//! this frame, a health bar, or both, while an HLTV demo plays. One setting, off by
+//! default: 1 the name alone, 2 the health bar alone, 3 both.
 //!
 //! ## What is drawn
 //!
@@ -10,13 +9,15 @@
 //!   answered): every player the engine is about to render, so nobody out of
 //!   the recorder's view, nobody the hook's own `ds_map_hide_asset` hid, and
 //!   not the player an HLTV camera watches in-eye (the client returns 0 for
-//!   him). The recording player of a POV demo is left out too, and anyone
+//!   him). Anyone
 //!   `g_PlayerExtraInfo` holds as dead or not on Allies or Axis.
 //! - **Where:** 12 units over the top of the player's box
 //!   (`curstate.maxs[2]`, which follows crouch and prone), at the place the
 //!   engine draws him this frame (`cl_entity_t::origin`), through TriAPI's
 //!   `WorldToScreen`, the engine's own projection, so a FOV change
-//!   (`default_fov`, HLAE's `mirv_fov`) moves the plates with the view.
+//!   (`default_fov`, HLAE's `mirv_fov`) moves the plates with the view. A
+//!   player so close that the point over his head is above the screen gets
+//!   his plate at the top edge, over him.
 //! - **The name:** the one the scoreboard shows, so `ds_player_change_name`
 //!   applies, in the engine's console font, in a light tint of the kill
 //!   feed's team colour over a translucent box.
@@ -28,12 +29,13 @@
 //! potentially visible set, not in his line of sight. A trace per player
 //! would hide them; that is a look for the user to choose (#1130).
 //!
-//! Only in demo playback: in a live game the plates would show enemies
-//! through walls.
+//! Only in HLTV demos: in a live game the plates would show enemies through
+//! walls, and in a POV demo they would read as a wallhack in a clip, where the
+//! game's own teammate name and health line already exists.
 //!
 //! ## Cost
 //!
-//! Off: one atomic load per entity in `HUD_AddEntity` and two cvar reads in
+//! Off: one atomic load per entity in `HUD_AddEntity` and one cvar read in
 //! `HUD_Redraw`. On: per frame, one `WorldToScreen`, one text measure, one or
 //! two boxes and one string per player drawn, and no allocation. Everything
 //! runs on the engine's thread; the only shared state is atomics.
@@ -45,14 +47,12 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::names::console_name;
 use crate::setting::Cvar;
 
-pub const NAMES_NAME: &str = console_name!("hud_show_player_names");
-pub const HEALTH_NAME: &str = console_name!("hud_show_player_health");
+pub const NAME: &str = console_name!("spec_show_player_info");
 
-pub static NAMES_CVAR: Cvar = Cvar::new();
-pub static HEALTH_CVAR: Cvar = Cvar::new();
+pub static CVAR: Cvar = Cvar::new();
 
-/// Whether either setting was on at the last `HUD_Redraw`, so `note_added`
-/// costs one load while both are off.
+/// Whether the setting was on at the last `HUD_Redraw`, so `note_added`
+/// costs one load while it is off.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Bit `i - 1` set: player `i` was let through `HUD_AddEntity` since the
 /// last `HUD_Redraw`.
@@ -112,6 +112,27 @@ fn to_pixels(ndc: [f32; 2], width: i32, height: i32) -> Option<(i32, i32)> {
     Some((px as i32, py as i32))
 }
 
+/// Where a plate goes: its point over the head on the screen, or, when that
+/// point is above the top while the player himself is on screen (a player
+/// close to the camera), the top edge over him, so the nearest player keeps
+/// his plate instead of losing it (#1130). `None` when he's off screen.
+fn plate_anchor(
+    plate: [f32; 2],
+    player_on_screen: impl FnOnce() -> bool,
+    width: i32,
+    height: i32,
+) -> Option<(i32, i32)> {
+    to_pixels(plate, width, height).or_else(|| {
+        let [x, y] = plate;
+        let above_top = (-1.0..=1.0).contains(&x) && y > 1.0;
+        if above_top && player_on_screen() {
+            to_pixels([x, 1.0], width, height)
+        } else {
+            None
+        }
+    })
+}
+
 /// The height the plate sits at over the player's origin.
 fn plate_height(maxs_z: f32) -> f32 {
     let top = if maxs_z.is_finite() && maxs_z > 0.0 {
@@ -155,8 +176,11 @@ struct Layout {
 
 /// The plate over a head at `anchor`: the bar's bottom edge on it, the name
 /// over the bar, both centred. `name` is the text's size, `bar` the bar's.
+/// A plate whose top would leave the screen moves down until it fits (the
+/// bar's 1 px outline included).
 fn layout(anchor: (i32, i32), name: Option<(i32, i32)>, bar: Option<(i32, i32)>) -> Layout {
-    let (cx, mut bottom) = anchor;
+    let tall = bar.map_or(0, |(_, h)| h + PADDING) + name.map_or(0, |(_, h)| h + PADDING);
+    let (cx, mut bottom) = (anchor.0, anchor.1.max(tall + 1));
     let bar_box = bar.map(|(w, h)| {
         let r = [cx - w / 2, bottom - h, cx - w / 2 + w, bottom];
         bottom -= h + PADDING;
@@ -187,25 +211,38 @@ fn layout(anchor: (i32, i32), name: Option<(i32, i32)>, bar: Option<(i32, i32)>)
 ///
 /// On the engine's thread, inside `HUD_Redraw`.
 pub(crate) unsafe fn draw(intermission: i32) {
-    let names = NAMES_CVAR.on();
-    let health = HEALTH_CVAR.on();
-    ENABLED.store(names || health, Ordering::Relaxed);
+    let show = Show::from_value(CVAR.value().unwrap_or(0.0));
+    ENABLED.store(show.names || show.health, Ordering::Relaxed);
     let added = ADDED.swap(0, Ordering::Relaxed);
-    let wanted = (names || health) && added != 0 && intermission == 0;
+    let wanted = (show.names || show.health) && added != 0 && intermission == 0;
     #[cfg(target_arch = "x86")]
     if wanted {
         // Safety: the caller's.
-        unsafe { live::draw(added, Show { names, health }) };
+        unsafe { live::draw(added, show) };
     }
     #[cfg(not(target_arch = "x86"))]
     let _ = wanted;
 }
 
 /// Which parts of the plate are on.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Show {
     names: bool,
     health: bool,
+}
+
+impl Show {
+    /// The parts a `ds_spec_show_player_info` value turns on: 1 the name,
+    /// 2 the health bar, 3 both; 0 and anything else none.
+    fn from_value(value: f32) -> Self {
+        let (names, health) = match value as i32 {
+            1 => (true, false),
+            2 => (false, true),
+            3 => (true, true),
+            _ => (false, false),
+        };
+        Self { names, health }
+    }
 }
 
 #[cfg(target_arch = "x86")]
@@ -220,6 +257,14 @@ mod live {
         let api = e.p_demo_api;
         // Safety: the engine's demo API, valid for the session.
         !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
+    }
+
+    /// An HLTV demo: the client is a spectator-only view (the test `anim_fix`
+    /// and `deathmsg` use).
+    fn is_hltv(e: &engine::ClEngineFuncsPartial) -> bool {
+        // Safety: the engine's own function, on its thread.
+        let spectate_only = unsafe { (e.is_spectate_only)() };
+        spectate_only != 0
     }
 
     /// The name the scoreboard shows for `index`: a `ds_player_change_name`
@@ -247,7 +292,7 @@ mod live {
         let (Some(e), Some(base)) = (engine::engfuncs(), engine::client_module_base()) else {
             return;
         };
-        if !is_playing_demo(e) || e.p_tri_api.is_null() {
+        if !is_playing_demo(e) || !is_hltv(e) || e.p_tri_api.is_null() {
             return;
         }
         // Safety: the engine's TriAPI table, valid for the session.
@@ -293,7 +338,19 @@ mod live {
             if unsafe { (tri.world_to_screen)(world.as_ptr(), ndc.as_mut_ptr()) } != 0 {
                 continue;
             }
-            let Some(anchor) = to_pixels([ndc[0], ndc[1]], screen.width, screen.height) else {
+            let player_on_screen = || {
+                let at = [origin.x, origin.y, origin.z];
+                let mut seen = [0f32; 3];
+                // Safety: as above.
+                let behind = unsafe { (tri.world_to_screen)(at.as_ptr(), seen.as_mut_ptr()) };
+                behind == 0 && to_pixels([seen[0], seen[1]], screen.width, screen.height).is_some()
+            };
+            let Some(anchor) = plate_anchor(
+                [ndc[0], ndc[1]],
+                player_on_screen,
+                screen.width,
+                screen.height,
+            ) else {
                 continue;
             };
             let name = if show.names {
@@ -359,6 +416,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_setting_picks_the_name_the_bar_or_both() {
+        let show = |names, health| Show { names, health };
+        assert_eq!(Show::from_value(0.0), show(false, false));
+        assert_eq!(Show::from_value(1.0), show(true, false));
+        assert_eq!(Show::from_value(2.0), show(false, true));
+        assert_eq!(Show::from_value(3.0), show(true, true));
+        assert_eq!(Show::from_value(4.0), show(false, false));
+        assert_eq!(Show::from_value(-1.0), show(false, false));
+        assert_eq!(Show::from_value(f32::NAN), show(false, false));
+    }
+
+    #[test]
     fn only_the_32_player_slots_have_a_bit() {
         assert_eq!(player_bit(0), None);
         assert_eq!(player_bit(1), Some(1));
@@ -379,6 +448,35 @@ mod tests {
         assert_eq!(to_pixels([0.0, 0.0], 1920, 1080), Some((960, 540)));
         // y is up in WorldToScreen's result, down on the screen.
         assert_eq!(to_pixels([-1.0, 1.0], 1920, 1080), Some((0, 0)));
+    }
+
+    #[test]
+    fn a_close_players_plate_sticks_to_the_top_edge() {
+        // Over the top, the player on screen: the top edge over him.
+        assert_eq!(
+            plate_anchor([0.0, 1.3], || true, 1920, 1080),
+            Some((960, 0))
+        );
+        // Over the top, the player off screen too: nothing.
+        assert_eq!(plate_anchor([0.0, 1.3], || false, 1920, 1080), None);
+        // Off a side or below: nothing, whoever is on screen.
+        assert_eq!(plate_anchor([1.3, 0.0], || true, 1920, 1080), None);
+        assert_eq!(plate_anchor([0.0, -1.3], || true, 1920, 1080), None);
+        // On screen: where it is, without asking about the player.
+        assert_eq!(
+            plate_anchor([0.0, 0.0], || unreachable!(), 1920, 1080),
+            Some((960, 540))
+        );
+    }
+
+    #[test]
+    fn a_plate_at_the_top_edge_moves_down_onto_the_screen() {
+        let at = layout((100, 0), Some((40, 12)), Some((49, 5)));
+        let (_, name_box) = at.name.unwrap();
+        assert!(name_box[1] >= 0, "{at:?}");
+        assert!(at.bar.unwrap()[1] >= 1, "{at:?}");
+        let at = layout((100, 0), None, Some((49, 5)));
+        assert!(at.bar.unwrap()[1] >= 1, "{at:?}");
     }
 
     #[test]
