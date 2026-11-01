@@ -27,6 +27,10 @@
 // `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
 // caller before wrapping.
 
+pub mod game_process;
+pub mod hd;
+pub mod take_cleanup;
+
 use std::fmt::Display;
 use std::path::Path;
 
