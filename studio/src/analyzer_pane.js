@@ -129,7 +129,7 @@ async function loadAnalyzerDemo(path) {
   } catch (err) {
     if (seq !== analyzerLoadSeq) return;
     if (container) {
-      container.innerHTML = `<p class="analyzer-empty" style="color:#f44336;">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
+      container.innerHTML = `<p class="analyzer-empty" style="color:var(--danger);">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
     }
     setAnalyzerFileIndicator('');
   } finally {

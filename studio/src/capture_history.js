@@ -132,7 +132,7 @@ export function createCaptureHistory({ getTakeIndex, getDemos, fetchStates, loca
     row.className = 'capture-history-row';
     const cell = document.createElement('td');
     cell.colSpan = tr.children.length;
-    cell.style.cssText = 'padding:4px 8px 8px 32px;font-size:0.9em;background:#1b1b1b;';
+    cell.style.cssText = 'padding:4px 8px 8px 32px;font-size:0.9em;background:var(--surface-subrow);';
     row.append(cell);
     tr.after(row);
     fill(cell, uid, captures);
