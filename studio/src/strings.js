@@ -827,6 +827,15 @@ export const STRINGS = {
     exportEdlNone: (skipped) => skipped > 0
       ? `${skipped} finished render${skipped === 1 ? '' : 's'} can't be placed: FFmpeg couldn't read ${skipped === 1 ? 'its' : 'their'} length.`
       : 'No finished renders yet, so there is nothing to export.',
+    // #1264: every video rendered for the loaded project, as one EDL.
+    EXPORT_PROJECT_EDL_BUTTON: 'Export Project to VEGAS…',
+    EXPORT_PROJECT_EDL_TITLE: "Save an EDL with every video rendered for the loaded project that is still on disk, even when its take was deleted, in movie order, with HUD passes laid over their clips. When highlights are ticked, only their videos go in. A video you moved is found again by its name in the render export folders. Same import as Export VEGAS EDL.",
+    exportProjectNone: (total) => total > 0
+      ? `None of the ${total} video${total === 1 ? '' : 's'} rendered for this project could be found. Add the folder they are in to the render export folders in Configuration.`
+      : 'No videos have been rendered for the loaded project yet, so there is nothing to export.',
+    exportProjectLooking: (count) => `Looking for ${count} rendered video${count === 1 ? '' : 's'}…`,
+    exportProjectLookFailed: "Couldn't look for the project's videos on disk.",
+    exportProjectDone: (count, scope, missing, skipped, nameplates = 0) => `EDL saved (${count} video${count === 1 ? '' : 's'}${scope === 'ticked' ? ' from the ticked highlights' : ''}${nameplates > 0 ? `, ${nameplates} with a nameplate` : ''}${missing > 0 ? `, ${missing} missing` : ''}${skipped > 0 ? `, ${skipped} left out: FFmpeg couldn't read the length` : ''})`,
     // #429: the nameplate script into VEGAS's script menu.
     VEGAS_SCRIPT_BUTTON: 'Add Nameplate Script to VEGAS',
     VEGAS_SCRIPT_TITLE: 'Copy the VEGAS nameplate script into Documents\\Vegas Script Menu (made if it is not there), replacing an older copy of it. Then in VEGAS Pro use Tools > Scripting > Rescan Script Menu Folder.',
