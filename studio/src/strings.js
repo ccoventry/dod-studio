@@ -1531,6 +1531,14 @@ export const STRINGS = {
     COL_WAVE: 'Wave',
     COL_TIME: 'Time',
     COL_DURATION: 'Duration',
+    // #448: engagement distance in the kill list and the player's tables.
+    COL_DISTANCE: 'Distance',
+    COL_AVG_DISTANCE: 'Avg. distance',
+    AVG_DISTANCE_TITLE: 'Avg. Distance',
+    DISTANCE_UNKNOWN_TITLE: 'Position unknown',
+    DISTANCE_AVERAGE_NOTE: 'Averaged over the kills where the position of both players is known; team kills are left out.',
+    distanceMeasured: (measured, total) => `${measured} of ${total} kills`,
+    metres: (m) => `${m.toFixed(1)} m`,
     WEAPON_CATEGORY_GRENADES: 'Grenades',
     WEAPON_CATEGORY_MELEE: 'Melee',
     WEAPON_CATEGORY_ALLIED: 'Allied',
@@ -1572,7 +1580,6 @@ export const STRINGS = {
     COL_AVERAGE_DISTANCE: 'Average',
     COL_LONGEST_DISTANCE: 'Longest',
     ALL_WEAPONS_LABEL: 'All weapons',
-    metres: (m) => `${m.toFixed(1)} m`,
 
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.
