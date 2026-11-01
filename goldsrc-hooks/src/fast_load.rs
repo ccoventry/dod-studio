@@ -79,11 +79,13 @@
 //! [`DEFAULT_BUDGET_MS`] of loading per frame leaves the frame time for the
 //! rest of the engine, so playback stays smooth while the demo loads.
 //! Measured on both builds (#1295, `docs/goldsrc_viewdemo.md` §5), 8 ms is
-//! also the fastest. Stock reading leaves most of each frame idle under
+//! the right one. Stock reading leaves most of each frame idle under
 //! `fps_max`; 8 ms fills it, so a 9 ms frame is already almost all reading,
-//! and a bigger budget only trades frames for the same reading time: no
-//! sooner loaded, and choppy until it is. The cvar's value is the budget in milliseconds above 1; `1` is the default
-//! budget and `0` the engine's own 33 packets.
+//! and a bigger budget only trades frames for about the same reading time:
+//! barely sooner loaded, and choppy until it is.
+//!
+//! The cvar's value is the budget in milliseconds above 1; `1` is the
+//! default budget and `0` the engine's own 33 packets.
 //!
 //! The hook log says how each load went, so a budget can be judged by numbers:
 //! `fast_load: <demo> loaded in <s>, <n> packets, ...`.
