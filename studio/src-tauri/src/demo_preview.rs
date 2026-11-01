@@ -264,9 +264,7 @@ pub async fn send_preview_to_running_game(
             .iter()
             .all(|&pid| native::sys::studio_pipe::game_asks_this_studio(pid))
         {
-            log_markdown(
-                "[preview] the open game was started by another DoD Studio that is still open, so the preview does not go to it (#1235)",
-            );
+            log_markdown(crate::messages::preview_start::GAME_STARTED_BY_ANOTHER_STUDIO);
             return Ok(None);
         }
         let (patcher_config, dod_dir) =
@@ -303,8 +301,8 @@ pub async fn send_preview_to_running_game(
             .map_err(crate::messages::failed_to_send_to_running_game)?
             {
                 native::sys::game_remote::Sent::Delivered => {
-                    log_markdown(&format!(
-                        "[preview] sent \"{command}\" to the running game (pid {pid})"
+                    log_markdown(&crate::messages::preview_start::sent_to_running_game(
+                        &command, pid,
                     ));
                     return Ok(Some(command));
                 }

@@ -129,13 +129,13 @@ pub fn overview_load_edits(map: String, install: Option<String>) -> Option<serde
 #[tauri::command(async)]
 pub fn overview_save_edits(map: String, edits: serde_json::Value) -> Result<(), String> {
     files::save_edits(&map, &edits)
-        .inspect(|_| native::log_markdown(&format!("[overview] saved edits for {map}")))
+        .inspect(|_| native::log_markdown(&crate::messages::overview::edits_saved(&map)))
 }
 
 #[tauri::command(async)]
 pub fn overview_reset_edits(map: String) -> Result<(), String> {
     files::remove_edits(&map)
-        .inspect(|_| native::log_markdown(&format!("[overview] reset edits for {map}")))
+        .inspect(|_| native::log_markdown(&crate::messages::overview::edits_reset(&map)))
 }
 
 /// Writes the high-quality copy (`<map>_hd.tga`). The pixels come as the raw
@@ -174,12 +174,11 @@ pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<Stri
             &rgba,
         )
         .inspect(|path| {
-            native::log_markdown(&format!(
-                "[overview] saved the high-quality {} ({}x{}): {}",
-                meta.map,
+            native::log_markdown(&crate::messages::overview::hd_saved(
+                &meta.map,
                 meta.width,
                 meta.height,
-                Path::new(path).display()
+                Path::new(path).display(),
             ));
         })
     }))

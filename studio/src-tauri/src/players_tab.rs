@@ -22,9 +22,7 @@ const PIPE_POLL: Duration = Duration::from_millis(500);
 /// settings are already written, and the hook keeps its last copy.
 pub fn mirror_table(settings: &AppSettings) {
     if let Err(e) = player_overrides::write_table(&settings.players) {
-        native::log_markdown(&format!(
-            "⚠️ **Players** — {e}. The game keeps the table it last read."
-        ));
+        native::log_markdown(&crate::messages::settings::players_table_not_written(e));
     }
 }
 

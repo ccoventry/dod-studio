@@ -17,9 +17,11 @@
 pub mod bsp;
 pub mod decal_probe;
 pub mod game_reuse;
+pub mod hook_dll;
 pub mod menu_scale;
 pub mod movie_copy;
 pub mod player_overrides;
+pub mod schedule;
 pub mod take_delete;
 
 use std::fmt::Display;
