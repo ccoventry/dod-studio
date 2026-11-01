@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { edlFrames, edlTimecode, jobFps, edlClips, pathsToProbe, vegasEdl, planEdlParts, partPaths, EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER, edlDefaultPath } from './vegas_edl.js';
+import { edlMs, jobFps, edlClips, pathsToProbe, vegasEdl, EDL_DEFAULT_FILE_NAME, EDL_SAVE_FILTER, edlDefaultPath } from './vegas_edl.js';
 
 describe('edlDefaultPath', () => {
   const clip = (path) => ({ path });
@@ -18,12 +19,13 @@ describe('edlDefaultPath', () => {
   });
 });
 
-describe('timecodes', () => {
-  it('counts 30 frames a second, as VEGAS reads them', () => {
-    expect(edlFrames(1.5)).toBe(45);
-    expect(edlTimecode(45)).toBe('00:00:01:15');
-    expect(edlTimecode(0)).toBe('00:00:00:00');
-    expect(edlTimecode(30 * 3725 + 7)).toBe('01:02:05:07');
+describe('edlMs', () => {
+  it('writes milliseconds with four decimals', () => {
+    expect(edlMs(6)).toBe('6000.0000');
+    expect(edlMs(1.5)).toBe('1500.0000');
+    expect(edlMs(0)).toBe('0.0000');
+    expect(edlMs(1 / 3)).toBe('333.3333');
+    expect(edlMs(-1)).toBe('0.0000');
   });
 });
 
@@ -77,123 +79,58 @@ describe('edlClips', () => {
 });
 
 describe('vegasEdl', () => {
-  // The shape VEGAS Pro 21.0 imported correctly: clips at 0 s, 2 s and 5 s,
-  // the third 1.5 s long, in a 60 fps project.
-  const clips = [
-    { name: 'Garand 3 kills', path: 'D:\\dodstudio-110\\clips\\clip_01.mp4', seconds: 2 },
-    { name: 'MP40 spree', path: 'D:\\dodstudio-110\\clips\\clip_02.mp4', seconds: 3 },
-    { name: 'K98 headshot', path: 'D:\\dodstudio-110\\clips\\clip_03.mp4', seconds: 1.5 },
-  ];
-  const expected = [
-    'TITLE:   dod_test',
-    'FCM: NON-DROP FRAME',
-    '',
-    '001  DOD0001  V      C        00:00:00:00 00:00:02:00 00:00:00:00 00:00:02:00',
-    '* FROM CLIP NAME: D:\\dodstudio-110\\clips\\clip_01.mp4',
-    '* LOC: 00:00:00:00 RED     Garand 3 kills',
-    '002  DOD0001  AA     C        00:00:00:00 00:00:02:00 00:00:00:00 00:00:02:00',
-    '* FROM CLIP NAME: D:\\dodstudio-110\\clips\\clip_01.mp4',
-    '003  DOD0002  V      C        00:00:00:00 00:00:03:00 00:00:02:00 00:00:05:00',
-    '* FROM CLIP NAME: D:\\dodstudio-110\\clips\\clip_02.mp4',
-    '* LOC: 00:00:02:00 RED     MP40 spree',
-    '004  DOD0002  AA     C        00:00:00:00 00:00:03:00 00:00:02:00 00:00:05:00',
-    '* FROM CLIP NAME: D:\\dodstudio-110\\clips\\clip_02.mp4',
-    '005  DOD0003  V      C        00:00:00:00 00:00:01:15 00:00:05:00 00:00:06:15',
-    '* FROM CLIP NAME: D:\\dodstudio-110\\clips\\clip_03.mp4',
-    '* LOC: 00:00:05:00 RED     K98 headshot',
-    '006  DOD0003  AA     C        00:00:00:00 00:00:01:15 00:00:05:00 00:00:06:15',
-    '* FROM CLIP NAME: D:\\dodstudio-110\\clips\\clip_03.mp4',
-    '',
-  ].join('\r\n');
+  const dir = 'C:\\Users\\chris\\Repos\\dod-studio\\local\\hud-overlay-test\\clips\\';
+  const main1 = { name: 'm1', path: `${dir}main_1.mov`, seconds: 6, hud: false, takeFolder: 'T1' };
+  const hud1 = { name: 'm1 hud', path: `${dir}main_1_hud.mov`, seconds: 6, hud: true, takeFolder: 'T1' };
+  const main2 = { name: 'm2', path: `${dir}main_2.mov`, seconds: 6, hud: false, takeFolder: 'T2' };
+  const lines = (text) => text.split('\r\n');
+  const rowsOf = (text) => lines(text).slice(1, -1);
 
-  it('writes the file shape VEGAS Pro 21 imported, clip by clip', () => {
-    expect(vegasEdl(clips, 'dod_test')).toBe(expected);
+  // vegas_export.fixture.txt is a project VEGAS Pro 21 exported itself and
+  // re-imported correctly; {DIR} stands for the clips' folder.
+  it('matches VEGAS\'s own export for two clips and one HUD', () => {
+    const golden = readFileSync(new URL('./vegas_export.fixture.txt', import.meta.url), 'utf8');
+    expect(vegasEdl([main1, hud1, main2])).toBe(golden.replaceAll('{DIR}', dir));
+  });
+
+  it('writes the header line and CRLF line ends', () => {
+    const out = vegasEdl([main1]);
+    expect(lines(out)[0]).toMatch(/^"ID";"Track";"StartTime";"Length";"PlayRate".*;"FirstChannel";"Channels"$/);
+    expect(out.endsWith('\r\n')).toBe(true);
+    expect(out).not.toMatch(/[^\r]\n/);
+  });
+
+  it('puts the main video on Track 1 when there is no HUD render', () => {
+    const rows = rowsOf(vegasEdl([main1, main2])).map((r) => r.split('; '));
+    expect(rows.map((r) => [r[0], r[1], r[2], r[10]])).toEqual([
+      ['1', '1', '0.0000', 'VIDEO'],
+      ['2', '1', '6000.0000', 'VIDEO'],
+      ['3', '0', '0.0000', 'AUDIO'],
+      ['4', '0', '6000.0000', 'AUDIO'],
+    ]);
+  });
+
+  it('keeps a HUD render over its own clip, picture only, whatever follows', () => {
+    const rows = rowsOf(vegasEdl([main1, hud1, main2])).map((r) => r.split('; '));
+    const hud = rows.find((r) => r[11].includes('main_1_hud'));
+    expect(hud.slice(1, 4)).toEqual(['1', '0.0000', '6000.0000']);
+    expect(rows.filter((r) => r[10] === 'AUDIO')).toHaveLength(2);
+    expect(rows.filter((r) => r[1] === '2').map((r) => r[2])).toEqual(['0.0000', '6000.0000']);
+  });
+
+  it('places a HUD with no clip of its take after the rest, on the upper track', () => {
+    const rows = rowsOf(vegasEdl([main2, hud1])).map((r) => r.split('; '));
+    expect(rows[0].slice(1, 4)).toEqual(['1', '6000.0000', '6000.0000']);
   });
 
   it('puts each clip where the last one ended, without drift', () => {
     const many = Array.from({ length: 100 }, (_, i) => ({ name: `c${i}`, path: `D:\\c${i}.mov`, seconds: 1 / 3 }));
-    const last = vegasEdl(many).split('\r\n').filter((l) => /^\d{3} /.test(l)).pop();
-    // 100 clips of 10 frames each: the last starts at frame 990.
-    expect(last).toContain('00:00:33:00 00:00:33:10');
+    const last = rowsOf(vegasEdl(many)).find((r) => r.includes('c99.mov') && r.includes('VIDEO'));
+    expect(Number(last.split('; ')[2])).toBeCloseTo(99 * 333.3333, 3);
   });
 
-  it('keeps a label on one line', () => {
-    expect(vegasEdl([{ name: 'a\nb', path: 'D:\\x.mov', seconds: 1 }])).toContain('RED     a b');
-  });
-});
-
-describe('HUD renders', () => {
-  const main = { name: 'a', path: 'D:/a.mov', seconds: 2, hud: false, takeFolder: 'T1' };
-  const hud = { name: 'a hud', path: 'D:/a_hud.mov', seconds: 2, hud: true, takeFolder: 'T1' };
-  const next = { name: 'b', path: 'D:/b.mov', seconds: 1, hud: false, takeFolder: 'T2' };
-
-  it('lie over the clip of their take, picture only', () => {
-    const events = vegasEdl([main, hud, next]).split('\r\n').filter((l) => /^\d{3} /.test(l));
-    expect(events).toEqual([
-      '001  DOD0001  V      C        00:00:00:00 00:00:02:00 00:00:00:00 00:00:02:00',
-      '002  DOD0001  AA     C        00:00:00:00 00:00:02:00 00:00:00:00 00:00:02:00',
-      '003  DOD0002  V      C        00:00:00:00 00:00:02:00 00:00:00:00 00:00:02:00',
-      '004  DOD0003  V      C        00:00:00:00 00:00:01:00 00:00:02:00 00:00:03:00',
-      '005  DOD0003  AA     C        00:00:00:00 00:00:01:00 00:00:02:00 00:00:03:00',
-    ]);
-  });
-
-  it('with no clip of their take before them are placed after the rest, still without sound', () => {
-    const events = vegasEdl([next, hud]).split('\r\n').filter((l) => /^\d{3} /.test(l));
-    expect(events).toHaveLength(3);
-    expect(events[2]).toContain('V      C        00:00:00:00 00:00:02:00 00:00:01:00 00:00:03:00');
-  });
-
-  it('are read from the job list', () => {
-    const jobs = [{
-      name: 'a', status: 'Finished', output_path: 'D:/a_hud.mov', frames: 600,
-      stream: 'HUD ONLY', take_folder: 'T1', settings_summary: 'ProRes @ 300fps (Render Settings)',
-    }];
-    expect(edlClips(jobs).clips[0]).toMatchObject({ hud: true, takeFolder: 'T1' });
-  });
-});
-
-describe('planEdlParts', () => {
-  const clip = (i, hud = false) => ({ name: `c${i}`, path: `D:/c${i}.mov`, seconds: 1, hud, takeFolder: `T${i}` });
-
-  it('keeps a short list in one file', () => {
-    expect(planEdlParts([clip(1), clip(2)])).toHaveLength(1);
-  });
-
-  it('splits so no file passes 999 events, and no event number repeats within one', () => {
-    const clips = Array.from({ length: 1200 }, (_, i) => clip(i));
-    const parts = planEdlParts(clips);
-    expect(parts.map((p) => p.length)).toEqual([499, 499, 202]);
-    parts.forEach((p) => {
-      const numbers = vegasEdl(p).split('\r\n').filter((l) => /^\d{3,} /.test(l)).map((l) => l.slice(0, 3));
-      expect(numbers.length).toBeLessThanOrEqual(999);
-    });
-    expect(parts.flat()).toHaveLength(1200);
-  });
-
-  it('keeps a HUD render in the file of its clip, behind it', () => {
-    const [a, b] = [clip(1), clip(2)];
-    const parts = planEdlParts([a, b, { ...clip(1, true), takeFolder: 'T1' }]);
-    expect(parts).toHaveLength(1);
-    expect(parts[0].map((c) => c.name)).toEqual(['c1', 'c1', 'c2']);
-    expect(parts[0][1].hud).toBe(true);
-  });
-
-  it('counts a HUD render as one event', () => {
-    const clips = [];
-    for (let i = 0; i < 400; i += 1) { clips.push(clip(i)); clips.push(clip(i, true)); }
-    // 400 x 3 events = 1200: 333 pairs fit in 999.
-    expect(planEdlParts(clips).map((p) => p.length)).toEqual([666, 134]);
-  });
-});
-
-
-describe('partPaths', () => {
-  it('leaves one file alone and numbers several', () => {
-    expect(partPaths('D:\\x\\a.edl', 1)).toEqual(['D:\\x\\a.edl']);
-    expect(partPaths('D:\\x\\a.edl', 2)).toEqual(['D:\\x\\a_part1.edl', 'D:\\x\\a_part2.edl']);
-    expect(partPaths('D:\\x.y\\a', 2)[0]).toBe('D:\\x.y\\a_part1.txt');
-    expect(partPaths('D:\\x\\a.txt', 2)).toEqual(['D:\\x\\a_part1.txt', 'D:\\x\\a_part2.txt']);
+  it('keeps a path on one line', () => {
+    expect(vegasEdl([{ name: 'a', path: 'D:\\a\nb.mov', seconds: 1 }])).toContain('"D:\\a b.mov"');
   });
 });
 

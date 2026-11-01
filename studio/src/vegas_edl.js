@@ -1,23 +1,28 @@
 // vegas_edl.js
-// "Export VEGAS EDL" (#110): the finished renders as a CMX 3600 EDL that
-// VEGAS Pro opens (File > Import > EDL Text File, or File > Open), with each
-// clip one after another on the timeline, its picture on the video track and
-// its sound on the audio track. Pure, so it can be tested on its own.
+// "Export VEGAS EDL" (#110): the finished renders as VEGAS Pro's own EDL text
+// format (the file File > Export > EDL Text File writes, imported with File >
+// Import > EDL Text File), each clip one after another on the timeline, its
+// picture on a video track and its sound on an audio track. Pure, so it can be
+// tested on its own.
 //
-// What VEGAS 21 does with the file (measured, see the PR for #110):
-//  - It finds each clip by the path after `* FROM CLIP NAME:`, so the full
-//    path with the extension goes there. A bare name is searched for in
-//    no folder at all and VEGAS asks for the file.
-//  - It reads the timecodes at 30 frames a second, whatever the project's
-//    frame rate; a frame number from 30 up is carried into the seconds.
-//  - It ignores `* LOC:` locators (no markers or regions appear). They stay
-//    in the file for editors that read them, with the clip's label.
-//  - An EDL holds at most 999 events (CMX 3600's three-digit event number),
-//    so a long list is split into several files (`planEdlParts`).
+// Why not CMX 3600: VEGAS 21 imported a CMX EDL with every picture event on
+// ONE video track, so a HUD-only render landed on the same track as its main
+// clip and covered it (clips on one track don't composite). Its own format
+// carries a track number per event, which CMX has no column for.
+//
+// What VEGAS does with this format (measured on an export of VEGAS's own, see
+// the PR for #1251):
+//  - One row per event, `; `-separated, the header line first, CRLF line ends.
+//    Times are milliseconds with four decimals. The path is quoted.
+//  - Video rows carry Channels 0, audio rows Channels 2.
+//  - VEGAS writes the topmost video track as Track 1, the next as Track 2 and
+//    the audio track as Track 0. Numbering the tracks 0/1/2 instead put all the
+//    video on one track and made empty audio tracks, so keep VEGAS's own.
+//  - It lists the rows by track: Track 1's, then Track 2's, then Track 0's.
 //
 // A HUD render is the HUD layer of a clip already on the timeline: it gets a
-// video event only (it has no sound) at the same time as that clip, so it
-// lies over it instead of after it.
+// video row only (it has no sound), on the track above, at the start and
+// length of that clip, so the footage shows through its transparent parts.
 
 /** The save dialog's default name and filter: `.txt`, because VEGAS Pro's
  *  File > Import > EDL Text File dialog only lists `*.txt` files. */
@@ -48,25 +53,6 @@ export function edlDefaultPath(clips) {
   }
   return best ? `${best.folder}${best.sep}${EDL_DEFAULT_FILE_NAME}` : EDL_DEFAULT_FILE_NAME;
 }
-
-/** Frames a second the EDL's timecodes count in: how VEGAS reads them. */
-export const EDL_TIMECODE_FPS = 30;
-
-/** Frames in `seconds`, rounded to the EDL's own frame rate. */
-export function edlFrames(seconds, fps = EDL_TIMECODE_FPS) {
-  return Math.max(0, Math.round((Number(seconds) || 0) * fps));
-}
-
-/** A frame count as `hh:mm:ss:ff`. */
-export function edlTimecode(frames, fps = EDL_TIMECODE_FPS) {
-  const f = Math.max(0, Math.floor(frames));
-  const pad = (n) => String(n).padStart(2, '0');
-  const secs = Math.floor(f / fps);
-  return `${pad(Math.floor(secs / 3600))}:${pad(Math.floor(secs / 60) % 60)}:${pad(secs % 60)}:${pad(f % fps)}`;
-}
-
-/** The most events one EDL file holds: CMX 3600 numbers them with three digits. */
-export const EDL_MAX_EVENTS = 999;
 
 /** The job's `stream` for a HUD-only render. */
 const HUD_STREAM = 'HUD ONLY';
@@ -122,73 +108,61 @@ export function edlClips(jobs, finishedStatus = 'Finished', probed = new Map()) 
   return { clips, skipped };
 }
 
-/** The events a clip writes: picture and sound, or the picture alone for a HUD render. */
-const eventsOf = (clip) => (clip.hud ? 1 : 2);
+/** VEGAS's own track numbers (see the header): the upper video track, the
+ *  lower one, and the audio track. */
+const TRACK_UPPER = 1;
+const TRACK_LOWER = 2;
+const TRACK_AUDIO = 0;
+
+const COLUMNS = [
+  'ID', 'Track', 'StartTime', 'Length', 'PlayRate', 'Locked', 'Normalized', 'StretchMethod', 'Looped',
+  'OnRuler', 'MediaType', 'FileName', 'Stream', 'StreamStart', 'StreamLength', 'FadeTimeIn',
+  'FadeTimeOut', 'SustainGain', 'CurveIn', 'GainIn', 'CurveOut', 'GainOut', 'Layer', 'Color',
+  'CurveInR', 'CurveOutR', 'PlayPitch', 'LockPitch', 'FirstChannel', 'Channels',
+];
+
+/** Seconds as milliseconds, the way VEGAS writes them: four decimals. */
+export const edlMs = (seconds) => (Math.max(0, Number(seconds) || 0) * 1000).toFixed(4);
+
+/** One row; the renders already carry their speed, so PlayRate is 1. */
+function row(id, track, type, path, startMs, lengthMs) {
+  return [
+    id, track, startMs, lengthMs, '1.000000', 'FALSE', 'FALSE', 0, 'TRUE', 'FALSE', type,
+    `"${String(path ?? '').replace(/[\r\n]+/g, ' ')}"`, 0, '0.0000', lengthMs, '0.0000', '0.0000',
+    '1.000000', 4, '0.000000', 4, '0.000000', 0, -1, 4, 4, '0.000000', 'FALSE', 0,
+    type === 'AUDIO' ? 2 : 0,
+  ].join('; ');
+}
 
 /**
- * The clips split into files of at most `EDL_MAX_EVENTS` events each. A HUD
- * render moves up behind the clip of its own take (so `vegasEdl` can lay it
- * over that clip) and the two stay in the same file.
+ * The whole EDL, CRLF line ends. Each main clip starts where the last ended: a
+ * video row and an audio row. A HUD render is a video row on the upper track
+ * at its take's main clip (the latest one of the same take folder), with that
+ * clip's length. With no HUD render in the export, the main video takes the
+ * upper track, so the timeline has no empty track above it. A HUD with no main
+ * clip of its take is placed after the rest, still on the upper track.
  */
-export function planEdlParts(clips, maxEvents = EDL_MAX_EVENTS) {
-  const units = [];
-  const mainOfTake = new Map();
-  clips.forEach((clip) => {
-    const home = clip.hud && clip.takeFolder ? mainOfTake.get(clip.takeFolder) : null;
-    if (home) { home.push(clip); return; }
-    const unit = [clip];
-    units.push(unit);
-    if (!clip.hud && clip.takeFolder) mainOfTake.set(clip.takeFolder, unit);
-  });
-  const parts = [];
-  let events = 0;
-  units.forEach((unit) => {
-    const size = unit.reduce((n, clip) => n + eventsOf(clip), 0);
-    if (parts.length === 0 || events + size > maxEvents) {
-      parts.push([]);
-      events = 0;
-    }
-    parts[parts.length - 1].push(...unit);
-    events += size;
-  });
-  return parts;
-}
-
-/** The files for `count` parts: `path` itself for one, else `name_part1.txt`, `name_part2.txt`... (the chosen extension is kept) */
-export function partPaths(path, count) {
-  if (count <= 1) return [path];
-  const dot = path.lastIndexOf('.');
-  const hasExt = dot > path.lastIndexOf('\\') && dot > path.lastIndexOf('/');
-  const stem = hasExt ? path.slice(0, dot) : path;
-  const ext = hasExt ? path.slice(dot) : '.txt';
-  return Array.from({ length: count }, (_, i) => `${stem}_part${i + 1}${ext}`);
-}
-
-const oneLine = (text) => String(text ?? '').replace(/[\r\n]+/g, ' ').trim();
-
-/** The whole EDL, CRLF line ends. Each clip starts where the last ended. */
-export function vegasEdl(clips, title = 'DoD Studio highlights') {
-  const lines = [`TITLE:   ${oneLine(title)}`, 'FCM: NON-DROP FRAME', ''];
-  let edit = 1;
+export function vegasEdl(clips) {
+  const mainTrack = clips.some((clip) => clip.hud) ? TRACK_LOWER : TRACK_UPPER;
+  const upper = [];
+  const lower = [];
+  const audio = [];
   let at = 0;
   let lastMain = null;
-  clips.forEach((clip, i) => {
-    const length = Math.max(1, edlFrames(clip.seconds));
-    const reel = `DOD${String(i + 1).padStart(4, '0')}`.slice(0, 8);
+  clips.forEach((clip) => {
     const overlay = clip.hud && clip.takeFolder && lastMain?.takeFolder === clip.takeFolder;
-    const start = overlay ? lastMain.start : at;
-    const times = `${edlTimecode(0)} ${edlTimecode(length)} ${edlTimecode(start)} ${edlTimecode(start + length)}`;
-    const tracks = clip.hud ? [['V     ', true]] : [['V     ', true], ['AA    ', false]];
-    tracks.forEach(([track, isVideo]) => {
-      lines.push(`${String(edit).padStart(3, '0')}  ${reel.padEnd(8)} ${track} C        ${times}`);
-      lines.push(`* FROM CLIP NAME: ${oneLine(clip.path)}`);
-      if (isVideo) lines.push(`* LOC: ${edlTimecode(start)} RED     ${oneLine(clip.name)}`);
-      edit += 1;
-    });
-    if (!overlay) {
-      if (!clip.hud) lastMain = { takeFolder: clip.takeFolder, start };
-      at += length;
+    const start = (overlay ? lastMain.start : at).toFixed(4);
+    const length = (overlay ? lastMain.length : Number(edlMs(clip.seconds))).toFixed(4);
+    if (clip.hud) {
+      upper.push((id) => row(id, TRACK_UPPER, 'VIDEO', clip.path, start, length));
+    } else {
+      (mainTrack === TRACK_UPPER ? upper : lower).push((id) => row(id, mainTrack, 'VIDEO', clip.path, start, length));
+      audio.push((id) => row(id, TRACK_AUDIO, 'AUDIO', clip.path, start, length));
+      lastMain = { takeFolder: clip.takeFolder, start: Number(start), length: Number(length) };
     }
+    if (!overlay) at += Number(length);
   });
-  return lines.join('\r\n') + '\r\n';
+  const rows = [...upper, ...lower, ...audio].map((make, i) => make(i + 1));
+  const header = COLUMNS.map((c) => `"${c}"`).join(';');
+  return [header, ...rows].join('\r\n') + '\r\n';
 }
