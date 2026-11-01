@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!--
+  Harness for the queue row's right-click menu (#1111): master_pane.js with
+  demo_context_menu.js hooked on. Review is stubbed and reports into #result;
+  the row's own Remove and Locate buttons are the real ones.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>demo row context menu test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input id="demo-search-input" />
+  <button id="btn-launch-preview" type="button">Launch Preview</button>
+  <table>
+    <thead><tr><th><div id="status-count-legend"></div></th><th><div id="review-count-legend"></div></th></tr></thead>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+  <div id="result"></div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+    import { startDemoContextMenu } from '/src/demo_context_menu.js';
+
+    const result = document.querySelector('#result');
+    document.querySelector('#btn-launch-preview').addEventListener('click', () => {
+      result.textContent = `preview ${window.__selected}`;
+    });
+    const missing = (demo) => {
+      Object.defineProperty(demo, 'missing', { value: true, writable: true, configurable: true });
+      return demo;
+    };
+    const demos = [
+      { name: 'alpha.dem', path: 'C:\demos\alpha.dem', streaks: [] },
+      { name: 'bravo.dem', path: 'C:\demos\bravo.dem', streaks: [] },
+      missing({ name: 'lost.dem', path: 'C:\demos\lost.dem', streaks: [] }),
+    ];
+    initMasterPane(
+      (idx, list) => { result.textContent = `removed, ${list.length} left`; return null; },
+      null,
+      (demo) => { result.textContent = `locate ${demo.name}`; },
+      null,
+      null
+    );
+    startDemoContextMenu({
+      startReview: (paths) => { result.textContent = `review ${paths.join(',')}`; },
+    });
+    renderMasterList(demos, null, (demo) => { window.__selected = demo.name; });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
