@@ -546,7 +546,7 @@ function renderDemoTable() {
   updateSortHeaderIndicators();
 
   if (browserError) {
-    tbody.innerHTML = `<tr><td colspan="4" class="table-empty" style="color:#f44336;">${esc(browserError)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="table-empty" style="color:var(--danger);">${esc(browserError)}</td></tr>`;
     return;
   }
   if (!currentDir) {

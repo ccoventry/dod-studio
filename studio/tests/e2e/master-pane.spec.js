@@ -76,11 +76,11 @@ test.describe('master_pane Status and Review counts', () => {
     await expect(cells(page).nth(1)).toHaveAttribute('title', '2 not reviewed, 1 Keep, 0 Maybe, 1 Skip');
   });
 
-  test('a count is in its colour, and grey at zero', async ({ page }) => {
+  test('a count is in its colour token (the harness loads no stylesheet), and grey at zero', async ({ page }) => {
     await gotoHarness(page);
     const numbers = cells(page).nth(0).locator('span:not(.count-slash)');
-    await expect(numbers.nth(0)).toHaveCSS('color', 'rgb(255, 167, 38)');
-    await expect(numbers.nth(2)).toHaveCSS('color', 'rgb(85, 85, 85)');
+    await expect(numbers.nth(0)).toHaveAttribute('style', /color: var\(--warn-orange\)/);
+    await expect(numbers.nth(2)).toHaveAttribute('style', /color: var\(--text-dim\)/);
   });
 
   test('the headers carry the matching legend letters', async ({ page }) => {
