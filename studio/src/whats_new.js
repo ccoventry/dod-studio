@@ -171,7 +171,7 @@ export function createWhatsNew(deps) {
     if (!offline) { historyRead = true; readFailed = !result || Boolean(result.error); }
     if (!result) setStatus(S.STATUS_FAILED);
     else if (result.error) {
-      logFrontendEvent(`What's new: GitHub's release list could not be read: ${result.error}`);
+      logFrontendEvent(S.githubReleaseListUnreadableLog(result.error));
       setStatus(result.releases.length ? S.STATUS_SAVED_COPY : S.STATUS_FAILED);
     } else if (offline && !historyRead) {
       setStatus(result.releases.length ? S.STATUS_OFFLINE_SAVED : S.STATUS_OFFLINE_NONE);

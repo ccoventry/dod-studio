@@ -7,18 +7,21 @@ use super::*;
 pub type BitSlice = _BitSlice<u8, Lsb0>;
 
 // Wraps bytes into bits because doing this with nom is a very bad idea.
-pub struct BitReader {
-    pub bytes: BitVec,
+pub struct BitReader<'a> {
+    /// The message's bytes as bits, borrowed: copying the rest of the
+    /// packet into a fresh `BitVec` for every message that reads bits was
+    /// one heap block and a copy per message (#37).
+    pub bytes: &'a BitSlice,
     // Bit offset, starting from starting of `bytes`.
     offset: usize,
     // Set once any read has run past the end of `bytes`. See `is_bad_read`.
     bad_read: bool,
 }
 
-impl BitReader {
-    pub fn new(bytes: &[u8]) -> Self {
+impl<'a> BitReader<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
         BitReader {
-            bytes: BitVec::from_slice(bytes),
+            bytes: BitSlice::from_slice(bytes),
             offset: 0,
             bad_read: false,
         }
@@ -59,7 +62,7 @@ impl BitReader {
         res
     }
 
-    pub fn read_n_bit(&mut self, n: usize) -> &BitSlice {
+    pub fn read_n_bit(&mut self, n: usize) -> &'a BitSlice {
         let end = match self.offset.checked_add(n) {
             Some(end) if end <= self.bytes.len() => end,
             // Either past the end, or `n` itself is nonsense -- a `bits` field
@@ -95,7 +98,7 @@ impl BitReader {
         return MSG_ReadBitString::buf;
     }
     */
-    pub fn read_string(&mut self) -> &BitSlice {
+    pub fn read_string(&mut self) -> &'a BitSlice {
         let start = self.offset;
         let len = self.bytes.len();
 
@@ -131,7 +134,7 @@ impl BitReader {
         matches!(self.offset.checked_add(n), Some(end) if end <= self.bytes.len())
     }
 
-    pub fn peek_n_bits(&self, n: usize) -> &BitSlice {
+    pub fn peek_n_bits(&self, n: usize) -> &'a BitSlice {
         match self.offset.checked_add(n) {
             Some(end) if end <= self.bytes.len() => &self.bytes[self.offset..end],
             _ => &self.bytes[self.bytes.len()..],

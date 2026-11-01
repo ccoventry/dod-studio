@@ -10,7 +10,8 @@ const S = STRINGS.CAPTURE_CONFIG;
 
 /**
  * What to show for one diagnostic ({ path, status, usable }) from
- * diagnose_capture_output_paths. `tone` is the chip colour: ok, note or bad.
+ * diagnose_capture_output_paths. `tone` is the chip colour: ok, note or bad;
+ * a bad one also has `detail`, the line shown under the row saying what is wrong.
  * With no diagnostic yet the chip says it is checking.
  */
 export function rowStatusFor(diagnostic) {
@@ -23,13 +24,13 @@ export function rowStatusFor(diagnostic) {
       // simply created on first write.
       return diagnostic.usable
         ? { tone: 'note', text: S.OUTPUT_ROW_WILL_BE_CREATED, title: S.OUTPUT_ROW_WILL_BE_CREATED_TITLE }
-        : { tone: 'bad', text: S.OUTPUT_ROW_DRIVE_MISSING, title: S.OUTPUT_ROW_DRIVE_MISSING_TITLE };
+        : { tone: 'bad', text: S.OUTPUT_ROW_DRIVE_MISSING, title: S.OUTPUT_ROW_DRIVE_MISSING_TITLE, detail: S.OUTPUT_ROW_DRIVE_MISSING_DETAIL };
     case 'not_absolute':
-      return { tone: 'bad', text: S.OUTPUT_ROW_NOT_FULL_PATH, title: S.OUTPUT_ROW_NOT_FULL_PATH_TITLE };
+      return { tone: 'bad', text: S.OUTPUT_ROW_NOT_FULL_PATH, title: S.OUTPUT_ROW_NOT_FULL_PATH_TITLE, detail: S.OUTPUT_ROW_NOT_FULL_PATH_DETAIL };
     case 'not_a_directory':
-      return { tone: 'bad', text: S.OUTPUT_ROW_NOT_A_FOLDER, title: S.OUTPUT_ROW_NOT_A_FOLDER_TITLE };
+      return { tone: 'bad', text: S.OUTPUT_ROW_NOT_A_FOLDER, title: S.OUTPUT_ROW_NOT_A_FOLDER_TITLE, detail: S.OUTPUT_ROW_NOT_A_FOLDER_DETAIL };
     default:
-      return { tone: 'bad', text: S.OUTPUT_ROW_MALFORMED, title: S.OUTPUT_ROW_MALFORMED_TITLE };
+      return { tone: 'bad', text: S.OUTPUT_ROW_MALFORMED, title: S.OUTPUT_ROW_MALFORMED_TITLE, detail: S.OUTPUT_ROW_MALFORMED_DETAIL };
   }
 }
 
@@ -59,11 +60,29 @@ export function createCaptureOutputStatus({ getPaths, diagnose, container, log }
     chip.title = title;
   }
 
+  /** A row that cannot be used gets the error style and its own line saying
+   *  why; anything else is cleared. */
+  function paintRowError(row, path) {
+    const answer = path?.trim() ? known.get(path) : null;
+    const bad = answer ? rowStatusFor(answer) : null;
+    const message = bad?.tone === 'bad' ? bad.detail : '';
+    row.classList.toggle('output-row-invalid', Boolean(message));
+    const line = row.querySelector('.output-row-detail');
+    if (line) {
+      line.textContent = message || '';
+      line.hidden = !message;
+    }
+  }
+
   /** Called by the list editor for each row it builds. */
   function decorateRow(row, item) {
     const chip = document.createElement('span');
     paintChip(chip, item);
     row.appendChild(chip);
+    const detail = document.createElement('div');
+    detail.className = 'output-row-detail field-error-line';
+    row.appendChild(detail);
+    paintRowError(row, item);
   }
 
   function paintAll() {
@@ -71,6 +90,7 @@ export function createCaptureOutputStatus({ getPaths, diagnose, container, log }
     [...container.querySelectorAll('.list-editor-row')].forEach((row, i) => {
       const chip = row.querySelector('.output-row-status');
       if (chip) paintChip(chip, paths[i]);
+      paintRowError(row, paths[i]);
     });
   }
 

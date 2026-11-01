@@ -60,9 +60,8 @@ pub async fn wait_for_batch_start(
         };
         let state = wait_for_start(&start, timeout, POLL, running);
         if state == StartState::Pending {
-            native::log_markdown(&format!(
-                "[capture] Closing: the batch's start had not reached the game after {} s",
-                timeout.as_secs()
+            native::log_markdown(&crate::messages::batch::start_not_reached_on_close(
+                timeout.as_secs(),
             ));
         }
         Ok(state.as_str().to_string())

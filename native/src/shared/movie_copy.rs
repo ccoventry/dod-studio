@@ -85,14 +85,10 @@ pub fn existing_names(game_root: &Path) -> Vec<String> {
 
 fn problem_text(problem: NameProblem, name: &str) -> String {
     match problem {
-        NameProblem::Empty => "The movie copy needs a name".to_string(),
-        NameProblem::BadChar => {
-            format!("\"{name}\" can only hold letters, digits and _")
-        }
-        NameProblem::Reserved => format!("Windows doesn't allow a folder named \"{name}\""),
-        NameProblem::Exists => {
-            format!("There's already a \"{name}\" in the Half-Life folder")
-        }
+        NameProblem::Empty => crate::messages::movie_copy::MOVIE_COPY_NEEDS_A_NAME.to_string(),
+        NameProblem::BadChar => crate::messages::movie_copy::name_can_only_hold(name),
+        NameProblem::Reserved => crate::messages::movie_copy::name_reserved_by_windows(name),
+        NameProblem::Exists => crate::messages::movie_copy::name_already_exists(name),
     }
 }
 
@@ -175,7 +171,12 @@ pub fn plan_movie_copy(source: &Path, name: &str) -> io::Result<CopyPlan> {
     while let Some(rel) = stack.pop() {
         let dir = source.join(&rel);
         let mut children: Vec<_> = fs::read_dir(&dir)
-            .map_err(|e| io::Error::new(e.kind(), format!("can't read {}: {e}", dir.display())))?
+            .map_err(|e| {
+                io::Error::new(
+                    e.kind(),
+                    crate::messages::movie_copy::could_not_read_dir(dir.display(), e),
+                )
+            })?
             .collect::<Result<_, _>>()?;
         children.sort_by_key(|e| e.file_name());
         let mut subdirs = Vec::new();
@@ -305,21 +306,19 @@ pub fn copy_with_free_space(
     }
     let source = game_root.join(SOURCE_FOLDER);
     if !source.is_dir() {
-        return Err(format!(
-            "There's no dod folder to copy at {}",
-            source.display()
+        return Err(crate::messages::movie_copy::no_dod_folder_to_copy(
+            source.display(),
         ));
     }
     let plan = plan_movie_copy(&source, name)
-        .map_err(|e| format!("Couldn't list the dod folder to copy it: {e}"))?;
+        .map_err(crate::messages::movie_copy::could_not_list_dod_folder)?;
     let total_bytes = plan.total_bytes(include_demos);
     if !fits(total_bytes, free_bytes) {
-        return Err(format!(
-            "The copy needs {} and the drive holding {} has {} free (DoD Studio leaves 1 GB spare)",
+        return Err(crate::messages::movie_copy::copy_needs_more_space(
             gb(total_bytes),
             game_root.display(),
             // Only reached for a known figure: an unknown one always fits.
-            gb(free_bytes.unwrap_or_default())
+            gb(free_bytes.unwrap_or_default()),
         ));
     }
     let target = game_root.join(name);
@@ -347,12 +346,9 @@ pub fn copy_with_free_space(
         Err(e) => {
             let left = made.remove();
             let tail = if left {
-                format!(
-                    "; something else wrote into {} meanwhile, so it was left",
-                    target.display()
-                )
+                crate::messages::movie_copy::left_in_place_tail(target.display())
             } else {
-                "; what it had copied was removed".to_string()
+                crate::messages::movie_copy::REMOVED_COPIED_TAIL.to_string()
             };
             Err(format!("{e}{tail}"))
         }
@@ -401,8 +397,10 @@ fn run_copy(
 ) -> Result<bool, String> {
     let make_dir = |dir: &Path, made: &mut Made| {
         fs::create_dir(dir).map_err(|e| match e.kind() {
-            io::ErrorKind::AlreadyExists => format!("{} appeared during the copy", dir.display()),
-            _ => format!("couldn't make {}: {e}", dir.display()),
+            io::ErrorKind::AlreadyExists => {
+                crate::messages::movie_copy::appeared_during_copy(dir.display())
+            }
+            _ => crate::messages::movie_copy::could_not_make(dir.display(), e),
         })?;
         made.dirs.push(dir.to_path_buf());
         Ok::<_, String>(())
@@ -429,20 +427,20 @@ fn run_copy(
         let to = target.join(&entry.dst);
         state.file = entry.dst.display().to_string();
         progress(&state);
-        let mut input =
-            File::open(&from).map_err(|e| format!("couldn't read {}: {e}", from.display()))?;
+        let mut input = File::open(&from)
+            .map_err(|e| crate::messages::movie_copy::could_not_read(from.display(), e))?;
         let meta = input
             .metadata()
-            .map_err(|e| format!("couldn't read {}: {e}", from.display()))?;
+            .map_err(|e| crate::messages::movie_copy::could_not_read(from.display(), e))?;
         let mut output = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&to)
             .map_err(|e| match e.kind() {
                 io::ErrorKind::AlreadyExists => {
-                    format!("{} appeared during the copy", to.display())
+                    crate::messages::movie_copy::appeared_during_copy(to.display())
                 }
-                _ => format!("couldn't write {}: {e}", to.display()),
+                _ => crate::messages::movie_copy::could_not_write(to.display(), e),
             })?;
         made.files.push(to.clone());
         loop {
@@ -451,13 +449,13 @@ fn run_copy(
             }
             let n = input
                 .read(&mut buf)
-                .map_err(|e| format!("couldn't read {}: {e}", from.display()))?;
+                .map_err(|e| crate::messages::movie_copy::could_not_read(from.display(), e))?;
             if n == 0 {
                 break;
             }
             output
                 .write_all(&buf[..n])
-                .map_err(|e| format!("couldn't write {}: {e}", to.display()))?;
+                .map_err(|e| crate::messages::movie_copy::could_not_write(to.display(), e))?;
             state.done_bytes += n as u64;
             progress(&state);
         }

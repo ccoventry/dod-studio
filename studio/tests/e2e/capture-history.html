@@ -5,7 +5,8 @@
   still there (shared with the second highlight, one finished render and one
   failed), a capture whose take was deleted, and a capture from a project
   saved before #439 (a bare uid list). The second highlight has the shared
-  take only.
+  take only. The deleted take's two videos are in the project's record
+  (#1264): one moved into another export folder, one gone.
 -->
 <html lang="en">
 <head>
@@ -21,6 +22,7 @@
     import { initDetailPane, renderDetailView } from '/src/detail_pane.js';
     import { streakUid } from '/src/take_index.js';
     import { recordCapture } from '/src/take_record.js';
+    import { recordRender } from '/src/take_renders.js';
 
     const streak = (t, player) => ({
       kill_count: 2, start_index: 0, end_index: 1, selected: false, status: 'Rendered', notes: '', player_index: 1, target_player: player,
@@ -31,8 +33,6 @@
 
     // takeIndex is bare uid lists, as in every project file; how each take was
     // captured sits beside it (take_record.js).
-    // takeIndex is bare uid lists, as in every project file; how each take was
-    // captured sits beside it (take_record.js).
     const takeIndex = {
       'old_session/chain_00_b0': [first],
       'gone_session/chain_00_b0': [first],
@@ -40,6 +40,9 @@
     };
     recordCapture(takeIndex, 'gone_session/chain_00_b0', { session_id: 'gone_session', captured_at: 1_700_000_000_000, capture_mode: 'frame_sequence', capture_fps: 300, take_folder: 'D:/caps/gone_session/chain_00_b0' });
     recordCapture(takeIndex, 'live_session/chain_01_b1', { session_id: 'live_session', captured_at: 1_700_100_000_000, capture_mode: 'direct_to_video', capture_fps: 120, take_folder: 'D:/caps/live_session/chain_01_b1' });
+    const recorded = (started, name) => ({ started_unix_ms: started, stream: 'all', codec: 'prores', fps: 60, outcome: 'finished', output_path: `D:/out/${name}` });
+    recordRender(takeIndex, 'gone_session/chain_00_b0', recorded(1_700_000_100_000, 'moved.mov'));
+    recordRender(takeIndex, 'gone_session/chain_00_b0', recorded(1_700_000_200_000, 'lost.mov'));
     window.__demo = demo;
     window.__revealed = [];
 
@@ -52,6 +55,8 @@
           ] }
         : { exists: false, renders: [] }
     ));
+    const nowAt = { 'D:/out/live.mov': 'D:/out/live.mov', 'D:/out/moved.mov': 'E:/sorted/moved.mov' };
+    window.__mockInvokeHandlers.locate_rendered_videos = ({ paths }) => paths.map((path) => nowAt[path] ?? null);
     window.__mockInvokeHandlers.reveal_in_explorer = ({ path }) => { window.__revealed.push(path); };
 
     initDetailPane(() => [demo], () => {}, () => {}, { getTakeIndex: () => takeIndex });

@@ -14,12 +14,12 @@ import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked } from './obs_status.js';
 import { runObsConnectionTest, launchObsAndRetry, setObsCheckListener } from './obs_connection_ui.js';
 import { initClearPreviewsModal } from './orphaned_previews_modal.js';
-import { describeProblemPaths } from './capture_pane_logic.js';
 import { renderTimingDiagram } from './timing_diagram.js';
 import { refreshRollFloors } from './roll_floors.js';
 import { streakUid, isSkipped, markBlockCaptured } from './take_index.js';
 import { captureRateOf } from './take_record.js';
 import { STRINGS } from './strings.js';
+import { MAX_PROBLEM_PATHS_SHOWN } from './capture_pane_logic.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { numberField } from './number_field.js';
 import { requestFinishClips, finishSummary } from './finish_clips.js';
@@ -37,6 +37,7 @@ import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
+import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
@@ -335,6 +336,13 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
+  // Only once something is picked to capture: a fresh install with nothing
+  // set up yet is not an error screen.
+  syncCaptureFieldErrors({
+    hlPath: document.querySelector('#hl-path-input')?.value,
+    hlaePath: document.querySelector('#hlae-path-input')?.value,
+    driveCount: effectiveDrivePool.length,
+  }, !noHighlightsSelected);
   const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
@@ -348,46 +356,46 @@ export async function refreshLaunchGuard(state) {
     // First of all, ahead of even the calm cases below: a banned command is
     // an active correctness bug, not an incomplete-but-normal state.
     if (bannedCommandsPresent) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
       warningEl.style.display = 'block';
     } else if (pathsMissing) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.OBS_NOT_CONNECTED_WARNING;
       warningEl.style.display = 'block';
     } else if (noHighlightsSelected) {
-      warningEl.style.color = '#64b5f6';
+      warningEl.style.color = 'var(--info-light)';
       warningEl.textContent = STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING;
       warningEl.style.display = 'block';
     } else if (noDrivesConfigured) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.NO_DRIVES_CONFIGURED_WARNING;
       warningEl.style.display = 'block';
     } else if (noUsableSpace) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = problemPaths.length > 0
-        ? STRINGS.CAPTURE.noUsableSpaceProblem(describeProblemPaths(problemPaths))
+        ? STRINGS.CAPTURE.NO_USABLE_OUTPUT_FOLDER_WARNING
         : STRINGS.CAPTURE.NO_USABLE_SPACE_WARNING;
       warningEl.style.display = 'block';
     } else if (makesRoom) {
-      warningEl.style.color = '#ffa726';
+      warningEl.style.color = 'var(--warn-orange)';
       warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
-      warningEl.style.color = '#ffa726';
+      warningEl.style.color = 'var(--warn-orange)';
       const wontBeUsed = problemPaths.length === 1 ? STRINGS.CAPTURE.ENTRY_WONT_BE_USED_SINGULAR : STRINGS.CAPTURE.ENTRY_WONT_BE_USED_PLURAL;
-      warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed, describeProblemPaths(problemPaths));
+      warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed);
       warningEl.style.display = 'block';
     } else if (willBeCreatedPaths.length > 0) {
-      warningEl.style.color = '#64b5f6';
+      warningEl.style.color = 'var(--info-light)';
       const shown = willBeCreatedPaths.slice(0, MAX_PROBLEM_PATHS_SHOWN).map((d) => `"${d.path}"`);
       const remaining = willBeCreatedPaths.length - MAX_PROBLEM_PATHS_SHOWN;
       if (remaining > 0) shown.push(STRINGS.CAPTURE.andNMore(remaining));
@@ -406,7 +414,7 @@ export async function refreshLaunchGuard(state) {
   if (footerRequiredEl) {
     const requiredGb = gigabytes(requiredBytes);
     footerRequiredEl.textContent = STRINGS.CAPTURE_CONFIG.footerRequiredSpace(requiredGb);
-    footerRequiredEl.style.color = insufficientSpace ? '#f44336' : '#4caf50';
+    footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
   return { requiredBytes, availableBytes, blocked, noHighlightsSelected };
@@ -624,6 +632,8 @@ export function batchSettingsPayload(state) {
   const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
   const autoClearTempDemosVal = document.querySelector("#config-auto-clear-temp-demos")?.checked || false;
 
+  // Mark the fields for when the user goes to Configuration; the toast says now.
+  syncCaptureFieldErrors({ hlPath: hlPathVal, hlaePath: hlaePathVal, driveCount: (state.targetDrives || []).filter(Boolean).length });
   if (!hlaePathVal || !hlPathVal) {
     showToast(STRINGS.CAPTURE.BOTH_PATHS_REQUIRED, 'error');
     return null;

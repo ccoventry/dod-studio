@@ -10,7 +10,7 @@ use nom::{
 
 use crate::{
     nom_helper::{Result, nom_fail, take_point_float},
-    parse_netmsg,
+    parse_netmsg, parse_netmsg_without_sounds,
     types::{
         Aux, AuxRefCell, ClientData, ConsoleCommand, Demo, DemoBuffer, DemoInfo, Directory,
         DirectoryEntry, Event, EventArgs, Frame, FrameData, Header, MessageData,
@@ -813,6 +813,12 @@ pub fn parse_network_messages(
             // otherwise, it might spill outside, which it will
             let (_, netmessages) = parse_netmsg(netmessage_data_chunk, aux)?;
 
+            MessageData::Parsed(netmessages)
+        }
+        // No `source_span`: this list is not the payload's messages, so no
+        // writer may stand it in for those bytes.
+        MessageDataParseMode::ParseWithoutSounds => {
+            let (_, netmessages) = parse_netmsg_without_sounds(netmessage_data_chunk, aux)?;
             MessageData::Parsed(netmessages)
         }
         MessageDataParseMode::Raw => MessageData::Raw(netmessage_data_chunk.to_vec()),

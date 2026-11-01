@@ -170,7 +170,7 @@ pub async fn hd_setup_tools(
 ) -> Result<SetupOutcome, String> {
     let scripts = scripts_dir(&app);
     let (running, cancel) = start(&state)?;
-    native::log_markdown("[hd] tool download started");
+    native::log_markdown(crate::messages::hd::HD_TOOL_DOWNLOAD_STARTED);
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let hd_tools = hd::setup::hd_tools_dir();
@@ -210,32 +210,30 @@ pub async fn hd_setup_tools(
 /// The activity log's line when the tool download ends.
 fn setup_end_log(result: &Result<SetupOutcome, String>) -> String {
     match result {
-        Ok(o) if o.already_there => "[hd] tools already there, nothing to download".to_string(),
-        Ok(o) => format!("[hd] tool download done: {} file(s)", o.fetched.len()),
-        Err(e) => format!("[hd] tool download stopped: {e}"),
+        Ok(o) if o.already_there => crate::messages::hd::HD_TOOLS_ALREADY_THERE.to_string(),
+        Ok(o) => crate::messages::hd::hd_tool_download_done(o.fetched.len()),
+        Err(e) => crate::messages::hd::hd_tool_download_stopped(e),
     }
 }
 
 /// The activity log's line when a build starts.
 fn build_start_log(request: &BuildRequest) -> String {
-    format!(
-        "[hd] build started: styles {}, types {}, up to {} px",
-        request.styles.join(", "),
-        request.types.join(", "),
-        request.cap
+    crate::messages::hd::hd_build_started(
+        &request.styles.join(", "),
+        &request.types.join(", "),
+        request.cap,
     )
 }
 
 /// The activity log's line when a build ends.
 fn build_end_log(result: &Result<BuildOutcome, String>) -> String {
     match result {
-        Ok(o) => format!(
-            "[hd] build done: {} step(s) in {} s, details in {}",
+        Ok(o) => crate::messages::hd::hd_build_done(
             o.steps,
             o.elapsed_secs,
-            Path::new(&o.log_path).display()
+            Path::new(&o.log_path).display(),
         ),
-        Err(e) => format!("[hd] build stopped: {e}"),
+        Err(e) => crate::messages::hd::hd_build_stopped(e),
     }
 }
 
@@ -300,14 +298,13 @@ pub async fn hd_set_python(path: Option<String>) -> Result<(), String> {
                     return Err(crate::messages::hd_not_python(path));
                 }
                 python::set_chosen(&hd_tools, Some(Path::new(path))).inspect(|_| {
-                    native::log_markdown(&format!(
-                        "[hd] Python set to {}",
-                        Path::new(path).display()
+                    native::log_markdown(&crate::messages::hd::hd_python_set(
+                        Path::new(path).display(),
                     ));
                 })
             }
             None => python::set_chosen(&hd_tools, None)
-                .inspect(|_| native::log_markdown("[hd] Python set back to automatic")),
+                .inspect(|_| native::log_markdown(crate::messages::hd::HD_PYTHON_AUTOMATIC)),
         }
     }))
     .await
@@ -321,11 +318,10 @@ pub async fn hd_set_upscaler(path: Option<String>) -> Result<(), String> {
         let hd_tools = hd::setup::hd_tools_dir();
         let dir = path.as_deref().map(str::trim).filter(|p| !p.is_empty());
         upscaler::set_chosen(&hd_tools, dir.map(Path::new)).inspect(|_| match dir {
-            Some(d) => native::log_markdown(&format!(
-                "[hd] upscaler folder set to {}",
-                Path::new(d).display()
+            Some(d) => native::log_markdown(&crate::messages::hd::hd_upscaler_set(
+                Path::new(d).display(),
             )),
-            None => native::log_markdown("[hd] upscaler folder set back to automatic"),
+            None => native::log_markdown(crate::messages::hd::HD_UPSCALER_AUTOMATIC),
         })
     }))
     .await
@@ -356,7 +352,7 @@ pub async fn hd_save_style(
     let scripts = scripts_dir(&app);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         my_styles::save(&root, scripts.as_deref(), &name, &def).inspect(|_| {
-            native::log_markdown(&format!("[hd] saved style \"{name}\""));
+            native::log_markdown(&crate::messages::hd::hd_style_saved(&name));
         })
     }))
     .await
@@ -375,9 +371,9 @@ pub async fn hd_save_map_list(
     let scripts = scripts_dir(&app);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let what = if text.is_some() {
-            "[hd] map list saved"
+            crate::messages::hd::HD_MAP_LIST_SAVED
         } else {
-            "[hd] map list cleared, every map is built"
+            crate::messages::hd::HD_MAP_LIST_CLEARED
         };
         match text {
             Some(text) => map_list::save(&root, &text),
@@ -400,7 +396,7 @@ pub async fn hd_remove_style(
     let scripts = scripts_dir(&app);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         my_styles::remove(&root, scripts.as_deref(), &name).inspect(|_| {
-            native::log_markdown(&format!("[hd] removed style \"{name}\""));
+            native::log_markdown(&crate::messages::hd::hd_style_removed(&name));
         })
     }))
     .await

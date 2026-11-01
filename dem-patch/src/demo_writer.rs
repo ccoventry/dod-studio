@@ -2,7 +2,7 @@ use std::{ffi::OsStr, fs::OpenOptions, io::Write, path::Path};
 
 use crate::{
     byte_writer::ByteWriter,
-    types::{Demo, FrameData, MessageData, NetworkMessageType},
+    types::{Demo, DirectoryEntry, FrameData, MessageData, NetworkMessageType},
 };
 
 impl Demo {
@@ -362,7 +362,7 @@ impl Demo {
             writer.append_i32(entry.cd_track);
             writer.append_f32(entry.track_time);
 
-            writer.append_i32(entry.frames.len() as i32);
+            writer.append_i32(engine_frame_count(entry));
             writer.append_i32(*offset_start as i32);
             writer.append_i32((offset_end - offset_start) as i32);
         }
@@ -374,6 +374,23 @@ impl Demo {
 
         Some(writer.data)
     }
+}
+
+/// The frame count the engine stores in a directory entry: its network
+/// message frames, and 0 for the LOADING entry (type 0), which the engine
+/// never fills in. All 442 engine-recorded demos in the PRE install's `dod\`
+/// folder hold exactly that (POV and HLTV, measured 2026-10-31), so a demo
+/// written back unchanged keeps its bytes. Counting every frame record
+/// instead overstates it 2-12x; the engine shows it only in `listdemo`.
+fn engine_frame_count(entry: &DirectoryEntry) -> i32 {
+    if entry.type_ == 0 {
+        return 0;
+    }
+    entry
+        .frames
+        .iter()
+        .filter(|frame| matches!(frame.frame_data, FrameData::NetworkMessage(_)))
+        .count() as i32
 }
 
 #[cfg(test)]

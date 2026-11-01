@@ -385,7 +385,7 @@ export const STRINGS = {
         'How frames get onto disk. Frame sequence and Video are both HLAE, deterministic and capable of any frame rate. OBS records the screen in real time instead, which is faster to a finished file but captures whatever actually rendered.',
     CAPTURE_MODE_AGR: 'AGR for Blender (no video)',
     CAPTURE_MODE_AGR_TITLE:
-        'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes.',
+        'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes. The sound of each clip is saved beside its .agr as a .wav of the same name, so the two line up.',
     AGR_FPS_LABEL: 'AGR FPS:',
     AGR_FPS_TITLE:
         'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
@@ -467,6 +467,8 @@ export const STRINGS = {
     // after it.
     FFMPEG_CAPTURE_UNAVAILABLE:
         "Capture to video is on, but HLAE has no FFmpeg — the capture would run and produce no video. Sort the HLAE FFmpeg row above first.",
+    AGR_SOUND_UNAVAILABLE:
+        "AGR mode records each clip's sound through HLAE's FFmpeg, and HLAE has none — the .agr files would have no sound beside them. Sort the HLAE FFmpeg row above first.",
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
     wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
@@ -583,6 +585,11 @@ export const STRINGS = {
     OUTPUT_ROW_MALFORMED_TITLE: 'This path has characters Windows does not allow in a folder name.',
     OUTPUT_ROW_NOT_A_FOLDER: 'That is a file',
     OUTPUT_ROW_NOT_A_FOLDER_TITLE: 'This path points at a file, not a folder.',
+    // The line under a row that cannot be used (#25): what is wrong with that path.
+    OUTPUT_ROW_DRIVE_MISSING_DETAIL: "This drive isn't connected, so nothing can be captured here. Connect it, or remove this folder.",
+    OUTPUT_ROW_NOT_FULL_PATH_DETAIL: 'Start with a drive letter, for example D:/captures.',
+    OUTPUT_ROW_MALFORMED_DETAIL: "This has characters Windows doesn't allow in a folder name.",
+    OUTPUT_ROW_NOT_A_FOLDER_DETAIL: 'This is a file, not a folder. Pick the folder to write captures into.',
     OUTPUT_ROW_OK_TITLE: 'This folder exists.',
     OUTPUT_ROW_CHECKING_TITLE: 'Checking this folder.',
     ADD_DIRECTORY_BUTTON: 'Add Directory',
@@ -670,30 +677,30 @@ export const STRINGS = {
   },
 
   // ── capture_pane.js runtime text (toasts, warnings, confirms) ───────────
+  // Under the Configuration field that blocks Start Capture (capture_field_errors.js).
+  CAPTURE_FIELDS: {
+    HL_PATH_EMPTY: 'Choose your Half-Life install: Start Capture needs hl.exe.',
+    HLAE_PATH_EMPTY: 'Set the path to hlae.exe: Start Capture needs it.',
+    OUTPUT_DIR_EMPTY: 'Add a Capture Output folder: Start Capture needs somewhere to write.',
+  },
+
   CAPTURE: {
-    pathProblem: {
-      notAbsolute: (p) => `"${p}" isn't a full path (it needs a drive letter, e.g. C:\\...)`,
-      malformed: (p) => `"${p}" isn't a valid path (invalid characters or formatting)`,
-      notFound: (p) => `"${p}" doesn't exist on this computer (check the spelling, or that the drive is connected)`,
-      notADirectory: (p) => `"${p}" points to a file, not a folder`,
-      unusable: (p) => `"${p}" is unusable`,
-    },
     andNMore: (n) => `...and ${n} more`,
-    PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
+    PATHS_MISSING_WARNING: 'Set hl.exe and hlae.exe on Configuration → Paths (marked in red) before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
-    NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
+    NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output folder yet: add one on Configuration → Destinations before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
     // after rendering — the user has no other way to find out.
-    noUsableSpaceProblem: (desc) => `Capture Output problem:\n${desc}`,
+    NO_USABLE_OUTPUT_FOLDER_WARNING: 'None of the Capture Output folders can be used: see the red rows in the list.',
     NO_USABLE_SPACE_WARNING: 'None of the configured Capture Output directories have any free space.',
     insufficientSpaceWarning: (required, available) => `Insufficient disk space: capture needs ~${required} GB, only ${available} GB available across the export pool.`,
     insufficientSpaceMakesRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: finished takes will be deleted to make room when the batch starts ("Only when space is needed").`,
     insufficientSpaceRendersMakeRoom: (required, available) => `Capture needs ~${required} GB and ${available} GB is free: the batch will wait between clips for renders to free room ("Render while capturing").`,
-    partialProblemsWarning: (wontBeUsed, desc) => `Some Capture Output ${wontBeUsed}:\n${desc}\nCapture will proceed using the other configured directory/directories.`,
+    partialProblemsWarning: (wontBeUsed) => `Some Capture Output ${wontBeUsed} (see the red rows in the list). Capture will proceed using the others.`,
     ENTRY_WONT_BE_USED_SINGULAR: "entry won't be used",
     ENTRY_WONT_BE_USED_PLURAL: "entries won't be used",
     willBeCreatedSingle: (path, doesnt) => `${path} ${doesnt} exist yet — it'll be created when the capture starts.`,
@@ -739,8 +746,8 @@ export const STRINGS = {
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
     allTakesVerified: (total) => `All ${total} takes verified on disk.`,
     highlightsMarkedCaptured: (n) => ` ${n} highlight(s) marked Captured.`,
-    BOTH_PATHS_REQUIRED: 'Please specify valid file paths for both HLAE Executable (hlae.exe) and Half-Life Executable (hl.exe).',
-    NO_CAPTURE_OUTPUT_DIR: 'Configure at least one Capture Output directory before starting a capture.',
+    BOTH_PATHS_REQUIRED: 'Set hl.exe and hlae.exe on Configuration → Paths first.',
+    NO_CAPTURE_OUTPUT_DIR: 'Add a Capture Output folder on Configuration → Destinations first.',
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
@@ -988,6 +995,9 @@ export const STRINGS = {
     scanNewShort: (n) => `${n} new`,
     SCAN_NONE_NEW: 'none new',
     ADD_RENDER_DIR_REQUIRED: 'Please add at least one render directory.',
+    // The line under the field that is wrong (#25), where a toast used to be the only word.
+    RENDER_DIR_FIELD_EMPTY: 'Add the folder your captures are written to, so Scan for Takes has somewhere to look.',
+    EXPORT_DIR_FIELD_EMPTY: 'Add an export folder: finished clips are written there, and Start Render Batch stays off until you do.',
     scanCompleteStatus: (count) => `Status: Scan complete — ${count} take(s) found`,
     // What a scan changed in the queue (#772); render_scan_summary.js joins them.
     scanNewTakes: (n) => (n === 1 ? '1 new take' : `${n} new takes`),
@@ -1329,6 +1339,16 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
   },
 
+  // ── Draggable splits between panels (#47) ────────────────────────────────
+  LAYOUT: {
+    SPLIT_HANDLE_TITLE: 'Drag to resize, double-click to reset',
+    CAPTURE_SPLIT_RESET_LOG: 'Capture Studio split reset to the default',
+    ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
+    CAPTURE_SPLIT_LABEL: 'Capture Studio split',
+    ANALYZER_SPLIT_LABEL: 'Demo Analyzer split',
+    splitNotSaved: (label, err) => `${label} not saved: ${err}`,
+  },
+
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
   ANALYZER: {
     EXPLORER_TITLE: 'Explorer',
@@ -1337,7 +1357,6 @@ export const STRINGS = {
     EXPLORER_SETTINGS_SUMMARY: '⚙ Explorer Settings',
     SHOW_FOLDER_COUNTS_LABEL: 'Show folder demo counts in the tree',
     ADD_PIN_BUTTON: '➕ Add Pin…',
-    RESIZE_HANDLE_TITLE: 'Drag to resize',
     DEMOS_TITLE: 'Demos',
     CACHE_ALL_BUTTON: 'Cache all',
     CACHE_STOP_BUTTON: 'Stop',
@@ -2915,6 +2934,9 @@ export const STRINGS = {
 
   // ── error_reporter.js: the one user-facing crash toast ───────────────────
   ERROR_REPORTER: {
+    NO_STACK: '(no stack)',
+    NOT_AN_ERROR_OBJECT: '(not an Error object)',
+    uncaughtLog: (source, message, stack) => `[error] Uncaught ${source}: ${message}\n${stack}`,
     somethingWentWrong: (message) => `Something went wrong (${message}). Details are in the activity log (Help → View Logs).`,
   },
 
@@ -2962,6 +2984,8 @@ export const STRINGS = {
     FETCH_TITLE: "Reads the release notes of every version from GitHub. Update checks are off, so DoD Studio doesn't do it by itself.",
     STATUS_READING: "Reading the release list from GitHub…",
     STATUS_FAILED: "Couldn't read GitHub's release list, and none is saved from before. The reason is in the activity log.",
+    releaseListUnreadableLog: (err) => `What's new: the release list could not be read: ${err}`,
+    githubReleaseListUnreadableLog: (err) => `What's new: GitHub's release list could not be read: ${err}`,
     STATUS_SAVED_COPY: "Couldn't read GitHub's release list, so this is the copy saved last time. The reason is in the activity log.",
     STATUS_OFFLINE_SAVED: 'Update checks are off, so this is the release list saved last time.',
     STATUS_OFFLINE_NONE: "Update checks are off, so only this version's notes show.",
