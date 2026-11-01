@@ -101,7 +101,7 @@ DEMO PLAYBACK
   ds_demo_seek_skip_between 0/1
       A jump skips the events and commands it passes over.
   ds_demo_fast_load 0/1/<ms>
-      viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
+      How long viewdemo loads the demo each frame: 8 ms (1, the default) loads it about twice as fast as the game's own pace (0) and stays smooth. More ms (<ms>) loads no faster and plays choppy until the demo has loaded.
   ds_demo_other_drives 0/1
       viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
   ds_demo_show_load_progress 0/1
