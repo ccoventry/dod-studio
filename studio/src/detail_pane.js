@@ -434,7 +434,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
+        <th class="col-clip-name">${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
         <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
@@ -525,7 +525,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
       <td class="streak-headshots" style="padding: 8px;">${headshotsCell(streak)}</td>
       ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
-      <td style="padding: 8px;">${durationText(durSecs)}</td>
+      <td class="streak-duration" style="padding: 8px;">${durationText(durSecs)}</td>
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
