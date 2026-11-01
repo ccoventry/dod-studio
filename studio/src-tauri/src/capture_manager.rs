@@ -1032,12 +1032,9 @@ pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[Veri
             ..meta.clone()
         };
         if let Err(e) = native::hlcr::take_meta::write(folder, &meta) {
-            log_markdown(&format!(
-                "[take-verify] could not record capture settings at {} — {}. Render Studio will \
-                 not be able to warn about an FPS mismatch for this take.",
-                folder.display(),
-                e
-            ));
+            log_markdown(
+                &crate::messages::capture::take_verify_settings_not_recorded(folder.display(), e),
+            );
         }
     }
 }
@@ -1095,24 +1092,24 @@ fn check_takes(
     mark_started_late(&mut blocks, &end.late_starts);
     for block in &blocks {
         if let Some(ms) = block.started_late_ms {
-            log_markdown(&format!(
-                "[take-verify] {}: OBS started recording {ms} ms after the clip's first frame, so \
-                 the take is missing its opening: not counted as captured. It is left at {}.",
-                block.take_key, block.take_folder
+            log_markdown(&crate::messages::capture::take_verify_started_late(
+                &block.take_key,
+                ms,
+                &block.take_folder,
             ));
         }
     }
     for block in blocks.iter().filter(|b| b.cut_short) {
         let why = match block.short_take {
-            Some(s) => format!(
-                "stopped writing video early ({:.2} s of video, {:.2} s of audio)",
-                s.video_secs, s.audio_secs
-            ),
+            Some(s) => {
+                crate::messages::capture::take_stopped_writing_video(s.video_secs, s.audio_secs)
+            }
             None => block.cut_by.unwrap_or(end.cut_by).log_text().to_string(),
         };
-        log_markdown(&format!(
-            "[take-verify] {} {why}: not counted as captured. Its partial take is left at {}.",
-            block.take_key, block.take_folder
+        log_markdown(&crate::messages::capture::take_verify_cut_short(
+            &block.take_key,
+            why,
+            &block.take_folder,
         ));
     }
     let captured_count = blocks.iter().filter(|b| b.captured).count();
@@ -1120,17 +1117,18 @@ fn check_takes(
     // missed.
     let renderable_count = blocks.iter().filter(|b| b.renderable || b.rendered).count();
 
-    log_markdown(&format!(
-        "[take-verify] session {}: {}/{} takes on disk or rendered while capturing, {} renderable or rendered",
-        manifest.session_id,
+    log_markdown(&crate::messages::capture::take_verify_session_summary(
+        &manifest.session_id,
         captured_count,
         blocks.len(),
-        renderable_count
+        renderable_count,
     ));
     for block in &blocks {
-        log_markdown(&format!(
-            "[take-verify] {} captured={} renderable={} at {}",
-            block.take_key, block.captured, block.renderable, block.take_folder
+        log_markdown(&crate::messages::capture::take_verify_block_line(
+            &block.take_key,
+            block.captured,
+            block.renderable,
+            &block.take_folder,
         ));
     }
 
@@ -1375,7 +1373,7 @@ pub async fn start_capture_batch_impl(
         if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks)
             .map_err(crate::messages::failed_to_check_demo_sources)
         {
-            log_markdown(&format!("[capture] {}", e));
+            log_markdown(&crate::messages::capture::capture_error_line(&e));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -1451,7 +1449,7 @@ pub async fn start_capture_batch_impl(
         ) {
             Ok(v) => v,
             Err(e) => {
-                log_markdown(&format!("[capture] build_batch_queue failed: {}", e));
+                log_markdown(&crate::messages::capture::build_batch_queue_failed(&e));
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
                 let _ = app_handle_clone.emit(
@@ -1498,14 +1496,14 @@ pub async fn start_capture_batch_impl(
         }
 
         if patch_jobs.is_empty() {
-            log_markdown("[capture] build_batch_queue produced no jobs");
+            log_markdown(crate::messages::capture::BUILD_BATCH_QUEUE_NO_JOBS);
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
                 "capture_status",
                 serde_json::json!({
                     "running": false,
-                    "status": "No jobs produced"
+                    "status": crate::messages::capture::STATUS_NO_JOBS
                 }),
             );
             return;
@@ -1553,7 +1551,7 @@ pub async fn start_capture_batch_impl(
                 // can't run in the open game the frontend picked (#725).
                 Err(why) if reuse_game_pid.is_some() => {
                     let status = crate::messages::batch_needs_fresh_game(&why);
-                    log_markdown(&format!("⚠️ **Batch not started** — {status}"));
+                    log_markdown(&crate::messages::capture::batch_not_started_line(&status));
                     let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                     *running = false;
                     let _ = app_handle_clone.emit(
@@ -1567,8 +1565,8 @@ pub async fn start_capture_batch_impl(
                     return;
                 }
                 Err(why) => {
-                    log_markdown(&format!(
-                        "ℹ️ **This batch is patched instead of seeking between clips** — {why}"
+                    log_markdown(&crate::messages::capture::batch_patched_instead_of_seeking(
+                        why,
                     ));
                     // The Commands tab checked these for a seeking batch, which
                     // runs them all; a patched one puts them in the demo, where
@@ -1806,7 +1804,10 @@ pub async fn start_capture_batch_impl(
         let failure = first_error.lock().unwrap_or_else(|p| p.into_inner()).take();
 
         if let Some((source_demo, e)) = failure {
-            log_markdown(&format!("[capture] Failed to patch {}: {}", source_demo, e));
+            log_markdown(&crate::messages::capture::patch_failed_line(
+                &source_demo,
+                &e,
+            ));
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
             let _ = app_handle_clone.emit(
@@ -1814,7 +1815,7 @@ pub async fn start_capture_batch_impl(
                 serde_json::json!({
                     "running": false,
                     "error": true,
-                    "status": format!("Failed to patch {}: {}", source_demo, e)
+                    "status": crate::messages::capture::patch_failed_status(&source_demo, &e)
                 }),
             );
             return;
@@ -2094,10 +2095,7 @@ pub async fn start_capture_batch_impl(
                     .map(|s| s.to_string())
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                log_markdown(&format!(
-                    "[capture] Event listener thread panicked: {}",
-                    msg
-                ));
+                log_markdown(&crate::messages::capture::listener_panicked_line(&msg));
                 let mut running = is_running_for_panic
                     .lock()
                     .unwrap_or_else(|p| p.into_inner());
@@ -2107,7 +2105,7 @@ pub async fn start_capture_batch_impl(
                     serde_json::json!({
                         "running": false,
                         "error": true,
-                        "status": format!("Internal error in capture event listener: {}", msg)
+                        "status": crate::messages::capture::listener_panicked_status(&msg)
                     }),
                 );
             }
