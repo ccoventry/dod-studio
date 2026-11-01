@@ -315,6 +315,11 @@ pub const AREAS: &[Area] = &[
                 "rain or snow on any map, or none. Needs cl_particlefx 2.",
                 WEATHER,
             ),
+            check(
+                console_name!("map_run_cfgs"),
+                "Run per-map cfgs",
+                "before a demo's map loads, run dodstudio_maps\\all_maps.cfg and dodstudio_maps\\<map>.cfg.",
+            ),
         ],
     },
     Area {
