@@ -42,6 +42,7 @@ import { initRenderPresets } from './render_presets_ui.js';
 import { createFolderPools } from './folder_pools.js';
 import { readScanWorkers, startScanWorkers } from './scan_workers.js';
 import { createDemoFolders } from './demo_folders.js';
+import { createLayoutSplits } from './layout_splits.js';
 import { startNavTabs } from './nav_tabs.js';
 import { startCloseGuard } from './close_guard.js';
 import { readHlPath, startHlPathWatch } from './hl_path_watch.js';
@@ -89,6 +90,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Pinned folders (Capture Studio's scan paths), the Explorer's Recent tier
   // and its toggles: demo_folders.js.
   const demoFolders = createDemoFolders({ persist: () => persistAppSettings() });
+  const layoutSplits = createLayoutSplits({ persist: () => persistAppSettings() });
   // Set when the saved pinned list held single demo files (older builds), so
   // the cleaned list is written back once after settings load.
   let pinnedListCleaned = false;
@@ -191,6 +193,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   const { persistAppSettings } = createSettingsSync({
     getState: () => ({
       ...demoFolders.settingsState(),
+      ...layoutSplits.settingsState(),
       recentProjects: recentProjects.list(),
       targetDrives: folderPools.targetDrives(),
       renderExportDirs: folderPools.renderExportDirs(),
@@ -216,6 +219,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       updateNotificationSettings(settings);
       applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCaptureModeUI });
       pinnedListCleaned = demoFolders.load(settings);
+      layoutSplits.load(settings);
       recentProjects.load(settings.recent_projects);
       savedSetupDismissed = !!settings.setup_dismissed;
       folderPools.load(settings);
@@ -480,6 +484,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // The Demo Analyzer's Explorer shares the pinned folders with Capture Studio.
   demoFolders.startAnalyzerPane();
+  layoutSplits.start();
 
   setup = createSetup({
     getDemos: queue.getDemos,

@@ -67,14 +67,12 @@ pub fn start() {
         return;
     }
     let own = super::studio_pipe::instance_pipe();
-    crate::log_markdown(&format!("Analysis server: serving {own}"));
+    crate::log_markdown(&crate::messages::analysis_server_serving(&own));
     let _ = std::thread::Builder::new()
         .name("analysis-server".into())
         .spawn(move || {
             if !serve(&own, None) {
-                crate::log_markdown(&format!(
-                    "Analysis server: could not serve {own}, which another process holds"
-                ));
+                crate::log_markdown(&crate::messages::analysis_server_name_held(&own));
             }
         });
     let _ = std::thread::Builder::new()
@@ -97,8 +95,8 @@ fn serve_plain() {
         }
         if !said {
             said = true;
-            crate::log_markdown(&format!(
-                "Analysis server: {PIPE_NAME} is served by another DoD Studio, so this one serves only its own name until that one closes"
+            crate::log_markdown(&crate::messages::analysis_server_plain_name_shared(
+                PIPE_NAME,
             ));
         }
         std::thread::sleep(PLAIN_RETRY);
@@ -141,7 +139,7 @@ fn serve(name: &str, held: Option<&AtomicBool>) -> bool {
         if first && let Some(held) = held {
             held.store(true, Ordering::Release);
             // At start, or once the Studio holding it has closed.
-            crate::log_markdown(&format!("Analysis server: serving {name}"));
+            crate::log_markdown(&crate::messages::analysis_server_serving(name));
         }
         first = false;
         // Safety: the handle just created; blocks until a client connects.
@@ -184,10 +182,7 @@ fn handle_client(pipe: std::fs::File) {
             return;
         }
     };
-    crate::log_markdown(&format!(
-        "Analysis server: the game asked for {}",
-        path.display()
-    ));
+    crate::log_markdown(&crate::messages::analysis_server_request(path.display()));
     let mut last = None;
     let result = crate::run_analyzer_cached(&path, |done, total| {
         let percent = progress(done, total);

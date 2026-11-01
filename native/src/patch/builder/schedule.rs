@@ -163,11 +163,10 @@ pub(super) fn log_post_roll_cut(index: usize, streak: &CaptureStreak) {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    crate::log_markdown(&format!(
-        "⚠️ **EOF Boundary Reached:** Highlight #{} in demo '{}' (Player: {}) has a post-roll that exceeds the demo's end frame. Post-roll truncated to save batch.",
+    crate::log_markdown(&crate::messages::post_roll_cut_at_demo_end(
         index + 1,
         demo_file_name,
-        streak.target_player.as_deref().unwrap_or("Unknown")
+        streak.target_player.as_deref().unwrap_or("Unknown"),
     ));
 }
 
@@ -285,15 +284,8 @@ fn note_if_runs_during_fast_forward(
             ),
         )
     };
-    crate::log_markdown(&format!(
-        "ℹ️ **Scheduled command runs during fast-forward** — `{}` is set {} {:.1}s \
-         {} the highlight, which lands at tick {}, {}. Setting a cvar there is \
-         usually fine — it simply takes effect early. It is worth checking only \
-         for commands that depend on playback running at real speed: anything \
-         touching sound, recording, or rendering, since the engine is at \
-         `host_framerate {}`, drawing nothing, with its audio buffers unflushed. \
-         To have it run at normal speed instead, {}.",
-        custom.command,
+    crate::log_markdown(&crate::messages::schedule::runs_during_fast_forward(
+        &custom.command,
         relation_label(&custom.relation).to_lowercase(),
         custom.offset,
         if matches!(custom.relation, CommandRelation::Before) {
@@ -304,7 +296,7 @@ fn note_if_runs_during_fast_forward(
         target_tick,
         where_,
         fast_forward_host_framerate(config),
-        fix
+        fix,
     ));
 }
 

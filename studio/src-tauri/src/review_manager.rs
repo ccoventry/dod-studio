@@ -114,9 +114,7 @@ fn listen(app: &AppHandle, pid: u32) {
     let mut said_reading = false;
     loop {
         if !native::sys::process::game_pids().contains(&pid) {
-            native::log_markdown(&format!(
-                "[review] game {pid} has closed; no more answers to read"
-            ));
+            native::log_markdown(&crate::messages::review::game_closed(pid));
             let _ = app.emit(
                 EVENT,
                 native::review_queue::ReviewEvent::Ended {
@@ -130,12 +128,12 @@ fn listen(app: &AppHandle, pid: u32) {
             continue;
         };
         if !std::mem::replace(&mut said_reading, true) {
-            native::log_markdown(&format!("[review] reading answers from game {pid}"));
+            native::log_markdown(&crate::messages::review::reading_answers(pid));
         }
         for bytes in BufReader::new(pipe).split(b'\n').map_while(Result::ok) {
             let line = String::from_utf8_lossy(&bytes);
             if let Some(event) = parse_event(&line) {
-                native::log_markdown(&format!("[review] {}", line.trim()));
+                native::log_markdown(&crate::messages::review::answer_line(line.trim()));
                 let ended = matches!(event, native::review_queue::ReviewEvent::Ended { .. });
                 let _ = app.emit(EVENT, event);
                 if ended {
@@ -208,8 +206,8 @@ pub async fn start_highlight_review(
             (pid, true)
         }
     };
-    native::log_markdown(&format!(
-        "[review] {count} highlight(s) sent to game {pid} (launched: {launched})"
+    native::log_markdown(&crate::messages::review::highlights_sent(
+        count, pid, launched,
     ));
     ensure_listener(app, pid);
     Ok(ReviewStarted {

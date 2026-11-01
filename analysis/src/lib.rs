@@ -177,9 +177,9 @@ fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
 
 /// Whether an analysis decodes the demo's `svc_sound` messages. No analyzer
 /// reads them, so both give the same [`Analysis`] (a test holds them equal),
-/// and the analyzer cache serves either; skipping them is the capture-queue
-/// scan's fast parse (#37), while the Demo Analyzer keeps the full decode.
-/// An analyzer that starts reading sounds must make the scan decode them.
+/// and the analyzer cache serves either. Skipping them is the default parse
+/// (#37); `Decode` stays for a probe that reads them. An analyzer that starts
+/// reading sounds must switch the default to `Decode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sounds {
     Decode,
@@ -274,16 +274,17 @@ impl Analysis {
     /// the ratio means anything: reading the demo's structure is the first
     /// [`PARSE_SHARE`] of [`PROGRESS_SCALE`] (it is ~85% of the time, measured
     /// on a 72 MB demo), going through its frames the rest, and the last call
-    /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`.
+    /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`. Skips the demo's sounds
+    /// ([`Sounds::Skip`]).
     pub fn try_from_bytes_with_progress<F>(value: &[u8], progress_cb: F) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
     {
-        Self::try_from_bytes_decoding(value, Sounds::Decode, progress_cb)
+        Self::try_from_bytes_decoding(value, Sounds::Skip, progress_cb)
     }
 
     /// [`Analysis::try_from_bytes_with_progress`], decoding the demo's
-    /// sounds or not as `sounds` says.
+    /// sounds or not as `sounds` says (the same analysis either way).
     pub fn try_from_bytes_decoding<F>(
         value: &[u8],
         sounds: Sounds,

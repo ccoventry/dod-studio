@@ -78,43 +78,35 @@ pub fn may_be_capturing(modules: Option<&[PathBuf]>) -> bool {
 pub fn game_to_reuse(facts: &ReuseFacts) -> Result<u32, String> {
     let pid = match facts.running {
         RunningGameCheck::Match { pid } => *pid,
-        RunningGameCheck::None => return Err("no game is running".into()),
+        RunningGameCheck::None => return Err(crate::messages::game_reuse::NO_GAME_RUNNING.into()),
         RunningGameCheck::Mismatch { .. } => {
-            return Err("the running game was started with other launch settings".into());
+            return Err(crate::messages::game_reuse::GAME_HAS_OTHER_LAUNCH_SETTINGS.into());
         }
     };
     if !facts.hook_runs_batch {
-        return Err(
-            "Seek Between Clips is off, and a patched batch starts the game on its first demo"
-                .into(),
-        );
+        return Err(crate::messages::game_reuse::SEEK_BETWEEN_CLIPS_OFF.into());
     }
     if facts.capture_mode == CaptureMode::Obs {
-        return Err(
-            "OBS mode starts the game with its sound through waveOut, which only a fresh start sets"
-                .into(),
-        );
+        return Err(crate::messages::game_reuse::OBS_NEEDS_FRESH_START.into());
     }
     if facts.hook_dll.is_none() {
-        return Err("Studio has no hook DLL to run the batch with".into());
+        return Err(crate::messages::game_reuse::NO_HOOK_DLL_IN_STUDIO.into());
     }
     let Some(modules) = facts.modules else {
-        return Err(format!("the game's DLLs (PID {pid}) could not be read"));
+        return Err(crate::messages::game_reuse::game_dlls_unreadable(pid));
     };
     // Which hook DLL and build it has is part of `facts.running` (#1143).
     if named(modules, HOOK_DLL_NAME).is_empty() {
-        return Err("the running game has no DoD Studio hook DLL (not started by Studio)".into());
+        return Err(crate::messages::game_reuse::GAME_HAS_NO_HOOK_DLL.into());
     }
     if named(modules, HLAE_DLL_NAME).is_empty() {
-        return Err(
-            "the running game has no HLAE in it, which every capture records through".into(),
-        );
+        return Err(crate::messages::game_reuse::GAME_HAS_NO_HLAE.into());
     }
     if !facts.pipe_answers {
-        return Err("the running game does not take commands from Studio".into());
+        return Err(crate::messages::game_reuse::GAME_DOES_NOT_TAKE_COMMANDS.into());
     }
     if !facts.asks_this_studio {
-        return Err("the running game was started by another DoD Studio that is still open".into());
+        return Err(crate::messages::game_reuse::GAME_STARTED_BY_OTHER_STUDIO.into());
     }
     Ok(pid)
 }

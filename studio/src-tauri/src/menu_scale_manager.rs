@@ -30,7 +30,7 @@ pub async fn menu_scale_status(
     let dir = game_dir(&game_path, &game_folder)?;
     tokio::task::spawn_blocking(move || native::menu_scale::status(Path::new(&game_path), &dir))
         .await
-        .map_err(|e| format!("menu size check stopped: {e}"))
+        .map_err(crate::messages::menu_size_check_stopped)
 }
 
 /// Writes (`on`) or removes Studio's scheme copy in `<game>_addon\resource`.
@@ -43,5 +43,5 @@ pub async fn set_menu_scale(
     let dir = game_dir(&game_path, &game_folder)?;
     tokio::task::spawn_blocking(move || native::menu_scale::set(Path::new(&game_path), &dir, on))
         .await
-        .map_err(|e| format!("menu size change stopped: {e}"))?
+        .map_err(crate::messages::menu_size_change_stopped)?
 }

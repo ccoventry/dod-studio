@@ -70,6 +70,14 @@ pub struct AppSettings {
     /// Demo Analyzer Explorer sidebar's drag-to-resize width, in pixels.
     #[serde(default = "default_analyzer_explorer_width")]
     pub analyzer_explorer_width: i32,
+    /// Capture Studio's draggable split (#47): the Master Demo Queue pane's share
+    /// of the window width, in tenths of a percent. `None` = the default layout.
+    #[serde(default)]
+    pub capture_split_left_permille: Option<i32>,
+    /// Demo Analyzer's draggable split (#47): the Demos panel's height in pixels.
+    /// `None` = the default layout.
+    #[serde(default)]
+    pub analyzer_demos_height_px: Option<i32>,
     pub language: String,
     #[serde(default = "default_capture_fps")]
     pub capture_fps: i32,
@@ -520,6 +528,8 @@ impl Default for AppSettings {
             kept_json_projects: Vec::new(),
             scan_folders_for_demos: false,
             analyzer_explorer_width: default_analyzer_explorer_width(),
+            capture_split_left_permille: None,
+            analyzer_demos_height_px: None,
             language: "en".to_string(),
             capture_fps: default_capture_fps(),
             obs_capture_fps: default_obs_capture_fps(),
@@ -730,9 +740,9 @@ impl SettingsManager {
 /// launching the game at a folder Studio cannot name.
 pub fn apply_game_folder(settings: &AppSettings) {
     if let Err(e) = native::shared::paths::set_game_folder(&settings.game_folder) {
-        native::log_markdown(&format!(
-            "⚠️ **Settings** — {e}. Using `{}` until it is changed in Configuration → Paths (#402).",
-            native::shared::paths::DEFAULT_GAME_FOLDER
+        native::log_markdown(&crate::messages::settings::game_folder_fell_back(
+            e,
+            native::shared::paths::DEFAULT_GAME_FOLDER,
         ));
         let _ = native::shared::paths::set_game_folder("");
     }

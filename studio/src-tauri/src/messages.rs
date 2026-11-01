@@ -5,9 +5,9 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log_markdown/eprintln!
-// diagnostics stay inline at their call site, same as strings.js leaves
-// console.log/console.error alone. Issue #33, track 2 — a parallel catalog
+// as a toast/dialog string, and, since #237's decision, the activity-log
+// lines too (moved area by area, e.g. `messages/capture.rs`). Per-item
+// eprintln! diagnostics stay inline. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
 // cross-language here).
 //
@@ -26,6 +26,26 @@
 // (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
 // `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
 // caller before wrapping.
+
+pub mod batch;
+pub mod blender;
+pub mod capture;
+pub mod catch_up;
+pub mod combine;
+pub mod game_process;
+pub mod hd;
+pub mod open_with;
+pub mod overview;
+pub mod preview;
+pub mod preview_start;
+pub mod render;
+pub mod review;
+pub mod scan;
+pub mod settings;
+pub mod take_cleanup;
+pub mod take_delete;
+pub mod update;
+pub mod vegas;
 
 use std::fmt::Display;
 use std::path::Path;
@@ -712,6 +732,28 @@ pub fn failed_to_discard_render_autosave(err: impl Display) -> String {
     failed_to("discard the saved render queue", err)
 }
 
+// ── menu_scale_manager.rs, movie_copy_manager.rs, overview_manager.rs, players_tab.rs ──
+
+pub fn menu_size_check_stopped(err: impl Display) -> String {
+    format!("menu size check stopped: {err}")
+}
+
+pub fn menu_size_change_stopped(err: impl Display) -> String {
+    format!("menu size change stopped: {err}")
+}
+
+pub fn could_not_list_to_copy(source: impl Display, err: impl Display) -> String {
+    format!("Couldn't list {source} to copy it: {err}")
+}
+
+pub const MOVIE_COPY_ALREADY_RUNNING: &str = "A movie copy is already running";
+
+pub const OVERVIEW_IMAGE_NOT_RAW_BYTES: &str = "the high-quality image did not arrive as raw bytes";
+
+pub fn not_a_sprite_file_name(sprite: &str) -> String {
+    format!("{sprite:?} is not a sprite file name")
+}
+
 /// Pins every function/constant above against the exact `format!`/literal it
 /// replaced at its original call site (text copied verbatim from the pre-PR
 /// source, not re-derived), so this refactor can't have silently changed any
@@ -1049,6 +1091,28 @@ mod tests {
         assert!(
             err.starts_with("Background task crashed: "),
             "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn small_manager_messages_match_their_original_inline_text() {
+        assert_eq!(menu_size_check_stopped("x"), "menu size check stopped: x");
+        assert_eq!(menu_size_change_stopped("x"), "menu size change stopped: x");
+        assert_eq!(
+            could_not_list_to_copy("D:/dod", "denied"),
+            "Couldn't list D:/dod to copy it: denied"
+        );
+        assert_eq!(
+            MOVIE_COPY_ALREADY_RUNNING,
+            "A movie copy is already running"
+        );
+        assert_eq!(
+            OVERVIEW_IMAGE_NOT_RAW_BYTES,
+            "the high-quality image did not arrive as raw bytes"
+        );
+        assert_eq!(
+            not_a_sprite_file_name("a.spr"),
+            "\"a.spr\" is not a sprite file name"
         );
     }
 

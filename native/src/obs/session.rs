@@ -182,7 +182,7 @@ impl ObsSession {
         }
 
         for warning in &preflight.warnings {
-            log_markdown(&format!("⚠️ **OBS** — {warning}"));
+            log_markdown(&crate::messages::obs_preflight_warning(warning));
         }
 
         Ok((
@@ -250,11 +250,9 @@ impl ObsSession {
                 started_late_ms: Some(late_ms),
             },
         );
-        log_markdown(&format!(
-            "⚠️ **OBS** — started recording {} ms after the clip's first frame, so `{}` is \
-             missing the clip's opening; it won't count as captured.",
+        log_markdown(&crate::messages::obs_started_late(
             late.as_millis(),
-            take_folder.display()
+            take_folder.display(),
         ));
         Some(LateStart { take_folder, late })
     }
@@ -265,10 +263,7 @@ impl ObsSession {
             // STOP_RECORD was missed. Closing the current one first is the only
             // way the next block gets its own file rather than being appended
             // to its predecessor.
-            log_markdown(
-                "⚠️ **OBS** — a new block started while still recording; closing the previous \
-                 take first. A `STOP_RECORD` marker was missed.",
-            );
+            log_markdown(crate::messages::OBS_BLOCK_STARTED_WHILE_RECORDING);
             self.end_block();
         }
         let Some(take_folder) = self.take_folders.get(self.next_block).cloned() else {
@@ -379,11 +374,9 @@ impl ObsSession {
                         // reports "partial file" with a broken audio frame at
                         // the very end. Truncated, not destroyed — so the
                         // wording promises recovery, not integrity.
-                        log_markdown(&format!(
-                            "⚠️ **OBS** — lost the connection mid-block ({e}). Salvaged \
-                             `{}`. It will be short and its last moment damaged, because the \
-                             recording was cut off rather than stopped.",
-                            video.display()
+                        log_markdown(&crate::messages::obs_lost_connection_salvaged(
+                            &e,
+                            video.display(),
                         ));
                         let take_folder = take_folder_of(&dest);
                         self.recorded.push(RecordedBlock {
@@ -469,12 +462,11 @@ impl ObsSession {
         } else {
             "the recorded clip stutters"
         };
-        log_markdown(&format!(
-            "⚠️ **OBS** — this block dropped {skipped_delta}/{total_delta} frames \
-             ({:.1}%) due to encoding lag: {effect}. The encoder can't keep up with \
-             OBS Capture FPS on this PC; lower it (Configuration → Output Format), \
-             or the resolution.",
-            rate * 100.0
+        log_markdown(&crate::messages::obs_frames_dropped(
+            skipped_delta,
+            total_delta,
+            rate * 100.0,
+            effect,
         ));
     }
 
@@ -550,7 +542,7 @@ impl ObsSession {
             }
         };
         if ok {
-            log_markdown("🔌 **OBS** — the connection dropped and was re-established.");
+            log_markdown(crate::messages::OBS_RECONNECTED);
         } else {
             self.dead = true;
         }
