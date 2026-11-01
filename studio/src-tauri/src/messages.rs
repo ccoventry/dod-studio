@@ -27,14 +27,25 @@
 // `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
 // caller before wrapping.
 
+pub mod batch;
+pub mod blender;
 pub mod capture;
 pub mod catch_up;
+pub mod combine;
 pub mod game_process;
 pub mod hd;
 pub mod open_with;
+pub mod overview;
 pub mod preview;
+pub mod preview_start;
+pub mod render;
+pub mod review;
+pub mod scan;
+pub mod settings;
 pub mod take_cleanup;
+pub mod take_delete;
 pub mod update;
+pub mod vegas;
 
 use std::fmt::Display;
 use std::path::Path;

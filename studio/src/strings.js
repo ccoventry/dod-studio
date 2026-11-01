@@ -1326,6 +1326,9 @@ export const STRINGS = {
     SPLIT_HANDLE_TITLE: 'Drag to resize, double-click to reset',
     CAPTURE_SPLIT_RESET_LOG: 'Capture Studio split reset to the default',
     ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
+    CAPTURE_SPLIT_LABEL: 'Capture Studio split',
+    ANALYZER_SPLIT_LABEL: 'Demo Analyzer split',
+    splitNotSaved: (label, err) => `${label} not saved: ${err}`,
   },
 
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
@@ -2913,6 +2916,9 @@ export const STRINGS = {
 
   // ── error_reporter.js: the one user-facing crash toast ───────────────────
   ERROR_REPORTER: {
+    NO_STACK: '(no stack)',
+    NOT_AN_ERROR_OBJECT: '(not an Error object)',
+    uncaughtLog: (source, message, stack) => `[error] Uncaught ${source}: ${message}\n${stack}`,
     somethingWentWrong: (message) => `Something went wrong (${message}). Details are in the activity log (Help → View Logs).`,
   },
 
@@ -2960,6 +2966,8 @@ export const STRINGS = {
     FETCH_TITLE: "Reads the release notes of every version from GitHub. Update checks are off, so DoD Studio doesn't do it by itself.",
     STATUS_READING: "Reading the release list from GitHub…",
     STATUS_FAILED: "Couldn't read GitHub's release list, and none is saved from before. The reason is in the activity log.",
+    releaseListUnreadableLog: (err) => `What's new: the release list could not be read: ${err}`,
+    githubReleaseListUnreadableLog: (err) => `What's new: GitHub's release list could not be read: ${err}`,
     STATUS_SAVED_COPY: "Couldn't read GitHub's release list, so this is the copy saved last time. The reason is in the activity log.",
     STATUS_OFFLINE_SAVED: 'Update checks are off, so this is the release list saved last time.',
     STATUS_OFFLINE_NONE: "Update checks are off, so only this version's notes show.",

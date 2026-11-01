@@ -44,7 +44,7 @@ pub async fn combine_clips(
         let _ = app_handle.emit("combine_progress", p);
     };
     let started = std::time::Instant::now();
-    native::log_markdown(&format!("[combine] started: {} clips", clips.len()));
+    native::log_markdown(&crate::messages::combine::combine_started(clips.len()));
     let result = async {
         let plan = combine::plan_with_progress(&ffmpeg, &paths(&clips), |done, total| {
             emit(CombineProgress::Checking { done, total })
