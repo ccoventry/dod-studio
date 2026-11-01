@@ -99,12 +99,12 @@ fn removed_line(take_folder: &Path, size_bytes: u64, method: AfterFinish, why: W
         AfterFinish::Recycle => crate::messages::take_cleanup::take_cleanup_recycled(
             take_folder.display(),
             &size,
-            &why.because(),
+            why.because(),
         ),
         _ => crate::messages::take_cleanup::take_cleanup_deleted(
             take_folder.display(),
             &size,
-            &why.because(),
+            why.because(),
         ),
     }
 }
