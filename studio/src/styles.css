@@ -2896,11 +2896,11 @@ tr.keyboard-selected {
   overflow-wrap: anywhere;
 }
 
-.split-maps tr[data-stage="finished"] .split-map-status { color: #4caf50; }
-.split-maps tr[data-stage="failed"] .split-map-status { color: #f44336; }
-.split-maps tr[data-stage="cancelled"] .split-map-status { color: var(--text-muted, #aaa); }
+.split-maps tr[data-stage="finished"] .split-map-status { color: var(--ok); }
+.split-maps tr[data-stage="failed"] .split-map-status { color: var(--danger); }
+.split-maps tr[data-stage="cancelled"] .split-map-status { color: var(--text-muted); }
 .split-maps tr[data-stage="writing"] .split-map-status,
-.split-maps tr[data-stage="checking"] .split-map-status { color: #7ec8e3; }
+.split-maps tr[data-stage="checking"] .split-map-status { color: var(--sky); }
 
 .split-map-bar {
   min-width: 90px;
