@@ -77,7 +77,7 @@ use super::decal_strip::{
 /// makes the three counts impossible to conflate.
 pub fn decal_texture_histogram(demo_bytes: &[u8]) -> Result<Vec<(u8, usize)>, String> {
     let demo = open_demo_from_bytes(demo_bytes)
-        .map_err(|e| format!("Could not parse demo file: {}", e))?;
+        .map_err(crate::messages::decal_probe::could_not_parse_demo)?;
     let mut counts: std::collections::BTreeMap<u8, usize> = std::collections::BTreeMap::new();
 
     for entry in &demo.directory.entries {
@@ -1329,20 +1329,16 @@ pub fn probe_decal_offsets(
     opts: &ProbeOptions,
 ) -> Result<(Vec<u8>, ProbeStats), String> {
     if opts.offsets.is_empty() {
-        return Err("no offsets to probe".into());
+        return Err(crate::messages::decal_probe::NO_OFFSETS.into());
     }
     if opts.offsets.windows(2).any(|w| w[1] <= w[0]) {
-        return Err(
-            "offsets must be strictly ascending — a row's hole count is \
-                    only readable as a threshold if they are"
-                .into(),
-        );
+        return Err(crate::messages::decal_probe::OFFSETS_NOT_ASCENDING.into());
     }
     if opts.offsets[0] < 0.0 {
-        return Err("offsets are magnitudes; the OUT and IN rows apply the sign".into());
+        return Err(crate::messages::decal_probe::OFFSETS_ARE_MAGNITUDES.into());
     }
     if opts.grids == 0 {
-        return Err("no grids to stamp".into());
+        return Err(crate::messages::decal_probe::NO_GRIDS.into());
     }
 
     // Every row gets a zero-offset column of its own, ahead of the offsets
@@ -1368,7 +1364,7 @@ pub fn probe_decal_offsets(
     };
 
     let mut demo = open_demo_from_bytes(demo_bytes)
-        .map_err(|e| format!("Could not parse demo file: {}", e))?;
+        .map_err(crate::messages::decal_probe::could_not_parse_demo)?;
 
     // One window spanning the whole demo, so the survey harvests decals and a
     // texture index from every frame rather than from capture windows it has
@@ -1406,9 +1402,7 @@ pub fn probe_decal_offsets(
             }]
         }
         (Some(_), None) => {
-            return Err("--anchor needs --axis: without a normal there is no \
-                        direction to offset along"
-                .into());
+            return Err(crate::messages::decal_probe::ANCHOR_NEEDS_AXIS.into());
         }
         (None, _) => {
             // Spawn is where a POV camera spends by far the most time: the demo
@@ -1454,27 +1448,20 @@ pub fn probe_decal_offsets(
     };
 
     if targets.is_empty() {
-        return Err(format!(
-            "no usable surface: {} harvested decals, none forming a connected patch of \
-             {}+ decals coplanar within {:.1} units, spanning {:.0}+ units, wide enough \
-             to seat {} columns, and within {:.0} units of somewhere the camera actually \
-             went. Try a demo with more decal traffic, lower --min-plane-decals, a \
-             smaller --column-spacing, a larger --require-approach, or pass --anchor \
-             x,y,z with --axis.",
+        return Err(crate::messages::decal_probe::no_usable_surface(
             survey.harvested.len(),
             opts.min_plane_decals,
             opts.plane_tolerance,
             opts.min_plane_spread,
             opts.offsets.len(),
-            opts.require_approach
+            opts.require_approach,
         ));
     }
 
-    let texture_index = opts.texture_index.or(survey.texture_index).ok_or_else(|| {
-        "no decal texture index available: the demo registered none and none was \
-         supplied. Pass --texture-index."
-            .to_string()
-    })?;
+    let texture_index = opts
+        .texture_index
+        .or(survey.texture_index)
+        .ok_or_else(|| crate::messages::decal_probe::NO_TEXTURE_INDEX.to_string())?;
 
     let texture_for = |row: ProbeRow| -> u8 {
         match (opts.row_textures, row) {
@@ -1615,10 +1602,9 @@ pub fn probe_decal_offsets(
 
     let needed = all_positions.len().div_ceil(MAX_PER_FRAME);
     if eligible.len() < needed {
-        return Err(format!(
-            "only {} parsed network frames after the last level load, need {}",
+        return Err(crate::messages::decal_probe::too_few_network_frames(
             eligible.len(),
-            needed
+            needed,
         ));
     }
 
@@ -1654,10 +1640,9 @@ pub fn probe_decal_offsets(
     }
 
     if placed < all_positions.len() {
-        return Err(format!(
-            "only {} of {} probes could be placed — too few eligible frames",
+        return Err(crate::messages::decal_probe::too_few_probes_placed(
             placed,
-            all_positions.len()
+            all_positions.len(),
         ));
     }
 
@@ -1944,7 +1929,7 @@ pub struct CameraView {
 /// everything when working out where a decal lands in a specific screenshot.
 pub fn camera_at_time(demo_bytes: &[u8], svc_time: f32) -> Result<CameraView, String> {
     let demo = open_demo_from_bytes(demo_bytes)
-        .map_err(|e| format!("Could not parse demo file: {}", e))?;
+        .map_err(crate::messages::decal_probe::could_not_parse_demo)?;
 
     let mut best: Option<CameraView> = None;
     let mut now = 0.0f32;
@@ -2045,7 +2030,7 @@ pub fn best_view_for(
     height: f32,
 ) -> Result<Option<(CameraView, usize, f32)>, String> {
     let demo = open_demo_from_bytes(demo_bytes)
-        .map_err(|e| format!("Could not parse demo file: {}", e))?;
+        .map_err(crate::messages::decal_probe::could_not_parse_demo)?;
 
     let mut best: Option<(CameraView, usize, f32)> = None;
     let mut now = 0.0f32;

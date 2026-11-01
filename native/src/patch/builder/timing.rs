@@ -288,23 +288,17 @@ pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
 pub(super) fn warn_short_rolls(config: &PatcherConfig) {
     let floors = roll_floors(config);
     if config.pre_roll_seconds < floors.pre_roll {
-        crate::log_markdown(&format!(
-            "⚠️ **Pre-roll is shorter than this capture needs** — {:.1}s, against a {:.1}s floor \
-             set by {}. Playback returns to real time {:.1}s before recording, which is not enough \
-             for it: the engine's audio buffers are left unflushed by the fast-forward. Raise the \
-             pre-roll to at least {:.1}s.",
+        crate::log_markdown(&crate::messages::pre_roll_too_short(
             config.pre_roll_seconds,
             floors.pre_roll,
             floors.pre_roll_binding,
-            config.pre_roll_seconds,
-            floors.pre_roll
         ));
     }
     if config.post_roll_seconds < floors.post_roll {
-        crate::log_markdown(&format!(
-            "⚠️ **Post-roll is shorter than this capture needs** — {:.1}s, against a {:.1}s floor \
-             set by {}. Anything past the post-roll fires while playback is fast-forwarding again.",
-            config.post_roll_seconds, floors.post_roll, floors.post_roll_binding
+        crate::log_markdown(&crate::messages::post_roll_too_short(
+            config.post_roll_seconds,
+            floors.post_roll,
+            floors.post_roll_binding,
         ));
     }
 }

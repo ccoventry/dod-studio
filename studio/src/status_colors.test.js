@@ -11,10 +11,10 @@ describe('HIGHLIGHT_STATUS (#35)', () => {
 
 describe('highlight status colours (#527)', () => {
   it('Pending is orange, Captured blue, Rendered green, None grey', () => {
-    expect(statusColor('Pending')).toBe('#ffa726');
-    expect(statusColor('Captured')).toBe('#2196f3');
-    expect(statusColor('Rendered')).toBe('#4caf50');
-    expect(statusColor('None')).toBe('#555');
+    expect(statusColor('Pending')).toBe('var(--warn-orange)');
+    expect(statusColor('Captured')).toBe('var(--info-bright)');
+    expect(statusColor('Rendered')).toBe('var(--ok)');
+    expect(statusColor('None')).toBe('var(--text-dim)');
   });
 
   it('every status the dropdown offers has its own colour', () => {
@@ -26,12 +26,12 @@ describe('highlight status colours (#527)', () => {
   });
 
   it('an unknown status falls back to grey', () => {
-    expect(statusColor(undefined)).toBe('#555');
-    expect(statusColor('Bogus')).toBe('#555');
+    expect(statusColor(undefined)).toBe('var(--text-dim)');
+    expect(statusColor('Bogus')).toBe('var(--text-dim)');
   });
 
   it('queue count columns use the status colour, grey at zero', () => {
-    expect(statusCountColor('Captured', 3)).toBe('#2196f3');
-    expect(statusCountColor('Captured', 0)).toBe('#555');
+    expect(statusCountColor('Captured', 3)).toBe('var(--info-bright)');
+    expect(statusCountColor('Captured', 0)).toBe('var(--text-dim)');
   });
 });

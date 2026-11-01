@@ -169,7 +169,7 @@ Rebuilds a highlight recorded in **AGR for Blender** capture mode (3.1) in Blend
 | **Frame sequence** (default) | HLAE `mirv_recordmovie`, one BMP per frame | `take0000/<stream>/00000.bmp…` plus `sound.wav` |
 | **Video** | HLAE pipes frames to an FFmpeg it launches itself | `take0000/<stream>/video.avi` plus `sound.wav`. Needs HLAE to find an FFmpeg (the Paths row). |
 | **OBS** | OBS Studio over obs-websocket v5, started and stopped from console-log markers | `take0000/all/video.<ext>` with audio muxed in, no wav |
-| **AGR for Blender** | HLAE `mirv_agr`, no video: every drawn model's bones and the camera, at the AGR FPS (#450) | one `.agr` file per clip, for the Blender page (2.9) |
+| **AGR for Blender** | HLAE `mirv_agr`, no video: every drawn model's bones and the camera, at the AGR FPS (#450); the clip's sound through HLAE's movie recorder, its picture sent to FFmpeg's null muxer (needs HLAE's FFmpeg) | one `.agr` file per clip, for the Blender page (2.9), and its sound beside it as a `.wav` of the same name, in sync to about 2 ms over 42 s |
 
 There is no Separate HUD setting. The alpha launch flags are sent on every launch, so typing `mirv_movie_separate_hud 1` into Initial Commands still produces a usable HUD alpha stream.
 

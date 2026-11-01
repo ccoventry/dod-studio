@@ -350,6 +350,13 @@ pub enum MessageData {
 pub enum MessageDataParseMode {
     /// Parses network messages
     Parse,
+    /// [`MessageDataParseMode::Parse`] leaving every `svc_sound` out of the
+    /// parsed list, for a caller that only reads the demo and reads no
+    /// sound (the analyzer, #37). Sounds are a fifth of a demo's messages
+    /// and several heap blocks each. The sounds are still read through, so
+    /// a demo fails to parse exactly where `Parse` fails. Never write a demo
+    /// parsed this way: its sounds are gone.
+    ParseWithoutSounds,
     /// Store raw network message bytes
     Raw,
     /// Does not store any network message bytes

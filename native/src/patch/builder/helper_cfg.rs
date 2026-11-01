@@ -36,8 +36,8 @@ pub(super) fn write_helper_cfg(dod_dir: &std::path::Path, content: &str) -> std:
 }
 
 /// The helper cfg's start, ahead of any job's own lines: its header, the
-/// global aliases every job calls (speed, sound, record, batch end) and, in
-/// direct-to-video mode, HLAE's FFmpeg settings. `dod_dir`'s configs are
+/// global aliases every job calls (speed, sound, record, batch end) and
+/// HLAE's FFmpeg settings for the mode. `dod_dir`'s configs are
 /// scanned for the values the normal-speed alias puts back.
 pub(super) fn helper_cfg_preamble(config: &PatcherConfig, dod_dir: &std::path::Path) -> String {
     let date_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -90,11 +90,43 @@ pub(super) fn helper_cfg_preamble(config: &PatcherConfig, dod_dir: &std::path::P
     helper_cfg_content.push_str(&record_alias_lines(config));
     helper_cfg_content.push_str("alias sys_capture_done_path \"mirv_movie_filename DOD_STUDIO_EXIT_TRIGGER; mirv_recordmovie_start; mirv_recordmovie_stop\"\n");
 
-    if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
-        helper_cfg_content.push_str(&direct_to_video_lines(config));
+    match config.capture_mode {
+        crate::patch::CaptureMode::DirectToVideo => {
+            helper_cfg_content.push_str(&direct_to_video_lines(config));
+        }
+        crate::patch::CaptureMode::Agr => helper_cfg_content.push_str(AGR_SOUND_LINES),
+        crate::patch::CaptureMode::FrameSequence | crate::patch::CaptureMode::Obs => {
+            helper_cfg_content.push_str(FFMPEG_OFF_LINES);
+        }
     }
     helper_cfg_content
 }
+
+/// The other modes turn HLAE's FFmpeg pipe off. A batch in a game that is
+/// already open (#725) inherits whatever the batch before it set, and
+/// `mirv_movie_ffmpeg` outlives a demo: after an AGR batch (null muxer) a
+/// frame-sequence batch would write no frame at all, and after a
+/// direct-to-video one a video instead of BMPs. The pipeline owns the
+/// command (`cfg_scan::BANNED_COMMANDS`), so turning it off loses no
+/// setting of the user's.
+const FFMPEG_OFF_LINES: &str = "\n# HLAE's FFmpeg pipe off, whatever an earlier batch set\n\
+                                mirv_movie_ffmpeg all enabled 0\n";
+
+/// AGR mode's sound (#450): HLAE's movie recorder runs beside `mirv_agr` for
+/// its `sound.wav` alone, with every image stream piped into FFmpeg's null
+/// muxer, so no picture reaches the disk.
+///
+/// HLAE has no sound-only movie. Measured on PRE (#450): `mirv_movie_simulate
+/// 1` writes no `sound.wav` at all, while the null muxer writes the same
+/// `sound.wav` a video take gets (same recorder, so the same
+/// `mirv_movie_sound_volume` and `ds_sound_*` settings) and an empty stream
+/// folder. Its cost is HLAE reading each frame back from the GPU: the pass
+/// ran ~127 frames a second against ~238 for `mirv_agr` alone, at 1/300.
+///
+/// Set once at load, like `direct_to_video_lines`, for the same reasons.
+const AGR_SOUND_LINES: &str = "\n# AGR capture: sound only, the picture goes to FFmpeg's null muxer\n\
+                               mirv_movie_ffmpeg all enabled 1\n\
+                               mirv_movie_ffmpeg all options \"-c:v rawvideo -f null NUL\"\n";
 
 /// Direct-to-video's HLAE settings (docs/direct_to_video_capture.md).
 ///
@@ -148,11 +180,11 @@ fn direct_to_video_lines(config: &PatcherConfig) -> String {
 ///
 /// AGR mode (#450): `mirv_agr` records one frame per `Host_Frame`, stamped with
 /// `host_frametime`, so the recorded rate is whatever `host_framerate` pins it
-/// to (#403 did exactly this by hand). Start pins it to `1 / agr_fps`; stop
-/// ends the recording and hands playback back to real time for the post-roll,
-/// the way `mirv_recordmovie_stop` releases its own timestep. The recording
-/// itself is started by the block's route alias, which is the one place that
-/// knows the block's file — see `route_alias_line`.
+/// to (#403 did exactly this by hand). Both recordings, `mirv_agr` and the
+/// sound-only movie (`AGR_SOUND_LINES`), start in the block's route alias,
+/// the one place that knows the block's file — see `route_alias_line`. Start
+/// then flushes the sound the fast-forward left, as the movie modes do;
+/// stop ends both and hands playback back to real time for the post-roll.
 pub(super) fn record_alias_lines(config: &PatcherConfig) -> String {
     match config.capture_mode {
         crate::patch::CaptureMode::FrameSequence | crate::patch::CaptureMode::DirectToVideo => {
@@ -171,11 +203,9 @@ pub(super) fn record_alias_lines(config: &PatcherConfig) -> String {
              alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
                 .to_string()
         }
-        crate::patch::CaptureMode::Agr => format!(
-            "alias sys_record_start \"host_framerate {}\"\n\
-             alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
-            agr_host_framerate(config)
-        ),
+        crate::patch::CaptureMode::Agr => "alias sys_record_start \"stopsound\"\n\
+             alias sys_record_stop \"mirv_agr stop; mirv_recordmovie_stop; host_framerate 0\"\n"
+            .to_string(),
     }
 }
 
@@ -183,8 +213,13 @@ pub(super) fn record_alias_lines(config: &PatcherConfig) -> String {
 /// at the block's record start just ahead of `sys_record_start`.
 ///
 /// For the movie modes it points `mirv_movie_filename` at the block's take
-/// folder; HLAE makes the folder itself. In AGR mode it starts the recording
-/// into that folder instead (made ahead of the batch by `build_batch_queue`).
+/// folder; HLAE makes the folder itself. In AGR mode it also starts both of
+/// the block's recordings, into that folder (made ahead of the batch by
+/// `build_batch_queue`): the timestep is pinned first, then `mirv_agr` and
+/// the sound-only movie start on one command line, so on one frame. Started
+/// a few frames apart, the `.agr` opened with real-time frames and ended
+/// 399 ms longer than its `sound.wav`; on one frame the two differed by
+/// 2.2 ms over 10.5 s (PRE, #450).
 pub(super) fn route_alias_line(
     config: &PatcherConfig,
     demo_name: &str,
@@ -193,9 +228,10 @@ pub(super) fn route_alias_line(
 ) -> String {
     if config.capture_mode == crate::patch::CaptureMode::Agr {
         format!(
-            "alias {}_route_{} \"mirv_agr start {}\"\n",
-            demo_name,
-            block_index,
+            "alias {demo_name}_route_{block_index} \"host_framerate {}; mirv_movie_filename \
+             _route_{drive_idx}/{demo_name}_b{block_index}; mirv_agr start {}; \
+             mirv_recordmovie_start\"\n",
+            agr_host_framerate(config),
             agr_route_path(drive_idx, demo_name, block_index)
         )
     } else {

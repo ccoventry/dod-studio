@@ -197,18 +197,21 @@ pub fn save(
         Target::Addon => addon_dir(install).join("overviews"),
         Target::Game => mod_dir(install).join("overviews"),
     };
-    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| crate::messages::path_failed(folder.display(), e))?;
     let txt = folder.join(format!("{map}.txt"));
     let mut saved = Saved::default();
 
     if txt.exists() && !is_ours(&txt) {
         let backups = folder.join(BACKUP_DIR);
-        std::fs::create_dir_all(&backups).map_err(|e| format!("{}: {e}", backups.display()))?;
+        std::fs::create_dir_all(&backups)
+            .map_err(|e| crate::messages::path_failed(backups.display(), e))?;
         for ext in ["txt", "bmp", "tga"] {
             let from = folder.join(format!("{map}.{ext}"));
             let to = backups.join(format!("{map}.{ext}"));
             if from.exists() && !to.exists() {
-                std::fs::copy(&from, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+                std::fs::copy(&from, &to)
+                    .map_err(|e| crate::messages::path_failed(to.display(), e))?;
                 saved.backed_up.push(to.to_string_lossy().into_owned());
             }
         }
@@ -219,12 +222,13 @@ pub fn save(
         Format::Bmp => "bmp",
     };
     let image_path = folder.join(format!("{map}.{ext}"));
-    std::fs::write(&image_path, image).map_err(|e| format!("{}: {e}", image_path.display()))?;
+    std::fs::write(&image_path, image)
+        .map_err(|e| crate::messages::path_failed(image_path.display(), e))?;
     saved
         .written
         .push(image_path.to_string_lossy().into_owned());
     let text = transform.text(&map, &format!("overviews/{map}.{ext}"));
-    std::fs::write(&txt, text).map_err(|e| format!("{}: {e}", txt.display()))?;
+    std::fs::write(&txt, text).map_err(|e| crate::messages::path_failed(txt.display(), e))?;
     saved.written.push(txt.to_string_lossy().into_owned());
 
     let other = match target {
@@ -265,7 +269,7 @@ pub fn export(request: &Export) -> Result<Saved, String> {
     use base64::Engine as _;
     let rgba = base64::engine::general_purpose::STANDARD
         .decode(request.rgba.as_bytes())
-        .map_err(|e| format!("the drawing did not arrive whole: {e}"))?;
+        .map_err(crate::messages::overview_drawing_incomplete)?;
     let image = match request.format {
         Format::Tga => super::image::tga(request.width, request.height, &rgba)?,
         Format::Bmp => super::image::bmp(request.width, request.height, &rgba)?,
@@ -301,10 +305,11 @@ pub fn sidecar_path(install: &Path, map: &str) -> PathBuf {
 fn save_sidecar(install: &Path, map: &str, edits: &serde_json::Value) -> Result<String, String> {
     let path = sidecar_path(install, map);
     if let Some(folder) = path.parent() {
-        std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        std::fs::create_dir_all(folder)
+            .map_err(|e| crate::messages::path_failed(folder.display(), e))?;
     }
     let text = serde_json::to_string_pretty(edits).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(&path, text).map_err(|e| crate::messages::path_failed(path.display(), e))?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -330,10 +335,11 @@ pub fn save_hd(
 ) -> Result<String, String> {
     let map = safe(map);
     let folder = addon_dir(install).join("overviews");
-    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| crate::messages::path_failed(folder.display(), e))?;
     let bytes = super::image::tga_hd(width, height, rgba)?;
     let path = folder.join(format!("{map}_hd.tga"));
-    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(&path, bytes).map_err(|e| crate::messages::path_failed(path.display(), e))?;
     let old = mod_dir(install)
         .join("overviews")
         .join(format!("{map}_hd.tga"));
@@ -360,10 +366,10 @@ pub fn remove_edits(map: &str) -> Result<(), String> {
 pub fn save_edits(map: &str, edits: &serde_json::Value) -> Result<(), String> {
     let path = edits_path(map);
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir).map_err(|e| crate::messages::path_failed(dir.display(), e))?;
     }
     let text = serde_json::to_string_pretty(edits).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::write(&path, text).map_err(|e| crate::messages::path_failed(path.display(), e))
 }
 
 #[cfg(test)]

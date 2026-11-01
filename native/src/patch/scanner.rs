@@ -104,10 +104,7 @@ fn leading_frame_times(
                             .unwrap(),
                     ) as usize;
                     if len > MAX_PAYLOAD_LIMIT_BYTES {
-                        return Err(format!(
-                            "Scanner alignment lost! Read impossible packet size: {} bytes at pos {}",
-                            len, pos
-                        ));
+                        return Err(crate::messages::scanner_alignment_lost(len, pos));
                     }
                     pos += total_fixed_size + len;
                 }
@@ -240,20 +237,21 @@ pub fn scan_demo_for_highlights_with_analysis(
 
     // The analysis comes from the analyzer cache when the Demo Analyzer (or an
     // earlier scan) already parsed this exact file: ~15 ms instead of a full
-    // parse of up to several seconds. A miss parses and fills the cache.
+    // parse of up to several seconds. A miss parses and fills the cache,
+    // without decoding the demo's sounds, which no analyzer reads (#37).
     let (_, analysis, _) = crate::run_analyzer_cached(&path.to_path_buf(), |_, _| {})
-        .map_err(|e| format!("Failed to parse demo: {}", e))?;
+        .map_err(crate::messages::scan_failed_to_parse_demo)?;
 
     // `frame_times` only covers the demo's opening segment (the walk stops at
     // the first section boundary), so it only needs the start of the file.
     let file_len = std::fs::metadata(path)
-        .map_err(|e| format!("Failed to read file: {}", e))?
+        .map_err(crate::messages::scan_failed_to_read_file)?
         .len() as usize;
     let prefix = read_prefix(path, LEADING_FRAMES_PREFIX_BYTES)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+        .map_err(crate::messages::scan_failed_to_read_file)?;
     let (mut frame_times, complete) = leading_frame_times(&prefix, file_len, &analysis)?;
     if !complete {
-        let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {}", e))?;
+        let bytes = std::fs::read(path).map_err(crate::messages::scan_failed_to_read_file)?;
         frame_times = leading_frame_times(&bytes, file_len, &analysis)?.0;
     }
 

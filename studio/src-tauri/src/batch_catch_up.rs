@@ -85,12 +85,15 @@ fn catch_up_one(
     apply_unfinished_takes(&manifest, &mut blocks);
     apply_obs_take_states(&manifest, &mut blocks);
     let captured = blocks.iter().filter(|b| b.captured).count();
-    log_markdown(&format!(
-        "[batch-catch-up] session {} ran while Studio was closed: {}/{} takes on disk",
-        manifest.session_id,
+    log_markdown(&crate::messages::catch_up::session_ran_while_closed(
+        &manifest.session_id,
         captured,
-        blocks.len()
+        blocks.len(),
     ));
+    // An AGR take's sound goes beside its `.agr` (#450).
+    if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::agr_take::place_batch_sounds(&manifest.blocks);
+    }
     record_capture_settings(&manifest, &blocks);
     crate::manifest_file::write_in(dir, &manifest, OUTCOME_UNWATCHED, Some(&blocks));
     CaughtUpBatch {
@@ -153,9 +156,8 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
         let running = crate::game_process_manager::running_game_pids().len();
         let capturing = games_that_may_be_capturing().len();
         if capturing < running {
-            log_markdown(&format!(
-                "[batch-catch-up] {} running game(s) have no HLAE in them, so they can't be capturing a batch: not waiting for them",
-                running - capturing
+            log_markdown(&crate::messages::catch_up::games_without_hlae(
+                running - capturing,
             ));
         }
         if capturing == 0 {
@@ -174,10 +176,7 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
                 waiting_for_game: false,
             });
         }
-        log_markdown(&format!(
-            "[batch-catch-up] {} batch(es) ran while Studio was closed; checking their takes once the game closes",
-            ids.len()
-        ));
+        log_markdown(&crate::messages::catch_up::checking_batches_once_game_closes(ids.len()));
         std::thread::spawn(move || {
             while !games_that_may_be_capturing().is_empty() {
                 std::thread::sleep(GAME_POLL);
@@ -186,9 +185,7 @@ pub async fn catch_up_unwatched_batches(app: tauri::AppHandle) -> Result<CatchUp
             // Sent even when empty: it also tells the frontend the wait is
             // over, so Start Capture Batch stops refusing (#20).
             if let Err(e) = app.emit(CATCH_UP_EVENT, &batches) {
-                log_markdown(&format!(
-                    "[batch-catch-up] Could not tell the window the batch's clips were checked: {e}"
-                ));
+                log_markdown(&crate::messages::catch_up::could_not_tell_window_checked(e));
             }
         });
         Ok(CatchUpStart {

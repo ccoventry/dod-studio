@@ -249,6 +249,12 @@ export async function refreshHlaeFfmpegStatus() {
     linkBtn.style.display = result?.can_link ? '' : 'none';
     return;
   }
+  // AGR mode's sound goes through HLAE's FFmpeg too (#450).
+  if (currentCaptureMode() === 'agr' && !result.usable) {
+    statusEl.textContent = STRINGS.CAPTURE_CONFIG.AGR_SOUND_UNAVAILABLE;
+    linkBtn.style.display = result?.can_link ? '' : 'none';
+    return;
+  }
 
   switch (s.state) {
     case 'bundled':

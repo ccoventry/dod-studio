@@ -117,10 +117,9 @@ pub(crate) fn write_in(
             Some(path)
         }
         Err(e) => {
-            native::log_markdown(&format!(
-                "Could not write the capture manifest to {}: {}",
+            native::log_markdown(&crate::messages::batch::manifest_not_written(
                 dir.display(),
-                e
+                e,
             ));
             None
         }
