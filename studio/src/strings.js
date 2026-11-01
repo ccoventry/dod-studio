@@ -677,12 +677,19 @@ export const STRINGS = {
   },
 
   // ── capture_pane.js runtime text (toasts, warnings, confirms) ───────────
+  // Under the Configuration field that blocks Start Capture (capture_field_errors.js).
+  CAPTURE_FIELDS: {
+    HL_PATH_EMPTY: 'Choose your Half-Life install: Start Capture needs hl.exe.',
+    HLAE_PATH_EMPTY: 'Set the path to hlae.exe: Start Capture needs it.',
+    OUTPUT_DIR_EMPTY: 'Add a Capture Output folder: Start Capture needs somewhere to write.',
+  },
+
   CAPTURE: {
     andNMore: (n) => `...and ${n} more`,
-    PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
+    PATHS_MISSING_WARNING: 'Set hl.exe and hlae.exe on Configuration → Paths (marked in red) before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
-    NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
+    NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output folder yet: add one on Configuration → Destinations before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
@@ -739,8 +746,8 @@ export const STRINGS = {
     takesRenderStudioMiss: (captured, total, missingRender) => `${captured}/${total} takes captured, but ${missingRender} won't be seen by Render Studio.`,
     allTakesVerified: (total) => `All ${total} takes verified on disk.`,
     highlightsMarkedCaptured: (n) => ` ${n} highlight(s) marked Captured.`,
-    BOTH_PATHS_REQUIRED: 'Please specify valid file paths for both HLAE Executable (hlae.exe) and Half-Life Executable (hl.exe).',
-    NO_CAPTURE_OUTPUT_DIR: 'Configure at least one Capture Output directory before starting a capture.',
+    BOTH_PATHS_REQUIRED: 'Set hl.exe and hlae.exe on Configuration → Paths first.',
+    NO_CAPTURE_OUTPUT_DIR: 'Add a Capture Output folder on Configuration → Destinations first.',
     NO_CAPTURE_OUTPUT_DIR_WITH_SPACE: 'Configure at least one Capture Output directory with free space before starting a capture.',
     insufficientDiskSpaceToast: (required, available) => `Insufficient disk space. Required: ${required} GB, Available: ${available} GB`,
     INITIALIZING_CAPTURE_BATCH: 'Initializing capture batch...',
@@ -1319,6 +1326,9 @@ export const STRINGS = {
     SPLIT_HANDLE_TITLE: 'Drag to resize, double-click to reset',
     CAPTURE_SPLIT_RESET_LOG: 'Capture Studio split reset to the default',
     ANALYZER_SPLIT_RESET_LOG: 'Demo Analyzer split reset to the default',
+    CAPTURE_SPLIT_LABEL: 'Capture Studio split',
+    ANALYZER_SPLIT_LABEL: 'Demo Analyzer split',
+    splitNotSaved: (label, err) => `${label} not saved: ${err}`,
   },
 
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
@@ -2913,6 +2923,9 @@ export const STRINGS = {
 
   // ── error_reporter.js: the one user-facing crash toast ───────────────────
   ERROR_REPORTER: {
+    NO_STACK: '(no stack)',
+    NOT_AN_ERROR_OBJECT: '(not an Error object)',
+    uncaughtLog: (source, message, stack) => `[error] Uncaught ${source}: ${message}\n${stack}`,
     somethingWentWrong: (message) => `Something went wrong (${message}). Details are in the activity log (Help → View Logs).`,
   },
 
@@ -2960,6 +2973,8 @@ export const STRINGS = {
     FETCH_TITLE: "Reads the release notes of every version from GitHub. Update checks are off, so DoD Studio doesn't do it by itself.",
     STATUS_READING: "Reading the release list from GitHub…",
     STATUS_FAILED: "Couldn't read GitHub's release list, and none is saved from before. The reason is in the activity log.",
+    releaseListUnreadableLog: (err) => `What's new: the release list could not be read: ${err}`,
+    githubReleaseListUnreadableLog: (err) => `What's new: GitHub's release list could not be read: ${err}`,
     STATUS_SAVED_COPY: "Couldn't read GitHub's release list, so this is the copy saved last time. The reason is in the activity log.",
     STATUS_OFFLINE_SAVED: 'Update checks are off, so this is the release list saved last time.',
     STATUS_OFFLINE_NONE: "Update checks are off, so only this version's notes show.",

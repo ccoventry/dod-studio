@@ -2188,7 +2188,7 @@ fn collapse_whitespace_outside_quotes(line: &str) -> String {
 pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
         let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+            .map_err(|e| crate::messages::failed_to_read_file(&path, e))?;
         Ok(content
             .lines()
             .map(str::trim)

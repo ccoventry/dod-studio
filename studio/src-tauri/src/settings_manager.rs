@@ -740,9 +740,9 @@ impl SettingsManager {
 /// launching the game at a folder Studio cannot name.
 pub fn apply_game_folder(settings: &AppSettings) {
     if let Err(e) = native::shared::paths::set_game_folder(&settings.game_folder) {
-        native::log_markdown(&format!(
-            "⚠️ **Settings** — {e}. Using `{}` until it is changed in Configuration → Paths (#402).",
-            native::shared::paths::DEFAULT_GAME_FOLDER
+        native::log_markdown(&crate::messages::settings::game_folder_fell_back(
+            e,
+            native::shared::paths::DEFAULT_GAME_FOLDER,
         ));
         let _ = native::shared::paths::set_game_folder("");
     }

@@ -114,7 +114,7 @@ fn make_batch_copies(
             }
             Err(e) => {
                 let line = crate::messages::demo_cannot_be_trimmed(&file_name(path), engine, &e);
-                native::log_markdown(&format!("⛔ **Batch not started** — {line}"));
+                native::log_markdown(&crate::messages::batch::batch_not_started(&line));
                 return Err(line);
             }
         }
@@ -150,7 +150,7 @@ pub fn for_preview(
         }
         Err(e) => {
             let line = crate::messages::demo_cannot_be_trimmed(&file_name(demo), &engine, &e);
-            native::log_markdown(&format!("⛔ **Preview not started** — {line}"));
+            native::log_markdown(&crate::messages::preview_start::preview_not_started(&line));
             Err(line)
         }
     }

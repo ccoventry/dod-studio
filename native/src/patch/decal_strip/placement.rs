@@ -100,12 +100,10 @@ pub(super) fn load_map(
     if key.checksum != 0 {
         match bsp::map_checksum_of_file(&path) {
             Ok(found) if found != key.checksum => {
-                crate::log_markdown(&format!(
-                    "⚠️ **Decal flush is ignoring `{}`** — the map here is a different build than \
-                     the demo was recorded on (demo wants `{:08x}`, this is `{:08x}`). Its \
-                     geometry describes a different world, so it cannot be trusted to say what a \
-                     camera can see. Falling back to the frame cone alone.",
-                    key.name, key.checksum, found
+                crate::log_markdown(&crate::messages::decal_flush_map_other_build(
+                    &key.name,
+                    key.checksum,
+                    found,
                 ));
                 return None;
             }
@@ -123,12 +121,7 @@ pub(super) fn load_map(
             Some(map)
         }
         Err(e) => {
-            crate::log_markdown(&format!(
-                "ℹ️ **Decal flush has no map geometry** for `{}`: {}. Falling back to the frame \
-                 cone alone, which cannot tell a wall from a sightline and so rejects spots that \
-                 are actually hidden.",
-                key.name, e
-            ));
+            crate::log_markdown(&crate::messages::decal_flush_no_geometry(&key.name, e));
             None
         }
     }

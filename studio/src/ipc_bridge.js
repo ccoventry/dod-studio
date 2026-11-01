@@ -1449,7 +1449,7 @@ export async function releaseHistory(offline) {
   return invoke("release_history", { offline: Boolean(offline) })
     .catch((err) => {
       console.error("IPC Execution Error (release_history):", err);
-      logFrontendEvent(`What's new: the release list could not be read: ${err}`);
+      logFrontendEvent(STRINGS.WHATS_NEW.releaseListUnreadableLog(err));
       return null;
     });
 }

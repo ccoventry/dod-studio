@@ -124,11 +124,10 @@ pub fn copy_all(plan: &[SourceCopy]) -> Result<(), String> {
                 item.copy.display()
             ));
         }
-        crate::log_markdown(&format!(
-            "📋 **Copied for the batch** — `{}` can't be played where it is (on another drive with a hook DLL older than #779, or a path viewdemo can't open), so it plays from `{}` ({:.0} MB); the copy goes when the batch ends",
+        crate::log_markdown(&crate::messages::batch_copy_made(
             item.source.display(),
             item.copy.display(),
-            item.bytes as f64 / (1024.0 * 1024.0)
+            item.bytes as f64 / (1024.0 * 1024.0),
         ));
     }
     Ok(())
@@ -139,9 +138,9 @@ pub fn copy_all(plan: &[SourceCopy]) -> Result<(), String> {
 pub fn remove_all<'a>(copies: impl IntoIterator<Item = &'a Path>) {
     for copy in copies {
         if let Some(e) = crate::shared::paths::remove_file_retrying(copy) {
-            crate::log_markdown(&format!(
-                "⚠️ **Cleanup** — could not remove the batch's copy {}: {e}",
-                copy.display()
+            crate::log_markdown(&crate::messages::batch_copy_cleanup_failed(
+                copy.display(),
+                e,
             ));
         }
     }

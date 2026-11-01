@@ -87,10 +87,9 @@ pub fn convert(path: &Path) -> Result<PathBuf, String> {
             )
         }
     })?;
-    native::log_markdown(&format!(
-        "📁 **Project** — switched {} to {}",
+    native::log_markdown(&crate::messages::settings::project_switched(
         path.display(),
-        target.display()
+        target.display(),
     ));
     Ok(target)
 }

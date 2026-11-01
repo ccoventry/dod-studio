@@ -127,11 +127,9 @@ pub(crate) fn apply_console_log(
     log_path: &Path,
 ) -> usize {
     let Some(records) = log.and_then(|log| records_in(manifest, log)) else {
-        log_markdown(&format!(
-            "[batch-catch-up] session {}: the game's console log at {} has no run of this batch; \
-             judging its takes by what they hold",
-            manifest.session_id,
-            log_path.display()
+        log_markdown(&crate::messages::catch_up::console_log_has_no_run(
+            &manifest.session_id,
+            log_path.display(),
         ));
         return 0;
     };
@@ -140,10 +138,9 @@ pub(crate) fn apply_console_log(
     let mut marked = 0;
     for (v, was) in blocks.iter().zip(captured) {
         if was && !v.captured {
-            log_markdown(&format!(
-                "[batch-catch-up] {} was recording when the game closed (its console log has no \
-                 STOP_RECORD for it): not counted as captured. Its partial take is left at {}",
-                v.take_key, v.take_folder
+            log_markdown(&crate::messages::catch_up::recording_when_game_closed(
+                &v.take_key,
+                &v.take_folder,
             ));
             marked += 1;
         }
@@ -168,10 +165,9 @@ pub(crate) fn apply_unfinished_takes(
             v.renderable = false;
             v.cut_short = true;
             v.cut_by = Some(CutBy::GameClosed);
-            log_markdown(&format!(
-                "[batch-catch-up] {} was cut short when the game closed: not counted as captured. Its partial take is left at {}",
-                block.take_key,
-                block.take_folder.display()
+            log_markdown(&crate::messages::catch_up::cut_short_when_game_closed(
+                &block.take_key,
+                block.take_folder.display(),
             ));
             marked += 1;
         }
@@ -213,10 +209,10 @@ pub(crate) fn apply_obs_take_states(
                 CutBy::StudioClosed.log_text()
             ),
         };
-        log_markdown(&format!(
-            "[batch-catch-up] {} {why}: not counted as captured. The take is left at {}",
-            block.take_key,
-            block.take_folder.display()
+        log_markdown(&crate::messages::catch_up::cut_short_because(
+            &block.take_key,
+            &why,
+            block.take_folder.display(),
         ));
         marked += 1;
     }

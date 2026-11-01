@@ -14,6 +14,16 @@
 // `native/examples/`, whose output is for the developer running them
 // (#237, D19). Issue #33.
 
+pub mod bsp;
+pub mod decal_probe;
+pub mod game_reuse;
+pub mod hook_dll;
+pub mod menu_scale;
+pub mod movie_copy;
+pub mod player_overrides;
+pub mod schedule;
+pub mod take_delete;
+
 use std::fmt::Display;
 
 // ── patch/map_fetch.rs ───────────────────────────────────────────────────
@@ -72,6 +82,21 @@ pub fn source_demo_changed(demo: impl Display) -> String {
          Scan it again before capturing, so the highlights match what is in it now.",
         demo
     )
+}
+
+pub fn scanner_alignment_lost(len: usize, pos: usize) -> String {
+    format!(
+        "Scanner alignment lost! Read impossible packet size: {} bytes at pos {}",
+        len, pos
+    )
+}
+
+pub fn scan_failed_to_parse_demo(err: impl Display) -> String {
+    format!("Failed to parse demo: {}", err)
+}
+
+pub fn scan_failed_to_read_file(err: impl Display) -> String {
+    format!("Failed to read file: {}", err)
 }
 
 // ── shared/hlae_ffmpeg.rs ────────────────────────────────────────────────
@@ -309,6 +334,26 @@ pub fn hook_copies_removed(count: usize, root: impl Display) -> String {
         ("copies", "use")
     };
     format!("goldsrc-hooks: removed {count} hook DLL {noun} no game {verb} from {root}")
+}
+
+pub fn could_not_read_hook_dll(path: impl Display, err: impl Display) -> String {
+    format!("could not read the hook DLL {}: {}", path, err)
+}
+
+pub fn hook_dll_names_no_file(path: impl Display) -> String {
+    format!("{} names no file", path)
+}
+
+pub fn could_not_make_hook_folder(dir: impl Display, err: impl Display) -> String {
+    format!("could not make the folder {}: {}", dir, err)
+}
+
+pub fn could_not_copy_hook_dll(copy: impl Display, err: impl Display) -> String {
+    format!("could not copy the hook DLL to {}: {}", copy, err)
+}
+
+pub fn could_not_write_hook_source(file: &str, dir: impl Display, err: impl Display) -> String {
+    format!("could not write {} in {}: {}", file, dir, err)
 }
 
 // ── patch/trimmed_copies.rs (#207) ────────────────────────────────────────
@@ -1404,6 +1449,389 @@ pub const DECAL_FLUSH_COMPUTED_FLOOR_ANCHOR: &str = "⚠️ **Decal flush anchor
      decal to borrow a proven surface from. If that point misses geometry, the sweep does \
      nothing at all.";
 
+// ── Error texts shared by several files (#237) ────────────────────────────
+
+/// `<path>: <why>`, the form an I/O error takes when it names the file.
+pub fn path_failed(path: impl std::fmt::Display, why: impl std::fmt::Display) -> String {
+    format!("{path}: {why}")
+}
+
+pub fn could_not_create(path: impl std::fmt::Display, why: impl std::fmt::Display) -> String {
+    format!("could not create {path}: {why}")
+}
+
+pub fn could_not_write(path: impl std::fmt::Display, why: impl std::fmt::Display) -> String {
+    format!("could not write {path}: {why}")
+}
+
+// ── crosshair_import.rs (#237) ────────────────────────────────────────────
+
+pub fn crosshair_name_missing() -> String {
+    "type a name for the crosshair (letters or numbers)".into()
+}
+
+pub fn crosshair_sprite_too_big(kilobytes: usize) -> String {
+    format!("the sprite is {kilobytes} KB, too big for a crosshair")
+}
+
+pub fn crosshair_zip_empty() -> String {
+    "the ZIP holds no crosshair (.spr) file".into()
+}
+
+pub fn crosshair_zip_many(count: usize, names: impl std::fmt::Display) -> String {
+    format!("the ZIP holds {count} sprites ({names}): unzip it and add the one you want")
+}
+
+pub fn crosshair_zip_unreadable(why: impl std::fmt::Display) -> String {
+    format!("the ZIP can't be read: {why}")
+}
+
+pub fn crosshair_zip_entry_unreadable(
+    name: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("{name} in the ZIP can't be read: {why}")
+}
+
+pub fn crosshair_zip_entry_invalid(
+    name: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("{name} in the ZIP: {why}")
+}
+
+pub fn crosshair_entry_too_big(name: impl std::fmt::Display) -> String {
+    format!("{name} is too big for a crosshair")
+}
+
+pub fn crosshair_name_taken(file: impl std::fmt::Display) -> String {
+    format!("there's already a crosshair called {file}: pick another name")
+}
+
+pub fn crosshair_source_too_big(path: impl std::fmt::Display, megabytes: u64) -> String {
+    format!("{path} is {megabytes} MB, too big to be a crosshair file")
+}
+
+// ── overview/files.rs (#237) ──────────────────────────────────────────────
+
+pub fn overview_drawing_incomplete(why: impl std::fmt::Display) -> String {
+    format!("the drawing did not arrive whole: {why}")
+}
+
+// ── sys/analysis_server.rs: activity log (#237) ───────────────────────────
+
+pub fn analysis_server_serving(pipe: impl std::fmt::Display) -> String {
+    format!("Analysis server: serving {pipe}")
+}
+
+pub fn analysis_server_name_held(pipe: impl std::fmt::Display) -> String {
+    format!("Analysis server: could not serve {pipe}, which another process holds")
+}
+
+pub fn analysis_server_plain_name_shared(pipe: impl std::fmt::Display) -> String {
+    format!(
+        "Analysis server: {pipe} is served by another DoD Studio, so this one serves only its own name until that one closes"
+    )
+}
+
+pub fn analysis_server_request(path: impl std::fmt::Display) -> String {
+    format!("Analysis server: the game asked for {path}")
+}
+
+// ── patch/engine.rs: activity log (#237) ──────────────────────────────────
+
+pub fn demo_buffer_eof(
+    label: impl std::fmt::Display,
+    expected_bytes: usize,
+    offset: u64,
+) -> String {
+    format!(
+        "Buffer Error [{label}]: Expected {expected_bytes} bytes at offset {offset}, but hit EOF."
+    )
+}
+
+pub fn demo_alignment_lost(size: usize, offset: u64) -> String {
+    format!("Alignment lost! Read impossible size: {size} at offset {offset}")
+}
+
+pub fn demo_commands_past_end(
+    count: usize,
+    demo: impl std::fmt::Display,
+    frames: impl std::fmt::Display,
+    first_tick: impl std::fmt::Display,
+    first_command: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **{count} scheduled command(s) fell past the end of** `{demo}` ({frames} frames) **and were not written.** \
+         The highlights don't match this file. First: frame {first_tick} `{first_command}`."
+    )
+}
+
+// ── patch/decal_atlas.rs: activity log (#237) ─────────────────────────────
+
+pub fn decal_atlas_unreadable(path: impl std::fmt::Display) -> String {
+    format!("⚠️ **Decal atlas unreadable** at `{path}` — ignoring it for this run.")
+}
+
+pub fn decal_atlas_checksum_mismatch(path: impl std::fmt::Display) -> String {
+    format!(
+        "⚠️ **Decal atlas checksum mismatch** at `{path}` — the map has been rebuilt since these \
+         coordinates were recorded, so they are ignored."
+    )
+}
+
+/// `action` is the verb that failed: "create", "write" or "replace".
+pub fn decal_atlas_not_saved(
+    action: &str,
+    path: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("⚠️ **Decal atlas not saved** — could not {action} `{path}`: {why}")
+}
+
+// ── hlcr/agr_take.rs: activity log (#237) ─────────────────────────────────
+
+pub fn agr_sound_empty(take: impl std::fmt::Display, agr: impl std::fmt::Display) -> String {
+    format!(
+        "⚠️ **AGR sound** — {take}: HLAE recorded nothing into {agr} (header only), so there is \
+         nothing for Blender to import; its sound is kept beside it all the same."
+    )
+}
+
+pub fn agr_sound_missing(take: impl std::fmt::Display, folder: impl std::fmt::Display) -> String {
+    format!(
+        "⚠️ **AGR sound** — {take}: no `sound.wav` under {folder}, so its `.agr` has no sound \
+         beside it. HLAE's movie recorder needs its FFmpeg for AGR mode's sound."
+    )
+}
+
+pub fn agr_sound_move_failed(
+    take: impl std::fmt::Display,
+    agr: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("⚠️ **AGR sound** — {take}: could not move the sound beside {agr}: {why}")
+}
+
+pub fn agr_sound_placed(placed: usize, agrs: usize) -> String {
+    format!(
+        "🦴 **AGR sound** — {placed} of {agrs} `.agr` file(s) have their sound beside them as a \
+         `.wav` of the same name."
+    )
+}
+
+// ── demo_bar_res.rs: activity log (#237) ──────────────────────────────────
+
+pub fn demo_bar_written(target: impl std::fmt::Display, source: impl std::fmt::Display) -> String {
+    format!("- Demo bar layout: wrote {target} from {source} with the loading progress controls")
+}
+
+pub fn demo_bar_kept_edit(target: impl std::fmt::Display) -> String {
+    format!(
+        "- Demo bar layout: kept your edited {target} (delete it to go back to the game's own layout)"
+    )
+}
+
+pub fn demo_bar_added_to_edit(target: impl std::fmt::Display) -> String {
+    format!(
+        "- Demo bar layout: added the loading progress controls to your edited {target}, keeping your edit"
+    )
+}
+
+pub fn demo_bar_skipped(why: impl std::fmt::Display) -> String {
+    format!(
+        "- Demo bar layout: skipped, the game will show no loading progress on the demo bar ({why})"
+    )
+}
+
+// ── Activity-log lines of the small native files (#237) ───────────────────
+
+pub fn hooks_injecting(dll: impl std::fmt::Display) -> String {
+    format!("goldsrc-hooks: injecting {dll}")
+}
+
+pub fn hooks_launching_from_copy(
+    copy: impl std::fmt::Display,
+    source: impl std::fmt::Display,
+) -> String {
+    format!("goldsrc-hooks: launching from a copy, {copy} (of {source})")
+}
+
+pub fn hooks_copy_failed(why: impl std::fmt::Display, source: impl std::fmt::Display) -> String {
+    format!(
+        "⚠️ goldsrc-hooks: {why}; launching from {source} itself, which stays locked while the game runs"
+    )
+}
+
+pub fn review_from_game(demo: impl std::fmt::Display, start: &impl std::fmt::Debug) -> String {
+    format!("Review from the game: {demo} ({start:?})")
+}
+
+pub fn post_roll_cut_at_demo_end(
+    highlight: usize,
+    demo: impl std::fmt::Display,
+    player: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **EOF Boundary Reached:** Highlight #{highlight} in demo '{demo}' (Player: {player}) has a post-roll that exceeds the demo's end frame. Post-roll truncated to save batch."
+    )
+}
+
+pub fn pre_roll_too_short(
+    pre_roll: impl std::fmt::Display,
+    floor: impl std::fmt::Display,
+    set_by: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **Pre-roll is shorter than this capture needs** — {pre_roll:.1}s, against a {floor:.1}s floor \
+         set by {set_by}. Playback returns to real time {pre_roll:.1}s before recording, which is not enough \
+         for it: the engine's audio buffers are left unflushed by the fast-forward. Raise the \
+         pre-roll to at least {floor:.1}s."
+    )
+}
+
+pub fn post_roll_too_short(
+    post_roll: impl std::fmt::Display,
+    floor: impl std::fmt::Display,
+    set_by: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **Post-roll is shorter than this capture needs** — {post_roll:.1}s, against a {floor:.1}s floor \
+         set by {set_by}. Anything past the post-roll fires while playback is fast-forwarding again."
+    )
+}
+
+pub fn cleanup_session_junction_failed(
+    path: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("[cleanup] Failed to remove session_junction {path}: {why}")
+}
+
+pub fn cleanup_pool_junction_failed(
+    path: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("[cleanup] Failed to remove pool junction {path}: {why}")
+}
+
+pub fn cleanup_exit_trigger_failed(
+    path: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("[cleanup] Failed to remove exit_trigger {path}: {why}")
+}
+
+pub fn decal_flush_map_other_build(map: impl std::fmt::Display, wanted: u32, found: u32) -> String {
+    format!(
+        "⚠️ **Decal flush is ignoring `{map}`** — the map here is a different build than \
+         the demo was recorded on (demo wants `{wanted:08x}`, this is `{found:08x}`). Its \
+         geometry describes a different world, so it cannot be trusted to say what a \
+         camera can see. Falling back to the frame cone alone."
+    )
+}
+
+pub fn decal_flush_no_geometry(map: impl std::fmt::Display, why: impl std::fmt::Display) -> String {
+    format!(
+        "ℹ️ **Decal flush has no map geometry** for `{map}`: {why}. Falling back to the frame \
+         cone alone, which cannot tell a wall from a sightline and so rejects spots that \
+         are actually hidden."
+    )
+}
+
+pub fn batch_copy_made(
+    source: impl std::fmt::Display,
+    copy: impl std::fmt::Display,
+    megabytes: f64,
+) -> String {
+    format!(
+        "📋 **Copied for the batch** — `{source}` can't be played where it is (on another drive with a hook DLL older than #779, or a path viewdemo can't open), so it plays from `{copy}` ({megabytes:.0} MB); the copy goes when the batch ends"
+    )
+}
+
+pub fn batch_copy_cleanup_failed(
+    copy: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!("⚠️ **Cleanup** — could not remove the batch's copy {copy}: {why}")
+}
+
+pub fn trimmed_copy_in_use(
+    demo: impl std::fmt::Display,
+    engine: impl std::fmt::Display,
+    limit: impl std::fmt::Display,
+    copy: impl std::fmt::Display,
+) -> String {
+    format!(
+        "✂️ **Trimmed copy** — `{demo}` has more entities in one snapshot than the {engine} engine takes ({limit}); \
+         the game plays the trimmed copy made earlier, `{copy}`. The original is unchanged."
+    )
+}
+
+pub fn trimmed_copy_map_unreadable(
+    demo: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **Trimmed copy** — couldn't read the map for `{demo}` ({why}); its decorations are left out of the trim"
+    )
+}
+
+pub fn cleanup_primer_demo_failed(
+    demo: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **Cleanup** — could not remove {demo} after retrying: {why} (auto_clear_temp_demos left it behind; hl.exe may still have had it open)"
+    )
+}
+
+pub fn cleanup_scratch_file_failed(
+    name: impl std::fmt::Display,
+    why: impl std::fmt::Display,
+    setting: impl std::fmt::Display,
+) -> String {
+    format!(
+        "⚠️ **Cleanup** — could not remove {name} after retrying: {why} ({setting} left it behind; something may still have had it open)"
+    )
+}
+
+// ── demo_cache.rs: activity log (#237) ────────────────────────────────────
+
+/// Older cache entries upgraded in place; `parsing_rest` is the clause naming
+/// what must be parsed again, empty when nothing does.
+pub fn cache_entries_upgraded(upgraded: usize, total: usize, parsing_rest: &str) -> String {
+    format!("Cache demos: upgraded {upgraded} of {total} older cache entries{parsing_rest}")
+}
+
+/// The clause of [`cache_entries_upgraded`] for entries that need a new parse.
+pub fn cache_parsing_the_rest(reasons: &[String]) -> String {
+    format!("; parsing the rest ({})", reasons.join(", "))
+}
+
+pub fn cache_could_not_analyse(demo: impl Display, why: impl Display) -> String {
+    format!("Cache demos: could not analyse {demo}: {why}")
+}
+
+// ── patch/builder/mod.rs: activity log (#237) ──────────────────────────────
+
+pub fn direct_to_video_capture(codec_args: impl Display, video_file: impl Display) -> String {
+    format!(
+        "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{codec_args}`) instead of \
+         writing a BMP sequence, one `{video_file}` per stream folder. Render Studio reads these the \
+         same way it reads frame sequences."
+    )
+}
+
+pub fn agr_capture(fps: impl Display) -> String {
+    format!(
+        "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file \
+         (models and camera, for the Blender page) at {fps} fps, in its take folder, with the \
+         game's sound for the same stretch beside it as a `.wav` of the same name (HLAE's \
+         movie recorder, its picture sent to FFmpeg's null muxer)."
+    )
+}
+
 // ── vegas.rs ─────────────────────────────────────────────────────────────
 
 pub const VEGAS_NO_SCRIPT: &str = "This copy of DoD Studio has no VEGAS script to install (the vegas folder in the DoD Studio repo).";
@@ -1418,6 +1846,61 @@ pub const VEGAS_NO_DOCUMENTS: &str =
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_and_builder_lines_match_their_original_inline_text() {
+        assert_eq!(
+            cache_entries_upgraded(3, 5, ""),
+            "Cache demos: upgraded 3 of 5 older cache entries"
+        );
+        assert_eq!(
+            cache_entries_upgraded(
+                3,
+                5,
+                &cache_parsing_the_rest(&["2: a".into(), "1: b".into()])
+            ),
+            "Cache demos: upgraded 3 of 5 older cache entries; parsing the rest (2: a, 1: b)"
+        );
+        assert_eq!(
+            cache_could_not_analyse("a.dem", "bad"),
+            "Cache demos: could not analyse a.dem: bad"
+        );
+        assert_eq!(
+            direct_to_video_capture("-c:v x", "video.mkv"),
+            "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`-c:v x`) instead of writing a BMP sequence, one `video.mkv` per stream folder. Render Studio reads these the same way it reads frame sequences."
+        );
+        assert_eq!(
+            agr_capture(60),
+            "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file (models and camera, for the Blender page) at 60 fps, in its take folder, with the game's sound for the same stretch beside it as a `.wav` of the same name (HLAE's movie recorder, its picture sent to FFmpeg's null muxer)."
+        );
+    }
+
+    #[test]
+    fn scanner_and_hook_copy_errors_match_their_original_inline_text() {
+        assert_eq!(
+            scanner_alignment_lost(9, 4),
+            "Scanner alignment lost! Read impossible packet size: 9 bytes at pos 4"
+        );
+        assert_eq!(scan_failed_to_parse_demo("x"), "Failed to parse demo: x");
+        assert_eq!(scan_failed_to_read_file("x"), "Failed to read file: x");
+        assert_eq!(
+            could_not_read_hook_dll("a.dll", "x"),
+            "could not read the hook DLL a.dll: x"
+        );
+        assert_eq!(hook_dll_names_no_file("a"), "a names no file");
+        assert_eq!(
+            could_not_make_hook_folder("d", "x"),
+            "could not make the folder d: x"
+        );
+        assert_eq!(
+            could_not_copy_hook_dll("c", "x"),
+            "could not copy the hook DLL to c: x"
+        );
+        assert_eq!(
+            could_not_write_hook_source("src.txt", "d", "x"),
+            "could not write src.txt in d: x"
+        );
+    }
 
     #[test]
     fn no_killstreaks_names_the_player_the_ask_and_the_longest_streak() {
@@ -1588,6 +2071,62 @@ mod tests {
              approach 12 units against a 40-unit preference. The surface each one is \
              drawn on cleared the line-of-sight test, so none should be in shot; this is the \
              margin narrowing, not a decal on screen."
+        );
+    }
+
+    #[test]
+    fn crosshair_and_overview_errors_match_their_original_inline_text() {
+        assert_eq!(
+            crosshair_zip_many(2, "a.spr, b.spr"),
+            "the ZIP holds 2 sprites (a.spr, b.spr): unzip it and add the one you want"
+        );
+        assert_eq!(
+            crosshair_name_taken("customxhair-dot.spr"),
+            "there's already a crosshair called customxhair-dot.spr: pick another name"
+        );
+        assert_eq!(
+            crosshair_source_too_big("C:/x/a.zip", 9),
+            "C:/x/a.zip is 9 MB, too big to be a crosshair file"
+        );
+        assert_eq!(path_failed("C:/x/a.txt", "denied"), "C:/x/a.txt: denied");
+        assert_eq!(
+            overview_drawing_incomplete("bad"),
+            "the drawing did not arrive whole: bad"
+        );
+    }
+
+    #[test]
+    fn native_log_lines_match_their_original_inline_text() {
+        assert_eq!(
+            demo_buffer_eof("Frame Header", 8, 100),
+            "Buffer Error [Frame Header]: Expected 8 bytes at offset 100, but hit EOF."
+        );
+        assert_eq!(
+            decal_atlas_not_saved("write", "a.json.tmp", "denied"),
+            "⚠️ **Decal atlas not saved** — could not write `a.json.tmp`: denied"
+        );
+        assert_eq!(
+            agr_sound_placed(2, 3),
+            "🦴 **AGR sound** — 2 of 3 `.agr` file(s) have their sound beside them as a \
+             `.wav` of the same name."
+        );
+        assert_eq!(
+            pre_roll_too_short(1.0_f32, 2.5_f32, "the mixer"),
+            "⚠️ **Pre-roll is shorter than this capture needs** — 1.0s, against a 2.5s floor \
+             set by the mixer. Playback returns to real time 1.0s before recording, which is not enough \
+             for it: the engine's audio buffers are left unflushed by the fast-forward. Raise the \
+             pre-roll to at least 2.5s."
+        );
+        assert_eq!(
+            decal_flush_map_other_build("dod_x", 0xab, 0xcd),
+            "⚠️ **Decal flush is ignoring `dod_x`** — the map here is a different build than \
+             the demo was recorded on (demo wants `000000ab`, this is `000000cd`). Its \
+             geometry describes a different world, so it cannot be trusted to say what a \
+             camera can see. Falling back to the frame cone alone."
+        );
+        assert_eq!(
+            review_from_game("a.dem", &Some(5)),
+            "Review from the game: a.dem (Some(5))"
         );
     }
 }
