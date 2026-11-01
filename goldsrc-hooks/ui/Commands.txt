@@ -13,6 +13,14 @@ SPECTATING (HLTV demos)
       Hide the camera mode's name ('Free Look', ...) and the green 'Press DUCK for Spectator Menu' (POV deaths too).
   ds_spec_hide_hltv_messages 0/1
       Hide the HLTV proxy's on-screen messages.
+  ds_spec_show_player_info 0-3
+      What to show over each player's head while an HLTV demo plays (nothing in POV demos) (the players the game draws, so through walls too): 0 off, 1 the name, 2 a health bar, 3 both.
+  ds_spec_xray_show 0-2
+      X-ray, like CS:GO's GOTV, while a demo plays: 0 off, 1 players behind walls glow in their team's colour, 2 and players in view get an outline too (HLTV demos: everyone; POV demos: the players the recording carries).
+  ds_spec_xray_allies_color "R G B"
+      X-ray's colour for the Allies, three numbers 0-255 (default "50 145 50", green).
+  ds_spec_xray_axis_color "R G B"
+      X-ray's colour for the Axis, three numbers 0-255 (default "160 40 40", red).
 
 HUD
   ds_hud_hide_scoreboard 0/1
