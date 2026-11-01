@@ -4706,3 +4706,13 @@ button.setup-skip:hover:not(:disabled) {
   outline: 1px solid var(--primary-accent);
   outline-offset: -1px;
 }
+
+/* A Capture Output row whose path cannot be used (#25): red field and the reason under it. */
+.list-editor-row.output-row-invalid { flex-wrap: wrap; }
+.output-row-invalid input { border-color: var(--danger-light); }
+.output-row-detail {
+  flex-basis: 100%;
+  font-size: 0.85em;
+  color: var(--danger-light);
+}
+.output-row-detail[hidden] { display: none; }

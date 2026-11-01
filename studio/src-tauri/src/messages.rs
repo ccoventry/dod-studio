@@ -5,9 +5,9 @@
 // (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
-// as a toast/dialog string. Developer-only log_markdown/eprintln!
-// diagnostics stay inline at their call site, same as strings.js leaves
-// console.log/console.error alone. Issue #33, track 2 — a parallel catalog
+// as a toast/dialog string, and, since #237's decision, the activity-log
+// lines too (moved area by area, e.g. `messages/capture.rs`). Per-item
+// eprintln! diagnostics stay inline. Issue #33, track 2 — a parallel catalog
 // to strings.js, not a merge into it (Rust and JS strings are never shared
 // cross-language here).
 //
@@ -26,6 +26,8 @@
 // (`takeCheckFailed`, `takeThumbFailed`, `takeSheetFailed`,
 // `deleteTakeRefused`) and the demo preview (`previewFailed`). Check the JS
 // caller before wrapping.
+
+pub mod capture;
 
 use std::fmt::Display;
 use std::path::Path;
