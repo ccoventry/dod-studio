@@ -43,7 +43,7 @@ export function startDemoContextMenu({ startReview }) {
     const actions = {
       // Preview and Review work on the demo open in Highlight Details, so the
       // row is selected first, exactly as a left click would.
-      launchPreview: () => { select(); document.querySelector('#btn-launch-preview')?.click(); },
+      launchPreview: () => { if (select()) document.querySelector('#btn-launch-preview')?.click(); },
       review: () => startReview([demo.path], {
         covers: document.querySelector('#review-covers-select')?.value,
       }),

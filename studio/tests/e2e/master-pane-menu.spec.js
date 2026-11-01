@@ -103,4 +103,26 @@ test.describe('queue row context menu', () => {
     expect(box.x + box.width).toBeLessThanOrEqual(320);
     expect(box.y + box.height).toBeLessThanOrEqual(300);
   });
+  test('Launch Preview after the queue was rebuilt selects the demo at its new index', async ({ page }) => {
+    await gotoHarness(page);
+    await row(page, 'bravo.dem').click({ button: 'right' });
+    await page.evaluate(() => window.__rerender(['bravo.dem', 'alpha.dem']));
+    await item(page, 'Launch Preview').click();
+    expect(await page.evaluate(() => window.__selected)).toBe('bravo.dem@0');
+    await expect(page.locator('#result')).toHaveText('preview bravo.dem@0');
+  });
+
+  test('Launch Preview does nothing when the demo left the queue while the menu was open', async ({ page }) => {
+    await gotoHarness(page);
+    await row(page, 'bravo.dem').click({ button: 'right' });
+    await page.evaluate(() => window.__rerender(['alpha.dem']));
+    await item(page, 'Launch Preview').click();
+    await expect(page.locator('#result')).toHaveText('');
+  });
+
+  test('rows are not Tab stops, so Tab still goes checkbox to Remove', async ({ page }) => {
+    await gotoHarness(page);
+    const tabIndexes = await page.$$eval('#master-demo-table-body tr', (rs) => rs.map((r) => r.tabIndex));
+    expect(tabIndexes.every((t) => t === -1)).toBe(true);
+  });
 });

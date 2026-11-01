@@ -91,6 +91,17 @@ export function setDemoRowMenuHandler(handler) {
   currentOnRowMenu = handler;
 }
 
+/** Selects `demo` as a left click on its row would. A queue re-render while
+ *  the menu was open leaves `tr` detached with an index that may no longer be
+ *  the demo's, so the index is looked up again. False when the demo is gone. */
+function selectForMenu(demo, tr) {
+  const idx = currentDemos.indexOf(demo);
+  if (idx === -1) return false;
+  if (tr.isConnected) tr.click();
+  else if (currentOnSelectDemo) currentOnSelectDemo(demo, idx);
+  return true;
+}
+
 /** Opens the row's menu at the pointer, or for the keyboard beside the row. */
 function openRowMenu(demo, tr, e, fromKeyboard) {
   if (!currentOnRowMenu) return;
@@ -99,7 +110,7 @@ function openRowMenu(demo, tr, e, fromKeyboard) {
     const box = tr.getBoundingClientRect();
     at = { x: box.left + 32, y: box.bottom };
   }
-  currentOnRowMenu({ demo, row: tr, select: () => tr.click(), at, fromKeyboard });
+  currentOnRowMenu({ demo, row: tr, select: () => selectForMenu(demo, tr), at, fromKeyboard });
 }
 
 /** Who recorded `demo` ({ id, name }), or null: HLTV, no resolvable owner,
@@ -635,7 +646,9 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // Right-click, or the Menu key / Shift+F10 on the focused row (#1111).
     // A menu key press also raises a contextmenu event of its own, which the
     // keydown has already answered.
-    tr.tabIndex = 0;
+    // -1: a click focuses the row (so the Menu key works) but Tab still goes
+    // straight from checkbox to Remove instead of stopping on every row.
+    tr.tabIndex = -1;
     tr.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       if (performance.now() - lastMenuKeyAt < 600) return;

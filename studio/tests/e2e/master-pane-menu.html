@@ -47,6 +47,9 @@
       startReview: (paths) => { result.textContent = `review ${paths.join(',')}`; },
     });
     renderMasterList(demos, null, (demo) => { window.__selected = demo.name; });
+    // For the stale-menu test: rebuild the queue with the given demo names, in order.
+    window.__rerender = (names) => renderMasterList(
+      names.map((n) => demos.find((d) => d.name === n)), null, (demo, idx) => { window.__selected = `${demo.name}@${idx}`; });
     window.__harnessReady = true;
   </script>
 </body>
