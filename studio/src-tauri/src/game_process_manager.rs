@@ -45,10 +45,9 @@ pub(crate) fn watch_for_error_dialogs(
                     continue;
                 }
                 reported.push(dialog.window);
-                log_markdown(&format!(
-                    "[launch] Error box from PID {}: {}",
+                log_markdown(&crate::messages::game_process::launch_error_box(
                     dialog.pid,
-                    dialog.full_text()
+                    dialog.full_text(),
                 ));
                 let _ = app.emit("external_error", dialog.summary());
             }
@@ -198,12 +197,13 @@ pub async fn check_running_game(
             differs,
         } = &check
         {
-            log_markdown(&format!(
-                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}{}",
-                running.exe,
+            log_markdown(&crate::messages::game_process::launch_game_other_settings(
+                *pid,
+                differs,
+                &running.exe,
                 running.width,
                 running.height,
-                wanted.exe,
+                &wanted.exe,
                 launch.resolution_width,
                 launch.resolution_height,
                 hook_dll_log(running, wanted, differs),
@@ -223,8 +223,7 @@ fn hook_dll_log(
 ) -> String {
     use native::patch::launch_settings::LaunchDifference;
     let side = |launch: &native::patch::launch_settings::GameLaunch| {
-        format!(
-            "hook build {} ({})",
+        crate::messages::game_process::launch_hook_side(
             launch
                 .hook_build
                 .as_deref()
@@ -233,18 +232,11 @@ fn hook_dll_log(
         )
     };
     if differs.contains(&LaunchDifference::HookUnreadable) {
-        format!(
-            "; which hook DLL the game has could not be read, Studio would launch {}",
-            side(wanted)
-        )
+        crate::messages::game_process::launch_hook_unreadable(side(wanted))
     } else if differs.contains(&LaunchDifference::HookDll)
         || differs.contains(&LaunchDifference::HookBuild)
     {
-        format!(
-            "; the game runs {}, Studio would launch {}",
-            side(running),
-            side(wanted)
-        )
+        crate::messages::game_process::launch_hook_differs(side(running), side(wanted))
     } else {
         String::new()
     }
@@ -286,12 +278,12 @@ pub async fn running_game_for_batch(
             asks_this_studio: pid.is_some_and(native::sys::studio_pipe::game_asks_this_studio),
         });
         match &verdict {
-            Ok(pid) => log_markdown(&format!(
-                "[launch] The batch runs in the game that is already open (PID {pid}) (#725)"
+            Ok(pid) => log_markdown(&crate::messages::game_process::launch_batch_reuses_game(
+                *pid,
             )),
-            Err(why) => log_markdown(&format!(
-                "[launch] The open game can't take the batch — {why}; asking to start it again"
-            )),
+            Err(why) => log_markdown(
+                &crate::messages::game_process::launch_open_game_cannot_take_batch(why),
+            ),
         }
         Ok(verdict.ok())
     }))
@@ -306,9 +298,7 @@ const CLOSE_GAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1
 #[tauri::command]
 pub async fn close_running_game(pid: u32) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        log_markdown(&format!(
-            "[launch] Closing game {pid} to start it with the current launch settings"
-        ));
+        log_markdown(&crate::messages::game_process::launch_closing_game(pid));
         if native::sys::process::close_game(pid, CLOSE_GAME_TIMEOUT) {
             Ok(())
         } else {
@@ -374,9 +364,8 @@ pub fn kill_engine_processes() -> Result<(), String> {
     let sys = native::sys::process::snapshot();
     for process in sys.processes().values() {
         if native::sys::process::is_named(process, ENGINE_PROCESS_NAMES) && !process.kill() {
-            log_markdown(&format!(
-                "[engine] Failed to kill engine process pid={}",
-                process.pid()
+            log_markdown(&crate::messages::game_process::engine_kill_failed(
+                process.pid(),
             ));
         }
     }

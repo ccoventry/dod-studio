@@ -261,13 +261,11 @@ fn reuse_copy(demo: &Path, engine: &Engine, path: &Path) {
         seed_analysis(&cache, demo, path, None);
     }
     mark_used(path);
-    crate::log_markdown(&format!(
-        "✂️ **Trimmed copy** — `{}` has more entities in one snapshot than the {} engine takes ({}); \
-         the game plays the trimmed copy made earlier, `{}`. The original is unchanged.",
+    crate::log_markdown(&crate::messages::trimmed_copy_in_use(
         file_name(demo),
         engine.name(),
         engine.limit,
-        path.display()
+        path.display(),
     ));
 }
 
@@ -297,9 +295,9 @@ impl MapFile {
         match parsed {
             Ok(props) => Some(props),
             Err(e) => {
-                crate::log_markdown(&format!(
-                    "⚠️ **Trimmed copy** — couldn't read the map for `{}` ({e}); its decorations are left out of the trim",
-                    file_name(demo)
+                crate::log_markdown(&crate::messages::trimmed_copy_map_unreadable(
+                    file_name(demo),
+                    e,
                 ));
                 None
             }

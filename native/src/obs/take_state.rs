@@ -49,10 +49,9 @@ pub fn save(block_folder: &Path, state: ObsTakeState) {
             .and_then(|json| std::fs::write(&path, json))
     };
     if let Err(e) = result {
-        crate::log_markdown(&format!(
-            "⚠️ **OBS** — could not record the take's state at {}: {e}. A catch-up after a \
-             restart may count this take as whole.",
-            path.display()
+        crate::log_markdown(&crate::messages::obs_take_state_not_recorded(
+            path.display(),
+            e,
         ));
     }
 }

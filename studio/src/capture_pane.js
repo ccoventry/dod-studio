@@ -37,6 +37,7 @@ import { isObsTestBatch } from './obs_test_flag.js';
 import { takeCleanupMakesRoom } from './take_cleanup.js';
 import { rendersMakeRoom } from './render_while_capturing.js';
 import { gigabytes } from './byte_size.js';
+import { syncCaptureFieldErrors } from './capture_field_errors.js';
 import { isBatchStillRunningInGame } from './batch_catch_up.js';
 
 let listeningForExternalErrors = false;
@@ -335,6 +336,13 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
+  // Only once something is picked to capture: a fresh install with nothing
+  // set up yet is not an error screen.
+  syncCaptureFieldErrors({
+    hlPath: document.querySelector('#hl-path-input')?.value,
+    hlaePath: document.querySelector('#hlae-path-input')?.value,
+    driveCount: effectiveDrivePool.length,
+  }, !noHighlightsSelected);
   const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || (insufficientSpace && !makesRoom);
 
   if (!capturingInFlight && !precheck?.isChecking()) {
@@ -624,6 +632,8 @@ export function batchSettingsPayload(state) {
   const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
   const autoClearTempDemosVal = document.querySelector("#config-auto-clear-temp-demos")?.checked || false;
 
+  // Mark the fields for when the user goes to Configuration; the toast says now.
+  syncCaptureFieldErrors({ hlPath: hlPathVal, hlaePath: hlaePathVal, driveCount: (state.targetDrives || []).filter(Boolean).length });
   if (!hlaePathVal || !hlPathVal) {
     showToast(STRINGS.CAPTURE.BOTH_PATHS_REQUIRED, 'error');
     return null;

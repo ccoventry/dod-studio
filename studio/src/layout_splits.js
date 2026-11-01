@@ -31,7 +31,7 @@ export function createLayoutSplits({ persist }) {
   }
 
   function save(label) {
-    persist().catch((err) => logFrontendEvent(`${label} not saved: ${err}`));
+    persist().catch((err) => logFrontendEvent(STRINGS.LAYOUT.splitNotSaved(label, err)));
   }
 
   function startCaptureSplit() {
@@ -57,12 +57,12 @@ export function createLayoutSplits({ persist }) {
       apply: (px) => { left.style.flex = `0 0 ${(px / container.clientWidth) * 100}%`; },
       commit: (px) => {
         captureLeftPermille = pxToPermille(px, container.clientWidth);
-        save('Capture Studio split');
+        save(STRINGS.LAYOUT.CAPTURE_SPLIT_LABEL);
       },
       reset: () => {
         captureLeftPermille = null;
         showSaved();
-        save('Capture Studio split');
+        save(STRINGS.LAYOUT.CAPTURE_SPLIT_LABEL);
         logFrontendEvent(STRINGS.LAYOUT.CAPTURE_SPLIT_RESET_LOG);
       },
     });
@@ -91,12 +91,12 @@ export function createLayoutSplits({ persist }) {
       apply: show,
       commit: (px) => {
         analyzerDemosPx = Math.round(px);
-        save('Demo Analyzer split');
+        save(STRINGS.LAYOUT.ANALYZER_SPLIT_LABEL);
       },
       reset: () => {
         analyzerDemosPx = null;
         show(null);
-        save('Demo Analyzer split');
+        save(STRINGS.LAYOUT.ANALYZER_SPLIT_LABEL);
         logFrontendEvent(STRINGS.LAYOUT.ANALYZER_SPLIT_RESET_LOG);
       },
     });

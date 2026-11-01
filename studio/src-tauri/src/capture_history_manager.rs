@@ -64,12 +64,11 @@ pub fn locate_rendered_videos(app: AppHandle, paths: Vec<String>) -> Vec<Option<
     // Only a lookup that had to search is worth a line: one per opened list
     // whose videos are all in place would bury the log.
     if moved + missing > 0 {
-        log_markdown(&format!(
-            "[render-locate] {} rendered video(s): {} found again in the export folders, {} missing ({} ms)",
+        log_markdown(&crate::messages::render::videos_located(
             paths.len(),
             moved,
             missing,
-            started.elapsed().as_millis()
+            started.elapsed().as_millis(),
         ));
     }
     located

@@ -273,14 +273,8 @@ fn warn_about_game_cfgs(config: &PatcherConfig) {
         })
         .collect();
 
-    crate::log_markdown(&format!(
-        "⚠️ **The game's own configs set values this pipeline depends on**: {}. Nothing here \
-         changes them — they are yours. But `r_decals` decides how many decals the engine keeps, \
-         and the sweep is sized to it; `mirv_fov` decides what counts as on screen. Stating them \
-         in the app's Init Commands instead puts them where the pipeline can see them. The FOV \
-         above has been used for this capture; `r_decals` has not, because the pipeline's own pin \
-         runs after the config and would override it anyway.",
-        lines.join(", ")
+    crate::log_markdown(&crate::messages::decal_flush_game_cfgs_set_values(
+        lines.join(", "),
     ));
 }
 
@@ -451,11 +445,7 @@ pub fn prepare_flushed_source(
     // being 0 is a real, reachable contradiction — logged the same as every
     // other skip path, since this one is otherwise completely silent.
     if ring_limit(config) == 0 {
-        crate::log_markdown(
-            "⚠️ **Decal flush skipped** — Flush Decals Between Clips is on, but r_decals \
-             resolves to 0 (stated in Initial Commands, or the app's own configured default). \
-             There is no ring to sweep. Capture continues; walls will not be cleaned between clips.",
-        );
+        crate::log_markdown(crate::messages::DECAL_FLUSH_SKIPPED_NO_RING);
         return Ok(None);
     }
 
@@ -470,10 +460,8 @@ pub fn prepare_flushed_source(
     let keep_windows = match keep_windows_for(job) {
         Some(w) => w,
         None => {
-            crate::log_markdown(&format!(
-                "⚠️ **Decal flush skipped** — not every block in `{}` carries usable record \
-                 bounds. Capture continues; walls will not be cleaned between clips.",
-                job.source_demo
+            crate::log_markdown(&crate::messages::decal_flush_skipped_no_record_bounds(
+                &job.source_demo,
             ));
             return Ok(None);
         }
@@ -482,9 +470,9 @@ pub fn prepare_flushed_source(
     let bytes = match std::fs::read(&job.source_demo) {
         Ok(b) => b,
         Err(e) => {
-            crate::log_markdown(&format!(
-                "⚠️ **Decal flush skipped** — could not read `{}`: {}",
-                job.source_demo, e
+            crate::log_markdown(&crate::messages::decal_flush_skipped_unreadable(
+                &job.source_demo,
+                e,
             ));
             return Ok(None);
         }
@@ -499,11 +487,7 @@ pub fn prepare_flushed_source(
         // in the capture log for something they did on purpose.
         Err(DecalCleanError::Cancelled) => return Err(crate::patch::Cancelled),
         Err(e) => {
-            crate::log_markdown(&format!(
-                "⚠️ **Decal flush failed** on `{}`: {}. Capture continues with the unmodified \
-                 demo; walls will not be cleaned between clips.",
-                job.source_demo, e
-            ));
+            crate::log_markdown(&crate::messages::decal_flush_failed(&job.source_demo, e));
             return Ok(None);
         }
     };
@@ -519,10 +503,9 @@ pub fn prepare_flushed_source(
 
     let path = scratch_path(&job.source_demo);
     if let Err(e) = std::fs::write(&path, &cleaned) {
-        crate::log_markdown(&format!(
-            "⚠️ **Decal flush skipped** — could not write scratch demo `{}`: {}",
+        crate::log_markdown(&crate::messages::decal_flush_skipped_scratch_not_written(
             path.display(),
-            e
+            e,
         ));
         return Ok(None);
     }
@@ -558,28 +541,14 @@ fn report(
     // and a log that does not mention it is a log someone will later read as
     // evidence about the shipped behaviour.
     if opts.require_pvs_hidden {
-        crate::log_markdown(
-            "🧪 **EXPERIMENT: `DOD_FLUSH_PVS_ONLY` is set.** The sweep was placed only where leaf \
-             visibility says the engine never renders it. This is the test of whether a decal on \
-             an unrendered face still allocates a ring slot — if old bullet holes survive into a \
-             clip, it does not. Unset the variable for a normal capture.",
-        );
+        crate::log_markdown(crate::messages::DECAL_FLUSH_EXPERIMENT_PVS_ONLY);
     }
     if opts.map_geometry_only {
-        crate::log_markdown(
-            "🧪 **EXPERIMENT: `DOD_FLUSH_MAP_GEOMETRY_ONLY` is set.** The sweep was placed from \
-             the map's own world faces alone — no harvested decals, no tiled planes, no \
-             coordinate store, no floor path. This is how the source meant for maps nobody has \
-             captured yet gets watched on a map somebody can watch. Unset the variable for a \
-             normal capture.",
-        );
+        crate::log_markdown(crate::messages::DECAL_FLUSH_EXPERIMENT_MAP_GEOMETRY_ONLY);
     }
 
-    crate::log_markdown(&format!(
-        "🧹 **Decal flush** on `{}`: stripped {} wall decals and {} sprays outside {} clip(s); \
-         injected {} flush decals across {} of {} position(s) from {}, in {} burst(s); \
-         r_decals pinned to {}.",
-        job.source_demo,
+    crate::log_markdown(&crate::messages::decal_flush_summary(
+        &job.source_demo,
         stats.temp_entity_stripped,
         stats.player_spray_stripped,
         keep_windows.len(),
@@ -588,7 +557,7 @@ fn report(
         stats.flush_positions_wanted,
         source,
         stats.bursts_placed,
-        opts.ring_limit
+        opts.ring_limit,
     ));
 
     // What the on-screen decision was actually able to consult. This changes
@@ -596,23 +565,19 @@ fn report(
     // geometry and 68 chosen against a bare cone are not the same claim, and
     // the counts look identical.
     match stats.visibility_basis {
-        VisibilityBasis::Geometry => crate::log_markdown(&format!(
-            "👁️ **Placement used map geometry** — {} world faces{}. Positions were kept only \
-             where the map says the camera cannot see them, not merely where they fall outside \
-             the frame.",
-            stats.map_faces,
-            if stats.map_has_vis {
-                ", with visibility data"
-            } else {
-                ", but the map carries no visibility data, so every in-frame candidate needed a \
-                 trace"
-            }
-        )),
-        VisibilityBasis::ConeOnly => crate::log_markdown(
-            "⚠️ **Placement used the frame cone alone** — no map geometry was available, so the \
-             pass cannot tell a wall from a sightline. It rejects spots that are genuinely \
-             hidden, and where that leaves it with nothing it will settle for a marginal one.",
-        ),
+        VisibilityBasis::Geometry => {
+            crate::log_markdown(&crate::messages::decal_flush_placement_used_geometry(
+                stats.map_faces,
+                if stats.map_has_vis {
+                    crate::messages::DECAL_FLUSH_GEOMETRY_WITH_VIS
+                } else {
+                    crate::messages::DECAL_FLUSH_GEOMETRY_NO_VIS
+                },
+            ))
+        }
+        VisibilityBasis::ConeOnly => {
+            crate::log_markdown(crate::messages::DECAL_FLUSH_PLACEMENT_CONE_ONLY)
+        }
     }
 
     // What the map's store contributed. Worth its own line: a demo that
@@ -620,9 +585,7 @@ fn report(
     // situation from one that stands on its own, and the difference is
     // invisible in the position count.
     if let Some(map) = &stats.atlas_map {
-        crate::log_markdown(&format!(
-            "🗺️ **Map coordinate store** for `{}`: {} coordinate(s) already known, {} added by \
-             this demo, {} now held{}.",
+        crate::log_markdown(&crate::messages::decal_flush_atlas_summary(
             map,
             stats.atlas.known,
             stats.atlas.added,
@@ -631,10 +594,10 @@ fn report(
             // *source* is not a reason to stop feeding it — but saying those
             // coordinates were "available to the flush" would be untrue.
             if opts.map_geometry_only {
-                " (the experiment gate refused them as a source for this run)"
+                crate::messages::DECAL_FLUSH_ATLAS_REFUSED_BY_GATE
             } else {
-                " and available to the flush"
-            }
+                crate::messages::DECAL_FLUSH_ATLAS_AVAILABLE
+            },
         ));
     }
 
@@ -651,16 +614,14 @@ fn report(
     // evidence.
     if stats.map_candidates > 0 {
         let why = if opts.map_geometry_only {
-            "every source drawn from the match was refused by the experiment gate"
+            crate::messages::DECAL_FLUSH_MAP_WHY_GATE
         } else {
-            "the demo's decals and the coordinate store together could not fill a sweep"
+            crate::messages::DECAL_FLUSH_MAP_WHY_SHORT
         };
-        crate::log_markdown(&format!(
-            "🧱 **Placed from the map's own geometry** — {}, so {} point(s) were sampled off the \
-             map's world faces and {} of those stayed clear of every in-clip camera. This source \
-             owes nothing to where anyone shot or walked, which is what lets it cover a map the \
-             store has never seen.",
-            why, stats.map_candidates, stats.map_camera_safe
+        crate::log_markdown(&crate::messages::decal_flush_placed_from_geometry(
+            why,
+            stats.map_candidates,
+            stats.map_camera_safe,
         ));
     }
 
@@ -669,19 +630,14 @@ fn report(
     // advances the ring — so the sweep stops short of a full revolution and
     // some of the old decals survive it.
     if stats.flush_positions < stats.flush_positions_wanted {
-        crate::log_markdown(&format!(
-            "⚠️ **Partial decal sweep** — only {} of the {} distinct positions a full ring \
-             revolution needs, so some decals will survive into the clip. {} tiles were laid \
-             across the demo's proven planes and {} of those stayed clear of every in-clip \
-             camera. An `r_decals {}` init command would give a complete sweep of a smaller \
-             ring instead.",
+        crate::log_markdown(&crate::messages::decal_flush_partial_sweep(
             stats.flush_positions,
             stats.flush_positions_wanted,
             stats.tiled_candidates,
             stats.tiled_camera_safe,
             // The largest ring this many positions can fully turn, backing the
             // over-provision margin out of the burst it implies.
-            (stats.flush_positions * DECALS_PER_POSITION).saturating_sub(opts.burst_margin)
+            (stats.flush_positions * DECALS_PER_POSITION).saturating_sub(opts.burst_margin),
         ));
     }
 
@@ -692,12 +648,9 @@ fn report(
     if let Some(nearest) = stats.min_camera_distance
         && nearest < opts.min_camera_clearance
     {
-        crate::log_markdown(&format!(
-            "ℹ️ **Decal flush spots are closer to the camera than preferred** — nearest \
-                 approach {:.0} units against a {:.0}-unit preference. The surface each one is \
-                 drawn on cleared the line-of-sight test, so none should be in shot; this is the \
-                 margin narrowing, not a decal on screen.",
-            nearest, opts.min_camera_clearance
+        crate::log_markdown(&crate::messages::decal_flush_spots_close_to_camera(
+            nearest,
+            opts.min_camera_clearance,
         ));
     }
 
@@ -705,30 +658,25 @@ fn report(
     // screen. The cone test is sampled every fourth frame, so a non-zero count
     // here has to be looked at rather than trusted.
     if stats.flush_on_camera_frames > 0 {
-        crate::log_markdown(&format!(
-            "⚠️ **Flush decals may be on camera** — the chosen spot(s) fall inside the camera cone \
-             on {} of {} sampled in-clip frames. Review the takes.",
-            stats.flush_on_camera_frames, stats.camera_samples
+        crate::log_markdown(&crate::messages::decal_flush_may_be_on_camera(
+            stats.flush_on_camera_frames,
+            stats.camera_samples,
         ));
     }
 
     // A gap too short to fit a whole sweep before the clip opens.
     for (window_start, placed, wanted) in &stats.bursts_short {
-        crate::log_markdown(&format!(
-            "⚠️ **Short decal burst** before frame {} — placed {} of {}. That clip is not \
-             guaranteed to start clean.",
-            window_start, placed, wanted
+        crate::log_markdown(&crate::messages::decal_flush_short_burst(
+            window_start,
+            placed,
+            wanted,
         ));
     }
 
     // A computed floor point is geometry the demo never proved. If it misses a
     // surface the engine creates nothing and the entire sweep no-ops silently.
     if stats.flush_source == Some(FlushSource::ComputedSpawnFloor) {
-        crate::log_markdown(
-            "⚠️ **Decal flush anchored on a computed floor point** — the demo contained no real \
-             decal to borrow a proven surface from. If that point misses geometry, the sweep does \
-             nothing at all.",
-        );
+        crate::log_markdown(crate::messages::DECAL_FLUSH_COMPUTED_FLOOR_ANCHOR);
     }
 }
 
