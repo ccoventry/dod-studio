@@ -273,6 +273,10 @@ pub fn install() {
     if let Some(weather) = register(crate::map_weather::NAME, "0") {
         crate::map_weather::CVAR.set(weather);
     }
+    // Standalone: read by demo_reload's playdemo/viewdemo wrappers.
+    if let Some(cvar) = register(crate::map_cfgs::NAME, "1") {
+        crate::map_cfgs::SETTING.set_cvar(cvar);
+    }
     for family in crate::map_sounds::Family::ALL {
         if let Some(mute) = register(family.setting(), "0") {
             family.cvar().set(mute);
