@@ -13,22 +13,53 @@ describe('rowStatusFor', () => {
     expect(rowStatusFor({ status: 'not_absolute', usable: false }).tone).toBe('bad');
     expect(rowStatusFor({ status: 'not_a_directory', usable: false }).text).toBe('That is a file');
     expect(rowStatusFor({ status: 'malformed', usable: false }).text).toBe('Not a valid path');
+    expect(rowStatusFor({ status: 'not_found', usable: false }).detail).toContain('drive');
+    expect(rowStatusFor({ status: 'ok', usable: true }).detail).toBeUndefined();
   });
 });
 
 describe('createCaptureOutputStatus', () => {
   const fakeEl = () => ({ hidden: false, className: '', textContent: '', title: '' });
+  const fakeRow = () => {
+    const parts = { '.output-row-status': fakeEl(), '.output-row-detail': fakeEl() };
+    const classes = new Set();
+    return {
+      parts,
+      classes,
+      querySelector: (sel) => parts[sel],
+      appendChild() {},
+      classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+    };
+  };
   function setup(paths, diagnose) {
-    const chips = paths.map(fakeEl);
-    const rows = chips.map((chip) => ({ querySelector: () => chip, appendChild() {} }));
+    const rows = paths.map(fakeRow);
+    const chips = rows.map((r) => r.parts['.output-row-status']);
     globalThis.document = { createElement: fakeEl };
     const status = createCaptureOutputStatus({
       getPaths: () => paths,
       diagnose,
       container: { querySelectorAll: () => rows },
     });
-    return { chips, status };
+    return { chips, rows, status };
   }
+
+  it('marks a bad row and says what is wrong with that path, leaving good rows alone', async () => {
+    const { rows, status } = setup(['E:/a', 'relative'], async (p) => p.map((path) => (
+      path === 'relative'
+        ? { path, status: 'not_absolute', usable: false }
+        : { path, status: 'ok', usable: true })));
+    await status.refresh();
+    expect(rows[0].classes.has('output-row-invalid')).toBe(false);
+    expect(rows[0].parts['.output-row-detail'].hidden).toBe(true);
+    expect(rows[1].classes.has('output-row-invalid')).toBe(true);
+    expect(rows[1].parts['.output-row-detail'].textContent).toContain('drive letter');
+  });
+
+  it('does not mark a folder that will simply be created', async () => {
+    const { rows, status } = setup(['E:/new'], async (p) => p.map((path) => ({ path, status: 'not_found', usable: true })));
+    await status.refresh();
+    expect(rows[0].classes.has('output-row-invalid')).toBe(false);
+  });
 
   it('hides the chip of a blank row instead of leaving it on Checking', async () => {
     const { chips, status } = setup(['E:/a', ''], async (p) => p.map((path) => ({ path, status: 'ok', usable: true })));
