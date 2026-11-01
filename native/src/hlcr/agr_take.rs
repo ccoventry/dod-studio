@@ -98,41 +98,33 @@ pub fn place_batch_sounds(blocks: &[crate::patch::types::CaptureBlock]) -> Sound
         }
         agrs += 1;
         if !agr_has_frames(&agr) {
-            crate::log_markdown(&format!(
-                "⚠️ **AGR sound** — {}: HLAE recorded nothing into {} (header only), so there is \
-                 nothing for Blender to import; its sound is kept beside it all the same.",
-                block.take_key,
-                agr.display()
+            crate::log_markdown(&crate::messages::agr_sound_empty(
+                &block.take_key,
+                agr.display(),
             ));
             result.empty_agr.push(block.take_key.clone());
         }
         match place_take_sound(folder, &agr) {
             Ok(Some(_)) => result.placed += 1,
             Ok(None) => {
-                crate::log_markdown(&format!(
-                    "⚠️ **AGR sound** — {}: no `sound.wav` under {}, so its `.agr` has no sound \
-                     beside it. HLAE's movie recorder needs its FFmpeg for AGR mode's sound.",
-                    block.take_key,
-                    folder.display()
+                crate::log_markdown(&crate::messages::agr_sound_missing(
+                    &block.take_key,
+                    folder.display(),
                 ));
                 result.no_sound.push(block.take_key.clone());
             }
             Err(e) => {
-                crate::log_markdown(&format!(
-                    "⚠️ **AGR sound** — {}: could not move the sound beside {}: {e}",
-                    block.take_key,
-                    agr.display()
+                crate::log_markdown(&crate::messages::agr_sound_move_failed(
+                    &block.take_key,
+                    agr.display(),
+                    &e,
                 ));
                 result.failed.push((block.take_key.clone(), e.to_string()));
             }
         }
     }
     if agrs > 0 {
-        crate::log_markdown(&format!(
-            "🦴 **AGR sound** — {} of {agrs} `.agr` file(s) have their sound beside them as a \
-             `.wav` of the same name.",
-            result.placed
-        ));
+        crate::log_markdown(&crate::messages::agr_sound_placed(result.placed, agrs));
     }
     result
 }

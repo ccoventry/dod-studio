@@ -368,23 +368,17 @@ pub fn prepare(hl_exe: &str, game_folder: &str) {
         return;
     };
     match install(game_dir, game_folder) {
-        Ok(Outcome::Written { source, target }) => crate::log_markdown(&format!(
-            "- Demo bar layout: wrote {} from {} with the loading progress controls",
-            target.display(),
-            source.display()
-        )),
+        Ok(Outcome::Written { source, target }) => crate::log_markdown(
+            &crate::messages::demo_bar_written(target.display(), source.display()),
+        ),
         Ok(Outcome::Unchanged) => {}
-        Ok(Outcome::KeptEdit { target }) => crate::log_markdown(&format!(
-            "- Demo bar layout: kept your edited {} (delete it to go back to the game's own layout)",
-            target.display()
-        )),
-        Ok(Outcome::AddedToEdit { target }) => crate::log_markdown(&format!(
-            "- Demo bar layout: added the loading progress controls to your edited {}, keeping your edit",
-            target.display()
-        )),
-        Err(why) => crate::log_markdown(&format!(
-            "- Demo bar layout: skipped, the game will show no loading progress on the demo bar ({why})"
-        )),
+        Ok(Outcome::KeptEdit { target }) => {
+            crate::log_markdown(&crate::messages::demo_bar_kept_edit(target.display()))
+        }
+        Ok(Outcome::AddedToEdit { target }) => {
+            crate::log_markdown(&crate::messages::demo_bar_added_to_edit(target.display()))
+        }
+        Err(why) => crate::log_markdown(&crate::messages::demo_bar_skipped(why)),
     }
 }
 
