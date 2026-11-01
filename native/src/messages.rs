@@ -1132,6 +1132,278 @@ pub fn cli_failed_to_write(path: impl Display, err: impl Display) -> String {
     format!("Failed to write {}: {}", path, err)
 }
 
+// ── obs/provision.rs, obs/session.rs, obs/take_state.rs: activity log (#237) ──
+//
+// Each function returns the line only; the caller writes it to the log.
+
+pub fn obs_recording_quality_not_set(profile: &str, err: impl Display) -> String {
+    format!(
+        "⚠️ **OBS** — couldn't set the `{profile}` profile's recording quality ({err}). \
+         Clips record at whatever OBS's Settings → Output has for it."
+    )
+}
+
+pub fn obs_profile_created(profile: &str) -> String {
+    format!("🎬 **OBS** — created the `{profile}` profile (first run on this OBS install).")
+}
+
+pub fn obs_profile_switched(profile: &str) -> String {
+    format!("🎬 **OBS** — switched to profile `{profile}` (restored afterwards).")
+}
+
+pub fn obs_only_profile_applies_next_start(profile: &str) -> String {
+    format!(
+        "⚠️ **OBS** — `{profile}` is OBS's only profile, so its new recording settings \
+         apply from OBS's next start."
+    )
+}
+
+pub fn obs_recording_settings_set(profile: &str, changed: impl Display) -> String {
+    format!("🎬 **OBS** — set the `{profile}` profile's recording settings: {changed}.")
+}
+
+pub fn obs_profile_folder_not_found(profile: &str) -> String {
+    format!(
+        "⚠️ **OBS** — couldn't find the `{profile}` profile's folder, so it records in \
+         OBS's Simple mode, which may drop frames at 120 fps."
+    )
+}
+
+pub fn obs_encoder_file_not_written(
+    file: impl Display,
+    err: impl Display,
+    profile: &str,
+) -> String {
+    format!(
+        "⚠️ **OBS** — couldn't write `{file}` ({err}), so the `{profile}` profile records \
+         in OBS's Simple mode, which may drop frames at 120 fps."
+    )
+}
+
+pub fn obs_scene_created(scene: &str) -> String {
+    format!("🎬 **OBS** — created the `{scene}` scene (first run in this scene collection).")
+}
+
+pub fn obs_scene_switched(scene: &str) -> String {
+    format!("🎬 **OBS** — switched to scene `{scene}` (restored afterwards).")
+}
+
+pub fn obs_preflight_warning(warning: impl Display) -> String {
+    format!("⚠️ **OBS** — {warning}")
+}
+
+pub fn obs_started_late(late_ms: impl Display, take_folder: impl Display) -> String {
+    format!(
+        "⚠️ **OBS** — started recording {late_ms} ms after the clip's first frame, so `{take_folder}` is \
+         missing the clip's opening; it won't count as captured."
+    )
+}
+
+pub const OBS_BLOCK_STARTED_WHILE_RECORDING: &str = "⚠️ **OBS** — a new block started while still recording; closing the previous \
+     take first. A `STOP_RECORD` marker was missed.";
+
+pub fn obs_lost_connection_salvaged(err: impl Display, video: impl Display) -> String {
+    format!(
+        "⚠️ **OBS** — lost the connection mid-block ({err}). Salvaged \
+         `{video}`. It will be short and its last moment damaged, because the \
+         recording was cut off rather than stopped."
+    )
+}
+
+pub fn obs_frames_dropped(
+    skipped_delta: impl Display,
+    total_delta: impl Display,
+    percent: f64,
+    effect: &str,
+) -> String {
+    format!(
+        "⚠️ **OBS** — this block dropped {skipped_delta}/{total_delta} frames \
+         ({percent:.1}%) due to encoding lag: {effect}. The encoder can't keep up with \
+         OBS Capture FPS on this PC; lower it (Configuration → Output Format), \
+         or the resolution."
+    )
+}
+
+pub const OBS_RECONNECTED: &str = "🔌 **OBS** — the connection dropped and was re-established.";
+
+pub fn obs_take_state_not_recorded(path: impl Display, err: impl Display) -> String {
+    format!(
+        "⚠️ **OBS** — could not record the take's state at {path}: {err}. A catch-up after a \
+         restart may count this take as whole."
+    )
+}
+
+// ── patch/decal_strip/flush_job.rs: activity log (#237) ───────────────────
+
+pub fn decal_flush_game_cfgs_set_values(found: impl Display) -> String {
+    format!(
+        "⚠️ **The game's own configs set values this pipeline depends on**: {found}. Nothing here \
+         changes them — they are yours. But `r_decals` decides how many decals the engine keeps, \
+         and the sweep is sized to it; `mirv_fov` decides what counts as on screen. Stating them \
+         in the app's Init Commands instead puts them where the pipeline can see them. The FOV \
+         above has been used for this capture; `r_decals` has not, because the pipeline's own pin \
+         runs after the config and would override it anyway."
+    )
+}
+
+pub const DECAL_FLUSH_SKIPPED_NO_RING: &str = "⚠️ **Decal flush skipped** — Flush Decals Between Clips is on, but r_decals \
+     resolves to 0 (stated in Initial Commands, or the app's own configured default). \
+     There is no ring to sweep. Capture continues; walls will not be cleaned between clips.";
+
+pub fn decal_flush_skipped_no_record_bounds(demo: impl Display) -> String {
+    format!(
+        "⚠️ **Decal flush skipped** — not every block in `{demo}` carries usable record \
+         bounds. Capture continues; walls will not be cleaned between clips."
+    )
+}
+
+pub fn decal_flush_skipped_unreadable(demo: impl Display, err: impl Display) -> String {
+    format!("⚠️ **Decal flush skipped** — could not read `{demo}`: {err}")
+}
+
+pub fn decal_flush_failed(demo: impl Display, err: impl Display) -> String {
+    format!(
+        "⚠️ **Decal flush failed** on `{demo}`: {err}. Capture continues with the unmodified \
+         demo; walls will not be cleaned between clips."
+    )
+}
+
+pub fn decal_flush_skipped_scratch_not_written(path: impl Display, err: impl Display) -> String {
+    format!("⚠️ **Decal flush skipped** — could not write scratch demo `{path}`: {err}")
+}
+
+pub const DECAL_FLUSH_EXPERIMENT_PVS_ONLY: &str = "🧪 **EXPERIMENT: `DOD_FLUSH_PVS_ONLY` is set.** The sweep was placed only where leaf \
+     visibility says the engine never renders it. This is the test of whether a decal on \
+     an unrendered face still allocates a ring slot — if old bullet holes survive into a \
+     clip, it does not. Unset the variable for a normal capture.";
+
+pub const DECAL_FLUSH_EXPERIMENT_MAP_GEOMETRY_ONLY: &str = "🧪 **EXPERIMENT: `DOD_FLUSH_MAP_GEOMETRY_ONLY` is set.** The sweep was placed from \
+     the map's own world faces alone — no harvested decals, no tiled planes, no \
+     coordinate store, no floor path. This is how the source meant for maps nobody has \
+     captured yet gets watched on a map somebody can watch. Unset the variable for a \
+     normal capture.";
+
+#[allow(clippy::too_many_arguments)]
+pub fn decal_flush_summary(
+    demo: impl Display,
+    wall_stripped: impl Display,
+    sprays_stripped: impl Display,
+    clips: impl Display,
+    injected: impl Display,
+    positions: impl Display,
+    positions_wanted: impl Display,
+    source: &str,
+    bursts: impl Display,
+    ring_limit: impl Display,
+) -> String {
+    format!(
+        "🧹 **Decal flush** on `{demo}`: stripped {wall_stripped} wall decals and {sprays_stripped} sprays outside {clips} clip(s); \
+         injected {injected} flush decals across {positions} of {positions_wanted} position(s) from {source}, in {bursts} burst(s); \
+         r_decals pinned to {ring_limit}."
+    )
+}
+
+pub fn decal_flush_placement_used_geometry(faces: impl Display, vis_note: &str) -> String {
+    format!(
+        "👁️ **Placement used map geometry** — {faces} world faces{vis_note}. Positions were kept only \
+         where the map says the camera cannot see them, not merely where they fall outside \
+         the frame."
+    )
+}
+
+pub const DECAL_FLUSH_GEOMETRY_WITH_VIS: &str = ", with visibility data";
+
+pub const DECAL_FLUSH_GEOMETRY_NO_VIS: &str = ", but the map carries no visibility data, so every in-frame candidate needed a \
+     trace";
+
+pub const DECAL_FLUSH_PLACEMENT_CONE_ONLY: &str = "⚠️ **Placement used the frame cone alone** — no map geometry was available, so the \
+     pass cannot tell a wall from a sightline. It rejects spots that are genuinely \
+     hidden, and where that leaves it with nothing it will settle for a marginal one.";
+
+pub fn decal_flush_atlas_summary(
+    map: impl Display,
+    known: impl Display,
+    added: impl Display,
+    total: impl Display,
+    available_note: &str,
+) -> String {
+    format!(
+        "🗺️ **Map coordinate store** for `{map}`: {known} coordinate(s) already known, {added} added by \
+         this demo, {total} now held{available_note}."
+    )
+}
+
+pub const DECAL_FLUSH_ATLAS_REFUSED_BY_GATE: &str =
+    " (the experiment gate refused them as a source for this run)";
+
+pub const DECAL_FLUSH_ATLAS_AVAILABLE: &str = " and available to the flush";
+
+pub const DECAL_FLUSH_MAP_WHY_GATE: &str =
+    "every source drawn from the match was refused by the experiment gate";
+
+pub const DECAL_FLUSH_MAP_WHY_SHORT: &str =
+    "the demo's decals and the coordinate store together could not fill a sweep";
+
+pub fn decal_flush_placed_from_geometry(
+    why: &str,
+    candidates: impl Display,
+    camera_safe: impl Display,
+) -> String {
+    format!(
+        "🧱 **Placed from the map's own geometry** — {why}, so {candidates} point(s) were sampled off the \
+         map's world faces and {camera_safe} of those stayed clear of every in-clip camera. This source \
+         owes nothing to where anyone shot or walked, which is what lets it cover a map the \
+         store has never seen."
+    )
+}
+
+pub fn decal_flush_partial_sweep(
+    positions: impl Display,
+    wanted: impl Display,
+    tiles: impl Display,
+    tiles_camera_safe: impl Display,
+    ring_hint: impl Display,
+) -> String {
+    format!(
+        "⚠️ **Partial decal sweep** — only {positions} of the {wanted} distinct positions a full ring \
+         revolution needs, so some decals will survive into the clip. {tiles} tiles were laid \
+         across the demo's proven planes and {tiles_camera_safe} of those stayed clear of every in-clip \
+         camera. An `r_decals {ring_hint}` init command would give a complete sweep of a smaller \
+         ring instead."
+    )
+}
+
+pub fn decal_flush_spots_close_to_camera(nearest: f32, preferred: f32) -> String {
+    format!(
+        "ℹ️ **Decal flush spots are closer to the camera than preferred** — nearest \
+         approach {nearest:.0} units against a {preferred:.0}-unit preference. The surface each one is \
+         drawn on cleared the line-of-sight test, so none should be in shot; this is the \
+         margin narrowing, not a decal on screen."
+    )
+}
+
+pub fn decal_flush_may_be_on_camera(frames: impl Display, samples: impl Display) -> String {
+    format!(
+        "⚠️ **Flush decals may be on camera** — the chosen spot(s) fall inside the camera cone \
+         on {frames} of {samples} sampled in-clip frames. Review the takes."
+    )
+}
+
+pub fn decal_flush_short_burst(
+    window_start: impl Display,
+    placed: impl Display,
+    wanted: impl Display,
+) -> String {
+    format!(
+        "⚠️ **Short decal burst** before frame {window_start} — placed {placed} of {wanted}. That clip is not \
+         guaranteed to start clean."
+    )
+}
+
+pub const DECAL_FLUSH_COMPUTED_FLOOR_ANCHOR: &str = "⚠️ **Decal flush anchored on a computed floor point** — the demo contained no real \
+     decal to borrow a proven surface from. If that point misses geometry, the sweep does \
+     nothing at all.";
+
 // ── vegas.rs ─────────────────────────────────────────────────────────────
 
 pub const VEGAS_NO_SCRIPT: &str = "This copy of DoD Studio has no VEGAS script to install (the vegas folder in the DoD Studio repo).";
@@ -1277,6 +1549,45 @@ mod tests {
         assert_eq!(
             could_not_move_after_retries(recorded, target, retry_secs, last),
             format!("could not move {recorded} to {target} after 5.0 s of retries: {last}")
+        );
+    }
+
+    #[test]
+    fn obs_log_lines_match_their_original_inline_text() {
+        assert_eq!(
+            obs_profile_switched("[DoD-Studio]"),
+            "🎬 **OBS** — switched to profile `[DoD-Studio]` (restored afterwards)."
+        );
+        assert_eq!(
+            obs_started_late(120, "C:/takes/a"),
+            "⚠️ **OBS** — started recording 120 ms after the clip's first frame, so `C:/takes/a` is \
+             missing the clip's opening; it won't count as captured."
+        );
+        assert_eq!(
+            obs_frames_dropped(5, 20, 25.0, "the recorded clip is visibly choppy"),
+            "⚠️ **OBS** — this block dropped 5/20 frames (25.0%) due to encoding lag: the recorded \
+             clip is visibly choppy. The encoder can't keep up with OBS Capture FPS on this PC; \
+             lower it (Configuration → Output Format), or the resolution."
+        );
+    }
+
+    #[test]
+    fn decal_flush_log_lines_match_their_original_inline_text() {
+        assert_eq!(
+            decal_flush_short_burst(10, 3, 8),
+            "⚠️ **Short decal burst** before frame 10 — placed 3 of 8. That clip is not \
+             guaranteed to start clean."
+        );
+        assert_eq!(
+            decal_flush_skipped_unreadable("a.dem", "gone"),
+            "⚠️ **Decal flush skipped** — could not read `a.dem`: gone"
+        );
+        assert_eq!(
+            decal_flush_spots_close_to_camera(12.4, 40.0),
+            "ℹ️ **Decal flush spots are closer to the camera than preferred** — nearest \
+             approach 12 units against a 40-unit preference. The surface each one is \
+             drawn on cleared the line-of-sight test, so none should be in shot; this is the \
+             margin narrowing, not a decal on screen."
         );
     }
 }
