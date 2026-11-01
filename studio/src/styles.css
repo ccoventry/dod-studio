@@ -1066,6 +1066,15 @@ button.danger-btn {
   border-bottom: 1px solid var(--border-faint);
 }
 
+/* The name cell is a flex box (master_pane.js), whose nowrap name sized the
+   whole table to the longest name and pushed the count columns out of sight
+   behind a scrollbar. Zero intrinsic width lets the table fit its pane and the
+   name's ellipsis (full name on hover) do the cutting (#46). */
+#master-demo-table td:nth-child(2) {
+  contain: inline-size;
+  width: 100%;
+}
+
 #master-demo-table tr:hover {
   background: var(--wash-04);
 }
@@ -1735,6 +1744,8 @@ button.danger-btn {
 }
 
 .analyzer-kv-table .kv-value {
+  /* A file name with no spaces would run under the next column (#46). */
+  overflow-wrap: anywhere;
   padding: 3px 0;
   color: var(--text-emphasis);
 }
@@ -3469,8 +3480,69 @@ input[type="checkbox"].hd-box-pattern {
   width: 25%;
 }
 
+/* Full-row hints under a setting are not the 260 px captions of the grid ones. */
+#config-take-after-finish-hint,
+#config-render-while-capturing-hint {
+  max-width: none;
+}
+
 #detail-streaks-table td.streak-duration {
   white-space: nowrap;
+}
+
+/* Narrow panes stack Player, Time and Dur. into one column (#46): at about
+   714 px the table needs ~1035 px and scrolled sideways. The wide layout keeps
+   the separate columns. Switched on the table wrapper's own width, not the
+   window's, since the queue/details split moves it. */
+#detail-pane .table-wrapper {
+  container: detail-table / inline-size;
+}
+
+#detail-streaks-table .col-stack {
+  display: none;
+}
+
+#detail-streaks-table .streak-stack-player {
+  max-width: 14em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#detail-streaks-table .streak-stack-when {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+@container detail-table (max-width: 1040px) {
+  #detail-streaks-table .col-wide {
+    display: none;
+  }
+
+  #detail-streaks-table .col-stack {
+    display: table-cell;
+  }
+
+  /* The weapon/timing chain is on the stacked cell's tooltip instead. */
+  #detail-streaks-table .col-details {
+    display: none;
+  }
+
+  #detail-streaks-table .streak-notes-input {
+    min-width: 70px;
+  }
+
+  #detail-streaks-table .streak-clip-name-input {
+    min-width: 9em !important; /* beats the input's inline min-width */
+  }
+
+  /* Cell padding is inline (8px); !important tightens it to fit. */
+  #detail-streaks-table th,
+  #detail-streaks-table td {
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+  }
 }
 
 .streak-notes-input {
@@ -4661,3 +4733,17 @@ input.field-invalid { border-color: var(--danger-light); }
 .output-row-invalid input { border-color: var(--danger-light); }
 /* Its text style is .field-error-line (field_error.js); this only spans the row. */
 .output-row-detail { flex-basis: 100%; }
+
+/* Render job rows: a date or count never breaks over lines; the clip name and
+   the settings summary are the cells that give (#46). */
+#render-jobs-table td.rj-date,
+#render-jobs-table td.rj-frames,
+#render-jobs-table td.rj-stream,
+#render-jobs-table td.rj-speed {
+  white-space: nowrap;
+}
+
+/* The placeholder says what to type; the default input width cut it (#46). */
+#blender-frames-input {
+  min-width: 22em;
+}
