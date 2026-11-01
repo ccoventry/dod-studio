@@ -4,7 +4,7 @@
 // the clip manifest (`clip_manifest.js`, #429) the nameplate script reads.
 
 import { save } from '@tauri-apps/plugin-dialog';
-import { combinePlan, writeTextFile } from './ipc_bridge.js';
+import { combinePlan, writeTextFile, logFrontendEvent } from './ipc_bridge.js';
 import { whileDialogOpens } from './dialog_wait.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -72,10 +72,17 @@ async function exportEdl(jobs, ffmpegPath, project) {
   if (!path) return;
   try {
     await writeTextFile(path, vegasEdl(clips));
+    await finishExport({ path, clips, skipped, project });
   } catch (err) {
     showToast(STRINGS.RENDER.exportEdlFailed(err), 'error');
-    return;
   }
+}
+
+/**
+ * The clip manifest beside the EDL (`name.dodstudio.json` for `name.txt`), for
+ * the nameplate script. A manifest that can't be saved doesn't undo the EDL.
+ */
+async function finishExport({ path, clips, skipped, project }) {
   const manifest = clipManifest(clips, {
     edlName: fileNameOf(path), ...project, useAsName, nameplatePath,
   });
@@ -84,5 +91,6 @@ async function exportEdl(jobs, ffmpegPath, project) {
   } catch (err) {
     showToast(STRINGS.RENDER.exportManifestFailed(err), 'error');
   }
+  logFrontendEvent(`Exported VEGAS EDL: ${clips.length} clips, ${skipped} left out`);
   showToast(STRINGS.RENDER.exportEdlDone(clips.length, skipped, nameplateCount(manifest)), 'success');
 }
