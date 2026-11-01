@@ -250,7 +250,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         cell.className = 'audit-keep-changed';
         const note = document.createElement('span');
         note.textContent = STRINGS.AUDITOR.KEEP_CHANGED_NOTE;
-        note.style.color = '#f0c060';
+        note.style.color = 'var(--warn-note)';
         const reset = document.createElement('button');
         reset.type = 'button';
         reset.className = 'audit-keep-reset-btn';
@@ -271,7 +271,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         tr.className = kept ? 'audit-file-row audit-kept' : 'audit-file-row';
         // The kept copy stands out where it is: rows don't move when
         // another copy is picked.
-        if (kept) tr.style.background = 'rgba(90, 200, 120, 0.10)';
+        if (kept) tr.style.background = 'var(--keep-wash)';
 
         const tdCb = document.createElement('td');
         const cb = document.createElement('input');
@@ -309,7 +309,7 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         keepLabel.append(keepRadio, document.createTextNode(` ${status.trim()}`));
         if (notCopy) {
           keepLabel.title = STRINGS.AUDITOR.NOT_A_COPY_TITLE;
-          keepLabel.style.color = '#f0c060';
+          keepLabel.style.color = 'var(--warn-note)';
         }
         tdStatus.appendChild(keepLabel);
 
@@ -319,13 +319,13 @@ export function initAuditorPane({ getDemos = () => [], onSettingsChange = () => 
         const displayPath = shownPath(file.path);
         const tdPath = pathCell(file);
         if (notCopy) {
-          tdPath.style.color = '#f0c060';
+          tdPath.style.color = 'var(--warn-note)';
         } else if (fileIdx > 0) {
-          tdPath.style.color = '#ff9999';
+          tdPath.style.color = 'var(--danger-pale)';
         } else {
           tdPath.style.fontWeight = 'bold';
-          tdPath.style.color = '#8fd18f';
-          keepLabel.style.color = '#8fd18f';
+          tdPath.style.color = 'var(--ok-keep)';
+          keepLabel.style.color = 'var(--ok-keep)';
           keepLabel.style.fontWeight = 'bold';
         }
 

@@ -348,46 +348,46 @@ export async function refreshLaunchGuard(state) {
     // First of all, ahead of even the calm cases below: a banned command is
     // an active correctness bug, not an incomplete-but-normal state.
     if (bannedCommandsPresent) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
       warningEl.style.display = 'block';
     } else if (pathsMissing) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.OBS_NOT_CONNECTED_WARNING;
       warningEl.style.display = 'block';
     } else if (noHighlightsSelected) {
-      warningEl.style.color = '#64b5f6';
+      warningEl.style.color = 'var(--info-light)';
       warningEl.textContent = STRINGS.CAPTURE.NO_HIGHLIGHTS_SELECTED_WARNING;
       warningEl.style.display = 'block';
     } else if (noDrivesConfigured) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.NO_DRIVES_CONFIGURED_WARNING;
       warningEl.style.display = 'block';
     } else if (noUsableSpace) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = problemPaths.length > 0
         ? STRINGS.CAPTURE.noUsableSpaceProblem(describeProblemPaths(problemPaths))
         : STRINGS.CAPTURE.NO_USABLE_SPACE_WARNING;
       warningEl.style.display = 'block';
     } else if (makesRoom) {
-      warningEl.style.color = '#ffa726';
+      warningEl.style.color = 'var(--warn-orange)';
       warningEl.textContent = (rendersRoom ? STRINGS.CAPTURE.insufficientSpaceRendersMakeRoom : STRINGS.CAPTURE.insufficientSpaceMakesRoom)(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (insufficientSpace) {
-      warningEl.style.color = '#f44336';
+      warningEl.style.color = 'var(--danger)';
       warningEl.textContent = STRINGS.CAPTURE.insufficientSpaceWarning(gigabytes(requiredBytes), gigabytes(availableBytes));
       warningEl.style.display = 'block';
     } else if (hasPartialProblems) {
-      warningEl.style.color = '#ffa726';
+      warningEl.style.color = 'var(--warn-orange)';
       const wontBeUsed = problemPaths.length === 1 ? STRINGS.CAPTURE.ENTRY_WONT_BE_USED_SINGULAR : STRINGS.CAPTURE.ENTRY_WONT_BE_USED_PLURAL;
       warningEl.textContent = STRINGS.CAPTURE.partialProblemsWarning(wontBeUsed, describeProblemPaths(problemPaths));
       warningEl.style.display = 'block';
     } else if (willBeCreatedPaths.length > 0) {
-      warningEl.style.color = '#64b5f6';
+      warningEl.style.color = 'var(--info-light)';
       const shown = willBeCreatedPaths.slice(0, MAX_PROBLEM_PATHS_SHOWN).map((d) => `"${d.path}"`);
       const remaining = willBeCreatedPaths.length - MAX_PROBLEM_PATHS_SHOWN;
       if (remaining > 0) shown.push(STRINGS.CAPTURE.andNMore(remaining));
@@ -406,7 +406,7 @@ export async function refreshLaunchGuard(state) {
   if (footerRequiredEl) {
     const requiredGb = gigabytes(requiredBytes);
     footerRequiredEl.textContent = STRINGS.CAPTURE_CONFIG.footerRequiredSpace(requiredGb);
-    footerRequiredEl.style.color = insufficientSpace ? '#f44336' : '#4caf50';
+    footerRequiredEl.style.color = insufficientSpace ? 'var(--danger)' : 'var(--ok)';
   }
 
   return { requiredBytes, availableBytes, blocked, noHighlightsSelected };

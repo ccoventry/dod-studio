@@ -398,7 +398,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // says exactly that; repeating it in the title was pure redundancy.
     titleEl.textContent = STRINGS.HIGHLIGHTS.DEFAULT_TITLE;
     titleEl.title = '';
-    container.innerHTML = `<p style="color: #888;">${STRINGS.HIGHLIGHTS.EMPTY_SELECT_DEMO}</p>`;
+    container.innerHTML = `<p style="color: var(--text-muted);">${STRINGS.HIGHLIGHTS.EMPTY_SELECT_DEMO}</p>`;
     return;
   }
 
@@ -410,7 +410,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
   container.innerHTML = '';
 
   if (!demo.streaks || demo.streaks.length === 0) {
-    container.innerHTML = `<p style="color: #888;">${STRINGS.HIGHLIGHTS.EMPTY_NO_STREAKS}</p>`;
+    container.innerHTML = `<p style="color: var(--text-muted);">${STRINGS.HIGHLIGHTS.EMPTY_NO_STREAKS}</p>`;
     return;
   }
 
@@ -471,7 +471,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     const rowNum = renderedRowNum;
 
     const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid #333';
+    tr.style.borderBottom = '1px solid var(--border-soft)';
     // #44: a Skip row is dimmed, unticked and locked.
     const skipped = isSkipped(streak);
     if (skipped) {
@@ -499,11 +499,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // (builder/blocks.rs's cut_blocks) — surfaced so it's obvious at a glance why
     // two rows flipped to Captured together instead of independently.
     const mergedBadge = streak.mergedTakeKey
-      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
+      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:var(--warn-deep);border:1px solid var(--warn-deep);border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
       : '';
 
     const byHandMark = streak.statusByHand
-      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:#aaa;cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
+      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:var(--text-subtle);cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
       : '';
 
     tr.innerHTML = `
@@ -512,13 +512,13 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} ${skipped ? `disabled title="${STRINGS.HIGHLIGHTS.SKIPPED_CB_TITLE}"` : ''} />
       </td>
       <td style="padding: 8px;">
-        <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:#ff9800;' : ''}">
+        <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:var(--warn-deep);' : ''}">
           <input type="number" class="kr-start-input" min="1" max="${maxKillIdx + 1}"
-                 value="${streak.start_index + 1}" style="width:38px;background:#1a1a1a;color:inherit;border:1px solid #444;border-radius:2px;" />
+                 value="${streak.start_index + 1}" style="width:38px;background:var(--surface-inset);color:inherit;border:1px solid var(--border-mid);border-radius:2px;" />
           <span>-</span>
           <input type="number" class="kr-end-input" min="1" max="${maxKillIdx + 1}"
-                 value="${streak.end_index + 1}" style="width:38px;background:#1a1a1a;color:inherit;border:1px solid #444;border-radius:2px;" />
-          ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid #555;border-radius:2px;color:#aaa;cursor:pointer;">↺</button>` : ''}
+                 value="${streak.end_index + 1}" style="width:38px;background:var(--surface-inset);color:inherit;border:1px solid var(--border-mid);border-radius:2px;" />
+          ${isRangeModified ? `<button type="button" class="kr-reset-btn" title="${STRINGS.HIGHLIGHTS.KR_RESET_TITLE}" style="background:transparent;border:1px solid var(--border-accent);border-radius:2px;color:var(--text-subtle);cursor:pointer;">↺</button>` : ''}
         </div>
       </td>
       <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
@@ -535,7 +535,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
-        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: var(--surface-inset); color: var(--text-strong); border: 1px solid var(--border-mid); border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
       </td>
       <td style="padding: 8px;">
         <select class="streak-curation-select" style="font-size: 0.85em;">
@@ -684,14 +684,14 @@ function playerFilterRow(demo) {
   const row = document.createElement('div');
   row.className = 'detail-player-filter-row';
   // Sticky: an HLTV table runs to 150+ rows, and the filter is what shortens it.
-  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:#1e1e1e;';
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:var(--bg-panel);';
   const label = document.createElement('label');
   label.htmlFor = 'detail-player-filter';
   label.textContent = STRINGS.HIGHLIGHTS.PLAYER_FILTER_LABEL;
   const select = document.createElement('select');
   select.id = 'detail-player-filter';
   select.title = STRINGS.HIGHLIGHTS.PLAYER_FILTER_TITLE;
-  select.style.cssText = 'padding:3px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:3px;max-width:260px;';
+  select.style.cssText = 'padding:3px 6px;font-size:12px;background:var(--surface-inset);color:var(--text-strong);border:1px solid var(--border-mid);border-radius:3px;max-width:260px;';
   const total = players.reduce((n, p) => n + p.count, 0);
   const all = new Option(STRINGS.HIGHLIGHTS.playerFilterAll(total), '');
   select.append(all, ...players.map((p) => new Option(STRINGS.HIGHLIGHTS.playerFilterOption(p.name, p.count), p.name)));
