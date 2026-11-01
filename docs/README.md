@@ -46,6 +46,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.
 - [goldsrc_spectator_bars.md](goldsrc_spectator_bars.md) — the spectator top and bottom bars.
 - [goldsrc_spectator_camera.md](goldsrc_spectator_camera.md) — keeping the camera on one player, the in-eye camera on a prone or crouching player (#329, #1144), the death cam when he dies, and the chase cameras drawing the players around them (#918).
+- [goldsrc_xray.md](goldsrc_xray.md) � X-ray (`ds_spec_xray`): what CS:GO's GOTV X-ray does, and how DoD Studio draws players through walls with the game's glow shell (#1297).
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
