@@ -80,7 +80,7 @@ export function createCaptureOutputStatus({ getPaths, diagnose, container, log }
     paintChip(chip, item);
     row.appendChild(chip);
     const detail = document.createElement('div');
-    detail.className = 'output-row-detail';
+    detail.className = 'output-row-detail field-error-line';
     row.appendChild(detail);
     paintRowError(row, item);
   }

@@ -31,6 +31,7 @@ import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
+import { setFieldError, clearFieldError } from './field_error.js';
 import { STRINGS } from './strings.js';
 import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
@@ -95,6 +96,7 @@ function getCustomCodecArgs() {
 function syncCustomCodecVisibility() {
   const group = document.querySelector('#render-custom-codec-group');
   if (group) group.style.display = getSelectedCodec() === 'custom' ? '' : 'none';
+  if (getSelectedCodec() !== 'custom') clearFieldError(document.querySelector('#render-custom-codec-input'));
 }
 
 function statusColor(status) {
@@ -543,6 +545,10 @@ function syncSelectionControls() {
   const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
   // No export folder: the renderer refuses, so Start says where to add one.
   const noExportDir = !hasExportDir();
+  // The field itself says why Start is off; it clears when a folder is added.
+  setFieldError(document.querySelector('#render-export-dir-input'),
+    noExportDir && queued > 0 ? R.EXPORT_DIR_FIELD_EMPTY : '',
+    { autoClear: false });
   setButton('#start-render-btn', queued, R.startRenderBatch,
     noExportDir ? R.START_RENDER_NO_EXPORT_DIR_TITLE
       : queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
@@ -924,6 +930,10 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     scanRenderBtn.addEventListener('click', () => {
       const captureLocations = getCaptureLocations ? getCaptureLocations() : [];
       if (!captureLocations || captureLocations.length === 0) {
+        // The folder list is on Configuration, off screen here: mark its field
+        // for when the user goes there, and say so in a toast now.
+        setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.RENDER_DIR_FIELD_EMPTY,
+          { list: document.querySelector('#target-drive-list') });
         showToast(STRINGS.RENDER.ADD_RENDER_DIR_REQUIRED, 'error');
         return;
       }
@@ -931,6 +941,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const codecVal = getSelectedCodec();
       const customCodecArgsVal = getCustomCodecArgs();
       if (codecVal === 'custom' && !customCodecArgsVal) {
+        setFieldError(document.querySelector('#render-custom-codec-input'), STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED);
         showToast(STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED, 'error');
         return;
       }
@@ -994,6 +1005,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
           scanRenderBtn.disabled = false;
           scanClock.stop();
           hideBar(scanBar);
+          // The error is about the folders: show it at the folder field too.
+          setFieldError(document.querySelector('#drive-path-input'), STRINGS.RENDER.scanDirError(err),
+            { list: document.querySelector('#target-drive-list') });
           showToast(STRINGS.RENDER.scanDirError(err), 'error');
           setRenderStatus(renderStatusEl, STRINGS.RENDER.STATUS_SCAN_FAILED, JOB_STATUS.ERROR);
         });
@@ -1007,6 +1021,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     startRenderBtn.addEventListener('click', () => {
       if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
       if (!hasExportDir()) {
+        // syncSelectionControls marks the export folder field.
         showToast(STRINGS.RENDER.START_RENDER_NO_EXPORT_DIR_TITLE, 'error');
         syncSelectionControls();
         return;

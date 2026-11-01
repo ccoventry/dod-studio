@@ -96,3 +96,12 @@ test('an old {player} template still works, and the side teams fill in', async (
   // alphabetically first of the two display names.
   await expect(page.locator('#config-clip-name-preview')).toContainText('Preview: krod_dice_v_KROD_dice_pov_01');
 });
+
+test('a bad template turns the field red, and a good one clears it (#25)', async ({ page }) => {
+  await loadHarness(page);
+  const input = page.locator('#config-clip-name-template');
+  await input.fill('{oponent}_{row}');
+  await expect(input).toHaveClass(/field-invalid/);
+  await input.fill('{map}_{name}');
+  await expect(input).not.toHaveClass(/field-invalid/);
+});
