@@ -909,7 +909,7 @@ impl PatcherConfig {
         // path that was tried.
         match &goldsrc_hooks_dll_str {
             Some(extra_dll) => {
-                crate::log_markdown(&format!("goldsrc-hooks: injecting {extra_dll}"));
+                crate::log_markdown(&crate::messages::hooks_injecting(extra_dll));
                 cmd.args(["-hookDllPath", extra_dll]);
             }
             None => {

@@ -163,11 +163,10 @@ pub(super) fn log_post_roll_cut(index: usize, streak: &CaptureStreak) {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    crate::log_markdown(&format!(
-        "⚠️ **EOF Boundary Reached:** Highlight #{} in demo '{}' (Player: {}) has a post-roll that exceeds the demo's end frame. Post-roll truncated to save batch.",
+    crate::log_markdown(&crate::messages::post_roll_cut_at_demo_end(
         index + 1,
         demo_file_name,
-        streak.target_player.as_deref().unwrap_or("Unknown")
+        streak.target_player.as_deref().unwrap_or("Unknown"),
     ));
 }
 
