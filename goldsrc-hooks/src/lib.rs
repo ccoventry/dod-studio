@@ -360,6 +360,7 @@ mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
 mod spectator_hud;
+mod spectator_input_gate;
 mod spectator_target;
 mod spectator_text;
 mod spray;

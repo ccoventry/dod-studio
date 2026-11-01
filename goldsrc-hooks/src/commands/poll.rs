@@ -460,6 +460,9 @@ pub fn poll() {
     crate::spectator_buttons::poll();
     // ...and the console can't move its demo or camera (#855).
     crate::review_lock::console::poll();
+    // A click made while a demo loaded (the clock then starts again)
+    // doesn't keep the spectator buttons dead (#1296).
+    crate::spectator_input_gate::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     crate::overview_speaker::poll();
