@@ -19,6 +19,9 @@
 //! (`alloc_counter`), and the decoded tree's delta tables are counted
 //! (`tree_census`), so a slow phase can be pinned on a representation (#37).
 //!
+//! `--without-sounds` decodes the way the capture-queue scan does, leaving
+//! the sounds out (`analysis::Sounds::Skip`, #37).
+//!
 //! Usage: cargo run --release -p dod-benchmark -- <demo.dem | directory>...
 
 mod alloc_counter;
@@ -45,6 +48,14 @@ const CONSUMED_ENGINE: &[&str] = &[
     "SvcSpawnBaseline",
     "SvcPacketEntities",
     "SvcDeltaPacketEntities",
+    // The recorder's own position on a POV demo.
+    "SvcClientData",
+    // Headshots (#1128), objectives and the rest.
+    "SvcEvent",
+    "SvcResourceList",
+    "SvcTempEntity",
+    "SvcPrint",
+    "SvcSpawnStaticSound",
 ];
 
 /// UserMessage names the analyzer accepts.
@@ -94,11 +105,19 @@ struct Row {
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let dump_dir = take_dump_dir(&mut args);
+    let sounds = take_sounds(&mut args);
+    let decode_mode = match sounds {
+        analysis::Sounds::Decode => MessageDataParseMode::Parse,
+        analysis::Sounds::Skip => MessageDataParseMode::ParseWithoutSounds,
+    };
     if args.is_empty() {
-        eprintln!("Usage: dod-benchmark [--dump-json <dir>] <demo.dem | directory>...");
+        eprintln!(
+            "Usage: dod-benchmark [--dump-json <dir>] [--without-sounds] <demo.dem | directory>..."
+        );
         eprintln!("Profiles the Demo Analyzer load path phase by phase.");
         eprintln!("--dump-json writes each demo's analysis there, keys sorted, so two");
         eprintln!("builds' outputs can be compared file by file.");
+        eprintln!("--without-sounds decodes as the capture-queue scan does.");
         std::process::exit(1);
     }
 
@@ -158,7 +177,7 @@ fn main() {
         let base_live = alloc_counter::live_bytes();
         let base_allocs = alloc_counter::allocations();
         let t = Instant::now();
-        let demo = match Demo::parse_from_bytes(&bytes, MessageDataParseMode::Parse) {
+        let demo = match Demo::parse_from_bytes(&bytes, decode_mode) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("  skipped (parse error: {})", e);
@@ -190,7 +209,8 @@ fn main() {
         let base_live = alloc_counter::live_bytes();
         let base_allocs = alloc_counter::allocations();
         let t = Instant::now();
-        let analysis = match analysis::Analysis::try_from_bytes(&bytes) {
+        let analysis = match analysis::Analysis::try_from_bytes_decoding(&bytes, sounds, |_, _| {})
+        {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("  skipped (analysis error: {})", e);
@@ -398,6 +418,17 @@ fn tally(demo: &Demo, histogram: &mut HashMap<(String, bool), usize>) {
                 *histogram.entry((key, used)).or_insert(0) += 1;
             }
         }
+    }
+}
+
+/// Removes `--without-sounds` from `args`, saying whether it was there.
+fn take_sounds(args: &mut Vec<String>) -> analysis::Sounds {
+    match args.iter().position(|a| a == "--without-sounds") {
+        Some(at) => {
+            args.remove(at);
+            analysis::Sounds::Skip
+        }
+        None => analysis::Sounds::Decode,
     }
 }
 

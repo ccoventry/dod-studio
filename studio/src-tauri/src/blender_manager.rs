@@ -112,7 +112,7 @@ pub async fn blender_run(
     state.cancel.store(false, Ordering::SeqCst);
     let (running, cancel) = (Arc::clone(&state.running), Arc::clone(&state.cancel));
     let step = step_name(&request);
-    native::log_markdown(&format!("[blender] {step} started for {}", request.map));
+    native::log_markdown(&crate::messages::blender::step_started(&step, &request.map));
     let map = request.map.clone();
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {

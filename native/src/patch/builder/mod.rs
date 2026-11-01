@@ -119,7 +119,15 @@ pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> 
 pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
     let mut out = config.init_commands.clone();
     out.push("sys_autodir".to_string());
-    out.push(format!("mirv_movie_fps {}", config.capture_fps));
+    // AGR mode's sound-only movie (#450) runs at the AGR rate: the movie
+    // recorder pins the timestep to `1 / mirv_movie_fps`, and that has to be
+    // the timestep the `.agr` is stamped with.
+    let movie_fps = if config.capture_mode == crate::patch::CaptureMode::Agr {
+        config.effective_agr_fps()
+    } else {
+        config.capture_fps
+    };
+    out.push(format!("mirv_movie_fps {movie_fps}"));
 
     // A batch runs at full speed with another window in front: without it the
     // engine waits up to 20 ms for input every frame while it isn't the active
@@ -461,21 +469,14 @@ fn make_session_dir(config: &PatcherConfig) -> std::io::Result<std::path::PathBu
 /// since neither writes the frame sequence the other modes do.
 fn announce_capture_mode(config: &PatcherConfig) {
     if config.capture_mode == crate::patch::CaptureMode::DirectToVideo {
-        crate::log_markdown(&format!(
-            "🎬 **Direct-to-video capture** — HLAE pipes frames to FFmpeg (`{}`) instead of \
-             writing a BMP sequence, one `{}` per stream folder. Render Studio reads these the \
-             same way it reads frame sequences.",
+        crate::log_markdown(&crate::messages::direct_to_video_capture(
             config.ffmpeg_capture_codec.args(),
             crate::hlcr::scanner::VIDEO_FILE,
         ));
     }
 
     if config.capture_mode == crate::patch::CaptureMode::Agr {
-        crate::log_markdown(&format!(
-            "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file \
-             (models and camera, for the Blender page) at {} fps, in its take folder.",
-            config.effective_agr_fps(),
-        ));
+        crate::log_markdown(&crate::messages::agr_capture(config.effective_agr_fps()));
     }
 }
 

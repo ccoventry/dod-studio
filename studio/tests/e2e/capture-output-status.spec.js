@@ -22,3 +22,23 @@ test('each Capture Output row shows its own status and rechecks on a change', as
   await page.evaluate(() => document.querySelector('#add-drive-btn').click());
   await expect(chips()).toHaveText(['Found', 'Drive not found', 'Will be created', 'Drive not found']);
 });
+
+test('a bad path gets its own red row and a line saying what is wrong', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__mockInvokeHandlers = {
+      get_settings: () => ({ target_drives: ['E:/caps', 'relative/dir'] }),
+      calculate_export_pool_space: () => 10 * 1024 ** 3,
+      diagnose_capture_output_paths: (args) => args.paths.map((path) => ({
+        path,
+        status: path === 'E:/caps' ? 'ok' : 'not_absolute',
+        usable: path === 'E:/caps',
+      })),
+    };
+  });
+  await page.goto('/index.html');
+  const rows = page.locator('#target-drive-list .list-editor-row');
+  await expect(rows.nth(1)).toHaveClass(/output-row-invalid/);
+  await expect(rows.nth(1).locator('.output-row-detail')).toContainText('drive letter');
+  await expect(rows.nth(0)).not.toHaveClass(/output-row-invalid/);
+  await expect(rows.nth(0).locator('.output-row-detail')).toBeHidden();
+});

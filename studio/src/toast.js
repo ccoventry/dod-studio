@@ -32,18 +32,18 @@ export function showToast(message, type = 'info', duration = 3000, { action } = 
   toast.className = className;
   toast.textContent = message;
 
-  let bg = '#2196f3';
-  if (type === 'success') bg = '#4caf50';
-  if (type === 'error') bg = '#f44336';
-  if (type === 'warning') bg = '#ff9800';
+  let bg = 'var(--info-bright)';
+  if (type === 'success') bg = 'var(--ok)';
+  if (type === 'error') bg = 'var(--danger)';
+  if (type === 'warning') bg = 'var(--warn-deep)';
 
-  toast.style.cssText = `background: ${bg}; color: #fff; padding: 10px 16px; border-radius: 4px; font-family: sans-serif; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); transition: all 0.3s ease; opacity: 1;`;
+  toast.style.cssText = `background: ${bg}; color: var(--text-strong); padding: 10px 16px; border-radius: 4px; font-family: sans-serif; font-size: 14px; box-shadow: 0 4px 12px var(--shade-30); transition: all 0.3s ease; opacity: 1;`;
 
   if (action) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = action.label;
-    button.style.cssText = 'margin-left: 12px; background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.7); border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 13px;';
+    button.style.cssText = 'margin-left: 12px; background: transparent; color: var(--text-strong); border: 1px solid var(--wash-70); border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 13px;';
     button.addEventListener('click', () => {
       action.onClick();
       if (toast.parentNode === container) container.removeChild(toast);

@@ -96,15 +96,15 @@ impl Why {
 fn removed_line(take_folder: &Path, size_bytes: u64, method: AfterFinish, why: Why) -> String {
     let size = format_gb(size_bytes);
     match method {
-        AfterFinish::Recycle => format!(
-            "[take-cleanup] Moved {} to the Recycle Bin ({size}): {}.",
+        AfterFinish::Recycle => crate::messages::take_cleanup::take_cleanup_recycled(
             take_folder.display(),
-            why.because()
+            &size,
+            why.because(),
         ),
-        _ => format!(
-            "[take-cleanup] Deleted {} for good ({size}): {}.",
+        _ => crate::messages::take_cleanup::take_cleanup_deleted(
             take_folder.display(),
-            why.because()
+            &size,
+            why.because(),
         ),
     }
 }
@@ -193,7 +193,7 @@ impl Done {
                 });
             }
             Err(error) => {
-                log_markdown(&format!("[take-cleanup] {error}"));
+                log_markdown(&crate::messages::take_cleanup::take_cleanup_failed(&error));
                 self.failed.push(Failure {
                     take_folder: take_folder.to_string_lossy().into_owned(),
                     error,
@@ -321,21 +321,26 @@ fn remove_finished(app: &AppHandle, finished_takes: Vec<String>, report: bool) {
             let history = native::hlcr::take_meta::read_history(path);
             let streams = native::hlcr::take_cleanup::streams_on_disk(path);
             if finished_at(&history, &streams, |p| Path::new(p).is_file()).is_none() {
-                log_markdown(&format!(
-                    "[take-cleanup] {} stays: its render history doesn't show every stream finished with the clip file still there.",
-                    path.display()
-                ));
+                log_markdown(
+                    &crate::messages::take_cleanup::take_cleanup_stays_unfinished(path.display()),
+                );
                 continue;
             }
             // The Delete Take check first, so a take that won't be deleted
             // (say, rendered from outside the Destinations folders) keeps its
             // rows.
             if let Err(e) = plan_take_deletion(path, &dirs) {
-                log_markdown(&format!("[take-cleanup] {} stays: {e}", path.display()));
+                log_markdown(&crate::messages::take_cleanup::take_cleanup_stays(
+                    path.display(),
+                    e,
+                ));
                 continue;
             }
             if let Err(e) = take_out_of_list(&app, &render, path) {
-                log_markdown(&format!("[take-cleanup] {} stays: {e}", path.display()));
+                log_markdown(&crate::messages::take_cleanup::take_cleanup_stays(
+                    path.display(),
+                    e,
+                ));
                 continue;
             }
             let outcome = match method {
@@ -411,9 +416,8 @@ pub(crate) fn make_room(
     let chosen = match plan {
         RoomPlan::Enough => return,
         RoomPlan::Unknown => {
-            log_markdown(&format!(
-                "[take-cleanup] Making room for {}: the free space on its drives can't be read, so no takes were deleted.",
-                why.job()
+            log_markdown(&crate::messages::take_cleanup::take_cleanup_room_unknown(
+                why.job(),
             ));
             return;
         }
@@ -422,12 +426,11 @@ pub(crate) fn make_room(
             available_bytes,
             moved_takes,
         } => {
-            log_markdown(&format!(
-                "[take-cleanup] Making room for {}: it needs {} free on one drive, and deleting every finished take on its drives would leave at most {} on any one.{} No takes were deleted.",
+            log_markdown(&crate::messages::take_cleanup::take_cleanup_room_short(
                 why.job(),
                 format_gb(needed_bytes),
                 format_gb(available_bytes),
-                moved_takes_note(moved_takes)
+                moved_takes_note(moved_takes),
             ));
             done.short = Some(Short {
                 needed_bytes,
@@ -443,9 +446,10 @@ pub(crate) fn make_room(
     let total = chosen.len();
     for (i, plan) in chosen.iter().enumerate() {
         if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
-            log_markdown(&format!(
-                "[take-cleanup] Making room for {} stopped: cancelled after {i} of {total} takes.",
-                why.job()
+            log_markdown(&crate::messages::take_cleanup::take_cleanup_room_cancelled(
+                why.job(),
+                i,
+                total,
             ));
             break;
         }
@@ -453,9 +457,9 @@ pub(crate) fn make_room(
             on_step(&crate::messages::making_room_deleting(i, total), i, total);
         }
         if let Err(e) = take_out_of_list(app, &render, &plan.take_folder) {
-            log_markdown(&format!(
-                "[take-cleanup] {} stays: {e}",
-                plan.take_folder.display()
+            log_markdown(&crate::messages::take_cleanup::take_cleanup_stays(
+                plan.take_folder.display(),
+                e,
             ));
             continue;
         }
